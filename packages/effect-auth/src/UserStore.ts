@@ -1,4 +1,4 @@
-import { Context, Effect } from "effect";
+import { Context, DateTime, Effect } from "effect";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import {
@@ -156,7 +156,10 @@ export const createUserWithIdentifier = <E, R>(
             const held = yield* store.getByValue(identifier.type, identifier.value);
             if (held === null || held.userId !== user.id) return yield* taken;
             if (!identifier.verified || held.verified) return held;
-            const verified = yield* store.setVerified(held.id, identifier.verifiedAt ?? new Date());
+            const verified = yield* store.setVerified(
+              held.id,
+              identifier.verifiedAt ?? (yield* DateTime.nowAsDate),
+            );
             return verified ?? held;
           }),
         // A store that cannot hold the first identifier cannot serve this

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Redacted } from "effect";
+import { Array as Arr, Context, Crypto, DateTime, Effect, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
 import { Hooks } from "./Hooks.ts";
@@ -51,8 +51,8 @@ const testConfig = { secret: Redacted.make("test-hmac-secret-32bytes-exactly!!")
 
 const testUser: User = {
   id: "user-td-1",
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
   attributes: {},
 };
 
@@ -78,7 +78,7 @@ describe("TrustedDeviceService", () => {
     );
 
     expect(cookieValue).toContain(".");
-    expect(expiresAt).toBeGreaterThan(Date.now());
+    expect(expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(verifiedId).toBe(testUser.id);
     expect(deviceRecords.size).toBe(1);
   });

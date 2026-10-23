@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Exit, Layer, Option } from "effect";
+import { DateTime, Effect, Exit, Layer, Option } from "effect";
 import type * as Types from "./Types.ts";
 import * as SessionContext from "./SessionContext.ts";
 import {
@@ -17,7 +17,7 @@ import { Authorizer, CurrentCredential, CurrentPrincipal } from "./Authorizer.ts
 // ---------------------------------------------------------------------------
 
 const USER_ID = "user-42";
-const now = new Date();
+const now = DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const testUser: Types.User = {
   id: USER_ID,
@@ -29,7 +29,7 @@ const testUser: Types.User = {
 const testSession: Types.Session = {
   id: "session-1",
   userId: USER_ID,
-  expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+  expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60 * 60 * 1000)),
   createdAt: now,
   lastActivityAt: now,
   attributes: {},

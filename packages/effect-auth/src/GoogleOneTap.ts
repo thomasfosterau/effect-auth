@@ -26,7 +26,7 @@
  *
  * @module google-one-tap
  */
-import { Context, Crypto, Data, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Crypto, Data, DateTime, Effect, Layer, Predicate } from "effect";
 import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -189,7 +189,7 @@ export const make = (
       createNonce: Effect.fn("GoogleOneTapService.createNonce")(function* () {
         const nonce = yield* generateNonce().pipe(Effect.provideService(Crypto.Crypto, crypto));
         yield* nonceStore
-          .create(nonce, Date.now() + nonceTtlMs)
+          .create(nonce, (yield* Clock.currentTimeMillis) + nonceTtlMs)
           .pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));
         return nonce;
       }),
@@ -205,7 +205,7 @@ export const make = (
         if (entry === null) {
           return yield* new GoogleOneTapError({ message: "Unknown or already-used nonce" });
         }
-        if (Date.now() > entry.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > entry.expiresAt) {
           yield* Effect.ignore(nonceStore.delete(nonce));
           return yield* new GoogleOneTapError({ message: "Nonce has expired" });
         }
@@ -245,7 +245,12 @@ export const make = (
           // Google attested the address as verified.
           const created = yield* createUserWithIdentifier(
             identifiers,
-            { type: "email", value: normalized, verified: true, verifiedAt: new Date() },
+            {
+              type: "email",
+              value: normalized,
+              verified: true,
+              verifiedAt: yield* DateTime.nowAsDate,
+            },
             (identifier) =>
               userStore.createUser({
                 ...(Predicate.isString(claims["name"]) && { name: claims["name"] }),

@@ -40,7 +40,17 @@
  * backend's intended use (best-effort rate limiting / attempt counting);
  * use a backend with atomic counters when strict enforcement is required.
  */
-import { Array as Arr, Effect, Layer, Option, Order, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Predicate,
+  Schema,
+} from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
@@ -260,7 +270,7 @@ export const rateLimitStoreKV: Effect.Effect<
     set: (key, entry, _ttl) => kv.write(rateLimitKey(key), entry, "rateLimit.set"),
     increment: (key, ttlSeconds) =>
       Effect.gen(function* () {
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const existing = yield* readEntry(key);
         if (existing == null || now >= existing.resetAt) {
           const entry: RateLimitEntry = { key, count: 1, resetAt: now + ttlSeconds * 1000 };
@@ -597,8 +607,10 @@ const decodeIdentifier = (stored: StoredIdentifier): Identifier => ({
   type: stored.type,
   value: stored.value,
   verified: stored.verified,
-  ...(stored.verifiedAt !== undefined ? { verifiedAt: new Date(stored.verifiedAt) } : {}),
-  createdAt: new Date(stored.createdAt),
+  ...(stored.verifiedAt !== undefined
+    ? { verifiedAt: DateTime.toDateUtc(DateTime.makeUnsafe(stored.verifiedAt)) }
+    : {}),
+  createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(stored.createdAt)),
 });
 
 const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({

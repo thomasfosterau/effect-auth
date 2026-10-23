@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Predicate, Schema } from "effect";
+import { DateTime, Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
@@ -61,7 +61,7 @@ const makeFixture = () => {
   const jwtKeys: JwtKeyPair[] = [];
 
   const seedUser = (id: string, email: string, attributes: Types.Attributes = {}) => {
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Types.User = {
       id,
       createdAt: now,
@@ -87,11 +87,11 @@ const makeFixture = () => {
       "hex",
     );
     const tokenHash = hashToken(rawToken);
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     sessions.set(tokenHash, {
       id: tokenHash,
       userId,
-      expiresAt: new Date(Date.now() + HOUR),
+      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: HOUR })),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
@@ -200,7 +200,11 @@ const makeFixture = () => {
       Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
     addTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
-        const teamMember: TeamMember = { teamId, userId, createdAt: Date.now() };
+        const teamMember: TeamMember = {
+          teamId,
+          userId,
+          createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        };
         teamMembers.push(teamMember);
         return teamMember;
       }),
@@ -250,13 +254,13 @@ const makeFixture = () => {
 
     createUser: (input: { name?: string; image?: string; attributes?: Types.Attributes }) =>
       Effect.sync(() => {
-        const id = `created-${Date.now()}`;
+        const id = `created-${DateTime.toEpochMillis(DateTime.nowUnsafe())}`;
         const user: Types.User = {
           id,
           ...(input.name !== undefined && { name: input.name }),
           ...(input.image !== undefined && { image: input.image }),
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
           attributes: input.attributes ?? {},
         };
         usersById.set(id, user);

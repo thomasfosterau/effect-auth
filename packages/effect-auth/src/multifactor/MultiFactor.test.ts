@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Redacted, Result } from "effect";
+import { Array as Arr, Clock, Context, Crypto, DateTime, Effect, Redacted, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService, make as makeSessionService } from "../SessionService.ts";
@@ -75,8 +75,8 @@ const emailPasswordStore = {
       const user: User = {
         id: `user-${users.size + 1}`,
         ...(input.name !== undefined && { name: input.name }),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: input.attributes ?? {},
       };
       users.set(user.id, user);
@@ -170,8 +170,8 @@ const makeTestContext = async () => {
 const seedUser = async (id: string, email: string, password: string): Promise<User> => {
   const user: User = {
     id,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   };
   users.set(id, user);
@@ -180,7 +180,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
     type: "email",
     value: email,
     verified: true,
-    verifiedAt: new Date(),
+    verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   identifiers.set(identifier.id, identifier);
 
@@ -595,7 +595,7 @@ describe("MultiFactorService with TOTP secret encryption", () => {
           // Confirm with the previous time step's code (within the default ±1
           // window) so the challenge verification below can use the current
           // step's code without tripping the replay guard.
-          const currentCounter = Math.floor(Date.now() / 1000 / 30);
+          const currentCounter = Math.floor((yield* Clock.currentTimeMillis) / 1000 / 30);
           const confirmCode = yield* generateHotp(enableResult.secret, currentCounter - 1);
           yield* service.confirmEnable("user-enc-1", confirmCode);
 

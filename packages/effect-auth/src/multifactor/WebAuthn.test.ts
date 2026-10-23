@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Effect, Context, Crypto, Data, Order, Schema } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Data, Effect, Order, Schema } from "effect";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
 import * as WebAuthn from "./WebAuthn.ts";
@@ -114,7 +114,7 @@ describe("WebAuthn Service", () => {
 
           expect(result.challenge).toBeInstanceOf(Uint8Array);
           expect(result.challenge.length).toBe(32); // 256 bits
-          expect(result.expiresAt).toBeGreaterThan(Date.now());
+          expect(result.expiresAt).toBeGreaterThan(yield* Clock.currentTimeMillis);
 
           // Verify challenge was stored
           expect(mockChallengeStore.challenges.size).toBe(1);
@@ -149,7 +149,7 @@ describe("WebAuthn Service", () => {
 
           expect(result.challenge).toBeInstanceOf(Uint8Array);
           expect(result.challenge.length).toBe(32);
-          expect(result.expiresAt).toBeGreaterThan(Date.now());
+          expect(result.expiresAt).toBeGreaterThan(yield* Clock.currentTimeMillis);
 
           // Verify challenge was stored with userId
           const stored = Array.from(mockChallengeStore.challenges.values())[0];
@@ -288,7 +288,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7, // ES256
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
 
           yield* mockCredentialStore.create(mockCredential);
@@ -312,7 +312,7 @@ describe("WebAuthn Service", () => {
               publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
               algorithm: -7,
               counter: 0,
-              createdAt: Date.now(),
+              createdAt: yield* Clock.currentTimeMillis,
             },
             {
               id: "cred-2",
@@ -320,7 +320,7 @@ describe("WebAuthn Service", () => {
               publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
               algorithm: -7,
               counter: 0,
-              createdAt: Date.now(),
+              createdAt: yield* Clock.currentTimeMillis,
             },
           ];
 
@@ -347,7 +347,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 5,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
 
           yield* mockCredentialStore.create(mockCredential);
@@ -398,7 +398,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           const cred2: WebAuthnCredential = {
             id: "cred-b",
@@ -406,7 +406,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           const other: WebAuthnCredential = {
             id: "cred-c",
@@ -414,7 +414,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           yield* mockCredentialStore.create(cred1);
           yield* mockCredentialStore.create(cred2);
@@ -445,7 +445,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           yield* mockCredentialStore.create(cred);
 
@@ -483,7 +483,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           yield* mockCredentialStore.create(cred);
 
@@ -506,7 +506,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           yield* mockCredentialStore.create(cred);
 
@@ -532,7 +532,7 @@ describe("WebAuthn Service", () => {
             publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
             algorithm: -7,
             counter: 0,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           yield* mockCredentialStore.create(cred);
 

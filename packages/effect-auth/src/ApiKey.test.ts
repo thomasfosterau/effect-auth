@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Option, Result } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Effect, Option, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   type ApiKeyService,
@@ -365,7 +365,7 @@ describe("ApiKeyService", () => {
 
         // Simulate 1 interval having elapsed
         yield* service.update("user-1", apiKey.id, {
-          lastRefillAt: Date.now() - 60_001,
+          lastRefillAt: (yield* Clock.currentTimeMillis) - 60_001,
         });
 
         const afterRefill = yield* service.verify(key);
@@ -395,7 +395,7 @@ describe("ApiKeyService", () => {
 
         // Simulate 4 intervals elapsed (4 * 3 = 12, capped at refillMax 10)
         yield* service.update("user-1", apiKey.id, {
-          lastRefillAt: Date.now() - 4 * 60_001,
+          lastRefillAt: (yield* Clock.currentTimeMillis) - 4 * 60_001,
         });
 
         const afterRefill = yield* service.verify(key);
@@ -423,7 +423,7 @@ describe("ApiKeyService", () => {
 
         // Simulate 1 interval elapsed: 4 + 10 = 14, capped at refillMax 5
         yield* service.update("user-1", apiKey.id, {
-          lastRefillAt: Date.now() - 60_001,
+          lastRefillAt: (yield* Clock.currentTimeMillis) - 60_001,
         });
 
         const afterRefill = yield* service.verify(key);
@@ -447,7 +447,7 @@ describe("ApiKeyService", () => {
 
         // Simulate 2.7 intervals elapsed — only 2 full ticks should apply
         yield* service.update("user-1", apiKey.id, {
-          lastRefillAt: Date.now() - Math.floor(2.7 * 60_000),
+          lastRefillAt: (yield* Clock.currentTimeMillis) - Math.floor(2.7 * 60_000),
         });
 
         const afterRefill = yield* service.verify(key);

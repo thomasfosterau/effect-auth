@@ -1,5 +1,5 @@
 // README:begin
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` nullable: a user created without an address gets `NULL`.
@@ -7,7 +7,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
   Effect.gen(function* () {
     const email = input.identifier?.type === "email" ? input.identifier : undefined;
     const id = crypto.randomUUID();
-    const now = new Date();
+    const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
         db.insert(appUsers).values({

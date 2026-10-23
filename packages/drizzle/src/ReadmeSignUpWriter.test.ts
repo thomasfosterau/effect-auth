@@ -10,7 +10,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
-import { Array as Arr, Effect, Layer } from "effect";
+import { Array as Arr, DateTime, Effect, Layer } from "effect";
 import { readFile } from "node:fs/promises";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -37,7 +37,7 @@ beforeEach(async () => {
   await truncate(client, ["app_users_readme_strict", "app_users_readme"]);
 });
 
-const verifiedAt = new Date(Date.UTC(2026, 9, 15));
+const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-15T00:00:00.000Z"));
 const ada: Auth.NewUserIdentifier = {
   type: "email",
   value: "ada@example.com",

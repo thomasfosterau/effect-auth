@@ -26,7 +26,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import * as EffectPglite from "drizzle-orm-effect/effect-pglite";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { effectDatabaseLayer, type EffectDrizzleDatabase } from "./Database.ts";
@@ -35,7 +35,10 @@ import { tables } from "./PgSchema.ts";
 import * as Requests from "./Requests.ts";
 import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
-const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
+const at = (offsetMs: number): Date =>
+  DateTime.toDateUtc(
+    DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
+  );
 
 const makeSession = (id: string): Auth.Session => ({
   id,

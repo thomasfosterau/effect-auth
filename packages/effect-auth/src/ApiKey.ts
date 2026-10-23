@@ -16,7 +16,7 @@
  * @module api-key
  */
 
-import { Array as Arr, Context, Crypto, Data, Effect, Layer, Record as Rec } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Data, Effect, Layer, Record as Rec } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
@@ -339,7 +339,7 @@ export const make = (
       requiredPermissions: Record<string, readonly string[]> | undefined,
     ) =>
       Effect.gen(function* () {
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
 
         if (!apiKey.enabled) {
           return { valid: false, error: "API key is disabled" } satisfies ApiKeyVerifyResult;
@@ -417,7 +417,7 @@ export const make = (
         const secret = yield* randomToken();
         const key = `${prefix}${secret}`;
 
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const expiresIn = options?.expiresIn ?? defaultExpiresIn;
 
         const hasRefill =
@@ -522,7 +522,7 @@ export const make = (
           ...(updates.refillMax !== undefined && { refillMax: updates.refillMax }),
           ...(updates.lastRefillAt !== undefined && { lastRefillAt: updates.lastRefillAt }),
           ...(updates.rateLimit !== undefined && { rateLimit: updates.rateLimit }),
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         });
       }),
 
@@ -532,7 +532,7 @@ export const make = (
       }),
 
       deleteAllExpired: Effect.fn("ApiKeyService.deleteAllExpired")(function* (userId: string) {
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
 
         const candidates = yield* store.listByUserId(userId);
 

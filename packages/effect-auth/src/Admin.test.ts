@@ -1,5 +1,15 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Layer, Order, Predicate, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  Layer,
+  Order,
+  Predicate,
+  Result,
+} from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   AdminUserStore,
@@ -134,8 +144,8 @@ const adminUserStore = {
         id,
         name: input.name,
         image: input.image,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: input.attributes ?? {},
       };
       users.set(id, user);
@@ -196,8 +206,8 @@ const makeTestContext = async (
 const seedUser = (id: string, email: string, attributes: Attributes = {}): User => {
   const user: User = {
     id,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes,
   };
   users.set(id, user);
@@ -206,7 +216,7 @@ const seedUser = (id: string, email: string, attributes: Attributes = {}): User 
     type: "email",
     value: email,
     verified: true,
-    verifiedAt: new Date(),
+    verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   identifiers.set(identifier.id, identifier);
   return user;
@@ -409,7 +419,7 @@ describe("AdminService", () => {
     expect(banned.attributes["banReason"]).toBe("No reason");
     const banExpires = banned.attributes["banExpires"];
     assert(Predicate.isNumber(banExpires));
-    expect(banExpires).toBeGreaterThan(Date.now());
+    expect(banExpires).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(isBanned(banned)).toBe(true);
   });
 
@@ -531,7 +541,7 @@ describe("AdminService", () => {
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     seedUser("user-1", "user@example.com");
 
-    const before = Date.now();
+    const before = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const session = await runService(
       testContext,
       { impersonationSessionDuration: 15 * 60 * 1000 },
@@ -738,8 +748,8 @@ describe("AdminService", () => {
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     const owner: User = {
       id: "owner",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(owner.id, owner);
@@ -871,9 +881,11 @@ describe("AdminService", () => {
         const expiredSession = {
           id: "expired-hash",
           userId: "user-1",
-          expiresAt: new Date(Date.now() - 1000),
-          createdAt: new Date(),
-          lastActivityAt: new Date(),
+          expiresAt: DateTime.toDateUtc(
+            DateTime.subtract(yield* DateTime.now, { milliseconds: 1000 }),
+          ),
+          createdAt: yield* DateTime.nowAsDate,
+          lastActivityAt: yield* DateTime.nowAsDate,
           attributes: {},
         };
         sessions.set("expired-hash", expiredSession);
@@ -885,7 +897,9 @@ describe("AdminService", () => {
     // Only non-expired sessions for user-1 are returned
     expect(result.length).toBe(2);
     expect(result.every((s) => s.userId === "user-1")).toBe(true);
-    expect(result.every((s) => s.expiresAt.getTime() > Date.now())).toBe(true);
+    expect(
+      result.every((s) => s.expiresAt.getTime() > DateTime.toEpochMillis(DateTime.nowUnsafe())),
+    ).toBe(true);
   });
 
   it("listUserSessions: authorization failure for non-admin", async () => {

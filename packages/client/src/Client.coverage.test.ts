@@ -10,7 +10,7 @@
  * covered with a recording `fetch` instead.
  */
 import * as Auth from "@thomasfosterau/effect-auth";
-import { Array as Arr, Effect, Order, Predicate, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Order, Predicate, Schema } from "effect";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { AuthClientError, SecondFactorChallengeError, createAuthClient } from "./Client.ts";
 import {
@@ -221,7 +221,12 @@ const totpFor = (secret: string) => Effect.runPromise(Auth.MultiFactor.generateT
  * guard does not reject the later challenge redemption.
  */
 const previousTotpFor = (secret: string) =>
-  Effect.runPromise(Auth.MultiFactor.generateHotp(secret, Math.floor(Date.now() / 1000 / 30) - 1));
+  Effect.runPromise(
+    Auth.MultiFactor.generateHotp(
+      secret,
+      Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000 / 30) - 1,
+    ),
+  );
 
 /** Enrol `email` in multi-factor and return the enrollment view. */
 const enrol = async (client: ReturnType<typeof createAuthClient>, email: string) => {
@@ -289,7 +294,7 @@ describe("multi-factor challenge continuation", () => {
 
     const challenge = client.multiFactor.challenge({
       token: "stale-token",
-      expiresAt: Date.now() - 1_000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1_000,
     });
     expect(challenge.isExpired()).toBe(true);
 

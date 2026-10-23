@@ -1,7 +1,18 @@
 import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { Array as Arr, Context, Crypto, Effect, Predicate, Redacted, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  Predicate,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
@@ -39,8 +50,8 @@ const storeContext = Context.merge(
 
 const user: User = {
   id: "user-1",
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
   // `email` is not a first-class `User` field (login handles are `Identifier`
   // records), so the claim source for `definePayload` lives in `attributes`.
   attributes: { email: "jwt@example.com" },
@@ -70,7 +81,7 @@ describe("JwtService", () => {
     );
 
     expect(result.signed.token.split(".")).toHaveLength(3);
-    expect(result.signed.expiresAt).toBeGreaterThan(Date.now());
+    expect(result.signed.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(result.payload["sub"]).toBe("user-1");
     expect(result.payload["iss"]).toBe("https://auth.example.com");
     expect(result.payload["aud"]).toBe("https://api.example.com");
@@ -289,7 +300,7 @@ describe("JwtService — nbf validation", () => {
     const payload = await run(
       Effect.gen(function* () {
         const service = yield* Jwt.make(baseConfig);
-        const pastNbf = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
+        const pastNbf = Math.floor((yield* Clock.currentTimeMillis) / 1000) - 60; // 1 minute ago
         const { token } = yield* service.sign(user, { nbf: pastNbf });
         return yield* service.verify(token);
       }),
@@ -302,7 +313,7 @@ describe("JwtService — nbf validation", () => {
     const result = await run(
       Effect.gen(function* () {
         const service = yield* Jwt.make(baseConfig);
-        const futureNbf = Math.floor(Date.now() / 1000) + 3600; // 1 hour ahead
+        const futureNbf = Math.floor((yield* Clock.currentTimeMillis) / 1000) + 3600; // 1 hour ahead
         const { token } = yield* service.sign(user, { nbf: futureNbf });
         return yield* Effect.result(service.verify(token));
       }),
@@ -370,7 +381,7 @@ describe("JwtService — clock-skew leeway", () => {
     const payload = await run(
       Effect.gen(function* () {
         const service = yield* Jwt.make({ ...baseConfig, clockSkewLeeway: 5000 });
-        const nearFutureNbf = Math.floor(Date.now() / 1000) + 2;
+        const nearFutureNbf = Math.floor((yield* Clock.currentTimeMillis) / 1000) + 2;
         const { token } = yield* service.sign(user, { nbf: nearFutureNbf });
         return yield* service.verify(token);
       }),
@@ -384,7 +395,7 @@ describe("JwtService — clock-skew leeway", () => {
     const result = await run(
       Effect.gen(function* () {
         const service = yield* Jwt.make({ ...baseConfig, clockSkewLeeway: 5000 });
-        const farFutureNbf = Math.floor(Date.now() / 1000) + 10;
+        const farFutureNbf = Math.floor((yield* Clock.currentTimeMillis) / 1000) + 10;
         const { token } = yield* service.sign(user, { nbf: farFutureNbf });
         return yield* Effect.result(service.verify(token));
       }),
@@ -416,7 +427,7 @@ describe("JwtService with private key encryption", () => {
     );
 
     expect(result.signed.token.split(".")).toHaveLength(3);
-    expect(result.signed.expiresAt).toBeGreaterThan(Date.now());
+    expect(result.signed.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(result.payload["sub"]).toBe("user-1");
     expect(result.payload["iss"]).toBe("https://auth.example.com");
 
@@ -645,7 +656,7 @@ describe("RemoteJwksVerifier", () => {
       Effect.gen(function* () {
         const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user, {
-          nbf: Math.floor(Date.now() / 1000) + 3600,
+          nbf: Math.floor((yield* Clock.currentTimeMillis) / 1000) + 3600,
         });
         return token;
       }),

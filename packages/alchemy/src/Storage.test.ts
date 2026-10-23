@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Clock, Effect, Layer, Order, Schema } from "effect";
+import { Array as Arr, Clock, DateTime, Effect, Layer, Order, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -54,11 +54,11 @@ describe("D1-backed effect-auth storage", () => {
           name: "Test User",
           attributes: { plan: "pro" },
         });
-        const now = new Date();
+        const now = yield* DateTime.nowAsDate;
         const session: Auth.Session = {
           id: "sess-1",
           userId: user.id,
-          expiresAt: new Date(now.getTime() + 60_000),
+          expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60_000)),
           createdAt: now,
           lastActivityAt: now,
           attributes: { device: "laptop" },
@@ -133,11 +133,14 @@ describe("D1-backed effect-auth storage", () => {
         const challenges = yield* Auth.MultiFactor.ChallengeStore;
         yield* challenges.create({
           challenge: bytes,
-          expiresAt: Date.now() + 60_000,
+          expiresAt: (yield* Clock.currentTimeMillis) + 60_000,
           userId: "user-1",
         });
         // A second create replaces the row — the DELETE + INSERT pair.
-        yield* challenges.create({ challenge: bytes, expiresAt: Date.now() + 90_000 });
+        yield* challenges.create({
+          challenge: bytes,
+          expiresAt: (yield* Clock.currentTimeMillis) + 90_000,
+        });
         const challenge = yield* challenges.get(bytes);
 
         const states = yield* Auth.OAuth.OAuthStateStore;
@@ -145,8 +148,8 @@ describe("D1-backed effect-auth storage", () => {
           state: "st-1",
           provider: "google",
           codeVerifier: "cv",
-          createdAt: Date.now(),
-          expiresAt: Date.now() + 600_000,
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + 600_000,
         });
         const state = yield* states.get("st-1");
 
@@ -156,8 +159,8 @@ describe("D1-backed effect-auth storage", () => {
           otpHash: "hash",
           purpose: "sign-in",
           attempts: 0,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + 300_000,
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + 300_000,
         });
         const attempts = yield* otps.incrementAttempts("otp@example.com", "sign-in");
 
@@ -267,9 +270,9 @@ describe("D1-backed effect-auth storage", () => {
         yield* sessions.create({
           id: "sess-bigint",
           userId: "user-1",
-          expiresAt: new Date(farFuture),
-          createdAt: new Date(farFuture - 1000),
-          lastActivityAt: new Date(farFuture - 500),
+          expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(farFuture)),
+          createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(farFuture - 1000)),
+          lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(farFuture - 500)),
           attributes: {},
         });
         return yield* sessions.get("sess-bigint");

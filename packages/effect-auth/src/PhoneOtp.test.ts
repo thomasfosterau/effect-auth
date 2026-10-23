@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Layer, Predicate, Result } from "effect";
+import { Array as Arr, Context, Crypto, DateTime, Effect, Layer, Predicate, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,
@@ -93,7 +93,7 @@ const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
   createUser: (input) =>
     Effect.sync(() => {
       createdWith.push(input.identifier);
-      const now = new Date();
+      const now = DateTime.toDateUtc(DateTime.nowUnsafe());
       const user: Types.User = {
         id: `user-${++seq}`,
         ...(input.name !== undefined && { name: input.name }),
@@ -109,7 +109,7 @@ const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
 // Seed an existing user with a phone identifier (the phone number lives in the
 // identifier store now, not on the user record).
 const seedPhoneUser = (phoneNumber: string, verified: boolean): Types.User => {
-  const now = new Date();
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
   const user: Types.User = {
     id: `user-${++seq}`,
     createdAt: now,
@@ -283,8 +283,8 @@ describe("PhoneOtpService", () => {
       otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
-      createdAt: Date.now() - 10_000,
-      expiresAt: Date.now() - 1,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10_000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1,
     });
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -394,8 +394,8 @@ describe("PhoneOtpService", () => {
       otpHash: hashToken("000000"),
       purpose: "sign-in",
       attempts: 0,
-      createdAt: Date.now() - 70_000,
-      expiresAt: Date.now() + 5 * 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 70_000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 5 * 60 * 1000,
     });
 
     await Effect.runPromise(

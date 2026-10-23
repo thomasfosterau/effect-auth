@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Predicate, Result } from "effect";
+import { Context, Crypto, DateTime, Effect, Predicate, Result } from "effect";
 import {
   make as makeOneTimeTokenService,
   OneTimeTokenStore,
@@ -132,8 +132,8 @@ describe("OneTimeTokenService", () => {
     oneTimeTokens.set(expiredHash, {
       token: expiredHash,
       subject: "user-expired",
-      createdAt: Date.now() - 20_000,
-      expiresAt: Date.now() - 10_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 20_000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10_000,
     });
 
     const result = await Effect.runPromise(

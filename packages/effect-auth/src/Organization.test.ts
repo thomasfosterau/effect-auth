@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Order, Result } from "effect";
+import { Array as Arr, Clock, Context, Crypto, DateTime, Effect, Order, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   IdentifierStore,
@@ -194,7 +194,11 @@ const organizationStore = {
 
   addTeamMember: (teamId: string, userId: string) =>
     Effect.sync(() => {
-      const teamMember: TeamMember = { teamId, userId, createdAt: Date.now() };
+      const teamMember: TeamMember = {
+        teamId,
+        userId,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      };
       teamMembers.push(teamMember);
       return teamMember;
     }),
@@ -1614,7 +1618,10 @@ describe("OrganizationService - invitations", () => {
 
           // Age the row: a pending-but-expired invitation is exactly what a
           // resend is for.
-          invitations.set(invitation.id, { ...invitation, expiresAt: Date.now() - 1_000 });
+          invitations.set(invitation.id, {
+            ...invitation,
+            expiresAt: (yield* Clock.currentTimeMillis) - 1_000,
+          });
 
           const resent = yield* service.resendInvitation("owner-1", invitation.id);
           const listed = yield* service.listInvitations(organization.id);
@@ -1624,7 +1631,7 @@ describe("OrganizationService - invitations", () => {
 
     expect(result.resent.id).toBe(result.invitation.id);
     expect(result.resent.status).toBe("pending");
-    expect(result.resent.expiresAt).toBeGreaterThan(Date.now());
+    expect(result.resent.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(result.listed).toHaveLength(1);
     expect(delivered.map((entry) => entry.id)).toEqual([
       result.invitation.id,

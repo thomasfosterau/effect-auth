@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Option, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Option, Schema } from "effect";
 import * as Admin from "../Admin.ts";
 import * as SessionContext from "../SessionContext.ts";
 import * as Types from "../Types.ts";
@@ -29,7 +29,7 @@ describe("fixtureUsers", () => {
   });
 
   it("takes id, role and timestamp overrides", () => {
-    const createdAt = new Date("2030-01-01T00:00:00.000Z");
+    const createdAt = DateTime.toDateUtc(DateTime.makeUnsafe("2030-01-01T00:00:00.000Z"));
     const users = Testing.fixtureUsers({
       ids: { member: "11111111-1111-4111-8111-111111111111" },
       adminRole: "owner",

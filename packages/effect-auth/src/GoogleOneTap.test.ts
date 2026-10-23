@@ -1,6 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Array as Arr, Effect, Layer, Predicate, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -69,8 +69,8 @@ const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject => ({
   email_verified: true,
   name: "Alice",
   picture: "https://img.test/alice.png",
-  exp: Math.floor(Date.now() / 1000) + 300,
-  iat: Math.floor(Date.now() / 1000),
+  exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
+  iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
   ...overrides,
 });
 
@@ -120,7 +120,7 @@ const makeStores = () => {
     createUser: (input) =>
       Effect.sync(() => {
         createdWith.push(input.identifier);
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const user: Types.User = {
           id: `u${++userSeq}`,
           ...(input.name !== undefined && { name: input.name }),
@@ -142,9 +142,11 @@ const makeStores = () => {
       Effect.succeed({
         id: `s-${userId}`,
         userId,
-        expiresAt: new Date(Date.now() + 3600_000),
-        createdAt: new Date(),
-        lastActivityAt: new Date(),
+        expiresAt: DateTime.toDateUtc(
+          DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+        ),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       }),
     validateSession: () => Effect.die("unused"),
@@ -185,8 +187,8 @@ describe("GoogleOneTapService", () => {
     await Effect.runPromise(
       Effect.all(
         [
-          nonceStore.create(nonce1, Date.now() + 60_000),
-          nonceStore.create(nonce2, Date.now() + 60_000),
+          nonceStore.create(nonce1, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+          nonceStore.create(nonce2, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
         ],
         { concurrency: 1 },
       ),
@@ -230,7 +232,9 @@ describe("GoogleOneTapService", () => {
     const { layer, identifiers, nonceStore } = makeStores();
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "test-nonce-bare-iss";
-    await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
+    await Effect.runPromise(
+      nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+    );
     const result = await withJwks(() =>
       Effect.runPromise(
         service
@@ -254,7 +258,9 @@ describe("GoogleOneTapService", () => {
     const nonces = ["n1", "n2", "n3", "n4", "n5"];
     await Arr.reduce(nonces, Promise.resolve(), async (previous, n) => {
       await previous;
-      await Effect.runPromise(nonceStore.create(n, Date.now() + 60_000));
+      await Effect.runPromise(
+        nonceStore.create(n, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+      );
     });
 
     const cases: [string, string][] = [
@@ -268,7 +274,10 @@ describe("GoogleOneTapService", () => {
       ],
       [
         signCredential(
-          validClaims({ exp: Math.floor(Date.now() / 1000) - 10, nonce: hashNonce(nonces[2]) }),
+          validClaims({
+            exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) - 10,
+            nonce: hashNonce(nonces[2]),
+          }),
         ),
         nonces[2],
       ],
@@ -285,7 +294,9 @@ describe("GoogleOneTapService", () => {
     await Arr.reduce(cases, Promise.resolve(), async (previous, [credential, nonce]) => {
       await previous;
       // Re-create nonce if already consumed by a previous failure
-      await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
+      await Effect.runPromise(
+        nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+      );
       const err = await withJwks(() =>
         Effect.runPromise(
           Effect.flip(service.signIn(credential, nonce)).pipe(Effect.provide(layer)),
@@ -299,7 +310,7 @@ describe("GoogleOneTapService", () => {
     const { layer, users, identifiers, nonceStore, passwordHashes, sessionsCleared } = makeStores();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     users.set("user-squat", { id: "user-squat", createdAt: now, updatedAt: now, attributes: {} });
     await Effect.runPromise(
       identifiers.create(
@@ -310,7 +321,9 @@ describe("GoogleOneTapService", () => {
 
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "squat-nonce";
-    await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
+    await Effect.runPromise(
+      nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+    );
     const result = await withJwks(() =>
       Effect.runPromise(
         service
@@ -330,7 +343,9 @@ describe("GoogleOneTapService", () => {
     const { layer, nonceStore } = makeStores();
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "replay-nonce";
-    await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
+    await Effect.runPromise(
+      nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+    );
 
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
@@ -365,7 +380,9 @@ describe("GoogleOneTapService", () => {
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "expired-nonce";
     // Create with a timestamp that is already in the past
-    await Effect.runPromise(nonceStore.create(nonce, Date.now() - 1));
+    await Effect.runPromise(
+      nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1),
+    );
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
     const err = await withJwks(() =>
@@ -379,7 +396,9 @@ describe("GoogleOneTapService", () => {
     const { layer, nonceStore } = makeStores();
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "correct-nonce";
-    await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
+    await Effect.runPromise(
+      nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
+    );
 
     // Token signed with a different nonce hash
     const credential = signCredential(validClaims({ nonce: hashNonce("wrong-nonce") }));
@@ -407,7 +426,7 @@ const makeHttpFixture = () => {
     },
     createUser: (input) =>
       Effect.sync(() => {
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const user: Types.User = {
           id: `u${++userSeq}`,
           ...(input.name !== undefined && { name: input.name }),

@@ -39,7 +39,7 @@
  *
  * @module plugins/account-lockout
  */
-import { Context, Effect } from "effect";
+import { Clock, Context, Effect } from "effect";
 import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
 import { makePlugin } from "../Hooks.ts";
@@ -190,7 +190,7 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
         beforeSignIn: (input: SignInInput) =>
           Effect.gen(function* () {
             const key = `${keyPrefix}${normalize(input.email)}`;
-            const now = Date.now();
+            const now = yield* Clock.currentTimeMillis;
 
             const existing = yield* guarded(store.get(key), null);
             if (

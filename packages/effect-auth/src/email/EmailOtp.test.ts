@@ -1,7 +1,17 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
-import { Array as Arr, Context, Crypto, Effect, Layer, Predicate, Result, Tracer } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  Layer,
+  Predicate,
+  Result,
+  Tracer,
+} from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -104,7 +114,7 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     type: "email",
     value: email,
     verified,
-    ...(verified ? { verifiedAt: new Date() } : {}),
+    ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
   });
   identifierRecords.set(identifier.id, identifier);
 };
@@ -121,8 +131,8 @@ const emailOtpUserStore = {
       const user: User = {
         id: `user-${users.size + 1}`,
         ...(input.name !== undefined && { name: input.name }),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       };
       addUser(user);
@@ -319,8 +329,8 @@ describe("EmailOtpService", () => {
 
     addUser({
       id: "user-known",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     });
     addEmailIdentifier("user-known", "known@example.com", true);
@@ -346,14 +356,19 @@ describe("EmailOtpService", () => {
 
     // A squatter signed up with the address and a password they know, and
     // holds a session; the address was never verified.
-    addUser({ id: "user-squat", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-squat",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-squat", "victim@example.com", false);
     passwordHashes.set("user-squat", "squatter-hash");
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     sessions.set("squatter-session", {
       id: "squatter-session",
       userId: "user-squat",
-      expiresAt: new Date(now.getTime() + 3_600_000),
+      expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
@@ -382,7 +397,12 @@ describe("EmailOtpService", () => {
   it("keeps the password and sessions of an account whose address is already verified (#440)", async () => {
     const testContext = await makeTestContext();
 
-    addUser({ id: "user-owner", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-owner",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-owner", "victim@example.com", true);
     passwordHashes.set("user-owner", "owner-hash");
 
@@ -430,8 +450,8 @@ describe("EmailOtpService", () => {
       otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
-      createdAt: Date.now() - 10 * 60 * 1000,
-      expiresAt: Date.now() - 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10 * 60 * 1000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 60 * 1000,
     });
 
     const result = await Effect.runPromise(
@@ -537,8 +557,8 @@ describe("EmailOtpService", () => {
       otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60 * 1000,
     });
 
     const result = await Effect.runPromise(
@@ -567,8 +587,8 @@ describe("EmailOtpService", () => {
 
     addUser({
       id: "user-member",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     });
     addEmailIdentifier("user-member", "member@example.com", true);
@@ -675,8 +695,8 @@ describe("EmailOtpService", () => {
       otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
-      createdAt: Date.now() - 70_000,
-      expiresAt: Date.now() + 5 * 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 70_000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 5 * 60 * 1000,
     });
 
     await Effect.runPromise(
@@ -751,7 +771,12 @@ describe("EmailOtpService", () => {
     "answers a known and an unknown email alike within the cooldown ($purpose, disableSignUp: $disableSignUp)",
     async ({ purpose, disableSignUp }) => {
       const testContext = await makeTestContext();
-      addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+      addUser({
+        id: "user-member",
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        attributes: {},
+      });
       addEmailIdentifier("user-member", "member@example.com", true);
 
       const { known, unknown } = await Effect.runPromise(
@@ -812,7 +837,12 @@ describe("EmailOtpService", () => {
     "stores a cooldown marker for an unknown email that no code redeems ($purpose)",
     async ({ purpose, disableSignUp }) => {
       const testContext = await makeTestContext();
-      addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+      addUser({
+        id: "user-member",
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        attributes: {},
+      });
       addEmailIdentifier("user-member", "member@example.com", true);
       const otpLength = 6;
       const guess = "0".repeat(otpLength);
@@ -872,7 +902,12 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
     sentOtps.splice(0, sentOtps.length);
     storeOps.length = 0;
     createdWith.length = 0;
-    addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-member",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-member", "member@example.com", true);
     vi.useFakeTimers({ toFake: ["Date"] });
   });

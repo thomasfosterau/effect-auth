@@ -6,6 +6,7 @@
  */
 import {
   Array as Arr,
+  Clock,
   Effect,
   Layer,
   Option,
@@ -254,6 +255,52 @@ const readSubjectConfirmation = (assertion: XmlNode): SubjectConfirmation => {
 // The service
 // -----------------------------------------------------------------------------
 
+/**
+ * Read the subject confirmation and check it: its `Recipient` must be this
+ * SP's ACS URL, and its `NotOnOrAfter` must not have passed (allowing
+ * `clockSkewMs`).
+ */
+const checkSubjectConfirmation = (
+  assertion: XmlNode,
+  acsUrl: string,
+  clockSkewMs: number,
+): Effect.Effect<SubjectConfirmation, SamlError> =>
+  Effect.gen(function* () {
+    const confirmation = readSubjectConfirmation(assertion);
+    if (confirmation.recipient !== undefined && confirmation.recipient !== acsUrl) {
+      return yield* fail(
+        `SAML assertion was issued for "${confirmation.recipient}", not this SP's ACS URL`,
+      );
+    }
+    if (
+      confirmation.notOnOrAfter !== undefined &&
+      (yield* Clock.currentTimeMillis) - clockSkewMs >= confirmation.notOnOrAfter
+    ) {
+      return yield* fail("SAML subject confirmation has expired");
+    }
+    return confirmation;
+  });
+
+/**
+ * `Destination` sits on the Response element, which is only authenticated
+ * when the whole response is signed. Checking it regardless costs nothing
+ * and closes the endpoint-substitution hole for deployments that do sign.
+ */
+const checkDestination = (xml: string, acsUrl: string): Effect.Effect<void, SamlError> => {
+  const foreignDestination = Arr.findFirst(
+    Arr.fromIterable(xml.matchAll(/\bDestination\s*=\s*("([^"]*)"|'([^']*)')/g)),
+    (match) => {
+      const destination = match[2] ?? match[3] ?? "";
+      return destination !== "" && destination !== acsUrl
+        ? Option.some(destination)
+        : Option.none();
+    },
+  );
+  return Option.isSome(foreignDestination)
+    ? fail(`SAML response Destination "${foreignDestination.value}" is not this SP's ACS URL`)
+    : Effect.void;
+};
+
 const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError> =>
   Effect.gen(function* () {
     if (Arr.isReadonlyArrayEmpty(input.idpCertificates)) {
@@ -343,36 +390,8 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
       );
     }
 
-    const confirmation = readSubjectConfirmation(assertion);
-    if (confirmation.recipient !== undefined && confirmation.recipient !== input.acsUrl) {
-      return yield* fail(
-        `SAML assertion was issued for "${confirmation.recipient}", not this SP's ACS URL`,
-      );
-    }
-    if (
-      confirmation.notOnOrAfter !== undefined &&
-      Date.now() - clockSkewMs >= confirmation.notOnOrAfter
-    ) {
-      return yield* fail("SAML subject confirmation has expired");
-    }
-
-    // `Destination` sits on the Response element, which is only authenticated
-    // when the whole response is signed. Checking it regardless costs nothing
-    // and closes the endpoint-substitution hole for deployments that do sign.
-    const foreignDestination = Arr.findFirst(
-      Arr.fromIterable(xml.matchAll(/\bDestination\s*=\s*("([^"]*)"|'([^']*)')/g)),
-      (match) => {
-        const destination = match[2] ?? match[3] ?? "";
-        return destination !== "" && destination !== input.acsUrl
-          ? Option.some(destination)
-          : Option.none();
-      },
-    );
-    if (Option.isSome(foreignDestination)) {
-      return yield* fail(
-        `SAML response Destination "${foreignDestination.value}" is not this SP's ACS URL`,
-      );
-    }
+    const confirmation = yield* checkSubjectConfirmation(assertion, input.acsUrl, clockSkewMs);
+    yield* checkDestination(xml, input.acsUrl);
 
     // Prefer the signed `InResponseTo` over the Response attribute, and reject
     // a document where the two disagree.

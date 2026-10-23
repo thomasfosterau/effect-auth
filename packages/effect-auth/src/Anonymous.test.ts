@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import {
   AnonymousService,
   AnonymousUserStore,
@@ -12,11 +12,11 @@ import type * as Types from "./Types.ts";
 import { InvalidInputError } from "./Errors.ts";
 
 const makeSession = (userId: string): Types.Session => {
-  const now = new Date();
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
   return {
     id: `sess-${userId}`,
     userId,
-    expiresAt: new Date(now.getTime() + 60_000),
+    expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60_000)),
     createdAt: now,
     lastActivityAt: now,
     attributes: {},
@@ -42,7 +42,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     createAnonymousUser: () =>
       Effect.sync(() => {
         const id = `anon-${++seq}`;
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         // `email` is not a first-class `User` field — anonymous users hold no
         // identifiers at all (see `Anonymous.ts`), so this fixture's
         // placeholder address rides in `attributes`.
@@ -139,8 +139,8 @@ describe("Anonymous", () => {
     const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
     const realUser: Types.User = {
       id: "real-1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     await run(h, (svc) => svc.linkAccount(anon, realUser));
@@ -151,8 +151,8 @@ describe("Anonymous", () => {
   it("isAnonymousUser detects the convention flag", () => {
     const anon: Types.User = {
       id: "a",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: { isAnonymous: true, email: "a@anonymous.local" },
     };
     const real: Types.User = { ...anon, id: "b", attributes: { email: "b@example.com" } };
@@ -164,14 +164,14 @@ describe("Anonymous", () => {
     const h = makeHarness();
     const notAnon: Types.User = {
       id: "real-99",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     const target: Types.User = {
       id: "real-100",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     const err = await runFail(h, (svc) => svc.linkAccount(notAnon, target));
@@ -191,8 +191,8 @@ describe("Anonymous", () => {
     const h = makeHarness();
     const realUser: Types.User = {
       id: "real-2",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     // Both linkAccount calls must run within the same Effect scope so they
@@ -214,8 +214,8 @@ describe("Anonymous", () => {
     const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
     const realUser: Types.User = {
       id: "real-3",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     await run(h, (svc) => svc.linkAccount(anon, realUser));

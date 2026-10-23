@@ -563,7 +563,7 @@ On a `NOT NULL` `email` column the row can't be inserted without the address,
 so the writer fails when there is none:
 
 ```ts
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` NOT NULL: the row can't be inserted without the address.
@@ -574,7 +574,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
       return yield* new Auth.AuthError({ message: "A user needs an email address" });
     }
     const id = crypto.randomUUID();
-    const now = new Date();
+    const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
         db.insert(appUsers).values({
@@ -604,7 +604,7 @@ On a nullable column the writer can insert the row without an address, and the
 claim that follows writes it:
 
 ```ts
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` nullable: a user created without an address gets `NULL`.
@@ -612,7 +612,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
   Effect.gen(function* () {
     const email = input.identifier?.type === "email" ? input.identifier : undefined;
     const id = crypto.randomUUID();
-    const now = new Date();
+    const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
         db.insert(appUsers).values({

@@ -13,7 +13,7 @@
 
 import { boolean, datetime, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -160,7 +160,7 @@ describe("single-table MySQL / statements", () => {
       type: "email",
       value: "ada@example.com",
       verified: true,
-      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
     });
   });
 
@@ -244,7 +244,7 @@ describe("single-table MySQL / replace", () => {
     type: "email",
     value: "ada@example.com",
     verified: true,
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
   };
   const to = Auth.makeIdentifier({
     userId: USER_ID,
@@ -311,7 +311,7 @@ describe("single-table MySQL / replace", () => {
 
   it("writes the replacement's verification time when the column is mapped", async () => {
     const proxy = makeProxy();
-    const verifiedAt = new Date("2026-01-02T09:30:00.000Z");
+    const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T09:30:00.000Z"));
 
     await runWith(
       proxy,
@@ -411,7 +411,7 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
   it("writes the verification time to its own column on setVerified, and reads it back", async () => {
     const proxy = makeProxy();
     proxy.respondWith([wireVerifiedRow("2026-01-02 09:30:00.000")]);
-    const verifiedAt = new Date("2026-01-02T09:30:00.000Z");
+    const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T09:30:00.000Z"));
 
     const verified = await runWith(
       proxy,
@@ -464,7 +464,10 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
       proxy,
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
-        return yield* store.setVerified(USER_ID, new Date("2026-01-02T09:30:00.000Z"));
+        return yield* store.setVerified(
+          USER_ID,
+          DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T09:30:00.000Z")),
+        );
       }),
     );
 

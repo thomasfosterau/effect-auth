@@ -7,10 +7,12 @@
 
 import {
   Array as Arr,
+  Clock,
   Config,
   Context,
   Crypto,
   Data,
+  DateTime,
   Effect,
   Layer,
   Predicate,
@@ -507,6 +509,7 @@ const fetchIdTokenJwk = (
 const idTokenClaimFailure = (
   payload: Schema.JsonObject,
   params: IdTokenParams,
+  now: number,
 ): string | undefined => {
   if (params.issuer !== undefined && payload["iss"] !== params.issuer) {
     return "id_token issuer mismatch";
@@ -516,7 +519,7 @@ const idTokenClaimFailure = (
     const ok = aud === params.audience || (Array.isArray(aud) && aud.includes(params.audience));
     if (!ok) return "id_token audience mismatch";
   }
-  const nowSec = (params.now ?? Date.now()) / 1000;
+  const nowSec = now / 1000;
   const exp = payload["exp"];
   if (Predicate.isNumber(exp) && nowSec > exp) {
     return "id_token expired";
@@ -579,7 +582,11 @@ const verifyIdTokenClaims = (
       return yield* fail("Invalid id_token signature");
     }
 
-    const failure = idTokenClaimFailure(payload, params);
+    const failure = idTokenClaimFailure(
+      payload,
+      params,
+      params.now ?? (yield* Clock.currentTimeMillis),
+    );
     if (failure !== undefined) {
       return yield* fail(failure);
     }
@@ -613,6 +620,7 @@ const profileAccount = (
   },
   tokens: OAuthTokenResponse,
   userInfo: OAuthUserInfo,
+  now: number,
 ): OAuthAccount => ({
   id: base.id,
   userId: base.userId,
@@ -624,10 +632,10 @@ const profileAccount = (
   accessToken: tokens.access_token,
   ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
   ...(tokens.expires_in && {
-    expiresAt: Date.now() + tokens.expires_in * 1000,
+    expiresAt: now + tokens.expires_in * 1000,
   }),
   createdAt: base.createdAt,
-  updatedAt: Date.now(),
+  updatedAt: now,
 });
 
 /**
@@ -730,8 +738,8 @@ export const provider = (
           provider: name,
           ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
           ...(nonce && { nonce }),
-          createdAt: Date.now(),
-          expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + 10 * 60 * 1000, // 10 minutes
         };
 
         yield* stateStore.create(stateEntry);
@@ -1088,7 +1096,7 @@ export const make = (
           });
         }
 
-        if (Date.now() > stateEntry.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
           return yield* new OAuthStateExpiredError({
             message: "OAuth state expired",
@@ -1125,9 +1133,9 @@ export const make = (
             refreshToken: tokens.refresh_token,
           }),
           ...(tokens.expires_in && {
-            expiresAt: Date.now() + tokens.expires_in * 1000,
+            expiresAt: (yield* Clock.currentTimeMillis) + tokens.expires_in * 1000,
           }),
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         };
         yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
@@ -1156,10 +1164,11 @@ export const make = (
             id: newAccountId,
             userId: options?.linkToUserId ?? "",
             provider,
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           },
           tokens,
           userInfo,
+          yield* Clock.currentTimeMillis,
         );
 
         yield* accountStore.create(yield* encryptAccount(newAccount));
@@ -1236,7 +1245,7 @@ export const make = (
         (state: string, code: string) =>
           Effect.gen(function* () {
             const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
-            const now = Date.now();
+            const now = yield* Clock.currentTimeMillis;
 
             const tokenFields = {
               accessToken: tokens.access_token,
@@ -1311,7 +1320,7 @@ export const make = (
                   type: "email",
                   value: email,
                   verified: emailVerified,
-                  ...(emailVerified ? { verifiedAt: new Date() } : {}),
+                  ...(emailVerified ? { verifiedAt: yield* DateTime.nowAsDate } : {}),
                 },
                 (identifier) =>
                   userStore.createUser({
@@ -1388,7 +1397,7 @@ export const make = (
         }
 
         // Check expiration
-        if (Date.now() > stateEntry.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
           return yield* new OAuthStateExpiredError({
             message: "OAuth state expired",
@@ -1448,10 +1457,11 @@ export const make = (
             id: accountId,
             userId,
             provider,
-            createdAt: existingAccount?.createdAt ?? Date.now(),
+            createdAt: existingAccount?.createdAt ?? (yield* Clock.currentTimeMillis),
           },
           tokens,
           userInfo,
+          yield* Clock.currentTimeMillis,
         );
 
         if (existingAccount) {
@@ -1597,9 +1607,9 @@ export const make = (
               accessToken: data.access_token,
               ...(data.refresh_token && { refreshToken: data.refresh_token }),
               ...(data.expires_in && {
-                expiresAt: Date.now() + data.expires_in * 1000,
+                expiresAt: (yield* Clock.currentTimeMillis) + data.expires_in * 1000,
               }),
-              updatedAt: Date.now(),
+              updatedAt: yield* Clock.currentTimeMillis,
             };
 
             yield* accountStore.update(yield* encryptAccount(updatedAccount));
@@ -1803,33 +1813,35 @@ export const appleClientSecret = (params: {
   readonly expiresIn?: number;
   readonly now?: number;
 }): Effect.Effect<string, OAuthProviderError> =>
-  Effect.try({
-    try: () => {
-      const iat = Math.floor((params.now ?? Date.now()) / 1000);
-      const exp = iat + (params.expiresIn ?? 15777000);
-      const header = { alg: "ES256", kid: params.keyId, typ: "JWT" };
-      const payload = {
-        iss: params.teamId,
-        iat,
-        exp,
-        aud: "https://appleid.apple.com",
-        sub: params.clientId,
-      };
-      const encode = (obj: Schema.Json): string =>
-        Buffer.from(encodeJsonString(obj), "utf8").toString("base64url");
-      const signingInput = `${encode(header)}.${encode(payload)}`;
-      const signature = Buffer.from(
-        Cipher.signJws("ES256", Buffer.from(signingInput), Redacted.value(params.privateKey)),
-      ).toString("base64url");
-      return `${signingInput}.${signature}`;
-    },
-    catch: (cause) =>
-      new OAuthProviderError({
-        message: "Failed to sign Apple client secret",
-        provider: "apple",
-        cause,
-      }),
-  });
+  Effect.flatMap(Clock.currentTimeMillis, (millis) =>
+    Effect.try({
+      try: () => {
+        const iat = Math.floor((params.now ?? millis) / 1000);
+        const exp = iat + (params.expiresIn ?? 15777000);
+        const header = { alg: "ES256", kid: params.keyId, typ: "JWT" };
+        const payload = {
+          iss: params.teamId,
+          iat,
+          exp,
+          aud: "https://appleid.apple.com",
+          sub: params.clientId,
+        };
+        const encode = (obj: Schema.Json): string =>
+          Buffer.from(encodeJsonString(obj), "utf8").toString("base64url");
+        const signingInput = `${encode(header)}.${encode(payload)}`;
+        const signature = Buffer.from(
+          Cipher.signJws("ES256", Buffer.from(signingInput), Redacted.value(params.privateKey)),
+        ).toString("base64url");
+        return `${signingInput}.${signature}`;
+      },
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: "Failed to sign Apple client secret",
+          provider: "apple",
+          cause,
+        }),
+    }),
+  );
 
 /** Facebook Login (Graph API userinfo; `picture` is nested under `data.url`). */
 export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>

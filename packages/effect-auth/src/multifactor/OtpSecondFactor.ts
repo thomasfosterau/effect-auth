@@ -16,7 +16,7 @@
  *
  * @module otp-second-factor
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { generateOtp } from "../email/EmailOtp.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
@@ -177,7 +177,7 @@ export const make = (
       begin: Effect.fn("OtpSecondFactorService.begin")(function* (user: Types.User) {
         const otp = yield* generateOtp(crypto, otpLength);
         const pendingToken = yield* generatePendingToken();
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
 
         const record: OtpSecondFactorRecord = {
           pendingToken,
@@ -219,7 +219,7 @@ export const make = (
           return yield* invalidOtp();
         }
 
-        if (Date.now() > record.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(pendingToken);
           return yield* new OtpSecondFactorError({ message: "OTP has expired" });
         }

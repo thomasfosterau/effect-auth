@@ -8,7 +8,7 @@
  *
  * @module magic-link
  */
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, DateTime, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import {
@@ -240,7 +240,7 @@ export const make = (
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.getByEmail(email);
           if (existing !== null) {
-            const elapsed = Date.now() - existing.createdAt;
+            const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
             if (elapsed < config.resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another magic link",
@@ -258,8 +258,8 @@ export const make = (
           // Store the hash — the raw token is delivered to the user via sendMagicLink.
           token: hashToken(rawToken),
           email,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + expiresIn,
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
         };
 
         yield* store.create(magicLink);
@@ -309,7 +309,7 @@ export const make = (
         }
 
         // Check expiration
-        if (Date.now() > magicLink.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > magicLink.expiresAt) {
           yield* store.delete(tokenHash);
           return yield* new Errors.MagicLinkError({
             message: "Magic link token has expired",
@@ -336,7 +336,12 @@ export const make = (
           // A verified magic link proves ownership of the email.
           const created = yield* createUserWithIdentifier(
             identifiers,
-            { type: "email", value: magicLink.email, verified: true, verifiedAt: new Date() },
+            {
+              type: "email",
+              value: magicLink.email,
+              verified: true,
+              verifiedAt: yield* DateTime.nowAsDate,
+            },
             (identifier) => userStore.createUser({ identifier }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>

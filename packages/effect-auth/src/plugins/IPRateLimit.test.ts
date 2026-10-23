@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer } from "effect";
+import { Array as Arr, DateTime, Effect, Layer } from "effect";
 import { ClientIP } from "../ClientIP.ts";
 import { Hooks } from "../Hooks.ts";
 import type { SignInInput } from "../email/EmailPassword.ts";
@@ -23,7 +23,7 @@ const makeMemStore = (
       }),
     increment: (key, ttlSec) =>
       Effect.sync(() => {
-        const now = Date.now();
+        const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
         const existing = store.get(key);
         if (!existing || now >= existing.resetAt) {
           const entry: RateLimitEntry = { key, count: 1, resetAt: now + ttlSec * 1000 };

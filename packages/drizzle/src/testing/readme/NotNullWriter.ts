@@ -1,5 +1,5 @@
 // README:begin
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` NOT NULL: the row can't be inserted without the address.
@@ -10,7 +10,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
       return yield* new Auth.AuthError({ message: "A user needs an email address" });
     }
     const id = crypto.randomUUID();
-    const now = new Date();
+    const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
         db.insert(appUsers).values({

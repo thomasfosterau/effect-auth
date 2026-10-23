@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer, Result } from "effect";
+import { Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -167,8 +167,8 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -223,8 +223,8 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-2",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -237,17 +237,17 @@ describe("PasswordResetService", () => {
       token: hashToken("token-123"),
       userId: user.id,
       email: "session-reset@example.com",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 60_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
     };
 
     resetTokens.set(resetToken.token, resetToken);
     sessions.set("session-1", {
       id: "session-1",
       userId: user.id,
-      createdAt: new Date(),
-      lastActivityAt: new Date(),
-      expiresAt: new Date(Date.now() + 3600_000),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
       attributes: {},
     });
 
@@ -283,8 +283,8 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-3",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -296,17 +296,17 @@ describe("PasswordResetService", () => {
       token: hashToken("token-456"),
       userId: user.id,
       email: "session-keep@example.com",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 60_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
     };
 
     resetTokens.set(resetToken.token, resetToken);
     sessions.set("session-2", {
       id: "session-2",
       userId: user.id,
-      createdAt: new Date(),
-      lastActivityAt: new Date(),
-      expiresAt: new Date(Date.now() + 3600_000),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
       attributes: {},
     });
 

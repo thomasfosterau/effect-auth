@@ -43,7 +43,18 @@
  * @module organization
  */
 
-import { Array as Arr, Context, Crypto, Data, Effect, Layer, Option, Order, Result } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Crypto,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Result,
+} from "effect";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
@@ -1261,7 +1272,7 @@ export const make = (
           userId,
           role,
           status: "active",
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
         return yield* store.createMember(member);
       });
@@ -1330,7 +1341,7 @@ export const make = (
             message: "This invitation is addressed to a different email",
           });
         }
-        if (Date.now() > invitation.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > invitation.expiresAt) {
           return yield* new OrganizationError({ message: "Invitation has expired" });
         }
         return invitation;
@@ -1369,7 +1380,7 @@ export const make = (
           metadata: input.metadata ?? {},
           defaultRole: "member",
           jitProvisioning: false,
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
 
         const created = yield* store.createOrganization(organization);
@@ -1462,7 +1473,7 @@ export const make = (
         const email = normalizeEmail(input.email);
 
         const existingInvitations = yield* store.listInvitationsByEmail(email);
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const duplicate = existingInvitations.find(
           (invitation) =>
             invitation.organizationId === organizationId &&
@@ -1559,7 +1570,7 @@ export const make = (
         // expired-but-pending invitation is revived rather than duplicated.
         const refreshed = yield* store.updateInvitation({
           ...invitation,
-          expiresAt: Date.now() + invitationExpiresIn,
+          expiresAt: (yield* Clock.currentTimeMillis) + invitationExpiresIn,
         });
 
         if (config.sendInvitationEmail) {
@@ -1579,7 +1590,7 @@ export const make = (
         email: string,
       ) {
         const invitations = yield* store.listInvitationsByEmail(email);
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         return invitations.filter(
           (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
         );
@@ -1755,7 +1766,7 @@ export const make = (
         yield* requireMemberPermission(actorUserId, organizationId, "team:create");
         yield* getOrganizationOrFail(organizationId);
 
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const team: Team = {
           id: yield* generateId(),
           organizationId,
@@ -1776,7 +1787,7 @@ export const make = (
         const updated = yield* store.updateTeam({
           ...team,
           ...(input.name !== undefined && { name: input.name }),
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         });
         if (!updated) {
           return yield* new OrganizationError({ message: "Team not found" });
@@ -1895,7 +1906,7 @@ export const make = (
           // The token is ours to mint: a client-chosen one would let a tenant
           // "prove" a domain with a record it had already published elsewhere.
           ...(strategy === "dns" && { verificationToken: yield* generateId() }),
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
         return yield* domainStore.create(claim);
       }),
@@ -1931,7 +1942,7 @@ export const make = (
           return yield* domainStore.update({
             ...domain,
             verificationState: "verified",
-            verifiedAt: Date.now(),
+            verifiedAt: yield* Clock.currentTimeMillis,
           });
         }
 
@@ -1949,7 +1960,7 @@ export const make = (
         return yield* domainStore.update({
           ...domain,
           verificationState: proved ? "verified" : "failed",
-          ...(proved && { verifiedAt: Date.now() }),
+          ...(proved && { verifiedAt: yield* Clock.currentTimeMillis }),
         });
       }),
 
@@ -1983,7 +1994,7 @@ export const make = (
         yield* getOrganizationOrFail(organizationId);
         yield* ensureNotOwnerRole(input.role);
 
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const existing = yield* store.getOrgRole(organizationId, input.role);
         return yield* store.upsertOrgRole({
           organizationId,

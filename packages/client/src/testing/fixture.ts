@@ -6,7 +6,7 @@
  * Excluded from the published build (see `tsconfig.json`).
  */
 import * as Auth from "@thomasfosterau/effect-auth";
-import { Array as Arr, Effect, Layer } from "effect";
+import { Array as Arr, DateTime, Effect, Layer } from "effect";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -54,7 +54,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     readonly name?: string;
     readonly attributes?: Auth.User["attributes"];
   }): Auth.User => {
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Auth.User = {
       id: `user-${++userSeq}`,
       ...(input.name !== undefined && { name: input.name }),
@@ -379,7 +379,11 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
     addTeamMember: (teamId, userId) =>
       Effect.sync(() => {
-        const teamMember: Auth.TeamMember = { teamId, userId, createdAt: Date.now() };
+        const teamMember: Auth.TeamMember = {
+          teamId,
+          userId,
+          createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        };
         teamMembers.push(teamMember);
         return teamMember;
       }),

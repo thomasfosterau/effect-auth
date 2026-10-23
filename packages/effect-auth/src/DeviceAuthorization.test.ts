@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Layer, Result } from "effect";
+import { DateTime, Effect, Layer, Result } from "effect";
 import {
   DeviceAuthorizationService,
   DeviceAuthorizationStore,
@@ -109,7 +109,7 @@ describe("DeviceAuthorizationService", () => {
     records.clear();
     sessions.clear();
     users.clear();
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     users.set("user-1", {
       id: "user-1",
       createdAt: now,
@@ -177,7 +177,10 @@ describe("DeviceAuthorizationService", () => {
     const deviceHash = hashToken(begun.deviceCode);
     const record = records.get(deviceHash);
     assert(record !== undefined, "begin stored the request");
-    records.set(deviceHash, { ...record, expiresAt: Date.now() - 1 });
+    records.set(deviceHash, {
+      ...record,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1,
+    });
     const expired = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
     assert.instanceOf(expired, DevicePollError);
     expect(expired.error).toBe("expired_token");
@@ -229,7 +232,7 @@ describe("DeviceAuthorizationService", () => {
     // Seed lastPolledAt to 1 second ago — within the 5 s interval.
     const record = records.get(hash);
     assert(record !== undefined, "begin stored the request");
-    const lastPolled = Date.now() - 1000;
+    const lastPolled = DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000;
     records.set(hash, { ...record, lastPolledAt: lastPolled });
 
     const err = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));

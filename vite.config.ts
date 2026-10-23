@@ -67,8 +67,13 @@ export default defineConfig({
       // count reaches zero its line is deleted, so it is back at the preset's
       // `error`. Counts (sources / tests) and the remaining sites:
       // #443.
-      // `Date.now()` / `new Date()` → `Clock` / `DateTime` changes how expiry
-      // logic sees time under `TestClock` (182 / 499).
+      // Synchronous exported helpers that read or default the time
+      // (`isBanned`, `makeIdentifier`, `makeLink`), where `Clock` would change
+      // a public signature; conversions of input they do not validate
+      // (`sessionFor`, `fromSessionWithUserView`, the sql row mapper), where
+      // `DateTime.makeUnsafe` throws on what `new Date` turns into an Invalid
+      // Date; and the SAML instant parser, where `DateTime.make` reads a
+      // zone-less instant as UTC, not local time (11 / 0).
       "effect/use-clock-service": "warn",
       // Published types say `Record<string, unknown>` (session and user
       // attributes, metadata, JWT claims, drizzle column types); narrowing

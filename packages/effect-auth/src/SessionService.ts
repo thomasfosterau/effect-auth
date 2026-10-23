@@ -1,4 +1,4 @@
-import { Context, Crypto, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Crypto, DateTime, Effect, Layer, Predicate } from "effect";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -42,8 +42,14 @@ export const make = (
             });
 
             const rawToken = yield* generateSessionId();
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
+            const nowUtc = yield* DateTime.now;
+            const now = DateTime.toDateUtc(nowUtc);
+            const expiresAt = DateTime.toDateUtc(
+              DateTime.mapEpochMillis(
+                nowUtc,
+                (millis) => millis + config.sessionExpiresIn.activePeriod,
+              ),
+            );
 
             const session: Types.Session = {
               id: hashToken(rawToken), // store only the hash; raw token goes to the cookie
@@ -80,7 +86,8 @@ export const make = (
           }
 
           // Check if session is expired
-          const now = new Date();
+          const nowUtc = yield* DateTime.now;
+          const now = DateTime.toDateUtc(nowUtc);
           if (session.expiresAt.getTime() < now.getTime()) {
             yield* Effect.ignore(sessionStore.delete(tokenHash));
             return yield* new Errors.SessionExpiredError({
@@ -110,10 +117,12 @@ export const make = (
           }
 
           // Extend expiration (capped at absolute max lifetime).
-          const newExpiresAt = new Date(
-            Math.min(
-              now.getTime() + config.sessionExpiresIn.idlePeriod,
-              session.createdAt.getTime() + config.sessionExpiresIn.activePeriod,
+          const newExpiresAt = DateTime.toDateUtc(
+            DateTime.mapEpochMillis(nowUtc, (millis) =>
+              Math.min(
+                millis + config.sessionExpiresIn.idlePeriod,
+                session.createdAt.getTime() + config.sessionExpiresIn.activePeriod,
+              ),
             ),
           );
 
@@ -176,7 +185,7 @@ export const make = (
 
       listSessions: Effect.fn("SessionService.listSessions")(function* (userId: string) {
         const sessions = yield* sessionStore.listByUserId(userId);
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         return sessions.filter((session) => session.expiresAt.getTime() >= now);
       }),
 

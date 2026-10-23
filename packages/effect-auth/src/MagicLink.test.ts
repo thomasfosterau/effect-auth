@@ -5,6 +5,7 @@ import {
   Array as Arr,
   Context,
   Crypto,
+  DateTime,
   Effect,
   Layer,
   Option,
@@ -101,7 +102,7 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     type: "email",
     value: email,
     verified,
-    ...(verified ? { verifiedAt: new Date() } : {}),
+    ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
   });
   identifierRecords.set(identifier.id, identifier);
 };
@@ -118,8 +119,8 @@ const magicLinkUserStore = {
       const user: User = {
         id: `user-${users.size + 1}`,
         ...(input.name !== undefined && { name: input.name }),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       };
       addUser(user);
@@ -253,7 +254,7 @@ describe("MagicLinkService", () => {
     const stored = magicLinkTokens.get(hashToken(recorded(sentLinks).token));
     expect(stored).toBeDefined();
     expect(stored?.email).toBe("new@example.com");
-    expect(stored?.expiresAt).toBeGreaterThan(Date.now());
+    expect(stored?.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
   });
 
   it("should normalize the email before sending", async () => {
@@ -322,7 +323,12 @@ describe("MagicLinkService", () => {
   // known branch does, or its timing reveals the account.
   it("does the same store work to send to a known and an unknown email without a cooldown", async () => {
     const testContext = await makeTestContext();
-    addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-member",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-member", "member@example.com", true);
 
     const { knownOps, unknownOps } = await Effect.runPromise(
@@ -351,8 +357,8 @@ describe("MagicLinkService", () => {
 
     addUser({
       id: "user-existing",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     });
     addEmailIdentifier("user-existing", "member@example.com", true);
@@ -411,8 +417,8 @@ describe("MagicLinkService", () => {
 
     const existing: User = {
       id: "user-known",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     addUser(existing);
@@ -442,14 +448,19 @@ describe("MagicLinkService", () => {
 
     // A squatter signed up with the address and a password they know, and
     // holds a session; the address was never verified.
-    addUser({ id: "user-squat", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-squat",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-squat", "victim@example.com", false);
     passwordHashes.set("user-squat", "squatter-hash");
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     sessions.set("squatter-session", {
       id: "squatter-session",
       userId: "user-squat",
-      expiresAt: new Date(now.getTime() + 3_600_000),
+      expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
@@ -478,7 +489,12 @@ describe("MagicLinkService", () => {
   it("keeps the password and sessions of an account whose address is already verified (#440)", async () => {
     const testContext = await makeTestContext();
 
-    addUser({ id: "user-owner", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-owner",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-owner", "victim@example.com", true);
     passwordHashes.set("user-owner", "owner-hash");
 
@@ -503,8 +519,8 @@ describe("MagicLinkService", () => {
     magicLinkTokens.set(hashToken("expired-token"), {
       token: hashToken("expired-token"),
       email: "late@example.com",
-      createdAt: Date.now() - 10 * 60 * 1000,
-      expiresAt: Date.now() - 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10 * 60 * 1000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 60 * 1000,
     });
 
     const result = await Effect.runPromise(
@@ -571,8 +587,8 @@ describe("MagicLinkService", () => {
     magicLinkTokens.set(hashToken("orphan-token"), {
       token: hashToken("orphan-token"),
       email: "orphan@example.com",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60 * 1000,
     });
 
     const result = await Effect.runPromise(
@@ -632,8 +648,8 @@ describe("MagicLinkService", () => {
     magicLinkTokens.set(oldToken, {
       token: oldToken,
       email: "user@example.com",
-      createdAt: Date.now() - 70_000,
-      expiresAt: Date.now() + 5 * 60 * 1000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 70_000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 5 * 60 * 1000,
     });
 
     await Effect.runPromise(
@@ -679,7 +695,12 @@ describe("MagicLinkService", () => {
   // as a known one does, or the second request's answer reveals the account.
   it("answers a known and an unknown email alike within the cooldown when sign-up is disabled", async () => {
     const testContext = await makeTestContext();
-    addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addUser({
+      id: "user-member",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier("user-member", "member@example.com", true);
 
     const { known, unknown } = await Effect.runPromise(

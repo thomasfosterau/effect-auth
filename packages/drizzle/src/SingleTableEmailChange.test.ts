@@ -20,7 +20,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { eq } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -112,7 +112,7 @@ const deleteStrictRow = async (userId: string) => {
 };
 
 const makeUser = (id: string): Auth.User => {
-  const now = new Date(USER_CREATED_AT);
+  const now = DateTime.toDateUtc(DateTime.makeUnsafe(USER_CREATED_AT));
   return { id, createdAt: now, updatedAt: now, attributes: {} };
 };
 

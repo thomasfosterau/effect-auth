@@ -17,7 +17,7 @@
  * and exercises exactly the code path a real certificate would.
  */
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { generateKeyPairSync } from "node:crypto";
 import { SignedXml } from "xml-crypto";
 import { SamlError, type SamlVerifyInput } from "@thomasfosterau/effect-auth";
@@ -40,7 +40,8 @@ const keyPair = () => {
 const trusted = keyPair();
 const foreign = keyPair();
 
-const iso = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString();
+const iso = (offsetMs: number): string =>
+  DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: offsetMs })).toISOString();
 
 interface ResponseOptions {
   readonly audience?: string;
@@ -151,7 +152,7 @@ describe("SamlVerifier.verify — happy path", () => {
     expect(assertion.sessionIndex).toBe("_session0001");
     expect(assertion.inResponseTo).toBe(REQUEST_ID);
     expect(assertion.id).toBe("_assertion0000000000000000000001");
-    expect(assertion.notOnOrAfter).toBeGreaterThan(Date.now());
+    expect(assertion.notOnOrAfter).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
   });
 
   it("honours expectedInResponseTo when the caller supplies one", async () => {

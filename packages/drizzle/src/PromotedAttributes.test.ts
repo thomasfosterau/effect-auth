@@ -10,7 +10,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { Effect, Layer, Predicate } from "effect";
+import { DateTime, Effect, Layer, Predicate } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { defineSchema } from "./Columns.ts";
@@ -155,7 +155,10 @@ const promotedRejects = () =>
     identifiers: identifierSpec,
   });
 
-const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
+const at = (offsetMs: number): Date =>
+  DateTime.toDateUtc(
+    DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
+  );
 const ids = {
   moderator: "3f1c0e8a-8b1a-4a5e-9c0e-0a1b2c3d4e5f",
   plain: "7a2d4b6c-1e3f-4058-9a7b-2c4d6e8f0a1b",

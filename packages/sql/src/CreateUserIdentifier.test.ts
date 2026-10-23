@@ -8,7 +8,7 @@
 
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { layer } from "./Stores.ts";
@@ -37,7 +37,7 @@ const identifierFor = (value: string): Auth.NewUserIdentifier => ({
   type: "email",
   value,
   verified: true,
-  verifiedAt: new Date(Date.UTC(2026, 9, 15)),
+  verifiedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-15T00:00:00.000Z")),
 });
 
 describe("effect-auth-sql: createUser ignores the identifier", () => {

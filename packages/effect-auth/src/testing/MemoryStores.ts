@@ -20,7 +20,7 @@
  *
  * @module testing
  */
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
@@ -83,8 +83,8 @@ export const memoryUserTable = (): MemoryUserTable => ({
 const insertUser = (
   table: MemoryUserTable,
   input: CreateUserInput | OAuthCreateUserInput,
+  now: Date,
 ): CreateUserResult => {
-  const now = new Date();
   const user: Types.User = {
     id: globalThis.crypto.randomUUID(),
     ...(input.name === undefined ? {} : { name: input.name }),
@@ -120,7 +120,7 @@ export const memoryUserStore = (
 export const memoryEmailPasswordStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof EmailPasswordStore.Service => ({
-  createUser: (input) => Effect.sync(() => insertUser(table, input)),
+  createUser: (input) => Effect.map(DateTime.nowAsDate, (now) => insertUser(table, input, now)),
   getPasswordHash: (userId) => Effect.sync(() => table.passwordHashes.get(userId) ?? null),
   setPasswordHash: (userId, hash) => Effect.sync(() => void table.passwordHashes.set(userId, hash)),
   clearPasswordHash: (userId) => Effect.sync(() => void table.passwordHashes.delete(userId)),
@@ -142,9 +142,9 @@ export const memoryOAuthUserStore = (
         ? Effect.fail(new Errors.UserNotFoundError({ message: "User not found", userId }))
         : Effect.succeed(user);
     }),
-  createUser: (input) => Effect.sync(() => insertUser(table, input)),
+  createUser: (input) => Effect.map(DateTime.nowAsDate, (now) => insertUser(table, input, now)),
   updateUser: (userId, update) =>
-    Effect.suspend(() => {
+    Effect.flatMap(DateTime.nowAsDate, (now) => {
       const user = table.users.get(userId);
       if (user === undefined) {
         return Effect.fail(new Errors.AuthError({ message: "User not found" }));
@@ -153,7 +153,7 @@ export const memoryOAuthUserStore = (
         ...user,
         ...(update.name === undefined ? {} : { name: update.name }),
         ...(update.image === undefined ? {} : { image: update.image }),
-        updatedAt: new Date(),
+        updatedAt: now,
       };
       table.users.set(userId, updated);
       return Effect.succeed(updated);

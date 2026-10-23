@@ -1,7 +1,9 @@
 import {
   Array as Arr,
   Cause,
+  Clock,
   Context,
+  DateTime,
   Effect,
   Exit,
   Fiber,
@@ -1207,7 +1209,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               response,
               multiCookieName(cfg),
               remaining.join("."),
-              sessionCookieOptions(cfg, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
+              sessionCookieOptions(
+                cfg,
+                DateTime.toDateUtc(DateTime.add(yield* DateTime.now, { days: 30 })),
+              ),
             );
           }
           return response;
@@ -1228,7 +1233,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             const value = encodeSessionCacheCookie(
               resolved,
               cache,
-              Date.now(),
+              yield* Clock.currentTimeMillis,
               resolved.session.id,
               yield* sessionCacheGateAttributes,
             );
@@ -1909,7 +1914,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const remaining = readDeviceSessionIds(request, cfg).filter(
             (id) => id !== payload.sessionId,
           );
-          const farFuture = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+          const farFuture = DateTime.toDateUtc(DateTime.add(yield* DateTime.now, { days: 30 }));
           const wasActive = sessionIdFromRequest(request, cfg) === payload.sessionId;
           return yield* Effect.gen(function* () {
             let response = yield* HttpServerResponse.json({ status: true });
@@ -3693,8 +3698,8 @@ const scimMeta = (
   updatedAt: number,
 ): S.ScimMetaView => ({
   resourceType,
-  created: new Date(createdAt).toISOString(),
-  lastModified: new Date(updatedAt).toISOString(),
+  created: DateTime.formatIso(DateTime.makeUnsafe(createdAt)),
+  lastModified: DateTime.formatIso(DateTime.makeUnsafe(updatedAt)),
   location: `${baseUrl}/${resourceType}s/${id}`,
 });
 
@@ -4155,7 +4160,13 @@ const resolveSession = (
         const cached = request.cookies[dataCookieName(cfg)];
         if (cached !== undefined) {
           const gate = yield* sessionCacheGateAttributes;
-          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId, gate);
+          const resolved = decodeSessionCacheCookie(
+            cached,
+            cfg.cache,
+            yield* Clock.currentTimeMillis,
+            primaryId,
+            gate,
+          );
           if (resolved !== null) return { resolved, cacheHit: true };
         }
       }

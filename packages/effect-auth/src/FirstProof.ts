@@ -11,7 +11,7 @@
  *
  * @internal
  */
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import type * as Errors from "./Errors.ts";
 import type { Identifier, IdentifierStore } from "./Identifier.ts";
 import type { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -39,5 +39,5 @@ export const proveAddress = (
       yield* services.passwords.clearPasswordHash(identifier.userId);
       yield* services.sessions.invalidateUserSessions(identifier.userId);
     }
-    return yield* services.identifiers.setVerified(identifier.id, new Date());
+    return yield* services.identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
   });

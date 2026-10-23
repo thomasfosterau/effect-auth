@@ -13,7 +13,7 @@
  * (`tsconfig.json` excludes `src/testing/`).
  */
 
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Email from "@thomasfosterau/effect-auth/email";
@@ -62,11 +62,11 @@ const testHasher: typeof Password.PasswordHasher.Service = {
 const sessions: typeof Auth.SessionService.Service = {
   createSession: (userId) =>
     Effect.sync(() => {
-      const now = new Date();
+      const now = DateTime.toDateUtc(DateTime.nowUnsafe());
       return {
         id: `s-${userId}`,
         userId,
-        expiresAt: new Date(now.getTime() + 3_600_000),
+        expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
         createdAt: now,
         lastActivityAt: now,
         attributes: {},
@@ -116,7 +116,7 @@ export const makeAppWriter = (
         if (existing !== undefined) return { user: existing, created: false };
       }
       const id = globalThis.crypto.randomUUID();
-      const now = new Date();
+      const now = yield* DateTime.nowAsDate;
       yield* Effect.tryPromise({
         try: () => insertUser(toRow(id, now, input.identifier)),
         catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
@@ -305,7 +305,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
         (row) => harness.insertUser({ ...row, emailVerified: false }),
         "writes",
       );
-      const verifiedAt = new Date(Date.UTC(2026, 9, 15));
+      const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-15T00:00:00.000Z"));
 
       const { flagged, dropped } = await harness.run(() =>
         Effect.gen(function* () {

@@ -1,5 +1,15 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Path,
+  Redacted,
+  Schema,
+} from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
@@ -103,7 +113,7 @@ const makeOidcStores = () => {
 // -----------------------------------------------------------------------------
 
 const makeUser = (id: string): Types.User => {
-  const now = new Date();
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
   return {
     id,
     name: "Test User",
@@ -386,8 +396,8 @@ describe("OidcProviderService", () => {
           userId: user.id,
           clientId: client.clientId,
           scopes: ["openid"],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
+          updatedAt: yield* Clock.currentTimeMillis,
         });
         return yield* service.authorize(user, {
           responseType: "code",
@@ -916,7 +926,7 @@ const makeHttpFixture = (
 
   const seedUser = (email: string, attributes: Types.User["attributes"] = {}): string => {
     const id = `u${++userSeq}`;
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     usersById.set(id, {
       id,
       name: `User ${id}`,
@@ -939,11 +949,11 @@ const makeHttpFixture = (
       "hex",
     );
     const tokenHash = hashToken(rawToken);
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     sessions.set(tokenHash, {
       id: tokenHash,
       userId,
-      expiresAt: new Date(Date.now() + 3600_000),
+      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
@@ -1765,8 +1775,8 @@ describe("HTTP OIDC provider endpoints", () => {
     assert(stored !== undefined, "the refresh token is stored");
     fx.oidcTokenStore.set(hash, {
       ...stored,
-      absoluteExpiresAt: Date.now() - 1000,
-      expiresAt: Date.now() - 1000,
+      absoluteExpiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000,
     });
 
     const expired = await fx.handler(

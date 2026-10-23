@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { Hooks, type HookError } from "../Hooks.ts";
 import {
   AccountLockoutPlugin,
@@ -17,8 +17,8 @@ const signIn = (email: string): SignInInput => ({ email, password: "pw" });
 const authResult = (email: string): AuthResult => ({
   user: {
     id: "u1",
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   } satisfies Types.User,
   identifier: { type: "email", value: email },
@@ -86,7 +86,7 @@ describe("AccountLockoutPlugin", () => {
     const rec = h.records.get(key);
     assert(rec !== undefined, "the lock is recorded");
 
-    h.records.set(key, { ...rec, lockedUntil: Date.now() - 1 });
+    h.records.set(key, { ...rec, lockedUntil: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1 });
 
     // Now allowed again (counter reset to a fresh streak).
     const allowed = await h.beforeSignInResult("user@example.com");
@@ -118,7 +118,11 @@ describe("AccountLockoutPlugin", () => {
   it("concurrent attempts do not lose increments (atomic registerAttempt)", async () => {
     const records = new Map<string, AccountLockoutRecord>();
     const store = memoryAccountLockoutStore(records);
-    const options = { maxAttempts: 100, lockoutDurationMs: 60_000, now: Date.now() };
+    const options = {
+      maxAttempts: 100,
+      lockoutDurationMs: 60_000,
+      now: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+    };
 
     await Effect.runPromise(
       Effect.all(
@@ -133,7 +137,7 @@ describe("AccountLockoutPlugin", () => {
   it("registerAttempt does not increment or extend an active lock", async () => {
     const records = new Map<string, AccountLockoutRecord>();
     const store = memoryAccountLockoutStore(records);
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     records.set("lockout:k", { failures: 5, lockedUntil: now + 60_000 });
 
     const result = await Effect.runPromise(

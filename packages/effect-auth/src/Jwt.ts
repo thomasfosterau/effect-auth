@@ -27,6 +27,7 @@
  */
 
 import {
+  Clock,
   Config,
   Context,
   Crypto,
@@ -286,23 +287,22 @@ export const generateKeyPair = (
         (cause) => new JwtError({ message: `Failed to generate ${algorithm} key id`, cause }),
       ),
     );
-    return yield* Effect.try({
-      try: (): JwtKeyPair => {
-        const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair(algorithm);
-        return {
-          id,
-          algorithm,
-          publicKeyJwk,
-          privateKeyPem,
-          createdAt: Date.now(),
-        };
-      },
+    const { publicKeyJwk, privateKeyPem } = yield* Effect.try({
+      try: () => Cipher.generateJwsKeyPair(algorithm),
       catch: (error) =>
         new JwtError({
           message: `Failed to generate ${algorithm} key pair`,
           cause: error,
         }),
     });
+    const pair: JwtKeyPair = {
+      id,
+      algorithm,
+      publicKeyJwk,
+      privateKeyPem,
+      createdAt: yield* Clock.currentTimeMillis,
+    };
+    return pair;
   });
 
 /**
@@ -381,8 +381,8 @@ interface ClaimExpectations {
 const registeredClaimFailure = (
   payload: JsonObject,
   expected: ClaimExpectations,
+  now: number,
 ): string | undefined => {
-  const now = Date.now();
   const exp = payload["exp"];
   if (!Predicate.isNumber(exp) || now >= exp * 1000 + expected.leewayMs) {
     return "Token has expired";
@@ -426,7 +426,7 @@ const verifySignedPayload = (
     }
 
     const payload = yield* decodeJsonSegment(jws.payloadSegment, "payload");
-    const failure = registeredClaimFailure(payload, expected);
+    const failure = registeredClaimFailure(payload, expected, yield* Clock.currentTimeMillis);
     if (failure !== undefined) {
       return yield* new JwtError({ message: failure });
     }
@@ -517,7 +517,7 @@ export const make = (
         Effect.gen(function* () {
           const pair = yield* getOrCreateActiveKey();
 
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
           const iat = Math.floor(now / 1000);
           const exp = Math.floor((now + expiresIn) / 1000);
 
@@ -665,7 +665,9 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
           ),
     ),
     Effect.flatMap((body) => decodeJwksDocument(body).pipe(Effect.mapError(jwksFetchError))),
-    Effect.map((data) => ({ keys: data.keys, fetchedAt: Date.now() })),
+    Effect.flatMap((data) =>
+      Effect.map(Clock.currentTimeMillis, (fetchedAt) => ({ keys: data.keys, fetchedAt })),
+    ),
   );
 
 /**
@@ -690,7 +692,7 @@ export const remoteJwksVerifier = (
       Effect.gen(function* () {
         if (!forceRefresh) {
           const cached = yield* Ref.get(cacheRef);
-          if (cached !== null && Date.now() - cached.fetchedAt < cacheTtlMs) {
+          if (cached !== null && (yield* Clock.currentTimeMillis) - cached.fetchedAt < cacheTtlMs) {
             return cached.keys;
           }
         }

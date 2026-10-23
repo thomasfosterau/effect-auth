@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, DateTime, Effect, Layer, Option } from "effect";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";
@@ -414,7 +414,7 @@ export const make = (
         yield* passwordHasher.hash(input.password);
         const id =
           store.newUserId === undefined ? globalThis.crypto.randomUUID() : yield* store.newUserId();
-        const now = new Date();
+        const now = yield* DateTime.nowAsDate;
         return {
           user: {
             id,

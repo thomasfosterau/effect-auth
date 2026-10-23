@@ -60,9 +60,11 @@
  */
 import {
   Array as Arr,
+  Clock,
   Context,
   Crypto,
   Data,
+  DateTime,
   Effect,
   Layer,
   Option,
@@ -854,17 +856,20 @@ export const make = (
      * has (a store that keeps one email per user), is `409 uniqueness`.
      */
     const claimEmail = (userId: string, email: string) =>
-      claimIdentifier(
-        identifiers,
-        makeIdentifier({
-          userId,
-          type: "email",
-          value: email,
-          // The IdP is the system of record for its users' addresses.
-          verified: true,
-          verifiedAt: new Date(),
-        }),
-      ).pipe(
+      DateTime.nowAsDate.pipe(
+        Effect.flatMap((verifiedAt) =>
+          claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId,
+              type: "email",
+              value: email,
+              // The IdP is the system of record for its users' addresses.
+              verified: true,
+              verifiedAt,
+            }),
+          ),
+        ),
         Effect.catchTags({
           IdentifierTakenError: () =>
             Effect.fail(conflict(`The email "${email}" is already in use`)),
@@ -873,7 +878,9 @@ export const make = (
       );
 
     const writeAttributes = (user: Types.User, attributes: Types.Attributes) =>
-      users.update({ ...user, attributes, updatedAt: new Date() });
+      Effect.flatMap(DateTime.nowAsDate, (updatedAt) =>
+        users.update({ ...user, attributes, updatedAt }),
+      );
 
     /**
      * Flip a user's `active` state. Deactivation revokes every live session, so
@@ -1031,11 +1038,13 @@ export const make = (
     /** Apply a `displayName` PATCH entry; a non-string value leaves the name as is. */
     const patchDisplayName = (user: Types.User, { value }: PatchEntry) => {
       const name = asString(value);
-      return users.update({
-        ...user,
-        ...(name === null ? {} : { name }),
-        updatedAt: new Date(),
-      });
+      return Effect.flatMap(DateTime.nowAsDate, (updatedAt) =>
+        users.update({
+          ...user,
+          ...(name === null ? {} : { name }),
+          updatedAt,
+        }),
+      );
     };
 
     /** Apply one expanded PATCH entry to a user, returning the updated user. */
@@ -1082,7 +1091,7 @@ export const make = (
         const renamed = yield* orgs.updateTeam({
           ...team,
           name: displayName,
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         });
         if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
         return renamed;
@@ -1185,7 +1194,7 @@ export const make = (
           id: yield* randomId(),
           organizationId,
           tokenHash: hashToken(token),
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
         return { connection: yield* connections.create(connection), token };
       }),
@@ -1210,7 +1219,9 @@ export const make = (
         if (connection === null) return yield* unauthorized;
         // Best-effort activity stamp: a failed touch must not fail the request
         // the IdP actually made.
-        yield* connections.update({ ...connection, lastUsedAt: Date.now() }).pipe(Effect.ignore);
+        yield* connections
+          .update({ ...connection, lastUsedAt: yield* Clock.currentTimeMillis })
+          .pipe(Effect.ignore);
         return connection;
       }),
 
@@ -1247,7 +1258,7 @@ export const make = (
         // the IdP is the system of record for its users' addresses.
         const { user } = yield* createUserWithIdentifier(
           identifiers,
-          { type: "email", value: userName, verified: true, verifiedAt: new Date() },
+          { type: "email", value: userName, verified: true, verifiedAt: yield* DateTime.nowAsDate },
           (identifier) =>
             users.create({
               ...(input.displayName !== undefined && { name: input.displayName }),
@@ -1273,7 +1284,7 @@ export const make = (
             userId: user.id,
             role: yield* provisioningRole(connection.organizationId),
             status: "active",
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           yield* orgs.createMember(member);
         }
@@ -1370,7 +1381,7 @@ export const make = (
           ...current,
           ...(input.displayName !== undefined && { name: input.displayName }),
           attributes,
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
         });
 
         if (input.active !== undefined && input.active === isScimDeactivated(current)) {
@@ -1406,7 +1417,7 @@ export const make = (
         if (displayName === "") {
           return yield* badRequest("displayName is required", "invalidValue");
         }
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const team = yield* orgs.createTeam({
           id: yield* randomId(),
           organizationId: connection.organizationId,
@@ -1460,7 +1471,7 @@ export const make = (
         const renamed = yield* orgs.updateTeam({
           ...team,
           name: displayName,
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         });
         if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
 

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Result } from "effect";
+import { Context, Crypto, DateTime, Effect, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { OtpSecondFactorStore, type OtpSecondFactorRecord } from "./OtpSecondFactor.ts";
@@ -108,8 +108,8 @@ const makeTestContext = async () => {
 
 const testUser: User = {
   id: "user-otp-1",
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
   attributes: {},
 };
 
@@ -144,7 +144,7 @@ describe("OtpSecondFactorService", () => {
     );
 
     expect(challenge.token).toBeDefined();
-    expect(challenge.expiresAt).toBeGreaterThan(Date.now());
+    expect(challenge.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(sentOtps).toHaveLength(1);
     expect(recorded(sentOtps).user.id).toBe(testUser.id);
     expect(recorded(sentOtps).otp).toMatch(/^\d{6}$/);

@@ -129,7 +129,7 @@
  * ```
  */
 
-import { Effect, Layer, Option, Redacted } from "effect";
+import { Clock, Effect, Layer, Option, Redacted } from "effect";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
 import { HttpServerRequest } from "effect/http";
 import { Hooks } from "../Hooks.ts";
@@ -337,7 +337,13 @@ const resolveSessionFromRequest = (
         const cached = request.cookies[dataCookieName(cfg)];
         if (cached !== undefined) {
           const gate = yield* sessionCacheGateAttributes;
-          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId, gate);
+          const resolved = decodeSessionCacheCookie(
+            cached,
+            cfg.cache,
+            yield* Clock.currentTimeMillis,
+            primaryId,
+            gate,
+          );
           if (resolved !== null) return Option.some(resolved);
         }
       }
