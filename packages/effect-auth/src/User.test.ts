@@ -59,30 +59,34 @@ describe("UserService", () => {
   });
 
   it("should get user by id", async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* User.make();
-      return yield* service.getUser("user-1");
-    });
-
-    const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make();
+          return yield* service.getUser("user-1");
+        }),
+        makeTestContext(),
+      ),
+    );
 
     expect(result.id).toBe("user-1");
     expect(result.name).toBe("User One");
   });
 
   it("should resolve a user by normalized email identifier", async () => {
-    const program = Effect.gen(function* () {
-      const store = yield* IdentifierStore;
-      return yield* resolveUserByIdentifier(
-        store,
-        userStore.get,
-        "email",
-        normalizeEmail("  USER@EXAMPLE.COM  "),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, Context.make(IdentifierStore, identifiers)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const store = yield* IdentifierStore;
+          return yield* resolveUserByIdentifier(
+            store,
+            userStore.get,
+            "email",
+            normalizeEmail("  USER@EXAMPLE.COM  "),
+          );
+        }),
+        Context.make(IdentifierStore, identifiers),
+      ),
     );
 
     assert(result !== null, "the identifier resolves to its user");
@@ -91,15 +95,18 @@ describe("UserService", () => {
   });
 
   it("should merge attributes when updating user", async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* User.make();
-      return yield* service.updateUserAttributes("user-1", {
-        theme: "dark",
-        displayName: "Updated User",
-      });
-    });
-
-    const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make();
+          return yield* service.updateUserAttributes("user-1", {
+            theme: "dark",
+            displayName: "Updated User",
+          });
+        }),
+        makeTestContext(),
+      ),
+    );
 
     expect(result.attributes.theme).toBe("dark");
     expect(result.attributes.displayName).toBe("Updated User");
@@ -107,14 +114,17 @@ describe("UserService", () => {
   });
 
   it("refuses a role in a profile update — the rung is server-only by default (#193)", async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* User.make();
-      return yield* Effect.flip(
-        service.updateUserAttributes("user-1", { displayName: "Sneaky", role: "admin" }),
-      );
-    });
-
-    const error = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+    const error = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make();
+          return yield* Effect.flip(
+            service.updateUserAttributes("user-1", { displayName: "Sneaky", role: "admin" }),
+          );
+        }),
+        makeTestContext(),
+      ),
+    );
 
     expect(error._tag).toBe("InvalidInputError");
     expect(error).toMatchObject({ field: "role" });
@@ -147,16 +157,17 @@ describe("UserService", () => {
   });
 
   it("should mark the user's email identifier as verified", async () => {
-    const program = Effect.gen(function* () {
-      const store = yield* IdentifierStore;
-      const identifier = yield* store.getByValue("email", "user@example.com");
-      assert(identifier !== null, "the email identifier exists");
-      yield* store.setVerified(identifier.id, new Date());
-      return yield* store.getByValue("email", "user@example.com");
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, Context.make(IdentifierStore, identifiers)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const store = yield* IdentifierStore;
+          const identifier = yield* store.getByValue("email", "user@example.com");
+          assert(identifier !== null, "the email identifier exists");
+          yield* store.setVerified(identifier.id, new Date());
+          return yield* store.getByValue("email", "user@example.com");
+        }),
+        Context.make(IdentifierStore, identifiers),
+      ),
     );
 
     expect(result?.verified).toBe(true);
@@ -164,13 +175,16 @@ describe("UserService", () => {
   });
 
   it("should delete user", async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* User.make();
-      yield* service.deleteUser("user-1");
-      return yield* Effect.result(service.getUser("user-1"));
-    });
-
-    const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make();
+          yield* service.deleteUser("user-1");
+          return yield* Effect.result(service.getUser("user-1"));
+        }),
+        makeTestContext(),
+      ),
+    );
 
     expect(result._tag).toBe("Failure");
 

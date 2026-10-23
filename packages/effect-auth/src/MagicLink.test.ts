@@ -226,12 +226,15 @@ describe("MagicLinkService", () => {
   it("should store a token and send a magic link for a new email", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("new@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("new@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentLinks.length).toBe(1);
     expect(sentLinks[0]?.email).toBe("new@example.com");
@@ -247,12 +250,15 @@ describe("MagicLinkService", () => {
   it("should normalize the email before sending", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("  Person@Example.COM  ");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("  Person@Example.COM  ");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentLinks.length).toBe(1);
     expect(sentLinks[0]?.email).toBe("person@example.com");
@@ -261,13 +267,16 @@ describe("MagicLinkService", () => {
   it("should invalidate outstanding tokens when a new link is requested", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("repeat@example.com");
-      yield* service.send("repeat@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("repeat@example.com");
+          yield* service.send("repeat@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentLinks.length).toBe(2);
     // Only the latest token remains usable. Compare by hash (store key).
@@ -279,17 +288,20 @@ describe("MagicLinkService", () => {
   it("should not send to unknown emails when sign-up is disabled, storing a marker token", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({
-        disableSignUp: true,
-        sendMagicLink: recordingSend,
-      });
-      yield* service.send("stranger@example.com");
-    });
-
     // Anti-enumeration: succeeds without sending, and stores an undelivered
     // marker token as it would a link's (#417).
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            disableSignUp: true,
+            sendMagicLink: recordingSend,
+          });
+          yield* service.send("stranger@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentLinks.length).toBe(0);
     expect([...magicLinkTokens.values()].map((token) => token.email)).toEqual([
@@ -304,16 +316,20 @@ describe("MagicLinkService", () => {
     addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
     addEmailIdentifier("user-member", "member@example.com", true);
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ disableSignUp: true, sendMagicLink: recordingSend });
-      yield* service.send("member@example.com");
-      const knownOps = storeOps.splice(0);
-      yield* service.send("missing@example.com");
-      return { knownOps, unknownOps: storeOps.splice(0) };
-    });
-
     const { knownOps, unknownOps } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            disableSignUp: true,
+            sendMagicLink: recordingSend,
+          });
+          yield* service.send("member@example.com");
+          const knownOps = storeOps.splice(0);
+          yield* service.send("missing@example.com");
+          return { knownOps, unknownOps: storeOps.splice(0) };
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(unknownOps).toEqual(knownOps);
@@ -332,15 +348,18 @@ describe("MagicLinkService", () => {
     });
     addEmailIdentifier("user-existing", "member@example.com", true);
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({
-        disableSignUp: true,
-        sendMagicLink: recordingSend,
-      });
-      yield* service.send("member@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            disableSignUp: true,
+            sendMagicLink: recordingSend,
+          });
+          yield* service.send("member@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentLinks.length).toBe(1);
     expect(magicLinkTokens.size).toBe(1);
@@ -349,16 +368,17 @@ describe("MagicLinkService", () => {
   it("should verify a token, create a user with a verified email identifier and a session", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("fresh@example.com");
-      return yield* service.verify(recorded(sentLinks).token, {
-        sessionAttributes: { device: "test" },
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("fresh@example.com");
+          return yield* service.verify(recorded(sentLinks).token, {
+            sessionAttributes: { device: "test" },
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     // Magic link proves email ownership, so the new user's email identifier
@@ -389,14 +409,15 @@ describe("MagicLinkService", () => {
     addUser(existing);
     addEmailIdentifier("user-known", "known@example.com", false);
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("known@example.com");
-      return yield* service.verify(recorded(sentLinks).token);
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("known@example.com");
+          return yield* service.verify(recorded(sentLinks).token);
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.user.id).toBe("user-known");
@@ -425,14 +446,15 @@ describe("MagicLinkService", () => {
       attributes: {},
     });
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("victim@example.com");
-      return yield* service.verify(recorded(sentLinks).token);
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("victim@example.com");
+          return yield* service.verify(recorded(sentLinks).token);
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     // The holder of the address is signed in; the squatter's password and
@@ -451,13 +473,16 @@ describe("MagicLinkService", () => {
     addEmailIdentifier("user-owner", "victim@example.com", true);
     passwordHashes.set("user-owner", "owner-hash");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("victim@example.com");
-      return yield* service.verify(recorded(sentLinks).token);
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("victim@example.com");
+          return yield* service.verify(recorded(sentLinks).token);
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(passwordHashes.get("user-owner")).toBe("owner-hash");
   });
@@ -473,13 +498,14 @@ describe("MagicLinkService", () => {
       expiresAt: Date.now() - 60 * 1000,
     });
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      return yield* Effect.result(service.verify("expired-token"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          return yield* Effect.result(service.verify("expired-token"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -492,16 +518,17 @@ describe("MagicLinkService", () => {
   it("should reject replayed tokens (one-time use)", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("once@example.com");
-      const token = recorded(sentLinks).token;
-      yield* service.verify(token);
-      return yield* Effect.result(service.verify(token));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("once@example.com");
+          const token = recorded(sentLinks).token;
+          yield* service.verify(token);
+          return yield* Effect.result(service.verify(token));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -514,13 +541,14 @@ describe("MagicLinkService", () => {
   it("should fail for unknown tokens", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      return yield* Effect.result(service.verify("missing-token"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          return yield* Effect.result(service.verify("missing-token"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -538,16 +566,17 @@ describe("MagicLinkService", () => {
       expiresAt: Date.now() + 60 * 1000,
     });
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({
-        disableSignUp: true,
-        sendMagicLink: recordingSend,
-      });
-      return yield* Effect.result(service.verify("orphan-token"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            disableSignUp: true,
+            sendMagicLink: recordingSend,
+          });
+          return yield* Effect.result(service.verify("orphan-token"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -561,17 +590,18 @@ describe("MagicLinkService", () => {
   it("should fail with ResendTooSoonError when a resend is within the cooldown window", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({
-        sendMagicLink: recordingSend,
-        resendCooldown: 60_000,
-      });
-      yield* service.send("user@example.com");
-      return yield* Effect.result(service.send("user@example.com"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            sendMagicLink: recordingSend,
+            resendCooldown: 60_000,
+          });
+          yield* service.send("user@example.com");
+          return yield* Effect.result(service.send("user@example.com"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -596,15 +626,18 @@ describe("MagicLinkService", () => {
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({
-        sendMagicLink: recordingSend,
-        resendCooldown: 60_000,
-      });
-      yield* service.send("user@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            sendMagicLink: recordingSend,
+            resendCooldown: 60_000,
+          });
+          yield* service.send("user@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     // A fresh link was issued after the cooldown elapsed.
     expect(sentLinks.length).toBe(1);
@@ -616,14 +649,17 @@ describe("MagicLinkService", () => {
   it("should not apply the cooldown when resendCooldown is not configured", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      // No resendCooldown: default behavior — immediate resend always succeeds.
-      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-      yield* service.send("repeat@example.com");
-      yield* service.send("repeat@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          // No resendCooldown: default behavior — immediate resend always succeeds.
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("repeat@example.com");
+          yield* service.send("repeat@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentLinks.length).toBe(2);
     expect(magicLinkTokens.size).toBe(1);
@@ -636,24 +672,25 @@ describe("MagicLinkService", () => {
     addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
     addEmailIdentifier("user-member", "member@example.com", true);
 
-    const program = Effect.gen(function* () {
-      const service = yield* MagicLink.make({
-        disableSignUp: true,
-        resendCooldown: 60_000,
-        sendMagicLink: recordingSend,
-      });
-      const twice = (email: string) =>
-        Effect.all([Effect.result(service.send(email)), Effect.result(service.send(email))], {
-          concurrency: 1,
-        });
-      return {
-        known: yield* twice("member@example.com"),
-        unknown: yield* twice("missing@example.com"),
-      };
-    });
-
     const { known, unknown } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({
+            disableSignUp: true,
+            resendCooldown: 60_000,
+            sendMagicLink: recordingSend,
+          });
+          const twice = (email: string) =>
+            Effect.all([Effect.result(service.send(email)), Effect.result(service.send(email))], {
+              concurrency: 1,
+            });
+          return {
+            known: yield* twice("member@example.com"),
+            unknown: yield* twice("missing@example.com"),
+          };
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(unknown.map(observable)).toEqual(known.map(observable));

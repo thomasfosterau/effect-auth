@@ -50,11 +50,15 @@ describe("pbkdf2 defaults", () => {
   });
 
   it("PasswordHasher.layer() uses the same default", async () => {
-    const program = Effect.gen(function* () {
-      const hasher = yield* PasswordHasher;
-      return yield* hasher.hash("default-params");
-    });
-    const { hash } = await Effect.runPromise(Effect.provide(program, PasswordHasher.layer()));
+    const { hash } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const hasher = yield* PasswordHasher;
+          return yield* hasher.hash("default-params");
+        }),
+        PasswordHasher.layer(),
+      ),
+    );
     expect(hash.startsWith("pbkdf2-sha256$600000$")).toBe(true);
     expect(pbkdf2.mock.calls[0]?.[2]).toBe(600000);
   });
@@ -79,12 +83,14 @@ describe("pbkdf2 iterations option", () => {
   });
 
   it("PasswordHasher.layer({ iterations }) forwards the option", async () => {
-    const program = Effect.gen(function* () {
-      const hasher = yield* PasswordHasher;
-      return yield* hasher.hash("pw");
-    });
     const { hash } = await Effect.runPromise(
-      Effect.provide(program, PasswordHasher.layer({ iterations: 1000 })),
+      Effect.provide(
+        Effect.gen(function* () {
+          const hasher = yield* PasswordHasher;
+          return yield* hasher.hash("pw");
+        }),
+        PasswordHasher.layer({ iterations: 1000 }),
+      ),
     );
     expect(hash.startsWith("pbkdf2-sha256$1000$")).toBe(true);
     expect(pbkdf2.mock.calls[0]?.[2]).toBe(1000);

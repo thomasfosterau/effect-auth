@@ -83,64 +83,62 @@ beforeEach(async () => {
 });
 
 const run = (): Promise<Observed> => {
-  const program = Effect.gen(function* () {
-    const db = yield* EffectPglite.make();
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const db = yield* EffectPglite.make();
 
-    let phase = "outside";
-    const fibers: Array<{ readonly phase: string; readonly inTransaction: boolean }> = [];
-    // Resolved per query, in the fiber that runs it — see the module docs.
-    const observedHandle = Effect.map(inTransaction, (transaction): EffectDrizzleDatabase => {
-      fibers.push({ phase, inTransaction: transaction });
-      return db;
-    });
+      let phase = "outside";
+      const fibers: Array<{ readonly phase: string; readonly inTransaction: boolean }> = [];
+      // Resolved per query, in the fiber that runs it — see the module docs.
+      const observedHandle = Effect.map(inTransaction, (transaction): EffectDrizzleDatabase => {
+        fibers.push({ phase, inTransaction: transaction });
+        return db;
+      });
 
-    const stores = Layer.mergeAll(storesLayer(tables), Requests.layer(tables)).pipe(
-      Layer.provide(effectDatabaseLayer(observedHandle)),
-    );
-
-    return yield* Effect.gen(function* () {
-      const sessions = yield* Auth.SessionStore;
-
-      // 1. A transaction that commits, with a direct read and a batch of
-      //    concurrent reads issued inside it.
-      const inside = yield* db.transaction(() =>
-        Effect.gen(function* () {
-          phase = "inside";
-          yield* sessions.create(makeSession("committed"));
-          const direct = yield* sessions.get("committed");
-          const batched = yield* Effect.all(
-            [Requests.getSession("committed"), Requests.getSession("committed")],
-            { concurrency: "unbounded" },
-          );
-          return { direct: direct?.id ?? null, batched: batched.map((s) => s?.id ?? null) };
-        }),
+      const stores = Layer.mergeAll(storesLayer(tables), Requests.layer(tables)).pipe(
+        Layer.provide(effectDatabaseLayer(observedHandle)),
       );
 
-      // 2. A transaction that fails after a store write: the write rolls back.
-      yield* db
-        .transaction(() =>
+      return yield* Effect.gen(function* () {
+        const sessions = yield* Auth.SessionStore;
+
+        // 1. A transaction that commits, with a direct read and a batch of
+        //    concurrent reads issued inside it.
+        const inside = yield* db.transaction(() =>
           Effect.gen(function* () {
             phase = "inside";
-            yield* sessions.create(makeSession("rolled-back"));
-            return yield* Effect.fail("boom" as const);
+            yield* sessions.create(makeSession("committed"));
+            const direct = yield* sessions.get("committed");
+            const batched = yield* Effect.all(
+              [Requests.getSession("committed"), Requests.getSession("committed")],
+              { concurrency: "unbounded" },
+            );
+            return { direct: direct?.id ?? null, batched: batched.map((s) => s?.id ?? null) };
           }),
-        )
-        .pipe(Effect.ignore);
+        );
 
-      phase = "outside";
-      const afterRollback = yield* sessions.get("rolled-back");
-      const committed = yield* sessions.get("committed");
-      return {
-        ...inside,
-        afterRollback: afterRollback?.id ?? null,
-        committed: committed?.id ?? null,
-        fibers,
-      };
-    }).pipe(Effect.provide(stores), Effect.timeout("10 seconds"));
-  });
+        // 2. A transaction that fails after a store write: the write rolls back.
+        yield* db
+          .transaction(() =>
+            Effect.gen(function* () {
+              phase = "inside";
+              yield* sessions.create(makeSession("rolled-back"));
+              return yield* Effect.fail("boom" as const);
+            }),
+          )
+          .pipe(Effect.ignore);
 
-  return Effect.runPromise(
-    program.pipe(
+        phase = "outside";
+        const afterRollback = yield* sessions.get("rolled-back");
+        const committed = yield* sessions.get("committed");
+        return {
+          ...inside,
+          afterRollback: afterRollback?.id ?? null,
+          committed: committed?.id ?? null,
+          fibers,
+        };
+      }).pipe(Effect.provide(stores), Effect.timeout("10 seconds"));
+    }).pipe(
       Effect.provide(
         Layer.mergeAll(EffectPglite.DefaultServices, PgliteClient.layer({ liveClient: client })),
       ),

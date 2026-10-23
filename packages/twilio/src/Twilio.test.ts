@@ -181,12 +181,15 @@ describe("layer", () => {
   it("provides the SmsSender service", async () => {
     const { fetch, calls } = stubFetch(new Response(twilioSuccessBody, { status: 201 }));
 
-    const program = Effect.gen(function* () {
-      const sender = yield* SmsSender;
-      yield* sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } });
-    });
-
-    await run(Effect.provide(program, layer({ ...baseConfig, fetch })));
+    await run(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sender = yield* SmsSender;
+          yield* sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } });
+        }),
+        layer({ ...baseConfig, fetch }),
+      ),
+    );
     expect(calls).toHaveLength(1);
   });
 });

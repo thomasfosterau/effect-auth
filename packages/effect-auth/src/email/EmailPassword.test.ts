@@ -152,23 +152,24 @@ describe("EmailPasswordService", () => {
   it("should sign up and create a session by default", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-
-      const result = yield* service.signUp({
-        email: "Test@Example.com",
-        password: "strong-password-123",
-        name: "Tester",
-      });
-
-      expect(result.identifier).toEqual({ type: "email", value: "test@example.com" });
-      expect(result.session).toBeDefined();
-
-      return result;
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+
+          const result = yield* service.signUp({
+            email: "Test@Example.com",
+            password: "strong-password-123",
+            name: "Tester",
+          });
+
+          expect(result.identifier).toEqual({ type: "email", value: "test@example.com" });
+          expect(result.session).toBeDefined();
+
+          return result;
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.session?.userId).toBe(result.user.id);
@@ -242,18 +243,19 @@ describe("EmailPasswordService", () => {
     seedEmailIdentifier(user.id, "existing@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make({
-        requireEmailVerification: true,
-      });
-      return yield* service.signIn({
-        email: "existing@example.com",
-        password: "sign-in-password",
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make({
+            requireEmailVerification: true,
+          });
+          return yield* service.signIn({
+            email: "existing@example.com",
+            password: "sign-in-password",
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.user.id).toBe(user.id);
@@ -277,18 +279,19 @@ describe("EmailPasswordService", () => {
     seedEmailIdentifier(user.id, "invalid@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* Effect.result(
-        service.signIn({
-          email: "invalid@example.com",
-          password: "wrong-password",
-        }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* Effect.result(
+            service.signIn({
+              email: "invalid@example.com",
+              password: "wrong-password",
+            }),
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -313,20 +316,21 @@ describe("EmailPasswordService", () => {
     seedEmailIdentifier(user.id, "unverified@example.com", false);
     passwordHashes.set(user.id, hashResult.hash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make({
-        requireEmailVerification: true,
-      });
-      return yield* Effect.result(
-        service.signIn({
-          email: "unverified@example.com",
-          password: "password-123",
-        }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make({
+            requireEmailVerification: true,
+          });
+          return yield* Effect.result(
+            service.signIn({
+              email: "unverified@example.com",
+              password: "password-123",
+            }),
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -385,15 +389,16 @@ describe("EmailPasswordService constant-work sign-in", () => {
       ),
     );
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* Effect.result(
-        service.signIn({ email: "ghost@example.com", password: "any-password" }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* Effect.result(
+            service.signIn({ email: "ghost@example.com", password: "any-password" }),
+          );
+        }),
+        ctx,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -452,15 +457,16 @@ describe("EmailPasswordService constant-work sign-in", () => {
       ),
     );
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* Effect.result(
-        service.signIn({ email: "nohash@example.com", password: "any-password" }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* Effect.result(
+            service.signIn({ email: "nohash@example.com", password: "any-password" }),
+          );
+        }),
+        ctx,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -498,14 +504,12 @@ describe("EmailPasswordService second-factor gate", () => {
       begin: () => Effect.succeed({ token: "pending-token", expiresAt: Date.now() + 60_000 }),
     };
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: "gated@example.com", password: "gate-password" });
-    });
-
     const result = await Effect.runPromise(
       Effect.provide(
-        program,
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* service.signIn({ email: "gated@example.com", password: "gate-password" });
+        }),
         Context.merge(testContext, Context.make(SecondFactorGate, gate)),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -541,14 +545,15 @@ describe("EmailPasswordService second-factor gate", () => {
       begin: () => Effect.succeed({ token: "unused", expiresAt: Date.now() + 60_000 }),
     };
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: "ungated@example.com", password: "no-gate-password" });
-    });
-
     const result = await Effect.runPromise(
       Effect.provide(
-        program,
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* service.signIn({
+            email: "ungated@example.com",
+            password: "no-gate-password",
+          });
+        }),
         Context.merge(testContext, Context.make(SecondFactorGate, gate)),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -615,17 +620,18 @@ describe("EmailPasswordService — migration and security hardening", () => {
     seedEmailIdentifier(user.id, "migration@example.com", true);
     passwordHashes.set(user.id, oldHash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* service.signIn({
-        email: "migration@example.com",
-        password: "migration-password",
-      });
-    });
-
     // Use the current PBKDF2 hasher — it detects the outdated hash via needsRehash.
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* service.signIn({
+            email: "migration@example.com",
+            password: "migration-password",
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.user.id).toBe(user.id);
@@ -662,11 +668,6 @@ describe("EmailPasswordService — migration and security hardening", () => {
       scryptHasher,
     ]);
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: "switch@example.com", password: "switch-password" });
-    });
-
     // testContext has PBKDF2 as PasswordHasher; override with scrypt + add verifier.
     // Context.merge(a, b) → b wins on conflict, so place the overrides second.
     const ctx = Context.merge(
@@ -675,7 +676,16 @@ describe("EmailPasswordService — migration and security hardening", () => {
     );
 
     const result = await Effect.runPromise(
-      Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* service.signIn({
+            email: "switch@example.com",
+            password: "switch-password",
+          });
+        }),
+        ctx,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.user.id).toBe(user.id);
@@ -701,15 +711,16 @@ describe("EmailPasswordService — migration and security hardening", () => {
     // Malformed hash: non-numeric iteration count — would previously cause a RangeError defect.
     passwordHashes.set(user.id, "pbkdf2-sha256$notanumber$aabbcc$ddeeff");
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* Effect.result(
-        service.signIn({ email: "malformed@example.com", password: "any-password" }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* Effect.result(
+            service.signIn({ email: "malformed@example.com", password: "any-password" }),
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -732,19 +743,20 @@ describe("EmailPasswordService — migration and security hardening", () => {
     seedEmailIdentifier(user.id, "longpw@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* Effect.result(
-        service.signIn({
-          email: "longpw@example.com",
-          // 2000 'a' chars — well over MAX_PASSWORD_BYTES (1024)
-          password: "a".repeat(2000),
-        }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          return yield* Effect.result(
+            service.signIn({
+              email: "longpw@example.com",
+              // 2000 'a' chars — well over MAX_PASSWORD_BYTES (1024)
+              password: "a".repeat(2000),
+            }),
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -933,16 +945,17 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
   it("default mode: duplicate email still returns EmailInUseError (unchanged)", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      yield* service.signUp({ email: "dup@example.com", password: "strong-password-123" });
-      return yield* Effect.result(
-        service.signUp({ email: "DUP@Example.com", password: "another-strong-pw" }),
-      );
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make();
+          yield* service.signUp({ email: "dup@example.com", password: "strong-password-123" });
+          return yield* Effect.result(
+            service.signUp({ email: "DUP@Example.com", password: "another-strong-pw" }),
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -953,23 +966,24 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
   it("antiEnumeration mode: fresh and duplicate sign-ups are indistinguishable", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make({ antiEnumeration: true });
-      const fresh = yield* service.signUp({
-        email: "shape@example.com",
-        password: "strong-password-123",
-        name: "Fresh User",
-      });
-      const duplicate = yield* service.signUp({
-        email: "Shape@Example.com",
-        password: "different-strong-pw",
-        name: "Attacker Supplied Name",
-      });
-      return { fresh, duplicate };
-    });
-
     const { fresh, duplicate } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make({ antiEnumeration: true });
+          const fresh = yield* service.signUp({
+            email: "shape@example.com",
+            password: "strong-password-123",
+            name: "Fresh User",
+          });
+          const duplicate = yield* service.signUp({
+            email: "Shape@Example.com",
+            password: "different-strong-pw",
+            name: "Attacker Supplied Name",
+          });
+          return { fresh, duplicate };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     // Neither branch creates a session — no Set-Cookie on either at the
@@ -1041,13 +1055,19 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
       ),
     );
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make({ antiEnumeration: true });
-      yield* service.signUp({ email: "hash@example.com", password: "strong-password-123" });
-      return yield* service.signUp({ email: "Hash@Example.com", password: "another-strong-pw" });
-    });
-
-    await Effect.runPromise(Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailPassword.make({ antiEnumeration: true });
+          yield* service.signUp({ email: "hash@example.com", password: "strong-password-123" });
+          return yield* service.signUp({
+            email: "Hash@Example.com",
+            password: "another-strong-pw",
+          });
+        }),
+        ctx,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
 
     // One hash for the fresh branch, one for the duplicate branch.
     expect(hashCalls).toBe(2);

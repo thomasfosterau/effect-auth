@@ -56,15 +56,13 @@ const canViewDeleted = Effect.map(
 
 describe("SessionContext.authenticatedLayer", () => {
   it("runs gated code in a runtime that never saw an HTTP request", async () => {
-    const program = Effect.gen(function* () {
-      const session = yield* CurrentSession;
-      const user = yield* CurrentUser;
-      const maybe = yield* MaybeCurrentSession;
-      return { sessionId: session.id, userId: user.id, maybe };
-    });
-
     const result = await Effect.runPromise(
-      program.pipe(Effect.provide(SessionContext.authenticatedLayer(resolved))),
+      Effect.gen(function* () {
+        const session = yield* CurrentSession;
+        const user = yield* CurrentUser;
+        const maybe = yield* MaybeCurrentSession;
+        return { sessionId: session.id, userId: user.id, maybe };
+      }).pipe(Effect.provide(SessionContext.authenticatedLayer(resolved))),
     );
 
     expect(result.sessionId).toBe("session-1");
@@ -90,22 +88,20 @@ describe("SessionContext.authenticatedLayer", () => {
       ],
     });
 
-    const program = Effect.gen(function* () {
-      const authorizer = yield* Authorizer;
-      return {
-        allowed: yield* authorizer.check({
-          action: "profile:read",
-          resource: Entity.ref("User", USER_ID),
-        }),
-        denied: yield* authorizer.check({
-          action: "profile:read",
-          resource: Entity.ref("User", "someone-else"),
-        }),
-      };
-    });
-
     const result = await Effect.runPromise(
-      program.pipe(
+      Effect.gen(function* () {
+        const authorizer = yield* Authorizer;
+        return {
+          allowed: yield* authorizer.check({
+            action: "profile:read",
+            resource: Entity.ref("User", USER_ID),
+          }),
+          denied: yield* authorizer.check({
+            action: "profile:read",
+            resource: Entity.ref("User", "someone-else"),
+          }),
+        };
+      }).pipe(
         Effect.provide(
           Layer.mergeAll(authorizerLayer, SessionContext.authenticatedLayer(resolved)),
         ),
@@ -220,14 +216,12 @@ describe("SessionContext.layer", () => {
 
 describe("SessionContext.userLayer", () => {
   it("provides CurrentUser and CurrentPrincipal without inventing a session", async () => {
-    const program = Effect.gen(function* () {
-      const user = yield* CurrentUser;
-      const principal = yield* CurrentPrincipal;
-      return { user, principal };
-    });
-
     const result = await Effect.runPromise(
-      program.pipe(Effect.provide(SessionContext.userLayer(testUser))),
+      Effect.gen(function* () {
+        const user = yield* CurrentUser;
+        const principal = yield* CurrentPrincipal;
+        return { user, principal };
+      }).pipe(Effect.provide(SessionContext.userLayer(testUser))),
     );
 
     expect(result.user.id).toBe(USER_ID);

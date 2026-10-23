@@ -133,13 +133,16 @@ describe("cost profiles", () => {
 
 describe("layer", () => {
   it("provides the PasswordHasher service", async () => {
-    const program = Effect.gen(function* () {
-      const hasher = yield* Password.PasswordHasher;
-      const { hash, algorithm } = yield* hasher.hash("through-the-layer");
-      return { algorithm, verified: yield* hasher.verify("through-the-layer", hash) };
-    });
-
-    const result = await run(Effect.provide(program, Argon2.argon2HasherLayer(cheap)));
+    const result = await run(
+      Effect.provide(
+        Effect.gen(function* () {
+          const hasher = yield* Password.PasswordHasher;
+          const { hash, algorithm } = yield* hasher.hash("through-the-layer");
+          return { algorithm, verified: yield* hasher.verify("through-the-layer", hash) };
+        }),
+        Argon2.argon2HasherLayer(cheap),
+      ),
+    );
     expect(result).toEqual({ algorithm: ARGON2ID, verified: true });
   });
 });

@@ -205,22 +205,23 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-1", "totp@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({ issuer: "TestApp" });
-
-      const enableResult = yield* service.enable("user-2fa-1", "correct-password");
-      const enabledBeforeConfirm = yield* service.isEnabled("user-2fa-1");
-
-      const code = yield* generateTotp(enableResult.secret);
-      yield* service.confirmEnable("user-2fa-1", code);
-
-      const enabledAfterConfirm = yield* service.isEnabled("user-2fa-1");
-
-      return { enableResult, enabledBeforeConfirm, enabledAfterConfirm };
-    });
-
     const { enableResult, enabledBeforeConfirm, enabledAfterConfirm } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({ issuer: "TestApp" });
+
+          const enableResult = yield* service.enable("user-2fa-1", "correct-password");
+          const enabledBeforeConfirm = yield* service.isEnabled("user-2fa-1");
+
+          const code = yield* generateTotp(enableResult.secret);
+          yield* service.confirmEnable("user-2fa-1", code);
+
+          const enabledAfterConfirm = yield* service.isEnabled("user-2fa-1");
+
+          return { enableResult, enabledBeforeConfirm, enabledAfterConfirm };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(enableResult.secret.length).toBeGreaterThan(0);
@@ -247,14 +248,15 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-2", "badcode@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({ issuer: "TestApp" });
-      yield* service.enable("user-2fa-2", "correct-password");
-      return yield* Effect.result(service.confirmEnable("user-2fa-2", "000000"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({ issuer: "TestApp" });
+          yield* service.enable("user-2fa-2", "correct-password");
+          return yield* Effect.result(service.confirmEnable("user-2fa-2", "000000"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -267,13 +269,14 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-3", "wrongpw@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({ issuer: "TestApp" });
-      return yield* Effect.result(service.enable("user-2fa-3", "wrong-password"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({ issuer: "TestApp" });
+          return yield* Effect.result(service.enable("user-2fa-3", "wrong-password"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -286,25 +289,28 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-4", "disable@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-      });
-
-      yield* service.enable("user-2fa-4", "correct-password");
-
-      const wrongPassword = yield* Effect.result(service.disable("user-2fa-4", "wrong-password"));
-      const stillEnabled = yield* service.isEnabled("user-2fa-4");
-
-      yield* service.disable("user-2fa-4", "correct-password");
-      const enabledAfterDisable = yield* service.isEnabled("user-2fa-4");
-
-      return { wrongPassword, stillEnabled, enabledAfterDisable };
-    });
-
     const { wrongPassword, stillEnabled, enabledAfterDisable } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+
+          yield* service.enable("user-2fa-4", "correct-password");
+
+          const wrongPassword = yield* Effect.result(
+            service.disable("user-2fa-4", "wrong-password"),
+          );
+          const stillEnabled = yield* service.isEnabled("user-2fa-4");
+
+          yield* service.disable("user-2fa-4", "correct-password");
+          const enabledAfterDisable = yield* service.isEnabled("user-2fa-4");
+
+          return { wrongPassword, stillEnabled, enabledAfterDisable };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(wrongPassword._tag).toBe("Failure");
@@ -319,23 +325,24 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-5", "challenge@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-      });
-
-      const { secret } = yield* service.enable("user-2fa-5", "correct-password");
-      const challenge = yield* service.beginChallenge("user-2fa-5");
-
-      const code = yield* generateTotp(secret);
-      return yield* service.verifyTotp(challenge.token, code, {
-        sessionAttributes: { device: "test" },
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+
+          const { secret } = yield* service.enable("user-2fa-5", "correct-password");
+          const challenge = yield* service.beginChallenge("user-2fa-5");
+
+          const code = yield* generateTotp(secret);
+          return yield* service.verifyTotp(challenge.token, code, {
+            sessionAttributes: { device: "test" },
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.userId).toBe("user-2fa-5");
@@ -350,22 +357,23 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-6", "expired@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-        pendingExpiresIn: -1000, // Already expired on creation
-      });
-
-      const { secret } = yield* service.enable("user-2fa-6", "correct-password");
-      const challenge = yield* service.beginChallenge("user-2fa-6");
-
-      const code = yield* generateTotp(secret);
-      return yield* Effect.result(service.verifyTotp(challenge.token, code));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+            pendingExpiresIn: -1000, // Already expired on creation
+          });
+
+          const { secret } = yield* service.enable("user-2fa-6", "correct-password");
+          const challenge = yield* service.beginChallenge("user-2fa-6");
+
+          const code = yield* generateTotp(secret);
+          return yield* Effect.result(service.verifyTotp(challenge.token, code));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -380,24 +388,25 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-7", "replay@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-      });
-
-      const { secret } = yield* service.enable("user-2fa-7", "correct-password");
-      const challenge = yield* service.beginChallenge("user-2fa-7");
-
-      const code = yield* generateTotp(secret);
-      yield* service.verifyTotp(challenge.token, code);
-
-      const replayCode = yield* generateTotp(secret);
-      return yield* Effect.result(service.verifyTotp(challenge.token, replayCode));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+
+          const { secret } = yield* service.enable("user-2fa-7", "correct-password");
+          const challenge = yield* service.beginChallenge("user-2fa-7");
+
+          const code = yield* generateTotp(secret);
+          yield* service.verifyTotp(challenge.token, code);
+
+          const replayCode = yield* generateTotp(secret);
+          return yield* Effect.result(service.verifyTotp(challenge.token, replayCode));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -411,26 +420,27 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-7b", "replay2@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-      });
-
-      const { secret } = yield* service.enable("user-2fa-7b", "correct-password");
-
-      // First challenge: verify with code C1 → success
-      const challenge1 = yield* service.beginChallenge("user-2fa-7b");
-      const code = yield* generateTotp(secret);
-      yield* service.verifyTotp(challenge1.token, code);
-
-      // Second challenge: a fresh pending token, but same code C1 within window
-      const challenge2 = yield* service.beginChallenge("user-2fa-7b");
-      return yield* Effect.result(service.verifyTotp(challenge2.token, code));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+
+          const { secret } = yield* service.enable("user-2fa-7b", "correct-password");
+
+          // First challenge: verify with code C1 → success
+          const challenge1 = yield* service.beginChallenge("user-2fa-7b");
+          const code = yield* generateTotp(secret);
+          yield* service.verifyTotp(challenge1.token, code);
+
+          // Second challenge: a fresh pending token, but same code C1 within window
+          const challenge2 = yield* service.beginChallenge("user-2fa-7b");
+          return yield* Effect.result(service.verifyTotp(challenge2.token, code));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -444,30 +454,31 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-8", "backup@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-      });
-
-      const { backupCodes } = yield* service.enable("user-2fa-8", "correct-password");
-
-      const firstChallenge = yield* service.beginChallenge("user-2fa-8");
-      const firstUse = yield* service.verifyBackupCode(firstChallenge.token, backupCodes[0]);
-
-      const secondChallenge = yield* service.beginChallenge("user-2fa-8");
-      const reuse = yield* Effect.result(
-        service.verifyBackupCode(secondChallenge.token, backupCodes[0]),
-      );
-
-      // A failed attempt does not consume the pending token; another code works
-      const secondUse = yield* service.verifyBackupCode(secondChallenge.token, backupCodes[1]);
-
-      return { firstUse, reuse, secondUse };
-    });
-
     const { firstUse, reuse, secondUse } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+
+          const { backupCodes } = yield* service.enable("user-2fa-8", "correct-password");
+
+          const firstChallenge = yield* service.beginChallenge("user-2fa-8");
+          const firstUse = yield* service.verifyBackupCode(firstChallenge.token, backupCodes[0]);
+
+          const secondChallenge = yield* service.beginChallenge("user-2fa-8");
+          const reuse = yield* Effect.result(
+            service.verifyBackupCode(secondChallenge.token, backupCodes[0]),
+          );
+
+          // A failed attempt does not consume the pending token; another code works
+          const secondUse = yield* service.verifyBackupCode(secondChallenge.token, backupCodes[1]);
+
+          return { firstUse, reuse, secondUse };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(firstUse.userId).toBe("user-2fa-8");
@@ -483,33 +494,37 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-9", "regen@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-        backupCodeCount: 4,
-      });
-
-      const { backupCodes: oldCodes } = yield* service.enable("user-2fa-9", "correct-password");
-
-      const wrongPassword = yield* Effect.result(
-        service.regenerateBackupCodes("user-2fa-9", "wrong-password"),
-      );
-
-      const newCodes = yield* service.regenerateBackupCodes("user-2fa-9", "correct-password");
-
-      const challenge = yield* service.beginChallenge("user-2fa-9");
-      const oldCodeResult = yield* Effect.result(
-        service.verifyBackupCode(challenge.token, oldCodes[0]),
-      );
-      const newCodeResult = yield* service.verifyBackupCode(challenge.token, newCodes[0]);
-
-      return { wrongPassword, oldCodes, newCodes, oldCodeResult, newCodeResult };
-    });
-
     const { wrongPassword, oldCodes, newCodes, oldCodeResult, newCodeResult } =
       await Effect.runPromise(
-        Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* MultiFactor.make({
+              issuer: "TestApp",
+              skipVerificationOnEnable: true,
+              backupCodeCount: 4,
+            });
+
+            const { backupCodes: oldCodes } = yield* service.enable(
+              "user-2fa-9",
+              "correct-password",
+            );
+
+            const wrongPassword = yield* Effect.result(
+              service.regenerateBackupCodes("user-2fa-9", "wrong-password"),
+            );
+
+            const newCodes = yield* service.regenerateBackupCodes("user-2fa-9", "correct-password");
+
+            const challenge = yield* service.beginChallenge("user-2fa-9");
+            const oldCodeResult = yield* Effect.result(
+              service.verifyBackupCode(challenge.token, oldCodes[0]),
+            );
+            const newCodeResult = yield* service.verifyBackupCode(challenge.token, newCodes[0]);
+
+            return { wrongPassword, oldCodes, newCodes, oldCodeResult, newCodeResult };
+          }),
+          testContext,
+        ).pipe(Effect.provide(Hooks.Default)),
       );
 
     expect(wrongPassword._tag).toBe("Failure");
@@ -525,20 +540,21 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-10", "nochallenge@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({ issuer: "TestApp" });
-
-      const withoutRecord = yield* Effect.result(service.beginChallenge("user-2fa-10"));
-
-      // Enabled but not yet confirmed: still not challengeable
-      yield* service.enable("user-2fa-10", "correct-password");
-      const unverified = yield* Effect.result(service.beginChallenge("user-2fa-10"));
-
-      return { withoutRecord, unverified };
-    });
-
     const { withoutRecord, unverified } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({ issuer: "TestApp" });
+
+          const withoutRecord = yield* Effect.result(service.beginChallenge("user-2fa-10"));
+
+          // Enabled but not yet confirmed: still not challengeable
+          yield* service.enable("user-2fa-10", "correct-password");
+          const unverified = yield* Effect.result(service.beginChallenge("user-2fa-10"));
+
+          return { withoutRecord, unverified };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(withoutRecord._tag).toBe("Failure");
@@ -565,33 +581,34 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-1", "enc-totp@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: false,
-        encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
-      });
-
-      const enableResult = yield* service.enable("user-enc-1", "correct-password");
-
-      // Confirm with the previous time step's code (within the default ±1
-      // window) so the challenge verification below can use the current
-      // step's code without tripping the replay guard.
-      const currentCounter = Math.floor(Date.now() / 1000 / 30);
-      const confirmCode = yield* generateHotp(enableResult.secret, currentCounter - 1);
-      yield* service.confirmEnable("user-enc-1", confirmCode);
-
-      const enabled = yield* service.isEnabled("user-enc-1");
-
-      const challenge = yield* service.beginChallenge("user-enc-1");
-      const verifyCode = yield* generateTotp(enableResult.secret);
-      const verifyResult = yield* service.verifyTotp(challenge.token, verifyCode);
-
-      return { enableResult, enabled, verifyResult };
-    });
-
     const { enableResult, enabled, verifyResult } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: false,
+            encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
+          });
+
+          const enableResult = yield* service.enable("user-enc-1", "correct-password");
+
+          // Confirm with the previous time step's code (within the default ±1
+          // window) so the challenge verification below can use the current
+          // step's code without tripping the replay guard.
+          const currentCounter = Math.floor(Date.now() / 1000 / 30);
+          const confirmCode = yield* generateHotp(enableResult.secret, currentCounter - 1);
+          yield* service.confirmEnable("user-enc-1", confirmCode);
+
+          const enabled = yield* service.isEnabled("user-enc-1");
+
+          const challenge = yield* service.beginChallenge("user-enc-1");
+          const verifyCode = yield* generateTotp(enableResult.secret);
+          const verifyResult = yield* service.verifyTotp(challenge.token, verifyCode);
+
+          return { enableResult, enabled, verifyResult };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(enabled).toBe(true);
@@ -611,24 +628,25 @@ describe("MultiFactorService with TOTP secret encryption", () => {
 
     const cipher = Cipher.aes256GcmCipher("custom-cipher-secret");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-        encryptSecret: { cipher },
-      });
-
-      const enableResult = yield* service.enable("user-enc-2", "correct-password");
-
-      const challenge = yield* service.beginChallenge("user-enc-2");
-      const code = yield* generateTotp(enableResult.secret);
-      const verifyResult = yield* service.verifyTotp(challenge.token, code);
-
-      return { enableResult, verifyResult };
-    });
-
     const { enableResult, verifyResult } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+            encryptSecret: { cipher },
+          });
+
+          const enableResult = yield* service.enable("user-enc-2", "correct-password");
+
+          const challenge = yield* service.beginChallenge("user-enc-2");
+          const code = yield* generateTotp(enableResult.secret);
+          const verifyResult = yield* service.verifyTotp(challenge.token, code);
+
+          return { enableResult, verifyResult };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(verifyResult.userId).toBe("user-enc-2");
@@ -642,16 +660,17 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-3", "enc-uri@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
-      });
-      return yield* service.enable("user-enc-3", "correct-password");
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
+          });
+          return yield* service.enable("user-enc-3", "correct-password");
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     // The returned secret is plaintext base32 (for QR code display)
@@ -665,21 +684,22 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-4", "enc-backup@example.com", "correct-password");
 
-    const program = Effect.gen(function* () {
-      const service = yield* MultiFactor.make({
-        issuer: "TestApp",
-        skipVerificationOnEnable: true,
-        encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
-      });
-
-      const { backupCodes } = yield* service.enable("user-enc-4", "correct-password");
-
-      const challenge = yield* service.beginChallenge("user-enc-4");
-      return yield* service.verifyBackupCode(challenge.token, backupCodes[0]);
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+            encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
+          });
+
+          const { backupCodes } = yield* service.enable("user-enc-4", "correct-password");
+
+          const challenge = yield* service.beginChallenge("user-enc-4");
+          return yield* service.verifyBackupCode(challenge.token, backupCodes[0]);
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.userId).toBe("user-enc-4");

@@ -302,25 +302,25 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
       Layer.provide(makeRateLimitStoreLayer()),
     );
 
-    const program = Effect.gen(function* () {
-      const hooks = yield* Hooks;
-      // login preset allows 5 requests per window.
-      return yield* Effect.forEach(
-        Arr.range(1, 6),
-        () =>
-          Effect.result(hooks.beforeSignIn(signIn("rate@example.com"))).pipe(
-            Effect.map(
-              Result.match({
-                onSuccess: (): string => "ok",
-                onFailure: (failure) => failure._tag,
-              }),
+    const outcomes = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        // login preset allows 5 requests per window.
+        return yield* Effect.forEach(
+          Arr.range(1, 6),
+          () =>
+            Effect.result(hooks.beforeSignIn(signIn("rate@example.com"))).pipe(
+              Effect.map(
+                Result.match({
+                  onSuccess: (): string => "ok",
+                  onFailure: (failure) => failure._tag,
+                }),
+              ),
             ),
-          ),
-        { concurrency: 1 },
-      );
-    });
-
-    const outcomes = await Effect.runPromise(program.pipe(Effect.provide(layer)));
+          { concurrency: 1 },
+        );
+      }).pipe(Effect.provide(layer)),
+    );
 
     expect(outcomes.slice(0, 5)).toEqual(["ok", "ok", "ok", "ok", "ok"]);
     expect(outcomes[5]).toBe("RateLimitError");
@@ -431,13 +431,11 @@ describe("Hooks - integration with EmailPasswordService", () => {
         }),
     });
 
-    const program = Effect.gen(function* () {
-      const service = yield* EmailPassword.make();
-      return yield* service.signUp({ email: "person@example.com", password: "strong-password" });
-    });
-
     const result = await Effect.runPromise(
-      program.pipe(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        return yield* service.signUp({ email: "person@example.com", password: "strong-password" });
+      }).pipe(
         Effect.provide(testContext),
         Effect.provide(composePlugins([enrich]).pipe(Layer.provide(Hooks.Default))),
       ),

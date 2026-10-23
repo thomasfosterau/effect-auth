@@ -159,8 +159,8 @@ export const oauthStateStoreKV: Effect.Effect<
   typeof OAuthStateStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (state) =>
       kv.write(oauthStateKey(state.state), state, "oauthState.create").pipe(Effect.as(state)),
@@ -204,8 +204,8 @@ export const challengeStoreKV: Effect.Effect<
   typeof ChallengeStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (challenge) =>
       kv
@@ -252,8 +252,8 @@ export const rateLimitStoreKV: Effect.Effect<
   typeof RateLimitStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   const readEntry = (key: string) => kv.read<RateLimitEntry>(rateLimitKey(key), "rateLimit.get");
   return {
     get: (key) => readEntry(key).pipe(Effect.orDie),
@@ -298,8 +298,8 @@ export const emailVerificationStoreKV: Effect.Effect<
   typeof EmailVerificationStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (verification) =>
       Effect.gen(function* () {
@@ -373,8 +373,8 @@ export const passwordResetStoreKV: Effect.Effect<
   typeof PasswordResetStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (reset) =>
       Effect.gen(function* () {
@@ -434,8 +434,8 @@ export const magicLinkStoreKV: Effect.Effect<
   typeof MagicLinkStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (token) =>
       Effect.gen(function* () {
@@ -500,8 +500,8 @@ export const emailOtpStoreKV: Effect.Effect<
   typeof EmailOtpStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     upsert: (record) =>
       kv
@@ -544,8 +544,8 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   typeof PendingMultiFactorStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (pending) =>
       kv
@@ -624,8 +624,8 @@ export const identifierStoreKV: Effect.Effect<
   typeof IdentifierStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
 
   const getByValue = (type: IdentifierType, value: string, label: string) =>
     Effect.gen(function* () {
@@ -784,8 +784,8 @@ export const googleOneTapNonceStoreKV: Effect.Effect<
   typeof GoogleOneTapNonceStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = Effect.gen(function* () {
-  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+> = KeyValueStore.KeyValueStore.useSync((store) => {
+  const kv = jsonKv(store);
   return {
     create: (nonce, expiresAt) =>
       kv.write(

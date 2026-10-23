@@ -149,17 +149,21 @@ describe("Authorizer", () => {
     const layer = Authorizer.Authorizer.layer({ policies: [ownerPolicy] }).pipe(
       Layer.provide(Layer.succeed(Authorizer.EntityResolver)(resolver)),
     );
-    const program = Effect.gen(function* () {
-      const authorizer = yield* Authorizer.Authorizer;
-      const allowed = yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const denied = yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(bob));
-      return { allowed, denied };
-    });
-    const result = await Effect.runPromise(Effect.provide(program, layer));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const authorizer = yield* Authorizer.Authorizer;
+          const allowed = yield* authorizer
+            .check({ action: readDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(alice));
+          const denied = yield* authorizer
+            .check({ action: readDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(bob));
+          return { allowed, denied };
+        }),
+        layer,
+      ),
+    );
     expect(result.allowed).toBe(true);
     expect(result.denied).toBe(false);
   });
@@ -197,17 +201,21 @@ describe("Authorizer", () => {
     const layer = Authorizer.Authorizer.layer({ policies: [adminPolicy], model }).pipe(
       Layer.provide(Layer.succeed(Authorizer.EntityResolver)(resolver)),
     );
-    const program = Effect.gen(function* () {
-      const authorizer = yield* Authorizer.Authorizer;
-      const allowedForAdmin = yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const deniedForNonAdmin = yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(bob));
-      return { allowedForAdmin, deniedForNonAdmin };
-    });
-    const result = await Effect.runPromise(Effect.provide(program, layer));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const authorizer = yield* Authorizer.Authorizer;
+          const allowedForAdmin = yield* authorizer
+            .check({ action: readDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(alice));
+          const deniedForNonAdmin = yield* authorizer
+            .check({ action: readDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(bob));
+          return { allowedForAdmin, deniedForNonAdmin };
+        }),
+        layer,
+      ),
+    );
     expect(result.allowedForAdmin).toBe(true);
     expect(result.deniedForNonAdmin).toBe(false);
   });
@@ -273,17 +281,21 @@ describe("Authorizer", () => {
       when: Condition.eq(Condition.attr("context", "mfa"), Condition.lit(true)),
     });
     const layer = Authorizer.Authorizer.layer({ policies: [contextOnlyPermit] });
-    const program = Effect.gen(function* () {
-      const authorizer = yield* Authorizer.Authorizer;
-      const allowed = yield* authorizer
-        .check({ action: readDoc, resource: doc1, context: { mfa: true } })
-        .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const denied = yield* authorizer
-        .check({ action: readDoc, resource: doc1, context: { mfa: false } })
-        .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      return { allowed, denied };
-    });
-    const result = await Effect.runPromise(Effect.provide(program, layer));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const authorizer = yield* Authorizer.Authorizer;
+          const allowed = yield* authorizer
+            .check({ action: readDoc, resource: doc1, context: { mfa: true } })
+            .pipe(Authorizer.CurrentPrincipal.provide(alice));
+          const denied = yield* authorizer
+            .check({ action: readDoc, resource: doc1, context: { mfa: false } })
+            .pipe(Authorizer.CurrentPrincipal.provide(alice));
+          return { allowed, denied };
+        }),
+        layer,
+      ),
+    );
     expect(result.allowed).toBe(true);
     expect(result.denied).toBe(false);
 
@@ -378,16 +390,24 @@ describe("Authorizer + PolicyStore", () => {
 
   const makeStoreLayer = () => {
     const store = PolicyStore.memoryPolicyStore();
-    const seed = Effect.gen(function* () {
-      yield* store.createTemplate(shareTemplate);
-      yield* store.createLink(
-        PolicyStore.makeLink({ id: "l1", templateId: "share-doc", principal: bob, resource: doc1 }),
-      );
-      yield* store.createPolicy(
-        Policy.forbid({ id: "stored-deny-delete", action: Policy.eq(deleteDoc) }),
-      );
-    });
-    return { store, seed, layer: Layer.succeed(PolicyStore.PolicyStore)(store) };
+    return {
+      store,
+      seed: Effect.gen(function* () {
+        yield* store.createTemplate(shareTemplate);
+        yield* store.createLink(
+          PolicyStore.makeLink({
+            id: "l1",
+            templateId: "share-doc",
+            principal: bob,
+            resource: doc1,
+          }),
+        );
+        yield* store.createPolicy(
+          Policy.forbid({ id: "stored-deny-delete", action: Policy.eq(deleteDoc) }),
+        );
+      }),
+      layer: Layer.succeed(PolicyStore.PolicyStore)(store),
+    };
   };
 
   it("stored policies and template links join every decision", async () => {
@@ -395,19 +415,23 @@ describe("Authorizer + PolicyStore", () => {
     const authorizerLayer = Authorizer.Authorizer.layer({ policies: [] }).pipe(
       Layer.provideMerge(storeLayer),
     );
-    const program = Effect.gen(function* () {
-      yield* seed;
-      const authorizer = yield* Authorizer.Authorizer;
-      const bobAllowed = yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(bob));
-      const aliceAllowed = yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      // The stored forbid overrides a static allow-all permit.
-      return { bobAllowed, aliceAllowed };
-    });
-    const result = await Effect.runPromise(Effect.provide(program, authorizerLayer));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* seed;
+          const authorizer = yield* Authorizer.Authorizer;
+          const bobAllowed = yield* authorizer
+            .check({ action: readDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(bob));
+          const aliceAllowed = yield* authorizer
+            .check({ action: readDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(alice));
+          // The stored forbid overrides a static allow-all permit.
+          return { bobAllowed, aliceAllowed };
+        }),
+        authorizerLayer,
+      ),
+    );
     expect(result.bobAllowed).toBe(true);
     expect(result.aliceAllowed).toBe(false);
   });
@@ -417,18 +441,22 @@ describe("Authorizer + PolicyStore", () => {
     const authorizerLayer = Authorizer.Authorizer.layer({
       policies: [Policy.permit({ id: "allow-all" })],
     }).pipe(Layer.provideMerge(storeLayer));
-    const program = Effect.gen(function* () {
-      yield* seed;
-      const authorizer = yield* Authorizer.Authorizer;
-      const check = authorizer
-        .check({ action: deleteDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const denied = yield* check;
-      yield* store.deletePolicy("stored-deny-delete");
-      const allowedAfterDelete = yield* check;
-      return { denied, allowedAfterDelete };
-    });
-    const result = await Effect.runPromise(Effect.provide(program, authorizerLayer));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* seed;
+          const authorizer = yield* Authorizer.Authorizer;
+          const check = authorizer
+            .check({ action: deleteDoc, resource: doc1 })
+            .pipe(Authorizer.CurrentPrincipal.provide(alice));
+          const denied = yield* check;
+          yield* store.deletePolicy("stored-deny-delete");
+          const allowedAfterDelete = yield* check;
+          return { denied, allowedAfterDelete };
+        }),
+        authorizerLayer,
+      ),
+    );
     expect(result.denied).toBe(false);
     expect(result.allowedAfterDelete).toBe(true);
   });
@@ -438,13 +466,19 @@ describe("Authorizer + PolicyStore", () => {
     const authorizerLayer = Authorizer.Authorizer.layer({ policies: [], useStore: false }).pipe(
       Layer.provideMerge(storeLayer),
     );
-    const program = Effect.gen(function* () {
-      yield* seed;
-      const authorizer = yield* Authorizer.Authorizer;
-      return yield* authorizer
-        .check({ action: readDoc, resource: doc1 })
-        .pipe(Authorizer.CurrentPrincipal.provide(bob));
-    });
-    expect(await Effect.runPromise(Effect.provide(program, authorizerLayer))).toBe(false);
+    expect(
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            yield* seed;
+            const authorizer = yield* Authorizer.Authorizer;
+            return yield* authorizer
+              .check({ action: readDoc, resource: doc1 })
+              .pipe(Authorizer.CurrentPrincipal.provide(bob));
+          }),
+          authorizerLayer,
+        ),
+      ),
+    ).toBe(false);
   });
 });

@@ -247,12 +247,13 @@ describe("AuthSchema resource", () => {
     const primary = makeTestD1();
     const tenants = makeTestD1();
     const engine = makeEngine({ databases: { primary, tenants } });
-    const program = Effect.gen(function* () {
-      yield* AuthSchema("primary-auth", { database: "primary" });
-      yield* AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
-    });
 
-    await engine.deploy(program as never);
+    await engine.deploy(
+      Effect.gen(function* () {
+        yield* AuthSchema("primary-auth", { database: "primary" });
+        yield* AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
+      }) as never,
+    );
     expect(await tablesIn(primary)).toEqual(sortedTableNames);
     expect(await tablesIn(tenants)).toEqual(sortedTableNames);
 

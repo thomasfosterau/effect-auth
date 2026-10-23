@@ -444,28 +444,31 @@ describe("AdminService", () => {
     const hooksWithPlugin = BannedUserPlugin.pipe(Layer.provide(Hooks.Default));
     const testContext = await makeTestContext(hooksWithPlugin);
 
-    const program = Effect.gen(function* () {
-      const service = yield* Admin.make({});
-      const sessionManager = yield* SessionService;
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* Admin.make({});
+          const sessionManager = yield* SessionService;
 
-      // Ban first (revokes existing sessions), then mint a fresh session to
-      // prove the plugin blocks validation even when a session exists.
-      yield* service.banUser(admin, "user-1");
-      const bannedSession = yield* sessionManager.createSession("user-1");
-      const blocked = yield* Effect.result(sessionManager.validateSession(bannedSession.id));
+          // Ban first (revokes existing sessions), then mint a fresh session to
+          // prove the plugin blocks validation even when a session exists.
+          yield* service.banUser(admin, "user-1");
+          const bannedSession = yield* sessionManager.createSession("user-1");
+          const blocked = yield* Effect.result(sessionManager.validateSession(bannedSession.id));
 
-      yield* service.unbanUser(admin, "user-1");
-      const allowed = yield* sessionManager.validateSession(bannedSession.id);
+          yield* service.unbanUser(admin, "user-1");
+          const allowed = yield* sessionManager.validateSession(bannedSession.id);
 
-      // A ban that has already lapsed does not block validation
-      yield* service.banUser(admin, "user-1", { expiresIn: -1000 });
-      const lapsedSession = yield* sessionManager.createSession("user-1");
-      const lapsed = yield* Effect.result(sessionManager.validateSession(lapsedSession.id));
+          // A ban that has already lapsed does not block validation
+          yield* service.banUser(admin, "user-1", { expiresIn: -1000 });
+          const lapsedSession = yield* sessionManager.createSession("user-1");
+          const lapsed = yield* Effect.result(sessionManager.validateSession(lapsedSession.id));
 
-      return { blocked, allowed, lapsed };
-    });
-
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+          return { blocked, allowed, lapsed };
+        }),
+        testContext,
+      ),
+    );
 
     expect(result.blocked._tag).toBe("Failure");
     assert(Result.isFailure(result.blocked));

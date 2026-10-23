@@ -77,13 +77,6 @@ describe("static service layers", () => {
       },
     };
 
-    const program = Effect.gen(function* () {
-      const manager = yield* Auth.SessionService;
-      const session = yield* manager.createSession(user.id);
-      const validated = yield* manager.validateSession(session.id);
-      return validated;
-    });
-
     const layer = Auth.SessionService.layer(config).pipe(
       Layer.provideMerge(
         Layer.mergeAll(
@@ -94,7 +87,14 @@ describe("static service layers", () => {
       ),
     );
 
-    const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const manager = yield* Auth.SessionService;
+        const session = yield* manager.createSession(user.id);
+        const validated = yield* manager.validateSession(session.id);
+        return validated;
+      }).pipe(Effect.provide(layer)),
+    );
 
     expect(result.user.id).toBe(user.id);
     expect(result.session.userId).toBe(user.id);
@@ -114,18 +114,18 @@ describe("static service layers", () => {
       delete: () => Effect.void,
     };
 
-    const program = Effect.gen(function* () {
-      const users = yield* Auth.UserService;
-      return yield* users.getUser(user.id);
-    });
-
     const layer = Auth.UserService.layer().pipe(
       Layer.provideMerge(
         Layer.mergeAll(Layer.succeed(Auth.UserServiceStore)(store), Auth.Hooks.Default),
       ),
     );
 
-    const viaStatic = await Effect.runPromise(program.pipe(Effect.provide(layer)));
+    const viaStatic = await Effect.runPromise(
+      Effect.gen(function* () {
+        const users = yield* Auth.UserService;
+        return yield* users.getUser(user.id);
+      }).pipe(Effect.provide(layer)),
+    );
     expect(viaStatic.id).toBe(user.id);
   });
 });

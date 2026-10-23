@@ -174,18 +174,21 @@ describe("PasswordResetService", () => {
     users.set(user.id, user);
     seedEmailIdentifier(user.id, "reset@example.com", false);
 
-    const program = Effect.gen(function* () {
-      const service = yield* PasswordReset.make({
-        sendResetPassword: (email, token) =>
-          Effect.sync(() => {
-            sentEmails.push({ email, token });
-          }),
-      });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({
+            sendResetPassword: (email, token) =>
+              Effect.sync(() => {
+                sentEmails.push({ email, token });
+              }),
+          });
 
-      yield* service.requestPasswordReset("reset@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+          yield* service.requestPasswordReset("reset@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("reset@example.com");
@@ -195,15 +198,18 @@ describe("PasswordResetService", () => {
   it("should not reveal whether an email exists", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* PasswordReset.make({
-        sendResetPassword: () => Effect.void,
-      });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({
+            sendResetPassword: () => Effect.void,
+          });
 
-      yield* service.requestPasswordReset("missing@example.com");
-    });
-
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+          yield* service.requestPasswordReset("missing@example.com");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentEmails.length).toBe(0);
     expect(resetTokens.size).toBe(0);
@@ -246,16 +252,18 @@ describe("PasswordResetService", () => {
     });
 
     // No revokeSessionsOnPasswordReset option — default should revoke sessions.
-    const program = Effect.gen(function* () {
-      const service = yield* PasswordReset.make({
-        sendResetPassword: () => Effect.void,
-      });
-
-      return yield* service.resetPassword("token-123", "new-password-123");
-    });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({
+            sendResetPassword: () => Effect.void,
+          });
+
+          return yield* service.resetPassword("token-123", "new-password-123");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     const updatedHash = passwordHashes.get(user.id);
@@ -302,17 +310,18 @@ describe("PasswordResetService", () => {
       attributes: {},
     });
 
-    const program = Effect.gen(function* () {
-      const service = yield* PasswordReset.make({
-        revokeSessionsOnPasswordReset: false,
-        sendResetPassword: () => Effect.void,
-      });
-
-      return yield* service.resetPassword("token-456", "new-password-123");
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({
+            revokeSessionsOnPasswordReset: false,
+            sendResetPassword: () => Effect.void,
+          });
+
+          return yield* service.resetPassword("token-456", "new-password-123");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     const updatedHash = passwordHashes.get(user.id);
@@ -327,16 +336,17 @@ describe("PasswordResetService", () => {
   it("should fail for invalid reset tokens", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* PasswordReset.make({
-        sendResetPassword: () => Effect.void,
-      });
-
-      return yield* Effect.result(service.resetPassword("missing-token", "new-password-123"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({
+            sendResetPassword: () => Effect.void,
+          });
+
+          return yield* Effect.result(service.resetPassword("missing-token", "new-password-123"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");

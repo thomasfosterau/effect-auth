@@ -111,18 +111,21 @@ describe("memoryStores", () => {
   });
 
   it("starts empty on every build", async () => {
-    const count = Effect.gen(function* () {
-      const store = yield* SessionStore;
-      yield* store.create({
-        id: "s",
-        userId: "u",
-        createdAt: new Date(),
-        lastActivityAt: new Date(),
-        expiresAt: new Date(),
-        attributes: {},
-      });
-      return (yield* store.listByUserId("u")).length;
-    });
+    const count = SessionStore.use((store) =>
+      store
+        .create({
+          id: "s",
+          userId: "u",
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+          expiresAt: new Date(),
+          attributes: {},
+        })
+        .pipe(
+          Effect.flatMap(() => store.listByUserId("u")),
+          Effect.map((sessions) => sessions.length),
+        ),
+    );
     expect(await Effect.runPromise(count.pipe(Effect.provide(Testing.memoryStores)))).toBe(1);
     expect(await Effect.runPromise(count.pipe(Effect.provide(Testing.memoryStores)))).toBe(1);
   });

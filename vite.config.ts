@@ -85,9 +85,6 @@ export default defineConfig({
       "effect/avoid-native-object-helpers": "warn",
       // Two unbounded scheduler loops in `HttpServer.ts` (2 / 206).
       "effect/imperative-loops": "warn",
-      // Exported Effect *values* built with `Effect.gen`, where `Effect.fn`
-      // would change the public type (12 / 183).
-      "effect/prefer-effect-fn": "warn",
     },
     overrides: [
       {

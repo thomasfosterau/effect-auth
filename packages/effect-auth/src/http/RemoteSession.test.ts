@@ -442,13 +442,12 @@ describe("RemoteSession.withSetCookie", () => {
 describe("RemoteSession.layerFetcher", () => {
   it("points the typed client at an arbitrary fetch-alike", async () => {
     const { calls, fetcher } = spy(() => okSession());
-    const program = Effect.gen(function* () {
-      const http = yield* HttpClient.HttpClient;
-      return yield* http.get("https://auth.internal/api/auth/session");
-    });
 
     const response = await Effect.runPromise(
-      program.pipe(Effect.provide(RemoteSession.layerFetcher(fetcher))),
+      Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        return yield* http.get("https://auth.internal/api/auth/session");
+      }).pipe(Effect.provide(RemoteSession.layerFetcher(fetcher))),
     );
 
     expect(response.status).toBe(200);

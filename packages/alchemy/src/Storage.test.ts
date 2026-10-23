@@ -24,14 +24,6 @@ const run = <A, E>(
   );
 };
 
-const listTables = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const rows = yield* sql<{
-    readonly name: string;
-  }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'auth_%' ORDER BY name`;
-  return rows.map((row) => row.name);
-});
-
 describe("D1-backed effect-auth storage", () => {
   it("applies the shared schema and converges on a re-run", async () => {
     const database = makeTestD1();
@@ -39,7 +31,15 @@ describe("D1-backed effect-auth storage", () => {
       migrate(database).pipe(
         // Every statement is `IF NOT EXISTS`: a second apply is a no-op.
         Effect.andThen(migrate(database)),
-        Effect.andThen(listTables.pipe(Effect.provide(D1Client.layer({ db: database })))),
+        Effect.andThen(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const rows = yield* sql<{
+              readonly name: string;
+            }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'auth_%' ORDER BY name`;
+            return rows.map((row) => row.name);
+          }).pipe(Effect.provide(D1Client.layer({ db: database }))),
+        ),
       ),
     );
     expect(tables).toEqual(Arr.sort(authTableNames, Order.String));

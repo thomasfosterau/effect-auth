@@ -46,11 +46,15 @@ describe("cost profiles reach the KDF", () => {
   });
 
   it("argon2HasherLayer() uses the default profile", async () => {
-    const program = Effect.gen(function* () {
-      const hasher = yield* Password.PasswordHasher;
-      return yield* hasher.hash("through-the-layer");
-    });
-    await Effect.runPromise(Effect.provide(program, Argon2.argon2HasherLayer()));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const hasher = yield* Password.PasswordHasher;
+          return yield* hasher.hash("through-the-layer");
+        }),
+        Argon2.argon2HasherLayer(),
+      ),
+    );
     expectCosts({ memoryCost: 19456, timeCost: 2, parallelism: 1 });
   });
 });
