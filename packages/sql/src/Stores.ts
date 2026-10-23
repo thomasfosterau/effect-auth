@@ -1082,8 +1082,9 @@ export interface PurgeExpiredResult {
  * whether an account exists write one for any address. Schedule this from the
  * host (a cron trigger on Workers, a timer on a long-lived server) so the
  * tables stay bounded. An expired row is already refused by the services, so a
- * purge changes no outcome; it only reclaims the space. Expiry is read from the
- * `Clock`.
+ * purge changes no outcome; it only reclaims the space: a row whose
+ * `expires_at` equals the current time is still accepted, so it stays. Expiry
+ * is read from the `Clock`.
  */
 export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> =
   SqlClient.SqlClient.use((sql) =>
@@ -1095,13 +1096,13 @@ export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, Sql
               "purgeExpired.magicLinks",
               sql<{
                 token: string;
-              }>`DELETE FROM auth_magic_links WHERE expires_at <= ${now} RETURNING token`,
+              }>`DELETE FROM auth_magic_links WHERE expires_at < ${now} RETURNING token`,
             ),
             emailOtps: allRows(
               "purgeExpired.emailOtps",
               sql<{
                 email: string;
-              }>`DELETE FROM auth_email_otps WHERE expires_at <= ${now} RETURNING email`,
+              }>`DELETE FROM auth_email_otps WHERE expires_at < ${now} RETURNING email`,
             ),
           },
           { concurrency: 1 },

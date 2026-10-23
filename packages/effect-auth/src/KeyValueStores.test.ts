@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, DateTime, Effect, Layer } from "effect";
+import { Array as Arr, Clock, DateTime, Effect, Layer, Order } from "effect";
+import { TestClock } from "effect/testing";
 import { KeyValueStore } from "effect/persistence";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -12,6 +13,9 @@ import {
   MagicLinkStoreKV,
   EmailOtpStoreKV,
   PendingMultiFactorStoreKV,
+  KeyValueStoreKeys,
+  layerMemoryKeyValueStore,
+  purgeExpiredKV,
 } from "./KeyValueStores.ts";
 import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.ts";
 import { ChallengeStore, type WebAuthnChallenge } from "./multifactor/WebAuthn.ts";
@@ -26,6 +30,7 @@ import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { EmailOtpStore, type EmailOtpRecord } from "./email/EmailOtp.ts";
 import { PendingMultiFactorStore, type PendingMultiFactor } from "./multifactor/MultiFactor.ts";
 import { Hooks } from "./Hooks.ts";
+import * as Errors from "./Errors.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
 const testLayer = () => layerKV.pipe(Layer.provide(KeyValueStore.layerMemory));
@@ -380,6 +385,159 @@ describe("KeyValueStores", () => {
         verified: true,
       });
       expect(outcome.reused._tag).toBe("EmailVerificationError");
+    });
+  });
+
+  describe("purgeExpiredKV", () => {
+    const now = 1_000_000;
+    const runPurge = <A, E>(
+      effect: Effect.Effect<
+        A,
+        E,
+        | MagicLinkStore
+        | EmailOtpStore
+        | OAuthStateStore
+        | KeyValueStore.KeyValueStore
+        | KeyValueStoreKeys
+        | TestClock.TestClock
+      >,
+    ): Promise<A> =>
+      Effect.runPromise(
+        effect.pipe(
+          Effect.provide(
+            Layer.provideMerge(
+              Layer.mergeAll(MagicLinkStoreKV, EmailOtpStoreKV, OAuthStateStoreKV),
+              layerMemoryKeyValueStore,
+            ),
+          ),
+          Effect.provide(TestClock.layer()),
+        ),
+      );
+    const link = (token: string, email: string, expiresAt: number): MagicLinkToken => ({
+      token,
+      email,
+      createdAt: 0,
+      expiresAt,
+    });
+    const otp = (
+      email: string,
+      purpose: EmailOtpRecord["purpose"],
+      expiresAt: number,
+    ): EmailOtpRecord => ({
+      email,
+      otpHash: "hash",
+      purpose,
+      attempts: 0,
+      createdAt: 0,
+      expiresAt,
+    });
+
+    it("deletes expired magic links and OTPs and keeps live ones", async () => {
+      const result = await runPurge(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const links = yield* MagicLinkStore;
+          const otps = yield* EmailOtpStore;
+          yield* links.create(link("old", "a@example.com", now - 1));
+          yield* links.create(link("new", "a@example.com", now + 60_000));
+          yield* links.create(link("gone", "b@example.com", now - 60_000));
+          yield* otps.upsert(otp("a@example.com", "sign-in", now - 1));
+          yield* otps.upsert(otp("a@example.com", "forget-password", now + 60_000));
+          yield* otps.upsert(otp("c@example.com", "email-verification", now - 60_000));
+          const purged = yield* purgeExpiredKV;
+          return {
+            purged,
+            old: yield* links.get("old"),
+            fresh: yield* links.get("new"),
+            gone: yield* links.get("gone"),
+            byEmailA: yield* links.getByEmail("a@example.com"),
+            byEmailB: yield* links.getByEmail("b@example.com"),
+            signIn: yield* otps.get("a@example.com", "sign-in"),
+            reset: yield* otps.get("a@example.com", "forget-password"),
+            verify: yield* otps.get("c@example.com", "email-verification"),
+            remaining: yield* (yield* KeyValueStoreKeys).list(""),
+          };
+        }),
+      );
+      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 2 });
+      expect(result.old).toBeNull();
+      expect(result.gone).toBeNull();
+      expect(result.fresh?.token).toBe("new");
+      // The purged token left its address's index; the empty index went.
+      expect(result.byEmailA?.token).toBe("new");
+      expect(result.byEmailB).toBeNull();
+      expect(result.signIn).toBeNull();
+      expect(result.verify).toBeNull();
+      expect(result.reset?.expiresAt).toBe(now + 60_000);
+      expect(Arr.sort(result.remaining, Order.String)).toEqual([
+        "email-otp:forget-password:a@example.com",
+        "magic-link:email:a@example.com",
+        "magic-link:token:new",
+      ]);
+    });
+
+    it("keeps a record that expires exactly now, which the services still accept", async () => {
+      const result = await runPurge(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          yield* (yield* MagicLinkStore).create(link("edge", "a@example.com", now));
+          yield* (yield* EmailOtpStore).upsert(otp("a@example.com", "sign-in", now));
+          return yield* purgeExpiredKV;
+        }),
+      );
+      expect(result).toEqual({ magicLinks: 0, emailOtps: 0 });
+    });
+
+    it("leaves the other stores' records alone, expired or not", async () => {
+      const result = await runPurge(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const states = yield* OAuthStateStore;
+          yield* states.create({
+            state: "s1",
+            provider: "google",
+            codeVerifier: "v",
+            createdAt: 0,
+            expiresAt: now - 1,
+          });
+          const purged = yield* purgeExpiredKV;
+          return { purged, state: yield* states.get("s1") };
+        }),
+      );
+      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(result.state?.state).toBe("s1");
+    });
+
+    it("skips a listed key that is gone by the time it is read", async () => {
+      const purged = await Effect.runPromise(
+        purgeExpiredKV.pipe(
+          Effect.provide(
+            Layer.merge(
+              KeyValueStore.layerMemory,
+              Layer.succeed(KeyValueStoreKeys, {
+                list: (prefix) => Effect.succeed([`${prefix}missing`]),
+              }),
+            ),
+          ),
+        ),
+      );
+      expect(purged).toEqual({ magicLinks: 0, emailOtps: 0 });
+    });
+
+    it("surfaces a listing failure as the AuthError it is", async () => {
+      const failure = await Effect.runPromise(
+        Effect.flip(purgeExpiredKV).pipe(
+          Effect.provide(
+            Layer.merge(
+              KeyValueStore.layerMemory,
+              Layer.succeed(KeyValueStoreKeys, {
+                list: () => Effect.fail(new Errors.AuthError({ message: "list failed" })),
+              }),
+            ),
+          ),
+        ),
+      );
+      expect(failure.message).toBe("list failed");
     });
   });
 });

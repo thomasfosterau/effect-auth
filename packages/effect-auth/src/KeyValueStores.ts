@@ -43,9 +43,11 @@
 import {
   Array as Arr,
   Clock,
+  Context,
   DateTime,
   Effect,
   Layer,
+  MutableHashMap,
   Option,
   Order,
   Predicate,
@@ -540,6 +542,216 @@ export const emailOtpStoreKV: Effect.Effect<
  */
 export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(EmailOtpStore, emailOtpStoreKV);
+
+// ---------------------------------------------------------------------------
+// purgeExpiredKV
+// ---------------------------------------------------------------------------
+
+/**
+ * The key-listing seam {@link purgeExpiredKV} needs beside the
+ * `KeyValueStore`, which has no way to enumerate its keys.
+ *
+ * `list(prefix)` returns every key that starts with `prefix`, exactly as the
+ * `KeyValueStore` sees it: when the store is a `KeyValueStore.prefix` view,
+ * strip that prefix from the backend's keys. The host implements it over its
+ * backend's own listing (Workers KV `list({ prefix })` followed through every
+ * `cursor`, Redis `SCAN … MATCH prefix*`), or uses
+ * {@link layerMemoryKeyValueStore} for an in-memory store. A key listed but
+ * gone by the time it is read is skipped, so a listing need not be a
+ * snapshot.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * // A host's binding, here a fixed key list standing in for a backend.
+ * const keys = ["email-otp:sign-in:a@example.com", "oauth-state:s1"]
+ * const KeysLive = Layer.succeed(Auth.KeyValueStoreKeys, {
+ *   list: (prefix) => Effect.succeed(keys.filter((key) => key.startsWith(prefix))),
+ * })
+ *
+ * const program = Effect.gen(function* () {
+ *   const listing = yield* Auth.KeyValueStoreKeys
+ *   return yield* listing.list("email-otp:")
+ * })
+ * assert.deepEqual(await Effect.runPromise(program.pipe(Effect.provide(KeysLive))), [
+ *   "email-otp:sign-in:a@example.com",
+ * ])
+ * ```
+ */
+export class KeyValueStoreKeys extends Context.Service<
+  KeyValueStoreKeys,
+  {
+    /** Every key starting with `prefix`, as the `KeyValueStore` names it. */
+    readonly list: (prefix: string) => Effect.Effect<ReadonlyArray<string>, Errors.AuthError>;
+  }
+>()("@effect-auth/KeyValueStoreKeys") {}
+
+/**
+ * An in-memory `KeyValueStore` together with the {@link KeyValueStoreKeys}
+ * listing over the same map, for tests, examples and single-process demos.
+ * Each build of the layer starts empty. `KeyValueStore.layerMemory` keeps its
+ * map private, so it cannot back {@link purgeExpiredKV}; use this instead.
+ */
+export const layerMemoryKeyValueStore: Layer.Layer<
+  KeyValueStore.KeyValueStore | KeyValueStoreKeys
+> = Layer.unwrap(
+  Effect.sync(() => {
+    const entries = MutableHashMap.empty<string, string>();
+    return Layer.merge(
+      Layer.succeed(
+        KeyValueStore.KeyValueStore,
+        KeyValueStore.makeStringOnly({
+          get: (key) => Effect.sync(() => Option.getOrUndefined(MutableHashMap.get(entries, key))),
+          set: (key, value) => Effect.sync(() => void MutableHashMap.set(entries, key, value)),
+          remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
+          clear: Effect.sync(() => void MutableHashMap.clear(entries)),
+          size: Effect.sync(() => MutableHashMap.size(entries)),
+        }),
+      ),
+      Layer.succeed(KeyValueStoreKeys, {
+        list: (prefix) =>
+          Effect.sync(() =>
+            Arr.filter(Arr.fromIterable(MutableHashMap.keys(entries)), (key) =>
+              key.startsWith(prefix),
+            ),
+          ),
+      }),
+    );
+  }),
+);
+
+/**
+ * How many expired records one {@link purgeExpiredKV} run deleted, per store.
+ */
+export interface PurgeExpiredKVResult {
+  /** Magic-link tokens deleted (`MagicLinkStoreKV`). */
+  readonly magicLinks: number;
+  /** Email OTP records deleted (`EmailOtpStoreKV`). */
+  readonly emailOtps: number;
+}
+
+const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: {
+  readonly kv: ReturnType<typeof jsonKv>;
+  readonly keys: typeof KeyValueStoreKeys.Service;
+  readonly prefix: string;
+  readonly now: number;
+  readonly label: string;
+  readonly onRemoved: (record: A, key: string) => Effect.Effect<void, Errors.AuthError>;
+}): Effect.Effect<number, Errors.AuthError> =>
+  options.keys.list(options.prefix).pipe(
+    Effect.flatMap((keys) =>
+      Effect.reduce(
+        keys,
+        () => 0,
+        (removed, key) =>
+          Effect.gen(function* () {
+            const record = yield* options.kv.read<A>(key, options.label);
+            // The services refuse a record once `now > expiresAt`, so a record
+            // with `expiresAt === now` is still live and stays.
+            if (record == null || record.expiresAt >= options.now) return removed;
+            yield* options.kv.remove(key, options.label);
+            yield* options.onRemoved(record, key);
+            return removed + 1;
+          }),
+      ),
+    ),
+  );
+
+/**
+ * Delete the magic-link tokens and email OTP records whose `expiresAt` has
+ * passed from the `KeyValueStore`-backed stores (`MagicLinkStoreKV`,
+ * `EmailOtpStoreKV`, and so `layerKV` and the testing package's
+ * `memoryStores`); requires the `KeyValueStore` and a
+ * {@link KeyValueStoreKeys} listing over it.
+ *
+ * No store deletes these records on its own: a code or link nobody redeems
+ * stays until a later send for the same address replaces it, and the sends
+ * that hide whether an account exists write one for any address. Schedule this
+ * from the host (a cron trigger on Workers, a timer on a long-lived server) so
+ * the store stays bounded. The services already refuse an expired record, so a
+ * purge changes no outcome; it only reclaims the space. Expiry is read from the
+ * `Clock`. A deleted magic link also leaves its address's index.
+ *
+ * Like the stores' other multi-step writes, this is read-then-delete, not
+ * atomic (see the module docs): an OTP re-sent for the same address and
+ * purpose between the read and the delete is deleted too, so that code is
+ * refused and the user asks for another. That fails closed.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import { TestClock } from "effect/testing"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * const StoresLive = Layer.provideMerge(
+ *   Layer.merge(Auth.MagicLinkStoreKV, Auth.EmailOtpStoreKV),
+ *   Auth.layerMemoryKeyValueStore,
+ * )
+ *
+ * const program = Effect.gen(function* () {
+ *   yield* TestClock.setTime(10_000)
+ *   const otps = yield* Auth.EmailOtpStore
+ *   const record = {
+ *     email: "a@example.com",
+ *     otpHash: "hash",
+ *     attempts: 0,
+ *     createdAt: 0,
+ *   }
+ *   yield* otps.upsert({ ...record, purpose: "sign-in", expiresAt: 5_000 })
+ *   yield* otps.upsert({ ...record, purpose: "forget-password", expiresAt: 60_000 })
+ *
+ *   const purged = yield* Auth.purgeExpiredKV
+ *   assert.deepEqual(purged, { magicLinks: 0, emailOtps: 1 })
+ *   assert.equal(yield* otps.get("a@example.com", "sign-in"), null)
+ *   assert.notEqual(yield* otps.get("a@example.com", "forget-password"), null)
+ * })
+ *
+ * await Effect.runPromise(
+ *   program.pipe(Effect.provide(StoresLive), Effect.provide(TestClock.layer())),
+ * )
+ * ```
+ */
+export const purgeExpiredKV: Effect.Effect<
+  PurgeExpiredKVResult,
+  Errors.AuthError,
+  KeyValueStore.KeyValueStore | KeyValueStoreKeys
+> = KeyValueStore.KeyValueStore.use((store) =>
+  KeyValueStoreKeys.use((keys) =>
+    Effect.flatMap(Clock.currentTimeMillis, (now) => {
+      const kv = jsonKv(store);
+      return Effect.all(
+        {
+          magicLinks: purgeExpiredRecords<MagicLinkToken>({
+            kv,
+            keys,
+            prefix: magicLinkTokenKey(""),
+            now,
+            label: "purgeExpired.magicLinks",
+            onRemoved: (token) =>
+              kv.indexRemove(
+                magicLinkEmailKey(token.email),
+                token.token,
+                "purgeExpired.magicLinks",
+              ),
+          }),
+          emailOtps: purgeExpiredRecords<EmailOtpRecord>({
+            kv,
+            keys,
+            prefix: "email-otp:",
+            now,
+            label: "purgeExpired.emailOtps",
+            onRemoved: () => Effect.void,
+          }),
+        },
+        { concurrency: 1 },
+      );
+    }),
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // PendingMultiFactorStore

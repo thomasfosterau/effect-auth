@@ -11,8 +11,9 @@
  * `OAuthAccountStore.hasPassword` share one {@link MemoryUserTable}, so a user
  * created through one is read through the others. {@link layer} provides every
  * store at once over fresh state, along with the core's `KeyValueStore`-backed
- * ephemeral stores (`layerKV`) over an in-memory `KeyValueStore`, and
- * `memoryIdentifierStore`.
+ * ephemeral stores (`layerKV`) over an in-memory `KeyValueStore` (provided
+ * with its `KeyValueStoreKeys` listing, so `purgeExpiredKV` runs against it),
+ * and `memoryIdentifierStore`.
  *
  * Every operation is synchronous, so the read-then-write steps are atomic
  * within one process. These are references for tests, examples and
@@ -21,10 +22,10 @@
  * @module testing
  */
 import { DateTime, Effect, Layer } from "effect";
-import { KeyValueStore } from "effect/persistence";
+import type { KeyValueStore } from "effect/persistence";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
-import { layerKV } from "../KeyValueStores.ts";
+import { type KeyValueStoreKeys, layerKV, layerMemoryKeyValueStore } from "../KeyValueStores.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
 import { MultiFactorStore, type MultiFactorRecord } from "../multifactor/MultiFactor.ts";
@@ -383,7 +384,9 @@ export type MemoryStores =
   | OidcCodeStore
   | OidcTokenStore
   | OidcConsentStore
-  | Layer.Success<typeof layerKV>;
+  | Layer.Success<typeof layerKV>
+  | KeyValueStore.KeyValueStore
+  | KeyValueStoreKeys;
 
 /**
  * Every in-memory store over fresh, shared state: the user-writing stores
@@ -391,7 +394,9 @@ export type MemoryStores =
  * `memoryIdentifierStore`, and the ephemeral token stores (`layerKV`: OAuth
  * state, WebAuthn challenges, rate limits, verification, reset and magic-link
  * tokens, email OTPs, pending multi-factor challenges) run over an in-memory
- * `KeyValueStore`. Each build of the layer starts empty.
+ * `KeyValueStore`, which the layer also provides with its `KeyValueStoreKeys`
+ * listing, so `purgeExpiredKV` runs against it. Each build of the layer starts
+ * empty.
  *
  * @example
  * ```ts
@@ -431,7 +436,7 @@ export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(
       Layer.succeed(OidcCodeStore, memoryOidcCodeStore()),
       Layer.succeed(OidcTokenStore, memoryOidcTokenStore()),
       Layer.succeed(OidcConsentStore, memoryOidcConsentStore()),
-      layerKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+      Layer.provideMerge(layerKV, layerMemoryKeyValueStore),
     );
   }),
 );

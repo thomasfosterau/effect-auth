@@ -272,7 +272,7 @@ await Effect.runPromise(
 
 The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
 
-`memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
+`memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`, which it also provides with its `KeyValueStoreKeys` listing so `purgeExpiredKV` runs against it. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
 
 ## Passwords
 
@@ -724,6 +724,48 @@ export const HooksLive = plugins.pipe(
 ```
 
 The captcha token is read from the optional `captchaToken` field on the sign-up and sign-in inputs (and the `SignUpPayload` / `SignInPayload` HTTP schemas). Have I Been Pwned fails open on API errors by default (`failClosed: false`).
+
+## Expired codes and links
+
+No store deletes an email OTP or a magic link that nobody redeems: it stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address. The services refuse an expired record, so this is about space, not access, but a caller can grow the store by one record per address it tries. Purge on a schedule the host owns (a cron trigger on Workers, a timer or job on a long-lived server):
+
+- `@thomasfosterau/effect-auth-sql`'s `purgeExpired` (and effect-auth-alchemy's `purgeExpired(db)` on D1) deletes the expired rows in one statement per table.
+- `purgeExpiredKV` does the same for `MagicLinkStoreKV` and `EmailOtpStoreKV` (so `layerKV` and `Testing.memoryStores`). A `KeyValueStore` cannot list its keys, so the purge also requires `KeyValueStoreKeys`, whose `list(prefix)` you implement over your backend; `layerMemoryKeyValueStore` provides both over one in-memory map.
+
+```ts
+import { Effect, Layer } from "effect";
+import * as Auth from "@thomasfosterau/effect-auth";
+
+// Workers KV: follow `list` through every cursor. `KV` is the namespace binding.
+export const workersKvKeys = (KV: {
+  list: (options: { prefix: string; cursor?: string }) => Promise<{
+    keys: ReadonlyArray<{ name: string }>;
+    list_complete: boolean;
+    cursor?: string;
+  }>;
+}) =>
+  Layer.succeed(Auth.KeyValueStoreKeys, {
+    list: (prefix) =>
+      Effect.tryPromise({
+        try: async () => {
+          const names: Array<string> = [];
+          let cursor: string | undefined;
+          do {
+            const page = await KV.list(cursor === undefined ? { prefix } : { prefix, cursor });
+            names.push(...page.keys.map((key) => key.name));
+            cursor = page.list_complete ? undefined : page.cursor;
+          } while (cursor !== undefined);
+          return names;
+        },
+        catch: () => new Auth.AuthError({ message: "KV list failed" }),
+      }),
+  });
+
+// In the scheduled handler, with the same KeyValueStore the stores use:
+// yield* Auth.purgeExpiredKV  // { magicLinks, emailOtps }
+```
+
+The listing must name keys as the `KeyValueStore` sees them: behind a `KeyValueStore.prefix` view, strip that prefix. The KV purge is read-then-delete like the stores' other multi-step writes, so an OTP re-sent for the same address and purpose mid-purge can be deleted with the expired one; that code is then refused and the user asks for another.
 
 ## Configuration
 

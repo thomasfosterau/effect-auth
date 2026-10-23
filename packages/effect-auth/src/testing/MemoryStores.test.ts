@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import { Array as Arr, DateTime, Effect, Layer, Redacted } from "effect";
+import { TestClock } from "effect/testing";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";
 import { IdentifierStore, memoryIdentifierStore } from "../Identifier.ts";
@@ -15,6 +16,9 @@ import { SessionStore } from "../SessionStore.ts";
 import { TrustedDeviceService } from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
+import { EmailOtpStore } from "../email/EmailOtp.ts";
+import { purgeExpiredKV } from "../KeyValueStores.ts";
+import { MagicLinkStore } from "../MagicLink.ts";
 import * as Testing from "./index.ts";
 
 const register = <E, R>(
@@ -183,5 +187,33 @@ describe("memoryStores", () => {
     expect(result.empty).toBeNull();
     expect(result.active?.id).toBe("new");
     expect(result.listed.map((pair) => pair.id)).toEqual(["old", "new"]);
+  });
+
+  it("purgeExpiredKV runs against its token stores", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(10_000);
+        const links = yield* MagicLinkStore;
+        const otps = yield* EmailOtpStore;
+        yield* links.create({ token: "old", email: "a@example.com", createdAt: 0, expiresAt: 1 });
+        yield* otps.upsert({
+          email: "a@example.com",
+          otpHash: "hash",
+          purpose: "sign-in",
+          attempts: 0,
+          createdAt: 0,
+          expiresAt: 20_000,
+        });
+        const purged = yield* purgeExpiredKV;
+        return {
+          purged,
+          link: yield* links.get("old"),
+          otp: yield* otps.get("a@example.com", "sign-in"),
+        };
+      }).pipe(Effect.provide(Testing.memoryStores), Effect.provide(TestClock.layer())),
+    );
+    expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 0 });
+    expect(result.link).toBeNull();
+    expect(result.otp?.expiresAt).toBe(20_000);
   });
 });

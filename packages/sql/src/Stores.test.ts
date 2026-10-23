@@ -13,6 +13,7 @@ import {
 } from "effect";
 import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
+import { TestClock } from "effect/testing";
 import Database from "better-sqlite3";
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
@@ -833,6 +834,30 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.live?.token).toBe("live");
       expect(result.staleOtp).toBeNull();
       expect(result.liveOtp?.email).toBe("live@example.com");
+    });
+
+    it("purgeExpired keeps a row that expires exactly now, which the services still accept", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(1_000_000);
+          yield* (yield* Auth.MagicLinkStore).create({
+            token: "edge",
+            email: "edge@example.com",
+            createdAt: 0,
+            expiresAt: 1_000_000,
+          });
+          yield* (yield* Auth.Email.EmailOtpStore).upsert({
+            email: "edge@example.com",
+            otpHash: "hash",
+            purpose: "sign-in",
+            attempts: 0,
+            createdAt: 0,
+            expiresAt: 1_000_000,
+          });
+          return yield* Sql.purgeExpired;
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result).toEqual({ magicLinks: 0, emailOtps: 0 });
     });
 
     it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {
