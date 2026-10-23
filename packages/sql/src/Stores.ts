@@ -37,8 +37,9 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // Codecs
 // ---------------------------------------------------------------------------
 
-const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
-const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, "base64"));
+const toBase64 = Schema.encodeSync(Schema.Uint8ArrayFromBase64);
+/** Decodes a column this module wrote with {@link toBase64}; throws on a corrupt value. */
+const fromBase64 = Schema.decodeSync(Schema.Uint8ArrayFromBase64);
 
 const AttributesJson = Schema.fromJsonString(Auth.Attributes);
 const StringListJson = Schema.fromJsonString(Schema.Array(Schema.String));

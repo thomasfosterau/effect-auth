@@ -20,6 +20,7 @@ import {
   Redacted,
   Schema,
 } from "effect";
+import { Base64, Base64Url, Hex } from "effect/encoding";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
@@ -345,7 +346,7 @@ export const generateState = (): Effect.Effect<string, never, Crypto.Crypto> =>
     const crypto = yield* Crypto.Crypto;
     return yield* crypto.randomBytes(32).pipe(
       Effect.orDie,
-      Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+      Effect.map((bytes) => Base64Url.encode(bytes)),
     );
   });
 
@@ -360,11 +361,11 @@ export const generatePKCE = (): Effect.Effect<
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const codeVerifierBytes = yield* crypto.randomBytes(32).pipe(Effect.orDie);
-    const codeVerifier = Buffer.from(codeVerifierBytes).toString("base64url");
+    const codeVerifier = Base64Url.encode(codeVerifierBytes);
     const codeChallengeBytes = yield* crypto
       .digest("SHA-256", new TextEncoder().encode(codeVerifier))
       .pipe(Effect.orDie);
-    const codeChallenge = Buffer.from(codeChallengeBytes).toString("base64url");
+    const codeChallenge = Base64Url.encode(codeChallengeBytes);
     return { codeVerifier, codeChallenge };
   });
 
@@ -377,15 +378,21 @@ export const generateNonce = (): Effect.Effect<string, never, Crypto.Crypto> =>
     const crypto = yield* Crypto.Crypto;
     return yield* crypto.randomBytes(16).pipe(
       Effect.orDie,
-      Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+      Effect.map((bytes) => Base64Url.encode(bytes)),
     );
   });
 
 /** Decodes a JWT segment's JSON object; throws on invalid JSON or a non-object. */
 const decodeJwtSegmentJson = Schema.decodeSync(Schema.fromJsonString(Schema.JsonObject));
 
+/** Decodes base64url text to its UTF-8 string; throws on invalid input. */
+const decodeBase64UrlText = Schema.decodeSync(Schema.StringFromBase64Url);
+
+/** Decodes base64url text to its bytes; throws on invalid input. */
+const decodeBase64UrlBytes = Schema.decodeSync(Schema.Uint8ArrayFromBase64Url);
+
 const decodeJwtSegment = (segment: string): Schema.JsonObject =>
-  decodeJwtSegmentJson(Buffer.from(segment, "base64url").toString("utf8"));
+  decodeJwtSegmentJson(decodeBase64UrlText(segment));
 
 /** Serializes a JSON value, as `JSON.stringify` does. */
 const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
@@ -567,8 +574,8 @@ const verifyIdTokenClaims = (
 
     const verified = yield* Effect.try({
       try: () => {
-        const signingInput = Buffer.from(`${headerSeg}.${payloadSeg}`);
-        const signature = Buffer.from(signatureSeg, "base64url");
+        const signingInput = new TextEncoder().encode(`${headerSeg}.${payloadSeg}`);
+        const signature = decodeBase64UrlBytes(signatureSeg);
         return Cipher.verifyJws(alg, signingInput, signature, jwk);
       },
       catch: (cause) =>
@@ -801,9 +808,9 @@ export const provider = (
               "Content-Type": "application/x-www-form-urlencoded",
               Accept: "application/json",
               ...(useBasic && {
-                Authorization: `Basic ${Buffer.from(
+                Authorization: `Basic ${Base64.encode(
                   `${config.clientId}:${Redacted.value(config.clientSecret)}`,
-                ).toString("base64")}`,
+                )}`,
               }),
             },
             body: params.toString(),
@@ -1044,7 +1051,7 @@ export const make = (
 
     const randomAccountId = (): Effect.Effect<string, AuthError> =>
       crypto.randomBytes(16).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.map((bytes) => Hex.encode(bytes)),
         Effect.mapError(
           (cause) => new AuthError({ message: "Failed to generate account id", cause }),
         ),
@@ -1574,9 +1581,9 @@ export const make = (
                   headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
                     ...(rUseBasic && {
-                      Authorization: `Basic ${Buffer.from(
+                      Authorization: `Basic ${Base64.encode(
                         `${rConfig.clientId}:${Redacted.value(rConfig.clientSecret)}`,
-                      ).toString("base64")}`,
+                      )}`,
                     }),
                   },
                   body: params.toString(),
@@ -1826,12 +1833,15 @@ export const appleClientSecret = (params: {
           aud: "https://appleid.apple.com",
           sub: params.clientId,
         };
-        const encode = (obj: Schema.Json): string =>
-          Buffer.from(encodeJsonString(obj), "utf8").toString("base64url");
+        const encode = (obj: Schema.Json): string => Base64Url.encode(encodeJsonString(obj));
         const signingInput = `${encode(header)}.${encode(payload)}`;
-        const signature = Buffer.from(
-          Cipher.signJws("ES256", Buffer.from(signingInput), Redacted.value(params.privateKey)),
-        ).toString("base64url");
+        const signature = Base64Url.encode(
+          Cipher.signJws(
+            "ES256",
+            new TextEncoder().encode(signingInput),
+            Redacted.value(params.privateKey),
+          ),
+        );
         return `${signingInput}.${signature}`;
       },
       catch: (cause) =>
