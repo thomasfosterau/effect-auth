@@ -164,7 +164,11 @@ const sameSiteOf = (value: string): CookieOptions["sameSite"] | undefined => {
  */
 export const parseSetCookie = (
   header: string,
-): Option.Option<{ readonly name: string; readonly value: string; readonly options: CookieOptions }> => {
+): Option.Option<{
+  readonly name: string;
+  readonly value: string;
+  readonly options: CookieOptions;
+}> => {
   const [pair = "", ...attributes] = header.split(";");
   const separator = pair.indexOf("=");
   if (separator <= 0) return Option.none();
@@ -294,4 +298,3 @@ export const credentialAction =
     };
     return kit.fail(failureStatus[kind], failure);
   };
-

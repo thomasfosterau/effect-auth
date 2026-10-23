@@ -177,6 +177,12 @@ export default defineConfig({
         files: ["packages/effect-auth/src/http/HttpServer.ts"],
         rules: { "effect/effect-run-in-body": "off" },
       },
+      {
+        // SvelteKit's `handle` is a Promise-facing entrypoint: it runs the
+        // session resolution effect.
+        files: ["packages/sveltekit/src/Handle.ts"],
+        rules: { "effect/effect-run-in-body": "off" },
+      },
     ],
     // Type checking is owned by each package's `check` task (tsc / vue-tsc /
     // svelte-check), which understands the per-package NodeNext tsconfigs.

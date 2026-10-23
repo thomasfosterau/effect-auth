@@ -73,11 +73,11 @@ export const actions = {
 
 On success the action relays every `Set-Cookie` onto `event.cookies` and redirects (303) to `?redirect=` when that is a same-origin path, or to `fallback` otherwise. On failure it returns `fail(status, { kind, message, retryAfterSeconds, fields })`:
 
-| Handler answered | `kind` | `fail` status |
-| --- | --- | --- |
-| `400`, `401` | `invalid` | 400 |
-| `429` | `rate-limited` (with `retryAfterSeconds` from `Retry-After`) | 429 |
-| anything else, or the call threw | `unavailable` | 503 |
+| Handler answered                 | `kind`                                                       | `fail` status |
+| -------------------------------- | ------------------------------------------------------------ | ------------- |
+| `400`, `401`                     | `invalid`                                                    | 400           |
+| `429`                            | `rate-limited` (with `retryAfterSeconds` from `Retry-After`) | 429           |
+| anything else, or the call threw | `unavailable`                                                | 503           |
 
 The action forwards the browser's `Origin`, `User-Agent`, `X-Forwarded-For` and `CF-Connecting-IP`, so the handler's CSRF check and rate limits see the real client. The browser's origin must be in the auth handler's `trustedOrigins`.
 

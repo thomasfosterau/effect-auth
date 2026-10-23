@@ -24,11 +24,14 @@ const signedIn: SessionWithUser = {
   user: { id: "u-1", createdAt: now, updatedAt: now, attributes: {} },
 };
 
-const event = (cookies: Record<string, string> = {}) => ({
-  request: new Request("https://app.example/page"),
-  cookies: { get: (name: string) => cookies[name] },
-  locals: {} as { auth?: LocalsAuth },
-});
+const event = (cookies: Record<string, string> = {}) => {
+  const locals: { auth?: LocalsAuth } = {};
+  return {
+    request: new Request("https://app.example/page"),
+    cookies: { get: (name: string) => cookies[name] },
+    locals,
+  };
+};
 
 const sessionCookie = { "__Host-conduit_session": "token" };
 
@@ -54,7 +57,10 @@ describe("handle", () => {
   });
 
   it("resolves before rendering and forces private caching for a signed-in viewer", async () => {
-    const hook = handle({ lookup: () => Effect.succeed(Option.some(signedIn)), failure: { mode: "closed" } });
+    const hook = handle({
+      lookup: () => Effect.succeed(Option.some(signedIn)),
+      failure: { mode: "closed" },
+    });
     const input = event(sessionCookie);
     let seenByRender: LocalsAuth | undefined;
     const response = await hook({
@@ -71,7 +77,10 @@ describe("handle", () => {
   });
 
   it("forces private caching even when the rendered response's headers are immutable", async () => {
-    const hook = handle({ lookup: () => Effect.succeed(Option.some(signedIn)), failure: { mode: "closed" } });
+    const hook = handle({
+      lookup: () => Effect.succeed(Option.some(signedIn)),
+      failure: { mode: "closed" },
+    });
     const immutable = Response.redirect("https://app.example/elsewhere", 302);
     const response = await hook({ event: event(sessionCookie), resolve: () => immutable });
     expect(response.headers.get("cache-control")).toBe(PRIVATE_CACHE_CONTROL);
@@ -91,8 +100,13 @@ describe("handle", () => {
   });
 
   it("fails closed by rejecting", async () => {
-    const hook = handle({ lookup: () => Effect.fail("binding unreachable"), failure: { mode: "closed" } });
-    await expect(hook({ event: event(sessionCookie), resolve: () => new Response("page") })).rejects.toThrow();
+    const hook = handle({
+      lookup: () => Effect.fail("binding unreachable"),
+      failure: { mode: "closed" },
+    });
+    await expect(
+      hook({ event: event(sessionCookie), resolve: () => new Response("page") }),
+    ).rejects.toThrow();
   });
 });
 
@@ -136,7 +150,9 @@ const kit = {
   fail: (status: number, data: unknown) => ({ status, data }),
 };
 
-const submit = (url: string): { event: ActionEvent; cookies: Array<[string, string, CookieOptions]> } => {
+const submit = (
+  url: string,
+): { event: ActionEvent; cookies: Array<[string, string, CookieOptions]> } => {
   const form = new FormData();
   form.set("email", "ada@example.com");
   form.set("password", "hunter2");
@@ -178,9 +194,14 @@ describe("credentialAction", () => {
     const seen: Array<Request> = [];
     const { event: input, cookies } = submit("https://app.example/login?redirect=/dashboard");
     const headers = new Headers();
-    headers.append("set-cookie", "__Host-conduit_session=tok; Path=/; HttpOnly; Secure; SameSite=Lax");
+    headers.append(
+      "set-cookie",
+      "__Host-conduit_session=tok; Path=/; HttpOnly; Secure; SameSite=Lax",
+    );
     headers.append("set-cookie", "__Host-conduit_session_data=cache; Path=/; HttpOnly; Secure");
-    const redirect = await thrown(signInWith(async () => new Response("{}", { headers }), seen)(input));
+    const redirect = await thrown(
+      signInWith(async () => new Response("{}", { headers }), seen)(input),
+    );
     expect(redirect).toMatchObject({ status: 303, location: "/dashboard" });
     expect(cookies.map(([name]) => name)).toEqual([
       "__Host-conduit_session",
@@ -218,7 +239,10 @@ describe("credentialAction", () => {
     const result = await signInWith(
       async () => new Response(null, { status: 429, headers: { "retry-after": "42" } }),
     )(input);
-    expect(result).toMatchObject({ status: 429, data: { kind: "rate-limited", retryAfterSeconds: 42 } });
+    expect(result).toMatchObject({
+      status: 429,
+      data: { kind: "rate-limited", retryAfterSeconds: 42 },
+    });
   });
 
   it("reports a failing service as unavailable", async () => {
@@ -228,7 +252,9 @@ describe("credentialAction", () => {
       data: { kind: "unavailable" },
     });
     const { event: again } = submit("https://app.example/login");
-    expect(await signInWith(() => Promise.reject(new TypeError("fetch failed")))(again)).toMatchObject({
+    expect(
+      await signInWith(() => Promise.reject(new TypeError("fetch failed")))(again),
+    ).toMatchObject({
       status: 503,
       data: { kind: "unavailable" },
     });

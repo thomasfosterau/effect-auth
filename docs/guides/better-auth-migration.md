@@ -285,14 +285,14 @@ Better Auth's most common customisation is a `role` `additionalField` on the use
 
 ### The `apiKey` plugin
 
-| Better Auth `apiKey` | effect-auth |
-| --- | --- |
-| `x-api-key` header | Read by default (`CredentialConfig.apiKeyHeaders`, default `["x-api-key"]`). A request carrying one resolves as a `machine` credential (`Authorizer.CredentialClass`). |
+| Better Auth `apiKey`                         | effect-auth                                                                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `x-api-key` header                           | Read by default (`CredentialConfig.apiKeyHeaders`, default `["x-api-key"]`). A request carrying one resolves as a `machine` credential (`Authorizer.CredentialClass`).                                 |
 | Session from key (`enableSessionForAPIKeys`) | No synthetic session. The key resolves the principal directly. Policies that should not admit machine callers ask for the `interactive` credential class instead of relying on a session being absent. |
-| Per-key rate limit | `ApiKey.rateLimit` (`{ maxRequests, windowMs }`), enforced by `ApiKeyService.verifyWithRateLimit`. |
-| `remaining` / refill | `remaining`, `refillAmount`, `refillInterval` and `refillMax` on the key ([ADR 0012](../adr/0012-api-key-design.md)). |
-| `referenceId` | A key belongs to `userId`. Carry any other owner reference in `metadata`. |
-| Stored key | Digest only (`keyHash`), with `start` and `prefix` kept for display. Better Auth's stored hashes do not carry over: re-issue keys, or verify old ones through a custom path during a window. |
+| Per-key rate limit                           | `ApiKey.rateLimit` (`{ maxRequests, windowMs }`), enforced by `ApiKeyService.verifyWithRateLimit`.                                                                                                     |
+| `remaining` / refill                         | `remaining`, `refillAmount`, `refillInterval` and `refillMax` on the key ([ADR 0012](../adr/0012-api-key-design.md)).                                                                                  |
+| `referenceId`                                | A key belongs to `userId`. Carry any other owner reference in `metadata`.                                                                                                                              |
+| Stored key                                   | Digest only (`keyHash`), with `start` and `prefix` kept for display. Better Auth's stored hashes do not carry over: re-issue keys, or verify old ones through a custom path during a window.           |
 
 `ApiKeyStore` has no effect-auth-sql implementation (see below): use the `KeyValueStore` default
 or bring your own.
