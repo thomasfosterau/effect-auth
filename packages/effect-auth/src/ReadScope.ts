@@ -499,6 +499,35 @@ interface Env {
   readonly slice: Entity.EntitySlice;
 }
 
+/** A bound resource attribute, or why the read isn't one. */
+const resourceOperand = (binding: Binding, path: ReadonlyArray<string>): Operand => {
+  const [name, ...rest] = path;
+  const kind = name === undefined ? undefined : binding.attributes[name];
+  return kind === undefined || name === undefined || Arr.isReadonlyArrayNonEmpty(rest)
+    ? unsupported(`resource.${path.join(".")} is not a bound attribute`)
+    : { _tag: "Attribute", name, kind };
+};
+
+/** The set fact a context read names, if any. */
+const setFactOf = (binding: Binding, attr: Condition.Attr): SetFact | undefined => {
+  const head = attr.path[0];
+  return attr.of === "context" && head !== undefined ? binding.setFacts?.[head] : undefined;
+};
+
+/** A read the request decides on its own: its value, or absent. */
+const requestOperand = (env: Env, attr: Condition.Attr): Operand => {
+  const evaluated = Condition.evaluateOperand(env.slice, env.request, attr);
+  return evaluated.ok ? { _tag: "Known", value: evaluated.value } : { _tag: "Absent" };
+};
+
+const attrOperand = (env: Env, attr: Condition.Attr): Operand => {
+  if (attr.of === "resource") return resourceOperand(env.binding, attr.path);
+  const fact = setFactOf(env.binding, attr);
+  if (fact === undefined) return requestOperand(env, attr);
+  // A set fact is a boolean: it has no fields to read.
+  return attr.path.length === 1 ? { _tag: "Fact", fact } : { _tag: "Absent" };
+};
+
 const resolveOperand = (env: Env, operand: Condition.Operand): Operand =>
   Match.valueTags(operand, {
     Lit: ({ value }): Operand => ({ _tag: "Known", value }),
@@ -506,24 +535,7 @@ const resolveOperand = (env: Env, operand: Condition.Operand): Operand =>
       of === "resource"
         ? unsupported("the resource reference itself is not a bound attribute")
         : { _tag: "Known", value: Entity.entityValue(env.request[of]) },
-    Attr: (attr): Operand => {
-      if (attr.of === "resource") {
-        const [name, ...rest] = attr.path;
-        const kind = name === undefined ? undefined : env.binding.attributes[name];
-        return kind === undefined || name === undefined || Arr.isReadonlyArrayNonEmpty(rest)
-          ? unsupported(`resource.${attr.path.join(".")} is not a bound attribute`)
-          : { _tag: "Attribute", name, kind };
-      }
-      const [head, ...rest] = attr.path;
-      const fact =
-        attr.of === "context" && head !== undefined ? env.binding.setFacts?.[head] : undefined;
-      if (fact !== undefined) {
-        // A set fact is a boolean: it has no fields to read.
-        return Arr.isReadonlyArrayEmpty(rest) ? { _tag: "Fact", fact } : { _tag: "Absent" };
-      }
-      const evaluated = Condition.evaluateOperand(env.slice, env.request, attr);
-      return evaluated.ok ? { _tag: "Known", value: evaluated.value } : { _tag: "Absent" };
-    },
+    Attr: (attr): Operand => attrOperand(env, attr),
   });
 
 const flip = (op: Compare["op"]): Compare["op"] =>
@@ -562,22 +574,24 @@ const compareRow = (row: Operand, op: Compare["op"], value: Entity.AttributeValu
   });
 };
 
-const isRow = (operand: Operand): boolean =>
-  P.isTagged(operand, "Attribute") || P.isTagged(operand, "Fact");
+/** The first operand that makes a comparison unsupported or an error on every row, if any. */
+const failing = (left: Operand, right: Operand): Partial | null => {
+  if (P.isTagged(left, "Unsupported")) return left;
+  if (P.isTagged(right, "Unsupported")) return right;
+  // Either side failing to evaluate makes the whole comparison an error, on every row.
+  return P.isTagged(left, "Absent") || P.isTagged(right, "Absent") ? errored : null;
+};
 
 const binary = (
   left: Operand,
   right: Operand,
   onRow: (row: Operand, value: Entity.AttributeValue, rowOnLeft: boolean) => Partial,
 ): Partial => {
-  if (P.isTagged(left, "Unsupported")) return left;
-  if (P.isTagged(right, "Unsupported")) return right;
-  // Either side failing to evaluate makes the whole comparison an error, on every row.
-  if (P.isTagged(left, "Absent") || P.isTagged(right, "Absent")) return errored;
-  if (isRow(left) && isRow(right)) return unsupported("a comparison between two row values");
-  if (P.isTagged(left, "Known") && isRow(right)) return onRow(right, left.value, false);
-  if (P.isTagged(right, "Known") && isRow(left)) return onRow(left, right.value, true);
-  return unsupported("internal: a comparison with no row operand");
+  const failed = failing(left, right);
+  if (failed !== null) return failed;
+  if (P.isTagged(left, "Known")) return onRow(right, left.value, false);
+  if (P.isTagged(right, "Known")) return onRow(left, right.value, true);
+  return unsupported("a comparison between two row values");
 };
 
 /** Whether a condition reads anything of the row (a resource attribute or a set fact). */
