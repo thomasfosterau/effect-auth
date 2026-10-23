@@ -1,6 +1,15 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, DateTime,
-  Duration, Effect, Layer, Predicate, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Predicate,
+  Result,
+} from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,

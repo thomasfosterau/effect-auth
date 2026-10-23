@@ -8,8 +8,7 @@
  *
  * @module email-otp
  */
-import { Clock, Context, Crypto, Data, DateTime,
-  Duration, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Data, DateTime, Duration, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore } from "../Identifier.ts";
 import {

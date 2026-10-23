@@ -8,8 +8,7 @@
  *
  * @module magic-link
  */
-import { Clock, Context, Crypto, DateTime,
-  Duration, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, DateTime, Duration, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import {
