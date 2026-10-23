@@ -1719,8 +1719,10 @@ export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlCli
  *
  * Stores added to core after this package's restoration (OneTimeToken,
  * TrustedDevice, PhoneOtp, Organization, OIDC provider, SSO,
- * DeviceAuthorization, ...) are not yet covered here — use the
- * `KeyValueStore`-backed layers from core or bring your own until they land.
+ * DeviceAuthorization, ...) are not yet covered here, and core's
+ * `KeyValueStore`-backed layers do not cover them either: implement those
+ * store interfaces yourself (over this `SqlClient` or any other backing)
+ * until they land here.
  *
  * Authorization is not bundled: wire {@link RbacEntityResolverLayer} and
  * {@link readRbacPolicies} into an `Authorizer` yourself, because

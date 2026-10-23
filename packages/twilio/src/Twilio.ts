@@ -55,11 +55,11 @@ export interface TwilioSmsSenderConfig {
    * Render a message into the SMS body. Defaults to {@link defaultRender};
    * supply your own for branded/localized copy.
    */
-  readonly render?: (message: SmsMessage) => string;
+  readonly render?: ((message: SmsMessage) => string) | undefined;
   /** Override the API base URL — for testing against a local stub. Defaults to `https://api.twilio.com`. */
-  readonly baseUrl?: string;
+  readonly baseUrl?: string | undefined;
   /** Inject a `fetch` implementation — for testing. Defaults to `globalThis.fetch`. */
-  readonly fetch?: typeof fetch;
+  readonly fetch?: typeof fetch | undefined;
 }
 
 const DEFAULT_BASE_URL = "https://api.twilio.com";
@@ -138,7 +138,7 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
           doFetch(`${baseUrl}/2010-04-01/Accounts/${config.accountSid}/Messages.json`, {
             method: "POST",
             headers: {
-              Authorization: `Basic ${Buffer.from(credentials).toString("base64")}`,
+              Authorization: `Basic ${btoa(credentials)}`,
               "Content-Type": "application/x-www-form-urlencoded",
             },
             body: form.toString(),

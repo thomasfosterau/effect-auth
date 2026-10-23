@@ -87,11 +87,11 @@ export interface ResendEmailSenderConfig {
    * Render a message into Resend's email fields. Defaults to
    * {@link defaultRender}; supply your own for branded/localized templates.
    */
-  readonly render?: (message: EmailMessage) => RenderedEmail;
+  readonly render?: ((message: EmailMessage) => RenderedEmail) | undefined;
   /** Override the API base URL — for testing against a local stub. Defaults to `https://api.resend.com`. */
-  readonly baseUrl?: string;
+  readonly baseUrl?: string | undefined;
   /** Inject a `fetch` implementation — for testing. Defaults to `globalThis.fetch`. */
-  readonly fetch?: typeof fetch;
+  readonly fetch?: typeof fetch | undefined;
 }
 
 const DEFAULT_BASE_URL = "https://api.resend.com";
