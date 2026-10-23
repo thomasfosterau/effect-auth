@@ -6,6 +6,7 @@ import {
   Context,
   Crypto,
   DateTime,
+  Duration,
   Effect,
   Layer,
   Option,
@@ -633,8 +634,8 @@ describe("MagicLinkService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("ResendTooSoonError");
     assert(result.failure._tag === "ResendTooSoonError");
-    expect(result.failure.retryAfter).toBeGreaterThan(0);
-    expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     // The original token is preserved — no replacement was issued.
     expect(sentLinks.length).toBe(1);
     expect(magicLinkTokens.size).toBe(1);
@@ -737,8 +738,8 @@ describe("MagicLinkService", () => {
       expect(result._tag).toBe("Failure");
       assert(Result.isFailure(result));
       assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
-      expect(result.failure.retryAfter).toBeGreaterThan(0);
-      expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+      expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
+      expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     });
     // Only the account holder is sent a link; the unknown email holds an
     // undelivered token as its cooldown marker.

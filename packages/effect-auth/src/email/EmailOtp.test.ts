@@ -6,6 +6,7 @@ import {
   Context,
   Crypto,
   DateTime,
+  Duration,
   Effect,
   Layer,
   Predicate,
@@ -679,8 +680,8 @@ describe("EmailOtpService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("ResendTooSoonError");
     assert(result.failure._tag === "ResendTooSoonError");
-    expect(result.failure.retryAfter).toBeGreaterThan(0);
-    expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     // The original OTP is preserved — no replacement was issued.
     expect(sentOtps.length).toBe(1);
     expect(otpRecords.size).toBe(1);
@@ -817,8 +818,8 @@ describe("EmailOtpService", () => {
         expect(result._tag).toBe("Failure");
         assert(Result.isFailure(result));
         assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
-        expect(result.failure.retryAfter).toBeGreaterThan(0);
-        expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+        expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
+        expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
       });
       // Only the account holder is sent a code; the unknown email holds an
       // undelivered record as its cooldown marker.

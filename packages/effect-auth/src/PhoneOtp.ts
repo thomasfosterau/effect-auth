@@ -13,7 +13,8 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import { Array as Arr, Clock, Context, Crypto, Data, DateTime, Effect, Layer, Order } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Data, DateTime,
+  Duration, Effect, Layer, Order } from "effect";
 import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
@@ -393,7 +394,7 @@ export const make = (
             if (elapsed < config.resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another OTP",
-                retryAfter: config.resendCooldown - elapsed,
+                retryAfter: Duration.millis(config.resendCooldown - elapsed),
               });
             }
           }

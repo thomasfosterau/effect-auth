@@ -8,7 +8,8 @@
  *
  * @module email-otp
  */
-import { Clock, Context, Crypto, Data, DateTime, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Data, DateTime,
+  Duration, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore } from "../Identifier.ts";
 import {
@@ -417,7 +418,7 @@ export const make = (
             if (elapsed < config.resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another OTP",
-                retryAfter: config.resendCooldown - elapsed,
+                retryAfter: Duration.millis(config.resendCooldown - elapsed),
               });
             }
           }

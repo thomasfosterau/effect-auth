@@ -8,7 +8,8 @@
  *
  * @module magic-link
  */
-import { Clock, Context, Crypto, DateTime, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, DateTime,
+  Duration, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import {
@@ -244,7 +245,7 @@ export const make = (
             if (elapsed < config.resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another magic link",
-                retryAfter: config.resendCooldown - elapsed,
+                retryAfter: Duration.millis(config.resendCooldown - elapsed),
               });
             }
           }
