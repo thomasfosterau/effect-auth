@@ -298,7 +298,13 @@ const slotRoot = (
   return found === null ? {} : found.attributes;
 };
 
-const evaluateOperand = (
+/**
+ * Evaluate one operand over a slice and request: its value, or a
+ * {@link ConditionError} when it reads an absent attribute. The read-scope
+ * compiler (`ReadScope.compile`) uses it for the operands that don't depend
+ * on the row, so they evaluate exactly as the kernel evaluates them.
+ */
+export const evaluateOperand = (
   slice: Entity.EntitySlice,
   request: ConditionRequest,
   operand: Operand,
