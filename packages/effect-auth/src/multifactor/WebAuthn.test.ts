@@ -491,13 +491,11 @@ describe("WebAuthn Service", () => {
 
 /** Minimal deterministic CBOR encoder (enough for COSE keys + attestation). */
 const cborHead = (major: number, n: number): number[] => {
-  let head: number[];
-  if (n < 24) head = [n];
-  else if (n < 256) head = [24, n];
-  else if (n < 65536) head = [25, (n >> 8) & 0xff, n & 0xff];
-  else head = [26, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
-  head[0]! |= major << 5;
-  return head;
+  const type = major << 5;
+  if (n < 24) return [type | n];
+  if (n < 256) return [type | 24, n];
+  if (n < 65536) return [type | 25, (n >> 8) & 0xff, n & 0xff];
+  return [type | 26, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
 };
 const cborUint = (n: number): number[] => cborHead(0, n);
 const cborNegInt = (n: number): number[] => cborHead(1, -1 - n);
@@ -679,7 +677,7 @@ const derInteger = (bytes: Uint8Array): Uint8Array => {
   let start = 0;
   while (start < bytes.length - 1 && bytes[start] === 0) start++;
   const trimmed = bytes.subarray(start);
-  const needsPad = (trimmed[0]! & 0x80) !== 0;
+  const needsPad = ((trimmed[0] ?? 0) & 0x80) !== 0;
   const content = needsPad ? concatBytes(new Uint8Array([0]), trimmed) : trimmed;
   return concatBytes(new Uint8Array([0x02, content.length]), content);
 };

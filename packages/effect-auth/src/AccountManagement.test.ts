@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Effect, Layer, Order } from "effect";
 import {
   AccountManagementService,
@@ -173,7 +173,7 @@ describe("AccountManagement — change email", () => {
       svc.requestEmailChange("user-1", "ALICE-NEW@example.com"),
     );
     expect(h.changeEmails).toHaveLength(1);
-    expect(h.changeEmails[0]!.newEmail).toBe("alice-new@example.com");
+    expect(h.changeEmails[0]?.newEmail).toBe("alice-new@example.com");
 
     const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
     expect(user.id).toBe("user-1");
@@ -182,8 +182,8 @@ describe("AccountManagement — change email", () => {
       (identifier) => identifier.userId === "user-1" && identifier.type === "email",
     );
     expect(userEmails).toHaveLength(1);
-    expect(userEmails[0]!.value).toBe("alice-new@example.com");
-    expect(userEmails[0]!.verified).toBe(true);
+    expect(userEmails[0]?.value).toBe("alice-new@example.com");
+    expect(userEmails[0]?.verified).toBe(true);
     expect(
       [...h.identifiers.values()].some((identifier) => identifier.value === "alice@example.com"),
     ).toBe(false);
@@ -217,7 +217,9 @@ describe("AccountManagement — change email", () => {
     const h = makeHarness();
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice3@example.com"));
     // Force expiry.
-    const rec = h.tokens.get(token)!;
+    const rec = h.tokens.get(token);
+    assert(rec !== undefined, "the change-email token is stored");
+
     h.tokens.set(token, { ...rec, expiresAt: Date.now() - 1 });
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AccountTokenError);

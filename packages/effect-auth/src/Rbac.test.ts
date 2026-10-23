@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Effect, Order, Predicate } from "effect";
 import * as Rbac from "./Rbac.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -54,7 +54,8 @@ describe("RBAC as policy-kernel sugar", () => {
     });
 
     it("scopes a permission to its role, action and resource type", () => {
-      const viewer = Rbac.policies(config).find((p) => p.id === "rbac:viewer:posts:read")!;
+      const viewer = Rbac.policies(config).find((p) => p.id === "rbac:viewer:posts:read");
+      assert(viewer !== undefined, "the viewer policy is generated");
 
       expect(viewer.principal).toEqual(Policy.inScope(Rbac.roleRef("viewer")));
       expect(viewer.action).toEqual(Policy.eq(Entity.ref("Action", "read")));
@@ -62,7 +63,8 @@ describe("RBAC as policy-kernel sugar", () => {
     });
 
     it('maps "*" wildcards to unscoped slots', () => {
-      const admin = Rbac.policies(config).find((p) => p.id === "rbac:admin:*:*")!;
+      const admin = Rbac.policies(config).find((p) => p.id === "rbac:admin:*:*");
+      assert(admin !== undefined, "the admin policy is generated");
 
       expect(admin.action).toEqual(Policy.any);
       expect(admin.resource).toEqual(Policy.any);

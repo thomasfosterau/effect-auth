@@ -1813,12 +1813,15 @@ describe("OrganizationService - domains", () => {
     );
     expect(failed.verificationState).toBe("failed");
     expect(failed.verifiedAt).toBeUndefined();
-    expect(seen).toEqual([{ domain: "acme.test", token: result.claim.verificationToken! }]);
+    const token = result.claim.verificationToken;
+    assert(token !== undefined, "a DNS claim carries a verification token");
+    expect(seen).toEqual([{ domain: "acme.test", token }]);
 
     // ... and once it does, the retry succeeds.
     const verified = await runServiceWithVerifier(
       {},
-      stubDomainVerifier([{ domain: "acme.test", token: result.claim.verificationToken! }]),
+      stubDomainVerifier([{ domain: "acme.test", token }]),
+
       (service) =>
         Effect.gen(function* () {
           const first = yield* service.verifyDomain(

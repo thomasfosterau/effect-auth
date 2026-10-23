@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer, Result } from "effect";
 import {
   DeviceAuthorizationService,
@@ -170,7 +170,8 @@ describe("DeviceAuthorizationService", () => {
   it("returns expired_token once the request has expired", async () => {
     const begun = await run((svc) => svc.begin());
     const deviceHash = hashToken(begun.deviceCode);
-    const record = records.get(deviceHash)!;
+    const record = records.get(deviceHash);
+    assert(record !== undefined, "begin stored the request");
     records.set(deviceHash, { ...record, expiresAt: Date.now() - 1 });
     const expired = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
     expect((expired as DevicePollError).error).toBe("expired_token");
@@ -220,14 +221,17 @@ describe("DeviceAuthorizationService", () => {
     const hash = hashToken(begun.deviceCode);
 
     // Seed lastPolledAt to 1 second ago — within the 5 s interval.
-    const record = records.get(hash)!;
+    const record = records.get(hash);
+    assert(record !== undefined, "begin stored the request");
     const lastPolled = Date.now() - 1000;
     records.set(hash, { ...record, lastPolledAt: lastPolled });
 
     const err = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
     expect((err as DevicePollError).error).toBe("slow_down");
 
-    const updated = records.get(hash)!;
+    const updated = records.get(hash);
+    assert(updated !== undefined, "the request is still stored");
+
     // lastPolledAt must NOT advance — the rejected poll must not reset the window.
     expect(updated.lastPolledAt).toBe(lastPolled);
     // Interval escalates by 5 s per RFC 8628 §3.5.

@@ -21,13 +21,11 @@ import * as Cipher from "../Cipher.ts";
 // --- Minimal deterministic CBOR encoder, for building fixtures --------------
 
 const cborHead = (major: number, n: number): number[] => {
-  let head: number[];
-  if (n < 24) head = [n];
-  else if (n < 256) head = [24, n];
-  else if (n < 65536) head = [25, (n >> 8) & 0xff, n & 0xff];
-  else head = [26, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
-  head[0]! |= major << 5;
-  return head;
+  const type = major << 5;
+  if (n < 24) return [type | n];
+  if (n < 256) return [type | 24, n];
+  if (n < 65536) return [type | 25, (n >> 8) & 0xff, n & 0xff];
+  return [type | 26, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
 };
 const cborUint = (n: number): number[] => cborHead(0, n);
 const cborNegInt = (n: number): number[] => cborHead(1, -1 - n);
@@ -675,7 +673,7 @@ describe("assertion signature verification", () => {
       while (start < value.length - 1 && value[start] === 0) start++;
       const trimmed = value.subarray(start);
       const content =
-        (trimmed[0]! & 0x80) !== 0 ? concatBytes(bytes(0), trimmed) : new Uint8Array(trimmed);
+        ((trimmed[0] ?? 0) & 0x80) !== 0 ? concatBytes(bytes(0), trimmed) : new Uint8Array(trimmed);
       return concatBytes(bytes(0x02, content.length), content);
     };
     const body = concatBytes(derInteger(raw.subarray(0, 32)), derInteger(raw.subarray(32, 64)));
@@ -685,7 +683,7 @@ describe("assertion signature verification", () => {
 
     // Flip a bit in the message: the same signature must no longer verify.
     const tampered = new Uint8Array(message);
-    tampered[0]! ^= 0x01;
+    tampered[0] = (tampered[0] ?? 0) ^ 0x01;
     expect(Cipher.verifyDerSignature("sha256", spki, tampered, der)).toBe(false);
   });
 });

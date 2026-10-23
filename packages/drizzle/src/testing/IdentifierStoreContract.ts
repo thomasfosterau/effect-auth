@@ -20,7 +20,7 @@
  */
 
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 /**
@@ -602,8 +602,9 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
           const ada = yield* store.getByValue("email", "ada@example.com");
+          assert(ada !== null, "ada's email is seeded");
           return {
-            replaced: yield* store.replace(ada!, emailFor(USER.ada, "ada-new@example.com", true)),
+            replaced: yield* store.replace(ada, emailFor(USER.ada, "ada-new@example.com", true)),
             old: yield* store.getByValue("email", "ada@example.com"),
             listed: yield* store.listByUser(USER.ada),
           };
@@ -624,8 +625,9 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
           const ada = yield* store.getByValue("email", "ada@example.com");
+          assert(ada !== null, "ada's email is seeded");
           return yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada!, emailFor(USER.ada, "grace@example.com")),
+            Auth.replaceIdentifier(store, ada, emailFor(USER.ada, "grace@example.com")),
           );
         }),
       );
@@ -789,8 +791,10 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
           const storedVerifiedAt = yield* Effect.orDie(
             Effect.tryPromise(() => harness.readVerifiedAt(USER.ada)),
           );
+          assert(verified !== null, "the verified replace succeeds");
           const unverified = yield* store.replace(
-            verified!,
+            verified,
+
             emailFor(USER.ada, "ada-other@example.com"),
           );
           return { verified, storedVerifiedAt, unverified };

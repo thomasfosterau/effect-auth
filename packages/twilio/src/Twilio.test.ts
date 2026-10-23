@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Data, Effect, Predicate, Redacted, Schema } from "effect";
 import { SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 import { defaultRender, layer, twilioSmsSender } from "./index.ts";
@@ -73,18 +73,19 @@ describe("twilioSmsSender", () => {
 
     expect(calls).toHaveLength(1);
     const [request] = calls;
-    expect(request!.url).toBe(
+    assert(request !== undefined);
+    expect(request.url).toBe(
       `https://api.twilio.com/2010-04-01/Accounts/${baseConfig.accountSid}/Messages.json`,
     );
-    expect(request!.init.method).toBe("POST");
+    expect(request.init.method).toBe("POST");
 
-    const headers = new Headers(request!.init.headers);
+    const headers = new Headers(request.init.headers);
     expect(headers.get("Authorization")).toBe(
       `Basic ${Buffer.from(`${baseConfig.accountSid}:test-auth-token`).toString("base64")}`,
     );
     expect(headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
 
-    const form = new URLSearchParams(request!.init.body as string);
+    const form = new URLSearchParams(request.init.body as string);
     expect(form.get("Body")).toBe("Your verification code: 654321");
     expect(form.get("From")).toBe("+15551234567");
     expect(form.get("To")).toBe("+15559876543");
@@ -96,7 +97,9 @@ describe("twilioSmsSender", () => {
 
     await run(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } }));
 
-    const form = new URLSearchParams(calls[0]!.init.body as string);
+    const [request] = calls;
+    assert(request !== undefined);
+    const form = new URLSearchParams(request.init.body as string);
     expect(form.get("Body")).toBe("Custom body");
   });
 
@@ -106,7 +109,9 @@ describe("twilioSmsSender", () => {
 
     await run(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } }));
 
-    expect(calls[0]!.url).toBe(
+    const [request] = calls;
+    assert(request !== undefined);
+    expect(request.url).toBe(
       `https://stub.local/2010-04-01/Accounts/${baseConfig.accountSid}/Messages.json`,
     );
   });

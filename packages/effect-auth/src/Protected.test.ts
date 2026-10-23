@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Result, Schema } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
@@ -186,7 +186,9 @@ describe("protectedField – custom policies", () => {
     );
     expect(encoded).toEqual({ email: "a@b" });
     // The request the custom predicate saw defaults resource === principal.
-    const last = seenRequests.at(-1)!;
+    const last = seenRequests.at(-1);
+    assert(last !== undefined, "the predicate saw a request");
+
     expect(last.principal).toEqual(alice);
     expect(last.resource).toEqual(alice);
     expect(last.action).toEqual(Entity.ref("Action", "user:read-email"));

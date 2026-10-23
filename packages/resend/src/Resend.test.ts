@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { ConfigProvider, Data, Effect, Layer, Predicate, Redacted, Schema } from "effect";
 import { EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 import { defaultRender, layer, layerConfig, resendEmailSender } from "./index.ts";
@@ -116,13 +116,14 @@ describe("resendEmailSender", () => {
 
     expect(calls).toHaveLength(1);
     const [request] = calls;
-    expect(request!.url).toBe("https://api.resend.com/emails");
-    expect(request!.init.method).toBe("POST");
-    const headers = new Headers(request!.init.headers);
+    assert(request !== undefined);
+    expect(request.url).toBe("https://api.resend.com/emails");
+    expect(request.init.method).toBe("POST");
+    const headers = new Headers(request.init.headers);
     expect(headers.get("Authorization")).toBe("Bearer re_test_key");
     expect(headers.get("Content-Type")).toBe("application/json");
 
-    const body = fromJson(request!.init.body as string);
+    const body = fromJson(request.init.body as string);
     expect(body).toEqual({
       from: "App <noreply@example.com>",
       to: "user@example.com",
@@ -143,7 +144,9 @@ describe("resendEmailSender", () => {
       sender.send({ to: "user@example.com", purpose: "magic-link", params: { token: "t" } }),
     );
 
-    const body = fromJson(calls[0]!.init.body as string);
+    const [request] = calls;
+    assert(request !== undefined);
+    const body = fromJson(request.init.body as string);
     expect(body).toEqual({
       from: "App <noreply@example.com>",
       to: "user@example.com",
@@ -159,7 +162,9 @@ describe("resendEmailSender", () => {
 
     await run(sender.send({ to: "a@b.com", purpose: "password-reset", params: { token: "t" } }));
 
-    expect(calls[0]!.url).toBe("https://stub.local/api/emails");
+    const [request] = calls;
+    assert(request !== undefined);
+    expect(request.url).toBe("https://stub.local/api/emails");
   });
 
   it("never leaks the API key onto a failure", async () => {

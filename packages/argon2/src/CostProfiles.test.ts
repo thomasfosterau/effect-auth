@@ -25,7 +25,7 @@ beforeEach(() => {
 
 const expectCosts = (costs: Argon2.Argon2Profile) => {
   expect(kdf).toHaveBeenCalledOnce();
-  expect(kdf.mock.calls[0]![0]).toMatchObject({
+  expect(kdf.mock.calls[0]?.[0]).toMatchObject({
     memorySize: costs.memoryCost,
     iterations: costs.timeCost,
     parallelism: costs.parallelism,

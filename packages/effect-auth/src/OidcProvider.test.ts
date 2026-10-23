@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
@@ -162,9 +162,9 @@ describe("OidcProviderService", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(web.clientSecret).toBeDefined();
+    assert(web.clientSecret !== undefined, "a web client gets a secret");
     expect(web.client.type).toBe("web");
-    expect(web.client.clientSecretHash).toBe(hashOidcSecret(web.clientSecret!));
+    expect(web.client.clientSecretHash).toBe(hashOidcSecret(web.clientSecret));
     expect(native.clientSecret).toBeUndefined();
     expect(native.client.type).toBe("native");
   });
@@ -586,9 +586,10 @@ describe("OidcProviderService dynamic client registration", () => {
       service.registerDynamicClient({ redirectUris: ["https://rp.test/cb"] }),
     );
     expect(confidential.clientSecret).toBeTruthy();
+    assert(confidential.clientSecret !== undefined);
     expect(confidential.client.type).toBe("web");
     expect(confidential.client.tokenEndpointAuthMethod).toBe("client_secret_basic");
-    expect(confidential.client.clientSecretHash).toBe(hashOidcSecret(confidential.clientSecret!));
+    expect(confidential.client.clientSecretHash).toBe(hashOidcSecret(confidential.clientSecret));
     // The default scope is the provider's full allowed set.
     expect(confidential.client.scope).toBe("openid profile email offline_access");
   });
@@ -1151,6 +1152,20 @@ const get = (
 };
 
 /** Swap `globalThis.fetch` for a canned JWKS response while `thunk` runs. */
+// The redirect a response carries; a response without one fails the test.
+const locationOf = (res: Response): URL => {
+  const location = res.headers.get("location");
+  assert(location !== null, `expected a redirect, got ${res.status}`);
+  return new URL(location);
+};
+
+// A query parameter the redirect must carry.
+const searchParam = (url: URL, name: string): string => {
+  const value = url.searchParams.get(name);
+  assert(value !== null, `the redirect carries no ${name}`);
+  return value;
+};
+
 const withJwksFetch = async <A>(jwks: Schema.Json, thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
@@ -1214,10 +1229,10 @@ describe("HTTP OIDC provider endpoints", () => {
       ),
     );
     expect(authorize.status).toBe(302);
-    const location = new URL(authorize.headers.get("location")!);
+    const location = locationOf(authorize);
     expect(location.origin + location.pathname).toBe("https://rp.test/cb");
     expect(location.searchParams.get("state")).toBe("st-1");
-    const code = location.searchParams.get("code")!;
+    const code = searchParam(location, "code");
     expect(code).toBeTruthy();
 
     // 3. Exchange the code (PKCE verifier + client secret).
@@ -1351,7 +1366,7 @@ describe("HTTP OIDC provider endpoints", () => {
     // No session: 302 to the login page with the original URL attached.
     const anonymous = await fx.handler(get("/oauth2/authorize", authorizeQuery));
     expect(anonymous.status).toBe(302);
-    const loginUrl = new URL(anonymous.headers.get("location")!);
+    const loginUrl = locationOf(anonymous);
     expect(loginUrl.origin + loginUrl.pathname).toBe("http://idp.test/login");
     expect(loginUrl.searchParams.get("redirect_to")).toContain("/oauth2/authorize");
 
@@ -1360,11 +1375,11 @@ describe("HTTP OIDC provider endpoints", () => {
       get("/oauth2/authorize", authorizeQuery, { sessionId: userSid }),
     );
     expect(needsConsent.status).toBe(302);
-    const consentUrl = new URL(needsConsent.headers.get("location")!);
+    const consentUrl = locationOf(needsConsent);
     expect(consentUrl.origin + consentUrl.pathname).toBe("http://idp.test/consent");
     expect(consentUrl.searchParams.get("client_id")).toBe(client.clientId);
     expect(consentUrl.searchParams.get("scope")).toBe("openid email");
-    const consentCode = consentUrl.searchParams.get("consent_code")!;
+    const consentCode = searchParam(consentUrl, "consent_code");
 
     // Denying redirects back with access_denied.
     const deniedConsent = await fx.handler(
@@ -1387,7 +1402,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const again = await fx.handler(
       get("/oauth2/authorize", authorizeQuery, { sessionId: userSid }),
     );
-    const consentCode2 = new URL(again.headers.get("location")!).searchParams.get("consent_code")!;
+    const consentCode2 = searchParam(locationOf(again), "consent_code");
     const accepted = await fx.handler(
       post("/oauth2/consent", { consentCode: consentCode2, accept: true }, userSid),
     );
@@ -1395,7 +1410,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const acceptedRedirect = new URL(
       ((await accepted.json()) as { redirectTo: string }).redirectTo,
     );
-    const code = acceptedRedirect.searchParams.get("code")!;
+    const code = searchParam(acceptedRedirect, "code");
     expect(code).toBeTruthy();
     expect(acceptedRedirect.searchParams.get("state")).toBe("st-2");
 
@@ -1415,7 +1430,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const remembered = await fx.handler(
       get("/oauth2/authorize", authorizeQuery, { sessionId: userSid }),
     );
-    const rememberedUrl = new URL(remembered.headers.get("location")!);
+    const rememberedUrl = locationOf(remembered);
     expect(rememberedUrl.origin + rememberedUrl.pathname).toBe("https://rp.test/cb");
     expect(rememberedUrl.searchParams.get("code")).toBeTruthy();
   });
@@ -1453,7 +1468,7 @@ describe("HTTP OIDC provider endpoints", () => {
           { sessionId: userSid },
         ),
       );
-      return new URL(res.headers.get("location")!).searchParams.get("code")!;
+      return searchParam(locationOf(res), "code");
     };
 
     // Wrong PKCE verifier -> invalid_grant.
@@ -1525,7 +1540,7 @@ describe("HTTP OIDC provider endpoints", () => {
         { sessionId: userSid },
       ),
     );
-    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+    const code = searchParam(locationOf(authorize), "code");
 
     const tokenRes = await fx.handler(
       new Request("http://idp.test/oauth2/token", {
@@ -1601,7 +1616,7 @@ describe("HTTP OIDC provider endpoints", () => {
         { sessionId: userSid },
       ),
     );
-    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+    const code = searchParam(locationOf(authorize), "code");
 
     const tokenRes = await fx.handler(
       post("/oauth2/token", {
@@ -1694,7 +1709,7 @@ describe("HTTP OIDC provider endpoints", () => {
         { sessionId: userSid },
       ),
     );
-    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+    const code = searchParam(locationOf(authorize), "code");
 
     const tokenRes = await fx.handler(
       post("/oauth2/token", {
@@ -1710,7 +1725,8 @@ describe("HTTP OIDC provider endpoints", () => {
 
     // Expire the token by mutating absoluteExpiresAt to the past.
     const hash = hashOidcSecret(rt);
-    const stored = fx.oidcTokenStore.get(hash)!;
+    const stored = fx.oidcTokenStore.get(hash);
+    assert(stored !== undefined, "the refresh token is stored");
     fx.oidcTokenStore.set(hash, {
       ...stored,
       absoluteExpiresAt: Date.now() - 1000,
@@ -1761,7 +1777,7 @@ describe("HTTP OIDC provider endpoints", () => {
         { sessionId: userSid },
       ),
     );
-    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+    const code = searchParam(locationOf(authorize), "code");
 
     const tokenRes = await fx.handler(
       post("/oauth2/token", {
@@ -1828,7 +1844,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(res.status).toBe(302);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = locationOf(res);
     expect(loc.origin + loc.pathname).toBe("https://rp.test/cb");
     expect(loc.searchParams.get("error")).toBe("login_required");
     expect(loc.searchParams.get("state")).toBe("s1");
@@ -1862,7 +1878,7 @@ describe("HTTP OIDC provider endpoints", () => {
       ),
     );
     expect(res.status).toBe(302);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = locationOf(res);
     expect(loc.origin + loc.pathname).toBe("http://idp.test/login");
   });
 });
@@ -1938,10 +1954,10 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       ),
     );
     expect(authorize.status).toBe(302);
-    const location = new URL(authorize.headers.get("location")!);
+    const location = locationOf(authorize);
     expect(location.origin + location.pathname).toBe(MCP_REDIRECT);
     expect(location.searchParams.get("state")).toBe("mcp-state");
-    const code = location.searchParams.get("code")!;
+    const code = searchParam(location, "code");
 
     // 3. Token exchange: public client authenticates with the PKCE verifier.
     const tokenRes = await fx.handler(
@@ -2006,9 +2022,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       ),
     );
     expect(authorize.status).toBe(302);
-    expect(new URL(authorize.headers.get("location")!).searchParams.get("error")).toBe(
-      "invalid_request",
-    );
+    expect(locationOf(authorize).searchParams.get("error")).toBe("invalid_request");
   });
 
   it("answers metadata failures with an RFC 7591 error body", async () => {
@@ -2086,7 +2100,8 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     const client = (await registered.json()) as RegistrationResponse;
-    const rat = client.registration_access_token!;
+    const rat = client.registration_access_token;
+    assert(rat !== undefined, "registration returns an access token");
     const path = `/register/${client.client_id}`;
 
     // Read.
@@ -2147,8 +2162,10 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     );
     expect(registered.status).toBe(201);
     const client = (await registered.json()) as RegistrationResponse;
+    const rat = client.registration_access_token;
+    assert(rat !== undefined, "registration returns an access token");
     const read = await noManagement.handler(
-      get(`/register/${client.client_id}`, {}, { bearer: client.registration_access_token! }),
+      get(`/register/${client.client_id}`, {}, { bearer: rat }),
     );
     expect(read.status).toBe(404);
   });

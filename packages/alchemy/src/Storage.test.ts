@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Clock, Effect, Layer, Order, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -255,8 +255,9 @@ describe("D1-backed effect-auth storage", () => {
       }),
     );
     const won = result.outcomes.filter((outcome) => outcome !== null);
-    expect(won).toHaveLength(1);
-    expect(result.listed.map((identifier) => identifier.value)).toEqual([won[0]!.value]);
+    const [winner] = won;
+    assert(won.length === 1 && winner !== undefined, "exactly one replace wins");
+    expect(result.listed.map((identifier) => identifier.value)).toEqual([winner.value]);
   });
 
   it("keeps epoch-millisecond timestamps intact through BIGINT columns", async () => {

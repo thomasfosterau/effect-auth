@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr } from "effect";
 import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 
@@ -40,8 +39,7 @@ const walkModuleGraph = async (entry: string): Promise<ModuleGraph> => {
   const externalSpecifiers = new Set<string>();
   const queue = [entry];
 
-  while (Arr.isArrayNonEmpty(queue)) {
-    const file = queue.pop()!;
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
     if (visited.has(file)) continue;
     visited.add(file);
 

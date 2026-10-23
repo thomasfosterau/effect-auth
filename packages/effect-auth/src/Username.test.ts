@@ -236,7 +236,8 @@ describe("UsernameService", () => {
     expect(err._tag).toBe("EmailNotVerifiedError");
 
     // Once the email identifier is marked verified the same credentials succeed.
-    const emailIdentifier = findIdentifier("email", "hector@example.com")!;
+    const emailIdentifier = findIdentifier("email", "hector@example.com");
+    assert(emailIdentifier !== null, "sign-up stored the email identifier");
     identifierRecords.set(emailIdentifier.id, {
       ...emailIdentifier,
       verified: true,
@@ -618,7 +619,10 @@ describe("UsernameService under anti-enumeration (#414)", () => {
         ),
       { hasher: racingHasher },
     );
-    identifierRecords.delete(findIdentifier("username", "contested")!.id);
+    const contested = findIdentifier("username", "contested");
+    assert(contested !== null, "the racing sign-up claimed the username");
+    identifierRecords.delete(contested.id);
+
     const taken = await runAntiEnumeration(
       (svc) =>
         Effect.flip(svc.signUp({ username: "contested", email: VICTIM, password: PASSWORD })),

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
@@ -775,12 +775,12 @@ describe("HTTP JWT endpoints", () => {
     );
     expect(header.alg).toBe("ES256");
     const jwk = keys.find((k) => k["kid"] === header.kid);
-    expect(jwk).toBeDefined();
+    assert(jwk !== undefined, "the token's kid is published");
     const valid = Cipher.verifyJws(
       "ES256",
       Buffer.from(`${headerSeg}.${payloadSeg}`),
       Buffer.from(sigSeg, "base64url"),
-      jwk!,
+      jwk,
     );
     expect(valid).toBe(true);
 

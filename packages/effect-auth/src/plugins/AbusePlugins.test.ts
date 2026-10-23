@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Crypto, Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { Hooks } from "../Hooks.ts";
@@ -154,13 +154,14 @@ describe("CaptchaPlugin", () => {
 
     await drive(CaptchaPlugin(config), client, (hooks) => hooks.beforeSignUp(signUp("pw", "tok")));
 
-    const url = new URL(captured!.url);
+    assert(captured !== undefined, "the plugin called the verifier");
+    const url = new URL(captured.url);
     expect(url.searchParams.has("secret")).toBe(false);
     expect(url.searchParams.has("response")).toBe(false);
 
-    expect(captured!.headers.get("content-type")).toContain("application/x-www-form-urlencoded");
+    expect(captured.headers.get("content-type")).toContain("application/x-www-form-urlencoded");
 
-    const bodyText = await captured!.text();
+    const bodyText = await captured.text();
     const params = new URLSearchParams(bodyText);
     expect(params.get("secret")).toBe("secret");
     expect(params.get("response")).toBe("tok");

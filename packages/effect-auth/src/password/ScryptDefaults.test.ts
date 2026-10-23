@@ -45,7 +45,10 @@ const expectDefaultHash = (hash: string) => {
   expect(salt).toMatch(/^[0-9a-f]{32}$/);
   expect(key).toMatch(/^[0-9a-f]{128}$/);
   expect(scrypt).toHaveBeenCalledOnce();
-  const options = scrypt.mock.calls[0]![3];
+  const [call] = scrypt.mock.calls;
+  assert(call !== undefined);
+  const options = call[3];
+
   expect(options).toMatchObject({ N: 131072, r: 8, p: 1 });
   expect(options.maxmem).toBeGreaterThanOrEqual(128 * 8 * (131072 + 1 + 2));
 };
@@ -69,15 +72,15 @@ describe("scrypt defaults", () => {
     const hasher = scryptHasher();
     const salt = "00".repeat(16);
     const key = "00".repeat(64);
-    expect(hasher.needsRehash!(`scrypt$131072$8$1$${salt}$${key}`)).toBe(false);
-    expect(hasher.needsRehash!(`scrypt$65536$8$1$${salt}$${key}`)).toBe(true);
+    expect(hasher.needsRehash?.(`scrypt$131072$8$1$${salt}$${key}`)).toBe(false);
+    expect(hasher.needsRehash?.(`scrypt$65536$8$1$${salt}$${key}`)).toBe(true);
   });
 
   it("verify accepts a stored hash at the default parameters", async () => {
     // The stub derives a zero key, so a stored all-zero key verifies.
     const stored = `scrypt$131072$8$1$${"00".repeat(16)}$${"00".repeat(64)}`;
     expect(await Effect.runPromise(scryptHasher().verify("pw", stored))).toBe(true);
-    expect(scrypt.mock.calls[0]![3]).toMatchObject({ N: 131072, r: 8, p: 1 });
+    expect(scrypt.mock.calls[0]?.[3]).toMatchObject({ N: 131072, r: 8, p: 1 });
   });
 
   it("verify accepts a hash at a configured cost above the 256 MiB floor", async () => {

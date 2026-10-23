@@ -314,7 +314,9 @@ describe("AdminService", () => {
 
     expect(updated.attributes["role"]).toBe("admin");
     expect(updated.attributes["theme"]).toBe("dark");
-    expect(isAdmin(users.get("user-1")!)).toBe(true);
+    const stored = users.get("user-1");
+    assert(stored !== undefined, "user-1 is seeded");
+    expect(isAdmin(stored)).toBe(true);
   });
 
   it("refuses a role off the configured ladder, writing nothing (#193)", async () => {
@@ -327,7 +329,7 @@ describe("AdminService", () => {
       Effect.flip(service.setRole(admin, "user-1", "superadmin")),
     );
     expect(refused._tag).toBe("AdminError");
-    expect(users.get("user-1")!.attributes["role"]).toBe("user");
+    expect(users.get("user-1")?.attributes["role"]).toBe("user");
 
     const promoted = await runService(testContext, { roles }, (service) =>
       service.setRole(admin, "user-1", "moderator"),
@@ -383,7 +385,9 @@ describe("AdminService", () => {
     expect(isBanned(result.banned)).toBe(true);
     expect(result.banSelf._tag).toBe("Failure");
     expect(result.banAdmin._tag).toBe("Failure");
-    expect(isBanned(users.get("admin-2")!)).toBe(false);
+    const storedAdmin = users.get("admin-2");
+    assert(storedAdmin !== undefined, "admin-2 is seeded");
+    expect(isBanned(storedAdmin)).toBe(false);
   });
 
   it("applies the default ban reason and defaultBanExpiresIn", async () => {

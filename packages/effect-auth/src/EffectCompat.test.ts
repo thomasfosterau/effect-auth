@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { ConfigProvider, Effect, Layer, Redacted } from "effect";
 import { JwtKeyStore, JwtService, jwtServiceConfig } from "./Jwt.ts";
 import { TrustedDeviceService, TrustedDeviceStore, trustedDeviceConfig } from "./TrustedDevice.ts";
@@ -55,7 +55,8 @@ describe("Effect floor compatibility", () => {
     expect(cfg.expiresIn).toBe(60000);
     expect(cfg.algorithm).toBe("ES256");
     expect(cfg.audience).toBeUndefined();
-    expect(Redacted.value(cfg.encryptPrivateKey!.secret)).toBe("s3cret");
+    assert(cfg.encryptPrivateKey !== undefined);
+    expect(Redacted.value(cfg.encryptPrivateKey.secret)).toBe("s3cret");
   });
 
   it("reads the trusted-device, multi-factor and OAuth configs from the environment", async () => {
@@ -75,7 +76,8 @@ describe("Effect floor compatibility", () => {
     expect(mfa.issuer).toBe("Acme");
     expect(mfa.encryptSecret).toBeUndefined();
     expect(oauth.autoLinkByVerifiedEmail).toBe(false);
-    expect(Redacted.value(oauth.encryptTokens!.secret)).toBe("token-secret");
+    assert(oauth.encryptTokens !== undefined);
+    expect(Redacted.value(oauth.encryptTokens.secret)).toBe("token-secret");
   });
 
   it("builds the env-backed JWT and trusted-device layers", async () => {

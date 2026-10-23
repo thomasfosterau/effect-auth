@@ -1289,8 +1289,9 @@ describe("identifier endpoints", () => {
     const listRes = await handler(getRequest("/identifiers", asCookie(sid)));
     const list = (await listRes.json()) as Array<{ id: string; type: string }>;
     expect(list).toHaveLength(2);
-    const username = list.find((identifier) => identifier.type === "username")!;
-    const email = list.find((identifier) => identifier.type === "email")!;
+    const username = list.find((identifier) => identifier.type === "username");
+    const email = list.find((identifier) => identifier.type === "email");
+    assert(username !== undefined && email !== undefined, "both identifiers are listed");
 
     // Another user cannot delete an identifier they do not own.
     const foreign = await handler(deleteRequest(`/identifiers/${username.id}`, asCookie(otherSid)));
@@ -1799,14 +1800,14 @@ describe("multi-factor", () => {
       user: { email: string };
       secondFactor?: { token: string; expiresAt: number };
     };
-    expect(gatedBody.secondFactor).toBeDefined();
+    assert(gatedBody.secondFactor !== undefined, "sign-in is gated on the second factor");
 
     // Wrong TOTP code -> 401 (the challenge remains redeemable).
     const code = await totpFor(enrollment.secret);
     const badCode = code === "000000" ? "111111" : "000000";
     const rejected = await handler(
       jsonRequest("/multi-factor/verify-totp", {
-        token: gatedBody.secondFactor!.token,
+        token: gatedBody.secondFactor.token,
         code: badCode,
       }),
     );
@@ -1814,7 +1815,7 @@ describe("multi-factor", () => {
 
     // Correct TOTP code redeems the challenge into a session.
     const verified = await handler(
-      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor!.token, code }),
+      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor.token, code }),
     );
     expect(verified.status).toBe(200);
     const verifiedBody = (await verified.json()) as { user: { email: string } };
@@ -1824,7 +1825,7 @@ describe("multi-factor", () => {
 
     // The pending token was consumed (one-time use).
     const replay = await handler(
-      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor!.token, code }),
+      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor.token, code }),
     );
     expect(replay.status).toBe(401);
   });
@@ -1851,8 +1852,8 @@ describe("multi-factor", () => {
         jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
       );
       const body = (await res.json()) as { secondFactor?: { token: string } };
-      expect(body.secondFactor).toBeDefined();
-      return body.secondFactor!.token;
+      assert(body.secondFactor !== undefined, "sign-in is gated on the second factor");
+      return body.secondFactor.token;
     };
 
     const backupCode = enrollment.backupCodes[0];
@@ -1905,9 +1906,10 @@ describe("multi-factor", () => {
       jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
     );
     const gatedBody = (await gated.json()) as { secondFactor?: { token: string } };
+    assert(gatedBody.secondFactor !== undefined, "sign-in is gated on the second factor");
     const staleCode = await handler(
       jsonRequest("/multi-factor/verify-backup-code", {
-        token: gatedBody.secondFactor!.token,
+        token: gatedBody.secondFactor.token,
         code: enrollment.backupCodes[0],
       }),
     );
@@ -2025,7 +2027,9 @@ describe("HTTP phone OTP", () => {
     expect(send.status).toBe(200);
     expect(await send.json()).toEqual({ status: true });
     expect(fixture.sentPhoneOtps).toHaveLength(1);
-    const otp = fixture.sentPhoneOtps[0]!.otp;
+    const [sent] = fixture.sentPhoneOtps;
+    assert(sent !== undefined);
+    const otp = sent.otp;
 
     const signIn = await handler(
       jsonRequest("/sign-in/phone-otp", { phoneNumber: "+15551234567", otp }),
@@ -2311,7 +2315,9 @@ describe("HTTP account management (change email / delete user)", () => {
     expect(reqRes.status).toBe(200);
     expect(await reqRes.json()).toEqual({ status: true });
     expect(fixture.sentChangeEmail).toHaveLength(1);
-    const token = fixture.sentChangeEmail[0]!.token;
+    const [sent] = fixture.sentChangeEmail;
+    assert(sent !== undefined);
+    const token = sent.token;
 
     const confRes = await handler(jsonRequest("/change-email/confirm", { token }));
     expect(confRes.status).toBe(200);
@@ -2359,7 +2365,8 @@ describe("HTTP account management (change email / delete user)", () => {
     const reqRes = await handler(jsonRequest("/delete-user/request", undefined, asCookie(sid)));
     expect(reqRes.status).toBe(200);
     expect(fixture.sentDeleteTokens).toHaveLength(1);
-    const token = fixture.sentDeleteTokens[0]!;
+    const [token] = fixture.sentDeleteTokens;
+    assert(token !== undefined);
 
     const confRes = await handler(jsonRequest("/delete-user/confirm", { token }));
     expect(confRes.status).toBe(200);
@@ -2379,7 +2386,7 @@ describe("HTTP account management (change email / delete user)", () => {
 
 const dataCookieFromSetCookie = (setCookie: string | null): string | null => {
   const match = /conduit_session_data=([^;]+)/.exec(setCookie ?? "");
-  return match === null ? null : match[1]!;
+  return match?.[1] ?? null;
 };
 
 const bothCookies = (sid: string, data: string) => ({
@@ -2402,14 +2409,14 @@ describe("HTTP session cookie cache", () => {
     const firstBody = (await first.json()) as { user: { id: string; email?: string } };
     expect(firstBody.user.email).toBe("cache@example.com");
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
-    expect(data).not.toBeNull();
+    assert(data !== null, "the store-served response issues the data cookie");
     const afterFirst = fixture.sessionStoreReads();
     expect(afterFirst).toBeGreaterThan(before);
 
     // Second /session with the data cookie: cache hit -> no store read. The
     // cache-served response skips the identifier lookup, so the derived
     // email fields are omitted.
-    const second = await handler(getRequest("/session", bothCookies(sid, data!)));
+    const second = await handler(getRequest("/session", bothCookies(sid, data)));
     expect(second.status).toBe(200);
     const body = (await second.json()) as { user: { id: string; email?: string } };
     expect(body.user.id).toBe(firstBody.user.id);
@@ -2422,7 +2429,8 @@ describe("HTTP session cookie cache", () => {
     const handler = handlerFor(fixture, { cache: { secret: SECRET } });
     const sid = await signUp(handler, "tamper@example.com");
     const first = await handler(getRequest("/session", asCookie(sid)));
-    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"))!;
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
+    assert(data !== null, "the first /session issues the data cookie");
 
     const before = fixture.sessionStoreReads();
     const tampered = data.slice(0, -1) + (data.endsWith("A") ? "B" : "A");
@@ -2437,7 +2445,8 @@ describe("HTTP session cookie cache", () => {
     const handler = handlerFor(fixture, { cache: { secret: SECRET, maxAge: 0 } });
     const sid = await signUp(handler, "expire@example.com");
     const first = await handler(getRequest("/session", asCookie(sid)));
-    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"))!;
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
+    assert(data !== null, "the first /session issues the data cookie");
 
     const before = fixture.sessionStoreReads();
     const res = await handler(getRequest("/session", bothCookies(sid, data)));
@@ -2472,7 +2481,8 @@ describe("HTTP session cookie cache", () => {
     const v1 = handlerFor(fixture, { cache: { secret: SECRET, version: "v1" } });
     const sid = await signUp(v1, "epoch@example.com");
     const first = await v1(getRequest("/session", asCookie(sid)));
-    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"))!;
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
+    assert(data !== null, "the first /session issues the data cookie");
 
     const v2 = handlerFor(fixture, { cache: { secret: SECRET, version: "v2" } });
     const before = fixture.sessionStoreReads();
@@ -2497,10 +2507,16 @@ describe("HTTP session cookie cache", () => {
 
 const setCookieValue = (res: Response, name: string): string | null => {
   for (const c of res.headers.getSetCookie()) {
-    const m = new RegExp(`^${name}=([^;]*)`).exec(c);
-    if (m) return m[1]!;
+    const value = new RegExp(`^${name}=([^;]*)`).exec(c)?.[1];
+    if (value !== undefined) return value;
   }
   return null;
+};
+
+const requireSetCookie = (res: Response, name: string): string => {
+  const value = setCookieValue(res, name);
+  assert(value !== null, `the response sets ${name}`);
+  return value;
 };
 
 describe("HTTP multi-session", () => {
@@ -2509,8 +2525,8 @@ describe("HTTP multi-session", () => {
 
     // Sign in account A.
     const a = await handler(jsonRequest("/sign-up", { email: "a@example.com", password: PW }));
-    const sidA = setCookieValue(a, "conduit_session")!;
-    const multiA = setCookieValue(a, "conduit_session_multi")!;
+    const sidA = requireSetCookie(a, "conduit_session");
+    const multiA = requireSetCookie(a, "conduit_session_multi");
     expect(multiA).toBe(sidA);
 
     // Sign in account B, carrying account A's device list.
@@ -2521,8 +2537,8 @@ describe("HTTP multi-session", () => {
         { cookie: `conduit_session_multi=${multiA}` },
       ),
     );
-    const sidB = setCookieValue(b, "conduit_session")!;
-    const multiB = setCookieValue(b, "conduit_session_multi")!;
+    const sidB = requireSetCookie(b, "conduit_session");
+    const multiB = requireSetCookie(b, "conduit_session_multi");
     expect(Arr.sort(multiB.split("."), Order.String)).toEqual(Arr.sort([sidA, sidB], Order.String));
 
     const deviceCookie = `conduit_session=${sidB}; conduit_session_multi=${multiB}`;
@@ -2548,7 +2564,7 @@ describe("HTTP multi-session", () => {
       jsonRequest("/multi-session/revoke", { sessionId: sidB }, { cookie: deviceCookie }),
     );
     expect(revoke.status).toBe(200);
-    const newMulti = setCookieValue(revoke, "conduit_session_multi")!;
+    const newMulti = requireSetCookie(revoke, "conduit_session_multi");
     expect(newMulti.split(".").filter(Boolean)).toEqual([sidA]);
     // B's session is now invalid, A still works.
     expect(
@@ -2571,8 +2587,8 @@ describe("HTTP multi-session", () => {
           { cookie: `conduit_session_multi=${multi}` },
         ),
       );
-      multi = setCookieValue(res, "conduit_session_multi")!;
-      last = setCookieValue(res, "conduit_session")!;
+      multi = requireSetCookie(res, "conduit_session_multi");
+      last = requireSetCookie(res, "conduit_session");
     }
     const ids = multi.split(".").filter(Boolean);
     expect(ids).toHaveLength(2);
@@ -2590,7 +2606,7 @@ describe("HTTP multi-session", () => {
 const parseCookieDirectives = (res: Response, name: string): Record<string, string | true> => {
   for (const header of res.headers.getSetCookie()) {
     const [pair, ...directives] = header.split(/;\s*/);
-    if (pair!.startsWith(`${name}=`)) {
+    if (pair?.startsWith(`${name}=`) === true) {
       const out: Record<string, string | true> = {};
       for (const d of directives) {
         const eq = d.indexOf("=");
@@ -2704,7 +2720,7 @@ describe("bearer mode", () => {
     expect(res.status).toBe(200);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(token)).toBe(true);
-    expect(token!.length).toBeGreaterThan(0);
+    expect(token?.length).toBeGreaterThan(0);
   });
 
   it("opt-in: token from set-auth-token can be used as Authorization: Bearer", async () => {
@@ -2714,7 +2730,8 @@ describe("bearer mode", () => {
       jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
     );
     expect(signInRes.status).toBe(200);
-    const rawToken = signInRes.headers.get(BEARER_TOKEN_HEADER)!;
+    const rawToken = signInRes.headers.get(BEARER_TOKEN_HEADER);
+    assert(rawToken !== null, "opt-in sign-in sets the bearer token header");
 
     const sessionRes = await handler(
       getRequest("/session", { authorization: `Bearer ${rawToken}` }),
@@ -2732,7 +2749,7 @@ describe("bearer mode", () => {
     expect(res.status).toBe(200);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(token)).toBe(true);
-    expect(token!.length).toBeGreaterThan(0);
+    expect(token?.length).toBeGreaterThan(0);
   });
 
   it("always mode: every session-issuing response carries set-auth-token", async () => {
@@ -2744,7 +2761,7 @@ describe("bearer mode", () => {
     expect(signUpRes.status).toBe(200);
     const signUpToken = signUpRes.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(signUpToken)).toBe(true);
-    expect(signUpToken!.length).toBeGreaterThan(0);
+    expect(signUpToken?.length).toBeGreaterThan(0);
 
     // Token from sign-up is usable as a bearer token
     const sessionRes = await handler(
@@ -2780,7 +2797,8 @@ describe("bearer mode", () => {
     await handler(jsonRequest("/sign-up", { email: "ml@test.com", password: PW }));
     // Send magic link
     await handler(jsonRequest("/magic-link/send", { email: "ml@test.com" }));
-    const token = fixture.sentMagicLinkTokens.at(-1)!;
+    const token = fixture.sentMagicLinkTokens.at(-1);
+    assert(token !== undefined);
 
     // Verify with x-use-bearer
     const verifyRes = await handler(
@@ -2789,7 +2807,7 @@ describe("bearer mode", () => {
     expect(verifyRes.status).toBe(200);
     const bearerToken = verifyRes.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(bearerToken)).toBe(true);
-    expect(bearerToken!.length).toBeGreaterThan(0);
+    expect(bearerToken?.length).toBeGreaterThan(0);
 
     // Use the bearer token to fetch session
     const sessionRes = await handler(
@@ -3572,7 +3590,8 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const atThrow = spins;
     await macrotasks(3);
     expect(spins).toBeGreaterThan(atThrow);
-    await Effect.runPromise(Fiber.interrupt(detached!));
+    assert(detached !== undefined, "the services build forked the spinner");
+    await Effect.runPromise(Fiber.interrupt(detached));
   });
 });
 

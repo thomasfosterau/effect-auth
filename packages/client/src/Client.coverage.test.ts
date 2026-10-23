@@ -87,7 +87,8 @@ describe("identifiers", () => {
       ),
     ).toEqual(["ids-user", "ids@client.test"]);
 
-    const username = both.find((i) => i.type === "username")!;
+    const username = both.find((i) => i.type === "username");
+    assert(username !== undefined, "the username identifier is listed");
     await client.identifiers.delete(username.id);
     expect((await client.identifiers.list()).map((i) => i.type)).toEqual(["email"]);
   });
@@ -96,8 +97,9 @@ describe("identifiers", () => {
     const { client } = withServer();
     await client.signUp({ email: "solo@client.test", password: PW });
     const [only] = await client.identifiers.list();
+    assert(only !== undefined, "sign-up created an identifier");
 
-    const error = await rejectionOf(client.identifiers.delete(only!.id), AuthClientError);
+    const error = await rejectionOf(client.identifiers.delete(only.id), AuthClientError);
     expect(error).toBeInstanceOf(AuthClientError);
     expect((error as AuthClientError).status).toBe(400);
   });
@@ -137,9 +139,11 @@ describe("phone OTP", () => {
     });
     expect(server.sentPhoneOtps).toHaveLength(1);
 
+    const [sent] = server.sentPhoneOtps;
+    assert(sent !== undefined);
     const signedIn = await client.phoneOtp.signIn({
       phoneNumber: "+15550001",
-      otp: server.sentPhoneOtps[0]!.otp,
+      otp: sent.otp,
     });
     expect(signedIn.user.id).toBeTypeOf("string");
     expect(await client.getSession()).not.toBeNull();
@@ -192,7 +196,8 @@ describe("multi-session", () => {
       ),
     ).toEqual(["a@client.test", "b@client.test"]);
 
-    const firstEntry = list.find((entry) => entry.user.id === first.user.id)!;
+    const firstEntry = list.find((entry) => entry.user.id === first.user.id);
+    assert(firstEntry !== undefined, "the first account is listed");
     expect(await client.multiSession.setActive({ sessionId: firstEntry.session.id })).toEqual({
       status: true,
     });
@@ -233,11 +238,11 @@ describe("multi-factor challenge continuation", () => {
     const enrollment = await enrol(client, "totp@client.test");
 
     const gated = await client.signIn({ email: "totp@client.test", password: PW });
-    expect(gated.secondFactor).toBeDefined();
+    assert(gated.secondFactor !== undefined, "sign-in is gated on the second factor");
     expect(await client.getSession()).toBeNull(); // no session until redeemed
 
     const challenge = client.multiFactor.continueChallenge(gated);
-    expect(challenge.token).toBe(gated.secondFactor!.token);
+    expect(challenge.token).toBe(gated.secondFactor.token);
     expect(challenge.isExpired()).toBe(false);
 
     const verified = await challenge.verifyTotp(await totpFor(enrollment.secret));
@@ -248,18 +253,20 @@ describe("multi-factor challenge continuation", () => {
   it("carries a gated sign-in into verifyBackupCode", async () => {
     const { client } = withServer({ features: true });
     const enrollment = await enrol(client, "backup@client.test");
+    const [backupCode] = enrollment.backupCodes;
+    assert(backupCode !== undefined, "enrolment issues backup codes");
 
     const gated = await client.signIn({ email: "backup@client.test", password: PW });
     const challenge = client.multiFactor.continueChallenge(gated);
 
-    const verified = await challenge.verifyBackupCode(enrollment.backupCodes[0]!);
+    const verified = await challenge.verifyBackupCode(backupCode);
     expect(verified.user.email).toBe("backup@client.test");
 
     // Backup codes are single-use: a fresh challenge rejects the same code.
     await client.signOut();
     const again = await client.signIn({ email: "backup@client.test", password: PW });
     const replay = await rejectionOf(
-      client.multiFactor.continueChallenge(again).verifyBackupCode(enrollment.backupCodes[0]!),
+      client.multiFactor.continueChallenge(again).verifyBackupCode(backupCode),
       AuthClientError,
     );
     expect(replay).toBeInstanceOf(AuthClientError);
@@ -307,7 +314,9 @@ describe("change email and delete user", () => {
     });
     expect(server.sentChangeEmail).toHaveLength(1);
 
-    await client.changeEmail.confirm({ token: server.sentChangeEmail[0]!.token });
+    const [sent] = server.sentChangeEmail;
+    assert(sent !== undefined);
+    await client.changeEmail.confirm({ token: sent.token });
 
     // Confirming revokes the old session; the new address is now the handle.
     const signedIn = await client.signIn({ email: "new@client.test", password: PW });
@@ -321,7 +330,9 @@ describe("change email and delete user", () => {
     expect(await client.deleteUser.request()).toEqual({ status: true });
     expect(server.sentDeleteTokens).toHaveLength(1);
 
-    await client.deleteUser.confirm({ token: server.sentDeleteTokens[0]! });
+    const [token] = server.sentDeleteTokens;
+    assert(token !== undefined);
+    await client.deleteUser.confirm({ token });
     expect(await client.getSession()).toBeNull();
   });
 });
@@ -474,8 +485,11 @@ describe("organizations", () => {
     );
 
     // The last active owner cannot be deactivated.
+    const ownerSession = await owner.getSession();
+    assert(ownerSession !== null, "the owner is signed in");
     const lastOwner = await rejectionOf(
-      owner.organization.deactivateMember(org.id, (await owner.getSession())!.user.id),
+      owner.organization.deactivateMember(org.id, ownerSession.user.id),
+
       AuthClientError,
     );
     expect(lastOwner).toBeInstanceOf(AuthClientError);

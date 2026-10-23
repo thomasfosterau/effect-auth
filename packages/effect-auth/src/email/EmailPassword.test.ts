@@ -632,11 +632,14 @@ describe("EmailPasswordService — migration and security hardening", () => {
     expect(result.session).toBeDefined();
 
     // The stored hash must have been silently upgraded to the current params.
-    const updatedHash = passwordHashes.get(user.id)!;
+    const updatedHash = passwordHashes.get(user.id);
+    assert(updatedHash !== undefined, "the user has a password hash");
     expect(updatedHash).not.toBe(oldHash);
     expect(updatedHash.startsWith(`pbkdf2-sha256$${CURRENT_PBKDF2_ITERATIONS}$`)).toBe(true);
     // ...including the current 32-byte key, not the seed's 64-byte one.
-    expect(Buffer.from(updatedHash.split("$")[3]!, "hex").length).toBe(32);
+    const key = updatedHash.split("$")[3];
+    assert(key !== undefined, "the hash encodes a key");
+    expect(Buffer.from(key, "hex").length).toBe(32);
   });
 
   it("signs in with old PBKDF2 hash after switching default hasher to scrypt via MultiAlgorithmVerifier", async () => {
@@ -679,7 +682,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
     expect(result.session).toBeDefined();
 
     // Hash must have been rehashed to scrypt by the active hasher.
-    const updatedHash = passwordHashes.get(user.id)!;
+    const updatedHash = passwordHashes.get(user.id);
+    assert(updatedHash !== undefined, "the user has a password hash");
     expect(updatedHash.startsWith("scrypt$")).toBe(true);
   });
 

@@ -166,8 +166,8 @@ describe("OneTimeTokenService", () => {
       // Check that the stored record has a short TTL.
       const hash = hashToken(rawToken);
       const stored = oneTimeTokens.get(hash);
-      expect(stored).toBeDefined();
-      expect(stored!.expiresAt - stored!.createdAt).toBe(1_000);
+      assert(stored !== undefined, "the token is stored");
+      expect(stored.expiresAt - stored.createdAt).toBe(1_000);
     });
 
     await Effect.runPromise(Effect.provide(program, testContext));
@@ -181,8 +181,8 @@ describe("OneTimeTokenService", () => {
       const rawToken = yield* service.generate("user-override", { expiresIn: 5_000 });
       const hash = hashToken(rawToken);
       const stored = oneTimeTokens.get(hash);
-      expect(stored).toBeDefined();
-      expect(stored!.expiresAt - stored!.createdAt).toBe(5_000);
+      assert(stored !== undefined, "the token is stored");
+      expect(stored.expiresAt - stored.createdAt).toBe(5_000);
     });
 
     await Effect.runPromise(Effect.provide(program, testContext));

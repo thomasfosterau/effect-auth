@@ -94,8 +94,8 @@ describe("vue useSession", () => {
     useSession(client).dispose();
 
     expect(warnSpy).toHaveBeenCalledOnce();
-    expect(warnSpy.mock.calls[0]![0]).toMatch(/effect-auth/);
-    expect(warnSpy.mock.calls[0]![0]).toMatch(/dispose\(\)/);
+    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/effect-auth/);
+    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/dispose\(\)/);
     warnSpy.mockRestore();
   });
 
@@ -151,8 +151,8 @@ describe("vue useListSessions", () => {
     dispose();
 
     expect(warnSpy).toHaveBeenCalledOnce();
-    expect(warnSpy.mock.calls[0]![0]).toMatch(/effect-auth/);
-    expect(warnSpy.mock.calls[0]![0]).toMatch(/dispose\(\)/);
+    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/effect-auth/);
+    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/dispose\(\)/);
     warnSpy.mockRestore();
   });
 

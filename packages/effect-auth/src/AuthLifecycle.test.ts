@@ -611,7 +611,9 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
       const verifiedResult = await Effect.runPromise(
         Effect.gen(function* () {
           const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
-          return yield* service.verifyEmail({ token: sentEmails[0]!.token });
+          const [sent] = sentEmails;
+          assert(sent !== undefined);
+          return yield* service.verifyEmail({ token: sent.token });
         }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
       );
       expect(verifiedResult.user.id).toBe(fresh.user.id);
@@ -724,7 +726,8 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
         // 2. The victim signs up with their own address and password; the
         //    recovered branch answers as if it went through and re-sends a link.
         const recovered = yield* service.signUp({ email: VICTIM, password: VICTIM_PASSWORD });
-        const link = sentEmails.at(-1)!;
+        const link = sentEmails.at(-1);
+        assert(link !== undefined, "the recovered sign-up re-sends a link");
 
         // 3. The victim follows the link and is signed into the account.
         const verified = yield* service.verifyEmail({ token: link.token });
