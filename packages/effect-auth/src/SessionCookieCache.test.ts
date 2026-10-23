@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Redacted } from "effect";
+import { DateTime, Redacted } from "effect";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
@@ -41,22 +41,22 @@ const mustDecode = (
   return decoded;
 };
 
-const now = Date.now();
+const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
 
 const makeSession = (overrides?: Partial<Types.Session>): Types.Session => ({
   id: SESSION_ID,
   userId: "user_1",
-  expiresAt: new Date(now + 60 * 60 * 1000),
-  createdAt: new Date(now - 60 * 1000),
-  lastActivityAt: new Date(now - 30 * 1000),
+  expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now + 60 * 60 * 1000)),
+  createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(now - 60 * 1000)),
+  lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(now - 30 * 1000)),
   attributes: {},
   ...overrides,
 });
 
 const makeUser = (overrides?: Partial<Types.User>): Types.User => ({
   id: "user_1",
-  createdAt: new Date(now - 7 * 24 * 60 * 60 * 1000),
-  updatedAt: new Date(now - 60 * 1000),
+  createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(now - 7 * 24 * 60 * 60 * 1000)),
+  updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe(now - 60 * 1000)),
   attributes: { plan: "pro" },
   ...overrides,
 });
@@ -173,7 +173,9 @@ describe("expiry", () => {
   });
 
   it("rejects a cache entry whose underlying session has expired", () => {
-    const expiredSession = makeSession({ expiresAt: new Date(now - 1000) });
+    const expiredSession = makeSession({
+      expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now - 1000)),
+    });
     const cookie = mustEncode(
       { session: expiredSession, user: makeUser() },
       cache,

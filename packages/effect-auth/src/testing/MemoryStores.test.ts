@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Redacted } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Redacted } from "effect";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";
 import { IdentifierStore, memoryIdentifierStore } from "../Identifier.ts";
@@ -110,19 +110,20 @@ describe("memoryStores", () => {
 
   it("starts empty on every build", async () => {
     const count = SessionStore.use((store) =>
-      store
-        .create({
-          id: "s",
-          userId: "u",
-          createdAt: new Date(),
-          lastActivityAt: new Date(),
-          expiresAt: new Date(),
-          attributes: {},
-        })
-        .pipe(
-          Effect.flatMap(() => store.listByUserId("u")),
-          Effect.map((sessions) => sessions.length),
+      DateTime.nowAsDate.pipe(
+        Effect.flatMap((now) =>
+          store.create({
+            id: "s",
+            userId: "u",
+            createdAt: now,
+            lastActivityAt: now,
+            expiresAt: now,
+            attributes: {},
+          }),
         ),
+        Effect.flatMap(() => store.listByUserId("u")),
+        Effect.map((sessions) => sessions.length),
+      ),
     );
     expect(await Effect.runPromise(count.pipe(Effect.provide(Testing.memoryStores)))).toBe(1);
     expect(await Effect.runPromise(count.pipe(Effect.provide(Testing.memoryStores)))).toBe(1);

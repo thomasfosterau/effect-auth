@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Order } from "effect";
 import {
   AccountManagementService,
   AccountManagementStore,
@@ -36,7 +36,7 @@ interface Harness {
 }
 
 const makeUser = (id: string): Types.User => {
-  const now = new Date();
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
   return {
     id,
     createdAt: now,
@@ -71,7 +71,7 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
       type: "email",
       value: email,
       verified: true,
-      verifiedAt: new Date(),
+      verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifiers.set(identifier.id, identifier);
   };
@@ -222,7 +222,7 @@ describe("AccountManagement — change email", () => {
     const rec = h.tokens.get(token);
     assert(rec !== undefined, "the change-email token is stored");
 
-    h.tokens.set(token, { ...rec, expiresAt: Date.now() - 1 });
+    h.tokens.set(token, { ...rec, expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1 });
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AccountTokenError);
   });
@@ -336,7 +336,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       userId: "user-1",
       type: "email",
       value: "alice@work.example.com",
-      now: new Date(Date.now() + 1000),
+      now: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
     });
     h.identifiers.set(second.id, second);
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
@@ -456,7 +456,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       userId: "user-1",
       type: "email",
       value: NEW_EMAIL,
-      now: new Date(Date.now() + 1000),
+      now: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
     });
     h.identifiers.set(held.id, held);
 

@@ -11,6 +11,7 @@ import {
 import {
   Array as Arr,
   Data,
+  DateTime,
   Deferred,
   Effect,
   Fiber,
@@ -231,7 +232,7 @@ const makeFixture = (
     readonly image?: string;
     readonly attributes?: Types.Attributes;
   }): Types.User => {
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Types.User = {
       id: `user-${++userSeq}`,
       ...(input.name !== undefined && { name: input.name }),
@@ -1011,8 +1012,8 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
     id: "user-holder",
     name: "Holder Name",
     image: "https://example.com/holder.png",
-    createdAt: new Date("2020-01-01T00:00:00Z"),
-    updatedAt: new Date("2021-01-01T00:00:00Z"),
+    createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2020-01-01T00:00:00Z")),
+    updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2021-01-01T00:00:00Z")),
     attributes: { plan: "enterprise", secret: "holder-only" },
   };
 
@@ -1802,7 +1803,12 @@ describe("multi-factor", () => {
   // enrollment with it leaves the current step's code unused, so the replay
   // guard doesn't reject the later challenge redemption.
   const previousTotpFor = (secret: string) =>
-    Effect.runPromise(generateHotp(secret, Math.floor(Date.now() / 1000 / 30) - 1));
+    Effect.runPromise(
+      generateHotp(
+        secret,
+        Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000 / 30) - 1,
+      ),
+    );
 
   it("enables, confirms, gates sign-in, and redeems a TOTP challenge", async () => {
     const fixture = makeFixture();
@@ -2276,7 +2282,7 @@ describe("passwordless verify where send hides the account", () => {
       );
     }
     if (sequence === "expired code") {
-      vi.setSystemTime(Date.now() + expiresIn + 1);
+      vi.setSystemTime(DateTime.toEpochMillis(DateTime.nowUnsafe()) + expiresIn + 1);
     }
     const tries = sequence === "wrong codes" ? 4 : 2;
     await Arr.reduce(Arr.range(1, tries), Promise.resolve(), async (previous) => {

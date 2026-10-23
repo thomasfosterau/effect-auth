@@ -20,7 +20,7 @@
  *
  * @module testing
  */
-import { Clock, type Context, Effect, Layer, type Option } from "effect";
+import { type Context, DateTime, Effect, Layer, type Option } from "effect";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "../Authorizer.ts";
 import * as SessionContext from "../SessionContext.ts";
 import type * as Types from "../Types.ts";
@@ -85,8 +85,7 @@ const authenticated = (
   options: RunAsOptions | undefined,
 ): Layer.Layer<AuthenticatedServices> =>
   Layer.unwrap(
-    Effect.map(Clock.currentTimeMillis, (millis) => {
-      const now = new Date(millis);
+    Effect.map(DateTime.nowAsDate, (now) => {
       return SessionContext.authenticatedLayer(sessionFor(user(now), now, options?.session), {
         credentialClass: options?.credentialClass ?? "interactive",
       });

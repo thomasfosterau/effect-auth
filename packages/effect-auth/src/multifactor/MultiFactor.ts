@@ -12,7 +12,17 @@
  * @module multi-factor
  */
 
-import { Array as Arr, Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Config,
+  Context,
+  Crypto,
+  Data,
+  Effect,
+  Layer,
+  Redacted,
+} from "effect";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
@@ -421,7 +431,7 @@ export const make = (
           });
         }
 
-        if (Date.now() > pending.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > pending.expiresAt) {
           yield* pendingStore.delete(pendingToken);
           return yield* new MultiFactorError({
             message: "Two-factor challenge token has expired",
@@ -469,7 +479,7 @@ export const make = (
           secret: storedSecret,
           backupCodes: backupCodes.map((code) => hashBackupCode(code)),
           verified: skipVerificationOnEnable,
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
 
         yield* store.upsert(record);
@@ -549,8 +559,8 @@ export const make = (
           const pending: PendingMultiFactor = {
             token,
             userId,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + pendingExpiresIn,
+            createdAt: yield* Clock.currentTimeMillis,
+            expiresAt: (yield* Clock.currentTimeMillis) + pendingExpiresIn,
           };
 
           yield* pendingStore.create(pending);

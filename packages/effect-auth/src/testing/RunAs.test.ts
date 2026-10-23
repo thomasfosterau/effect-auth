@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Context, Effect, Exit, Option } from "effect";
+import { Context, DateTime, Effect, Exit, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as Authorizer from "../Authorizer.ts";
 import * as Condition from "../Condition.ts";
@@ -11,7 +11,7 @@ import * as SessionContext from "../SessionContext.ts";
 import type * as Types from "../Types.ts";
 import * as Testing from "./index.ts";
 
-const createdAt = new Date("2026-01-01T00:00:00.000Z");
+const createdAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"));
 const ada: Types.User = { id: "u-ada", createdAt, updatedAt: createdAt, attributes: {} };
 
 const whoAmI = Effect.all(
@@ -76,7 +76,7 @@ describe("runAs", () => {
   });
 
   it("mints the session from the Clock", async () => {
-    const at = Date.parse("2030-06-01T00:00:00.000Z");
+    const at = DateTime.toEpochMillis(DateTime.makeUnsafe("2030-06-01T00:00:00.000Z"));
     const session = await Effect.runPromise(
       Effect.gen(function* () {
         yield* TestClock.setTime(at);

@@ -21,7 +21,18 @@
  * @module admin
  */
 
-import { Context, Crypto, Data, Effect, Layer, Match, Predicate, Record as Rec } from "effect";
+import {
+  Clock,
+  Context,
+  Crypto,
+  Data,
+  DateTime,
+  Effect,
+  Layer,
+  Match,
+  Predicate,
+  Record as Rec,
+} from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType, refusalAuthError } from "./Identifier.ts";
@@ -429,7 +440,7 @@ export const make = (
 
         return yield* userStore.update({
           ...user,
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
           attributes: { ...user.attributes, role },
         });
       }),
@@ -462,12 +473,14 @@ export const make = (
           ...withoutBanAttributes(user.attributes),
           banned: true,
           banReason: options.reason ?? defaultBanReason,
-          ...(expiresIn !== undefined ? { banExpires: Date.now() + expiresIn } : {}),
+          ...(expiresIn !== undefined
+            ? { banExpires: (yield* Clock.currentTimeMillis) + expiresIn }
+            : {}),
         };
 
         const banned = yield* userStore.update({
           ...user,
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
           attributes,
         });
 
@@ -491,7 +504,7 @@ export const make = (
 
         return yield* userStore.update({
           ...user,
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
           attributes,
         });
       }),
@@ -531,7 +544,7 @@ export const make = (
 
         return yield* sessionManager.createSession(target.id, {
           impersonatedBy: actor.id,
-          impersonationExpiresAt: Date.now() + impersonationSessionDuration,
+          impersonationExpiresAt: (yield* Clock.currentTimeMillis) + impersonationSessionDuration,
         });
       }),
 
@@ -575,7 +588,7 @@ export const make = (
             type: "email",
             value: normalizeEmail(input.email),
             verified: emailVerified,
-            ...(emailVerified ? { verifiedAt: new Date() } : {}),
+            ...(emailVerified ? { verifiedAt: yield* DateTime.nowAsDate } : {}),
           },
           (identifier) =>
             adminStore.createUser({
@@ -590,7 +603,7 @@ export const make = (
           ),
         );
 
-        const now = new Date();
+        const now = yield* DateTime.nowAsDate;
         yield* Effect.forEach(
           extraIdentifiers,
           (ident) =>

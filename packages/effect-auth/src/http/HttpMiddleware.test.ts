@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Exit, Layer, Option, Redacted } from "effect";
+import { Array as Arr, DateTime, Effect, Exit, Layer, Option, Redacted } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import type * as Types from "../Types.ts";
@@ -25,7 +25,7 @@ import { Authorizer, CurrentPrincipal } from "../Authorizer.ts";
 
 const RAW_TOKEN = "validrawtoken1234567890abcdef123456";
 const USER_ID = "user-42";
-const now = new Date();
+const now = DateTime.toDateUtc(DateTime.nowUnsafe());
 
 // `email` is not a first-class `User` field (login handles are `Identifier`
 // records); it rides along in `attributes` here purely so the assertions can
@@ -40,7 +40,7 @@ const testUser: Types.User = {
 const testSession: Types.Session = {
   id: RAW_TOKEN,
   userId: USER_ID,
-  expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+  expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60 * 60 * 1000)),
   createdAt: now,
   lastActivityAt: now,
   attributes: {},

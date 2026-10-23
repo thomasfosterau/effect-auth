@@ -2,7 +2,7 @@
  * Rate limiting types for effect-auth
  */
 
-import { Context, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Effect, Layer, Predicate } from "effect";
 import { RateLimitError, type AuthError } from "./Errors.ts";
 import * as Obs from "./Observability.ts";
 
@@ -110,7 +110,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
         Effect.gen(function* () {
           const entry = yield* store.get(key);
 
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
 
           // Check if blocked
           if (entry?.blockedUntil && now < entry.blockedUntil) {
@@ -151,7 +151,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
 
       consumeToken: Effect.fn("RateLimiter.consumeToken")((key: string, config: RateLimitConfig) =>
         Effect.gen(function* () {
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
 
           const entry = yield* store.get(key);
 
@@ -209,7 +209,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
       ) {
         const entry = yield* store.get(key);
 
-        if (!entry || Date.now() >= entry.resetAt) {
+        if (!entry || (yield* Clock.currentTimeMillis) >= entry.resetAt) {
           return config.maxRequests;
         }
 

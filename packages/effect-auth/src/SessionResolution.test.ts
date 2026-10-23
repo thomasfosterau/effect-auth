@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Cause, Effect, Exit, Option, Schema } from "effect";
+import { Cause, DateTime, Effect, Exit, Option, Schema } from "effect";
 import { HttpServerRequest } from "effect/http";
 import type * as Types from "./Types.ts";
 import * as SessionResolution from "./SessionResolution.ts";
@@ -12,13 +12,13 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const now = new Date();
+const now = DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const resolved: Types.SessionWithUser = {
   session: {
     id: "session-1",
     userId: "user-42",
-    expiresAt: new Date(now.getTime() + 3600_000),
+    expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3600_000)),
     createdAt: now,
     lastActivityAt: now,
     attributes: {},

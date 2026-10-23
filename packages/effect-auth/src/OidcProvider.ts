@@ -19,6 +19,7 @@
  */
 import {
   Array as Arr,
+  Clock,
   Context,
   Crypto,
   Data,
@@ -825,12 +826,11 @@ export const make = (
       string,
       { familyId: string; absoluteExpiresAt: number }
     >();
-    const pruneConsumed = () => {
-      const now = Date.now();
+    const pruneConsumed = Effect.map(Clock.currentTimeMillis, (now) => {
       Arr.fromIterable(consumedRefreshTokens)
         .filter(([, entry]) => now > entry.absoluteExpiresAt)
         .forEach(([hash]) => MutableHashMap.remove(consumedRefreshTokens, hash));
-    };
+    });
 
     /** Trusted config clients, normalized to the stored shape (secret hashed). */
     const trustedClients = HashMap.fromIterable<string, OidcClient>(
@@ -895,7 +895,7 @@ export const make = (
     ) =>
       Effect.gen(function* () {
         const value = yield* randomToken();
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         yield* codeStore.create({
           ...base,
           codeHash: hashOidcSecret(value),
@@ -944,7 +944,7 @@ export const make = (
       readonly absoluteExpiresAt?: number;
     }) =>
       Effect.gen(function* () {
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
 
         // Mint the id_token FIRST — a signing failure here must not leave
         // orphaned access/refresh tokens that can never be revoked.
@@ -1248,7 +1248,7 @@ export const make = (
             const clientSecret = isPublic ? undefined : yield* randomToken();
             const registrationAccessToken = yield* randomToken();
             const clientId = yield* randomClientId();
-            const now = Date.now();
+            const now = yield* Clock.currentTimeMillis;
             const client = yield* clientStore.create({
               clientId,
               ...(clientSecret !== undefined && {
@@ -1316,7 +1316,7 @@ export const make = (
           responseTypes: normalized.responseTypes,
           scope: normalized.scope,
           ...(disposition.skipConsent !== undefined && { skipConsent: disposition.skipConsent }),
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         });
       }),
 
@@ -1347,7 +1347,7 @@ export const make = (
         const type = input.type ?? "web";
         const clientSecret = type === "web" ? yield* randomToken() : undefined;
         const clientId = yield* randomClientId();
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const client = yield* clientStore.create({
           clientId,
           ...(clientSecret !== undefined && { clientSecretHash: hashOidcSecret(clientSecret) }),
@@ -1393,7 +1393,7 @@ export const make = (
           ...(input.skipConsent !== undefined && { skipConsent: input.skipConsent }),
           ...(input.disabled !== undefined && { disabled: input.disabled }),
           ...(input.metadata !== undefined && { metadata: input.metadata }),
-          updatedAt: Date.now(),
+          updatedAt: yield* Clock.currentTimeMillis,
         });
       }),
 
@@ -1525,7 +1525,7 @@ export const make = (
               pending === null ||
               pending.kind !== "pending_consent" ||
               pending.userId !== userId ||
-              Date.now() > pending.expiresAt
+              (yield* Clock.currentTimeMillis) > pending.expiresAt
             ) {
               return yield* new OidcProviderError({
                 message: "Consent request not found or expired",
@@ -1542,7 +1542,7 @@ export const make = (
               };
             }
 
-            const now = Date.now();
+            const now = yield* Clock.currentTimeMillis;
             const existing = yield* consentStore.get(userId, pending.clientId);
             yield* consentStore.upsert({
               userId,
@@ -1602,7 +1602,7 @@ export const make = (
             // Single use: burn the code before any further checks so a replay
             // (even with corrected parameters) always fails.
             yield* codeStore.delete(record.codeHash);
-            if (Date.now() > record.expiresAt) {
+            if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
               return yield* new OidcTokenError({
                 error: "invalid_grant",
                 description: "Code expired",
@@ -1651,7 +1651,7 @@ export const make = (
               });
             }
 
-            pruneConsumed();
+            yield* pruneConsumed;
             const presentedHash = hashOidcSecret(request.refreshToken);
             const record = yield* tokenStore.get(presentedHash);
 
@@ -1692,7 +1692,7 @@ export const make = (
             });
 
             // Absolute (non-sliding) lifetime check.
-            if (Date.now() > absoluteExpiresAt) {
+            if ((yield* Clock.currentTimeMillis) > absoluteExpiresAt) {
               return yield* new OidcTokenError({
                 error: "invalid_grant",
                 description: "Refresh token expired",
@@ -1732,7 +1732,11 @@ export const make = (
       userinfo: Effect.fn("OidcProviderService.userinfo")((accessToken: string) =>
         Effect.gen(function* () {
           const record = yield* tokenStore.get(hashOidcSecret(accessToken));
-          if (record === null || record.kind !== "access" || Date.now() > record.expiresAt) {
+          if (
+            record === null ||
+            record.kind !== "access" ||
+            (yield* Clock.currentTimeMillis) > record.expiresAt
+          ) {
             return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
           const user = yield* userStore

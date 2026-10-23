@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Clock, DateTime, Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -63,8 +63,8 @@ describe("KeyValueStores", () => {
       provider: "google",
       codeVerifier: "verifier",
       returnTo: "/dashboard",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 600_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 600_000,
     };
 
     it("roundtrips create/get/delete", async () => {
@@ -87,7 +87,7 @@ describe("KeyValueStores", () => {
     it("roundtrips challenge bytes", async () => {
       const challenge: WebAuthnChallenge = {
         challenge: new Uint8Array([1, 2, 3, 255, 0, 42]),
-        expiresAt: Date.now() + 60_000,
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
         userId: "user-1",
       };
       const result = await run(
@@ -109,7 +109,7 @@ describe("KeyValueStores", () => {
     it("stores anonymous challenges (no userId)", async () => {
       const challenge: WebAuthnChallenge = {
         challenge: new Uint8Array([9, 9, 9]),
-        expiresAt: Date.now() + 60_000,
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
       };
       const loaded = await run(
         Effect.gen(function* () {
@@ -128,8 +128,8 @@ describe("KeyValueStores", () => {
       const entry: RateLimitEntry = {
         key: "login:1.2.3.4",
         count: 3,
-        resetAt: Date.now() + 60_000,
-        blockedUntil: Date.now() + 120_000,
+        resetAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+        blockedUntil: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 120_000,
       };
       const result = await run(
         Effect.gen(function* () {
@@ -157,7 +157,7 @@ describe("KeyValueStores", () => {
           // Force an expired window, next increment starts over at 1.
           yield* store.set(
             "otp:me@example.com",
-            { key: "otp:me@example.com", count: 99, resetAt: Date.now() - 1 },
+            { key: "otp:me@example.com", count: 99, resetAt: (yield* Clock.currentTimeMillis) - 1 },
             60,
           );
           const restarted = yield* store.increment("otp:me@example.com", 60);
@@ -176,8 +176,8 @@ describe("KeyValueStores", () => {
       token,
       userId,
       email: `${userId}@example.com`,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 86_400_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 86_400_000,
     });
 
     it("roundtrips create/get/delete", async () => {
@@ -221,8 +221,8 @@ describe("KeyValueStores", () => {
       token,
       userId,
       email: `${userId}@example.com`,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 3_600_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
     });
 
     it("roundtrips and deletes by user id", async () => {
@@ -252,8 +252,8 @@ describe("KeyValueStores", () => {
     const link = (token: string, email: string): MagicLinkToken => ({
       token,
       email,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 300_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
     });
 
     it("roundtrips and deletes by email", async () => {
@@ -285,8 +285,8 @@ describe("KeyValueStores", () => {
       otpHash: "hash",
       purpose: "sign-in",
       attempts: 0,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 300_000,
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
     };
 
     it("upserts per email+purpose and increments attempts", async () => {
@@ -327,8 +327,8 @@ describe("KeyValueStores", () => {
       const pending: PendingMultiFactor = {
         token: "2fa-1",
         userId: "user-1",
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 300_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
       };
       const result = await run(
         Effect.gen(function* () {

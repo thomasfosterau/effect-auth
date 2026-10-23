@@ -12,7 +12,7 @@
  *
  * @module one-time-token
  */
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -152,7 +152,7 @@ export const make = (
           Effect.gen(function* () {
             const rawToken = yield* generateRawToken();
             const expiresIn = options?.expiresIn ?? defaultExpiresIn;
-            const now = Date.now();
+            const now = yield* Clock.currentTimeMillis;
             const record: OneTimeTokenRecord = {
               token: hashToken(rawToken),
               subject,
@@ -181,7 +181,7 @@ export const make = (
         // does not leak whether the hash exists in the store.
         yield* store.delete(tokenHash);
 
-        if (Date.now() > record.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
 

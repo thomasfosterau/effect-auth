@@ -43,7 +43,7 @@
  *
  * @module saml
  */
-import { Context, Data, Effect } from "effect";
+import { Clock, Context, Data, Effect } from "effect";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */
@@ -259,17 +259,21 @@ export const memorySamlReplayStore = (
   records: Map<string, SamlReplayRecord> = new Map(),
 ): typeof SamlReplayStore.Service => ({
   create: (record) =>
-    Effect.sync(() => {
-      const existing = records.get(record.id);
-      if (existing !== undefined && Date.now() <= existing.expiresAt) return null;
-      records.set(record.id, record);
-      return record;
-    }),
+    Effect.flatMap(Clock.currentTimeMillis, (now) =>
+      Effect.sync(() => {
+        const existing = records.get(record.id);
+        if (existing !== undefined && now <= existing.expiresAt) return null;
+        records.set(record.id, record);
+        return record;
+      }),
+    ),
   consume: (id) =>
-    Effect.sync(() => {
-      const existing = records.get(id);
-      if (existing === undefined) return null;
-      records.delete(id);
-      return Date.now() > existing.expiresAt ? null : existing;
-    }),
+    Effect.flatMap(Clock.currentTimeMillis, (now) =>
+      Effect.sync(() => {
+        const existing = records.get(id);
+        if (existing === undefined) return null;
+        records.delete(id);
+        return now > existing.expiresAt ? null : existing;
+      }),
+    ),
 });

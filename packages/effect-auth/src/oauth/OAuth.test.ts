@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Crypto, Effect, Layer, Predicate, Redacted, Schema } from "effect";
+import { Array as Arr, Crypto, DateTime, Effect, Layer, Predicate, Redacted, Schema } from "effect";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
 import {
@@ -918,8 +918,8 @@ describe("OAuthService encryptTokens", () => {
       providerId: "gh-1",
       accessToken: encAccess,
       refreshToken: encRefresh,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
     const service = await Effect.runPromise(
@@ -972,8 +972,8 @@ describe("OAuthService encryptTokens", () => {
       providerId: "gh-1",
       accessToken: PLAIN_ACCESS,
       refreshToken: PLAIN_REFRESH,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
     const service = await Effect.runPromise(
@@ -1011,8 +1011,8 @@ describe("OAuthService encryptTokens", () => {
       providerId: "gh-2",
       accessToken: await Effect.runPromise(customCipher.encrypt("old-access")),
       refreshToken: encRefresh,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
     const service = await Effect.runPromise(
@@ -1078,8 +1078,8 @@ describe("OAuthService unlinkAccount guard", () => {
     provider: "github",
     providerId: "gh-1",
     accessToken: "at",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     ...overrides,
   });
 
@@ -1195,8 +1195,8 @@ describe("OAuthService linking controls", () => {
   const makeState = (provider: string, stateKey = "state-123"): OAuthState => ({
     state: stateKey,
     provider,
-    expiresAt: Date.now() + 60_000,
-    createdAt: Date.now(),
+    expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+    createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
   });
 
   const makeStateLayer = (state: OAuthState) =>
@@ -1237,8 +1237,8 @@ describe("OAuthService linking controls", () => {
 
   const makeUser = (overrides?: Partial<Types.User>): Types.User => ({
     id: "u1",
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
     ...overrides,
   });
@@ -1293,9 +1293,9 @@ describe("OAuthService linking controls", () => {
     const session: Types.Session = {
       id: "sess-test",
       userId,
-      expiresAt: new Date(Date.now() + 3600_000),
-      createdAt: new Date(),
-      lastActivityAt: new Date(),
+      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     const user: Types.User = makeUser({ id: userId });

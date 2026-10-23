@@ -13,7 +13,7 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import { Array as Arr, Context, Crypto, Data, Effect, Layer, Order } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Data, DateTime, Effect, Layer, Order } from "effect";
 import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
@@ -343,7 +343,7 @@ export const make = (
           return yield* rejectOtp(purpose, "missing");
         }
 
-        if (Date.now() > record.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(phoneNumber, purpose);
           return yield* rejectOtp(purpose, "expired");
         }
@@ -389,7 +389,7 @@ export const make = (
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.get(phoneNumber, purpose);
           if (existing !== null) {
-            const elapsed = Date.now() - existing.createdAt;
+            const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
             if (elapsed < config.resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another OTP",
@@ -413,8 +413,8 @@ export const make = (
           otpHash: hashToken(deliver ? otp : markerSecret),
           purpose,
           attempts: 0,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + expiresIn,
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
         };
 
         yield* store.upsert(record);
@@ -457,7 +457,12 @@ export const make = (
           // A verified OTP proves ownership of the phone number.
           const created = yield* createUserWithIdentifier(
             identifiers,
-            { type: "phone", value: phoneNumber, verified: true, verifiedAt: new Date() },
+            {
+              type: "phone",
+              value: phoneNumber,
+              verified: true,
+              verifiedAt: yield* DateTime.nowAsDate,
+            },
             (identifier) => userStore.createUser({ identifier }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
@@ -467,7 +472,7 @@ export const make = (
           user = created.user;
         } else if (identifier !== null && !identifier.verified) {
           // The OTP proves ownership — promote the identifier to verified.
-          yield* identifiers.setVerified(identifier.id, new Date());
+          yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
         }
 
         const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
@@ -497,7 +502,7 @@ export const make = (
               type: "phone",
               value: phoneNumber,
               verified: true,
-              verifiedAt: new Date(),
+              verifiedAt: yield* DateTime.nowAsDate,
             }),
           ).pipe(
             Effect.catchTags({
@@ -507,7 +512,7 @@ export const make = (
             }),
           );
         } else if (!existing.verified) {
-          yield* identifiers.setVerified(existing.id, new Date());
+          yield* identifiers.setVerified(existing.id, yield* DateTime.nowAsDate);
         }
 
         const user = yield* users.get(userId);

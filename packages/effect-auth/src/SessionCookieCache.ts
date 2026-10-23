@@ -43,7 +43,7 @@
  * Without `encrypt`, the cookie is signed but NOT encrypted: session and user
  * data (including any PII in `attributes`) is readable by the browser.
  */
-import { Data, Effect, Option, Redacted, Schema } from "effect";
+import { Data, DateTime, Effect, Option, Redacted, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
 import { timingSafeEqualBytes } from "./TokenHash.ts";
@@ -265,9 +265,9 @@ export const decodeSessionCacheCookie = (
   const session: Types.Session = {
     id: ss.id,
     userId: ss.userId,
-    expiresAt: new Date(ss.expiresAt),
-    createdAt: new Date(ss.createdAt),
-    lastActivityAt: new Date(ss.lastActivityAt),
+    expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(ss.expiresAt)),
+    createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(ss.createdAt)),
+    lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(ss.lastActivityAt)),
     attributes: ss.attributes,
   };
   // Honour the session's own expiry even within the cache window.
@@ -278,8 +278,8 @@ export const decodeSessionCacheCookie = (
     id: su.id,
     name: su.name,
     image: su.image,
-    createdAt: new Date(su.createdAt),
-    updatedAt: new Date(su.updatedAt),
+    createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(su.createdAt)),
+    updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe(su.updatedAt)),
     attributes: su.attributes,
   };
   // An authorization-bearing attribute is never served from a snapshot.

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Layer, Result } from "effect";
+import { Array as Arr, Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Errors from "./Errors.ts";
@@ -20,8 +20,8 @@ const signIn = (email: string): SignInInput => ({ email, password: "secret" });
 const authResult: AuthResult = {
   user: {
     id: "user-1",
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   },
   identifier: { type: "email", value: "user-1@example.com" },
@@ -373,8 +373,8 @@ describe("Hooks - integration with EmailPasswordService", () => {
           const user: User = {
             id,
             ...(name !== undefined && { name }),
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
             attributes: attributes ?? {},
           };
           users.set(id, user);

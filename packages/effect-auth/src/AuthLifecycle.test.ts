@@ -1,5 +1,5 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer, Result } from "effect";
+import { Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
 import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -53,7 +53,7 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     type: "email",
     value: email,
     verified,
-    ...(verified ? { verifiedAt: new Date() } : {}),
+    ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
   });
   identifierRecords.set(identifier.id, identifier);
 };
@@ -107,8 +107,8 @@ const emailPasswordStore = {
       const user: User = {
         id,
         ...(name !== undefined && { name }),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: attributes ?? {},
       };
       users.set(id, user);
@@ -315,8 +315,8 @@ describe("AuthLifecycleService", () => {
       id: "user-pending",
       name: "Pending Holder",
       image: "https://example.com/pending.png",
-      createdAt: new Date("2020-01-01T00:00:00Z"),
-      updatedAt: new Date("2021-01-01T00:00:00Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2020-01-01T00:00:00Z")),
+      updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2021-01-01T00:00:00Z")),
       attributes: { plan: "enterprise", secret: "holder-only" },
     };
     users.set(pending.id, pending);
@@ -363,8 +363,8 @@ describe("AuthLifecycleService", () => {
 
     const holder: User = {
       id: "user-holder",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(holder.id, holder);
@@ -397,8 +397,8 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-sign-in-unverified",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -435,8 +435,8 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-verify",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -481,8 +481,8 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-verified",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -530,8 +530,8 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
   const seedHolder = (verified: boolean): User => {
     const holder: User = {
       id: "user-holder",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(holder.id, holder);
@@ -781,8 +781,8 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
     const context = await makeTestContext();
     const user: User = {
       id: "user-1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -810,8 +810,8 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
     const context = await makeTestContext();
     const user: User = {
       id: "user-1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -863,7 +863,12 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
   ).pipe(Layer.provide(Hooks.Default));
 
   const seed = (id: string, email: string, verified: boolean) => {
-    users.set(id, { id, createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    users.set(id, {
+      id,
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
     addEmailIdentifier(id, email, verified);
   };
 

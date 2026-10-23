@@ -3,7 +3,7 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Array as Arr, Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Data, Effect, Layer } from "effect";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -270,7 +270,7 @@ export const make = (
         function* (user: WebAuthnUser) {
           // Generate random challenge (32 bytes = 256 bits)
           const challenge: Uint8Array = yield* generateChallenge();
-          const expiresAt = Date.now() + challengeExpiresIn;
+          const expiresAt = (yield* Clock.currentTimeMillis) + challengeExpiresIn;
 
           const challengeData: WebAuthnChallenge = {
             challenge,
@@ -318,7 +318,7 @@ export const make = (
               return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
             }
 
-            if (Date.now() > storedChallenge.expiresAt) {
+            if ((yield* Clock.currentTimeMillis) > storedChallenge.expiresAt) {
               yield* challengeStore.delete(challenge);
               return yield* new Errors.ChallengeExpiredError({
                 message: "Challenge has expired",
@@ -421,7 +421,7 @@ export const make = (
               publicKey: publicKeyBytes,
               algorithm,
               counter: authenticatorData.signatureCounter,
-              createdAt: Date.now(),
+              createdAt: yield* Clock.currentTimeMillis,
             };
 
             // Store credential
@@ -444,7 +444,7 @@ export const make = (
       generateAuthenticationChallenge: Effect.fn("WebAuthnService.generateAuthenticationChallenge")(
         function* (userId?: string) {
           const challenge: Uint8Array = yield* generateChallenge();
-          const expiresAt = Date.now() + challengeExpiresIn;
+          const expiresAt = (yield* Clock.currentTimeMillis) + challengeExpiresIn;
 
           const challengeData: WebAuthnChallenge = {
             challenge,
@@ -467,7 +467,7 @@ export const make = (
               return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
             }
 
-            if (Date.now() > storedChallenge.expiresAt) {
+            if ((yield* Clock.currentTimeMillis) > storedChallenge.expiresAt) {
               yield* challengeStore.delete(challenge);
               return yield* new Errors.ChallengeExpiredError({
                 message: "Challenge has expired",

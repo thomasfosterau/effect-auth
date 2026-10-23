@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Context, Layer, Result } from "effect";
+import { Context, DateTime, Effect, Layer, Result } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
@@ -53,8 +53,8 @@ const mockUserStore = {
       {
         id: "user1",
         name: "Test User",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       },
     ],
@@ -63,8 +63,8 @@ const mockUserStore = {
       {
         id: "user2",
         name: "Another User",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       },
     ],
@@ -338,7 +338,9 @@ describe("SessionService", () => {
 
       sessions.set(tokenHash, {
         ...stored,
-        lastActivityAt: new Date(stored.lastActivityAt.getTime() - 200),
+        lastActivityAt: DateTime.toDateUtc(
+          DateTime.makeUnsafe(stored.lastActivityAt.getTime() - 200),
+        ),
       });
 
       await Effect.runPromise(

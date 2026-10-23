@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, Effect, Layer, Order, Result } from "effect";
+import { Array as Arr, Context, Crypto, DateTime, Effect, Layer, Order, Result } from "effect";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as Errors from "../Errors.ts";
@@ -81,8 +81,8 @@ const emailPasswordStore = {
         id,
         ...(name !== undefined && { name }),
         ...(image !== undefined && { image }),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: attributes ?? {},
       };
       users.set(id, user);
@@ -190,8 +190,8 @@ describe("EmailPasswordService", () => {
     // reports that it inserted nothing.
     const owner: User = {
       id: "owner",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     const upsertingStore: typeof EmailPasswordStore.Service = {
@@ -234,8 +234,8 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-existing",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -270,8 +270,8 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-invalid-cred",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -307,8 +307,8 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-unverified",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -419,8 +419,8 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
     const user: User = {
       id: "user-nohash",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -491,8 +491,8 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const user: User = {
       id: "user-gated",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -501,7 +501,11 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const gate = {
       required: (candidate: User) => Effect.succeed(candidate.id === user.id),
-      begin: () => Effect.succeed({ token: "pending-token", expiresAt: Date.now() + 60_000 }),
+      begin: () =>
+        Effect.succeed({
+          token: "pending-token",
+          expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+        }),
     };
 
     const result = await Effect.runPromise(
@@ -532,8 +536,8 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const user: User = {
       id: "user-ungated",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -542,7 +546,11 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const gate = {
       required: () => Effect.succeed(false),
-      begin: () => Effect.succeed({ token: "unused", expiresAt: Date.now() + 60_000 }),
+      begin: () =>
+        Effect.succeed({
+          token: "unused",
+          expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+        }),
     };
 
     const result = await Effect.runPromise(
@@ -612,8 +620,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
     const oldHash = await makeOldPbkdf2Hash("migration-password");
     const user: User = {
       id: "user-migration",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -654,8 +662,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
     const oldHash = await makeOldPbkdf2Hash("switch-password");
     const user: User = {
       id: "user-switch",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -702,8 +710,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
     const user: User = {
       id: "user-malformed",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -735,8 +743,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
     const user: User = {
       id: "user-long-pw",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     users.set(user.id, user);
@@ -811,8 +819,8 @@ describe("EmailPasswordService - dangling session protection", () => {
         const user: User = {
           id,
           ...(name !== undefined && { name }),
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
           attributes: attributes ?? {},
         };
         localUsers.set(id, user);
@@ -1123,8 +1131,8 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
   // sign-up's pre-check found the address free.
   const owner: User = {
     id: "owner",
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   };
   const seedOwner = (email: string) => {

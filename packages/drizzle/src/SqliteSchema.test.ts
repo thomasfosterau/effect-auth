@@ -16,7 +16,7 @@
 import Database from "better-sqlite3";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { Array as Arr, Effect, Layer, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Schema } from "effect";
 import { assert, afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -126,7 +126,10 @@ const runRequests = <A, E>(
     ),
   );
 
-const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
+const at = (offsetMs: number): Date =>
+  DateTime.toDateUtc(
+    DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
+  );
 
 const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
   id: "session-1",

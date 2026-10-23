@@ -12,7 +12,17 @@
  * every viewer.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Context, Effect, Exit, Layer, Logger, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Logger,
+  Option,
+  Schema,
+} from "effect";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -306,12 +316,17 @@ describe("the viewer seam (SessionContext)", () => {
     session: {
       id: "s1",
       userId: "u1",
-      expiresAt: new Date(0),
-      createdAt: new Date(0),
-      lastActivityAt: new Date(0),
+      expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+      lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
       attributes: {},
     },
-    user: { id: "u1", createdAt: new Date(0), updatedAt: new Date(0), attributes },
+    user: {
+      id: "u1",
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+      updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+      attributes,
+    },
   });
 
   class LibraryViewer extends Context.Service<

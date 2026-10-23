@@ -1,5 +1,16 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Clock, Data, Effect, Layer, Order, Predicate, Schema, Stream } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Data,
+  DateTime,
+  Effect,
+  Layer,
+  Order,
+  Predicate,
+  Schema,
+  Stream,
+} from "effect";
 import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
 import Database from "better-sqlite3";
@@ -275,11 +286,11 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.SessionStore;
-          const now = new Date();
+          const now = yield* DateTime.nowAsDate;
           const session: Auth.Session = {
             id: "sess-1",
             userId: "user-1",
-            expiresAt: new Date(now.getTime() + 60_000),
+            expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60_000)),
             createdAt: now,
             lastActivityAt: now,
             attributes: { device: "laptop" },
@@ -291,7 +302,7 @@ const storeContract = (engine: StoreEngine): void => {
           assert(loaded !== null, "the session was created");
           const updated = yield* store.update({
             ...loaded,
-            lastActivityAt: new Date(now.getTime() + 1000),
+            lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 1000)),
             attributes: { device: "phone" },
           });
           const listed = yield* store.listByUserId("user-1");
@@ -353,7 +364,7 @@ const storeContract = (engine: StoreEngine): void => {
             ...created,
             name: "Renamed",
             image: "https://example.com/x.png",
-            updatedAt: new Date(),
+            updatedAt: yield* DateTime.nowAsDate,
           });
           const loaded = yield* store.get(created.id);
           yield* store.delete(created.id);
@@ -461,17 +472,25 @@ const storeContract = (engine: StoreEngine): void => {
             {
               key: "k",
               count: 9,
-              resetAt: Date.now() + 60_000,
-              blockedUntil: Date.now() + 120_000,
+              resetAt: (yield* Clock.currentTimeMillis) + 60_000,
+              blockedUntil: (yield* Clock.currentTimeMillis) + 120_000,
             },
             60,
           );
           const afterSet = yield* store.get("k");
           // set() on a fresh key inserts (upsert path).
-          yield* store.set("fresh", { key: "fresh", count: 3, resetAt: Date.now() + 60_000 }, 60);
+          yield* store.set(
+            "fresh",
+            { key: "fresh", count: 3, resetAt: (yield* Clock.currentTimeMillis) + 60_000 },
+            60,
+          );
           const freshSet = yield* store.get("fresh");
           // Expired window restarts the counter.
-          yield* store.set("k", { key: "k", count: 9, resetAt: Date.now() - 1 }, 60);
+          yield* store.set(
+            "k",
+            { key: "k", count: 9, resetAt: (yield* Clock.currentTimeMillis) - 1 },
+            60,
+          );
           const restarted = yield* store.increment("k", 60);
           yield* store.delete("k");
           const deleted = yield* store.get("k");
@@ -493,8 +512,8 @@ const storeContract = (engine: StoreEngine): void => {
         token,
         userId,
         email: `${userId}@example.com`,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 86_400_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 86_400_000,
       });
       const result = await run(
         Effect.gen(function* () {
@@ -524,11 +543,14 @@ const storeContract = (engine: StoreEngine): void => {
           const store = yield* Auth.MultiFactor.ChallengeStore;
           yield* store.create({
             challenge: bytes,
-            expiresAt: Date.now() + 60_000,
+            expiresAt: (yield* Clock.currentTimeMillis) + 60_000,
             userId: "user-1",
           });
           // create replaces an existing row for the same challenge
-          yield* store.create({ challenge: bytes, expiresAt: Date.now() + 90_000 });
+          yield* store.create({
+            challenge: bytes,
+            expiresAt: (yield* Clock.currentTimeMillis) + 90_000,
+          });
           const loaded = yield* store.get(bytes);
           yield* store.delete(bytes);
           const missing = yield* store.get(bytes);
@@ -547,7 +569,7 @@ const storeContract = (engine: StoreEngine): void => {
         publicKey: new Uint8Array([9, 8, 7]),
         algorithm: -7,
         counter: 0,
-        createdAt: Date.now(),
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
         name: "MacBook",
         transports: ["internal", "hybrid"],
       };
@@ -581,8 +603,8 @@ const storeContract = (engine: StoreEngine): void => {
         codeVerifier: "cv",
         nonce: "n-1",
         returnTo: "/home",
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 600_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 600_000,
       };
       const result = await run(
         Effect.gen(function* () {
@@ -603,7 +625,7 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("OAuthAccountStore upserts, links, unlinks and reports hasPassword", async () => {
-      const now = Date.now();
+      const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const account: Auth.OAuth.OAuthAccount = {
         id: "acc-1",
         userId: "user-1",
@@ -678,8 +700,8 @@ const storeContract = (engine: StoreEngine): void => {
         token,
         userId,
         email: `${userId}@example.com`,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 3_600_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
       });
       const result = await run(
         Effect.gen(function* () {
@@ -704,8 +726,8 @@ const storeContract = (engine: StoreEngine): void => {
       const link = (token: string, email: string): Auth.MagicLinkToken => ({
         token,
         email,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 300_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
       });
       const result = await run(
         Effect.gen(function* () {
@@ -735,8 +757,8 @@ const storeContract = (engine: StoreEngine): void => {
         otpHash: "hash",
         purpose: "sign-in",
         attempts: 0,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 300_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
       };
       const result = await run(
         Effect.gen(function* () {
@@ -819,13 +841,13 @@ const storeContract = (engine: StoreEngine): void => {
         secret: "JBSWY3DPEHPK3PXP",
         backupCodes: ["h1", "h2", "h3"],
         verified: false,
-        createdAt: Date.now(),
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       };
       const pending: Auth.MultiFactor.PendingMultiFactor = {
         token: "p2f-1",
         userId: "user-1",
-        expiresAt: Date.now() + 300_000,
-        createdAt: Date.now(),
+        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
+        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       };
       const result = await run(
         Effect.gen(function* () {
@@ -920,9 +942,9 @@ const storeContract = (engine: StoreEngine): void => {
           const session: Auth.Session = {
             id: "bigint-test",
             userId: "user-bigint",
-            expiresAt: new Date(FAR_FUTURE_MS),
-            createdAt: new Date(FAR_FUTURE_MS - 1000),
-            lastActivityAt: new Date(FAR_FUTURE_MS - 500),
+            expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(FAR_FUTURE_MS)),
+            createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(FAR_FUTURE_MS - 1000)),
+            lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(FAR_FUTURE_MS - 500)),
             attributes: {},
           };
           yield* sessionStore.create(session);
@@ -935,7 +957,7 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("IdentifierStore roundtrips create/getByValue/listByUser/setVerified/delete/deleteByUser", async () => {
-      const now = new Date("2026-07-04T00:00:00.000Z");
+      const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T00:00:00.000Z"));
       const emailId: Auth.Identifier = {
         id: "ident-email",
         userId: "user-ident",
@@ -951,7 +973,7 @@ const storeContract = (engine: StoreEngine): void => {
         value: "alice",
         verified: true,
         verifiedAt: now,
-        createdAt: new Date(now.getTime() + 1000),
+        createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 1000)),
       };
       const result = await run(
         Effect.gen(function* () {
@@ -962,7 +984,7 @@ const storeContract = (engine: StoreEngine): void => {
           const missing = yield* store.getByValue("email", "nobody@example.com");
           const listed = yield* store.listByUser("user-ident");
           const emptyList = yield* store.listByUser("no-such-user");
-          const verifiedAt = new Date("2026-07-04T12:00:00.000Z");
+          const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T12:00:00.000Z"));
           const verified = yield* store.setVerified("ident-email", verifiedAt);
           const verifiedMissing = yield* store.setVerified("no-such-id", verifiedAt);
           const afterVerify = yield* store.getByValue("email", "alice@example.com");
@@ -1113,7 +1135,7 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("ApiKeyStore roundtrips full records incl. permissions/metadata/refill/rateLimit", async () => {
-      const now = Date.now();
+      const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const apiKey: Auth.ApiKey = {
         id: "key-1",
         name: "CI deploy key",
@@ -1173,7 +1195,7 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("ApiKeyStore treats minimal records (no permissions/metadata/refill/rateLimit) as absent, not null", async () => {
-      const now = Date.now();
+      const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const minimal: Auth.ApiKey = {
         id: "key-min",
         start: "ghijkl",
@@ -1204,7 +1226,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
           yield* sql`INSERT INTO auth_api_keys (id, name, prefix, start, key_hash, user_id, enabled, expires_at, last_used_at, permissions, metadata, remaining, refill_amount, refill_interval, refill_max, last_refill_at, rate_limit_max_requests, rate_limit_window_ms, created_at, updated_at)
             VALUES (${"key-corrupt"}, ${null}, ${null}, ${"abcdef"}, ${"hash-corrupt"}, ${"user-1"}, ${1}, ${null}, ${null}, ${"INVALID_JSON"}, ${"{}"}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${now}, ${now})`;
           const store = yield* Auth.ApiKeyStore;
@@ -1335,7 +1357,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
           yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
             VALUES (${"u-corrupt"}, ${null}, ${null}, ${null}, ${"INVALID_JSON"}, ${now}, ${now})`;
           const store = yield* Auth.UserServiceStore;
@@ -1350,7 +1372,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.Plugins.AccountLockoutStore;
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
           const opts = { maxAttempts: 3, lockoutDurationMs: 60_000, now };
 
           const before = yield* store.get("lockout:a");

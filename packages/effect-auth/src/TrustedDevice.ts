@@ -46,7 +46,7 @@
  *
  * @module trusted-device
  */
-import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
+import { Clock, Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
 import * as Cipher from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import { SecondFactorGate } from "./email/EmailPassword.ts";
@@ -264,7 +264,7 @@ export const make = (
         const rawToken = yield* generateRawToken();
         const hmac = computeHmac(config.secret, rawToken);
         const tokenHash = hashToken(rawToken);
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const record: TrustedDeviceRecord = {
           tokenHash,
           userId,
@@ -290,7 +290,7 @@ export const make = (
         const record = yield* store.getByTokenHash(tokenHash);
         if (!record) return null;
 
-        if (Date.now() > record.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(tokenHash);
           return null;
         }

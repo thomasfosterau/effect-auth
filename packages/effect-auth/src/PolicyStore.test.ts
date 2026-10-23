@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
@@ -15,7 +15,7 @@ const readDoc = Entity.ref("Action", "doc:read");
 const doc1 = Entity.ref("Document", "doc-1");
 const doc2 = Entity.ref("Document", "doc-2");
 
-const at = (iso: string) => new Date(iso);
+const at = (iso: string) => DateTime.toDateUtc(DateTime.makeUnsafe(iso));
 
 /** `permit(principal == ?principal, action doc:read, resource == ?resource)`. */
 const shareTemplate = PolicyStore.template({

@@ -5,7 +5,7 @@
  * Never published (`tsconfig.json` excludes this file; the rest of `src/testing/`
  * is the public `./testing` subpath).
  */
-import { Array as Arr, Crypto, Effect, Predicate } from "effect";
+import { Array as Arr, Crypto, DateTime, Effect, Predicate } from "effect";
 import { vi } from "vite-plus/test";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 
@@ -78,7 +78,9 @@ export const runVerifySequence = <E extends { readonly _tag: string; readonly me
       record: yield* record,
     };
     if (sequence === "expired code") {
-      yield* Effect.sync(() => vi.setSystemTime(Date.now() + options.expiresIn + 1));
+      yield* Effect.sync(() =>
+        vi.setSystemTime(DateTime.toEpochMillis(DateTime.nowUnsafe()) + options.expiresIn + 1),
+      );
     }
     const tries = sequence === "wrong codes" ? options.maxAttempts + 1 : 2;
     const attempts = yield* Effect.forEach(

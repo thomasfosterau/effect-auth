@@ -7,7 +7,7 @@
  * House module pattern: store tag + `Context.Service` tag + `make*` +
  * `*ServiceLayer`, module-local `Data.TaggedError`s, epoch-ms timestamps.
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
@@ -234,7 +234,7 @@ const make = (
         const rawUserCode = yield* randomCode(crypto, userCodeLength, alphabet);
         const userCode = formatUserCode(rawUserCode);
         const normalizedUserCode = normalizeUserCode(userCode);
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
 
         yield* store.create({
           // Both codes are stored as SHA-256 hashes; the raw values are
@@ -261,7 +261,7 @@ const make = (
 
       poll: Effect.fn("DeviceAuthorizationService.poll")(function* (deviceCode: string) {
         const record = yield* store.getByDeviceCode(hashToken(deviceCode));
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
 
         // record.deviceCode is already the stored hash.
         if (record === null || now > record.expiresAt) {
@@ -326,7 +326,7 @@ const make = (
         userId: string,
       ) {
         const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
-        if (record === null || Date.now() > record.expiresAt) {
+        if (record === null || (yield* Clock.currentTimeMillis) > record.expiresAt) {
           return yield* new DeviceCodeError({ message: "Invalid or expired code" });
         }
         yield* store.update({ ...record, status: "approved", userId });
@@ -334,7 +334,7 @@ const make = (
 
       deny: Effect.fn("DeviceAuthorizationService.deny")(function* (userCode: string) {
         const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
-        if (record === null || Date.now() > record.expiresAt) {
+        if (record === null || (yield* Clock.currentTimeMillis) > record.expiresAt) {
           return yield* new DeviceCodeError({ message: "Invalid or expired code" });
         }
         yield* store.update({ ...record, status: "denied" });

@@ -1,6 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Effect, Layer, Predicate, Schema } from "effect";
+import { DateTime, Effect, Layer, Predicate, Schema } from "effect";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -114,7 +114,7 @@ const makeStores = (
     createUser: (input: OAuthCreateUserInput) =>
       Effect.sync(() => {
         createdWith.push(input.identifier);
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const user: Types.User = {
           id: `u${++userSeq}`,
           ...(input.name !== undefined && { name: input.name }),
@@ -145,9 +145,11 @@ const makeStores = (
       Effect.succeed({
         id: `s-${userId}`,
         userId,
-        expiresAt: new Date(Date.now() + 3600_000),
-        createdAt: new Date(),
-        lastActivityAt: new Date(),
+        expiresAt: DateTime.toDateUtc(
+          DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+        ),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       }),
     validateSession: () => Effect.die("unused"),
@@ -236,7 +238,7 @@ const makeStores = (
       name: organizationId,
       slug: organizationId,
       metadata: {},
-      createdAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       ...overrides,
     };
     organizations.set(organization.id, organization);
@@ -255,8 +257,10 @@ const makeStores = (
       domain,
       verificationState,
       verificationStrategy: "manual",
-      createdAt: Date.now(),
-      ...(verificationState === "verified" && { verifiedAt: Date.now() }),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      ...(verificationState === "verified" && {
+        verifiedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      }),
     };
     domainRecords.set(record.id, record);
     return record;
@@ -400,7 +404,7 @@ describe("SsoService", () => {
     const fx = jitFixture();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     fx.users.set("user-squat", {
       id: "user-squat",
       createdAt: now,
@@ -913,29 +917,47 @@ describe("memorySamlReplayStore", () => {
     id,
     kind: "assertion",
     providerId: "p1",
-    createdAt: Date.now(),
+    createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     expiresAt,
   });
 
   it("inserts if absent and reports a duplicate as null", async () => {
     const store = memorySamlReplayStore();
-    expect(await Effect.runPromise(store.create(record("a", Date.now() + 60_000)))).not.toBeNull();
-    expect(await Effect.runPromise(store.create(record("a", Date.now() + 60_000)))).toBeNull();
+    expect(
+      await Effect.runPromise(
+        store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+      ),
+    ).not.toBeNull();
+    expect(
+      await Effect.runPromise(
+        store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+      ),
+    ).toBeNull();
   });
 
   it("lets an expired id be re-used, since the window it guarded has passed", async () => {
     const store = memorySamlReplayStore();
-    await Effect.runPromise(store.create(record("a", Date.now() - 1)));
-    expect(await Effect.runPromise(store.create(record("a", Date.now() + 60_000)))).not.toBeNull();
+    await Effect.runPromise(
+      store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1)),
+    );
+    expect(
+      await Effect.runPromise(
+        store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+      ),
+    ).not.toBeNull();
   });
 
   it("consumes exactly once, and treats an expired record as absent", async () => {
     const store = memorySamlReplayStore();
-    await Effect.runPromise(store.create(record("a", Date.now() + 60_000)));
+    await Effect.runPromise(
+      store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+    );
     expect(await Effect.runPromise(store.consume("a"))).not.toBeNull();
     expect(await Effect.runPromise(store.consume("a"))).toBeNull();
 
-    await Effect.runPromise(store.create(record("b", Date.now() - 1)));
+    await Effect.runPromise(
+      store.create(record("b", DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1)),
+    );
     expect(await Effect.runPromise(store.consume("b"))).toBeNull();
     expect(await Effect.runPromise(store.consume("missing"))).toBeNull();
   });
@@ -956,7 +978,7 @@ const makeHttpFixture = () => {
 
   const seedUser = (email: string, attributes: Types.Attributes = {}): string => {
     const id = `u${++userSeq}`;
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Types.User = {
       id,
       createdAt: now,
@@ -979,11 +1001,11 @@ const makeHttpFixture = () => {
       "hex",
     );
     const tokenHash = hashToken(rawToken);
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     sessions.set(tokenHash, {
       id: tokenHash,
       userId,
-      expiresAt: new Date(Date.now() + 3600_000),
+      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
@@ -1021,7 +1043,7 @@ const makeHttpFixture = () => {
     createUser: (input: { name?: string; image?: string }) =>
       Effect.sync(() => {
         const id = `u${++userSeq}`;
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const user: Types.User = {
           id,
           ...(input.name !== undefined && { name: input.name }),

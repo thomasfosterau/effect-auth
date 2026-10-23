@@ -29,7 +29,7 @@ import type {
   PreparedQueryHKTBase,
 } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
-import { Effect, Layer, Predicate, Schema } from "effect";
+import { DateTime, Effect, Layer, Predicate, Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { fromTables } from "./Columns.ts";
@@ -99,7 +99,10 @@ const run = <A, E>(
     program.pipe(Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(proxy.db))))),
   );
 
-const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
+const at = (offsetMs: number): Date =>
+  DateTime.toDateUtc(
+    DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
+  );
 
 // ---------------------------------------------------------------------------
 // The SQL a MySQL server would receive

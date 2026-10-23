@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { composePlugins, Hooks } from "../Hooks.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
@@ -25,7 +25,7 @@ const makeFixture = () => {
   const emailPasswordStore: typeof EmailPasswordStore.Service = {
     createUser: (input) =>
       Effect.sync(() => {
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const user: Types.User = {
           id: `user-${++userSeq}`,
           ...(input.name !== undefined && { name: input.name }),
@@ -130,7 +130,7 @@ describe("LastLoginMethodPlugin", () => {
       ),
     );
 
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Types.User = {
       id: "u1",
       createdAt: now,

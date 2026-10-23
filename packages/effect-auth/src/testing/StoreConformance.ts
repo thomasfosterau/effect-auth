@@ -53,7 +53,17 @@
  *
  * @module testing
  */
-import { Array as Arr, Data, Effect, Exit, Option, Order, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Data,
+  DateTime,
+  Effect,
+  Exit,
+  Option,
+  Order,
+  Predicate,
+  Schema,
+} from "effect";
 import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
@@ -183,7 +193,12 @@ const uuid = (): string => globalThis.crypto.randomUUID();
 const digest = (): string => `${uuid()}${uuid()}`.replaceAll("-", "");
 
 /** A millisecond-precision instant, `offset` ms from a fixed base. */
-const at = (offset = 0): Date => new Date(Date.UTC(2026, 0, 1) + offset);
+const at = (offset = 0): Date =>
+  DateTime.toDateUtc(
+    DateTime.makeUnsafe(
+      DateTime.toEpochMillis(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")) + offset,
+    ),
+  );
 
 const makeUser = (id: string): Types.User => ({
   id,

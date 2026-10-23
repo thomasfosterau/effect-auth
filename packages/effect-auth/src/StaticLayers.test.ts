@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Predicate } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Predicate } from "effect";
 import * as Auth from "./index.ts";
 
 /**
@@ -43,8 +43,8 @@ describe("static service layers", () => {
     const sessions = new Map<string, Auth.Session>();
     const user: Auth.User = {
       id: "user-1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
 
@@ -104,8 +104,8 @@ describe("static service layers", () => {
     // UserService.layer() requires only its store; exercise it end-to-end.
     const user: Auth.User = {
       id: "user-2",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
     const store: typeof Auth.UserServiceStore.Service = {

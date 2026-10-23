@@ -1,4 +1,13 @@
-import { Array as Arr, Context, Effect, HashSet, Layer, Option, Record as Rec } from "effect";
+import {
+  Array as Arr,
+  Context,
+  DateTime,
+  Effect,
+  HashSet,
+  Layer,
+  Option,
+  Record as Rec,
+} from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
@@ -136,7 +145,7 @@ export const make = (
 
         const updated: Types.User = {
           ...existing,
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
           attributes: {
             ...existing.attributes,
             ...attributes,
@@ -156,7 +165,7 @@ export const make = (
           ...existing,
           ...(updates.name !== undefined && { name: updates.name }),
           ...(updates.image !== undefined && { image: updates.image }),
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
         };
 
         return yield* store.update(updated);

@@ -12,7 +12,7 @@
  * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
-import { Array as Arr, Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Clock, Context, Crypto, Data, DateTime, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -232,7 +232,7 @@ const make = (
         }
 
         const token = yield* generateToken();
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         yield* store.create({
           token,
           userId,
@@ -254,7 +254,7 @@ const make = (
         if (record === null || record.purpose !== "change-email" || record.newEmail === undefined) {
           return yield* new AccountTokenError({ message: "Invalid or expired token" });
         }
-        if (Date.now() > record.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(token);
           return yield* new AccountTokenError({ message: "Token has expired" });
         }
@@ -294,7 +294,7 @@ const make = (
             type: "email",
             value: newEmail,
             verified: true,
-            verifiedAt: new Date(),
+            verifiedAt: yield* DateTime.nowAsDate,
           });
           const outcome = yield* (
             current === null
@@ -348,7 +348,7 @@ const make = (
         // A concurrent delete may remove the identifier first; then refuse and
         // keep the token, so the user can confirm again.
         if (!confirmed.verified) {
-          const verified = yield* identifiers.setVerified(confirmed.id, new Date());
+          const verified = yield* identifiers.setVerified(confirmed.id, yield* DateTime.nowAsDate);
           if (verified === null) {
             return yield* new AccountTokenError({
               message: "The account's email changed during the confirmation; try again",
@@ -372,7 +372,7 @@ const make = (
 
         const updated = yield* users.update({
           ...user,
-          updatedAt: new Date(),
+          updatedAt: yield* DateTime.nowAsDate,
         });
 
         // Single-use.
@@ -397,7 +397,7 @@ const make = (
           }
 
           const token = yield* generateToken();
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
           yield* store.create({
             token,
             userId,
@@ -419,7 +419,7 @@ const make = (
           if (record === null || record.purpose !== "delete-account") {
             return yield* new AccountTokenError({ message: "Invalid or expired token" });
           }
-          if (Date.now() > record.expiresAt) {
+          if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
             yield* store.delete(token);
             return yield* new AccountTokenError({ message: "Token has expired" });
           }

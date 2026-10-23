@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Option } from "effect";
+import { Array as Arr, DateTime, Effect, Option } from "effect";
 import { AuthError } from "./Errors.ts";
 import {
   type Identifier,
@@ -10,7 +10,7 @@ import {
 import { createUserWithIdentifier, type NewUserIdentifier } from "./UserStore.ts";
 import type { User } from "./Types.ts";
 
-const now = new Date("2026-10-15T00:00:00.000Z");
+const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-15T00:00:00.000Z"));
 
 const makeUser = (id: string): User => ({ id, createdAt: now, updatedAt: now, attributes: {} });
 
@@ -113,7 +113,7 @@ describe("createUserWithIdentifier", () => {
 
   it("marks the held address verified when the flow asked for a verified one", async () => {
     const records = new Map<string, Identifier>();
-    const verifiedAt = new Date("2026-10-15T01:00:00.000Z");
+    const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-15T01:00:00.000Z"));
     // A writer that stores the address but not its verification.
     const writer = rowWriter(records, "u-1", { verified: false });
 

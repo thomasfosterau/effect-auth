@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Effect, Layer, Schema } from "effect";
+import { Clock, DateTime, Effect, Layer, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -51,8 +51,8 @@ const PHONE = "+15555550123";
 const makeWorld = (type: IdentifierType, value: string) => {
   const owner: Types.User = {
     id: "owner",
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   };
   const users = new Map<string, Types.User>([[owner.id, owner]]);
@@ -83,9 +83,11 @@ const makeWorld = (type: IdentifierType, value: string) => {
         return {
           id: `s-${userId}`,
           userId,
-          expiresAt: new Date(Date.now() + 3600_000),
-          createdAt: new Date(),
-          lastActivityAt: new Date(),
+          expiresAt: DateTime.toDateUtc(
+            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+          ),
+          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
           attributes: {},
         };
       }),
@@ -163,8 +165,8 @@ const signGoogleCredential = (nonce: string): string => {
     email: EMAIL,
     email_verified: true,
     nonce: hashToken(nonce),
-    exp: Math.floor(Date.now() / 1000) + 300,
-    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
+    iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
   };
   const signingInput = `${b64(header)}.${b64(claims)}`;
   const signature = Cipher.signJws(
@@ -458,7 +460,7 @@ const cases: ReadonlyArray<Case> = [
             id: "conn-1",
             organizationId: "org-1",
             tokenHash: hashToken("token"),
-            createdAt: Date.now(),
+            createdAt: yield* Clock.currentTimeMillis,
           };
           const error = yield* Effect.flip(scim.createUser(connection, { userName: EMAIL }));
           return error._tag;

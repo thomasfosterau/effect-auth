@@ -1,4 +1,13 @@
-import { Array as Arr, Crypto, Data, Effect, Option, Predicate, String as Str } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Crypto,
+  Data,
+  Effect,
+  Option,
+  Predicate,
+  String as Str,
+} from "effect";
 import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
@@ -264,17 +273,18 @@ export const verifyHotp = (
 export const generateTotp = (
   secret: string | Buffer,
   config: TotpConfig = {},
-): Effect.Effect<string, Errors.HashingError> => {
-  const period = config?.period ?? 30;
-  const currentTime = Math.floor(Date.now() / 1000);
-  const counter = Math.floor(currentTime / period);
-  const hotpConfig: HotpConfig = {
-    ...(config?.digits !== undefined && { digits: config.digits }),
-    ...(config?.algorithm !== undefined && { algorithm: config.algorithm }),
-  };
+): Effect.Effect<string, Errors.HashingError> =>
+  Effect.flatMap(Clock.currentTimeMillis, (millis) => {
+    const period = config?.period ?? 30;
+    const currentTime = Math.floor(millis / 1000);
+    const counter = Math.floor(currentTime / period);
+    const hotpConfig: HotpConfig = {
+      ...(config?.digits !== undefined && { digits: config.digits }),
+      ...(config?.algorithm !== undefined && { algorithm: config.algorithm }),
+    };
 
-  return generateHotp(secret, counter, hotpConfig);
-};
+    return generateHotp(secret, counter, hotpConfig);
+  });
 
 /**
  * Verify Time-based One-Time Password (TOTP).
@@ -309,7 +319,7 @@ export const verifyTotp = (
       window = Math.floor(window);
     }
 
-    const currentTime = Math.floor(Date.now() / 1000);
+    const currentTime = Math.floor((yield* Clock.currentTimeMillis) / 1000);
     const currentCounter = Math.floor(currentTime / period);
 
     const hotpConfig: HotpConfig = {

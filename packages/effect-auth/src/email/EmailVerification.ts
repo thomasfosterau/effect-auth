@@ -2,7 +2,7 @@
  * Email verification types for effect-auth
  */
 
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Effect, Layer } from "effect";
 import { AuthError, EmailVerificationError, type RateLimitError } from "../Errors.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
@@ -180,8 +180,8 @@ export const make = (
         token: hashToken(rawToken),
         userId,
         email,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + expiresIn,
+        createdAt: yield* Clock.currentTimeMillis,
+        expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
       };
 
       yield* store.create(verification);
@@ -226,7 +226,7 @@ export const make = (
         }
 
         // Check expiration
-        if (Date.now() > verification.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > verification.expiresAt) {
           yield* store.delete(tokenHash);
           return yield* new EmailVerificationError({
             message: "Verification token has expired",
@@ -254,7 +254,7 @@ export const make = (
             message: "Invalid or expired verification token",
           });
         }
-        if (Date.now() > verification.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > verification.expiresAt) {
           yield* store.delete(tokenHash);
           return yield* new EmailVerificationError({
             message: "Verification token has expired",

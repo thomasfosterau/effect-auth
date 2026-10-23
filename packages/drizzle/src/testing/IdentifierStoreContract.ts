@@ -19,7 +19,7 @@
  * assertion. Never published (`tsconfig.json` excludes `src/testing/`).
  */
 
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -35,7 +35,7 @@ export const USER = {
 } as const;
 
 /** The `created_at` every seeded user row carries. */
-export const USER_CREATED_AT = new Date(Date.UTC(2026, 0, 1));
+export const USER_CREATED_AT = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"));
 
 /** The database a suite runs against. */
 export interface StoreHarness {
@@ -155,9 +155,15 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
           const store = yield* Auth.IdentifierStore;
           const created = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
-            verified: yield* store.setVerified(created.id, new Date(Date.UTC(2026, 0, 2))),
+            verified: yield* store.setVerified(
+              created.id,
+              DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+            ),
             reloaded: yield* store.getByValue("email", "ada@example.com"),
-            unknown: yield* store.setVerified(USER.ghost, new Date(Date.UTC(2026, 0, 2))),
+            unknown: yield* store.setVerified(
+              USER.ghost,
+              DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+            ),
           };
         }),
       );
@@ -374,7 +380,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
               type: "email",
               value: "ada@example.com",
               verified: true,
-              verifiedAt: new Date(Date.UTC(2026, 0, 2)),
+              verifiedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
             }),
           );
           return {
@@ -494,7 +500,10 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           const store = yield* Auth.IdentifierStore;
           return {
             listed: yield* store.listByUser(USER.grace),
-            verified: yield* store.setVerified(USER.grace, new Date(Date.UTC(2026, 0, 2))),
+            verified: yield* store.setVerified(
+              USER.grace,
+              DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+            ),
           };
         }),
       );
@@ -696,7 +705,10 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
-          return yield* store.setVerified(USER.ada, new Date(Date.UTC(2026, 0, 2)));
+          return yield* store.setVerified(
+            USER.ada,
+            DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+          );
         }),
       );
 
@@ -724,7 +736,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
     beforeEach(() => harness.seedUsers());
 
     it("stores the verification time on setVerified and reports it", async () => {
-      const verifiedAt = new Date(Date.UTC(2026, 0, 2, 9, 30));
+      const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T09:30:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -742,7 +754,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
     });
 
     it("stores and reports a verifiedAt given at claim", async () => {
-      const verifiedAt = new Date(Date.UTC(2026, 0, 3));
+      const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-03T00:00:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -775,7 +787,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
     });
 
     it("replace writes the replacement's verification time, and clears it for an unverified one", async () => {
-      const verifiedAt = new Date(Date.UTC(2026, 0, 4));
+      const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-04T00:00:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -810,7 +822,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
     });
 
     it("delete clears the verification time with the address", async () => {
-      const verifiedAt = new Date(Date.UTC(2026, 0, 2));
+      const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
@@ -247,7 +247,7 @@ export const make = (
               // The caller has proven nothing about the address, so the answer
               // is a stand-in built only from their own input (#421): never
               // the holder's id, profile or timestamps.
-              const now = new Date();
+              const now = yield* DateTime.nowAsDate;
               return {
                 recovered: true as const,
                 user: {
@@ -377,7 +377,7 @@ export const make = (
         }
 
         // FIX 4: durable state change BEFORE burning the token.
-        yield* identifiers.setVerified(identifier.id, new Date());
+        yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
         const verifiedUser = yield* userService.getUser(verificationRecord.userId);
 
         // burnToken deletes the token and fires the afterVerifyEmail hook.

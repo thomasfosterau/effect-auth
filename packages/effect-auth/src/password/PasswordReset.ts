@@ -1,4 +1,4 @@
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
 import { UserStore } from "../UserStore.ts";
@@ -183,8 +183,8 @@ export const make = (
           token: hashToken(rawToken),
           userId: user.id,
           email: normalizedEmail,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + expiresIn,
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
         };
 
         yield* resetStore.create(reset);
@@ -223,7 +223,7 @@ export const make = (
           });
         }
 
-        if (Date.now() > reset.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > reset.expiresAt) {
           yield* resetStore.delete(tokenHash);
           return yield* new Errors.PasswordResetError({
             message: "Password reset token has expired",

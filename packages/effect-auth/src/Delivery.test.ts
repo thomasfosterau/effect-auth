@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Logger, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Logger, Schema } from "effect";
 import {
   EmailSender,
   SmsSender,
@@ -19,8 +19,8 @@ import type * as Types from "./Types.ts";
 
 const user = (attributes: Types.Attributes = {}): Types.User => ({
   id: "u1",
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
   attributes,
 });
 

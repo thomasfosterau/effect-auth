@@ -28,7 +28,18 @@
  *
  * @module sso
  */
-import { Array as Arr, Context, Crypto, Data, Effect, Layer, Option, Redacted } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Crypto,
+  Data,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Redacted,
+} from "effect";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -522,7 +533,7 @@ export const make = (
         // The IdP attested the address as verified.
         const created = yield* createUserWithIdentifier(
           identifiers,
-          { type: "email", value: email, verified: true, verifiedAt: new Date() },
+          { type: "email", value: email, verified: true, verifiedAt: yield* DateTime.nowAsDate },
           (identifier) =>
             userStore.createUser({
               ...(profile.name !== undefined && { name: profile.name }),
@@ -557,7 +568,7 @@ export const make = (
               userId: user.id,
               role: config.defaultRole ?? organization?.defaultRole ?? "member",
               status: "active",
-              createdAt: Date.now(),
+              createdAt: yield* Clock.currentTimeMillis,
             };
             yield* orgStore.value.createMember(member);
           }
@@ -659,7 +670,7 @@ export const make = (
           usePKCE: input.usePKCE ?? true,
           ...(input.organizationId !== undefined && { organizationId: input.organizationId }),
           userId: registrarUserId,
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
         // The store speaks the `SsoProvider` union; narrow the record it
         // hands back to the arm we asked it to persist.
@@ -717,7 +728,7 @@ export const make = (
           ...(input.forceAuthn !== undefined && { forceAuthn: input.forceAuthn }),
           ...(input.organizationId !== undefined && { organizationId: input.organizationId }),
           userId: registrarUserId,
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         };
         const created = yield* store.create(provider);
         if (created.protocol !== "saml") {
@@ -755,7 +766,7 @@ export const make = (
           // Record the request id *before* redirecting: the response can only
           // be accepted if it answers a request we know we made, and spending
           // that record is what makes the round trip one-time-use.
-          const now = Date.now();
+          const now = yield* Clock.currentTimeMillis;
           const created = yield* replay.create({
             id: request.requestId,
             kind: "authn-request",
@@ -793,7 +804,7 @@ export const make = (
         if (stateEntry === null) {
           return yield* new SsoError({ message: "SSO state not found or expired" });
         }
-        if (Date.now() > stateEntry.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
           return yield* new SsoError({ message: "SSO state expired" });
         }
@@ -911,7 +922,7 @@ export const make = (
         // Spend the assertion id itself, so a captured response cannot be
         // replayed inside its own validity window (or at all, for an
         // IdP-initiated one, where there is no request to spend).
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const seen = yield* replay.create({
           id: assertion.id,
           kind: "assertion",

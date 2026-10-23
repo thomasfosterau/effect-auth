@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Order, Schema } from "effect";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
@@ -87,7 +87,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     create: (input) =>
       Effect.sync(() => {
         createdWith.push(input.identifier);
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const user: Types.User = {
           id: `u${++userSeq}`,
           ...(input.name !== undefined && { name: input.name }),
@@ -117,11 +117,13 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.sync(() => {
-        const now = new Date();
+        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const session: Types.Session = {
           id: `s-${userId}-${sessions.size}`,
           userId,
-          expiresAt: new Date(Date.now() + 3600_000),
+          expiresAt: DateTime.toDateUtc(
+            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+          ),
           createdAt: now,
           lastActivityAt: now,
           attributes: {},
@@ -171,7 +173,11 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
     addTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
-        const teamMember: TeamMember = { teamId, userId, createdAt: Date.now() };
+        const teamMember: TeamMember = {
+          teamId,
+          userId,
+          createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+        };
         teamMembers.push(teamMember);
         return teamMember;
       }),
@@ -209,7 +215,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
 
   /** Seed a user that SCIM did not create (e.g. someone who signed up directly). */
   const seedUser = (organizationId: string, email: string): string => {
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Types.User = {
       id: `u${++userSeq}`,
       createdAt: now,
@@ -231,13 +237,13 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       organizationId,
       userId: user.id,
       role: "member",
-      createdAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
     return user.id;
   };
 
   const seedTeam = (organizationId: string, name: string): Team => {
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const team: Team = {
       id: `t${++teamSeq}`,
       organizationId,
@@ -269,7 +275,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       slug: organizationId,
       metadata: {},
       ...(defaultRole !== undefined && { defaultRole }),
-      createdAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     };
     organizations.set(organization.id, organization);
     return organization;
@@ -946,15 +952,15 @@ describe("ScimDeactivatedPlugin", () => {
       session: {
         id: "s1",
         userId: "u1",
-        expiresAt: new Date(Date.now() + 1000),
-        createdAt: new Date(),
-        lastActivityAt: new Date(),
+        expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       },
       user: {
         id: "u1",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: {},
       },
     };

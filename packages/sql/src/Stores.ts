@@ -29,7 +29,7 @@
  * bearer token.
  */
 
-import { Array as Arr, Clock, Effect, Layer, Order, Record as Rec, Schema } from "effect";
+import { Array as Arr, Clock, DateTime, Effect, Layer, Order, Record as Rec, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -164,7 +164,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     label: string,
   ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
     Effect.gen(function* () {
-      const now = new Date();
+      const now = yield* DateTime.nowAsDate;
       const user: Auth.User = {
         id: globalThis.crypto.randomUUID(),
         createdAt: now,
@@ -468,7 +468,7 @@ export const makeRateLimitStore: Effect.Effect<
       ),
     increment: (key, ttlSeconds) =>
       Effect.gen(function* () {
-        const now = Date.now();
+        const now = yield* Clock.currentTimeMillis;
         const resetAt = now + ttlSeconds * 1000;
         // Single atomic upsert+increment: if the row is new or the window has
         // expired, reset count to 1; otherwise increment by 1. RETURNING
@@ -841,7 +841,7 @@ export const makeOAuthUserStore: Effect.Effect<
           sql`UPDATE auth_users SET
                 name = COALESCE(${update.name ?? null}, name),
                 image = COALESCE(${update.image ?? null}, image),
-                updated_at = ${Date.now()}
+                updated_at = ${yield* Clock.currentTimeMillis}
               WHERE id = ${userId}`,
         );
         return yield* users

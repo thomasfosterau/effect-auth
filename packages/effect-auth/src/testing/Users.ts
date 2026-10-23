@@ -6,6 +6,7 @@
  * @module testing
  */
 import type * as Types from "../Types.ts";
+import { DateTime } from "effect";
 
 /**
  * The canonical fixtures' ids: fixed, valid version-4 UUIDs, so a test can
@@ -27,7 +28,9 @@ export const fixtureUserIds = {
  * @since 1.0.0
  * @category constants
  */
-export const fixtureEpoch: Date = new Date("2026-01-01T00:00:00.000Z");
+export const fixtureEpoch: Date = DateTime.toDateUtc(
+  DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+);
 
 /**
  * A fixture user's fields. Everything is optional.

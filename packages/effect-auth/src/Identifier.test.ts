@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer } from "effect";
+import { Array as Arr, DateTime, Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import {
   IdentifierStore,
@@ -21,7 +21,7 @@ const testLayer = () => IdentifierStoreKV.pipe(Layer.provide(KeyValueStore.layer
 const run = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(testLayer())));
 
-const now = new Date("2026-07-04T00:00:00.000Z");
+const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T00:00:00.000Z"));
 
 const mkIdentifier = (overrides: Partial<Identifier> = {}): Identifier => ({
   id: "id-1",
@@ -81,19 +81,19 @@ describe("IdentifierStoreKV", () => {
       id: "id-email",
       type: "email",
       value: "alice@example.com",
-      createdAt: new Date("2026-07-04T01:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T01:00:00.000Z")),
     });
     const b = mkIdentifier({
       id: "id-username",
       type: "username",
       value: "alice",
-      createdAt: new Date("2026-07-04T02:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T02:00:00.000Z")),
     });
     const c = mkIdentifier({
       id: "id-phone",
       type: "phone",
       value: "+61400000000",
-      createdAt: new Date("2026-07-04T00:30:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T00:30:00.000Z")),
     });
     const result = await run(
       Effect.gen(function* () {
@@ -132,7 +132,7 @@ describe("IdentifierStoreKV", () => {
 
   it("setVerified marks an identifier as verified and records verifiedAt", async () => {
     const identifier = mkIdentifier();
-    const verifiedAt = new Date("2026-07-04T12:00:00.000Z");
+    const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T12:00:00.000Z"));
     const result = await run(
       Effect.gen(function* () {
         const store = yield* IdentifierStore;
@@ -149,7 +149,7 @@ describe("IdentifierStoreKV", () => {
     const result = await run(
       Effect.gen(function* () {
         const store = yield* IdentifierStore;
-        return yield* store.setVerified("no-such-id", new Date());
+        return yield* store.setVerified("no-such-id", yield* DateTime.nowAsDate);
       }),
     );
     expect(result).toBeNull();
@@ -157,7 +157,7 @@ describe("IdentifierStoreKV", () => {
 
   it("setVerified preserves the updated record in getByValue", async () => {
     const identifier = mkIdentifier();
-    const verifiedAt = new Date("2026-07-04T12:00:00.000Z");
+    const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T12:00:00.000Z"));
     const fetched = await run(
       Effect.gen(function* () {
         const store = yield* IdentifierStore;
@@ -402,14 +402,14 @@ describe("primaryEmail", () => {
       type: "email",
       value: "old@example.com",
       verified: true,
-      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
     });
     const newer = mkIdentifier({
       id: "id-new",
       type: "email",
       value: "new@example.com",
       verified: true,
-      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-06-01T00:00:00.000Z")),
     });
     expect(primaryEmail([newer, older])?.id).toBe("id-old");
   });
@@ -420,14 +420,14 @@ describe("primaryEmail", () => {
       type: "email",
       value: "early@example.com",
       verified: false,
-      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
     });
     const verified = mkIdentifier({
       id: "id-verified",
       type: "email",
       value: "later@example.com",
       verified: true,
-      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-06-01T00:00:00.000Z")),
     });
     expect(primaryEmail([unverified, verified])?.id).toBe("id-verified");
   });

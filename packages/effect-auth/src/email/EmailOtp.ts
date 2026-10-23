@@ -8,7 +8,7 @@
  *
  * @module email-otp
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Clock, Context, Crypto, Data, DateTime, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore } from "../Identifier.ts";
 import {
@@ -363,7 +363,7 @@ export const make = (
         }
 
         // Check expiration
-        if (Date.now() > record.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(email, purpose);
           return yield* rejectOtp(purpose, "expired");
         }
@@ -413,7 +413,7 @@ export const make = (
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.get(email, purpose);
           if (existing !== null) {
-            const elapsed = Date.now() - existing.createdAt;
+            const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
             if (elapsed < config.resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another OTP",
@@ -437,8 +437,8 @@ export const make = (
           otpHash: hashToken(deliver ? otp : markerSecret),
           purpose,
           attempts: 0,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + expiresIn,
+          createdAt: yield* Clock.currentTimeMillis,
+          expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
         };
 
         // One active OTP per email + purpose: replaces any outstanding one.
@@ -492,7 +492,7 @@ export const make = (
           // A verified OTP proves ownership of the email.
           const created = yield* createUserWithIdentifier(
             identifiers,
-            { type: "email", value: email, verified: true, verifiedAt: new Date() },
+            { type: "email", value: email, verified: true, verifiedAt: yield* DateTime.nowAsDate },
             (identifier) => userStore.createUser({ identifier }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>

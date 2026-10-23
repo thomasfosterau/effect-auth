@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Option, Order } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Option, Order } from "effect";
 import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
   type AuthResult,
@@ -50,7 +50,7 @@ const findIdentifier = (type: IdentifierType, value: string): Identifier | null 
 const emailPasswordStore: typeof EmailPasswordStore.Service = {
   createUser: (input) =>
     Effect.sync(() => {
-      const now = new Date();
+      const now = DateTime.toDateUtc(DateTime.nowUnsafe());
       const user: Types.User = {
         id: `user-${++seq}`,
         ...(input.name !== undefined && { name: input.name }),
@@ -118,7 +118,11 @@ const baseDeps = Layer.mergeAll(stage1, emailPasswordServiceLayer);
 
 const gate = (required: boolean): typeof SecondFactorGate.Service => ({
   required: () => Effect.succeed(required),
-  begin: () => Effect.succeed({ token: "2fa-token", expiresAt: Date.now() + 60_000 }),
+  begin: () =>
+    Effect.succeed({
+      token: "2fa-token",
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+    }),
 });
 
 type UsernameDeps =
@@ -245,7 +249,7 @@ describe("UsernameService", () => {
     identifierRecords.set(emailIdentifier.id, {
       ...emailIdentifier,
       verified: true,
-      verifiedAt: new Date(),
+      verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     const result = await run(
       (svc) => svc.signIn({ username: "hector", password: "password-123" }),
@@ -341,7 +345,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
 
   /** A user who already holds `email`, created outside any sign-up. */
   const seedOwner = (email: string): Types.User => {
-    const now = new Date();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const owner: Types.User = {
       id: `owner-${++seq}`,
       createdAt: now,

@@ -1,5 +1,5 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Result } from "effect";
+import { Context, DateTime, Effect, Result } from "effect";
 import { UserServiceStore } from "./User.ts";
 import * as User from "./User.ts";
 import {
@@ -41,8 +41,8 @@ describe("UserService", () => {
     const seeded: UserRecord = {
       id: "user-1",
       name: "User One",
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {
         role: "member",
       },
@@ -163,7 +163,7 @@ describe("UserService", () => {
           const store = yield* IdentifierStore;
           const identifier = yield* store.getByValue("email", "user@example.com");
           assert(identifier !== null, "the email identifier exists");
-          yield* store.setVerified(identifier.id, new Date());
+          yield* store.setVerified(identifier.id, yield* DateTime.nowAsDate);
           return yield* store.getByValue("email", "user@example.com");
         }),
         Context.make(IdentifierStore, identifiers),

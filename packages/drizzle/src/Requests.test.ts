@@ -11,7 +11,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -88,7 +88,10 @@ const runRequests = <A, E>(db: PgliteDatabase, program: Effect.Effect<A, E, Auth
     program.pipe(Effect.provide(requestsLayer(tables).pipe(Layer.provide(databaseLayer(db))))),
   );
 
-const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
+const at = (offsetMs: number): Date =>
+  DateTime.toDateUtc(
+    DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
+  );
 
 const seedUsers = (db: PgliteDatabase, rows: ReadonlyArray<{ id: string; hash?: string }>) =>
   db
