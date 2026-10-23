@@ -12,11 +12,11 @@ Infrastructure-as-Code toolkit — covering both sides of the deploy:
 The package is deliberately small. It contains no queries and no schema of its
 own:
 
-| Module       | What it is                                                            |
-| ------------ | --------------------------------------------------------------------- |
-| `D1Client`   | A `SqlClient` (from `effect/sql`) over a D1 binding.                  |
-| `Storage`    | `layer(db)` / `migrate(db)` — the client wired to the SQL stores.     |
-| `AuthSchema` | The Alchemy resource + provider that reconciles the schema on deploy. |
+| Module       | What it is                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------- |
+| `D1Client`   | A `SqlClient` (from `effect/sql`) over a D1 binding.                                                     |
+| `Storage`    | `layer(db)` / `migrate(db)` — the client wired to the SQL stores.                                        |
+| `AuthSchema` | The Alchemy resource + provider that reconciles the schema on deploy.                                    |
 | `./postgres` | The same over Postgres: a Hyperdrive-backed `SqlClient`, the stores, and a Postgres `AuthSchema` target. |
 
 Every store, statement and DDL comes from
@@ -271,7 +271,7 @@ const providers = AuthSchemaProvider({
   database: Postgres.database(Redacted.make(process.env.DATABASE_URL)),
 });
 // in the program:
-yield* AuthSchema("auth-schema");
+yield * AuthSchema("auth-schema");
 ```
 
 D1 bindings and Postgres databases can be registered side by side in

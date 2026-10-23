@@ -36,7 +36,7 @@ const providers = Layer.mergeAll(
   AuthSchemaProvider({ database: Postgres.database(Redacted.make(process.env.DATABASE_URL)) }),
 );
 // …inside the program:
-yield* AuthSchema("auth-schema");
+yield * AuthSchema("auth-schema");
 ```
 
 Every deploy reconciles the `auth_*` tables in Postgres. The DDL is idempotent `CREATE … IF NOT
@@ -61,12 +61,14 @@ migration history.
 ## 2. The auth Worker is internal-only because it declares `workersDev: false`
 
 ```ts
-const auth = yield* Cloudflare.Worker("auth", {
-  main: "./src/auth.ts",
-  // Load-bearing: without it the Worker is public. See below.
-  workersDev: false,
-  // …the Hyperdrive binding, the secrets below, `compatibility.flags: ["nodejs_compat"]`
-});
+const auth =
+  yield *
+  Cloudflare.Worker("auth", {
+    main: "./src/auth.ts",
+    // Load-bearing: without it the Worker is public. See below.
+    workersDev: false,
+    // …the Hyperdrive binding, the secrets below, `compatibility.flags: ["nodejs_compat"]`
+  });
 ```
 
 **Declaring no `domain` or `routes` is not what keeps the Worker private.** Alchemy defaults
@@ -111,17 +113,17 @@ Set these as Worker secrets, never as plain bindings:
 If you want a public auth origin instead (the app's browser talks to the auth Worker directly),
 this is what you would be exposing. The paths are relative to the handler's `prefix`.
 
-| Group | Paths | Intended exposure |
-| --- | --- | --- |
-| Sign-in and sign-up | `/sign-in/*`, `/sign-up`, `/sign-out`, `/magic-link/*`, `/email-otp/*`, `/phone-otp/*`, `/password-reset/*`, `/email-verification/*` | Public. These are what a browser calls. Put the rate limits (`ipRateLimit`, which needs `trustedProxy`) and the captcha plugin in front of them. |
-| Session and account | `/session`, `/sessions/*`, `/multi-session/*`, `/user`, `/change-*`, `/identifiers/*`, `/delete-user/*`, `/multi-factor/*` | Public, and authenticated by the session cookie. |
-| SSO as a relying party | `/sign-in/sso`, `/sso/callback`, `/sso/saml/*` | Public: the identity provider sends the browser back here. `/sso/register` configures a provider and belongs with admin. |
-| API keys | `/api-keys/*` | Authenticated by a session, so it may be public. Many deployments keep key management internal. |
-| Organizations, teams, invitations | `/organization/*`, `/organizations`, `/teams/*`, `/invitations/*` | Public and session-authenticated, if your product exposes them. |
-| Admin | `/admin/*` | Internal. Authorized by role, but there is no reason to route it publicly. |
-| SCIM | `/Users`, `/Groups`, `/Schemas`, `/ResourceTypes`, `/ServiceProviderConfig` | Reachable by the identity provider that provisions users, and nothing else. Bearer-token authenticated. |
-| JWT | `/token`, `/jwks` | `/jwks` is public wherever another service verifies the tokens. `/token` exchanges a session for a JWT, so it is as public as the session routes. |
-| OIDC provider and device grant | `/oauth2/*`, `/register`, `/register/:clientId`, `/.well-known/*`, `/device/*` | Public only when you act as an identity provider: clients call them directly. Dynamic client registration (`/register`) needs `trustedProxy` for its rate limit and is safest left off unless you need it. `/oauth2/clients` is client administration: keep it internal. |
+| Group                             | Paths                                                                                                                                | Intended exposure                                                                                                                                                                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sign-in and sign-up               | `/sign-in/*`, `/sign-up`, `/sign-out`, `/magic-link/*`, `/email-otp/*`, `/phone-otp/*`, `/password-reset/*`, `/email-verification/*` | Public. These are what a browser calls. Put the rate limits (`ipRateLimit`, which needs `trustedProxy`) and the captcha plugin in front of them.                                                                                                                         |
+| Session and account               | `/session`, `/sessions/*`, `/multi-session/*`, `/user`, `/change-*`, `/identifiers/*`, `/delete-user/*`, `/multi-factor/*`           | Public, and authenticated by the session cookie.                                                                                                                                                                                                                         |
+| SSO as a relying party            | `/sign-in/sso`, `/sso/callback`, `/sso/saml/*`                                                                                       | Public: the identity provider sends the browser back here. `/sso/register` configures a provider and belongs with admin.                                                                                                                                                 |
+| API keys                          | `/api-keys/*`                                                                                                                        | Authenticated by a session, so it may be public. Many deployments keep key management internal.                                                                                                                                                                          |
+| Organizations, teams, invitations | `/organization/*`, `/organizations`, `/teams/*`, `/invitations/*`                                                                    | Public and session-authenticated, if your product exposes them.                                                                                                                                                                                                          |
+| Admin                             | `/admin/*`                                                                                                                           | Internal. Authorized by role, but there is no reason to route it publicly.                                                                                                                                                                                               |
+| SCIM                              | `/Users`, `/Groups`, `/Schemas`, `/ResourceTypes`, `/ServiceProviderConfig`                                                          | Reachable by the identity provider that provisions users, and nothing else. Bearer-token authenticated.                                                                                                                                                                  |
+| JWT                               | `/token`, `/jwks`                                                                                                                    | `/jwks` is public wherever another service verifies the tokens. `/token` exchanges a session for a JWT, so it is as public as the session routes.                                                                                                                        |
+| OIDC provider and device grant    | `/oauth2/*`, `/register`, `/register/:clientId`, `/.well-known/*`, `/device/*`                                                       | Public only when you act as an identity provider: clients call them directly. Dynamic client registration (`/register`) needs `trustedProxy` for its rate limit and is safest left off unless you need it. `/oauth2/clients` is client administration: keep it internal. |
 
 An internal-only auth Worker sidesteps the table: nothing is public, and the app decides which
 operations to forward.

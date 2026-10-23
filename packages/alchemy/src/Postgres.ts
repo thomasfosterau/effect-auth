@@ -109,5 +109,7 @@ export const purgeExpired = (
  * The provider holds the target as it holds a D1 binding, so a destroy, which
  * runs from persisted state, can still reach the database.
  */
-export const database = (url: Redacted.Redacted<string>, options?: ClientOptions): PostgresDatabase =>
-  postgresDatabase(clientLayer(url, options));
+export const database = (
+  url: Redacted.Redacted<string>,
+  options?: ClientOptions,
+): PostgresDatabase => postgresDatabase(clientLayer(url, options));

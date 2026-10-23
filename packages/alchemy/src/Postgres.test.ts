@@ -9,22 +9,24 @@
  * binding-shaped source is exercised as such.
  */
 
-import { DateTime, Effect, Redacted } from "effect";
+import { Config, DateTime, Effect, Option, Redacted } from "effect";
 import { assert, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Postgres from "./Postgres.ts";
 
-const databaseUrl = process.env["DATABASE_URL"];
+const databaseUrl = Option.getOrUndefined(
+  Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
+);
 
-const url = (): string => {
+const url = (): Redacted.Redacted<string> => {
   assert(databaseUrl !== undefined, "DATABASE_URL names the Postgres server");
   return databaseUrl;
 };
 
 describe.skipIf(databaseUrl === undefined)("effect-auth on Postgres over @effect/sql-pg", () => {
   it("migrates by URL, then round-trips a user and a session over a Hyperdrive-shaped binding", async () => {
-    await Effect.runPromise(Postgres.migrate(Redacted.make(url())));
-    const hyperdrive: Postgres.Hyperdrive = { connectionString: url() };
+    await Effect.runPromise(Postgres.migrate(url()));
+    const hyperdrive: Postgres.Hyperdrive = { connectionString: Redacted.value(url()) };
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const users = yield* Auth.Email.EmailPasswordStore;
@@ -50,7 +52,7 @@ describe.skipIf(databaseUrl === undefined)("effect-auth on Postgres over @effect
   });
 
   it("purges expired rows", async () => {
-    const result = await Effect.runPromise(Postgres.purgeExpired(Redacted.make(url())));
+    const result = await Effect.runPromise(Postgres.purgeExpired(url()));
     expect(result).toBeDefined();
   });
 });

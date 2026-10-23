@@ -1,14 +1,15 @@
-import { assert, describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
 import {
   Array as Arr,
+  Config,
   Effect,
   FileSystem,
   Layer,
+  Option,
   Order,
   Path,
   PlatformError,
   Predicate,
-  Redacted,
   Schema,
 } from "effect";
 import { PGlite } from "@electric-sql/pglite";
@@ -309,7 +310,15 @@ const tablesInPostgres = (database: PostgresDatabase): Promise<readonly string[]
     }).pipe(Effect.provide(database.client)),
   );
 
-const pglite = async (): Promise<{ readonly database: PostgresDatabase; readonly close: () => Promise<void> }> => {
+/** The real Postgres server CI's alchemy job runs, if this environment names one. */
+const databaseUrl = Option.getOrUndefined(
+  Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
+);
+
+const pglite = async (): Promise<{
+  readonly database: PostgresDatabase;
+  readonly close: () => Promise<void>;
+}> => {
   const client = await PGlite.create();
   return {
     database: postgresDatabase(PgliteClient.layer({ liveClient: client })),
@@ -317,10 +326,16 @@ const pglite = async (): Promise<{ readonly database: PostgresDatabase; readonly
   };
 };
 
+// `PGlite.create()` runs `initdb` inside its WASM module, which takes seconds on
+// a loaded machine, so the PGlite cases get more than the default 5 s.
+const PGLITE_TIMEOUT = 60_000;
+
 describe("AuthSchema resource on Postgres", () => {
-  it("deploys the schema into Postgres, converges, and drops it only when asked", async () => {
-    const { database, close } = await pglite();
-    try {
+  it(
+    "deploys the schema into Postgres, converges, and drops it only when asked",
+    async () => {
+      const { database, close } = await pglite();
+      onTestFinished(close);
       const engine = makeEngine({ database });
       const created = await engine.deploy(AuthSchema("auth-schema", { dropOnDelete: true }));
       assert(created !== undefined);
@@ -329,15 +344,16 @@ describe("AuthSchema resource on Postgres", () => {
       expect(await tablesInPostgres(database)).toEqual(sortedTableNames);
       await engine.destroy();
       expect(await tablesInPostgres(database)).toEqual([]);
-    } finally {
-      await close();
-    }
-  });
+    },
+    PGLITE_TIMEOUT,
+  );
 
-  it("reconciles a D1 binding and a Postgres database in one stack", async () => {
-    const d1 = makeTestD1();
-    const { database: pg, close } = await pglite();
-    try {
+  it(
+    "reconciles a D1 binding and a Postgres database in one stack",
+    async () => {
+      const d1 = makeTestD1();
+      const { database: pg, close } = await pglite();
+      onTestFinished(close);
       const engine = makeEngine({ databases: { edge: d1, origin: pg } });
       await engine.deploy(
         Effect.gen(function* () {
@@ -347,19 +363,17 @@ describe("AuthSchema resource on Postgres", () => {
       );
       expect(await tablesIn(d1)).toEqual(sortedTableNames);
       expect(await tablesInPostgres(pg)).toEqual(sortedTableNames);
-    } finally {
-      await close();
-    }
-  });
+    },
+    PGLITE_TIMEOUT,
+  );
 
   // A real server, over `@effect/sql-pg` — CI's alchemy job runs one and sets
   // DATABASE_URL; without it the case is skipped.
-  const databaseUrl = process.env["DATABASE_URL"];
   it.skipIf(databaseUrl === undefined)(
     "deploys through @effect/sql-pg against a real Postgres server",
     async () => {
       assert(databaseUrl !== undefined);
-      const database = Postgres.database(Redacted.make(databaseUrl));
+      const database = Postgres.database(databaseUrl);
       const engine = makeEngine({ database });
       await engine.deploy(AuthSchema("auth-schema", { dropOnDelete: true }));
       expect(await tablesInPostgres(database)).toEqual(sortedTableNames);

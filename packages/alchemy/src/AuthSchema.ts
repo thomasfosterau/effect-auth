@@ -41,7 +41,7 @@
  * {@link AuthSchemaProps.dropOnDelete}.
  */
 
-import { Array as Arr, Clock, Data, Effect, type Layer, Record as Rec } from "effect";
+import { Array as Arr, Clock, Data, Effect, type Layer, Predicate, Record as Rec } from "effect";
 import { SqlClient, SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
 import * as Provider from "alchemy/Provider";
@@ -135,7 +135,7 @@ export const postgresDatabase = (
 export type AuthSchemaDatabase = D1Client.D1Database | PostgresDatabase;
 
 const isPostgres = (database: AuthSchemaDatabase): database is PostgresDatabase =>
-  "_tag" in database && database._tag === "PostgresDatabase";
+  Predicate.isTagged(database, "PostgresDatabase");
 
 const clientOf = (database: AuthSchemaDatabase) =>
   isPostgres(database) ? database.client : D1Client.layer({ db: database });
