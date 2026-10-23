@@ -377,6 +377,13 @@ export { Unauthorized, Forbidden } from "./Guard.ts";
  */
 export * as OwnedAccess from "./OwnedAccess.ts";
 /**
+ * The read scope (ADR-0020): a declarative policy set compiled over an unbound
+ * row into `AllowAll | Deny | Filter(predicate)`, a bound-scalar predicate a
+ * LIST renders as its `WHERE`, exact or flagged `Inexact`, with relationships
+ * as named sets.
+ */
+export * as ReadScope from "./ReadScope.ts";
+/**
  * Viewer-less cache questions, kept apart: may this representation be served
  * to anyone (`publiclyServeable`), and must this viewer bypass the cache for
  * freshness (`bypassesForFreshness`)?
