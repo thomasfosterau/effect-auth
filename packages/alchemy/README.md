@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-alchemy
 
-Cloudflare **D1** support for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) on
+Cloudflare **D1** and **Postgres over Hyperdrive** support for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) on
 [Alchemy v2](https://v2.alchemy.run) — the TypeScript-native, Effect-based
 Infrastructure-as-Code toolkit — covering both sides of the deploy:
 
@@ -17,6 +17,7 @@ own:
 | `D1Client`   | A `SqlClient` (from `effect/sql`) over a D1 binding.                  |
 | `Storage`    | `layer(db)` / `migrate(db)` — the client wired to the SQL stores.     |
 | `AuthSchema` | The Alchemy resource + provider that reconciles the schema on deploy. |
+| `./postgres` | The same over Postgres: a Hyperdrive-backed `SqlClient`, the stores, and a Postgres `AuthSchema` target. |
 
 Every store, statement and DDL comes from
 [`@thomasfosterau/effect-auth-sql`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/sql), which implements the effect-auth
@@ -236,6 +237,49 @@ export default Cloudflare.Worker(
 );
 ```
 
+## Postgres over Hyperdrive
+
+`@thomasfosterau/effect-auth-alchemy/postgres` is the Postgres counterpart of
+the D1 wiring, for an Alchemy app whose database is Postgres reached through
+Hyperdrive. It needs the optional peer `@effect/sql-pg` (`>=4.0.0`):
+
+```sh
+pnpm add @effect/sql-pg
+```
+
+In the Worker, provide every store over the Hyperdrive binding. Hyperdrive
+pools at the edge, so keep the client's own pool small:
+
+```ts
+import * as Postgres from "@thomasfosterau/effect-auth-alchemy/postgres";
+
+const stores = Postgres.layer(env.HYPERDRIVE, { maxConnections: 1 });
+```
+
+`@effect/sql-pg` connects with `node:net` / `node:tls`: the Worker needs the
+`nodejs_compat` flag.
+
+On deploy, `AuthSchema` reconciles a Postgres database just as it does a D1
+binding. A Hyperdrive binding only exists inside a Worker, so the provider
+reaches the origin database by URL:
+
+```ts
+import { AuthSchema, AuthSchemaProvider } from "@thomasfosterau/effect-auth-alchemy";
+import * as Postgres from "@thomasfosterau/effect-auth-alchemy/postgres";
+
+const providers = AuthSchemaProvider({
+  database: Postgres.database(Redacted.make(process.env.DATABASE_URL)),
+});
+// in the program:
+yield* AuthSchema("auth-schema");
+```
+
+D1 bindings and Postgres databases can be registered side by side in
+`AuthSchemaProvider({ databases })`. The full recipe, including deploying auth
+as an internal-only Worker, is the
+[Auth as an internal Worker on Alchemy](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/alchemy-internal-worker.md)
+guide.
+
 ## API
 
 - `layer(db): Layer<AuthStores>` — every effect-auth-sql store over a D1 binding (`AuthStores` is that store set).
@@ -245,6 +289,8 @@ export default Cloudflare.Worker(
 - `AuthSchemaProvider(options)` — its provider layer, given `{ database }` or `{ databases: { name: db } }` (`AuthSchemaProviderOptions`); `DEFAULT_DATABASE` is the single-database name.
 - `UnknownDatabaseError` — a resource named a database the provider does not hold.
 - `authTableNames` — the tables the schema owns, derived from effect-auth-sql's DDL.
+- `PostgresDatabase` / `postgresDatabase(clientLayer)` / `AuthSchemaDatabase` — a Postgres target for `AuthSchemaProvider` over any Postgres `SqlClient` layer; `AuthSchemaDatabase` is `D1Database | PostgresDatabase`.
+- `./postgres`: `layer(source, options?)`, `migrate(source)`, `purgeExpired(source)`, `clientLayer(source, options?)` over a `Hyperdrive` binding (`{ connectionString }`) or a `Redacted` URL, and `database(url, options?)`, the `AuthSchema` target. `options` are `@effect/sql-pg`'s pool settings.
 - `D1Client` — `make({ db })` / `layer({ db })` (a `SqlClient` over the binding) and the structural `D1Database`, `D1PreparedStatement`, `D1Result` types; `D1Database` is also exported at the root.
 
 ## Notes

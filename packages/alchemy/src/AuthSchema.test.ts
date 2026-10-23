@@ -8,8 +8,11 @@ import {
   Path,
   PlatformError,
   Predicate,
+  Redacted,
   Schema,
 } from "effect";
+import { PGlite } from "@electric-sql/pglite";
+import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import { SqlClient } from "effect/sql";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
@@ -25,8 +28,15 @@ import { Stack } from "alchemy/Stack";
 import { make as makeStack, type StackServices } from "alchemy/Stack";
 import { Stage } from "alchemy/Stage";
 import * as State from "alchemy/State";
-import { AuthSchema, AuthSchemaProvider, authTableNames } from "./AuthSchema.ts";
+import {
+  AuthSchema,
+  AuthSchemaProvider,
+  authTableNames,
+  type PostgresDatabase,
+  postgresDatabase,
+} from "./AuthSchema.ts";
 import * as D1Client from "./D1Client.ts";
+import * as Postgres from "./Postgres.ts";
 import { makeTestD1 } from "./testShim.ts";
 
 /**
@@ -281,4 +291,80 @@ describe("AuthSchema resource", () => {
     await expect(detached.destroy()).rejects.toThrow(/UnknownDatabaseError/);
     expect(await tablesIn(database)).toEqual(sortedTableNames);
   });
+});
+
+/**
+ * The Postgres path: the same lifecycle against a PGlite database, held open
+ * across every operation so a later deploy sees what an earlier one created.
+ */
+const tablesInPostgres = (database: PostgresDatabase): Promise<readonly string[]> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly name: string }>`
+        SELECT table_name AS name FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name LIKE 'auth\\_%' ESCAPE '\\'
+        ORDER BY table_name`;
+      return rows.map((row) => row.name);
+    }).pipe(Effect.provide(database.client)),
+  );
+
+const pglite = async (): Promise<{ readonly database: PostgresDatabase; readonly close: () => Promise<void> }> => {
+  const client = await PGlite.create();
+  return {
+    database: postgresDatabase(PgliteClient.layer({ liveClient: client })),
+    close: () => client.close(),
+  };
+};
+
+describe("AuthSchema resource on Postgres", () => {
+  it("deploys the schema into Postgres, converges, and drops it only when asked", async () => {
+    const { database, close } = await pglite();
+    try {
+      const engine = makeEngine({ database });
+      const created = await engine.deploy(AuthSchema("auth-schema", { dropOnDelete: true }));
+      assert(created !== undefined);
+      expect(created.tables).toEqual(sortedTableNames);
+      await engine.deploy(AuthSchema("auth-schema", { dropOnDelete: true }));
+      expect(await tablesInPostgres(database)).toEqual(sortedTableNames);
+      await engine.destroy();
+      expect(await tablesInPostgres(database)).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("reconciles a D1 binding and a Postgres database in one stack", async () => {
+    const d1 = makeTestD1();
+    const { database: pg, close } = await pglite();
+    try {
+      const engine = makeEngine({ databases: { edge: d1, origin: pg } });
+      await engine.deploy(
+        Effect.gen(function* () {
+          yield* AuthSchema("edge-auth", { database: "edge" });
+          yield* AuthSchema("origin-auth", { database: "origin" });
+        }),
+      );
+      expect(await tablesIn(d1)).toEqual(sortedTableNames);
+      expect(await tablesInPostgres(pg)).toEqual(sortedTableNames);
+    } finally {
+      await close();
+    }
+  });
+
+  // A real server, over `@effect/sql-pg` — CI's alchemy job runs one and sets
+  // DATABASE_URL; without it the case is skipped.
+  const databaseUrl = process.env["DATABASE_URL"];
+  it.skipIf(databaseUrl === undefined)(
+    "deploys through @effect/sql-pg against a real Postgres server",
+    async () => {
+      assert(databaseUrl !== undefined);
+      const database = Postgres.database(Redacted.make(databaseUrl));
+      const engine = makeEngine({ database });
+      await engine.deploy(AuthSchema("auth-schema", { dropOnDelete: true }));
+      expect(await tablesInPostgres(database)).toEqual(sortedTableNames);
+      await engine.destroy();
+      expect(await tablesInPostgres(database)).toEqual([]);
+    },
+  );
 });

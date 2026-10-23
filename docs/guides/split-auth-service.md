@@ -30,6 +30,9 @@ observable.
 > An un-routed service is still a published service. If your platform can expose it by
 > default (Cloudflare's `workers.dev`, for instance), turn that off explicitly and pin it
 > with a test. "We never gave out the URL" is not access control.
+>
+> On Alchemy, that is `workersDev: false` on the auth Worker: see
+> [Auth as an internal Worker on Alchemy](alchemy-internal-worker.md#2-the-auth-worker-is-internal-only-because-it-declares-workersdev-false).
 
 ## The transport
 
