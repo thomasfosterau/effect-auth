@@ -155,6 +155,38 @@ const sameSiteOf = (value: string): CookieOptions["sameSite"] | undefined => {
   return lower === "strict" || lower === "lax" || lower === "none" ? lower : undefined;
 };
 
+/** How each `Set-Cookie` attribute lands in SvelteKit's options; unknown attributes are dropped. */
+const cookieAttributes: Readonly<Record<string, (options: CookieOptions, value: string) => void>> =
+  {
+    path: (options, value) => {
+      if (value !== "") options.path = value;
+    },
+    domain: (options, value) => {
+      if (value !== "") options.domain = value;
+    },
+    "max-age": (options, value) => {
+      if (/^-?\d+$/u.test(value)) options.maxAge = Number(value);
+    },
+    expires: (options, value) => {
+      Option.map(DateTime.make(value), (expires) => {
+        options.expires = DateTime.toDateUtc(expires);
+      });
+    },
+    httponly: (options) => {
+      options.httpOnly = true;
+    },
+    secure: (options) => {
+      options.secure = true;
+    },
+    partitioned: (options) => {
+      options.partitioned = true;
+    },
+    samesite: (options, value) => {
+      const sameSite = sameSiteOf(value);
+      if (sameSite !== undefined) options.sameSite = sameSite;
+    },
+  };
+
 /**
  * Parse one `Set-Cookie` header into a name, a value and SvelteKit cookie
  * options. Returns `None` for a header with no `name=` pair.
@@ -177,23 +209,7 @@ export const parseSetCookie = (
   const options: CookieOptions = { path: "/" };
   Arr.forEach(attributes, (attribute) => {
     const [rawKey = "", ...rest] = attribute.split("=");
-    const key = rawKey.trim().toLowerCase();
-    const attributeValue = rest.join("=").trim();
-    if (key === "path" && attributeValue !== "") options.path = attributeValue;
-    else if (key === "domain" && attributeValue !== "") options.domain = attributeValue;
-    else if (key === "max-age" && /^-?\d+$/u.test(attributeValue)) {
-      options.maxAge = Number(attributeValue);
-    } else if (key === "expires") {
-      Option.map(DateTime.make(attributeValue), (expires) => {
-        options.expires = DateTime.toDateUtc(expires);
-      });
-    } else if (key === "httponly") options.httpOnly = true;
-    else if (key === "secure") options.secure = true;
-    else if (key === "partitioned") options.partitioned = true;
-    else if (key === "samesite") {
-      const sameSite = sameSiteOf(attributeValue);
-      if (sameSite !== undefined) options.sameSite = sameSite;
-    }
+    cookieAttributes[rawKey.trim().toLowerCase()]?.(options, rest.join("=").trim());
   });
   // SvelteKit defaults `httpOnly` and `secure` to true when they are omitted,
   // so state their absence explicitly to keep the handler's choice.
