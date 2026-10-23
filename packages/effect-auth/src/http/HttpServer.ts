@@ -4,6 +4,7 @@ import {
   Clock,
   Context,
   DateTime,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -4800,15 +4801,7 @@ const serve = (
                 Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
                 Effect.catchTag("AuthError", () => Effect.succeed(null)),
               );
-            if (denied !== null) {
-              return HttpServerResponse.jsonUnsafe(
-                {
-                  message: "Too many requests",
-                  ...(denied.retryAfter !== undefined && { retryAfter: denied.retryAfter }),
-                },
-                { status: 429 },
-              );
-            }
+            if (denied !== null) return tooManyRequests(denied.retryAfter);
           }
         }
 
@@ -4927,6 +4920,24 @@ const refuseUnservableBuild = (
   // thrown ServicesBuildPendingError cannot carry.
   if (pending) Effect.runFork(logPendingBuildFailure(servicesFiber));
   throw refused.error;
+};
+
+/**
+ * The 429 the IP rate limit answers with. `Retry-After` (and the body's
+ * `retryAfter`) are whole seconds, rounded up so a client that waits that
+ * long is not refused again.
+ */
+const tooManyRequests = (
+  retryAfter: Duration.Duration | undefined,
+): HttpServerResponse.HttpServerResponse => {
+  if (retryAfter === undefined) {
+    return HttpServerResponse.jsonUnsafe({ message: "Too many requests" }, { status: 429 });
+  }
+  const seconds = Math.ceil(Duration.toSeconds(retryAfter));
+  return HttpServerResponse.jsonUnsafe(
+    { message: "Too many requests", retryAfter: seconds },
+    { status: 429, headers: { "retry-after": String(seconds) } },
+  );
 };
 
 /**

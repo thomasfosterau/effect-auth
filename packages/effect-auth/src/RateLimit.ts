@@ -2,7 +2,7 @@
  * Rate limiting types for effect-auth
  */
 
-import { Clock, Context, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Predicate } from "effect";
 import { RateLimitError, type AuthError } from "./Errors.ts";
 import * as Obs from "./Observability.ts";
 
@@ -48,6 +48,15 @@ export class RateLimitStore extends Context.Service<
       entry: RateLimitEntry,
       ttl: number,
     ) => Effect.Effect<void, AuthError>;
+    /**
+     * Count one request against `key` and return the new count, in one atomic
+     * step: when `key` has no entry, or its window has expired (`resetAt` is
+     * not after now), start a new window with a count of 1 and a `resetAt`
+     * `ttl` seconds from now; otherwise add 1 to the open window's count.
+     * `RateLimiter.consumeToken` decides from the count this returns, so an
+     * increment that two concurrent callers can interleave lets them
+     * overshoot the limit.
+     */
     readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>;
     readonly delete: (key: string) => Effect.Effect<void, AuthError>;
   }
@@ -98,6 +107,10 @@ const recordRateLimitHit =
       ),
     );
 
+/** The time from `now` until `until` (both epoch milliseconds), never negative. */
+const retryAfter = (until: number, now: number): Duration.Duration =>
+  Duration.millis(Math.max(0, until - now));
+
 /**
  * Create a rate limiter service
  */
@@ -117,7 +130,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
             return yield* new RateLimitError({
               message: `Rate limit exceeded for ${key}`,
               key,
-              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+              retryAfter: retryAfter(entry.blockedUntil, now),
             });
           }
 
@@ -141,7 +154,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
             return yield* new RateLimitError({
               message: `Rate limit exceeded for ${key}`,
               key,
-              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
+              retryAfter: retryAfter(entry.resetAt, now),
             });
           }
 
@@ -153,49 +166,43 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
 
+          // A block outlives the window it was set in, so it is checked
+          // before the window is.
           const entry = yield* store.get(key);
-
-          // Check if window expired or no entry
-          if (!entry || now >= entry.resetAt) {
-            // Start new window
-            const newEntry: RateLimitEntry = {
+          if (entry?.blockedUntil && now < entry.blockedUntil) {
+            return yield* new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
               key,
-              count: 1,
-              resetAt: now + config.windowMs,
+              retryAfter: retryAfter(entry.blockedUntil, now),
+            });
+          }
+
+          // Count first, then decide from the count the store returns: the
+          // increment is the one step a concurrent request cannot interleave
+          // with (#455). The store starts a new window when there is none or
+          // the current one has expired.
+          const count = yield* store.increment(key, Math.ceil(config.windowMs / 1000));
+          if (count <= config.maxRequests) return;
+
+          const current = yield* store.get(key);
+          const resetAt = current?.resetAt ?? now + config.windowMs;
+
+          // Apply block if configured
+          if (config.blockDurationMs) {
+            const blockedEntry: RateLimitEntry = {
+              key,
+              count,
+              resetAt,
+              blockedUntil: now + config.blockDurationMs,
             };
-            yield* store.set(key, newEntry, Math.ceil(config.windowMs / 1000));
-            return;
+            yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
           }
 
-          // Check if blocked
-          if (entry.blockedUntil && now < entry.blockedUntil) {
-            return yield* new RateLimitError({
-              message: `Rate limit exceeded for ${key}`,
-              key,
-              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
-            });
-          }
-
-          // Increment counter
-          if (entry.count >= config.maxRequests) {
-            // Apply block if configured
-            if (config.blockDurationMs) {
-              const blockedEntry: RateLimitEntry = {
-                ...entry,
-                blockedUntil: now + config.blockDurationMs,
-              };
-              yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
-            }
-
-            return yield* new RateLimitError({
-              message: `Rate limit exceeded for ${key}`,
-              key,
-              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
-            });
-          }
-
-          // Increment
-          yield* store.increment(key, Math.ceil(config.windowMs / 1000));
+          return yield* new RateLimitError({
+            message: `Rate limit exceeded for ${key}`,
+            key,
+            retryAfter: retryAfter(resetAt, now),
+          });
         }).pipe(recordRateLimitHit(key)),
       ),
 

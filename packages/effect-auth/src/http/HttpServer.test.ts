@@ -12,6 +12,7 @@ import {
   Array as Arr,
   Data,
   DateTime,
+  Clock,
   Deferred,
   Effect,
   Fiber,
@@ -660,13 +661,20 @@ const memoryRateLimitStoreLayer = (): Layer.Layer<RateLimitStore> => {
     get: (key: string) => Effect.sync(() => entries.get(key) ?? null),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
       Effect.sync(() => void entries.set(key, entry)),
-    increment: (key: string, _ttl: number) =>
-      Effect.sync(() => {
-        const entry = entries.get(key);
-        const count = (entry?.count ?? 0) + 1;
-        if (entry) entries.set(key, { ...entry, count });
-        return count;
-      }),
+    increment: (key: string, ttl: number) =>
+      // Starts a new window when there is none or it has expired, as the
+      // RateLimitStore contract requires (#455).
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        Effect.sync(() => {
+          const entry = entries.get(key);
+          const next: RateLimitEntry =
+            entry === undefined || now >= entry.resetAt
+              ? { key, count: 1, resetAt: now + ttl * 1000 }
+              : { ...entry, count: entry.count + 1 };
+          entries.set(key, next);
+          return next.count;
+        }),
+      ),
     delete: (key: string) => Effect.sync(() => void entries.delete(key)),
   };
   return Layer.succeed(RateLimitStore, store);
@@ -2943,14 +2951,21 @@ describe("client IP at the HTTP boundary", () => {
           keys.add(key);
           entries.set(key, entry);
         }),
-      increment: (key: string, _ttl: number) =>
-        Effect.sync(() => {
-          keys.add(key);
-          const entry = entries.get(key);
-          const count = (entry?.count ?? 0) + 1;
-          if (entry) entries.set(key, { ...entry, count });
-          return count;
-        }),
+      increment: (key: string, ttl: number) =>
+        // Starts a new window when there is none or it has expired, as the
+        // RateLimitStore contract requires (#455).
+        Effect.flatMap(Clock.currentTimeMillis, (now) =>
+          Effect.sync(() => {
+            keys.add(key);
+            const entry = entries.get(key);
+            const next: RateLimitEntry =
+              entry === undefined || now >= entry.resetAt
+                ? { key, count: 1, resetAt: now + ttl * 1000 }
+                : { ...entry, count: entry.count + 1 };
+            entries.set(key, next);
+            return next.count;
+          }),
+        ),
       delete: (key: string) => Effect.sync(() => void entries.delete(key)),
     };
     const limiter = RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
@@ -2987,6 +3002,19 @@ describe("client IP at the HTTP boundary", () => {
     expect((await attempt(handler, "203.0.113.2", "7.7.7.7")).status).not.toBe(429);
     // The same visitor, with a different forged X-Forwarded-For, is still limited.
     expect((await attempt(handler, "203.0.113.1", "8.8.8.8")).status).toBe(429);
+  });
+
+  it("sends Retry-After in whole seconds, rounded up, with a matching body field", async () => {
+    const { handler } = limitedHandler({ trustedProxy: ClientIP.cloudflare });
+
+    expect((await attempt(handler, "203.0.113.9", "6.6.6.6")).status).not.toBe(429);
+    const refused = await attempt(handler, "203.0.113.9", "6.6.6.6");
+    expect(refused.status).toBe(429);
+    const header = Number(refused.headers.get("retry-after"));
+    expect(Number.isInteger(header)).toBe(true);
+    // The window is an hour; under a second of it has passed.
+    expect(header).toBe(HOUR / 1000);
+    expect(await refused.json()).toMatchObject({ retryAfter: header });
   });
 
   it("fails the build when ipRateLimit has no trustedProxy and no opt-out", () => {

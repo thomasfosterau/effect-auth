@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
+import { Array as Arr, Clock, Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Errors from "./Errors.ts";
@@ -278,15 +278,20 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
         Effect.sync(() => {
           entries.set(key, entry);
         }),
-      increment: (key: string) =>
-        Effect.sync(() => {
-          const existing = entries.get(key);
-          const count = (existing?.count ?? 0) + 1;
-          if (existing) {
-            entries.set(key, { ...existing, count });
-          }
-          return count;
-        }),
+      increment: (key: string, ttl: number) =>
+        // Starts a new window when there is none or it has expired, as the
+        // RateLimitStore contract requires (#455).
+        Effect.flatMap(Clock.currentTimeMillis, (now) =>
+          Effect.sync(() => {
+            const existing = entries.get(key);
+            const next: RateLimitEntry =
+              existing === undefined || now >= existing.resetAt
+                ? { key, count: 1, resetAt: now + ttl * 1000 }
+                : { ...existing, count: existing.count + 1 };
+            entries.set(key, next);
+            return next.count;
+          }),
+        ),
       delete: (key: string) =>
         Effect.sync(() => {
           entries.delete(key);

@@ -1,4 +1,4 @@
-import { Data } from "effect";
+import { Data, type Duration } from "effect";
 
 // ---------------------------------------------------------------------------
 // Stable error codes – append-only; never rename or remove.
@@ -554,13 +554,14 @@ export class ResendTooSoonError extends Data.TaggedError("ResendTooSoonError")<{
 }
 
 /**
- * Rate limit exceeded. `retryAfter` is the number of milliseconds before the
- * caller may retry.
+ * Rate limit exceeded. `retryAfter`, when present, is how long the caller
+ * must wait before retrying; an HTTP layer that sends it as a `Retry-After`
+ * header rounds it up to whole seconds.
  */
 export class RateLimitError extends Data.TaggedError("RateLimitError")<{
   readonly message: string;
   readonly key: string;
-  readonly retryAfter?: number;
+  readonly retryAfter?: Duration.Duration | undefined;
 }> {
   get code(): typeof ErrorCode.RATE_LIMIT_EXCEEDED {
     return ErrorCode.RATE_LIMIT_EXCEEDED;

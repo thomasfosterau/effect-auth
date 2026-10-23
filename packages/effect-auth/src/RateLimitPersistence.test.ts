@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer } from "effect";
+import { Array as Arr, Duration, Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import * as RateLimitPersistence from "./RateLimitPersistence.ts";
 import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.ts";
@@ -37,6 +37,10 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
     );
     assert.instanceOf(result, RateLimitError);
     expect(result.key).toBe("k1");
+    // The same Duration RateLimiter.make() reports: at most the window, not a bare number.
+    assert.isTrue(result.retryAfter !== undefined && Duration.isDuration(result.retryAfter));
+    expect(Duration.toMillis(result.retryAfter ?? Duration.zero)).toBeLessThanOrEqual(60_000);
+    expect(Duration.toMillis(result.retryAfter ?? Duration.zero)).toBeGreaterThan(0);
   });
 
   it("checkLimit reflects remaining capacity without failing", async () => {
