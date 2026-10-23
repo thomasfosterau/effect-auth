@@ -138,12 +138,12 @@ _Avoid_: saying "the org's users" when you mean Member records — a Member is t
 not a User. Also avoid "the user's org" — a User may have many Memberships.
 
 **Invitation**:
-A pending request to join an Organization, addressed to an email. A _Verification_ entity (see
-the Verifications section above) with extra fields `organizationId`, `invitedEmail`,
-`proposedRole`, `inviterUserId`. Hashed at rest per ADR-0004; consumed by acceptance which
-creates the `Member` row.
-_Avoid_: treating Invitation as separate machinery from other Verifications — same shape, same
-hashing rule.
+A pending request to join an Organization, addressed to an email (`Organization.ts`'s
+`Invitation`: `organizationId`, `email`, `role`, `inviterId`, `status`, `expiresAt`). It carries
+no secret token, so there is nothing to hash at rest: acceptance goes by the invitation id plus a
+signed-in User who owns the invited email as an Identifier, and creates the `Member` row.
+_Avoid_: treating the invitation id as a bearer secret — knowing it is not enough to accept;
+the accepting User must own the invited email.
 
 **Active organization**:
 The Organization the user is currently working in: `session.attributes.activeOrganizationId`,

@@ -97,12 +97,12 @@ export interface RefreshOptions {
    * starts when the first subscriber joins and is cancelled when the last one
    * leaves. Off by default.
    */
-  readonly intervalMs?: number;
+  readonly intervalMs?: number | undefined;
   /**
    * Refetch when the browser tab becomes visible or the window gains focus.
    * Falls back to a no-op in non-browser environments. Default: `false`.
    */
-  readonly onFocus?: boolean;
+  readonly onFocus?: boolean | undefined;
   /**
    * Mirror session changes across browser tabs via `BroadcastChannel`.
    * Pass `true` for the default channel name (`"effect-auth-session"`), or a
@@ -110,7 +110,7 @@ export interface RefreshOptions {
    * Falls back to a no-op when `BroadcastChannel` is unavailable (e.g. older
    * Safari or Node.js). Default: `false`.
    */
-  readonly crossTab?: boolean | string;
+  readonly crossTab?: boolean | string | undefined;
 }
 
 /** Options for {@link createAuthClient}: the base URL, a `fetch` override, extra headers and background refresh. */
@@ -121,11 +121,11 @@ export interface AuthClientOptions {
    */
   readonly baseUrl: string;
   /** Custom `fetch` (tests, SSR, mounting the handler in-process). */
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: typeof globalThis.fetch | undefined;
   /** Extra headers attached to every request. */
-  readonly headers?: Record<string, string>;
+  readonly headers?: Record<string, string> | undefined;
   /** Opt-in background session refresh. All features are off by default. */
-  readonly refresh?: RefreshOptions;
+  readonly refresh?: RefreshOptions | undefined;
 }
 
 /** Internals exposed to plugins during {@link AuthClientPlugin.install}. */

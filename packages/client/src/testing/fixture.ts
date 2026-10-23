@@ -3,7 +3,7 @@
  * real `Auth.Http.make` handler over in-memory stores) plus a cookie-jar `fetch`
  * so the browser-oriented client can be exercised end to end in-process.
  *
- * Excluded from the published build (see `tsconfig.json`).
+ * Published as the `./testing` entry point (`@thomasfosterau/effect-auth-client/testing`).
  */
 import * as Auth from "@thomasfosterau/effect-auth";
 import { Array as Arr, DateTime, Effect, Layer } from "effect";
