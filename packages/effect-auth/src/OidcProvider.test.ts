@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect";
+import { Array as Arr, Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
@@ -258,18 +258,21 @@ describe("OidcProviderService", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    for (const [result, error] of [
-      [results.badResponseType, "unsupported_response_type"],
-      [results.badScope, "invalid_scope"],
-      [results.missingOpenid, "invalid_scope"],
-      [results.plainPkce, "invalid_request"],
-    ] as const) {
-      expect(result.type).toBe("error");
-      const url = new URL(result.redirectTo);
-      expect(url.origin + url.pathname).toBe("https://rp.test/callback");
-      expect(url.searchParams.get("error")).toBe(error);
-      expect(url.searchParams.get("state")).toBe("s1");
-    }
+    Arr.forEach(
+      [
+        [results.badResponseType, "unsupported_response_type"],
+        [results.badScope, "invalid_scope"],
+        [results.missingOpenid, "invalid_scope"],
+        [results.plainPkce, "invalid_request"],
+      ] as const,
+      ([result, error]) => {
+        expect(result.type).toBe("error");
+        const url = new URL(result.redirectTo);
+        expect(url.origin + url.pathname).toBe("https://rp.test/callback");
+        expect(url.searchParams.get("error")).toBe(error);
+        expect(url.searchParams.get("state")).toBe("s1");
+      },
+    );
   });
 
   it("requires PKCE from native (public) clients", async () => {
@@ -309,7 +312,8 @@ describe("OidcProviderService", () => {
       "http://192.168.1.1/cb",
       "ftp://example.com/cb",
     ];
-    for (const uri of bad) {
+    await Arr.reduce(bad, Promise.resolve(), async (previous, uri) => {
+      await previous;
       const err = await Effect.runPromise(
         Effect.flip(service.registerClient({ name: "x", redirectUris: [uri] })).pipe(
           Effect.provide(layer),
@@ -317,7 +321,7 @@ describe("OidcProviderService", () => {
       );
       expect(err).toBeInstanceOf(OidcProviderError);
       expect((err as OidcProviderError).message).toContain("https or loopback http");
-    }
+    });
 
     const good = [
       "https://app.example.com/cb",
@@ -325,12 +329,13 @@ describe("OidcProviderService", () => {
       "http://[::1]/cb",
       "http://localhost/cb",
     ];
-    for (const uri of good) {
+    await Arr.reduce(good, Promise.resolve(), async (previous, uri) => {
+      await previous;
       const result = await Effect.runPromise(
         service.registerClient({ name: "x", redirectUris: [uri] }).pipe(Effect.provide(layer)),
       );
       expect(result.client.redirectUris).toContain(uri);
-    }
+    });
   });
 
   it("returns interaction_required for prompt=none when consent is needed", async () => {
@@ -632,12 +637,13 @@ describe("OidcProviderService dynamic client registration", () => {
       ["https://rp.test/cb#fragment"],
       ["not a url"],
     ];
-    for (const redirectUris of cases) {
+    await Arr.reduce(cases, Promise.resolve(), async (previous, redirectUris) => {
+      await previous;
       const err = await Effect.runPromise(
         Effect.flip(service.registerDynamicClient({ ...publicMetadata, redirectUris })),
       );
       expect((err as OidcRegistrationError).error).toBe("invalid_redirect_uri");
-    }
+    });
 
     // Private-use URI schemes (RFC 8252 §7.1) are opt-in per deployment.
     const withScheme = setup({ allowedRedirectUriSchemes: ["myapp"] });
@@ -662,12 +668,13 @@ describe("OidcProviderService dynamic client registration", () => {
       // refresh_token without offline_access can never mint a refresh token.
       { grantTypes: ["authorization_code", "refresh_token"], scope: "openid" },
     ];
-    for (const overrides of cases) {
+    await Arr.reduce(cases, Promise.resolve(), async (previous, overrides) => {
+      await previous;
       const err = await Effect.runPromise(
         Effect.flip(service.registerDynamicClient({ ...publicMetadata, ...overrides })),
       );
       expect((err as OidcRegistrationError).error).toBe("invalid_client_metadata");
-    }
+    });
   });
 
   it("honours the registration policy for denial, error code, and consent", async () => {
@@ -753,13 +760,18 @@ describe("OidcProviderService dynamic client registration", () => {
     const read = await Effect.runPromise(service.readDynamicClient(clientId, rat));
     expect(read.name).toBe("MCP Client");
 
-    for (const [id, token] of [
-      [clientId, "wrong-token"],
-      ["unknown-client", rat],
-    ] as const) {
-      const err = await Effect.runPromise(Effect.flip(service.readDynamicClient(id, token)));
-      expect((err as OidcRegistrationError).error).toBe("invalid_token");
-    }
+    await Arr.reduce(
+      [
+        [clientId, "wrong-token"],
+        ["unknown-client", rat],
+      ] as const,
+      Promise.resolve(),
+      async (previous, [id, token]) => {
+        await previous;
+        const err = await Effect.runPromise(Effect.flip(service.readDynamicClient(id, token)));
+        expect((err as OidcRegistrationError).error).toBe("invalid_token");
+      },
+    );
 
     const updated = await Effect.runPromise(
       service.updateDynamicClient(clientId, rat, {
@@ -944,7 +956,9 @@ const makeHttpFixture = (
     delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        for (const [id, s] of sessions) if (s.userId === userId) sessions.delete(id);
+        sessions.forEach((s, id) => {
+          if (s.userId === userId) sessions.delete(id);
+        });
       }),
     listByUserId: (userId: string) =>
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
@@ -1140,7 +1154,9 @@ const get = (
   options: { sessionId?: string; bearer?: string } = {},
 ): Request => {
   const url = new URL(`http://idp.test${path}`);
-  for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+  Arr.forEach(Object.entries(query), ([k, v]) => {
+    url.searchParams.set(k, v);
+  });
   return new Request(url, {
     headers: {
       ...(options.sessionId !== undefined

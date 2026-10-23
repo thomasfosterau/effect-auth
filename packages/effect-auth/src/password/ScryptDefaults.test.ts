@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Effect, Result } from "effect";
+import { Array as Arr, Effect, Result } from "effect";
 import { PasswordHasher, scryptHasher } from "./Password.ts";
 
 // Pins scrypt's production defaults (N = 2^17, r = 8, p = 1) without running
@@ -117,13 +117,18 @@ describe("scrypt defaults", () => {
     // Caps are max(floor, configured value); a NaN or Infinity option must
     // not turn them into NaN/Infinity (every `>` comparison false).
     const hasher = scryptHasher(options);
-    for (const stored of [
-      `scrypt$${2 ** 20}$32$1$${"00".repeat(16)}$${"00".repeat(64)}`,
-      `scrypt$1024$8$1000000$${"00".repeat(16)}$${"00".repeat(64)}`,
-    ]) {
-      const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored)));
-      expect(result._tag).toBe("Failure");
-    }
+    await Arr.reduce(
+      [
+        `scrypt$${2 ** 20}$32$1$${"00".repeat(16)}$${"00".repeat(64)}`,
+        `scrypt$1024$8$1000000$${"00".repeat(16)}$${"00".repeat(64)}`,
+      ],
+      Promise.resolve(),
+      async (previous, stored) => {
+        await previous;
+        const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored)));
+        expect(result._tag).toBe("Failure");
+      },
+    );
     expect(scrypt).not.toHaveBeenCalled();
   });
 });

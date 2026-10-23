@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Result } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Option, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   type ApiKeyService,
@@ -30,12 +30,9 @@ const apiKeyStore = {
 
   getByHash: (keyHash: string) =>
     Effect.sync(() => {
-      for (const apiKey of apiKeys.values()) {
-        if (apiKey.keyHash === keyHash) {
-          return apiKey;
-        }
-      }
-      return null;
+      return Option.getOrNull(
+        Arr.findFirst(apiKeys.values(), (apiKey) => apiKey.keyHash === keyHash),
+      );
     }),
 
   update: (apiKey: ApiKeyRecord) =>

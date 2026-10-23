@@ -1,5 +1,5 @@
 import { describe, it, expect, assert } from "vite-plus/test";
-import { Context, Effect, Result } from "effect";
+import { Array as Arr, Context, Effect, Result } from "effect";
 import { PasswordHasher, scryptHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 
@@ -332,16 +332,21 @@ describe("scrypt stored parameter limits", () => {
   });
 
   it("verifies its own hashes across valid configurations", async () => {
-    for (const options of [
-      { cost: 1024 },
-      { cost: 1024, blockSize: 1 },
-      { cost: 2, blockSize: 8, parallelization: 8 },
-      { cost: 1024, blockSize: 4, parallelization: 3 },
-    ]) {
-      const hasher = scryptHasher(options);
-      const hashed = await Effect.runPromise(hasher.hash("round-trip"));
-      expect(await Effect.runPromise(hasher.verify("round-trip", hashed.hash))).toBe(true);
-    }
+    await Arr.reduce(
+      [
+        { cost: 1024 },
+        { cost: 1024, blockSize: 1 },
+        { cost: 2, blockSize: 8, parallelization: 8 },
+        { cost: 1024, blockSize: 4, parallelization: 3 },
+      ],
+      Promise.resolve(),
+      async (previous, options) => {
+        await previous;
+        const hasher = scryptHasher(options);
+        const hashed = await Effect.runPromise(hasher.hash("round-trip"));
+        expect(await Effect.runPromise(hasher.verify("round-trip", hashed.hash))).toBe(true);
+      },
+    );
   });
 
   it("still verifies a stored hash with r and p at the caps", async () => {
@@ -361,9 +366,9 @@ describe("scrypt stored parameter limits", () => {
 
   it("needsRehash flags a stored hash that verify would refuse", () => {
     const hasher = scryptHasher({ cost: 1024 });
-    for (const [, hash] of refused) {
+    Arr.forEach(refused, ([, hash]) => {
       expect(hasher.needsRehash?.(hash)).toBe(true);
-    }
+    });
   });
 });
 

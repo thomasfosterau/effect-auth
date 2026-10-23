@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Option, Schema } from "effect";
+import { Array as Arr, Effect, Option, Schema } from "effect";
 import * as Admin from "../Admin.ts";
 import * as SessionContext from "../SessionContext.ts";
 import * as Types from "../Types.ts";
@@ -14,9 +14,9 @@ describe("fixtureUsers", () => {
     expect(users.admin.id).toBe(Testing.fixtureUserIds.admin);
     expect(users.member.id).toBe(Testing.fixtureUserIds.member);
     expect(users.otherMember.id).toBe(Testing.fixtureUserIds.otherMember);
-    for (const user of [users.admin, users.member, users.otherMember]) {
+    Arr.forEach([users.admin, users.member, users.otherMember], (user) => {
       expect(user.id).toMatch(uuidV4);
-    }
+    });
     expect(new Set([users.admin.id, users.member.id, users.otherMember.id]).size).toBe(3);
 
     expect(Admin.isAdmin(users.admin)).toBe(true);
@@ -47,10 +47,10 @@ describe("fixtureUsers", () => {
 
   it("are valid User records that survive an encode/decode round trip", () => {
     const users = Testing.fixtureUsers();
-    for (const user of [users.admin, users.member, users.otherMember]) {
+    Arr.forEach([users.admin, users.member, users.otherMember], (user) => {
       const row = Schema.encodeSync(Types.User)(user);
       expect(Schema.decodeUnknownSync(Types.User)(row)).toEqual(user);
-    }
+    });
   });
 
   it("run as the principal their id names", async () => {

@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { Context, Effect, Match, Option } from "effect";
+import { Array as Arr, Context, Effect, Match, Option } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
@@ -156,12 +156,13 @@ const describeViewer = (viewer: AppUser | null) =>
   viewer === null ? "anonymous" : `${viewer.id} (${viewer.role})`;
 
 describe("ownedListFilter agrees with canView, row for row", () => {
-  for (const seam of ["database", "absent", "never"] as const) {
-    for (const viewer of VIEWERS) {
+  Arr.forEach(["database", "absent", "never"] as const, (seam) => {
+    Arr.forEach(VIEWERS, (viewer) => {
       it(`posts (with drafts): ${describeViewer(viewer)}, follower seam ${seam}`, async () => {
         const all = await db.select().from(posts);
         const expected = new Set<string>();
-        for (const row of all) {
+        await Arr.reduce(all, Promise.resolve(), async (previous, row) => {
+          await previous;
           const visible = await Effect.runPromise(
             withSeam(
               owned.canView({
@@ -174,7 +175,7 @@ describe("ownedListFilter agrees with canView, row for row", () => {
             ),
           );
           if (visible) expected.add(row.id);
-        }
+        });
         const scope = await Effect.runPromise(withSeam(owned.readScope, viewer, seam));
         const listed = await db
           .select({ id: posts.id })
@@ -192,7 +193,8 @@ describe("ownedListFilter agrees with canView, row for row", () => {
       it(`gardens (no draft axis): ${describeViewer(viewer)}, follower seam ${seam}`, async () => {
         const all = await db.select().from(gardens);
         const expected = new Set<string>();
-        for (const row of all) {
+        await Arr.reduce(all, Promise.resolve(), async (previous, row) => {
+          await previous;
           const visible = await Effect.runPromise(
             withSeam(
               owned.canView({
@@ -204,7 +206,7 @@ describe("ownedListFilter agrees with canView, row for row", () => {
             ),
           );
           if (visible) expected.add(row.id);
-        }
+        });
         const scope = await Effect.runPromise(withSeam(owned.readScope, viewer, seam));
         const listed = await db
           .select({ id: gardens.id })
@@ -214,8 +216,8 @@ describe("ownedListFilter agrees with canView, row for row", () => {
           );
         expect(new Set(listed.map((row) => row.id))).toEqual(expected);
       });
-    }
-  }
+    });
+  });
 
   it("is not vacuous: each audience sees what it should, not nothing and not everything", async () => {
     const listFor = async (viewer: AppUser | null) => {
@@ -297,9 +299,9 @@ describe("ownedListFilter's rendered SQL", () => {
       userId: "bob",
       following: Auth.OwnedAccess.subquery(["alice", "carol"]),
     });
-    for (const rendered of [nobody, foreign]) {
+    Arr.forEach([nobody, foreign], (rendered) => {
       expect(rendered?.sql).not.toContain("followers");
       expect(rendered?.params).toEqual(["public", false, "bob"]);
-    }
+    });
   });
 });

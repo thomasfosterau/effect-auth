@@ -179,7 +179,9 @@ export const memorySessionStore = (
   delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id);
+      sessions.forEach((session, id) => {
+        if (session.userId === userId) sessions.delete(id);
+      });
     }),
   listByUserId: (userId) =>
     Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
@@ -213,7 +215,9 @@ export const memoryTrustedDeviceStore = (
   delete: (tokenHash) => Effect.sync(() => void records.delete(tokenHash)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      for (const [hash, record] of records) if (record.userId === userId) records.delete(hash);
+      records.forEach((record, hash) => {
+        if (record.userId === userId) records.delete(hash);
+      });
     }),
 });
 
@@ -275,9 +279,9 @@ export const memoryOAuthAccountStore = (
     linkToUser: (userId, account) => Effect.sync(() => put({ ...account, userId })),
     unlinkFromUser: (userId, provider) =>
       Effect.sync(() => {
-        for (const [key, account] of accounts) {
+        accounts.forEach((account, key) => {
           if (account.userId === userId && account.provider === provider) accounts.delete(key);
-        }
+        });
       }),
     delete: (provider, providerId) =>
       Effect.sync(() => void accounts.delete(accountKey(provider, providerId))),

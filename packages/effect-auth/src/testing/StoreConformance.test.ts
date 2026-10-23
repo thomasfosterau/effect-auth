@@ -4,7 +4,7 @@
  * the same suites over SQLite and PostgreSQL (`packages/sql/src/Stores.test.ts`).
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Result } from "effect";
+import { Array as Arr, Effect, Layer, Result } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as ApiKey from "../ApiKey.ts";
 import * as Errors from "../Errors.ts";
@@ -24,7 +24,9 @@ const sessionStore = (): typeof SessionStore.Service => {
     delete: (id) => Effect.sync(() => void sessions.delete(id)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id);
+        sessions.forEach((session, id) => {
+          if (session.userId === userId) sessions.delete(id);
+        });
       }),
     listByUserId: (userId) =>
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
@@ -56,11 +58,11 @@ const register = <E, R>(
   layer: () => Layer.Layer<R, unknown>,
 ): void => {
   describe(`${suite.contract} conformance`, () => {
-    for (const testCase of suite.cases) {
+    Arr.forEach(suite.cases, (testCase) => {
       it(testCase.name, () =>
         Effect.runPromise(testCase.run.pipe(Effect.provide(layer())) as Effect.Effect<void>),
       );
-    }
+    });
   });
 };
 
@@ -74,9 +76,14 @@ register(Testing.identifierStoreConformance(), () =>
 describe("the suites share one store", () => {
   it("runs every case of a suite against a single store instance", async () => {
     const layer = Layer.succeed(SessionStore, sessionStore());
-    for (const testCase of Testing.sessionStoreConformance().cases) {
-      await Effect.runPromise(testCase.run.pipe(Effect.provide(layer)));
-    }
+    await Arr.reduce(
+      Testing.sessionStoreConformance().cases,
+      Promise.resolve(),
+      async (previous, testCase) => {
+        await previous;
+        await Effect.runPromise(testCase.run.pipe(Effect.provide(layer)));
+      },
+    );
   });
 
   it("calls seedUser for every user a case touches", async () => {
@@ -100,12 +107,13 @@ const failures = async <E, R>(
   layer: () => Layer.Layer<R>,
 ): Promise<ReadonlyArray<{ readonly name: string; readonly error: unknown }>> => {
   const failed: Array<{ readonly name: string; readonly error: unknown }> = [];
-  for (const testCase of suite.cases) {
+  await Arr.reduce(suite.cases, Promise.resolve(), async (previous, testCase) => {
+    await previous;
     const result = await Effect.runPromise(
       Effect.result(testCase.run.pipe(Effect.provide(layer())) as Effect.Effect<void, unknown>),
     );
     if (Result.isFailure(result)) failed.push({ name: testCase.name, error: result.failure });
-  }
+  });
   return failed;
 };
 

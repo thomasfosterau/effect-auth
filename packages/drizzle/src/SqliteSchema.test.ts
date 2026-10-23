@@ -16,7 +16,7 @@
 import Database from "better-sqlite3";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -78,9 +78,9 @@ const withDatabase = async <A>(
 ): Promise<A> => {
   const client = new Database(":memory:");
   const migrateAndUse = async (): Promise<A> => {
-    for (const statement of migrationStatements(names)) {
+    Arr.forEach(migrationStatements(names), (statement) => {
       client.exec(statement);
-    }
+    });
     const log = makeQueryLog();
     return await use(
       drizzle(client, { logger: log.logger }),
@@ -629,9 +629,9 @@ describe("SQLite / IdentifierStore contract", () => {
 
   beforeEach(() => {
     client = new Database(":memory:");
-    for (const statement of migrationStatements()) {
+    Arr.forEach(migrationStatements(), (statement) => {
       client.exec(statement);
-    }
+    });
     db = drizzle(client);
   });
 

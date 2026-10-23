@@ -1,7 +1,17 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Array as Arr, Context, Crypto, Effect, Layer, Order, Predicate, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Predicate,
+  Result,
+} from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -65,11 +75,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -140,10 +150,9 @@ const magicLinkStore = {
   getByEmail: (email: string) =>
     Effect.sync(() => {
       storeOps.push("getByEmail");
-      for (const token of magicLinkTokens.values()) {
-        if (token.email === email) return token;
-      }
-      return null;
+      return Option.getOrNull(
+        Arr.findFirst(magicLinkTokens.values(), (token) => token.email === email),
+      );
     }),
 
   delete: (token: string) =>
@@ -155,11 +164,11 @@ const magicLinkStore = {
   deleteByEmail: (email: string) =>
     Effect.sync(() => {
       storeOps.push("deleteByEmail");
-      for (const [token, magicLink] of magicLinkTokens.entries()) {
+      magicLinkTokens.forEach((magicLink, token) => {
         if (magicLink.email === email) {
           magicLinkTokens.delete(token);
         }
-      }
+      });
     }),
 };
 
@@ -702,13 +711,13 @@ describe("MagicLinkService", () => {
         message: "Please wait before requesting another magic link",
       },
     ]);
-    for (const result of [known[1], unknown[1]]) {
+    Arr.forEach([known[1], unknown[1]], (result) => {
       expect(result._tag).toBe("Failure");
       assert(Result.isFailure(result));
       assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
       expect(result.failure.retryAfter).toBeGreaterThan(0);
       expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
-    }
+    });
     // Only the account holder is sent a link; the unknown email holds an
     // undelivered token as its cooldown marker.
     expect(sentLinks.map((link) => link.email)).toEqual(["member@example.com"]);

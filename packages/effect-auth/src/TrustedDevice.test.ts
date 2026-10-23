@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Redacted } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
 import { Hooks } from "./Hooks.ts";
@@ -34,11 +34,11 @@ const deviceStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [hash, record] of deviceRecords.entries()) {
+      deviceRecords.forEach((record, hash) => {
         if (record.userId === userId) {
           deviceRecords.delete(hash);
         }
-      }
+      });
     }),
 };
 
@@ -94,9 +94,9 @@ describe("TrustedDeviceService", () => {
     const rawToken = cookieValue.split(".").slice(0, -1).join(".");
 
     // The raw token must never appear in the stored record
-    for (const record of deviceRecords.values()) {
+    Arr.forEach(deviceRecords.values(), (record) => {
       expect(record.tokenHash).not.toBe(rawToken);
-    }
+    });
     expect(deviceRecords.size).toBe(1);
   });
 

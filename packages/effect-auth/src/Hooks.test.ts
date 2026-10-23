@@ -352,9 +352,9 @@ describe("Hooks - integration with EmailPasswordService", () => {
         }),
       deleteByUserId: (userId: string) =>
         Effect.sync(() => {
-          for (const [id, session] of sessions.entries()) {
+          sessions.forEach((session, id) => {
             if (session.userId === userId) sessions.delete(id);
-          }
+          });
         }),
       listByUserId: (userId: string) =>
         Effect.sync(() =>

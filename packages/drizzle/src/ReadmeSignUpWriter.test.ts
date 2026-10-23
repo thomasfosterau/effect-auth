@@ -10,7 +10,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer } from "effect";
 import { readFile } from "node:fs/promises";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -56,12 +56,14 @@ const region = async (file: string): Promise<string> => {
 describe("README: sign-up writer examples", () => {
   it("the README shows each compiled writer verbatim", async () => {
     const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-    for (const file of [
-      "./testing/readme/NotNullWriter.ts",
-      "./testing/readme/NullableWriter.ts",
-    ]) {
-      expect(readme).toContain("```ts\n" + (await region(file)) + "```");
-    }
+    await Arr.reduce(
+      ["./testing/readme/NotNullWriter.ts", "./testing/readme/NullableWriter.ts"],
+      Promise.resolve(),
+      async (previous, file) => {
+        await previous;
+        expect(readme).toContain("```ts\n" + (await region(file)) + "```");
+      },
+    );
   });
 
   it("NOT NULL: inserts the row with the address and its verification, and reports created", async () => {

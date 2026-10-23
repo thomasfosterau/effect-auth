@@ -16,8 +16,8 @@ export const conformance = <E, R>(
   run: (effect: Effect.Effect<void, unknown, R>) => Promise<void>,
 ): void => {
   describe(`${label}: ${suite.contract} conformance`, () => {
-    for (const testCase of suite.cases) {
+    suite.cases.forEach((testCase) => {
       it(testCase.name, () => run(testCase.run));
-    }
+    });
   });
 };

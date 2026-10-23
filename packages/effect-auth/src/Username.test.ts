@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order } from "effect";
+import { Array as Arr, Effect, Layer, Option, Order } from "effect";
 import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
   type AuthResult,
@@ -39,10 +39,12 @@ let seq = 0;
 const identifierStore = memoryIdentifierStore(identifierRecords);
 
 const findIdentifier = (type: IdentifierType, value: string): Identifier | null => {
-  for (const record of identifierRecords.values()) {
-    if (record.type === type && record.value === value) return record;
-  }
-  return null;
+  return Option.getOrNull(
+    Arr.findFirst(
+      identifierRecords.values(),
+      (record) => record.type === type && record.value === value,
+    ),
+  );
 };
 
 const emailPasswordStore: typeof EmailPasswordStore.Service = {
@@ -79,7 +81,9 @@ const sessionStore: typeof SessionStore.Service = {
   delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      for (const [id, s] of sessions) if (s.userId === userId) sessions.delete(id);
+      sessions.forEach((s, id) => {
+        if (s.userId === userId) sessions.delete(id);
+      });
     }),
   listByUserId: (userId) =>
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),

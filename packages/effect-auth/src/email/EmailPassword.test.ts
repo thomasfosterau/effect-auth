@@ -57,11 +57,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -792,9 +792,9 @@ describe("EmailPasswordService - dangling session protection", () => {
       }),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        for (const [id, session] of localSessions.entries()) {
+        localSessions.forEach((session, id) => {
           if (session.userId === userId) localSessions.delete(id);
-        }
+        });
       }),
     listByUserId: (userId: string) =>
       Effect.sync(() => Array.from(localSessions.values()).filter((s) => s.userId === userId)),

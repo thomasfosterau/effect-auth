@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Result, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Result, Schema } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
 import { CurrentPrincipal, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";
@@ -98,11 +98,12 @@ describe("protectedField – write-side guard on decode", () => {
   });
 
   it("an absent field decodes fine for everyone", async () => {
-    for (const principal of [alice, bob]) {
+    await Arr.reduce([alice, bob], Promise.resolve(), async (previous, principal) => {
+      await previous;
       const result = await decodeAs(principal, { id: "u-1" });
       expect(result._tag).toBe("Success");
       expect(Result.getOrUndefined(result)).toEqual({ id: "u-1" });
-    }
+    });
   });
 });
 

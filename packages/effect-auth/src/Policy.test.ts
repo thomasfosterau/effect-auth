@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Schema } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
@@ -71,15 +71,18 @@ describe("decidePure semantics", () => {
   it("forbid overrides permit regardless of order", () => {
     const permit = Policy.permit({ id: "allow-all" });
     const forbid = Policy.forbid({ id: "deny-bob", principal: Policy.eq(bob) });
-    for (const policies of [
-      [permit, forbid],
-      [forbid, permit],
-    ]) {
-      const decision = Policy.decidePure(policies, requestFor(bob, readDoc, doc1));
-      expect(decision.allowed).toBe(false);
-      expect(decision.reason).toBe("forbid");
-      expect(decision.determining.map((o) => o.policyId)).toEqual(["deny-bob"]);
-    }
+    Arr.forEach(
+      [
+        [permit, forbid],
+        [forbid, permit],
+      ],
+      (policies) => {
+        const decision = Policy.decidePure(policies, requestFor(bob, readDoc, doc1));
+        expect(decision.allowed).toBe(false);
+        expect(decision.reason).toBe("forbid");
+        expect(decision.determining.map((o) => o.policyId)).toEqual(["deny-bob"]);
+      },
+    );
     // Alice is not covered by the forbid.
     expect(Policy.decidePure([permit, forbid], requestFor(alice, readDoc, doc1)).allowed).toBe(
       true,

@@ -1,4 +1,4 @@
-import { Metric } from "effect";
+import { Array as Arr, Metric } from "effect";
 import { describe, it, expect } from "vite-plus/test";
 import * as Obs from "./Observability.ts";
 
@@ -14,13 +14,13 @@ describe("Observability", () => {
       const prometheusNamePattern = /^[a-zA-Z_:][a-zA-Z0-9_:]*$/;
 
       expect(exportedMetrics.length).toBeGreaterThan(0);
-      for (const metric of exportedMetrics) {
+      Arr.forEach(exportedMetrics, (metric) => {
         expect(
           prometheusNamePattern.test(metric.id),
           `Metric '${metric.name}' has invalid name '${metric.id}'. ` +
             `Must match pattern /^[a-zA-Z_:][a-zA-Z0-9_:]*$/`,
         ).toBe(true);
-      }
+      });
     });
 
     it("pins every counter's published name", () => {
@@ -54,12 +54,12 @@ describe("Observability", () => {
     it("span names follow dotted naming convention", () => {
       const dottedPattern = /^effect-auth\./;
 
-      for (const [key, spanName] of Object.entries(Obs.spanNames)) {
+      Arr.forEach(Object.entries(Obs.spanNames), ([key, spanName]) => {
         expect(
           dottedPattern.test(spanName),
           `Span name '${key}' has value '${spanName}' which doesn't start with 'effect-auth.'`,
         ).toBe(true);
-      }
+      });
     });
   });
 });

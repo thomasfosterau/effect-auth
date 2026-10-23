@@ -904,9 +904,9 @@ const storeContract = (engine: StoreEngine): void => {
             ([table, columns]) =>
               engine.columnTypes(table).pipe(
                 Effect.map((typeByCol) => {
-                  for (const col of columns) {
+                  Arr.forEach(columns, (col) => {
                     expect(typeByCol[col], `${table}.${col}`).toBe("BIGINT");
-                  }
+                  });
                 }),
               ),
             { concurrency: 1, discard: true },
@@ -1427,13 +1427,13 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.identifierStoreConformance({ seedUser }),
       Testing.apiKeyStoreConformance({ seedUser }),
     ];
-    for (const suite of suites) {
+    Arr.forEach(suites, (suite) => {
       describe(`${suite.contract} conformance`, () => {
-        for (const testCase of suite.cases) {
+        Arr.forEach(suite.cases, (testCase) => {
           it(testCase.name, () => run(testCase.run));
-        }
+        });
       });
-    }
+    });
   });
 };
 

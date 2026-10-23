@@ -52,6 +52,10 @@ const makeFixture = () => {
   const invitations = new Map<string, Invitation>();
   const teams = new Map<string, Team>();
   const teamMembers: TeamMember[] = [];
+  const removeTeamMembers = (teamId: string): void => {
+    const kept = teamMembers.filter((m) => m.teamId !== teamId);
+    teamMembers.splice(0, teamMembers.length, ...kept);
+  };
   const orgRoles = new Map<string, OrgRole>();
   const apiKeys = new Map<string, ApiKey>();
   const jwtKeys: JwtKeyPair[] = [];
@@ -124,7 +128,9 @@ const makeFixture = () => {
     delete: (sessionId: string) => Effect.sync(() => void sessions.delete(sessionId)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        for (const [id, s] of sessions) if (s.userId === userId) sessions.delete(id);
+        sessions.forEach((s, id) => {
+          if (s.userId === userId) sessions.delete(id);
+        });
       }),
     listByUserId: (userId: string) =>
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
@@ -139,16 +145,14 @@ const makeFixture = () => {
     deleteOrganization: (id: string) =>
       Effect.sync(() => {
         orgs.delete(id);
-        for (const [key, orgRole] of orgRoles) {
+        orgRoles.forEach((orgRole, key) => {
           if (orgRole.organizationId === id) orgRoles.delete(key);
-        }
-        for (const [teamId, team] of teams) {
-          if (team.organizationId !== id) continue;
+        });
+        teams.forEach((team, teamId) => {
+          if (team.organizationId !== id) return;
           teams.delete(teamId);
-          for (let i = teamMembers.length - 1; i >= 0; i--) {
-            if (teamMembers[i].teamId === teamId) teamMembers.splice(i, 1);
-          }
-        }
+          removeTeamMembers(teamId);
+        });
       }),
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
@@ -190,9 +194,7 @@ const makeFixture = () => {
     deleteTeam: (teamId: string) =>
       Effect.sync(() => {
         teams.delete(teamId);
-        for (let i = teamMembers.length - 1; i >= 0; i--) {
-          if (teamMembers[i].teamId === teamId) teamMembers.splice(i, 1);
-        }
+        removeTeamMembers(teamId);
       }),
     listTeams: (organizationId: string) =>
       Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),

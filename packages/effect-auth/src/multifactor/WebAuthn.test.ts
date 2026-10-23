@@ -563,19 +563,16 @@ const cborText = (s: string): number[] => {
   return [...cborHead(3, b.length), ...b];
 };
 const cborMap = (entries: ReadonlyArray<readonly [number[], number[]]>): number[] => {
-  const parts = cborHead(5, entries.length);
-  for (const [k, v] of entries) parts.push(...k, ...v);
-  return parts;
+  return [...cborHead(5, entries.length), ...Arr.flatMap(entries, ([k, v]) => [...k, ...v])];
 };
 
 const concatBytes = (...arrays: Uint8Array[]): Uint8Array => {
   const total = arrays.reduce((sum, a) => sum + a.length, 0);
   const out = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) {
+  Arr.reduce(arrays, 0, (offset, a) => {
     out.set(a, offset);
-    offset += a.length;
-  }
+    return offset + a.length;
+  });
   return out;
 };
 
@@ -732,8 +729,8 @@ const signCounter = (counter: number): Uint8Array =>
  * bit is set, so it isn't misread as negative).
  */
 const derInteger = (bytes: Uint8Array): Uint8Array => {
-  let start = 0;
-  while (start < bytes.length - 1 && bytes[start] === 0) start++;
+  const firstNonZero = bytes.findIndex((b) => b !== 0);
+  const start = Math.max(0, firstNonZero === -1 ? bytes.length - 1 : firstNonZero);
   const trimmed = bytes.subarray(start);
   const needsPad = ((trimmed[0] ?? 0) & 0x80) !== 0;
   const content = needsPad ? concatBytes(new Uint8Array([0]), trimmed) : trimmed;

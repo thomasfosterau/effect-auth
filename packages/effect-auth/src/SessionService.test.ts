@@ -33,11 +33,11 @@ const mockSessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of mockSessionStore.sessions.entries()) {
+      mockSessionStore.sessions.forEach((session, id) => {
         if (session.userId === userId) {
           mockSessionStore.sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -297,9 +297,9 @@ describe("SessionService", () => {
           }),
         deleteByUserId: (userId: string) =>
           Effect.sync(() => {
-            for (const [id, session] of sessions.entries()) {
+            sessions.forEach((session, id) => {
               if (session.userId === userId) sessions.delete(id);
-            }
+            });
           }),
         listByUserId: (userId: string) =>
           Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),
@@ -377,9 +377,9 @@ describe("SessionService", () => {
           }),
         deleteByUserId: (userId: string) =>
           Effect.sync(() => {
-            for (const [id, session] of sessions.entries()) {
+            sessions.forEach((session, id) => {
               if (session.userId === userId) sessions.delete(id);
-            }
+            });
           }),
         listByUserId: (userId: string) =>
           Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer, Predicate, Result } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Layer, Predicate, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,
@@ -143,7 +143,9 @@ const sessionStore: typeof SessionStore.Service = {
   delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      for (const [id, s] of sessions) if (s.userId === userId) sessions.delete(id);
+      sessions.forEach((s, id) => {
+        if (s.userId === userId) sessions.delete(id);
+      });
     }),
   listByUserId: (userId) =>
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
@@ -459,13 +461,13 @@ describe("PhoneOtpService", () => {
         message: "Please wait before requesting another OTP",
       },
     ]);
-    for (const result of [known[1], unknown[1]]) {
+    Arr.forEach([known[1], unknown[1]], (result) => {
       expect(result._tag).toBe("Failure");
       assert(Result.isFailure(result));
       assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
       expect(result.failure.retryAfter).toBeGreaterThan(0);
       expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
-    }
+    });
     // Only the account holder is sent a code; the unknown number holds an
     // undelivered record as its cooldown marker.
     expect(sentOtps.map((sent) => sent.phoneNumber)).toEqual(["+15559990010"]);

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Effect, Result } from "effect";
+import { Array as Arr, Effect, Result } from "effect";
 import { PasswordHasher, pbkdf2Hasher } from "./Password.ts";
 
 // Pins PBKDF2's production default (600,000 iterations) and the `iterations`
@@ -97,12 +97,13 @@ describe("pbkdf2 iterations option", () => {
   });
 
   it("accepts 1 and Node's largest count, 2^31 - 1", async () => {
-    for (const iterations of [1, 2 ** 31 - 1]) {
+    await Arr.reduce([1, 2 ** 31 - 1], Promise.resolve(), async (previous, iterations) => {
+      await previous;
       pbkdf2.mockClear();
       const { hash } = await Effect.runPromise(pbkdf2Hasher({ iterations }).hash("pw"));
       expect(hash.startsWith(`pbkdf2-sha256$${iterations}$`)).toBe(true);
       expect(pbkdf2.mock.calls[0]?.[2]).toBe(iterations);
-    }
+    });
   });
 
   it("needsRehash compares against the configured count, not the default", () => {
@@ -202,12 +203,17 @@ describe("pbkdf2 stored iteration limit", () => {
       // The cap is max(5,000,000, the configured count) only for a usable
       // configured count; for any other value it stays at 5,000,000.
       const hasher = pbkdf2Hasher({ iterations });
-      for (const count of ["5000001", String(2 ** 31 - 1), "3000000000"]) {
-        const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored(count))));
-        expect(result._tag).toBe("Failure");
-        assert(Result.isFailure(result));
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      await Arr.reduce(
+        ["5000001", String(2 ** 31 - 1), "3000000000"],
+        Promise.resolve(),
+        async (previous, count) => {
+          await previous;
+          const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored(count))));
+          expect(result._tag).toBe("Failure");
+          assert(Result.isFailure(result));
+          expect(result.failure._tag).toBe("HashingError");
+        },
+      );
       expect(pbkdf2).not.toHaveBeenCalled();
     },
   );

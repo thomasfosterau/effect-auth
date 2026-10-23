@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Schema } from "effect";
+import { Array as Arr, Schema } from "effect";
 import {
   AttestationObjectParseError,
   AuthenticatorDataParseError,
@@ -35,14 +35,10 @@ const cborText = (s: string): number[] => {
   return [...cborHead(3, b.length), ...b];
 };
 const cborArray = (elements: ReadonlyArray<number[]>): number[] => {
-  const parts = cborHead(4, elements.length);
-  for (const e of elements) parts.push(...e);
-  return parts;
+  return [...cborHead(4, elements.length), ...Arr.flatten(elements)];
 };
 const cborMap = (entries: ReadonlyArray<readonly [number[], number[]]>): number[] => {
-  const parts = cborHead(5, entries.length);
-  for (const [k, v] of entries) parts.push(...k, ...v);
-  return parts;
+  return [...cborHead(5, entries.length), ...Arr.flatMap(entries, ([k, v]) => [...k, ...v])];
 };
 
 const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
@@ -50,11 +46,10 @@ const bytes = (...values: number[]): Uint8Array => new Uint8Array(values);
 const concatBytes = (...arrays: Uint8Array[]): Uint8Array => {
   const total = arrays.reduce((sum, a) => sum + a.length, 0);
   const out = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) {
+  Arr.reduce(arrays, 0, (offset, a) => {
     out.set(a, offset);
-    offset += a.length;
-  }
+    return offset + a.length;
+  });
   return out;
 };
 
@@ -648,9 +643,7 @@ describe("assertion signature verification", () => {
     const ec2 = key.ec2();
     const toBytes = (value: bigint, length: number): Uint8Array => {
       const hex = value.toString(16).padStart(length * 2, "0");
-      const out = new Uint8Array(length);
-      for (let i = 0; i < length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-      return out;
+      return new Uint8Array(Arr.makeBy(length, (i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)));
     };
     const spki = Cipher.jwkToSpkiDer({
       kty: "EC",
@@ -669,8 +662,8 @@ describe("assertion signature verification", () => {
     );
     // Authenticators emit DER; Web Crypto emits raw r||s.
     const derInteger = (value: Uint8Array): Uint8Array => {
-      let start = 0;
-      while (start < value.length - 1 && value[start] === 0) start++;
+      const firstNonZero = value.findIndex((b) => b !== 0);
+      const start = Math.max(0, firstNonZero === -1 ? value.length - 1 : firstNonZero);
       const trimmed = value.subarray(start);
       const content =
         ((trimmed[0] ?? 0) & 0x80) !== 0 ? concatBytes(bytes(0), trimmed) : new Uint8Array(trimmed);

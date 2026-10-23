@@ -83,8 +83,6 @@ export default defineConfig({
       "effect/no-unknown-returns": "warn",
       // Exported `Map` parameters and `ReadonlyMap` results (10 / 284).
       "effect/avoid-native-object-helpers": "warn",
-      // Two unbounded scheduler loops in `HttpServer.ts` (2 / 206).
-      "effect/imperative-loops": "warn",
     },
     overrides: [
       {

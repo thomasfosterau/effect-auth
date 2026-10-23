@@ -47,9 +47,8 @@ const seedEmail = (userId: string, email: string): void => {
 
 /** Drop every team-membership row matching `predicate` (in-place). */
 const removeTeamMemberRows = (predicate: (teamMember: TeamMember) => boolean): void => {
-  for (let i = teamMembers.length - 1; i >= 0; i--) {
-    if (predicate(teamMembers[i])) teamMembers.splice(i, 1);
-  }
+  const kept = teamMembers.filter((teamMember) => !predicate(teamMember));
+  teamMembers.splice(0, teamMembers.length, ...kept);
 };
 
 const organizationStore = {
@@ -78,27 +77,27 @@ const organizationStore = {
   deleteOrganization: (organizationId: string) =>
     Effect.sync(() => {
       organizations.delete(organizationId);
-      for (const [id, member] of members.entries()) {
+      members.forEach((member, id) => {
         if (member.organizationId === organizationId) {
           members.delete(id);
         }
-      }
-      for (const [id, invitation] of invitations.entries()) {
+      });
+      invitations.forEach((invitation, id) => {
         if (invitation.organizationId === organizationId) {
           invitations.delete(id);
         }
-      }
-      for (const [id, team] of teams.entries()) {
+      });
+      teams.forEach((team, id) => {
         if (team.organizationId === organizationId) {
           teams.delete(id);
           removeTeamMemberRows((teamMember) => teamMember.teamId === id);
         }
-      }
-      for (const [key, orgRole] of orgRoles.entries()) {
+      });
+      orgRoles.forEach((orgRole, key) => {
         if (orgRole.organizationId === organizationId) {
           orgRoles.delete(key);
         }
-      }
+      });
     }),
 
   createMember: (member: Member) =>

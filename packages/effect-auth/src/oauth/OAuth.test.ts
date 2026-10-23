@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Crypto, Effect, Layer, Predicate, Redacted, Schema } from "effect";
+import { Array as Arr, Crypto, Effect, Layer, Predicate, Redacted, Schema } from "effect";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
 import {
@@ -229,7 +229,7 @@ const CATALOGUE: ReadonlyArray<{
 ];
 
 describe("OAuth provider catalogue", () => {
-  for (const entry of CATALOGUE) {
+  Arr.forEach(CATALOGUE, (entry) => {
     it(`${entry.name}: builds an authorization URL with state and client id`, async () => {
       const result = await runWithState(entry.provider.generateAuthorizationUrl());
       const url = new URL(result.url);
@@ -239,7 +239,7 @@ describe("OAuth provider catalogue", () => {
       expect(url.searchParams.get("state")).toBe(result.state);
       expect(url.searchParams.get("response_type")).toBe("code");
     });
-  }
+  });
 
   it("apple: requests form_post response mode and carries an OIDC nonce", async () => {
     const result = await runWithState(AppleProvider(CLIENT).generateAuthorizationUrl());
@@ -566,7 +566,7 @@ const baseClaims = (now: number) => ({
 describe("verifyIdToken", () => {
   const now = 1_700_000_000_000;
 
-  for (const alg of ["RS256", "ES256", "EdDSA"] as const) {
+  Arr.forEach(["RS256", "ES256", "EdDSA"] as const, (alg) => {
     it(`verifies a valid ${alg} id_token`, async () => {
       const key = await makeSigningKey(alg);
       const token = await signIdToken(alg, key.privateKey, baseClaims(now));
@@ -586,7 +586,7 @@ describe("verifyIdToken", () => {
       expect(claims["sub"]).toBe("user-1");
       expect(claims["email"]).toBe("u@idp.com");
     });
-  }
+  });
 
   const expectFailure = async (
     token: string,
@@ -871,7 +871,9 @@ describe("OAuthService encryptTokens", () => {
         }),
       unlinkFromUser: (uid, p) =>
         Effect.sync(() => {
-          for (const [k, v] of stored) if (v.userId === uid && v.provider === p) stored.delete(k);
+          stored.forEach((v, k) => {
+            if (v.userId === uid && v.provider === p) stored.delete(k);
+          });
         }),
       delete: (p, id) =>
         Effect.sync(() => {
@@ -1101,7 +1103,9 @@ describe("OAuthService unlinkAccount guard", () => {
         }),
       unlinkFromUser: (uid, p) =>
         Effect.sync(() => {
-          for (const [k, v] of stored) if (v.userId === uid && v.provider === p) stored.delete(k);
+          stored.forEach((v, k) => {
+            if (v.userId === uid && v.provider === p) stored.delete(k);
+          });
         }),
       delete: (p, id) =>
         Effect.sync(() => {
@@ -1263,7 +1267,7 @@ describe("OAuthService linking controls", () => {
     ...seeds: ReadonlyArray<{ userId: string; email: string; verified?: boolean }>
   ) => {
     const records = new Map<string, Identifier>();
-    for (const seed of seeds) {
+    Arr.forEach(seeds, (seed) => {
       const identifier = makeIdentifier({
         userId: seed.userId,
         type: "email",
@@ -1271,7 +1275,7 @@ describe("OAuthService linking controls", () => {
         verified: seed.verified ?? true,
       });
       records.set(identifier.id, identifier);
-    }
+    });
     const store = memoryIdentifierStore(records);
     return { records, store, layer: Layer.succeed(IdentifierStore)(store) };
   };

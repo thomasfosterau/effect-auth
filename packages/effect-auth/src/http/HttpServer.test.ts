@@ -17,6 +17,7 @@ import {
   FileSystem,
   Layer,
   Logger,
+  Option,
   Order,
   Path,
   Predicate,
@@ -265,7 +266,9 @@ const makeFixture = (
     delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id);
+        sessions.forEach((session, id) => {
+          if (session.userId === userId) sessions.delete(id);
+        });
       }),
     listByUserId: (userId) =>
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
@@ -311,8 +314,9 @@ const makeFixture = (
     delete: (token) => Effect.sync(() => void verifications.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [token, v] of verifications)
+        verifications.forEach((v, token) => {
           if (v.userId === userId) verifications.delete(token);
+        });
       }),
   };
 
@@ -326,7 +330,9 @@ const makeFixture = (
     delete: (token) => Effect.sync(() => void resets.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [token, reset] of resets) if (reset.userId === userId) resets.delete(token);
+        resets.forEach((reset, token) => {
+          if (reset.userId === userId) resets.delete(token);
+        });
       }),
   };
 
@@ -394,13 +400,14 @@ const makeFixture = (
     get: (token) => Effect.sync(() => magicLinks.get(token) ?? null),
     getByEmail: (email) =>
       Effect.sync(() => {
-        for (const link of magicLinks.values()) if (link.email === email) return link;
-        return null;
+        return Option.getOrNull(Arr.findFirst(magicLinks.values(), (link) => link.email === email));
       }),
     delete: (token) => Effect.sync(() => void magicLinks.delete(token)),
     deleteByEmail: (email) =>
       Effect.sync(() => {
-        for (const [key, link] of magicLinks) if (link.email === email) magicLinks.delete(key);
+        magicLinks.forEach((link, key) => {
+          if (link.email === email) magicLinks.delete(key);
+        });
       }),
   };
   const magicLinkUserStore: typeof MagicLinkUserStore.Service = {
@@ -462,7 +469,9 @@ const makeFixture = (
     delete: (token) => Effect.sync(() => void accountTokens.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [t, rec] of accountTokens) if (rec.userId === userId) accountTokens.delete(t);
+        accountTokens.forEach((rec, t) => {
+          if (rec.userId === userId) accountTokens.delete(t);
+        });
       }),
   };
 
@@ -1008,17 +1017,20 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
       const text = await res.text();
 
       // Nothing the holder's record stores reaches the caller.
-      for (const value of [
-        holder.id,
-        holder.name,
-        holder.image,
-        "enterprise",
-        "holder-only",
-        String(holder.createdAt.getTime()),
-        String(holder.updatedAt.getTime()),
-      ]) {
-        expect(text).not.toContain(value);
-      }
+      Arr.forEach(
+        [
+          holder.id,
+          holder.name,
+          holder.image,
+          "enterprise",
+          "holder-only",
+          String(holder.createdAt.getTime()),
+          String(holder.updatedAt.getTime()),
+        ],
+        (value) => {
+          expect(text).not.toContain(value);
+        },
+      );
 
       const body = parseJson(text) as SignUpBody;
       expect(body.needsEmailVerification).toBe(true);
@@ -1044,13 +1056,18 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
       // its token verifies the holder's address.
       expect(fixture.sentVerificationTokens).toHaveLength(verification ? 1 : 0);
       // At most one token, checked above: verifying each verifies the one sent.
-      for (const token of fixture.sentVerificationTokens) {
-        const verify = await handler(jsonRequest("/email-verification/verify", { token }));
-        expect(verify.status).toBe(200);
-        const verified = (await verify.json()) as SignUpBody;
-        expect(verified.user["id"]).toBe(holder.id);
-        expect(verified.user["emailVerified"]).toBe(true);
-      }
+      await Arr.reduce(
+        fixture.sentVerificationTokens,
+        Promise.resolve(),
+        async (previous, token) => {
+          await previous;
+          const verify = await handler(jsonRequest("/email-verification/verify", { token }));
+          expect(verify.status).toBe(200);
+          const verified = (await verify.json()) as SignUpBody;
+          expect(verified.user["id"]).toBe(holder.id);
+          expect(verified.user["emailVerified"]).toBe(true);
+        },
+      );
     },
   );
 
@@ -2211,13 +2228,14 @@ describe("passwordless verify where send hides the account", () => {
       vi.setSystemTime(Date.now() + expiresIn + 1);
     }
     const tries = sequence === "wrong codes" ? 4 : 2;
-    for (let i = 0; i < tries; i++) {
+    await Arr.reduce(Arr.range(1, tries), Promise.resolve(), async (previous) => {
+      await previous;
       steps.push(
         await observe(
           await handler(jsonRequest(verify, verifyPayload(address.email, address.phone))),
         ),
       );
-    }
+    });
     return steps;
   };
 
@@ -2505,13 +2523,12 @@ describe("HTTP session cookie cache", () => {
   });
 });
 
-const setCookieValue = (res: Response, name: string): string | null => {
-  for (const c of res.headers.getSetCookie()) {
-    const value = new RegExp(`^${name}=([^;]*)`).exec(c)?.[1];
-    if (value !== undefined) return value;
-  }
-  return null;
-};
+const setCookieValue = (res: Response, name: string): string | null =>
+  Option.getOrNull(
+    Arr.findFirst(res.headers.getSetCookie(), (c) =>
+      Option.fromNullishOr(new RegExp(`^${name}=([^;]*)`).exec(c)?.[1]),
+    ),
+  );
 
 const requireSetCookie = (res: Response, name: string): string => {
   const value = setCookieValue(res, name);
@@ -2579,17 +2596,22 @@ describe("HTTP multi-session", () => {
     const handler = handlerFor(makeFixture(), { multiSession: { maximumSessions: 2 } });
     let multi = "";
     let last = "";
-    for (const email of ["1@e.com", "2@e.com", "3@e.com"]) {
-      const res = await handler(
-        jsonRequest(
-          "/sign-up",
-          { email, password: PW },
-          { cookie: `conduit_session_multi=${multi}` },
-        ),
-      );
-      multi = requireSetCookie(res, "conduit_session_multi");
-      last = requireSetCookie(res, "conduit_session");
-    }
+    await Arr.reduce(
+      ["1@e.com", "2@e.com", "3@e.com"],
+      Promise.resolve(),
+      async (previous, email) => {
+        await previous;
+        const res = await handler(
+          jsonRequest(
+            "/sign-up",
+            { email, password: PW },
+            { cookie: `conduit_session_multi=${multi}` },
+          ),
+        );
+        multi = requireSetCookie(res, "conduit_session_multi");
+        last = requireSetCookie(res, "conduit_session");
+      },
+    );
     const ids = multi.split(".").filter(Boolean);
     expect(ids).toHaveLength(2);
     expect(ids).toContain(last); // newest retained
@@ -2604,19 +2626,19 @@ describe("HTTP multi-session", () => {
 
 // Parse the Set-Cookie header for a named cookie and return its directives.
 const parseCookieDirectives = (res: Response, name: string): Record<string, string | true> => {
-  for (const header of res.headers.getSetCookie()) {
-    const [pair, ...directives] = header.split(/;\s*/);
-    if (pair?.startsWith(`${name}=`) === true) {
-      const out: Record<string, string | true> = {};
-      for (const d of directives) {
-        const eq = d.indexOf("=");
-        if (eq === -1) out[d.toLowerCase()] = true;
-        else out[d.slice(0, eq).toLowerCase()] = d.slice(eq + 1);
-      }
-      return out;
-    }
-  }
-  return {};
+  const found = Arr.findFirst(
+    Arr.map(res.headers.getSetCookie(), (header) => header.split(/;\s*/)),
+    ([pair]) => pair?.startsWith(`${name}=`) === true,
+  );
+  const out: Record<string, string | true> = {};
+  if (Option.isNone(found)) return out;
+  const [, ...directives] = found.value;
+  Arr.forEach(directives, (d) => {
+    const eq = d.indexOf("=");
+    if (eq === -1) out[d.toLowerCase()] = true;
+    else out[d.slice(0, eq).toLowerCase()] = d.slice(eq + 1);
+  });
+  return out;
 };
 
 describe("rememberMe cookie behaviour", () => {
@@ -2909,7 +2931,8 @@ describe("client IP at the HTTP boundary", () => {
     const { handler, keys } = limitedHandler({ allowMissingClientIp: true });
 
     // Two address-less sign-ins: both refused, neither counted under a shared bucket.
-    for (let i = 0; i < 2; i++) {
+    await Arr.reduce(Arr.range(1, 2), Promise.resolve(), async (previous) => {
+      await previous;
       const res = await handler(
         jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
       );
@@ -2917,7 +2940,7 @@ describe("client IP at the HTTP boundary", () => {
       expect(await res.json()).toEqual({
         message: expect.stringContaining("Client address unavailable"),
       });
-    }
+    });
     expect([...keys]).toEqual([]);
 
     // An endpoint with no rule is not limited, so it needs no address.
@@ -2941,7 +2964,9 @@ describe("client IP at the HTTP boundary", () => {
     // A valid address is still keyed on its own: the refusals used no bucket.
     expect((await attempt(handler, "203.0.113.1", "6.6.6.6")).status).not.toBe(429);
     expect(keys.size).toBeGreaterThan(0);
-    for (const key of keys) expect(key.endsWith("203.0.113.1")).toBe(true);
+    Arr.forEach(keys, (key) => {
+      expect(key.endsWith("203.0.113.1")).toBe(true);
+    });
   });
 });
 
@@ -3014,18 +3039,20 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
       cookie: { secure: false },
     });
     // An unknown code is a 400 every time: no limiter, by explicit choice.
-    for (let i = 0; i < 7; i++) {
+    await Arr.reduce(Arr.range(1, 7), Promise.resolve(), async (previous) => {
+      await previous;
       const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
       expect(res.status).toBe(400);
-    }
+    });
   });
 
   it("limits device approve/deny to 5 attempts per user code when a RateLimiter is in services", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    for (let i = 0; i < 5; i++) {
+    await Arr.reduce(Arr.range(1, 5), Promise.resolve(), async (previous) => {
+      await previous;
       const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
       expect(res.status).toBe(400);
-    }
+    });
     const sixth = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
     expect(sixth.status).toBe(429);
   });
@@ -3234,7 +3261,9 @@ const thrownBy = (thunk: () => HttpServer.AuthWebHandler): Error =>
 
 /** Let the event loop run a few macrotasks (setImmediate callbacks). */
 const macrotasks = async (count: number): Promise<void> => {
-  for (let i = 0; i < count; i++) await new Promise((resolve) => setImmediate(resolve));
+  if (count <= 0) return;
+  await new Promise((resolve) => setImmediate(resolve));
+  await macrotasks(count - 1);
 };
 
 class BootError extends Data.TaggedError("BootError")<{ readonly reason: string }> {}
@@ -3667,7 +3696,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     ],
   ];
 
-  for (const [composition, services] of asynchronous) {
+  Arr.forEach(asynchronous, ([composition, services]) => {
     it(`rejects RateLimiterConfigError for ${composition}, where make takes the fallback`, async () => {
       const made = HttpServer.make({ services: services(), ...limitWithoutLimiter });
       await expect(made.handler(signIn())).rejects.toBeInstanceOf(RateLimiterConfigError);
@@ -3679,7 +3708,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       expect(error).toBeInstanceOf(RateLimiterConfigError);
       expect(String(error)).toMatch(/ipRateLimit configured with no RateLimiter/);
     });
-  }
+  });
 
   it("rejects ClientAddressConfigError for an IPRateLimitPlugin with no address source, built asynchronously", async () => {
     const services = Layer.merge(
@@ -3901,8 +3930,14 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
   };
 
   /** Yield to the event loop until `state.ticks` reaches `target`, for at most 1,000 turns. */
-  const untilTicks = async (state: { ticks: number }, target: number): Promise<void> => {
-    for (let turn = 0; turn < 1000 && state.ticks < target; turn++) await macrotasks(1);
+  const untilTicks = async (
+    state: { ticks: number },
+    target: number,
+    turns = 1000,
+  ): Promise<void> => {
+    if (turns <= 0 || state.ticks >= target) return;
+    await macrotasks(1);
+    await untilTicks(state, target, turns - 1);
   };
 
   it("interrupts a forkChild loop when the layer that forks it finishes, so its ticks are frozen by the time the promise resolves", async () => {
@@ -3914,7 +3949,10 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         yield* Effect.forkChild(
           counter.tick.pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
         );
-        while (counter.state.ticks < 3) yield* Effect.yieldNow;
+        const untilThreeTicks: Effect.Effect<void> = Effect.suspend(() =>
+          counter.state.ticks >= 3 ? Effect.void : Effect.andThen(Effect.yieldNow, untilThreeTicks),
+        );
+        yield* untilThreeTicks;
       }),
     );
     onTestFinished(() => {
@@ -3989,7 +4027,7 @@ describe("make with strict (#416)", () => {
     ],
   ];
 
-  for (const [composition, services] of pending) {
+  Arr.forEach(pending, ([composition, services]) => {
     it(`throws ServicesBuildPendingError for ${composition}, and takes the fallback without it`, async () => {
       const error = thrownBy(() =>
         HttpServer.make({
@@ -4019,7 +4057,7 @@ describe("make with strict (#416)", () => {
       expect((await off.handler(signIn())).status).toBe(401);
       await off.dispose();
     });
-  }
+  });
 
   it("returns the handler for a synchronous build", async () => {
     const { handler, dispose } = HttpServer.make({
@@ -4290,7 +4328,8 @@ describe("make with strict (#416)", () => {
   });
 
   it("is ignored by makeAsync, which waits for the build", async () => {
-    for (const [, services] of pending) {
+    await Arr.reduce(pending, Promise.resolve(), async (previous, [, services]) => {
+      await previous;
       const { handler, dispose } = await HttpServer.makeAsync({
         services: services(),
         cookie: { secure: false },
@@ -4298,6 +4337,6 @@ describe("make with strict (#416)", () => {
       });
       expect((await handler(signIn())).status).toBe(401);
       await dispose();
-    }
+    });
   });
 });

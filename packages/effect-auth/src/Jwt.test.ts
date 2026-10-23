@@ -1,7 +1,7 @@
 import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { Context, Crypto, Effect, Redacted, Result, Schema } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Redacted, Result, Schema } from "effect";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
@@ -239,14 +239,14 @@ describe("JwtService", () => {
 
     expect(jwks.keys).toHaveLength(2);
 
-    for (const key of jwks.keys) {
+    Arr.forEach(jwks.keys, (key) => {
       expect(key["kid"]).toBeTypeOf("string");
       expect(key["use"]).toBe("sig");
       expect(["ES256", "EdDSA"]).toContain(key["alg"]);
       // No private material in the JWKS
       expect(key["d"]).toBeUndefined();
       expect(encodeJson(key)).not.toContain("PRIVATE KEY");
-    }
+    });
 
     const es256Key = jwks.keys.find((key) => key["alg"] === "ES256");
     expect(es256Key?.["kty"]).toBe("EC");

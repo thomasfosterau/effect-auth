@@ -98,7 +98,9 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
     delete: (token) => Effect.sync(() => void tokens.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [t, rec] of tokens) if (rec.userId === userId) tokens.delete(t);
+        tokens.forEach((rec, t) => {
+          if (rec.userId === userId) tokens.delete(t);
+        });
       }),
   };
 
@@ -394,33 +396,36 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         }),
     });
 
-  for (const [label, rejectTakenFirst] of [
-    ["resolves to null", false],
-    ["refuses the held value", true],
-  ] as const) {
-    it(`a double-submitted confirmation converges to success when the store ${label}`, async () => {
-      const h = makeHarness(doubleSubmit(rejectTakenFirst));
-      const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+  Arr.forEach(
+    [
+      ["resolves to null", false],
+      ["refuses the held value", true],
+    ] as const,
+    ([label, rejectTakenFirst]) => {
+      it(`a double-submitted confirmation converges to success when the store ${label}`, async () => {
+        const h = makeHarness(doubleSubmit(rejectTakenFirst));
+        const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
 
-      const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
+        const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
 
-      expect(user.id).toBe("user-1");
-      expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-      expect(h.tokens.has(token)).toBe(false);
-      expect(h.revoked).toEqual(["user-1"]);
-      expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
-    });
+        expect(user.id).toBe("user-1");
+        expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+        expect(h.tokens.has(token)).toBe(false);
+        expect(h.revoked).toEqual(["user-1"]);
+        expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
+      });
 
-    it(`a converged confirmation leaves the new address verified when the concurrent write left it unverified and the store ${label}`, async () => {
-      const h = makeHarness(doubleSubmit(rejectTakenFirst, false));
-      const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+      it(`a converged confirmation leaves the new address verified when the concurrent write left it unverified and the store ${label}`, async () => {
+        const h = makeHarness(doubleSubmit(rejectTakenFirst, false));
+        const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
 
-      await run(h, (svc) => svc.confirmEmailChange(token));
+        await run(h, (svc) => svc.confirmEmailChange(token));
 
-      expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-      expect(h.tokens.has(token)).toBe(false);
-    });
-  }
+        expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+        expect(h.tokens.has(token)).toBe(false);
+      });
+    },
+  );
 
   it("a store that reports a row already holding the new address, unverified, ends with it verified", async () => {
     // The single-table store resolves a stale `from` to the row when the row
@@ -507,9 +512,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
   it("a user with no email claims the new address", async () => {
     const h = makeHarness();
-    for (const [id, identifier] of h.identifiers) {
+    h.identifiers.forEach((identifier, id) => {
       if (identifier.userId === "user-1") h.identifiers.delete(id);
-    }
+    });
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
 
     await run(h, (svc) => svc.confirmEmailChange(token));
@@ -534,9 +539,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
           return store.create(identifier);
         }),
     }));
-    for (const [id, identifier] of h.identifiers) {
+    h.identifiers.forEach((identifier, id) => {
       if (identifier.userId === "user-1") h.identifiers.delete(id);
-    }
+    });
     return h;
   };
 

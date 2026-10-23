@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 import { ARGON2ID } from "./index.ts";
 import * as Argon2 from "./index.ts";
 import { Password } from "@thomasfosterau/effect-auth";
@@ -98,10 +98,11 @@ describe("PHC parameter parsing on verify", () => {
       "$argon2id$v=16$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$aGFzaA",
       "$argon2id$v=19$m=abc,t=2,p=1$c2FsdHNhbHRzYWx0$aGFzaA",
     ];
-    for (const invalid of cases) {
+    await Arr.reduce(cases, Promise.resolve(), async (previous, invalid) => {
+      await previous;
       const err = await run(Effect.flip(hasher.verify("whatever", invalid)));
       expect(err.message).toMatch(/Invalid Argon2 hash/);
-    }
+    });
   });
 
   it("fails on an empty hash", async () => {
