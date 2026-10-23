@@ -18,6 +18,10 @@ import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 let database: PGlite;
 
+// Opening PGlite from the template and loading the corpus takes seconds on a
+// loaded machine: more than the default 10 s hook timeout allows.
+const SETUP_TIMEOUT = 60_000;
+
 beforeAll(async () => {
   database = await migratedPglite();
   await database.exec(`
@@ -25,19 +29,16 @@ beforeAll(async () => {
     CREATE TABLE follows (follower TEXT NOT NULL, followee TEXT NOT NULL);
     INSERT INTO follows VALUES ('u-other', 'u-member'), ('u-other', 'u-admin');
   `);
-  const values = Arr.map(corpus, (row) => [
-    row.id,
-    row.owner,
-    row.visibility,
-    row.draft,
-    row.score,
-  ]);
-  await Promise.all(
-    Arr.map(values, (params) =>
-      database.query(`INSERT INTO owned VALUES ($1, $2, $3, $4, $5)`, params),
-    ),
+  // One statement for the whole corpus: five parameters per row.
+  const placeholders = Arr.map(corpus, (_, index) => {
+    const base = index * 5;
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+  }).join(", ");
+  await database.query(
+    `INSERT INTO owned VALUES ${placeholders}`,
+    Arr.flatMap(corpus, (row) => [row.id, row.owner, row.visibility, row.draft, row.score]),
   );
-});
+}, SETUP_TIMEOUT);
 
 afterAll(async () => {
   await database?.close();
