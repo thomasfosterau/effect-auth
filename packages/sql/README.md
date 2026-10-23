@@ -114,6 +114,32 @@ export const authorization = (SqlLive: Layer.Layer<SqlClient.SqlClient>) =>
 
 Policies are read once, when the layer is built; re-read them behind a `PolicyStore` if role edits must apply without a restart.
 
+## Read scopes
+
+`readScopeWhere(scope, { columns, sets? })` renders a core `Auth.ReadScope` as a `WHERE` fragment, so a LIST filters in the database rather than after the fact. `Auth.ReadScope.compile` produces the scope from a policy set (ADR-0020).
+
+```typescript
+import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as AuthSql from "@thomasfosterau/effect-auth-sql";
+
+export const listPosts = (scope: Auth.ReadScope.ReadScope, viewerId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const where = yield* AuthSql.readScopeWhere(scope, {
+      columns: { owner: sql("owner_id"), visibility: sql("visibility"), draft: sql("draft") },
+      sets: { following: sql`SELECT followee FROM follows WHERE follower = ${viewerId}` },
+    });
+    return yield* sql`SELECT * FROM posts WHERE ${where}`;
+  });
+```
+
+- `AllowAll` renders `1 = 1` and `Deny` renders `1 = 0`, so the fragment always splices in.
+- Every comparison carries an `IS NOT NULL` guard, so a NULL column decides as the core decides an absent attribute and never through SQL's third truth value.
+- A named set is a subquery and is never materialised. A set with no fragment in `sets` is dropped with `ReadScope.withoutSets`, which narrows the scope.
+- An attribute with no column in `columns` lists nothing.
+
 ## Dialects
 
 - **SQLite:** supported. The test suite runs every store over `better-sqlite3`.
