@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import * as RateLimitPersistence from "./RateLimitPersistence.ts";
@@ -15,6 +15,8 @@ const Live = Layer.mergeAll(
     Layer.provide(PersistenceRateLimiter.layer),
     Layer.provide(PersistenceRateLimiter.layerStoreMemory),
   ),
+  // SAFETY: this backend never reads `RateLimitStore`; only the interface's
+  // legacy requirement asks for it.
   Layer.succeed(RateLimitStore)(undefined as never),
 );
 
@@ -33,8 +35,8 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
         return yield* Effect.catch(rl.consumeToken("k1", config), (e) => Effect.succeed(e));
       }),
     );
-    expect(result).toBeInstanceOf(RateLimitError);
-    expect((result as RateLimitError).key).toBe("k1");
+    assert.instanceOf(result, RateLimitError);
+    expect(result.key).toBe("k1");
   });
 
   it("checkLimit reflects remaining capacity without failing", async () => {

@@ -208,7 +208,7 @@ const makeHarness = (
         Effect.gen(function* () {
           const svc = yield* Auth.AccountManagementService;
           return yield* f(svc);
-        }).pipe(Effect.provide(layer)) as Effect.Effect<A, E>,
+        }).pipe(Effect.provide(layer)),
       ),
     tokens,
   };

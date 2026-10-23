@@ -91,7 +91,7 @@ const withFetch = async <A>(
 ): Promise<A> => {
   const calls: Captured[] = [];
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+  globalThis.fetch = (input, init) => {
     const url = Predicate.isString(input) ? input : input.toString();
     const body = init?.body;
     calls.push({
@@ -101,7 +101,7 @@ const withFetch = async <A>(
       body: Predicate.isString(body) ? body : null,
     });
     return Promise.resolve(handler(url, init));
-  }) as typeof fetch;
+  };
   return thunk(calls).finally(() => {
     globalThis.fetch = original;
   });
@@ -529,10 +529,12 @@ const makeSigningKey = async (
   alg: "RS256" | "ES256" | "EdDSA",
   kid = "test-kid",
 ): Promise<SigningKey> => {
-  const keyPair = (await globalThis.crypto.subtle.generateKey(keyGenParams(alg), true, [
+  const keyPair = await globalThis.crypto.subtle.generateKey(keyGenParams(alg), true, [
     "sign",
     "verify",
-  ])) as { publicKey: CryptoKey; privateKey: CryptoKey };
+  ]);
+  // Every algorithm `keyGenParams` names is asymmetric, so the result is a pair.
+  assert("privateKey" in keyPair, `${alg} generates a key pair`);
   const jwk = await globalThis.crypto.subtle.exportKey("jwk", keyPair.publicKey);
   return { privateKey: keyPair.privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
 };
@@ -767,7 +769,9 @@ describe("OAuth.appleClientSecret", () => {
       }),
     );
 
-    const [headerSeg, payloadSeg, signatureSeg] = secret.split(".") as [string, string, string];
+    const [headerSeg, payloadSeg, signatureSeg] = Schema.decodeUnknownSync(
+      Schema.Tuple([Schema.String, Schema.String, Schema.String]),
+    )(secret.split("."));
     const header = decodeJson(Buffer.from(headerSeg, "base64url").toString("utf8"));
     const payload = Schema.decodeSync(
       Schema.fromJsonString(
@@ -836,11 +840,10 @@ describe("Cipher.aes256GcmCipher", () => {
 });
 
 describe("OAuthService encryptTokens", () => {
-  // OAuth.make resolves OAuthStateStore | OAuthAccountStore | OAuthUserStore |
-  // IdentifierStore | UserStore | SessionService at construction time. These
-  // tests only exercise refreshAccessToken (which only touches
-  // OAuthAccountStore, via closure), so the others are stubbed out — never
-  // actually invoked.
+  // SAFETY: OAuth.make resolves OAuthStateStore | OAuthAccountStore |
+  // OAuthUserStore | IdentifierStore | UserStore | SessionService at construction
+  // time. These tests only exercise refreshAccessToken (which only touches
+  // OAuthAccountStore, via closure), so the `undefined` others are never invoked.
   const unusedDepsLayer = Layer.mergeAll(
     Layer.succeed(OAuthStateStore)(undefined as never),
     Layer.succeed(OAuthUserStore)(undefined as never),
@@ -1058,8 +1061,8 @@ describe("OAuthService unlinkAccount guard", () => {
     false,
   );
 
-  // unlinkAccount only touches OAuthAccountStore (resolved in `make`'s closure);
-  // the other construction-time deps are stubbed — never invoked here.
+  // SAFETY: unlinkAccount only touches OAuthAccountStore (resolved in `make`'s
+  // closure); the `undefined` construction-time deps are never invoked here.
   const unusedDeps = Layer.mergeAll(
     Layer.succeed(OAuthStateStore)(undefined as never),
     Layer.succeed(OAuthUserStore)(undefined as never),
@@ -1307,7 +1310,8 @@ describe("OAuthService linking controls", () => {
     });
   };
 
-  // linkAccount never touches SessionService; stub it for those tests.
+  // SAFETY: linkAccount never touches SessionService, so the `undefined` stub is
+  // never invoked by the tests that use it.
   const noSession = Layer.succeed(SessionService)(undefined as never);
 
   const mockTokenResponse = { access_token: "at-new", token_type: "bearer" };
@@ -1474,8 +1478,8 @@ describe("OAuthService linking controls", () => {
 
     // Without a trusted provider and without email_verified, the flow must not
     // auto-link — and it must not double-claim the email either.
-    expect(err).toBeInstanceOf(AuthError);
-    expect((err as AuthError).message).toMatch(/already associated/i);
+    assert.instanceOf(err, AuthError);
+    expect(err.message).toMatch(/already associated/i);
   });
 
   it("trustedProviders: unclaimed unverified email creates a new user with an unverified identifier", async () => {
@@ -1620,8 +1624,8 @@ describe("OAuthService linking controls", () => {
       () => Effect.runPromise(Effect.flip(service.signInWithCallback("owner-state", "code-owner"))),
     );
 
-    expect(err).toBeInstanceOf(AuthError);
-    expect((err as AuthError).message).toMatch(/already associated/i);
+    assert.instanceOf(err, AuthError);
+    expect(err.message).toMatch(/already associated/i);
     // No account linked to the owner, and the owner's address is still unverified.
     expect(accounts.size).toBe(0);
     const held = await Effect.runPromise(

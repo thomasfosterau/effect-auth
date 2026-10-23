@@ -20,7 +20,10 @@ type StubOf<T> = T extends (...args: infer A) => infer R
 
 /** Any subset of the client's members; the code under test touches only the ones a test supplies. */
 type ClientStub = StubOf<AuthClient>;
-const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
+const stub = (methods: ClientStub): AuthClient =>
+  // SAFETY: the code under test touches only the members a test supplies; reaching
+  // for a missing one throws, so a stub cannot let a test pass by omission.
+  methods as AuthClient;
 
 /**
  * A client backed by a stand-in server covering only the endpoints these

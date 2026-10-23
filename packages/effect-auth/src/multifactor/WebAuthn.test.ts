@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Array as Arr, Effect, Context, Crypto, Data, Order, Schema } from "effect";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
@@ -590,6 +590,11 @@ const keyGenParams = (alg: Alg) =>
         }
       : { name: "Ed25519" };
 
+// The public JWK members each key type exports.
+const Ec2Jwk = Schema.Struct({ x: Schema.String, y: Schema.String });
+const RsaJwk = Schema.Struct({ n: Schema.String, e: Schema.String });
+const OkpJwk = Schema.Struct({ x: Schema.String });
+
 /**
  * Generate a keypair and its COSE-key CBOR bytes for the given algorithm.
  * `algorithmLabel` overrides the advertised COSE `alg` value, for tests that
@@ -599,17 +604,18 @@ const buildKey = async (
   alg: Alg,
   algorithmLabel: number = alg,
 ): Promise<{ privateKey: CryptoKey; cose: number[] }> => {
-  const { publicKey, privateKey } = (await globalThis.crypto.subtle.generateKey(
-    keyGenParams(alg),
-    true,
-    ["sign", "verify"],
-  )) as { publicKey: CryptoKey; privateKey: CryptoKey };
+  const keyPair = await globalThis.crypto.subtle.generateKey(keyGenParams(alg), true, [
+    "sign",
+    "verify",
+  ]);
+  // Every algorithm `keyGenParams` names is asymmetric, so the result is a pair.
+  assert("privateKey" in keyPair, `${alg} generates a key pair`);
+  const { publicKey, privateKey } = keyPair;
 
   if (alg === -7) {
-    const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as {
-      x: string;
-      y: string;
-    };
+    const jwk = Schema.decodeUnknownSync(Ec2Jwk)(
+      await globalThis.crypto.subtle.exportKey("jwk", publicKey),
+    );
     const x = new Uint8Array(Buffer.from(jwk.x, "base64url"));
     const y = new Uint8Array(Buffer.from(jwk.y, "base64url"));
     return {
@@ -624,10 +630,9 @@ const buildKey = async (
     };
   }
   if (alg === -257) {
-    const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as {
-      n: string;
-      e: string;
-    };
+    const jwk = Schema.decodeUnknownSync(RsaJwk)(
+      await globalThis.crypto.subtle.exportKey("jwk", publicKey),
+    );
     const n = new Uint8Array(Buffer.from(jwk.n, "base64url"));
     const e = new Uint8Array(Buffer.from(jwk.e, "base64url"));
     return {
@@ -640,7 +645,9 @@ const buildKey = async (
       ]),
     };
   }
-  const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as { x: string };
+  const jwk = Schema.decodeUnknownSync(OkpJwk)(
+    await globalThis.crypto.subtle.exportKey("jwk", publicKey),
+  );
   const x = new Uint8Array(Buffer.from(jwk.x, "base64url"));
   return {
     privateKey,
@@ -757,14 +764,14 @@ const signAssertion = async (
 ): Promise<Uint8Array> => {
   const clientDataHash = await globalThis.crypto.subtle.digest(
     "SHA-256",
-    clientData as NodeJS.BufferSource,
+    new Uint8Array(clientData),
   );
   const message = concatBytes(authenticatorData, new Uint8Array(clientDataHash));
   // ES256/RS256 hash with SHA-256; Ed25519 hashes internally.
   const signature = await globalThis.crypto.subtle.sign(
     alg === -8 ? "Ed25519" : alg === -7 ? { name: "ECDSA", hash: "SHA-256" } : "RSASSA-PKCS1-v1_5",
     privateKey,
-    message as NodeJS.BufferSource,
+    new Uint8Array(message),
   );
   // ES256 (Web Crypto emits raw r||s; authenticators/WebAuthn.ts expect DER).
   return alg === -7 ? p1363ToDer(new Uint8Array(signature)) : new Uint8Array(signature);
@@ -983,8 +990,8 @@ describe("WebAuthn algorithm support", () => {
         dependencies,
       ),
     );
-    expect(err).toBeInstanceOf(WebAuthnVerificationError);
-    expect((err as WebAuthnVerificationError).message).toContain("Unsupported algorithm: -35");
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toContain("Unsupported algorithm: -35");
     expect(mockCredentialStore.credentials.size).toBe(0);
   });
 
@@ -1005,8 +1012,8 @@ describe("WebAuthn algorithm support", () => {
         dependencies,
       ),
     );
-    expect(err).toBeInstanceOf(WebAuthnVerificationError);
-    expect((err as WebAuthnVerificationError).message).toBe("Failed to parse attestation object");
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Failed to parse attestation object");
   });
 
   it("rejects an assertion whose authenticator data is truncated", async () => {
@@ -1044,7 +1051,7 @@ describe("WebAuthn algorithm support", () => {
         dependencies,
       ),
     );
-    expect(err).toBeInstanceOf(WebAuthnVerificationError);
-    expect((err as WebAuthnVerificationError).message).toBe("Failed to parse authenticator data");
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Failed to parse authenticator data");
   });
 });

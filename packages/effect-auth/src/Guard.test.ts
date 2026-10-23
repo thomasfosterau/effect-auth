@@ -61,10 +61,13 @@ const run = <A>(effect: Effect.Effect<A, never, CurrentViewer>, viewer: AppUser 
 const runGate = <A, E>(gate: Effect.Effect<A, E, CurrentViewer>, viewer: AppUser | null) =>
   Effect.runSyncExit(gate.pipe(Effect.provide(as(viewer))));
 
+/** A failure's `_tag`; a failure without one fails the test. */
+const decodeTagged = Schema.decodeUnknownSync(Schema.Struct({ _tag: Schema.String }));
+
 const tagOf = (exit: Exit.Exit<unknown, unknown>): string | undefined =>
   Exit.isFailure(exit)
     ? Option.getOrUndefined(
-        Option.map(Exit.findErrorOption(exit), (error) => (error as { _tag: string })._tag),
+        Option.map(Exit.findErrorOption(exit), (error) => decodeTagged(error)._tag),
       )
     : undefined;
 
@@ -110,7 +113,7 @@ describe("the named gates", () => {
     it(`${name} admits exactly ${admitted.join(" / ")}`, () => {
       Arr.forEach(Roles.rungs, (held) => {
         expect(Exit.isSuccess(runGate(gate, user(held))), `${name} for ${held}`).toBe(
-          (admitted as ReadonlyArray<string>).includes(held),
+          admitted.some((rung) => rung === held),
         );
       });
       expect(tagOf(runGate(gate, null))).toBe("Unauthorized");

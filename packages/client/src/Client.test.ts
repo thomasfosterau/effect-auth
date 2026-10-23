@@ -53,8 +53,8 @@ describe("createAuthClient", () => {
       client.signIn({ email: EMAIL, password: "wrong" }),
       AuthClientError,
     );
-    expect(err).toBeInstanceOf(AuthClientError);
-    expect((err as AuthClientError).status).toBe(401);
+    assert.instanceOf(err, AuthClientError);
+    expect(err.status).toBe(401);
 
     const ok = await client.signIn({ email: EMAIL, password: PW });
     expect(ok.user.email).toBe(EMAIL);
@@ -118,8 +118,8 @@ describe("createAuthClient", () => {
   it("answers 404 feature errors for unconfigured optional modules", async () => {
     const { client } = makeClient();
     const err = await rejectionOf(client.magicLink.send({ email: EMAIL }), AuthClientError);
-    expect(err).toBeInstanceOf(AuthClientError);
-    expect((err as AuthClientError).status).toBe(404);
+    assert.instanceOf(err, AuthClientError);
+    expect(err.status).toBe(404);
   });
 });
 
@@ -162,8 +162,8 @@ describe("session store correctness", () => {
 
     const after = client.session.get();
     expect(after.data?.user.email).toBe(EMAIL);
-    expect(after.error).toBeInstanceOf(AuthClientError);
-    expect((after.error as AuthClientError).status).toBe(503);
+    assert.instanceOf(after.error, AuthClientError);
+    expect(after.error.status).toBe(503);
     expect(after.isPending).toBe(false);
 
     unsubscribe();
@@ -340,8 +340,8 @@ describe("JSON response detection", () => {
     );
 
     const error = await rejectionOf(client.listSessions(), AuthClientError);
-    expect(error).toBeInstanceOf(AuthClientError);
-    expect((error as AuthClientError).message).toBe("Session expired");
+    assert.instanceOf(error, AuthClientError);
+    expect(error.message).toBe("Session expired");
   });
 
   it("does not parse a non-JSON body", async () => {
@@ -360,7 +360,8 @@ describe("JSON response detection", () => {
     );
 
     const error = await rejectionOf(client.listSessions(), AuthClientError);
-    expect((error as AuthClientError).message).toBe("Bad Request");
+    assert.instanceOf(error, AuthClientError);
+    expect(error.message).toBe("Bad Request");
   });
 
   it("treats a missing content-type as non-JSON", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { Array as Arr, Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
@@ -15,7 +15,6 @@ import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
-import { type AuthServices } from "./http/HttpServer.ts";
 import * as HttpServer from "./http/HttpServer.ts";
 import {
   IdentifierStore,
@@ -40,6 +39,14 @@ const JWKS = {
 };
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** A JSON response body, decoded against the shape the test reads from it. */
+const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
+
+const NonceBody = Schema.Struct({ nonce: Schema.String });
 
 const b64 = (value: Schema.Json): string =>
   Buffer.from(encodeJson(value), "utf8").toString("base64url");
@@ -70,7 +77,7 @@ const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject => ({
 /** Swap `globalThis.fetch` for a canned JWKS response while `thunk` runs. */
 const withJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
-  globalThis.fetch = (() => Promise.resolve(Response.json(JWKS))) as typeof fetch;
+  globalThis.fetch = () => Promise.resolve(Response.json(JWKS));
   return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
     globalThis.fetch = original;
   });
@@ -336,8 +343,8 @@ describe("GoogleOneTapService", () => {
     const err = await withJwks(() =>
       Effect.runPromise(Effect.flip(service.signIn(credential, nonce)).pipe(Effect.provide(layer))),
     );
-    expect(err).toBeInstanceOf(GoogleOneTapError);
-    expect((err as GoogleOneTapError).message).toMatch(/unknown|already.used/i);
+    assert.instanceOf(err, GoogleOneTapError);
+    expect(err.message).toMatch(/unknown|already.used/i);
   });
 
   it("rejects a nonce that was never issued", async () => {
@@ -349,8 +356,8 @@ describe("GoogleOneTapService", () => {
     const err = await withJwks(() =>
       Effect.runPromise(Effect.flip(service.signIn(credential, nonce)).pipe(Effect.provide(layer))),
     );
-    expect(err).toBeInstanceOf(GoogleOneTapError);
-    expect((err as GoogleOneTapError).message).toMatch(/unknown|already.used/i);
+    assert.instanceOf(err, GoogleOneTapError);
+    expect(err.message).toMatch(/unknown|already.used/i);
   });
 
   it("rejects an expired nonce", async () => {
@@ -364,8 +371,8 @@ describe("GoogleOneTapService", () => {
     const err = await withJwks(() =>
       Effect.runPromise(Effect.flip(service.signIn(credential, nonce)).pipe(Effect.provide(layer))),
     );
-    expect(err).toBeInstanceOf(GoogleOneTapError);
-    expect((err as GoogleOneTapError).message).toMatch(/expired/i);
+    assert.instanceOf(err, GoogleOneTapError);
+    expect(err.message).toMatch(/expired/i);
   });
 
   it("rejects when nonce in id_token does not match the supplied nonce", async () => {
@@ -421,7 +428,7 @@ const makeHttpFixture = () => {
     update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
     delete: () => Effect.void,
   };
-  const sessionStore = {
+  const sessionStore: typeof SessionStore.Service = {
     create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
     get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
     update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
@@ -437,13 +444,15 @@ const makeHttpFixture = () => {
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.succeed(SessionStore)(sessionStore as never),
+        Layer.succeed(SessionStore)(sessionStore),
         Layer.succeed(UserStore)(userStore),
         Hooks.Default,
       ),
     ),
   );
 
+  // SAFETY: the `undefined` services complete `AuthServices` for
+  // `HttpServer.make`; no One Tap route these tests drive calls them.
   const base = Layer.mergeAll(
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
@@ -476,11 +485,11 @@ const makeHttpFixture = () => {
 
   return {
     handler: HttpServer.make({
-      services: Layer.mergeAll(base, oneTapLayer) as Layer.Layer<AuthServices>,
+      services: Layer.mergeAll(base, oneTapLayer),
       cookie: { secure: false, lastLoginMethod: true },
     }).handler,
     handlerWithoutOneTap: HttpServer.make({
-      services: base as Layer.Layer<AuthServices>,
+      services: base,
       cookie: { secure: false },
     }).handler,
     nonceStore,
@@ -501,7 +510,7 @@ describe("HTTP Google One Tap endpoint", () => {
     const fx = makeHttpFixture();
     const res = await fx.handler(get("/sign-in/google-one-tap/nonce"));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { nonce: string };
+    const body = await jsonBody(res, NonceBody);
     expect(Predicate.isString(body.nonce)).toBe(true);
     expect(body.nonce.length).toBeGreaterThan(0);
   });
@@ -511,7 +520,7 @@ describe("HTTP Google One Tap endpoint", () => {
 
     // Obtain a server-issued nonce
     const nonceRes = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    const { nonce } = (await nonceRes.json()) as { nonce: string };
+    const { nonce } = await jsonBody(nonceRes, NonceBody);
 
     const res = await withJwks(() =>
       fx.handler(
@@ -522,7 +531,10 @@ describe("HTTP Google One Tap endpoint", () => {
       ),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { user: { email: string } };
+    const body = await jsonBody(
+      res,
+      Schema.Struct({ user: Schema.Struct({ email: Schema.String }) }),
+    );
     expect(body.user.email).toBe("alice@gmail.test");
     const cookies = res.headers.getSetCookie();
     expect(cookies.some((c) => c.startsWith("conduit_session="))).toBe(true);
@@ -532,7 +544,7 @@ describe("HTTP Google One Tap endpoint", () => {
   it("answers 401 for an invalid credential", async () => {
     const fx = makeHttpFixture();
     const nonceRes = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    const { nonce } = (await nonceRes.json()) as { nonce: string };
+    const { nonce } = await jsonBody(nonceRes, NonceBody);
 
     const res = await withJwks(() =>
       fx.handler(
@@ -548,7 +560,7 @@ describe("HTTP Google One Tap endpoint", () => {
   it("answers 401 for a replayed credential (nonce already used)", async () => {
     const fx = makeHttpFixture();
     const nonceRes = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    const { nonce } = (await nonceRes.json()) as { nonce: string };
+    const { nonce } = await jsonBody(nonceRes, NonceBody);
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
     // First sign-in consumes the nonce

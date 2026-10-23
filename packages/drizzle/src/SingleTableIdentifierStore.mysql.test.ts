@@ -91,7 +91,7 @@ const makeProxy = (): Proxy => {
     if (method === "all") {
       const rows = queued;
       queued = [];
-      return { rows: rows as Array<Array<unknown>> };
+      return { rows: rows.map((row) => [...row]) };
     }
     return { rows: [{ insertId: 0, affectedRows: 1 }] };
   });
@@ -118,9 +118,7 @@ const runWith = <A, E>(
   program: Effect.Effect<A, E, Auth.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
-    program.pipe(
-      Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(proxy.db)))),
-    ) as Effect.Effect<A, E>,
+    program.pipe(Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(proxy.db))))),
   );
 
 const run = <A, E>(proxy: Proxy, program: Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>

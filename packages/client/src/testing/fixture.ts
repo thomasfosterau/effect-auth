@@ -446,7 +446,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     core,
     options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
-  ) as Layer.Layer<Auth.Http.AuthServices>;
+  );
 
   const { handler } = Auth.Http.make({
     services,
@@ -492,7 +492,7 @@ export const makeCookieJarFetch = (
 ): typeof globalThis.fetch => {
   const jar = new Map<string, string>();
 
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input, init) => {
     const request = new Request(input, init);
     if (jar.size > 0) {
       request.headers.set(
@@ -514,5 +514,5 @@ export const makeCookieJarFetch = (
       }
     });
     return response;
-  }) as typeof globalThis.fetch;
+  };
 };

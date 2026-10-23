@@ -70,9 +70,6 @@ export default defineConfig({
       // `Date.now()` / `new Date()` → `Clock` / `DateTime` changes how expiry
       // logic sees time under `TestClock` (182 / 499).
       "effect/use-clock-service": "warn",
-      // Test fixtures' casts, plus the one unvalidated `JWT_ALGORITHM` cast
-      // (1 / 599).
-      "effect/require-safety-comment-for-type-assertion": "warn",
       // Published types say `Record<string, unknown>` (session and user
       // attributes, metadata, JWT claims, drizzle column types); narrowing
       // them is an API change (60 / 0).

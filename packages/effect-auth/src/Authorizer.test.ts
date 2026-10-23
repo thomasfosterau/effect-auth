@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Effect, Layer, Order } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
@@ -135,9 +135,10 @@ describe("Authorizer", () => {
     );
     const error = await Effect.runPromise(Effect.provide(program, layer).pipe(Effect.flip));
     expect(error._tag).toBe("AuthorizationDeniedError");
-    // `authorize` can also fail with `AuthError`; the assertion above pins the
-    // tag, so reading the decision trace off the denial is safe here.
-    const denied = error as Policy.AuthorizationDeniedError;
+    // `authorize` can also fail with `AuthError`; narrowing to the denial reads
+    // the decision trace off it.
+    assert.instanceOf(error, Policy.AuthorizationDeniedError);
+    const denied = error;
     expect(denied.decision.reason).toBe("default-deny");
     expect(denied.decision.allowed).toBe(false);
   });

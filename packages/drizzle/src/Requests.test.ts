@@ -85,9 +85,7 @@ const withDatabase = async <A>(
  */
 const runRequests = <A, E>(db: PgliteDatabase, program: Effect.Effect<A, E, AuthRequests>) =>
   Effect.runPromise(
-    program.pipe(
-      Effect.provide(requestsLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
-    ) as Effect.Effect<A, E>,
+    program.pipe(Effect.provide(requestsLayer(tables).pipe(Layer.provide(databaseLayer(db))))),
   );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);

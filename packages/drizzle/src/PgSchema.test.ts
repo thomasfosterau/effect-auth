@@ -7,7 +7,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { Array as Arr, Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Schema } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -76,8 +76,11 @@ const runWithCustomNames = <A, E>(
   Effect.runPromise(
     build(db, customTables).pipe(
       Effect.provide(layer(customTables).pipe(Layer.provide(databaseLayer(db)))),
-    ) as Effect.Effect<A, E>,
+    ),
   );
+
+/** `information_schema.tables` rows, read for their names. */
+const TableNameRows = Schema.Array(Schema.Struct({ table_name: Schema.String }));
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
 
@@ -146,8 +149,7 @@ describe("Schema", () => {
               `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
             );
-            const list = Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
-            return list.map((row) => (row as { table_name: string }).table_name);
+            return Schema.decodeUnknownSync(TableNameRows)(rows.rows).map((row) => row.table_name);
           }),
         );
 

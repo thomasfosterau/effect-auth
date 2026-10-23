@@ -43,7 +43,7 @@ const run = <A, E>(
     | EmailOtpStore
     | PendingMultiFactorStore
   >,
-): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())) as Effect.Effect<A, E>);
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())));
 
 describe("KeyValueStores", () => {
   it("exports individual layers", () => {

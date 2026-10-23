@@ -118,6 +118,8 @@ describe("LastLoginMethodPlugin", () => {
       composePlugins([LastLoginMethod.LastLoginMethodPlugin]).pipe(
         Layer.provide(Hooks.Default),
         Layer.provide(
+          // SAFETY: the plugin's hook reaches `SessionService` only through
+          // `setSessionAttributes`, the one member this stand-in carries.
           Layer.succeed(SessionService)({
             setSessionAttributes: (sessionId: string) =>
               Effect.sync(() => {

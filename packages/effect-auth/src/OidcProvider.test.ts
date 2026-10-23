@@ -17,6 +17,7 @@ import {
   type Identifier,
 } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
+import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
 import {
   PasswordResetService,
@@ -319,8 +320,8 @@ describe("OidcProviderService", () => {
           Effect.provide(layer),
         ),
       );
-      expect(err).toBeInstanceOf(OidcProviderError);
-      expect((err as OidcProviderError).message).toContain("https or loopback http");
+      assert.instanceOf(err, OidcProviderError);
+      expect(err.message).toContain("https or loopback http");
     });
 
     const good = [
@@ -623,8 +624,8 @@ describe("OidcProviderService dynamic client registration", () => {
     const { service } = setup();
     expect(service.dynamicRegistration.enabled).toBe(false);
     const err = await Effect.runPromise(Effect.flip(service.registerDynamicClient(publicMetadata)));
-    expect(err).toBeInstanceOf(OidcRegistrationError);
-    expect((err as OidcRegistrationError).error).toBe("access_denied");
+    assert.instanceOf(err, OidcRegistrationError);
+    expect(err.error).toBe("access_denied");
   });
 
   it("rejects redirect URIs that are not https, loopback, or a registered scheme", async () => {
@@ -642,7 +643,8 @@ describe("OidcProviderService dynamic client registration", () => {
       const err = await Effect.runPromise(
         Effect.flip(service.registerDynamicClient({ ...publicMetadata, redirectUris })),
       );
-      expect((err as OidcRegistrationError).error).toBe("invalid_redirect_uri");
+      assert.instanceOf(err, OidcRegistrationError);
+      expect(err.error).toBe("invalid_redirect_uri");
     });
 
     // Private-use URI schemes (RFC 8252 §7.1) are opt-in per deployment.
@@ -673,7 +675,8 @@ describe("OidcProviderService dynamic client registration", () => {
       const err = await Effect.runPromise(
         Effect.flip(service.registerDynamicClient({ ...publicMetadata, ...overrides })),
       );
-      expect((err as OidcRegistrationError).error).toBe("invalid_client_metadata");
+      assert.instanceOf(err, OidcRegistrationError);
+      expect(err.error).toBe("invalid_client_metadata");
     });
   });
 
@@ -682,7 +685,8 @@ describe("OidcProviderService dynamic client registration", () => {
     const denied = await Effect.runPromise(
       Effect.flip(denyAll.service.registerDynamicClient(publicMetadata)),
     );
-    expect((denied as OidcRegistrationError).error).toBe("invalid_client_metadata");
+    assert.instanceOf(denied, OidcRegistrationError);
+    expect(denied.error).toBe("invalid_client_metadata");
 
     const forbid = setup({
       policy: () =>
@@ -691,8 +695,9 @@ describe("OidcProviderService dynamic client registration", () => {
     const forbidden = await Effect.runPromise(
       Effect.flip(forbid.service.registerDynamicClient(publicMetadata)),
     );
-    expect((forbidden as OidcRegistrationError).error).toBe("access_denied");
-    expect((forbidden as OidcRegistrationError).description).toBe("Closed");
+    assert.instanceOf(forbidden, OidcRegistrationError);
+    expect(forbidden.error).toBe("access_denied");
+    expect(forbidden.description).toBe("Closed");
 
     // The policy sees the NORMALIZED metadata and may opt the client into
     // skipping the consent screen.
@@ -714,14 +719,16 @@ describe("OidcProviderService dynamic client registration", () => {
     const missing = await Effect.runPromise(
       Effect.flip(secret.service.registerDynamicClient(publicMetadata)),
     );
-    expect((missing as OidcRegistrationError).error).toBe("invalid_token");
+    assert.instanceOf(missing, OidcRegistrationError);
+    expect(missing.error).toBe("invalid_token");
 
     const wrong = await Effect.runPromise(
       Effect.flip(
         secret.service.registerDynamicClient(publicMetadata, { initialAccessToken: "nope" }),
       ),
     );
-    expect((wrong as OidcRegistrationError).error).toBe("invalid_token");
+    assert.instanceOf(wrong, OidcRegistrationError);
+    expect(wrong.error).toBe("invalid_token");
 
     const ok = await Effect.runPromise(
       secret.service.registerDynamicClient(publicMetadata, {
@@ -748,7 +755,8 @@ describe("OidcProviderService dynamic client registration", () => {
         hook.service.registerDynamicClient(publicMetadata, { initialAccessToken: "other" }),
       ),
     );
-    expect((rejected as OidcRegistrationError).error).toBe("invalid_token");
+    assert.instanceOf(rejected, OidcRegistrationError);
+    expect(rejected.error).toBe("invalid_token");
   });
 
   it("gates RFC 7592 management on the registration access token", async () => {
@@ -769,7 +777,8 @@ describe("OidcProviderService dynamic client registration", () => {
       async (previous, [id, token]) => {
         await previous;
         const err = await Effect.runPromise(Effect.flip(service.readDynamicClient(id, token)));
-        expect((err as OidcRegistrationError).error).toBe("invalid_token");
+        assert.instanceOf(err, OidcRegistrationError);
+        expect(err.error).toBe("invalid_token");
       },
     );
 
@@ -794,7 +803,8 @@ describe("OidcProviderService dynamic client registration", () => {
         }),
       ),
     );
-    expect((promote as OidcRegistrationError).error).toBe("invalid_client_metadata");
+    assert.instanceOf(promote, OidcRegistrationError);
+    expect(promote.error).toBe("invalid_client_metadata");
 
     await Effect.runPromise(service.deleteDynamicClient(clientId, rat));
     expect(stores.clients.has(clientId)).toBe(false);
@@ -949,7 +959,7 @@ const makeHttpFixture = (
     update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
     delete: () => Effect.void,
   };
-  const sessionStore = {
+  const sessionStore: typeof SessionStore.Service = {
     create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
     get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
     update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
@@ -965,7 +975,7 @@ const makeHttpFixture = (
   };
 
   const coreStoreLayer = Layer.mergeAll(
-    Layer.succeed(SessionStore)(sessionStore as never),
+    Layer.succeed(SessionStore)(sessionStore),
     Layer.succeed(UserStore)(userStore),
   );
 
@@ -973,6 +983,8 @@ const makeHttpFixture = (
     sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
   }).pipe(Layer.provide(Layer.mergeAll(coreStoreLayer, Hooks.Default)));
 
+  // SAFETY: the `undefined` services below complete `AuthServices` for
+  // `HttpServer.make`; no OIDC route or flow these tests drive calls them.
   const base = Layer.mergeAll(
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
@@ -981,6 +993,7 @@ const makeHttpFixture = (
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(PasswordHasher)(undefined as never),
+    Layer.succeed(EmailPasswordService)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
     Layer.succeed(EmailVerificationStore)(undefined as never),
     Layer.succeed(PasswordResetService)(undefined as never),
@@ -1063,13 +1076,13 @@ const makeHttpFixture = (
         )
       : Layer.empty;
   // The connection is built first, so the OIDC layer builds after it returns.
-  const withOidc = Layer.mergeAll(base, oidcLayer).pipe(
+  const withOidc: Layer.Layer<AuthServices> = Layer.mergeAll(base, oidcLayer).pipe(
     Layer.provide(connection),
-  ) as Layer.Layer<AuthServices>;
-  const withOidcLimiter = Layer.merge(withOidc, limiterLayer) as Layer.Layer<AuthServices>;
+  );
+  const withOidcLimiter: Layer.Layer<AuthServices> = Layer.merge(withOidc, limiterLayer);
   const limited =
     options.rateLimit === true || (registrationEnabled && options.rateLimit !== false);
-  const withoutOidc = base as Layer.Layer<AuthServices>;
+  const withoutOidc: Layer.Layer<AuthServices> = base;
 
   return {
     seedUser,
@@ -1104,8 +1117,8 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
     Layer.provide(HttpServer.scimGroupLayer()),
     Layer.provide(platform),
   );
-  // The handlers' phantom requirements are satisfied by `services` at runtime;
-  // `Http.make` narrows its handler the same way.
+  // SAFETY: the handlers' phantom requirements are satisfied by `services` at
+  // runtime; `Http.make` narrows its handler the same way.
   return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
     disableLogger: true,
   }).handler as (request: Request) => Promise<Response>;
@@ -1118,6 +1131,23 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
 const FIXTURE_CLIENT_HEADERS = { "cf-connecting-ip": "203.0.113.10" };
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** A JSON response body, decoded against the shape the test reads from it. */
+const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
+
+// The response bodies several tests read.
+/** A JSON object's own fields, read one by one. */
+const JsonFields = Schema.Record(Schema.String, Schema.Json);
+const MessageBody = Schema.Struct({ message: Schema.String });
+const ClientIdBody = Schema.Struct({ client: Schema.Struct({ clientId: Schema.String }) });
+const CreatedClientBody = Schema.Struct({
+  client: Schema.Struct({ clientId: Schema.String }),
+  clientSecret: Schema.String,
+});
+const RefreshTokenBody = Schema.Struct({ refresh_token: Schema.String });
 
 const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
   new Request(`http://idp.test${path}`, {
@@ -1184,10 +1214,10 @@ const searchParam = (url: URL, name: string): string => {
 
 const withJwksFetch = async <A>(jwks: Schema.Json, thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
-  globalThis.fetch = (() =>
+  globalThis.fetch = () =>
     Promise.resolve(
       new Response(encodeJson(jwks), { headers: { "content-type": "application/json" } }),
-    )) as typeof fetch;
+    );
   return Promise.resolve()
     .then(thunk)
     .finally(() => {
@@ -1220,10 +1250,7 @@ describe("HTTP OIDC provider endpoints", () => {
       ),
     );
     expect(registered.status).toBe(200);
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
@@ -1263,14 +1290,17 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
-    const tokens = (await tokenRes.json()) as {
-      access_token: string;
-      token_type: string;
-      expires_in: number;
-      refresh_token: string;
-      id_token: string;
-      scope: string;
-    };
+    const tokens = await jsonBody(
+      tokenRes,
+      Schema.Struct({
+        access_token: Schema.String,
+        token_type: Schema.String,
+        expires_in: Schema.Number,
+        refresh_token: Schema.String,
+        id_token: Schema.String,
+        scope: Schema.String,
+      }),
+    );
     expect(tokens.token_type).toBe("Bearer");
     expect(tokens.refresh_token).toBeTruthy();
     expect(tokens.scope).toBe("openid profile email offline_access");
@@ -1291,7 +1321,7 @@ describe("HTTP OIDC provider endpoints", () => {
     // 4. Verify the id_token against the published JWKS.
     const jwksRes = await fx.handler(get("/.well-known/jwks.json"));
     expect(jwksRes.status).toBe(200);
-    const jwks = (await jwksRes.json()) as { keys: ReadonlyArray<Schema.Json> };
+    const jwks = await jsonBody(jwksRes, Schema.Struct({ keys: Schema.Array(Schema.Json) }));
     expect(jwks.keys.length).toBeGreaterThan(0);
 
     const claims = await withJwksFetch(jwks, () =>
@@ -1312,7 +1342,7 @@ describe("HTTP OIDC provider endpoints", () => {
     // 5. UserInfo with the bearer access token.
     const userinfo = await fx.handler(get("/oauth2/userinfo", {}, { bearer: tokens.access_token }));
     expect(userinfo.status).toBe(200);
-    const info = (await userinfo.json()) as Record<string, Schema.Json>;
+    const info = await jsonBody(userinfo, JsonFields);
     expect(info["sub"]).toBe(userId);
     expect(info["email"]).toBe("alice@idp.test");
     expect(info["name"]).toBe(`User ${userId}`);
@@ -1330,11 +1360,14 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(refreshRes.status).toBe(200);
-    const rotated = (await refreshRes.json()) as {
-      access_token: string;
-      refresh_token: string;
-      id_token: string;
-    };
+    const rotated = await jsonBody(
+      refreshRes,
+      Schema.Struct({
+        access_token: Schema.String,
+        refresh_token: Schema.String,
+        id_token: Schema.String,
+      }),
+    );
     expect(rotated.access_token).not.toBe(tokens.access_token);
     expect(rotated.refresh_token).not.toBe(tokens.refresh_token);
     expect(rotated.id_token).toBeTruthy();
@@ -1349,7 +1382,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(reuse.status).toBe(400);
-    expect(((await reuse.json()) as { message: string }).message).toBe("invalid_grant");
+    expect((await jsonBody(reuse, MessageBody)).message).toBe("invalid_grant");
 
     // The rotated access token is live.
     const userinfo2 = await fx.handler(
@@ -1366,10 +1399,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const registered = await fx.handler(
       post("/oauth2/register", { name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
     );
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
 
     const authorizeQuery = {
       response_type: "code",
@@ -1403,7 +1433,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     expect(deniedConsent.status).toBe(200);
     const deniedRedirect = new URL(
-      ((await deniedConsent.json()) as { redirectTo: string }).redirectTo,
+      (await jsonBody(deniedConsent, Schema.Struct({ redirectTo: Schema.String }))).redirectTo,
     );
     expect(deniedRedirect.searchParams.get("error")).toBe("access_denied");
     expect(deniedRedirect.searchParams.get("state")).toBe("st-2");
@@ -1424,7 +1454,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     expect(accepted.status).toBe(200);
     const acceptedRedirect = new URL(
-      ((await accepted.json()) as { redirectTo: string }).redirectTo,
+      (await jsonBody(accepted, Schema.Struct({ redirectTo: Schema.String }))).redirectTo,
     );
     const code = searchParam(acceptedRedirect, "code");
     expect(code).toBeTruthy();
@@ -1463,10 +1493,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorizeOnce = async () => {
@@ -1499,7 +1526,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badVerifier.status).toBe(400);
-    expect(((await badVerifier.json()) as { message: string }).message).toBe("invalid_grant");
+    expect((await jsonBody(badVerifier, MessageBody)).message).toBe("invalid_grant");
 
     // Wrong client secret -> 401 invalid_client.
     const badSecret = await fx.handler(
@@ -1513,7 +1540,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badSecret.status).toBe(401);
-    expect(((await badSecret.json()) as { message: string }).message).toBe("invalid_client");
+    expect((await jsonBody(badSecret, MessageBody)).message).toBe("invalid_client");
 
     // Unsupported grant type -> 400.
     const badGrant = await fx.handler(
@@ -1524,7 +1551,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badGrant.status).toBe(400);
-    expect(((await badGrant.json()) as { message: string }).message).toBe("unsupported_grant_type");
+    expect((await jsonBody(badGrant, MessageBody)).message).toBe("unsupported_grant_type");
   });
 
   it("accepts a form-urlencoded token request", async () => {
@@ -1539,10 +1566,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
 
     const authorize = await fx.handler(
       get(
@@ -1572,14 +1596,16 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
-    expect(((await tokenRes.json()) as { access_token: string }).access_token).toBeTruthy();
+    expect(
+      (await jsonBody(tokenRes, Schema.Struct({ access_token: Schema.String }))).access_token,
+    ).toBeTruthy();
   });
 
   it("serves the discovery document", async () => {
     const fx = makeHttpFixture();
     const res = await fx.handler(get("/.well-known/openid-configuration"));
     expect(res.status).toBe(200);
-    const doc = (await res.json()) as Record<string, Schema.Json>;
+    const doc = await jsonBody(res, JsonFields);
     expect(doc["issuer"]).toBe(ISSUER);
     expect(doc["authorization_endpoint"]).toBe(`${ISSUER}/oauth2/authorize`);
     expect(doc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
@@ -1612,10 +1638,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1644,7 +1667,7 @@ describe("HTTP OIDC provider endpoints", () => {
         client_secret: clientSecret,
       }),
     );
-    const { refresh_token: rt1 } = (await tokenRes.json()) as { refresh_token: string };
+    const { refresh_token: rt1 } = await jsonBody(tokenRes, RefreshTokenBody);
 
     // First rotation — consumes rt1, issues rt2.
     const rot1 = await fx.handler(
@@ -1656,7 +1679,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(rot1.status).toBe(200);
-    const { refresh_token: rt2 } = (await rot1.json()) as { refresh_token: string };
+    const { refresh_token: rt2 } = await jsonBody(rot1, RefreshTokenBody);
 
     // Second rotation — consumes rt2, issues rt3.
     const rot2 = await fx.handler(
@@ -1668,7 +1691,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(rot2.status).toBe(200);
-    const { refresh_token: rt3 } = (await rot2.json()) as { refresh_token: string };
+    const { refresh_token: rt3 } = await jsonBody(rot2, RefreshTokenBody);
 
     // Replay rt1 — already consumed → reuse detection fires, revokes family (rt3 should be gone).
     const replay = await fx.handler(
@@ -1705,10 +1728,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1737,7 +1757,7 @@ describe("HTTP OIDC provider endpoints", () => {
         client_secret: clientSecret,
       }),
     );
-    const { refresh_token: rt } = (await tokenRes.json()) as { refresh_token: string };
+    const { refresh_token: rt } = await jsonBody(tokenRes, RefreshTokenBody);
 
     // Expire the token by mutating absoluteExpiresAt to the past.
     const hash = hashOidcSecret(rt);
@@ -1758,7 +1778,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(expired.status).toBe(400);
-    expect(((await expired.json()) as { message: string }).message).toBe("invalid_grant");
+    expect((await jsonBody(expired, MessageBody)).message).toBe("invalid_grant");
   });
 
   it("allows scope down-scoping on refresh token grant", async () => {
@@ -1773,10 +1793,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client, clientSecret } = (await registered.json()) as {
-      client: { clientId: string };
-      clientSecret: string;
-    };
+    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1805,7 +1822,7 @@ describe("HTTP OIDC provider endpoints", () => {
         client_secret: clientSecret,
       }),
     );
-    const { refresh_token: rt } = (await tokenRes.json()) as { refresh_token: string };
+    const { refresh_token: rt } = await jsonBody(tokenRes, RefreshTokenBody);
 
     // Down-scope to a subset (keep offline_access for rotation) — should succeed.
     const downScoped = await fx.handler(
@@ -1818,7 +1835,10 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(downScoped.status).toBe(200);
-    const downScopedBody = (await downScoped.json()) as { scope: string; refresh_token: string };
+    const downScopedBody = await jsonBody(
+      downScoped,
+      Schema.Struct({ scope: Schema.String, refresh_token: Schema.String }),
+    );
     expect(downScopedBody.scope).toBe("openid email offline_access");
 
     // Up-scope is forbidden: original grant had "profile"; re-requesting it via the narrower token fails.
@@ -1833,7 +1853,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(upScoped.status).toBe(400);
-    expect(((await upScoped.json()) as { message: string }).message).toBe("invalid_scope");
+    expect((await jsonBody(upScoped, MessageBody)).message).toBe("invalid_scope");
   });
 
   it("prompt=none on authorize returns login_required for unauthenticated users", async () => {
@@ -1847,7 +1867,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client } = (await registered.json()) as { client: { clientId: string } };
+    const { client } = await jsonBody(registered, ClientIdBody);
 
     const res = await fx.handler(
       get("/oauth2/authorize", {
@@ -1878,7 +1898,7 @@ describe("HTTP OIDC provider endpoints", () => {
         adminSid,
       ),
     );
-    const { client } = (await registered.json()) as { client: { clientId: string } };
+    const { client } = await jsonBody(registered, ClientIdBody);
 
     const res = await fx.handler(
       get(
@@ -1903,20 +1923,20 @@ describe("HTTP OIDC provider endpoints", () => {
 // HTTP layer: RFC 7591 dynamic client registration + RFC 8414 metadata
 // -----------------------------------------------------------------------------
 
-interface RegistrationResponse {
-  readonly client_id: string;
-  readonly client_id_issued_at: number;
-  readonly client_secret?: string;
-  readonly client_secret_expires_at?: number;
-  readonly client_name: string;
-  readonly redirect_uris: readonly string[];
-  readonly grant_types: readonly string[];
-  readonly response_types: readonly string[];
-  readonly token_endpoint_auth_method: string;
-  readonly scope: string;
-  readonly registration_access_token?: string;
-  readonly registration_client_uri?: string;
-}
+const RegistrationResponse = Schema.Struct({
+  client_id: Schema.String,
+  client_id_issued_at: Schema.Number,
+  client_secret: Schema.optional(Schema.String),
+  client_secret_expires_at: Schema.optional(Schema.Number),
+  client_name: Schema.String,
+  redirect_uris: Schema.Array(Schema.String),
+  grant_types: Schema.Array(Schema.String),
+  response_types: Schema.Array(Schema.String),
+  token_endpoint_auth_method: Schema.String,
+  scope: Schema.String,
+  registration_access_token: Schema.optional(Schema.String),
+  registration_client_uri: Schema.optional(Schema.String),
+});
 
 describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
   const MCP_REDIRECT = "http://127.0.0.1:33418/callback";
@@ -1941,7 +1961,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(registered.status).toBe(201);
-    const client = (await registered.json()) as RegistrationResponse;
+    const client = await jsonBody(registered, RegistrationResponse);
     expect(client.client_id).toBeTruthy();
     expect(client.client_secret).toBeUndefined();
     expect(client.token_endpoint_auth_method).toBe("none");
@@ -1986,13 +2006,16 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
-    const tokens = (await tokenRes.json()) as {
-      access_token: string;
-      token_type: string;
-      refresh_token: string;
-      id_token: string;
-      scope: string;
-    };
+    const tokens = await jsonBody(
+      tokenRes,
+      Schema.Struct({
+        access_token: Schema.String,
+        token_type: Schema.String,
+        refresh_token: Schema.String,
+        id_token: Schema.String,
+        scope: Schema.String,
+      }),
+    );
     expect(tokens.token_type).toBe("Bearer");
     expect(tokens.id_token).toBeTruthy();
     expect(tokens.scope).toBe("openid profile email offline_access");
@@ -2000,7 +2023,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     // The access token resolves the user's claims.
     const userinfo = await fx.handler(get("/oauth2/userinfo", {}, { bearer: tokens.access_token }));
     expect(userinfo.status).toBe(200);
-    expect(((await userinfo.json()) as Record<string, Schema.Json>)["sub"]).toBe(userId);
+    expect((await jsonBody(userinfo, JsonFields))["sub"]).toBe(userId);
 
     // 4. The registered refresh_token grant works too.
     const refreshed = await fx.handler(
@@ -2023,7 +2046,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
         token_endpoint_auth_method: "none",
       }),
     );
-    const client = (await registered.json()) as RegistrationResponse;
+    const client = await jsonBody(registered, RegistrationResponse);
 
     const authorize = await fx.handler(
       get(
@@ -2048,10 +2071,10 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       post("/register", { redirect_uris: ["http://evil.test/cb"] }),
     );
     expect(badRedirect.status).toBe(400);
-    const body = (await badRedirect.json()) as {
-      error: string;
-      error_description: string;
-    };
+    const body = await jsonBody(
+      badRedirect,
+      Schema.Struct({ error: Schema.String, error_description: Schema.String }),
+    );
     expect(body.error).toBe("invalid_redirect_uri");
     expect(body.error_description).toContain("http://evil.test/cb");
 
@@ -2062,7 +2085,9 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(badGrant.status).toBe(400);
-    expect(((await badGrant.json()) as { error: string }).error).toBe("invalid_client_metadata");
+    expect((await jsonBody(badGrant, Schema.Struct({ error: Schema.String }))).error).toBe(
+      "invalid_client_metadata",
+    );
   });
 
   it("requires the initial access token as a bearer credential when configured", async () => {
@@ -2073,7 +2098,9 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
 
     const anonymous = await fx.handler(post("/register", body));
     expect(anonymous.status).toBe(401);
-    expect(((await anonymous.json()) as { code: string }).code).toBe("invalid_token");
+    expect((await jsonBody(anonymous, Schema.Struct({ code: Schema.String }))).code).toBe(
+      "invalid_token",
+    );
 
     const wrong = await fx.handler(jsonRequest("POST", "/register", body, "nope"));
     expect(wrong.status).toBe(401);
@@ -2098,7 +2125,9 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       post("/register", { redirect_uris: ["https://rp.test/cb"], client_name: "Other" }),
     );
     expect(denied.status).toBe(403);
-    expect(((await denied.json()) as { code: string }).code).toBe("access_denied");
+    expect((await jsonBody(denied, Schema.Struct({ code: Schema.String }))).code).toBe(
+      "access_denied",
+    );
 
     const allowed = await fx.handler(
       post("/register", { redirect_uris: ["https://rp.test/cb"], client_name: "Allowed" }),
@@ -2115,7 +2144,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
         client_name: "Managed",
       }),
     );
-    const client = (await registered.json()) as RegistrationResponse;
+    const client = await jsonBody(registered, RegistrationResponse);
     const rat = client.registration_access_token;
     assert(rat !== undefined, "registration returns an access token");
     const path = `/register/${client.client_id}`;
@@ -2123,7 +2152,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     // Read.
     const read = await fx.handler(get(path, {}, { bearer: rat }));
     expect(read.status).toBe(200);
-    const readBody = (await read.json()) as RegistrationResponse;
+    const readBody = await jsonBody(read, RegistrationResponse);
     expect(readBody.client_name).toBe("Managed");
     // Neither one-time credential is recoverable after registration.
     expect(readBody.client_secret).toBeUndefined();
@@ -2149,7 +2178,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       ),
     );
     expect(updated.status).toBe(200);
-    const updatedBody = (await updated.json()) as RegistrationResponse;
+    const updatedBody = await jsonBody(updated, RegistrationResponse);
     expect(updatedBody.client_name).toBe("Managed v2");
     expect(updatedBody.redirect_uris).toEqual([MCP_REDIRECT, "https://rp.test/cb"]);
 
@@ -2158,7 +2187,9 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       jsonRequest("PUT", path, { redirect_uris: ["http://evil.test/cb"] }, rat),
     );
     expect(badUpdate.status).toBe(400);
-    expect(((await badUpdate.json()) as { error: string }).error).toBe("invalid_redirect_uri");
+    expect((await jsonBody(badUpdate, Schema.Struct({ error: Schema.String }))).error).toBe(
+      "invalid_redirect_uri",
+    );
 
     // Delete, after which the registration is gone.
     const deleted = await fx.handler(jsonRequest("DELETE", path, undefined, rat));
@@ -2177,7 +2208,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       post("/register", { redirect_uris: ["https://rp.test/cb"] }),
     );
     expect(registered.status).toBe(201);
-    const client = (await registered.json()) as RegistrationResponse;
+    const client = await jsonBody(registered, RegistrationResponse);
     const rat = client.registration_access_token;
     assert(rat !== undefined, "registration returns an access token");
     const read = await noManagement.handler(
@@ -2190,7 +2221,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     const withoutDCR = makeHttpFixture();
     const base = await withoutDCR.handler(get("/.well-known/oauth-authorization-server"));
     expect(base.status).toBe(200);
-    const baseDoc = (await base.json()) as Record<string, Schema.Json>;
+    const baseDoc = await jsonBody(base, JsonFields);
     expect(baseDoc["issuer"]).toBe(ISSUER);
     expect(baseDoc["authorization_endpoint"]).toBe(`${ISSUER}/oauth2/authorize`);
     expect(baseDoc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
@@ -2209,13 +2240,15 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
 
     // With DCR on, both documents advertise the RFC 7591 endpoint.
     const withDCR = makeHttpFixture({ dynamicRegistration: {} });
-    const doc = (await (
-      await withDCR.handler(get("/.well-known/oauth-authorization-server"))
-    ).json()) as Record<string, Schema.Json>;
+    const doc = await jsonBody(
+      await withDCR.handler(get("/.well-known/oauth-authorization-server")),
+      JsonFields,
+    );
     expect(doc["registration_endpoint"]).toBe(`${ISSUER}/register`);
-    const oidcDoc = (await (
-      await withDCR.handler(get("/.well-known/openid-configuration"))
-    ).json()) as Record<string, Schema.Json>;
+    const oidcDoc = await jsonBody(
+      await withDCR.handler(get("/.well-known/openid-configuration")),
+      JsonFields,
+    );
     expect(oidcDoc["registration_endpoint"]).toBe(`${ISSUER}/register`);
     expect(oidcDoc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
     expect(oidcDoc["claims_supported"]).toBeDefined();
@@ -2373,7 +2406,7 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
     );
     expect(registered.status).toBe(200);
     // SAFETY: a 200 from /oauth2/register carries the registered client.
-    const { client } = (await registered.json()) as { client: { clientId: string } };
+    const { client } = await jsonBody(registered, ClientIdBody);
     return client.clientId;
   };
 
@@ -2397,13 +2430,16 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
     );
     expect(res.status).toBe(200);
     // SAFETY: a 200 from the update endpoint carries the client view.
-    const body = (await res.json()) as {
-      clientId: string;
-      name: string;
-      redirectUris: ReadonlyArray<string>;
-      skipConsent: boolean;
-      disabled: boolean;
-    };
+    const body = await jsonBody(
+      res,
+      Schema.Struct({
+        clientId: Schema.String,
+        name: Schema.String,
+        redirectUris: Schema.Array(Schema.String),
+        skipConsent: Schema.Boolean,
+        disabled: Schema.Boolean,
+      }),
+    );
     expect(body).toMatchObject({
       clientId,
       name: "Renamed RP",
@@ -2421,7 +2457,10 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
     const res = await fx.handler(patch(`/oauth2/clients/${clientId}`, {}, adminSid));
     expect(res.status).toBe(200);
     // SAFETY: a 200 from the update endpoint carries the client view.
-    const body = (await res.json()) as { name: string; redirectUris: ReadonlyArray<string> };
+    const body = await jsonBody(
+      res,
+      Schema.Struct({ name: Schema.String, redirectUris: Schema.Array(Schema.String) }),
+    );
     expect(body).toMatchObject({ name: "RP", redirectUris: ["https://rp.test/cb"] });
   });
 

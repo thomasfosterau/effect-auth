@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Schema } from "effect";
 import {
   AttestationObjectParseError,
@@ -55,6 +55,13 @@ const concatBytes = (...arrays: Uint8Array[]): Uint8Array => {
 
 // --- CBOR --------------------------------------------------------------------
 
+/** Decode `data`, which the test built as a CBOR map. */
+const decodeMap = (data: Uint8Array): CBORMap => {
+  const decoded = decodeCBORNoLeftoverBytes(data);
+  assert(decoded instanceof Map, "the bytes decode to a CBOR map");
+  return decoded;
+};
+
 describe("CBOR decoding", () => {
   it("decodes integers, byte strings, text strings, arrays, and maps", () => {
     const encoded = new Uint8Array(
@@ -65,7 +72,7 @@ describe("CBOR decoding", () => {
         [cborText("list"), cborArray([cborUint(1), cborNegInt(-7), cborText("x")])],
       ]),
     );
-    const decoded = decodeCBORNoLeftoverBytes(encoded) as CBORMap;
+    const decoded = decodeMap(encoded);
     expect(decoded).toBeInstanceOf(Map);
     expect(decoded.get("fmt")).toBe("none");
     // Integer keys are stringified, matching the COSE label convention.
@@ -176,22 +183,28 @@ const keyGenParams = (alg: Alg) =>
         }
       : { name: "Ed25519" };
 
+// The public JWK members each key type exports.
+const Ec2Jwk = Schema.Struct({ x: Schema.String, y: Schema.String });
+const RsaJwk = Schema.Struct({ n: Schema.String, e: Schema.String });
+const OkpJwk = Schema.Struct({ x: Schema.String });
+
 /** Generate a keypair and the CBOR bytes of its COSE_Key representation. */
 const buildKey = async (
   alg: Alg,
   algorithmLabel: number = alg,
 ): Promise<{ privateKey: CryptoKey; cose: number[] }> => {
-  const { publicKey, privateKey } = (await globalThis.crypto.subtle.generateKey(
-    keyGenParams(alg),
-    true,
-    ["sign", "verify"],
-  )) as { publicKey: CryptoKey; privateKey: CryptoKey };
+  const keyPair = await globalThis.crypto.subtle.generateKey(keyGenParams(alg), true, [
+    "sign",
+    "verify",
+  ]);
+  // Every algorithm `keyGenParams` names is asymmetric, so the result is a pair.
+  assert("privateKey" in keyPair, `${alg} generates a key pair`);
+  const { publicKey, privateKey } = keyPair;
 
   if (alg === -7) {
-    const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as {
-      x: string;
-      y: string;
-    };
+    const jwk = Schema.decodeUnknownSync(Ec2Jwk)(
+      await globalThis.crypto.subtle.exportKey("jwk", publicKey),
+    );
     return {
       privateKey,
       cose: cborMap([
@@ -204,10 +217,9 @@ const buildKey = async (
     };
   }
   if (alg === -257) {
-    const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as {
-      n: string;
-      e: string;
-    };
+    const jwk = Schema.decodeUnknownSync(RsaJwk)(
+      await globalThis.crypto.subtle.exportKey("jwk", publicKey),
+    );
     return {
       privateKey,
       cose: cborMap([
@@ -218,7 +230,9 @@ const buildKey = async (
       ]),
     };
   }
-  const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as { x: string };
+  const jwk = Schema.decodeUnknownSync(OkpJwk)(
+    await globalThis.crypto.subtle.exportKey("jwk", publicKey),
+  );
   return {
     privateKey,
     cose: cborMap([
@@ -277,19 +291,19 @@ describe("COSE public keys", () => {
 
   it("rejects keys missing or misdeclaring required parameters", () => {
     const missingAlg = new COSEPublicKey(
-      decodeCBORNoLeftoverBytes(new Uint8Array(cborMap([[cborUint(1), cborUint(2)]]))) as CBORMap,
+      decodeMap(new Uint8Array(cborMap([[cborUint(1), cborUint(2)]]))),
     );
     expect(() => missingAlg.algorithm()).toThrow("Invalid or missing parameter 'alg'");
     expect(missingAlg.isAlgorithmDefined()).toBe(false);
 
     const unknownKty = new COSEPublicKey(
-      decodeCBORNoLeftoverBytes(new Uint8Array(cborMap([[cborUint(1), cborUint(9)]]))) as CBORMap,
+      decodeMap(new Uint8Array(cborMap([[cborUint(1), cborUint(9)]]))),
     );
     expect(() => unknownKty.type()).toThrow("Unknown 'kty' value");
 
     // EC2 key with a 31-byte x coordinate.
     const shortX = new COSEPublicKey(
-      decodeCBORNoLeftoverBytes(
+      decodeMap(
         new Uint8Array(
           cborMap([
             [cborUint(1), cborUint(2)],
@@ -299,7 +313,7 @@ describe("COSE public keys", () => {
             [cborNegInt(-3), cborBytes(new Uint8Array(32))],
           ]),
         ),
-      ) as CBORMap,
+      ),
     );
     expect(() => shortX.ec2()).toThrow("Invalid or missing parameter 'x'");
   });
@@ -657,7 +671,7 @@ describe("assertion signature verification", () => {
       await globalThis.crypto.subtle.sign(
         { name: "ECDSA", hash: "SHA-256" },
         privateKey,
-        message as NodeJS.BufferSource,
+        new Uint8Array(message),
       ),
     );
     // Authenticators emit DER; Web Crypto emits raw r||s.

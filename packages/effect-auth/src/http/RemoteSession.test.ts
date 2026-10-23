@@ -63,7 +63,7 @@ const okSession = (setCookie: ReadonlyArray<string> = []) =>
     status: 200,
     headers: [
       ["content-type", "application/json"],
-      ...setCookie.map((value) => ["set-cookie", value] as [string, string]),
+      ...setCookie.map((value): [string, string] => ["set-cookie", value]),
     ],
   });
 

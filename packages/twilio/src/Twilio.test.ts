@@ -20,14 +20,19 @@ const stubFetch = (
   response: Response | ((request: CapturedRequest) => Response),
 ): { readonly fetch: typeof fetch; readonly calls: CapturedRequest[] } => {
   const calls: CapturedRequest[] = [];
-  // `RequestInfo` is not a global under `types: ["node"]`; take fetch's own
-  // input type instead of naming the DOM alias.
-  const fetchStub = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+  const fetchStub: typeof fetch = async (input, init) => {
     const request = { url: String(input), init: init ?? {} };
     calls.push(request);
     return Predicate.isFunction(response) ? response(request) : response;
-  }) as typeof fetch;
+  };
   return { fetch: fetchStub, calls };
+};
+
+/** The form a captured request sent, which the sender encodes as a string. */
+const formOf = (request: CapturedRequest): URLSearchParams => {
+  const body = request.init.body;
+  assert(Predicate.isString(body), "the form body is sent as a string");
+  return new URLSearchParams(body);
 };
 
 const baseConfig = {
@@ -85,7 +90,7 @@ describe("twilioSmsSender", () => {
     );
     expect(headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
 
-    const form = new URLSearchParams(request.init.body as string);
+    const form = formOf(request);
     expect(form.get("Body")).toBe("Your verification code: 654321");
     expect(form.get("From")).toBe("+15551234567");
     expect(form.get("To")).toBe("+15559876543");
@@ -99,7 +104,7 @@ describe("twilioSmsSender", () => {
 
     const [request] = calls;
     assert(request !== undefined);
-    const form = new URLSearchParams(request.init.body as string);
+    const form = formOf(request);
     expect(form.get("Body")).toBe("Custom body");
   });
 
@@ -163,9 +168,9 @@ describe("twilioSmsSender", () => {
   });
 
   it("maps a network failure to an AuthError", async () => {
-    const failingFetch = (async () => {
+    const failingFetch: typeof fetch = async () => {
       throw new NetworkDown();
-    }) as typeof fetch;
+    };
     const sender = twilioSmsSender({ ...baseConfig, fetch: failingFetch });
 
     const err = await run(

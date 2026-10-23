@@ -254,10 +254,12 @@ const testContext = Context.merge(
 );
 
 /** Run against an explicit context - used to exercise "domains not enabled". */
-const runServiceIn = <A, E, R>(
-  context: Context.Context<R>,
+const runServiceIn = <A, E>(
+  context: Context.Context<OrganizationStore | IdentifierStore | Crypto.Crypto>,
   config: OrganizationConfig,
-  program: (service: typeof OrganizationService.Service) => Effect.Effect<A, E, R>,
+  program: (
+    service: typeof OrganizationService.Service,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore | Crypto.Crypto>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
@@ -265,8 +267,8 @@ const runServiceIn = <A, E, R>(
         const service = yield* OrganizationModule.make(config);
         return yield* program(service);
       }),
-      context as Context.Context<OrganizationStore | IdentifierStore | Crypto.Crypto>,
-    ) as Effect.Effect<A, E, never>,
+      context,
+    ),
   );
 
 const runService = <A, E>(

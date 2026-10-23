@@ -129,7 +129,7 @@ const runWith = <A, E>(
   Effect.runPromise(
     build().pipe(
       Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(drizzle(client))))),
-    ) as Effect.Effect<A, E>,
+    ),
   );
 
 /** Insert the users the contract expects, with no login handle. */

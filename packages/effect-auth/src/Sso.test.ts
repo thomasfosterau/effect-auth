@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { Effect, Layer, Predicate, Schema } from "effect";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
@@ -52,20 +52,31 @@ import type * as Types from "./Types.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
+/** A JSON response body, decoded against the shape the test reads from it. */
+const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
+
+// The response bodies several tests read.
+const IdBody = Schema.Struct({ id: Schema.String });
+const SignInBody = Schema.Struct({ url: Schema.String, state: Schema.String });
+const UserEmailBody = Schema.Struct({ user: Schema.Struct({ email: Schema.String }) });
+
 /** Swap `globalThis.fetch` for a route handler while `thunk` runs. */
 const withFetch = <A>(
   routes: Readonly<Record<string, Schema.Json>>,
   thunk: () => Promise<A>,
 ): Promise<A> => {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request) => {
+  globalThis.fetch = (input) => {
     const url = Predicate.isString(input) ? input : input.toString();
     const key = Object.keys(routes).find((k) => url.startsWith(k));
     const body = key ? routes[key] : { error: "no route" };
     return Promise.resolve(
       new Response(encodeJson(body), { headers: { "content-type": "application/json" } }),
     );
-  }) as typeof fetch;
+  };
   return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
     globalThis.fetch = original;
   });
@@ -147,7 +158,7 @@ const makeStores = (
     setSessionAttributes: () => Effect.die("unused"),
   };
 
-  const orgStore = {
+  const orgStore: typeof OrganizationStore.Service = {
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
@@ -159,32 +170,32 @@ const makeStores = (
     countMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     // Unused by SSO:
-    createOrganization: () => Effect.die("unused") as never,
-    getOrganizationBySlug: () => Effect.die("unused") as never,
-    updateOrganization: () => Effect.die("unused") as never,
-    deleteOrganization: () => Effect.die("unused") as never,
-    updateMember: () => Effect.die("unused") as never,
-    deleteMember: () => Effect.die("unused") as never,
-    listMembersByOrganization: () => Effect.die("unused") as never,
-    listMembersByUser: () => Effect.die("unused") as never,
-    createInvitation: () => Effect.die("unused") as never,
-    getInvitation: () => Effect.die("unused") as never,
-    updateInvitation: () => Effect.die("unused") as never,
-    listInvitationsByOrganization: () => Effect.die("unused") as never,
-    listInvitationsByEmail: () => Effect.die("unused") as never,
-    createTeam: () => Effect.die("unused") as never,
-    getTeam: () => Effect.die("unused") as never,
-    updateTeam: () => Effect.die("unused") as never,
-    deleteTeam: () => Effect.die("unused") as never,
-    listTeams: () => Effect.die("unused") as never,
-    addTeamMember: () => Effect.die("unused") as never,
-    removeTeamMember: () => Effect.die("unused") as never,
-    listTeamMembers: () => Effect.die("unused") as never,
-    listTeamsForMember: () => Effect.die("unused") as never,
-    upsertOrgRole: () => Effect.die("unused") as never,
-    getOrgRole: () => Effect.die("unused") as never,
-    listOrgRoles: () => Effect.die("unused") as never,
-    deleteOrgRole: () => Effect.die("unused") as never,
+    createOrganization: () => Effect.die("unused"),
+    getOrganizationBySlug: () => Effect.die("unused"),
+    updateOrganization: () => Effect.die("unused"),
+    deleteOrganization: () => Effect.die("unused"),
+    updateMember: () => Effect.die("unused"),
+    deleteMember: () => Effect.die("unused"),
+    listMembersByOrganization: () => Effect.die("unused"),
+    listMembersByUser: () => Effect.die("unused"),
+    createInvitation: () => Effect.die("unused"),
+    getInvitation: () => Effect.die("unused"),
+    updateInvitation: () => Effect.die("unused"),
+    listInvitationsByOrganization: () => Effect.die("unused"),
+    listInvitationsByEmail: () => Effect.die("unused"),
+    createTeam: () => Effect.die("unused"),
+    getTeam: () => Effect.die("unused"),
+    updateTeam: () => Effect.die("unused"),
+    deleteTeam: () => Effect.die("unused"),
+    listTeams: () => Effect.die("unused"),
+    addTeamMember: () => Effect.die("unused"),
+    removeTeamMember: () => Effect.die("unused"),
+    listTeamMembers: () => Effect.die("unused"),
+    listTeamsForMember: () => Effect.die("unused"),
+    upsertOrgRole: () => Effect.die("unused"),
+    getOrgRole: () => Effect.die("unused"),
+    listOrgRoles: () => Effect.die("unused"),
+    deleteOrgRole: () => Effect.die("unused"),
   };
 
   const layer = Layer.mergeAll(
@@ -727,8 +738,8 @@ describe("SsoService — SAML", () => {
     );
 
     expect(outcome.ok.isNewUser).toBe(true);
-    expect(outcome.err).toBeInstanceOf(SsoError);
-    expect((outcome.err as SsoError).message).toMatch(/already been used/);
+    assert.instanceOf(outcome.err, SsoError);
+    expect(outcome.err.message).toMatch(/already been used/);
   });
 
   it("rejects a response answering an unknown or already-spent request", async () => {
@@ -748,7 +759,8 @@ describe("SsoService — SAML", () => {
         );
       }).pipe(Effect.provide(fx.layer)),
     );
-    expect((err as SsoError).message).toMatch(/unknown, expired, or already-used/);
+    assert.instanceOf(err, SsoError);
+    expect(err.message).toMatch(/unknown, expired, or already-used/);
   });
 
   it("rejects an assertion from a foreign issuer", async () => {
@@ -769,7 +781,8 @@ describe("SsoService — SAML", () => {
         );
       }).pipe(Effect.provide(fx.layer)),
     );
-    expect((err as SsoError).message).toMatch(/does not match this connection/);
+    assert.instanceOf(err, SsoError);
+    expect(err.message).toMatch(/does not match this connection/);
   });
 
   it("rejects a RelayState that does not match the one it minted", async () => {
@@ -790,7 +803,8 @@ describe("SsoService — SAML", () => {
         );
       }).pipe(Effect.provide(fx.layer)),
     );
-    expect((err as SsoError).message).toMatch(/RelayState/);
+    assert.instanceOf(err, SsoError);
+    expect(err.message).toMatch(/RelayState/);
   });
 
   it("refuses an unsolicited (IdP-initiated) response unless configured for it", async () => {
@@ -811,7 +825,8 @@ describe("SsoService — SAML", () => {
         Effect.provide(fx.layer),
       ),
     );
-    expect((err as SsoError).message).toMatch(/IdP-initiated/);
+    assert.instanceOf(err, SsoError);
+    expect(err.message).toMatch(/IdP-initiated/);
 
     const ok = await Effect.runPromise(
       permissive
@@ -834,8 +849,10 @@ describe("SsoService — SAML", () => {
       }).pipe(Effect.provide(fx.layer)),
     );
 
-    expect((errors.wrongProtocol as SsoError).message).toMatch(/is an OIDC connection/);
-    expect((errors.unknown as SsoError).message).toMatch(/not found/);
+    assert.instanceOf(errors.wrongProtocol, SsoError);
+    expect(errors.wrongProtocol.message).toMatch(/is an OIDC connection/);
+    assert.instanceOf(errors.unknown, SsoError);
+    expect(errors.unknown.message).toMatch(/not found/);
   });
 
   it("reports missing SAML support instead of half-working", async () => {
@@ -850,7 +867,8 @@ describe("SsoService — SAML", () => {
         return yield* Effect.flip(sso.signIn({ providerId: provider.id }));
       }).pipe(Effect.provide(layer)),
     );
-    expect((err as SsoError).message).toMatch(/SAML support is not installed/);
+    assert.instanceOf(err, SsoError);
+    expect(err.message).toMatch(/SAML support is not installed/);
   });
 
   it("validates a SAML registration before storing it", async () => {
@@ -869,8 +887,10 @@ describe("SsoService — SAML", () => {
       }).pipe(Effect.provide(fx.layer)),
     );
 
-    expect((errors.noCerts as SsoError).message).toMatch(/idpCertificates must not be empty/);
-    expect((errors.badUrl as SsoError).message).toMatch(/acsUrl must be an absolute URL/);
+    assert.instanceOf(errors.noCerts, SsoError);
+    expect(errors.noCerts.message).toMatch(/idpCertificates must not be empty/);
+    assert.instanceOf(errors.badUrl, SsoError);
+    expect(errors.badUrl.message).toMatch(/acsUrl must be an absolute URL/);
     expect(fx.providers.size).toBe(0);
   });
 
@@ -979,7 +999,7 @@ const makeHttpFixture = () => {
     update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
     delete: () => Effect.void,
   };
-  const sessionStore = {
+  const sessionStore: typeof SessionStore.Service = {
     create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
     get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
     update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
@@ -1027,7 +1047,7 @@ const makeHttpFixture = () => {
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
   // SSO only ever calls getMember/createMember plus the organization read that
-  // resolves the default role; the rest are unused stubs.
+  // resolves the default role.
   const orgStore = {
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
@@ -1038,7 +1058,7 @@ const makeHttpFixture = () => {
   };
 
   const coreStoreLayer = Layer.mergeAll(
-    Layer.succeed(SessionStore)(sessionStore as never),
+    Layer.succeed(SessionStore)(sessionStore),
     Layer.succeed(UserStore)(userStore),
   );
 
@@ -1046,6 +1066,8 @@ const makeHttpFixture = () => {
     sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
   }).pipe(Layer.provide(Layer.mergeAll(coreStoreLayer, Hooks.Default)));
 
+  // SAFETY: the `undefined` services below complete `AuthServices` for
+  // `HttpServer.make`; no SSO route these tests drive calls them.
   const base = Layer.mergeAll(
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
@@ -1076,6 +1098,8 @@ const makeHttpFixture = () => {
     Layer.succeed(OAuthUserStore)(oauthUserStore),
     Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(UserStore)(userStore),
+    // SAFETY: SSO only ever calls the three `orgStore` methods; the HTTP flows
+    // these tests drive reach no other `OrganizationStore` method.
     Layer.succeed(OrganizationStore)(orgStore as never),
     Layer.succeed(SamlVerifier)(stubSamlVerifier(samlRequests)),
     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
@@ -1086,8 +1110,8 @@ const makeHttpFixture = () => {
 
   const ssoLayer = Layer.mergeAll(ssoDeps, ssoServiceLayer);
 
-  const withSso = Layer.mergeAll(base, ssoLayer) as Layer.Layer<AuthServices>;
-  const withoutSso = base as Layer.Layer<AuthServices>;
+  const withSso: Layer.Layer<AuthServices> = Layer.mergeAll(base, ssoLayer);
+  const withoutSso: Layer.Layer<AuthServices> = base;
 
   return {
     seedUser,
@@ -1134,14 +1158,14 @@ describe("HTTP SSO endpoints", () => {
     // Admin registers the connection (secret is never echoed back).
     const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
     expect(registered.status).toBe(200);
-    const provider = (await registered.json()) as Schema.JsonObject;
+    const provider = await jsonBody(registered, Schema.JsonObject);
     expect(provider["domain"]).toBe("acme.test");
     expect(provider).not.toHaveProperty("clientSecret");
 
     // Anonymous sign-in resolves the IdP URL by email domain.
     const signIn = await fx.handler(post("/sign-in/sso", { email: "worker@acme.test" }));
     expect(signIn.status).toBe(200);
-    const { url, state } = (await signIn.json()) as { url: string; state: string };
+    const { url, state } = await jsonBody(signIn, SignInBody);
     expect(new URL(url).origin).toBe("https://idp.acme.test");
 
     // Callback provisions the user and sets a session cookie.
@@ -1159,9 +1183,7 @@ describe("HTTP SSO endpoints", () => {
     );
     expect(callback.status).toBe(200);
     expect(callback.headers.get("set-cookie")).toContain("conduit_session=");
-    expect(((await callback.json()) as { user: { email: string } }).user.email).toBe(
-      "worker@acme.test",
-    );
+    expect((await jsonBody(callback, UserEmailBody)).user.email).toBe("worker@acme.test");
   });
 
   it("returns 404 when SSO is not configured", async () => {
@@ -1198,7 +1220,7 @@ describe("HTTP SSO endpoints — SAML", () => {
 
     const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
     expect(registered.status).toBe(200);
-    const provider = (await registered.json()) as Schema.JsonObject;
+    const provider = await jsonBody(registered, Schema.JsonObject);
     expect(provider["protocol"]).toBe("saml");
     expect(provider["entityId"]).toBe(SAML_IDP);
     expect(provider["idpCertificates"]).toEqual(SAML_REGISTER_BODY.idpCertificates);
@@ -1215,7 +1237,7 @@ describe("HTTP SSO endpoints — SAML", () => {
 
     const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
     expect(registered.status).toBe(200);
-    const provider = (await registered.json()) as Schema.JsonObject;
+    const provider = await jsonBody(registered, Schema.JsonObject);
     expect(provider["protocol"]).toBe("oidc");
     expect(provider["issuer"]).toBe("https://idp.acme.test");
     expect(provider).not.toHaveProperty("clientSecret");
@@ -1231,7 +1253,9 @@ describe("HTTP SSO endpoints — SAML", () => {
       post("/sso/register", { ...SAML_REGISTER_BODY, idpCertificates: [] }, adminSid),
     );
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { message: string }).message).toMatch(/idpCertificates/);
+    expect((await jsonBody(res, Schema.Struct({ message: Schema.String }))).message).toMatch(
+      /idpCertificates/,
+    );
   });
 
   it("completes the ACS form POST and issues a session cookie", async () => {
@@ -1239,13 +1263,13 @@ describe("HTTP SSO endpoints — SAML", () => {
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
     const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    const { id: providerId } = (await registered.json()) as { id: string };
+    const { id: providerId } = await jsonBody(registered, IdBody);
 
     // Start the flow so the AuthnRequest id is banked, exactly as a browser
     // redirect would.
     const signIn = await fx.handler(post("/sign-in/sso", { email: "worker@acme.test" }));
     expect(signIn.status).toBe(200);
-    const { state } = (await signIn.json()) as { url: string; state: string };
+    const { state } = await jsonBody(signIn, SignInBody);
     const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
 
     const acs = await fx.handler(
@@ -1256,14 +1280,14 @@ describe("HTTP SSO endpoints — SAML", () => {
     );
     expect(acs.status).toBe(200);
     expect(acs.headers.get("set-cookie")).toContain("conduit_session=");
-    expect(((await acs.json()) as { user: { email: string } }).user.email).toBe("worker@acme.test");
+    expect((await jsonBody(acs, UserEmailBody)).user.email).toBe("worker@acme.test");
   });
 
   it("answers 400 when the ACS response cannot be trusted", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
     const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    const { id: providerId } = (await registered.json()) as { id: string };
+    const { id: providerId } = await jsonBody(registered, IdBody);
 
     // No AuthnRequest was ever issued, so there is nothing to spend.
     const res = await fx.handler(
@@ -1277,7 +1301,7 @@ describe("HTTP SSO endpoints — SAML", () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
     const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    const { id: providerId } = (await registered.json()) as { id: string };
+    const { id: providerId } = await jsonBody(registered, IdBody);
 
     const res = await fx.handler(
       new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),
@@ -1291,7 +1315,7 @@ describe("HTTP SSO endpoints — SAML", () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
     const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
-    const { id: providerId } = (await registered.json()) as { id: string };
+    const { id: providerId } = await jsonBody(registered, IdBody);
 
     const res = await fx.handler(
       new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),

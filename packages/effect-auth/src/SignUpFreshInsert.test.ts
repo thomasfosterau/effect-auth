@@ -179,10 +179,10 @@ const signGoogleCredential = (nonce: string): string => {
 const withGoogleJwks = <A>(thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
   const jwks = { keys: [{ ...oneTapKeys.publicKeyJwk, kid: "k1", alg: "ES256" }] };
-  globalThis.fetch = (() =>
+  globalThis.fetch = () =>
     Promise.resolve(
       new Response(encodeJson(jwks), { headers: { "content-type": "application/json" } }),
-    )) as typeof fetch;
+    );
   return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
     globalThis.fetch = original;
   });

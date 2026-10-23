@@ -108,6 +108,7 @@ describe("databaseLayer doors", () => {
      * seam still insisted on a `Promise`, `run` would reject the value rather
      * than run it, and none of the assertions below would be reachable.
      */
+
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* EffectPglite.make();
@@ -128,14 +129,7 @@ describe("databaseLayer doors", () => {
             PgliteClient.layer({ liveClient: primary }),
           ),
         ),
-      ) as Effect.Effect<
-        {
-          readonly created: Auth.Session;
-          readonly read: Auth.Session | null;
-          readonly afterDelete: Auth.Session | null;
-        },
-        unknown
-      >,
+      ),
     );
 
     expect(result.created.id).toBe("effect-driver");
@@ -221,10 +215,7 @@ describe("overlapping requests", () => {
           ],
           { concurrency: "unbounded" },
         );
-      }).pipe(Effect.provide(stores)) as Effect.Effect<
-        readonly [ReadonlyArray<Auth.Session | null>, ReadonlyArray<Auth.Session | null>],
-        unknown
-      >,
+      }).pipe(Effect.provide(stores)),
     );
 
     expect(firstReads.map((session) => session?.userId)).toEqual([

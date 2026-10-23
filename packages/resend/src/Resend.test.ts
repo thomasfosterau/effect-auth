@@ -22,13 +22,11 @@ const stubFetch = (
   response: Response | ((request: CapturedRequest) => Response),
 ): { readonly fetch: typeof fetch; readonly calls: CapturedRequest[] } => {
   const calls: CapturedRequest[] = [];
-  // `RequestInfo` is not a global under `types: ["node"]`; take fetch's own
-  // input type instead of naming the DOM alias.
-  const fetchStub = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+  const fetchStub: typeof fetch = async (input, init) => {
     const request = { url: String(input), init: init ?? {} };
     calls.push(request);
     return Predicate.isFunction(response) ? response(request) : response;
-  }) as typeof fetch;
+  };
   return { fetch: fetchStub, calls };
 };
 
@@ -123,7 +121,7 @@ describe("resendEmailSender", () => {
     expect(headers.get("Authorization")).toBe("Bearer re_test_key");
     expect(headers.get("Content-Type")).toBe("application/json");
 
-    const body = fromJson(request.init.body as string);
+    const body = fromJson(request.init.body);
     expect(body).toEqual({
       from: "App <noreply@example.com>",
       to: "user@example.com",
@@ -146,7 +144,7 @@ describe("resendEmailSender", () => {
 
     const [request] = calls;
     assert(request !== undefined);
-    const body = fromJson(request.init.body as string);
+    const body = fromJson(request.init.body);
     expect(body).toEqual({
       from: "App <noreply@example.com>",
       to: "user@example.com",
@@ -200,7 +198,7 @@ describe("resendEmailSender", () => {
     expect(err._tag).toBe("AuthError");
     expect(err.message).toContain("422");
     expect(err.cause).toMatchObject({ status: 422 });
-    expect((err.cause as { body: string }).body).toContain("invalid `to` field");
+    expect(err.cause).toMatchObject({ body: expect.stringContaining("invalid `to` field") });
   });
 
   it("maps a 5xx response to an AuthError", async () => {
@@ -216,9 +214,9 @@ describe("resendEmailSender", () => {
   });
 
   it("maps a network failure to an AuthError", async () => {
-    const failingFetch = (async () => {
+    const failingFetch: typeof fetch = async () => {
       throw new NetworkDown();
-    }) as typeof fetch;
+    };
     const sender = resendEmailSender({ ...baseConfig, fetch: failingFetch });
 
     const err = await run(

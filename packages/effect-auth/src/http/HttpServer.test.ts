@@ -625,10 +625,7 @@ const makeFixture = (
 
   // The device user-code limit runs only with a RateLimiter (#389), so the feature
   // set that includes device authorization carries one.
-  const featureServices = Layer.merge(
-    featureServicesWithoutRateLimiter,
-    memoryRateLimiterLayer(),
-  ) as Layer.Layer<AuthServices>;
+  const featureServices = Layer.merge(featureServicesWithoutRateLimiter, memoryRateLimiterLayer());
 
   return {
     services,
@@ -720,6 +717,43 @@ const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 /** A JSON response body, parsed as the wire carried it. */
 const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
+/** A JSON response body, decoded against the shape the test reads from it. */
+const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
+
+// The response bodies several tests read.
+const UserIdBody = Schema.Struct({ user: Schema.Struct({ id: Schema.String }) });
+const UserEmailBody = Schema.Struct({ user: Schema.Struct({ email: Schema.String }) });
+const UserIdEmailBody = Schema.Struct({
+  user: Schema.Struct({ id: Schema.String, email: Schema.optional(Schema.String) }),
+});
+const UserEmailVerifiedBody = Schema.Struct({
+  user: Schema.Struct({ email: Schema.String, emailVerified: Schema.Boolean }),
+});
+const UserVerificationBody = Schema.Struct({
+  user: Schema.Struct({ email: Schema.String, emailVerified: Schema.Boolean }),
+  needsEmailVerification: Schema.Boolean,
+});
+const MessageBody = Schema.Struct({ message: Schema.String });
+const TagBody = Schema.Struct({ _tag: Schema.String });
+const IdListBody = Schema.Array(Schema.Struct({ id: Schema.String }));
+const TotpEnrollmentBody = Schema.Struct({
+  secret: Schema.String,
+  backupCodes: Schema.Array(Schema.String),
+});
+const SecondFactorBody = Schema.Struct({
+  secondFactor: Schema.optional(Schema.Struct({ token: Schema.String })),
+});
+/** A sign-up body, its user read field by field. */
+const SignUpBody = Schema.Struct({
+  user: Schema.Record(Schema.String, Schema.Json),
+  needsEmailVerification: Schema.Json,
+});
+/** A body's own fields, in the order the wire carried them. */
+const JsonFields = Schema.Record(Schema.String, Schema.Json);
+
 /** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
 class PromiseRejection extends Data.TaggedError("PromiseRejection")<{
   readonly cause: unknown;
@@ -784,11 +818,6 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
   const FRESH = "fresh1@example.com"; // As long as VICTIM, so bodies match in length.
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-  type SignUpBody = {
-    readonly user: Record<string, Schema.Json>;
-    readonly needsEmailVerification: Schema.Json;
-  };
-
   const signUpAs = (handler: Handler, email: string) =>
     handler(
       jsonRequest("/sign-up", {
@@ -806,7 +835,9 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
    * value's type, plus the values that must match exactly.
    */
   const observe = async (res: Response) => {
-    const body = (await res.json()) as SignUpBody;
+    const json: unknown = await res.json();
+    const body = Schema.decodeUnknownSync(SignUpBody)(json);
+    const fields = Schema.decodeUnknownSync(JsonFields)(json);
     // The JSON type of a body value: `typeof`'s name, with null and arrays apart.
     const typeOf = (value: Schema.Json) =>
       value === null
@@ -827,7 +858,7 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
           name === "content-length" ? [name, "<length>"] : [name, value],
         ),
         setCookie: res.headers.getSetCookie(),
-        bodyFields: Object.keys(body).map((key) => [key, typeOf(body[key as keyof SignUpBody])]),
+        bodyFields: Object.entries(fields).map(([key, value]) => [key, typeOf(value)]),
         userFields: Object.entries(body.user).map(([key, value]) => [key, typeOf(value)]),
         emailVerified: body.user["emailVerified"],
         name: body.user["name"],
@@ -985,11 +1016,6 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
     attributes: { plan: "enterprise", secret: "holder-only" },
   };
 
-  type SignUpBody = {
-    readonly user: Record<string, Schema.Json>;
-    readonly needsEmailVerification: Schema.Json;
-  };
-
   const lifecycles: ReadonlyArray<AuthLifecycleConfig> = [{}, { requireEmailVerification: true }];
 
   it.each(
@@ -1032,7 +1058,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
         },
       );
 
-      const body = parseJson(text) as SignUpBody;
+      const body = Schema.decodeUnknownSync(SignUpBody)(parseJson(text));
       expect(body.needsEmailVerification).toBe(true);
       expect(Object.keys(body.user)).toEqual([
         "id",
@@ -1063,7 +1089,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
           await previous;
           const verify = await handler(jsonRequest("/email-verification/verify", { token }));
           expect(verify.status).toBe(200);
-          const verified = (await verify.json()) as SignUpBody;
+          const verified = await jsonBody(verify, SignUpBody);
           expect(verified.user["id"]).toBe(holder.id);
           expect(verified.user["emailVerified"]).toBe(true);
         },
@@ -1095,10 +1121,7 @@ describe("HTTP auth protocol", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
-    const body = (await res.json()) as {
-      user: { email: string; emailVerified: boolean };
-      needsEmailVerification: boolean;
-    };
+    const body = await jsonBody(res, UserVerificationBody);
     expect(body.user.email).toBe("a@b.com");
     expect(body.user.emailVerified).toBe(false);
     expect(body.needsEmailVerification).toBe(false);
@@ -1110,7 +1133,7 @@ describe("HTTP auth protocol", () => {
 
     const res = await handler(getRequest("/session", asCookie(sid)));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { user: { email: string } };
+    const body = await jsonBody(res, UserEmailBody);
     expect(body.user.email).toBe("a@b.com");
   });
 
@@ -1133,7 +1156,7 @@ describe("HTTP auth protocol", () => {
     await signUp(handler, "a@b.com");
     const res = await handler(jsonRequest("/sign-in", { email: "a@b.com", password: "wrong-pw" }));
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { _tag: string };
+    const body = await jsonBody(res, TagBody);
     expect(body._tag).toBe("Unauthorized");
   });
 
@@ -1191,8 +1214,7 @@ describe("HTTP auth protocol", () => {
 
   it("works through the derived typed client (in-memory)", async () => {
     const handler = handlerFor();
-    const fetchImpl = ((input: Request | string | URL, init?: RequestInit) =>
-      handler(new Request(input as never, init))) as typeof globalThis.fetch;
+    const fetchImpl: typeof globalThis.fetch = (input, init) => handler(new Request(input, init));
     const ClientLayer = FetchHttpClient.layer.pipe(
       Layer.provide(Layer.succeed(FetchHttpClient.Fetch)(fetchImpl)),
     );
@@ -1216,7 +1238,7 @@ describe("session management endpoints", () => {
 
     const res = await handler(getRequest("/sessions", asCookie(sid1)));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ id: string }>;
+    const body = await jsonBody(res, IdListBody);
     expect(
       Arr.sort(
         body.map((s) => s.id),
@@ -1276,13 +1298,18 @@ describe("identifier endpoints", () => {
 
     const res = await handler(getRequest("/identifiers", asCookie(sid)));
     expect(res.status).toBe(200);
-    const list = (await res.json()) as Array<{
-      id: string;
-      type: string;
-      value: string;
-      verified: boolean;
-      createdAt: number;
-    }>;
+    const list = await jsonBody(
+      res,
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          type: Schema.String,
+          value: Schema.String,
+          verified: Schema.Boolean,
+          createdAt: Schema.Number,
+        }),
+      ),
+    );
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ type: "email", value: "a@b.com", verified: false });
   });
@@ -1298,13 +1325,16 @@ describe("identifier endpoints", () => {
     const handler = handlerFor(fixture);
     const up = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
     expect(up.status).toBe(200);
-    const userId = ((await up.json()) as { user: { id: string } }).user.id;
+    const userId = (await jsonBody(up, UserIdBody)).user.id;
     const sid = sessionIdFromSetCookie(up.headers.get("set-cookie"));
     fixture.registerUsername(userId, "cooluser");
     const otherSid = await signUp(handler, "other@b.com");
 
     const listRes = await handler(getRequest("/identifiers", asCookie(sid)));
-    const list = (await listRes.json()) as Array<{ id: string; type: string }>;
+    const list = await jsonBody(
+      listRes,
+      Schema.Array(Schema.Struct({ id: Schema.String, type: Schema.String })),
+    );
     expect(list).toHaveLength(2);
     const username = list.find((identifier) => identifier.type === "username");
     const email = list.find((identifier) => identifier.type === "email");
@@ -1322,7 +1352,7 @@ describe("identifier endpoints", () => {
     const deleted = await handler(deleteRequest(`/identifiers/${username.id}`, asCookie(sid)));
     expect(deleted.status).toBe(204);
     const after = await handler(getRequest("/identifiers", asCookie(sid)));
-    const remaining = (await after.json()) as Array<{ id: string }>;
+    const remaining = await jsonBody(after, IdListBody);
     expect(remaining.map((identifier) => identifier.id)).toEqual([email.id]);
 
     // The account's only remaining identifier cannot be deleted.
@@ -1403,13 +1433,19 @@ describe("change-password and update-user", () => {
       jsonRequest("/user", { name: "Ada Lovelace" }, asCookie(sid), "PATCH"),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { name?: string; email: string };
+    const body = await jsonBody(
+      res,
+      Schema.Struct({ name: Schema.optional(Schema.String), email: Schema.String }),
+    );
     expect(body.name).toBe("Ada Lovelace");
     expect(body.email).toBe("a@b.com");
 
     // The update is visible on subsequent session reads.
     const session = await handler(getRequest("/session", asCookie(sid)));
-    const sessionBody = (await session.json()) as { user: { name?: string } };
+    const sessionBody = await jsonBody(
+      session,
+      Schema.Struct({ user: Schema.Struct({ name: Schema.optional(Schema.String) }) }),
+    );
     expect(sessionBody.user.name).toBe("Ada Lovelace");
   });
 
@@ -1434,7 +1470,10 @@ describe("email verification roundtrip", () => {
     const token = fixture.sentVerificationTokens[0];
     const verify = await handler(jsonRequest("/email-verification/verify", { token }));
     expect(verify.status).toBe(200);
-    const body = (await verify.json()) as { user: { emailVerified: boolean } };
+    const body = await jsonBody(
+      verify,
+      Schema.Struct({ user: Schema.Struct({ emailVerified: Schema.Boolean }) }),
+    );
     expect(body.user.emailVerified).toBe(true);
     // Auto sign-in after verification sets a session cookie.
     expect(verify.headers.get("set-cookie")).toContain("conduit_session=");
@@ -1598,7 +1637,7 @@ describe("request body size limit", () => {
       }),
     );
     expect(res.status).toBe(413);
-    const body = (await res.json()) as { message: string };
+    const body = await jsonBody(res, MessageBody);
     expect(body.message).toBe("Payload too large");
   });
 
@@ -1629,7 +1668,7 @@ describe("mount prefix: 404 for out-of-prefix paths", () => {
     const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
     const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { message: string };
+    const body = await jsonBody(res, MessageBody);
     expect(body.message).toBe("Not Found");
   });
 
@@ -1661,7 +1700,7 @@ describe("optional features return 404 when not configured", () => {
 
     const magicLink = await handler(jsonRequest("/magic-link/send", { email: "a@b.com" }));
     expect(magicLink.status).toBe(404);
-    expect(((await magicLink.json()) as { _tag: string })._tag).toBe("NotFound");
+    expect((await jsonBody(magicLink, TagBody))._tag).toBe("NotFound");
 
     const emailOtp = await handler(
       jsonRequest("/email-otp/send", { email: "a@b.com", purpose: "sign-in" }),
@@ -1693,10 +1732,7 @@ describe("magic link", () => {
     const token = fixture.sentMagicLinkTokens[0];
     const verify = await handler(jsonRequest("/magic-link/verify", { token }));
     expect(verify.status).toBe(200);
-    const body = (await verify.json()) as {
-      user: { email: string; emailVerified: boolean };
-      needsEmailVerification: boolean;
-    };
+    const body = await jsonBody(verify, UserVerificationBody);
     // A verified link proves email ownership: the user is auto-created verified.
     expect(body.user.email).toBe("ml@example.com");
     expect(body.user.emailVerified).toBe(true);
@@ -1733,7 +1769,7 @@ describe("email OTP", () => {
     const otp = fixture.sentOtps[0].otp;
     const res = await handler(jsonRequest("/sign-in/email-otp", { email: "otp@example.com", otp }));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { user: { email: string; emailVerified: boolean } };
+    const body = await jsonBody(res, UserEmailVerifiedBody);
     expect(body.user.email).toBe("otp@example.com");
     expect(body.user.emailVerified).toBe(true);
 
@@ -1783,11 +1819,14 @@ describe("multi-factor", () => {
       jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
     expect(enable.status).toBe(200);
-    const enrollment = (await enable.json()) as {
-      secret: string;
-      totpUri: string;
-      backupCodes: string[];
-    };
+    const enrollment = await jsonBody(
+      enable,
+      Schema.Struct({
+        secret: Schema.String,
+        totpUri: Schema.String,
+        backupCodes: Schema.Array(Schema.String),
+      }),
+    );
     expect(enrollment.totpUri).toMatch(/^otpauth:\/\/totp\//);
     expect(enrollment.backupCodes).toHaveLength(10);
 
@@ -1813,10 +1852,15 @@ describe("multi-factor", () => {
     );
     expect(gated.status).toBe(200);
     expect(gated.headers.get("set-cookie")).toBeNull();
-    const gatedBody = (await gated.json()) as {
-      user: { email: string };
-      secondFactor?: { token: string; expiresAt: number };
-    };
+    const gatedBody = await jsonBody(
+      gated,
+      Schema.Struct({
+        user: Schema.Struct({ email: Schema.String }),
+        secondFactor: Schema.optional(
+          Schema.Struct({ token: Schema.String, expiresAt: Schema.Number }),
+        ),
+      }),
+    );
     assert(gatedBody.secondFactor !== undefined, "sign-in is gated on the second factor");
 
     // Wrong TOTP code -> 401 (the challenge remains redeemable).
@@ -1835,7 +1879,7 @@ describe("multi-factor", () => {
       jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor.token, code }),
     );
     expect(verified.status).toBe(200);
-    const verifiedBody = (await verified.json()) as { user: { email: string } };
+    const verifiedBody = await jsonBody(verified, UserEmailBody);
     expect(verifiedBody.user.email).toBe("2fa@example.com");
     const newSid = sessionIdFromSetCookie(verified.headers.get("set-cookie"));
     expect((await handler(getRequest("/session", asCookie(newSid)))).status).toBe(200);
@@ -1855,7 +1899,7 @@ describe("multi-factor", () => {
     const enable = await handler(
       jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
-    const enrollment = (await enable.json()) as { secret: string; backupCodes: string[] };
+    const enrollment = await jsonBody(enable, TotpEnrollmentBody);
     await handler(
       jsonRequest(
         "/multi-factor/confirm",
@@ -1868,7 +1912,7 @@ describe("multi-factor", () => {
       const res = await handler(
         jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
       );
-      const body = (await res.json()) as { secondFactor?: { token: string } };
+      const body = await jsonBody(res, SecondFactorBody);
       assert(body.secondFactor !== undefined, "sign-in is gated on the second factor");
       return body.secondFactor.token;
     };
@@ -1901,7 +1945,7 @@ describe("multi-factor", () => {
     const enable = await handler(
       jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
-    const enrollment = (await enable.json()) as { secret: string; backupCodes: string[] };
+    const enrollment = await jsonBody(enable, TotpEnrollmentBody);
     await handler(
       jsonRequest(
         "/multi-factor/confirm",
@@ -1914,7 +1958,10 @@ describe("multi-factor", () => {
       jsonRequest("/multi-factor/regenerate-backup-codes", { password: PW }, asCookie(sid)),
     );
     expect(regen.status).toBe(200);
-    const regenBody = (await regen.json()) as { backupCodes: string[] };
+    const regenBody = await jsonBody(
+      regen,
+      Schema.Struct({ backupCodes: Schema.Array(Schema.String) }),
+    );
     expect(regenBody.backupCodes).toHaveLength(10);
     expect(regenBody.backupCodes).not.toEqual(enrollment.backupCodes);
 
@@ -1922,7 +1969,7 @@ describe("multi-factor", () => {
     const gated = await handler(
       jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
     );
-    const gatedBody = (await gated.json()) as { secondFactor?: { token: string } };
+    const gatedBody = await jsonBody(gated, SecondFactorBody);
     assert(gatedBody.secondFactor !== undefined, "sign-in is gated on the second factor");
     const staleCode = await handler(
       jsonRequest("/multi-factor/verify-backup-code", {
@@ -1958,12 +2005,15 @@ describe("HTTP device authorization (RFC 8628)", () => {
 
     const codeRes = await handler(jsonRequest("/device/code", {}));
     expect(codeRes.status).toBe(200);
-    const code = (await codeRes.json()) as { deviceCode: string; userCode: string };
+    const code = await jsonBody(
+      codeRes,
+      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
+    );
 
     // Polling before approval yields authorization_pending (400).
     const pending = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
     expect(pending.status).toBe(400);
-    expect(((await pending.json()) as { message: string }).message).toBe("authorization_pending");
+    expect((await jsonBody(pending, MessageBody)).message).toBe("authorization_pending");
 
     // Approve from an authenticated verification page.
     const sid = await signUp(handler, "device-user@example.com");
@@ -1981,7 +2031,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
   it("requires authentication to approve a code", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
     const codeRes = await handler(jsonRequest("/device/code", {}));
-    const code = (await codeRes.json()) as { userCode: string };
+    const code = await jsonBody(codeRes, Schema.Struct({ userCode: Schema.String }));
     const res = await handler(jsonRequest("/device/approve", { userCode: code.userCode }));
     expect(res.status).toBe(401);
   });
@@ -1999,7 +2049,7 @@ describe("HTTP username sign-in", () => {
     const handler = handlerFor(fixture, { features: true });
     // Create the account (email/password) and register a username for it.
     const up = await handler(jsonRequest("/sign-up", { email: "u@example.com", password: PW }));
-    const user = ((await up.json()) as { user: { id: string } }).user;
+    const user = (await jsonBody(up, UserIdBody)).user;
     fixture.registerUsername(user.id, "cooluser");
 
     const res = await handler(
@@ -2013,7 +2063,7 @@ describe("HTTP username sign-in", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
     const up = await handler(jsonRequest("/sign-up", { email: "u2@example.com", password: PW }));
-    const user = ((await up.json()) as { user: { id: string } }).user;
+    const user = (await jsonBody(up, UserIdBody)).user;
     fixture.registerUsername(user.id, "someone");
 
     const wrong = await handler(
@@ -2060,11 +2110,12 @@ describe("HTTP phone OTP", () => {
     // The phone number was claimed as a verified `phone` identifier.
     const identifiers = await handler(getRequest("/identifiers", asCookie(sid)));
     expect(identifiers.status).toBe(200);
-    const list = (await identifiers.json()) as Array<{
-      type: string;
-      value: string;
-      verified: boolean;
-    }>;
+    const list = await jsonBody(
+      identifiers,
+      Schema.Array(
+        Schema.Struct({ type: Schema.String, value: Schema.String, verified: Schema.Boolean }),
+      ),
+    );
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ type: "phone", value: "+15551234567", verified: true });
   });
@@ -2137,7 +2188,7 @@ describe("passwordless send within the resend cooldown", () => {
         jsonRequest("/sign-up", { email: "member@example.com", password: PW }),
       );
       expect(up.status).toBe(200);
-      const user = ((await up.json()) as { user: { id: string } }).user;
+      const user = (await jsonBody(up, UserIdBody)).user;
       fixture.registerPhone(user.id, "+15557770001");
       const sentBefore =
         fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length;
@@ -2206,7 +2257,7 @@ describe("passwordless verify where send hides the account", () => {
       jsonRequest("/sign-up", { email: "member@example.com", password: PW }),
     );
     expect(up.status).toBe(200);
-    const user = ((await up.json()) as { user: { id: string } }).user;
+    const user = (await jsonBody(up, UserIdBody)).user;
     fixture.registerPhone(user.id, "+15557770001");
     return { fixture, handler };
   };
@@ -2240,7 +2291,9 @@ describe("passwordless verify where send hides the account", () => {
   };
 
   const messageOf = (response: { readonly body: string }) =>
-    (parseJson(response.body) as { message?: string }).message;
+    Schema.decodeUnknownSync(Schema.Struct({ message: Schema.optional(Schema.String) }))(
+      parseJson(response.body),
+    ).message;
 
   it.each(flows.flatMap((flow) => verifySequences.map((sequence) => ({ ...flow, sequence }))))(
     "answers $sequence alike for every address: $flow (disableSignUp: true)",
@@ -2306,9 +2359,15 @@ describe("HTTP anonymous sign-in", () => {
 
     const sess = await handler(getRequest("/session", asCookie(sid)));
     expect(sess.status).toBe(200);
-    const body = (await sess.json()) as {
-      user: { email?: string; attributes: Record<string, Schema.Json> };
-    };
+    const body = await jsonBody(
+      sess,
+      Schema.Struct({
+        user: Schema.Struct({
+          email: Schema.optional(Schema.String),
+          attributes: Schema.Record(Schema.String, Schema.Json),
+        }),
+      }),
+    );
     // Guest users have no login handle, so no derived email fields.
     expect(body.user.email).toBeUndefined();
     expect(body.user.attributes["isAnonymous"]).toBe(true);
@@ -2344,7 +2403,7 @@ describe("HTTP account management (change email / delete user)", () => {
     const newSid = await signIn(handler, "alice2@example.com");
     const sess = await handler(getRequest("/session", asCookie(newSid)));
     expect(sess.status).toBe(200);
-    const body = (await sess.json()) as { user: { email: string; emailVerified: boolean } };
+    const body = await jsonBody(sess, UserEmailVerifiedBody);
     expect(body.user.email).toBe("alice2@example.com");
     expect(body.user.emailVerified).toBe(true);
   });
@@ -2424,7 +2483,7 @@ describe("HTTP session cookie cache", () => {
     const before = fixture.sessionStoreReads();
     const first = await handler(getRequest("/session", asCookie(sid)));
     expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as { user: { id: string; email?: string } };
+    const firstBody = await jsonBody(first, UserIdEmailBody);
     expect(firstBody.user.email).toBe("cache@example.com");
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
     assert(data !== null, "the store-served response issues the data cookie");
@@ -2436,7 +2495,7 @@ describe("HTTP session cookie cache", () => {
     // email fields are omitted.
     const second = await handler(getRequest("/session", bothCookies(sid, data)));
     expect(second.status).toBe(200);
-    const body = (await second.json()) as { user: { id: string; email?: string } };
+    const body = await jsonBody(second, UserIdEmailBody);
     expect(body.user.id).toBe(firstBody.user.id);
     expect(body.user.email).toBeUndefined();
     expect(fixture.sessionStoreReads()).toBe(afterFirst);
@@ -2485,7 +2544,12 @@ describe("HTTP session cookie cache", () => {
 
     const first = await handler(getRequest("/session", asCookie(sid)));
     expect(first.status).toBe(200);
-    const body = (await first.json()) as { user: { attributes: Record<string, unknown> } };
+    const body = await jsonBody(
+      first,
+      Schema.Struct({
+        user: Schema.Struct({ attributes: Schema.Record(Schema.String, Schema.Unknown) }),
+      }),
+    );
     expect(body.user.attributes["role"]).toBe("admin");
     expect(dataCookieFromSetCookie(first.headers.get("set-cookie"))).toBeNull();
 
@@ -2564,7 +2628,12 @@ describe("HTTP multi-session", () => {
     const list = await handler(getRequest("/multi-session/list", { cookie: deviceCookie }));
     expect(list.status).toBe(200);
     const emails = Arr.sort(
-      ((await list.json()) as Array<{ user: { email: string } }>).map((s) => s.user.email),
+      (
+        await jsonBody(
+          list,
+          Schema.Array(Schema.Struct({ user: Schema.Struct({ email: Schema.String }) })),
+        )
+      ).map((s) => s.user.email),
       Order.String,
     );
     expect(emails).toEqual(["a@example.com", "b@example.com"]);
@@ -2688,7 +2757,7 @@ describe("rememberMe cookie behaviour", () => {
 
     const up = await handler(jsonRequest("/sign-up", { email: "u@b.com", password: PW }));
     expect(up.status).toBe(200);
-    const userId = ((await up.json()) as { user: { id: string } }).user.id;
+    const userId = (await jsonBody(up, UserIdBody)).user.id;
     fixture.registerUsername(userId, "testuser");
 
     const res = await handler(
@@ -2706,7 +2775,7 @@ describe("rememberMe cookie behaviour", () => {
 
     const up = await handler(jsonRequest("/sign-up", { email: "u2@b.com", password: PW }));
     expect(up.status).toBe(200);
-    const userId = ((await up.json()) as { user: { id: string } }).user.id;
+    const userId = (await jsonBody(up, UserIdBody)).user.id;
     fixture.registerUsername(userId, "testuser2");
 
     const res = await handler(
@@ -2759,7 +2828,7 @@ describe("bearer mode", () => {
       getRequest("/session", { authorization: `Bearer ${rawToken}` }),
     );
     expect(sessionRes.status).toBe(200);
-    const body = (await sessionRes.json()) as { user: { email: string } };
+    const body = await jsonBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("bearer@test.com");
   });
 
@@ -2790,7 +2859,7 @@ describe("bearer mode", () => {
       getRequest("/session", { authorization: `Bearer ${signUpToken}` }),
     );
     expect(sessionRes.status).toBe(200);
-    const body = (await sessionRes.json()) as { user: { email: string } };
+    const body = await jsonBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("always@test.com");
   });
 
@@ -2836,7 +2905,7 @@ describe("bearer mode", () => {
       getRequest("/session", { authorization: `Bearer ${bearerToken}` }),
     );
     expect(sessionRes.status).toBe(200);
-    const body = (await sessionRes.json()) as { user: { email: string } };
+    const body = await jsonBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("ml@test.com");
   });
 });
@@ -2879,7 +2948,7 @@ describe("client IP at the HTTP boundary", () => {
       delete: (key: string) => Effect.sync(() => void entries.delete(key)),
     };
     const limiter = RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
-    const services = Layer.merge(makeFixture().services, limiter) as Layer.Layer<AuthServices>;
+    const services = Layer.merge(makeFixture().services, limiter);
     const handler = HttpServer.make({
       services,
       cookie: { secure: false },
@@ -2983,8 +3052,8 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>): Handler => {
     Layer.provide(HttpServer.scimGroupLayer()),
     Layer.provide(platform),
   );
-  // The handlers' phantom requirements are satisfied by `services` at runtime;
-  // `Http.make` narrows its handler the same way.
+  // SAFETY: the handlers' phantom requirements are satisfied by `services` at
+  // runtime; `Http.make` narrows its handler the same way.
   return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
     disableLogger: true,
   }).handler as (request: Request) => Promise<Response>;
@@ -3060,10 +3129,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
   it("builds and serves when a RateLimiter is in services", async () => {
     const fixture = makeFixture();
     const { handler } = HttpServer.make({
-      services: Layer.merge(
-        fixture.services,
-        memoryRateLimiterLayer(),
-      ) as Layer.Layer<AuthServices>,
+      services: Layer.merge(fixture.services, memoryRateLimiterLayer()),
       cookie: { secure: false },
       trustedProxy: ClientIP.cloudflare,
       ipRateLimit: {},
@@ -3103,7 +3169,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     );
     const fixture = makeFixture();
     const { handler, dispose } = HttpServer.make({
-      services: Layer.merge(fixture.services, counted) as Layer.Layer<AuthServices>,
+      services: Layer.merge(fixture.services, counted),
       cookie: { secure: false },
     });
     expect(builds).toBe(1);
@@ -3125,7 +3191,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     const fixture = makeFixture();
     expect(() =>
       HttpServer.make({
-        services: Layer.merge(fixture.services, counted) as Layer.Layer<AuthServices>,
+        services: Layer.merge(fixture.services, counted),
         trustedProxy: ClientIP.cloudflare,
         ipRateLimit: {},
       }),
@@ -3139,7 +3205,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     const fixture = makeFixture();
     const asyncStep = Layer.effectDiscard(promiseOrDie(() => Promise.resolve()));
     const { handler } = HttpServer.make({
-      services: Layer.merge(fixture.services, asyncStep) as Layer.Layer<AuthServices>,
+      services: Layer.merge(fixture.services, asyncStep),
       cookie: { secure: false },
       trustedProxy: ClientIP.cloudflare,
       ipRateLimit: {},
@@ -3208,10 +3274,7 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
       logs.push({ level: options.logLevel, message: String(options.message) });
     });
     const handler = handBuiltHandler(
-      Layer.merge(
-        makeFixture().featureServicesWithoutRateLimiter,
-        Logger.layer([collector]),
-      ) as Layer.Layer<AuthServices>,
+      Layer.merge(makeFixture().featureServicesWithoutRateLimiter, Logger.layer([collector])),
     );
     const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
     expect(res.status).toBe(429);
@@ -3268,6 +3331,14 @@ const macrotasks = async (count: number): Promise<void> => {
 
 class BootError extends Data.TaggedError("BootError")<{ readonly reason: string }> {}
 
+/** `services` whose build fails with a {@link BootError}, typed as `make` takes them. */
+const failingBoot = (layer: Layer.Layer<AuthServices, BootError>): Layer.Layer<AuthServices> => {
+  // SAFETY: `make` types `services` as infallible, yet it runs the build and
+  // surfaces the build's typed failure itself (#402). The callers hand it a build
+  // that fails with a `BootError` on purpose, to check exactly that path.
+  return layer as Layer.Layer<AuthServices>;
+};
+
 describe("make builds services synchronously, up to their exit (#402)", () => {
   it("returns while a fiber that services forked keeps running, and dispose stops it", async () => {
     // A busy fiber the build forks and never awaits. make must not wait for it.
@@ -3295,7 +3366,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     const { handler, dispose } = HttpServer.make({
       // provideMerge builds `busy` on the build's own fiber, after the rest.
-      services: busy.pipe(Layer.provideMerge(fixture.services)) as Layer.Layer<AuthServices>,
+      services: busy.pipe(Layer.provideMerge(fixture.services)),
       cookie: { secure: false },
     });
     returned = true;
@@ -3347,7 +3418,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       // path than one forked by a build that is already running.
       services: Layer.mergeAll(fixture.services, busy, asyncStep).pipe(
         Layer.provide(Layer.effectDiscard(Effect.yieldNow)),
-      ) as Layer.Layer<AuthServices>,
+      ),
       cookie: { secure: false },
       trustedProxy: ClientIP.cloudflare,
       ipRateLimit: {},
@@ -3376,9 +3447,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     );
     expect(() =>
       HttpServer.make({
-        services: long.pipe(
-          Layer.provideMerge(makeFixture().services),
-        ) as Layer.Layer<AuthServices>,
+        services: long.pipe(Layer.provideMerge(makeFixture().services)),
         trustedProxy: ClientIP.cloudflare,
         ipRateLimit: {},
       }),
@@ -3403,7 +3472,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     const { dispose } = HttpServer.make({
       // provideMerge builds `forks` last, on the build's own fiber.
-      services: forks.pipe(Layer.provideMerge(fixture.services)) as Layer.Layer<AuthServices>,
+      services: forks.pipe(Layer.provideMerge(fixture.services)),
       cookie: { secure: false },
     });
     expect(bRan).toBe(false);
@@ -3420,7 +3489,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const fixture = makeFixture();
 
     const { dispose } = HttpServer.make({
-      services: child.pipe(Layer.provideMerge(fixture.services)) as Layer.Layer<AuthServices>,
+      services: child.pipe(Layer.provideMerge(fixture.services)),
       cookie: { secure: false },
     });
     await macrotasks(3);
@@ -3442,9 +3511,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
         }),
       );
       HttpServer.make({
-        services: queued.pipe(
-          Layer.provideMerge(makeFixture().services),
-        ) as Layer.Layer<AuthServices>,
+        services: queued.pipe(Layer.provideMerge(makeFixture().services)),
         cookie: { secure: false },
       });
       return ran;
@@ -3485,7 +3552,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     expect(
       thrownBy(() =>
         HttpServer.make({
-          services: services as Layer.Layer<AuthServices>,
+          services: services,
           cookie: { secure: false },
         }),
       ),
@@ -3512,7 +3579,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     expect(() =>
       HttpServer.make({
-        services: Layer.merge(fixture.services, slowRelease) as Layer.Layer<AuthServices>,
+        services: Layer.merge(fixture.services, slowRelease),
         trustedProxy: ClientIP.cloudflare,
         ipRateLimit: {},
       }),
@@ -3543,7 +3610,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     expect(() =>
       HttpServer.make({
-        services: Layer.merge(fixture.services, failingRelease) as Layer.Layer<AuthServices>,
+        services: Layer.merge(fixture.services, failingRelease),
         trustedProxy: ClientIP.cloudflare,
         ipRateLimit: {},
       }),
@@ -3563,9 +3630,11 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     );
     const failure = new BootError({ reason: "no database" });
     // provideMerge builds `counted` before the failing layer runs.
-    const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
-      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
-    ) as Layer.Layer<AuthServices>;
+    const services = failingBoot(
+      Layer.effectDiscard(Effect.fail(failure)).pipe(
+        Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
+      ),
+    );
 
     expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
     expect(released).toBe(1);
@@ -3579,7 +3648,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const defect = new TestFailure({ message: "services could not start" });
     const services = Layer.effectDiscard(Effect.die(defect)).pipe(
       Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
-    ) as Layer.Layer<AuthServices>;
+    );
 
     expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(defect);
     expect(released).toBe(1);
@@ -3608,10 +3677,12 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       ).pipe(Effect.tap((fiber) => Effect.sync(() => void (detached = fiber)))),
     );
     const failure = new BootError({ reason: "after the fork" });
-    const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
-      Layer.provideMerge(spinner),
-      Layer.provideMerge(makeFixture().services),
-    ) as Layer.Layer<AuthServices>;
+    const services = failingBoot(
+      Layer.effectDiscard(Effect.fail(failure)).pipe(
+        Layer.provideMerge(spinner),
+        Layer.provideMerge(makeFixture().services),
+      ),
+    );
 
     expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
     thrown = true;
@@ -3649,7 +3720,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
           Layer.effectDiscard(
             promiseOrDie(() => new Promise<void>((resolve) => setTimeout(resolve, 1))),
           ),
-        ) as Layer.Layer<AuthServices>,
+        ),
     ],
     [
       "merged layers that yield",
@@ -3658,7 +3729,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
           makeFixture().services,
           Layer.effectDiscard(Effect.yieldNow),
           Layer.effectDiscard(Effect.yieldNow),
-        ) as Layer.Layer<AuthServices>,
+        ),
     ],
     [
       "a merged layer that runs past Effect's op budget",
@@ -3671,7 +3742,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
               discard: true,
             }),
           ),
-        ) as Layer.Layer<AuthServices>,
+        ),
     ],
     [
       "a provideMerge chain with an asynchronous step",
@@ -3679,7 +3750,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         Layer.effectDiscard(Effect.void).pipe(
           Layer.provideMerge(Layer.effectDiscard(promiseOrDie(() => Promise.resolve()))),
           Layer.provideMerge(makeFixture().services),
-        ) as Layer.Layer<AuthServices>,
+        ),
     ],
     [
       "a forkScoped fiber that yields before it completes a Deferred the build awaits",
@@ -3692,7 +3763,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
             );
             yield* Deferred.await(ready);
           }),
-        ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>,
+        ).pipe(Layer.provideMerge(makeFixture().services)),
     ],
   ];
 
@@ -3714,7 +3785,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     const services = Layer.merge(
       makeFixture({ hooks: ipRateLimitHooks() }).services,
       Layer.effectDiscard(promiseOrDie(() => Promise.resolve())),
-    ) as Layer.Layer<AuthServices>;
+    );
     const error = await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }));
     expect(error).toBeInstanceOf(ClientAddressConfigError);
     expect(String(error)).toMatch(/IPRateLimitPlugin/);
@@ -3725,7 +3796,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     const counted = Layer.effectDiscard(Effect.sync(() => void builds++));
     const error = await rejectionOf(
       HttpServer.makeAsync({
-        services: Layer.merge(makeFixture().services, counted) as Layer.Layer<AuthServices>,
+        services: Layer.merge(makeFixture().services, counted),
         ipRateLimit: {},
       }),
     );
@@ -3745,9 +3816,11 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     );
     const failure = new BootError({ reason: "no database" });
     const services = (): Layer.Layer<AuthServices> =>
-      Layer.effectDiscard(Effect.fail(failure)).pipe(
-        Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
-      ) as Layer.Layer<AuthServices>;
+      failingBoot(
+        Layer.effectDiscard(Effect.fail(failure)).pipe(
+          Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
+        ),
+      );
 
     // Effect releases what the failed build acquired before the build ends, so
     // the asynchronous finalizer keeps make from seeing the failure.
@@ -3774,7 +3847,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     const defect = new TestFailure({ message: "services could not start" });
     const services = Layer.effectDiscard(
       promiseOrDie(() => Promise.resolve()).pipe(Effect.andThen(Effect.die(defect))),
-    ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>;
+    ).pipe(Layer.provideMerge(makeFixture().services));
     expect(await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }))).toBe(
       defect,
     );
@@ -3795,10 +3868,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         ),
       ),
     );
-    const services = Layer.merge(
-      makeFixture().services,
-      slowFailingRelease,
-    ) as Layer.Layer<AuthServices>;
+    const services = Layer.merge(makeFixture().services, slowFailingRelease);
 
     const error = await HttpServer.makeAsync({ services, ...limitWithoutLimiter }).then(
       () => expect.unreachable("expected a rejection"),
@@ -3845,7 +3915,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     expect(
       await rejectionOf(
         HttpServer.makeAsync({
-          services: services as Layer.Layer<AuthServices>,
+          services: services,
           cookie: { secure: false },
         }),
       ),
@@ -3865,11 +3935,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       ),
     );
     const { handler, dispose } = await HttpServer.makeAsync({
-      services: Layer.mergeAll(
-        makeFixture().services,
-        counted,
-        memoryRateLimiterLayer(),
-      ) as Layer.Layer<AuthServices>,
+      services: Layer.mergeAll(makeFixture().services, counted, memoryRateLimiterLayer()),
       ...limitWithoutLimiter,
     });
     expect(builds).toBe(1);
@@ -3905,7 +3971,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         makeFixture().services,
         busy,
         Layer.effectDiscard(promiseOrDie(() => Promise.resolve())),
-      ) as Layer.Layer<AuthServices>,
+      ),
       cookie: { secure: false },
     });
     const res = await handler(signIn());
@@ -3959,7 +4025,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       counter.state.stopped = true;
     });
     const { dispose } = await HttpServer.makeAsync({
-      services: Layer.merge(makeFixture().services, forking) as Layer.Layer<AuthServices>,
+      services: Layer.merge(makeFixture().services, forking),
       cookie: { secure: false },
     });
     const atResolve = counter.state.ticks;
@@ -3977,7 +4043,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       counter.state.stopped = true;
     });
     const { dispose } = await HttpServer.makeAsync({
-      services: Layer.merge(makeFixture().services, detached) as Layer.Layer<AuthServices>,
+      services: Layer.merge(makeFixture().services, detached),
       cookie: { secure: false },
     });
     const atResolve = counter.state.ticks;
@@ -4003,14 +4069,14 @@ describe("make with strict (#416)", () => {
           makeFixture().services,
           Layer.effectDiscard(Effect.yieldNow),
           Layer.effectDiscard(Effect.yieldNow),
-        ) as Layer.Layer<AuthServices>,
+        ),
     ],
     [
       "an Effect.promise step",
       () =>
         Layer.effectDiscard(promiseOrDie(() => Promise.resolve())).pipe(
           Layer.provideMerge(makeFixture().services),
-        ) as Layer.Layer<AuthServices>,
+        ),
     ],
     [
       "a forkScoped fiber that yields before it completes a Deferred the build awaits",
@@ -4023,7 +4089,7 @@ describe("make with strict (#416)", () => {
             );
             yield* Deferred.await(ready);
           }),
-        ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>,
+        ).pipe(Layer.provideMerge(makeFixture().services)),
     ],
   ];
 
@@ -4071,9 +4137,9 @@ describe("make with strict (#416)", () => {
 
   it("throws a synchronous build's own failure, and its startup errors", () => {
     const failure = new BootError({ reason: "no database" });
-    const failing = Layer.effectDiscard(Effect.fail(failure)).pipe(
-      Layer.provideMerge(makeFixture().services),
-    ) as Layer.Layer<AuthServices>;
+    const failing = failingBoot(
+      Layer.effectDiscard(Effect.fail(failure)).pipe(Layer.provideMerge(makeFixture().services)),
+    );
     expect(
       thrownBy(() =>
         HttpServer.make({
@@ -4111,9 +4177,7 @@ describe("make with strict (#416)", () => {
         Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true))),
       ),
     );
-    const services = waiting.pipe(
-      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
-    ) as Layer.Layer<AuthServices>;
+    const services = waiting.pipe(Layer.provideMerge(Layer.merge(makeFixture().services, counted)));
 
     const error = thrownBy(() =>
       HttpServer.make({ services, cookie: { secure: false }, strict: true }),
@@ -4140,7 +4204,7 @@ describe("make with strict (#416)", () => {
         ),
       ).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
     );
-    const services = Layer.merge(makeFixture().services, spinning) as Layer.Layer<AuthServices>;
+    const services = Layer.merge(makeFixture().services, spinning);
 
     expect(
       thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
@@ -4162,7 +4226,7 @@ describe("make with strict (#416)", () => {
     );
     const services = Layer.effectDiscard(promiseOrDie(() => Promise.resolve())).pipe(
       Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
-    ) as Layer.Layer<AuthServices>;
+    );
 
     expect(
       thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
@@ -4192,7 +4256,7 @@ describe("make with strict (#416)", () => {
           ),
         ),
       ),
-    ) as Layer.Layer<AuthServices>;
+    );
 
   it("interrupts the build before it releases what the build acquired", () => {
     const events: Array<string> = [];
@@ -4280,13 +4344,15 @@ describe("make with strict (#416)", () => {
     let released = false;
     // The step fails, and Effect runs its finalizer, which awaits, before the
     // build ends: the build has no exit when make has run it synchronously.
-    const failing = Layer.effectDiscard(
-      Effect.acquireRelease(Effect.void, () =>
-        promiseOrDie(() => Promise.resolve()).pipe(
-          Effect.andThen(Effect.sync(() => void (released = true))),
-        ),
-      ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
-    ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>;
+    const failing = failingBoot(
+      Layer.effectDiscard(
+        Effect.acquireRelease(Effect.void, () =>
+          promiseOrDie(() => Promise.resolve()).pipe(
+            Effect.andThen(Effect.sync(() => void (released = true))),
+          ),
+        ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
+      ).pipe(Layer.provideMerge(makeFixture().services)),
+    );
 
     expect(
       thrownBy(() =>
@@ -4311,7 +4377,7 @@ describe("make with strict (#416)", () => {
     });
     const services = Layer.effectDiscard(promiseOrDie(() => Promise.resolve())).pipe(
       Layer.provideMerge(makeFixture().services),
-    ) as Layer.Layer<AuthServices>;
+    );
     expect(
       thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
     ).toBeInstanceOf(ServicesBuildPendingError);

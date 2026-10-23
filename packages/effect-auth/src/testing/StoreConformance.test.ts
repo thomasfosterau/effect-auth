@@ -59,9 +59,7 @@ const register = <E, R>(
 ): void => {
   describe(`${suite.contract} conformance`, () => {
     Arr.forEach(suite.cases, (testCase) => {
-      it(testCase.name, () =>
-        Effect.runPromise(testCase.run.pipe(Effect.provide(layer())) as Effect.Effect<void>),
-      );
+      it(testCase.name, () => Effect.runPromise(testCase.run.pipe(Effect.provide(layer()))));
     });
   });
 };
@@ -110,7 +108,7 @@ const failures = async <E, R>(
   await Arr.reduce(suite.cases, Promise.resolve(), async (previous, testCase) => {
     await previous;
     const result = await Effect.runPromise(
-      Effect.result(testCase.run.pipe(Effect.provide(layer())) as Effect.Effect<void, unknown>),
+      Effect.result(testCase.run.pipe(Effect.provide(layer()))),
     );
     if (Result.isFailure(result)) failed.push({ name: testCase.name, error: result.failure });
   });

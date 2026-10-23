@@ -116,9 +116,7 @@ const runWith = <A, E>(
   build: () => Effect.Effect<A, E, Auth.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
-    build().pipe(
-      Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(db)))),
-    ) as Effect.Effect<A, E>,
+    build().pipe(Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(db))))),
   );
 
 const run = <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>

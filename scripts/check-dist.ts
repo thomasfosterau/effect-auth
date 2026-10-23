@@ -163,7 +163,8 @@ const publishedVersions = (name: string): ReadonlyArray<string> => {
   let versions = publishedCache.get(name);
   if (!versions) {
     const parsed: unknown = JSON.parse(run("npm", ["view", name, "versions", "--json"], root));
-    versions = ([] as ReadonlyArray<unknown>).concat(parsed).map(String);
+    // npm prints a lone version as a string and several as an array.
+    versions = [parsed].flat().map(String);
     publishedCache.set(name, versions);
   }
   return versions;
@@ -197,7 +198,9 @@ const listEffectCopies = (cwd: string): ReadonlyArray<string> => {
   try {
     out = run("npm", ["ls", "effect", "--all", "--parseable"], cwd);
   } catch (error) {
-    out = String((error as { stdout?: unknown }).stdout ?? "");
+    // `execFileSync` attaches the child's captured output to the error it
+    // throws for a failed child.
+    out = error instanceof Error && "stdout" in error ? String(error.stdout) : "";
   }
   return out.split("\n").filter((line) => line.endsWith("/node_modules/effect"));
 };
@@ -218,6 +221,8 @@ const unmetEffectRanges = (
   names.flatMap((name) => {
     const path = join(project, "node_modules", name, "package.json");
     if (!existsSync(path)) return [];
+    // SAFETY: an installed package's `package.json` is a manifest: `name` is
+    // always present and every other field `Manifest` reads is optional.
     const manifest = JSON.parse(readFileSync(path, "utf8")) as Manifest;
     return [manifest.peerDependencies?.effect, manifest.dependencies?.effect]
       .filter((range): range is string => range !== undefined)
@@ -493,6 +498,8 @@ try {
     if (!file?.endsWith(".tgz")) throw new Error(`${dir}: pnpm pack printed no tarball`);
     // The floor comes from the manifest a consumer will see, not a constant
     // here, so a peer range and the version it is checked at cannot drift.
+    // SAFETY: a packed `package.json` is a manifest: `name` is always present and
+    // every other field `Manifest` reads is optional (and checked below).
     const manifest = JSON.parse(
       run("tar", ["-xzOf", file, "package/package.json"], scratch),
     ) as Manifest;
@@ -572,6 +579,7 @@ try {
       project,
     );
 
+    // SAFETY: an installed package's manifest always carries its `version`.
     const installed = (
       JSON.parse(readFileSync(join(project, "node_modules", "effect", "package.json"), "utf8")) as {
         version: string;
@@ -591,6 +599,7 @@ try {
       throw new Error(`effect ${installed} is outside a declared range:\n${unmet.join("\n")}`);
     }
     for (const [peer, { version }] of peerVersions) {
+      // SAFETY: an installed package's manifest always carries its `version`.
       const peerManifest = JSON.parse(
         readFileSync(join(project, "node_modules", peer, "package.json"), "utf8"),
       ) as { version: string };

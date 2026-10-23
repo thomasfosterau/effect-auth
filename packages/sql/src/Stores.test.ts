@@ -39,12 +39,12 @@ const makeConnection = (db: Database.Database): SqlConnection.Connection => {
   ): Effect.Effect<ReadonlyArray<any>, SqlError.SqlError> =>
     Effect.try({
       try: () => {
-        const statement = db.prepare(sqlText);
+        const statement = db.prepare<Array<unknown>>(sqlText);
         if (statement.reader) {
-          return statement.all(...(params as ReadonlyArray<never>)) as ReadonlyArray<any>;
+          return statement.all(...params);
         }
-        statement.run(...(params as ReadonlyArray<never>));
-        return [] as ReadonlyArray<any>;
+        statement.run(...params);
+        return [];
       },
       catch: driverError,
     });
@@ -55,14 +55,13 @@ const makeConnection = (db: Database.Database): SqlConnection.Connection => {
   ): Effect.Effect<ReadonlyArray<ReadonlyArray<unknown>>, SqlError.SqlError> =>
     Effect.try({
       try: () => {
-        const statement = db.prepare(sqlText);
+        // In raw mode each row is the array of its column values.
+        const statement = db.prepare<Array<unknown>, ReadonlyArray<unknown>>(sqlText);
         if (statement.reader) {
-          return statement.raw(true).all(...(params as ReadonlyArray<never>)) as ReadonlyArray<
-            ReadonlyArray<unknown>
-          >;
+          return statement.raw(true).all(...params);
         }
-        statement.run(...(params as ReadonlyArray<never>));
-        return [] as ReadonlyArray<ReadonlyArray<unknown>>;
+        statement.run(...params);
+        return [];
       },
       catch: driverError,
     });
@@ -236,10 +235,7 @@ const storeContract = (engine: StoreEngine): void => {
       Effect.gen(function* () {
         yield* migrate;
         return yield* effect;
-      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(engine.client())))) as Effect.Effect<
-        A,
-        E
-      >,
+      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(engine.client())))),
     );
 
   describe(`@thomasfosterau/effect-auth-sql stores over ${engine.name}`, () => {

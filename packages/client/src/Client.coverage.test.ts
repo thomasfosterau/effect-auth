@@ -52,11 +52,11 @@ const withServer = (options?: ServerFixtureOptions) => {
 const recordingFetch = (body: Schema.Json) => {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   const fetchImpl: typeof globalThis.fetch = async (input, init) => {
-    const request = new Request(input as RequestInfo, init);
+    const request = new Request(input, init);
     calls.push({
       method: request.method,
       path: new URL(request.url).pathname,
-      body: request.body === null ? undefined : ((await request.json()) as unknown),
+      body: request.body === null ? undefined : await request.json(),
     });
     return new Response(toJson(body), {
       status: 200,
@@ -100,8 +100,8 @@ describe("identifiers", () => {
     assert(only !== undefined, "sign-up created an identifier");
 
     const error = await rejectionOf(client.identifiers.delete(only.id), AuthClientError);
-    expect(error).toBeInstanceOf(AuthClientError);
-    expect((error as AuthClientError).status).toBe(400);
+    assert.instanceOf(error, AuthClientError);
+    expect(error.status).toBe(400);
   });
 });
 
@@ -161,8 +161,8 @@ describe("device authorization", () => {
 
     // Polling before the user decides answers 400 authorization_pending.
     const pending = await device.device.token({ deviceCode: code.deviceCode }).catch((e) => e);
-    expect(pending).toBeInstanceOf(AuthClientError);
-    expect((pending as AuthClientError).status).toBe(400);
+    assert.instanceOf(pending, AuthClientError);
+    expect(pending.status).toBe(400);
 
     await phone.signUp({ email: "device@client.test", password: PW });
     expect(await phone.device.approve({ userCode: code.userCode })).toEqual({ status: true });
@@ -269,8 +269,8 @@ describe("multi-factor challenge continuation", () => {
       client.multiFactor.continueChallenge(again).verifyBackupCode(backupCode),
       AuthClientError,
     );
-    expect(replay).toBeInstanceOf(AuthClientError);
-    expect((replay as AuthClientError).status).toBe(401);
+    assert.instanceOf(replay, AuthClientError);
+    expect(replay.status).toBe(401);
   });
 
   it("throws a typed error when the result carries no challenge", async () => {
@@ -294,8 +294,8 @@ describe("multi-factor challenge continuation", () => {
     expect(challenge.isExpired()).toBe(true);
 
     const error = await rejectionOf(challenge.verifyTotp("123456"), SecondFactorChallengeError);
-    expect(error).toBeInstanceOf(SecondFactorChallengeError);
-    expect((error as SecondFactorChallengeError).reason).toBe("expired");
+    assert.instanceOf(error, SecondFactorChallengeError);
+    expect(error.reason).toBe("expired");
     expect(calls).toHaveLength(0);
   });
 });
@@ -439,8 +439,8 @@ describe("organizations", () => {
       teammate.organization.createTeam(org.id, { name: "Growth" }),
       AuthClientError,
     );
-    expect(denied).toBeInstanceOf(AuthClientError);
-    expect((denied as AuthClientError).status).toBe(403);
+    assert.instanceOf(denied, AuthClientError);
+    expect(denied.status).toBe(403);
 
     await owner.organization.removeTeamMember(team.id, mate.user.id);
     expect(await owner.organization.listTeamMembers(team.id)).toEqual([]);
@@ -471,8 +471,8 @@ describe("organizations", () => {
       staff.organization.createTeam(org.id, { name: "Nope" }),
       AuthClientError,
     );
-    expect(denied).toBeInstanceOf(AuthClientError);
-    expect((denied as AuthClientError).status).toBe(403);
+    assert.instanceOf(denied, AuthClientError);
+    expect(denied.status).toBe(403);
     // ...but the row is still on the organization.
     expect((await owner.organization.get(org.id)).members).toHaveLength(2);
     // The session survives: deactivation is organization-scoped.
@@ -492,8 +492,8 @@ describe("organizations", () => {
 
       AuthClientError,
     );
-    expect(lastOwner).toBeInstanceOf(AuthClientError);
-    expect((lastOwner as AuthClientError).status).toBe(403);
+    assert.instanceOf(lastOwner, AuthClientError);
+    expect(lastOwner.status).toBe(403);
   });
 
   it("sets a default role that addMember and the org view both use", async () => {
@@ -521,8 +521,8 @@ describe("organizations", () => {
       owner.organization.setDefaultRole(org.id, { role: "auditor" }),
       AuthClientError,
     );
-    expect(unknown).toBeInstanceOf(AuthClientError);
-    expect((unknown as AuthClientError).status).toBe(403);
+    assert.instanceOf(unknown, AuthClientError);
+    expect(unknown.status).toBe(403);
   });
 
   it("resends a pending invitation on the same id", async () => {
@@ -547,8 +547,8 @@ describe("organizations", () => {
       owner.organization.resendInvitation(invitation.id),
       AuthClientError,
     );
-    expect(canceled).toBeInstanceOf(AuthClientError);
-    expect((canceled as AuthClientError).status).toBe(403);
+    assert.instanceOf(canceled, AuthClientError);
+    expect(canceled.status).toBe(403);
   });
 
   it("claims a domain, verifies it over DNS, and keeps it unique across orgs", async () => {
@@ -587,8 +587,8 @@ describe("organizations", () => {
       rival.organization.addDomain(other.id, { domain: "acme.test" }),
       AuthClientError,
     );
-    expect(conflict).toBeInstanceOf(AuthClientError);
-    expect((conflict as AuthClientError).status).toBe(403);
+    assert.instanceOf(conflict, AuthClientError);
+    expect(conflict.status).toBe(403);
 
     // Releasing the claim frees the domain again.
     await owner.organization.removeDomain(org.id, claim.id);
@@ -603,8 +603,8 @@ describe("organizations", () => {
     await client.signUp({ email: "noorg@client.test", password: PW });
 
     const error = await rejectionOf(client.organization.list(), AuthClientError);
-    expect(error).toBeInstanceOf(AuthClientError);
-    expect((error as AuthClientError).status).toBe(404);
+    assert.instanceOf(error, AuthClientError);
+    expect(error.status).toBe(404);
   });
 });
 

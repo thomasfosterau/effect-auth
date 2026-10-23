@@ -132,8 +132,8 @@ describe("DeviceAuthorizationService", () => {
   it("returns authorization_pending before approval", async () => {
     const begun = await run((svc) => svc.begin());
     const pending = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
-    expect(pending).toBeInstanceOf(DevicePollError);
-    expect((pending as DevicePollError).error).toBe("authorization_pending");
+    assert.instanceOf(pending, DevicePollError);
+    expect(pending.error).toBe("authorization_pending");
   });
 
   it("returns a session after approval", async () => {
@@ -151,7 +151,8 @@ describe("DeviceAuthorizationService", () => {
     await run((svc) => svc.poll(begun.deviceCode));
 
     const again = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
-    expect((again as DevicePollError).error).toBe("expired_token");
+    assert.instanceOf(again, DevicePollError);
+    expect(again.error).toBe("expired_token");
   });
 
   it("enforces slow_down when polled faster than the interval", async () => {
@@ -159,14 +160,16 @@ describe("DeviceAuthorizationService", () => {
     // First poll sets lastPolledAt.
     await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
     const tooSoon = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
-    expect((tooSoon as DevicePollError).error).toBe("slow_down");
+    assert.instanceOf(tooSoon, DevicePollError);
+    expect(tooSoon.error).toBe("slow_down");
   });
 
   it("returns access_denied after deny", async () => {
     const begun = await run((svc) => svc.begin());
     await run((svc) => svc.deny(begun.userCode));
     const denied = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
-    expect((denied as DevicePollError).error).toBe("access_denied");
+    assert.instanceOf(denied, DevicePollError);
+    expect(denied.error).toBe("access_denied");
   });
 
   it("returns expired_token once the request has expired", async () => {
@@ -176,7 +179,8 @@ describe("DeviceAuthorizationService", () => {
     assert(record !== undefined, "begin stored the request");
     records.set(deviceHash, { ...record, expiresAt: Date.now() - 1 });
     const expired = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
-    expect((expired as DevicePollError).error).toBe("expired_token");
+    assert.instanceOf(expired, DevicePollError);
+    expect(expired.error).toBe("expired_token");
   });
 
   it("rejects approving an unknown user code", async () => {
@@ -229,7 +233,8 @@ describe("DeviceAuthorizationService", () => {
     records.set(hash, { ...record, lastPolledAt: lastPolled });
 
     const err = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
-    expect((err as DevicePollError).error).toBe("slow_down");
+    assert.instanceOf(err, DevicePollError);
+    expect(err.error).toBe("slow_down");
 
     const updated = records.get(hash);
     assert(updated !== undefined, "the request is still stored");

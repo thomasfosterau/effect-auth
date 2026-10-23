@@ -16,8 +16,8 @@
 import Database from "better-sqlite3";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { Array as Arr, Effect, Layer } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { Array as Arr, Effect, Layer, Schema } from "effect";
+import { assert, afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { layer } from "./Layers.ts";
@@ -106,7 +106,7 @@ const runStores = <A, E>(
       Effect.runPromise(
         build(db, activeTables, client).pipe(
           Effect.provide(layer(activeTables).pipe(Layer.provide(databaseLayer(db)))),
-        ) as Effect.Effect<A, E>,
+        ),
       ),
     names,
   );
@@ -123,7 +123,7 @@ const runRequests = <A, E>(
   Effect.runPromise(
     program.pipe(
       Effect.provide(requestsLayer(activeTables).pipe(Layer.provide(databaseLayer(db)))),
-    ) as Effect.Effect<A, E>,
+    ),
   );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
@@ -414,7 +414,8 @@ describe("SQLite / IdentifierStore", () => {
     expect(result.duplicate.cause).toBeDefined();
 
     expect(result.claim._tag).toBe("IdentifierTakenError");
-    expect((result.claim as Auth.IdentifierTakenError).identifierType).toBe("email");
+    assert.instanceOf(result.claim, Auth.IdentifierTakenError);
+    expect(result.claim.identifierType).toBe("email");
 
     expect(result.free.id).toBe("identifier-4");
     // The loser never overwrote the original owner.
@@ -470,12 +471,12 @@ describe("SQLite / Schema", () => {
           yield* identifiers.create(identifier());
 
           const present = yield* Effect.sync(() =>
-            (
+            Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
               client
                 .prepare(
                   "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
                 )
-                .all() as Array<{ name: string }>
+                .all(),
             ).map((row) => row.name),
           );
 
@@ -642,9 +643,7 @@ describe("SQLite / IdentifierStore contract", () => {
   identifierStoreContract("IdentifierStore (multi-identifier) SQLite", {
     run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
       Effect.runPromise(
-        build().pipe(
-          Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db)))),
-        ) as Effect.Effect<A, E>,
+        build().pipe(Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db))))),
       ),
     seedUsers: async () => {},
   });
@@ -655,9 +654,7 @@ describe("SQLite / IdentifierStore contract", () => {
     Testing.identifierStoreConformance(),
     (effect) =>
       Effect.runPromise(
-        effect.pipe(
-          Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db)))),
-        ) as Effect.Effect<void>,
+        effect.pipe(Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db))))),
       ),
   );
 });

@@ -16,8 +16,9 @@ describe("password barrel", () => {
   });
 
   it("re-exports every other PasswordReset value", () => {
+    const values = Object.entries(PasswordReset).filter(([name]) => name !== "make");
     const expected = Arr.sort(
-      Object.keys(PasswordReset).filter((name) => name !== "make"),
+      values.map(([name]) => name),
       Order.String,
     );
     expect(expected).toEqual([
@@ -25,11 +26,8 @@ describe("password barrel", () => {
       "PasswordResetStore",
       "PasswordResetUserStore",
     ]);
-    Arr.forEach(expected, (name) => {
-      expect(PasswordCluster).toHaveProperty(
-        name,
-        PasswordReset[name as keyof typeof PasswordReset],
-      );
+    Arr.forEach(values, ([name, value]) => {
+      expect(PasswordCluster).toHaveProperty(name, value);
     });
     expect(Auth.Password.PasswordResetService).toBe(PasswordReset.PasswordResetService);
   });

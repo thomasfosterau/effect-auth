@@ -65,7 +65,7 @@ const makeProxy = (): Proxy => {
     if (method === "all") {
       const rows = queued;
       queued = [];
-      return { rows: rows as Array<Array<unknown>> };
+      return { rows: rows.map((row) => [...row]) };
     }
     // What mysql2 hands back for an INSERT/UPDATE/DELETE.
     return { rows: [{ insertId: 0, affectedRows: 1 }] };
@@ -96,9 +96,7 @@ const run = <A, E>(
   program: Effect.Effect<A, E, Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
-    program.pipe(
-      Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
-    ) as Effect.Effect<A, E>,
+    program.pipe(Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(proxy.db))))),
   );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
@@ -320,9 +318,7 @@ describe("MySQL / statements", () => {
     const [user, missing] = await Effect.runPromise(
       Effect.all([Requests.getUser("user-1"), Requests.getUser("ghost")], {
         concurrency: "unbounded",
-      }).pipe(
-        Effect.provide(Requests.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
-      ) as Effect.Effect<[Auth.User | null, Auth.User | null]>,
+      }).pipe(Effect.provide(Requests.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db))))),
     );
 
     // Two reads, two ids, one query.
