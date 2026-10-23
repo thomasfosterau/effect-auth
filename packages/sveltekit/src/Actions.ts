@@ -21,7 +21,7 @@
  *
  * @module actions
  */
-import { Array as Arr, Option, Schema } from "effect";
+import { Array as Arr, DateTime, Option, Schema } from "effect";
 import { safeRedirect } from "@thomasfosterau/effect-auth";
 
 /**
@@ -93,9 +93,9 @@ export interface CredentialFailure<Fields> {
  * @since 0.1.0
  * @category models
  */
-export interface Kit<Failure> {
+export interface Kit<Failure, Fields> {
   readonly redirect: (status: 303, location: string) => never;
-  readonly fail: (status: number, data: unknown) => Failure;
+  readonly fail: (status: number, data: CredentialFailure<Fields>) => Failure;
 }
 
 /**
@@ -113,7 +113,7 @@ export interface CredentialActionOptions<Fields> {
   /** The auth endpoint to POST to, as an absolute URL (for example `https://auth.internal/api/auth/sign-in`). */
   readonly endpoint: string;
   /** The JSON body to send, built from the submitted form. */
-  readonly body: (form: FormData) => Record<string, unknown>;
+  readonly body: (form: FormData) => Schema.Json;
   /** The form fields to echo back on failure (never the password). */
   readonly fields: (form: FormData) => Fields;
   /** The query parameter that carries the post-sign-in target. Default `redirect`. */
@@ -138,7 +138,7 @@ const failureStatus: Record<CredentialFailureKind, number> = {
 };
 
 /** Serializes the request body as JSON. */
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 const kindOf = (status: number): CredentialFailureKind =>
   status === 429 ? "rate-limited" : status === 400 || status === 401 ? "invalid" : "unavailable";
@@ -183,8 +183,10 @@ export const parseSetCookie = (
     else if (key === "domain" && attributeValue !== "") options.domain = attributeValue;
     else if (key === "max-age" && /^-?\d+$/u.test(attributeValue)) {
       options.maxAge = Number(attributeValue);
-    } else if (key === "expires" && !Number.isNaN(Date.parse(attributeValue))) {
-      options.expires = new Date(attributeValue);
+    } else if (key === "expires") {
+      Option.map(DateTime.make(attributeValue), (expires) => {
+        options.expires = DateTime.toDateUtc(expires);
+      });
     } else if (key === "httponly") options.httpOnly = true;
     else if (key === "secure") options.secure = true;
     else if (key === "partitioned") options.partitioned = true;
@@ -228,13 +230,16 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
  *   redirect: (status: 303, location: string): never => {
  *     throw { status, location };
  *   },
- *   fail: (status: number, data: unknown) => ({ status, data }),
+ *   fail: <Data>(status: number, data: Data) => ({ status, data }),
  * };
  *
  * const signIn = credentialAction(kit, {
  *   fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
  *   endpoint: "https://auth.internal/api/auth/sign-in",
- *   body: (form) => ({ email: form.get("email"), password: form.get("password") }),
+ *   body: (form) => ({
+ *     email: String(form.get("email") ?? ""),
+ *     password: String(form.get("password") ?? ""),
+ *   }),
  *   fields: (form) => ({ email: String(form.get("email") ?? "") }),
  *   fallback: "/",
  * });
@@ -262,7 +267,7 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
  * @category actions
  */
 export const credentialAction =
-  <Failure, Fields>(kit: Kit<Failure>, options: CredentialActionOptions<Fields>) =>
+  <Failure, Fields>(kit: Kit<Failure, Fields>, options: CredentialActionOptions<Fields>) =>
   async (event: ActionEvent): Promise<Failure> => {
     const form = await event.request.formData();
     const forwarded = new Headers({ "content-type": "application/json" });

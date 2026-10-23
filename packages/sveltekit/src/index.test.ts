@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Option } from "effect";
+import { DateTime, Effect, Option } from "effect";
 import type { SessionWithUser } from "@thomasfosterau/effect-auth";
 import {
   type ActionEvent,
@@ -11,12 +11,12 @@ import {
   PRIVATE_CACHE_CONTROL,
 } from "./index.ts";
 
-const now = new Date("2026-10-23T00:00:00.000Z");
+const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-23T00:00:00.000Z"));
 const signedIn: SessionWithUser = {
   session: {
     id: "session-hash",
     userId: "u-1",
-    expiresAt: new Date(now.getTime() + 60_000),
+    expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60_000)),
     createdAt: now,
     lastActivityAt: now,
     attributes: {},
@@ -147,7 +147,7 @@ const kit = {
   redirect: (status: 303, location: string): never => {
     throw new Redirect(status, location);
   },
-  fail: (status: number, data: unknown) => ({ status, data }),
+  fail: <Data>(status: number, data: Data) => ({ status, data }),
 };
 
 const submit = (
@@ -178,16 +178,13 @@ const signInWith = (answer: () => Promise<Response>, seen?: Array<Request>) =>
       return answer();
     },
     endpoint: "https://auth.internal/api/auth/sign-in",
-    body: (form) => ({ email: form.get("email"), password: form.get("password") }),
+    body: (form) => ({
+      email: String(form.get("email") ?? ""),
+      password: String(form.get("password") ?? ""),
+    }),
     fields: (form) => ({ email: String(form.get("email") ?? "") }),
     fallback: "/home",
   });
-
-const thrown = async (promise: Promise<unknown>): Promise<unknown> =>
-  promise.then(
-    () => undefined,
-    (error: unknown) => error,
-  );
 
 describe("credentialAction", () => {
   it("relays Set-Cookie and redirects to the validated target", async () => {
@@ -199,10 +196,9 @@ describe("credentialAction", () => {
       "__Host-conduit_session=tok; Path=/; HttpOnly; Secure; SameSite=Lax",
     );
     headers.append("set-cookie", "__Host-conduit_session_data=cache; Path=/; HttpOnly; Secure");
-    const redirect = await thrown(
+    await expect(
       signInWith(async () => new Response("{}", { headers }), seen)(input),
-    );
-    expect(redirect).toMatchObject({ status: 303, location: "/dashboard" });
+    ).rejects.toMatchObject({ status: 303, location: "/dashboard" });
     expect(cookies.map(([name]) => name)).toEqual([
       "__Host-conduit_session",
       "__Host-conduit_session_data",
@@ -215,8 +211,10 @@ describe("credentialAction", () => {
 
   it("refuses an off-site redirect target", async () => {
     const { event: input } = submit("https://app.example/login?redirect=https://evil.example");
-    const redirect = await thrown(signInWith(async () => new Response("{}"))(input));
-    expect(redirect).toMatchObject({ status: 303, location: "/home" });
+    await expect(signInWith(async () => new Response("{}"))(input)).rejects.toMatchObject({
+      status: 303,
+      location: "/home",
+    });
   });
 
   it("reports wrong credentials (401) as invalid, without echoing the password", async () => {
