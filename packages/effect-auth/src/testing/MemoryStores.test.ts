@@ -210,7 +210,7 @@ describe("memoryStores", () => {
           link: yield* links.get("old"),
           otp: yield* otps.get("a@example.com", "sign-in"),
         };
-      }).pipe(Effect.provide(Testing.memoryStores), Effect.provide(TestClock.layer())),
+      }).pipe(Effect.provide(Layer.merge(Testing.memoryStores, TestClock.layer()))),
     );
     expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 0 });
     expect(result.link).toBeNull();

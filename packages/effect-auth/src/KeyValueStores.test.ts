@@ -405,12 +405,14 @@ describe("KeyValueStores", () => {
       Effect.runPromise(
         effect.pipe(
           Effect.provide(
-            Layer.provideMerge(
-              Layer.mergeAll(MagicLinkStoreKV, EmailOtpStoreKV, OAuthStateStoreKV),
-              layerMemoryKeyValueStore,
+            Layer.merge(
+              Layer.provideMerge(
+                Layer.mergeAll(MagicLinkStoreKV, EmailOtpStoreKV, OAuthStateStoreKV),
+                layerMemoryKeyValueStore,
+              ),
+              TestClock.layer(),
             ),
           ),
-          Effect.provide(TestClock.layer()),
         ),
       );
     const link = (token: string, email: string, expiresAt: number): MagicLinkToken => ({

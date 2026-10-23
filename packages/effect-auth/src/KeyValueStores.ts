@@ -694,7 +694,7 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
  *
  * const program = Effect.gen(function* () {
  *   yield* TestClock.setTime(10_000)
- *   const otps = yield* Auth.EmailOtpStore
+ *   const otps = yield* Auth.Email.EmailOtpStore
  *   const record = {
  *     email: "a@example.com",
  *     otpHash: "hash",
@@ -711,7 +711,7 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
  * })
  *
  * await Effect.runPromise(
- *   program.pipe(Effect.provide(StoresLive), Effect.provide(TestClock.layer())),
+ *   program.pipe(Effect.provide(Layer.merge(StoresLive, TestClock.layer()))),
  * )
  * ```
  */
