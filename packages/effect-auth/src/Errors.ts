@@ -590,9 +590,8 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.
  *
- * Exported from the package root as `ClientAddressConfigError` and as
- * `Http.ClientAddressConfigError`, and from the `./http` subpath. Every name is
- * the same class.
+ * Exported from the package root and from the `./http` subpath as
+ * `ClientAddressConfigError`. Both names are the same class.
  */
 export class ClientAddressConfigError extends Data.TaggedError("ClientAddressConfigError")<{
   readonly message: string;
@@ -641,9 +640,8 @@ export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigE
  * Without `strict`, `make` never raises it: it returns, and the startup checks
  * run when the build finishes.
  *
- * Exported from the package root as `ServicesBuildPendingError` and as
- * `Http.ServicesBuildPendingError`, and from the `./http` subpath. Every name
- * is the same class.
+ * Exported from the package root and from the `./http` subpath as
+ * `ServicesBuildPendingError`. Both names are the same class.
  */
 export class ServicesBuildPendingError extends Data.TaggedError("ServicesBuildPendingError")<{
   readonly message: string;

@@ -42,7 +42,7 @@ binding, a `Http.make` handler mounted in-process, a test double:
 
 ```ts
 import { Effect } from "effect";
-import { Http } from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 
 const program = Effect.gen(function* () {
   const client = yield* Http.client("https://auth.internal");
@@ -192,7 +192,8 @@ because the guard is your app's, not the auth service's.
 
 ```ts
 import { Effect } from "effect";
-import { Http, SessionContext } from "@thomasfosterau/effect-auth";
+import { SessionContext } from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 
 const auth = Http.RemoteSession.make({ fetcher: env.AUTH });
 

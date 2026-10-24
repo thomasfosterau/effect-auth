@@ -125,7 +125,7 @@ Every framework package ships the same six headless form components out of the b
 
 ## 5. Endpoint coverage
 
-Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from `@thomasfosterau/effect-auth`'s `Http` namespace (`import type { Http } from "@thomasfosterau/effect-auth"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing.
+Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from the `@thomasfosterau/effect-auth/http` subpath (`import type * as Http from "@thomasfosterau/effect-auth/http"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing.
 
 **Core** — `signUp`, `signIn`, `signOut`, `getSession`, `sendVerificationEmail`, `verifyEmail`, `passwordResetRequest`, `passwordResetConfirm`, `changePassword`, `updateUser`, `listSessions`, `revokeSession`, `revokeOtherSessions`.
 
@@ -248,7 +248,7 @@ The install context gives a plugin `request` (raw call), `mutating` (call + cond
 The client's `fetch` option is the whole seam: point it at your auth handler in-process and the suite needs no network, no ports and no mock of the protocol.
 
 ```ts
-const { handler } = Auth.Http.make({ services, cookie: { secure: false } });
+const { handler } = Http.make({ services, cookie: { secure: false } });
 
 const client = createAuthClient({
   baseUrl: "http://app.test",

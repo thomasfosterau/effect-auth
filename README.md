@@ -117,7 +117,7 @@ const program = Effect.gen(function* () {
 console.log(await Effect.runPromise(program.pipe(Effect.provide(AuthLive))));
 ```
 
-From here: mount the HTTP API with `Auth.Http.make({ services })`, swap the in-memory stores for [`effect-auth-sql`](packages/sql) or [`effect-auth-drizzle`](packages/drizzle), and talk to it from the browser with [`effect-auth-client`](packages/client). The [core README](packages/effect-auth/README.md) covers every feature.
+From here: mount the HTTP API with `Http.make({ services })` from the `@thomasfosterau/effect-auth/http` subpath, swap the in-memory stores for [`effect-auth-sql`](packages/sql) or [`effect-auth-drizzle`](packages/drizzle), and talk to it from the browser with [`effect-auth-client`](packages/client). The [core README](packages/effect-auth/README.md) covers every feature.
 
 ## Documentation
 

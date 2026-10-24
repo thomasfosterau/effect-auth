@@ -11,7 +11,7 @@
  *
  * @module client
  */
-import type * as Auth from "@thomasfosterau/effect-auth";
+import type * as Http from "@thomasfosterau/effect-auth/http";
 
 /** A non-2xx response from the auth server. */
 export class AuthClientError extends Error {
@@ -58,15 +58,15 @@ export interface SecondFactorContinuation {
    * {@link SecondFactorChallengeError} (`reason: "expired"`) without issuing a
    * request when the challenge has already expired.
    */
-  readonly verifyTotp: (code: string) => Promise<Auth.Http.AuthSuccess>;
+  readonly verifyTotp: (code: string) => Promise<Http.AuthSuccess>;
   /** Redeem the challenge with a single-use backup code. */
-  readonly verifyBackupCode: (code: string) => Promise<Auth.Http.AuthSuccess>;
+  readonly verifyBackupCode: (code: string) => Promise<Http.AuthSuccess>;
 }
 
 /** The session store's state. */
 export interface SessionState {
   /** The authenticated session + user, or `null` when signed out. */
-  readonly data: Auth.Http.SessionWithUserView | null;
+  readonly data: Http.SessionWithUserView | null;
   /** `true` while the initial fetch (or a refetch) is in flight. */
   readonly isPending: boolean;
   /** The last unexpected error (401s resolve to `data: null`, not an error). */
@@ -187,102 +187,87 @@ const isJson = (response: Response): boolean => {
 export interface AuthClient {
   readonly session: SessionStore;
 
-  readonly signUp: (payload: Auth.Http.SignUpPayload) => Promise<Auth.Http.AuthSuccess>;
-  readonly signIn: (payload: Auth.Http.SignInPayload) => Promise<Auth.Http.AuthSuccess>;
+  readonly signUp: (payload: Http.SignUpPayload) => Promise<Http.AuthSuccess>;
+  readonly signIn: (payload: Http.SignInPayload) => Promise<Http.AuthSuccess>;
   readonly signOut: () => Promise<void>;
   /** Guest sign-in — creates an anonymous user + session. 404 when unconfigured. */
-  readonly signInAnonymous: () => Promise<Auth.Http.AuthSuccess>;
+  readonly signInAnonymous: () => Promise<Http.AuthSuccess>;
   /** Username + password sign-in. 404 when unconfigured. */
-  readonly signInUsername: (
-    payload: Auth.Http.UsernameSignInPayload,
-  ) => Promise<Auth.Http.AuthSuccess>;
+  readonly signInUsername: (payload: Http.UsernameSignInPayload) => Promise<Http.AuthSuccess>;
   /** Resolves `null` when not authenticated (401). */
-  readonly getSession: () => Promise<Auth.Http.SessionWithUserView | null>;
-  readonly sendVerificationEmail: (payload: { email: string }) => Promise<Auth.Http.StatusResponse>;
-  readonly verifyEmail: (payload: { token: string }) => Promise<Auth.Http.AuthSuccess>;
-  readonly passwordResetRequest: (payload: { email: string }) => Promise<Auth.Http.StatusResponse>;
+  readonly getSession: () => Promise<Http.SessionWithUserView | null>;
+  readonly sendVerificationEmail: (payload: { email: string }) => Promise<Http.StatusResponse>;
+  readonly verifyEmail: (payload: { token: string }) => Promise<Http.AuthSuccess>;
+  readonly passwordResetRequest: (payload: { email: string }) => Promise<Http.StatusResponse>;
   readonly passwordResetConfirm: (payload: {
     token: string;
     newPassword: string;
-  }) => Promise<Auth.Http.StatusResponse>;
-  readonly changePassword: (payload: Auth.Http.ChangePasswordPayload) => Promise<void>;
-  readonly updateUser: (payload: Auth.Http.UpdateUserPayload) => Promise<Auth.Http.UserView>;
-  readonly listSessions: () => Promise<readonly Auth.Http.SessionView[]>;
+  }) => Promise<Http.StatusResponse>;
+  readonly changePassword: (payload: Http.ChangePasswordPayload) => Promise<void>;
+  readonly updateUser: (payload: Http.UpdateUserPayload) => Promise<Http.UserView>;
+  readonly listSessions: () => Promise<readonly Http.SessionView[]>;
   readonly revokeSession: (sessionId: string) => Promise<void>;
   readonly revokeOtherSessions: () => Promise<void>;
   /** Fetch a signed JWT for the current session. 404 when unconfigured. */
-  readonly jwtToken: () => Promise<Auth.Http.JwtTokenView>;
+  readonly jwtToken: () => Promise<Http.JwtTokenView>;
   /** The JWKS that verifies {@link jwtToken}'s tokens. 404 when unconfigured. */
-  readonly jwks: () => Promise<Auth.Http.JwksView>;
+  readonly jwks: () => Promise<Http.JwksView>;
 
   /**
    * The signed-in user's login handles (email / username / phone). The server
    * refuses to delete the last one (400) so an account is never orphaned.
    */
   readonly identifiers: {
-    readonly list: () => Promise<Auth.Http.IdentifierListView>;
+    readonly list: () => Promise<Http.IdentifierListView>;
     readonly delete: (identifierId: string) => Promise<void>;
   };
 
   /** Verification-gated email change. 404 when unconfigured. */
   readonly changeEmail: {
-    readonly request: (
-      payload: Auth.Http.ChangeEmailRequestPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
-    readonly confirm: (
-      payload: Auth.Http.ChangeEmailConfirmPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
+    readonly request: (payload: Http.ChangeEmailRequestPayload) => Promise<Http.StatusResponse>;
+    readonly confirm: (payload: Http.ChangeEmailConfirmPayload) => Promise<Http.StatusResponse>;
   };
 
   /** Self-service account deletion. 404 when unconfigured. */
   readonly deleteUser: {
-    readonly request: () => Promise<Auth.Http.StatusResponse>;
-    readonly confirm: (
-      payload: Auth.Http.DeleteUserConfirmPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
+    readonly request: () => Promise<Http.StatusResponse>;
+    readonly confirm: (payload: Http.DeleteUserConfirmPayload) => Promise<Http.StatusResponse>;
   };
 
   /** Multi-account management (several accounts per device). 404 when unconfigured. */
   readonly multiSession: {
-    readonly list: () => Promise<Auth.Http.MultiSessionListView>;
-    readonly setActive: (
-      payload: Auth.Http.MultiSessionActionPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
-    readonly revoke: (
-      payload: Auth.Http.MultiSessionActionPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
+    readonly list: () => Promise<Http.MultiSessionListView>;
+    readonly setActive: (payload: Http.MultiSessionActionPayload) => Promise<Http.StatusResponse>;
+    readonly revoke: (payload: Http.MultiSessionActionPayload) => Promise<Http.StatusResponse>;
   };
 
   readonly magicLink: {
-    readonly send: (payload: { email: string }) => Promise<Auth.Http.StatusResponse>;
-    readonly verify: (payload: { token: string }) => Promise<Auth.Http.AuthSuccess>;
+    readonly send: (payload: { email: string }) => Promise<Http.StatusResponse>;
+    readonly verify: (payload: { token: string }) => Promise<Http.AuthSuccess>;
   };
 
   readonly emailOtp: {
     readonly send: (payload: {
       email: string;
-      purpose: Auth.Http.EmailOtpPurpose;
-    }) => Promise<Auth.Http.StatusResponse>;
-    readonly signIn: (payload: { email: string; otp: string }) => Promise<Auth.Http.AuthSuccess>;
+      purpose: Http.EmailOtpPurpose;
+    }) => Promise<Http.StatusResponse>;
+    readonly signIn: (payload: { email: string; otp: string }) => Promise<Http.AuthSuccess>;
   };
 
   /** SMS one-time passcodes. 404 when unconfigured. */
   readonly phoneOtp: {
     readonly send: (payload: {
       phoneNumber: string;
-      purpose: Auth.Http.PhoneOtpPurpose;
-    }) => Promise<Auth.Http.StatusResponse>;
-    readonly signIn: (payload: {
-      phoneNumber: string;
-      otp: string;
-    }) => Promise<Auth.Http.AuthSuccess>;
+      purpose: Http.PhoneOtpPurpose;
+    }) => Promise<Http.StatusResponse>;
+    readonly signIn: (payload: { phoneNumber: string; otp: string }) => Promise<Http.AuthSuccess>;
   };
 
   /** Google One Tap. 404 when unconfigured. */
   readonly googleOneTap: {
     /** Server-generated nonce to hand to Google's One Tap prompt. */
-    readonly nonce: () => Promise<Auth.Http.GoogleOneTapNonceView>;
-    readonly signIn: (payload: Auth.Http.GoogleOneTapPayload) => Promise<Auth.Http.AuthSuccess>;
+    readonly nonce: () => Promise<Http.GoogleOneTapNonceView>;
+    readonly signIn: (payload: Http.GoogleOneTapPayload) => Promise<Http.AuthSuccess>;
   };
 
   /**
@@ -291,30 +276,25 @@ export interface AuthClient {
    * verification page. 404 when unconfigured.
    */
   readonly device: {
-    readonly code: (payload?: Auth.Http.DeviceCodePayload) => Promise<Auth.Http.DeviceCodeView>;
+    readonly code: (payload?: Http.DeviceCodePayload) => Promise<Http.DeviceCodeView>;
     /** Poll for the session. 400 while the user has not decided yet. */
-    readonly token: (payload: Auth.Http.DeviceTokenPayload) => Promise<Auth.Http.AuthSuccess>;
-    readonly approve: (
-      payload: Auth.Http.DeviceUserCodePayload,
-    ) => Promise<Auth.Http.StatusResponse>;
-    readonly deny: (payload: Auth.Http.DeviceUserCodePayload) => Promise<Auth.Http.StatusResponse>;
+    readonly token: (payload: Http.DeviceTokenPayload) => Promise<Http.AuthSuccess>;
+    readonly approve: (payload: Http.DeviceUserCodePayload) => Promise<Http.StatusResponse>;
+    readonly deny: (payload: Http.DeviceUserCodePayload) => Promise<Http.StatusResponse>;
   };
 
   readonly multiFactor: {
-    readonly enable: (payload: { password: string }) => Promise<Auth.Http.MultiFactorEnableView>;
-    readonly confirm: (payload: { code: string }) => Promise<Auth.Http.StatusResponse>;
-    readonly disable: (payload: { password: string }) => Promise<Auth.Http.StatusResponse>;
+    readonly enable: (payload: { password: string }) => Promise<Http.MultiFactorEnableView>;
+    readonly confirm: (payload: { code: string }) => Promise<Http.StatusResponse>;
+    readonly disable: (payload: { password: string }) => Promise<Http.StatusResponse>;
     readonly regenerateBackupCodes: (payload: {
       password: string;
-    }) => Promise<Auth.Http.BackupCodesView>;
-    readonly verifyTotp: (payload: {
-      token: string;
-      code: string;
-    }) => Promise<Auth.Http.AuthSuccess>;
+    }) => Promise<Http.BackupCodesView>;
+    readonly verifyTotp: (payload: { token: string; code: string }) => Promise<Http.AuthSuccess>;
     readonly verifyBackupCode: (payload: {
       token: string;
       code: string;
-    }) => Promise<Auth.Http.AuthSuccess>;
+    }) => Promise<Http.AuthSuccess>;
     /**
      * Bind a pending challenge so the caller only needs to pass the code.
      *
@@ -325,9 +305,7 @@ export interface AuthClient {
      * }
      * ```
      */
-    readonly challenge: (
-      challenge: Auth.Http.SecondFactorChallengeView,
-    ) => SecondFactorContinuation;
+    readonly challenge: (challenge: Http.SecondFactorChallengeView) => SecondFactorContinuation;
     /**
      * Carry a gated sign-in straight into the second-factor step: takes the
      * `AuthSuccess` a sign-in returned and hands back the verify calls bound
@@ -346,7 +324,7 @@ export interface AuthClient {
      * and the verify calls reject with `reason: "expired"` once the challenge
      * window has passed.
      */
-    readonly continueChallenge: (result: Auth.Http.AuthSuccess) => SecondFactorContinuation;
+    readonly continueChallenge: (result: Http.AuthSuccess) => SecondFactorContinuation;
   };
 
   /**
@@ -356,32 +334,30 @@ export interface AuthClient {
    * actor's role lacks the required permission.
    */
   readonly organization: {
-    readonly create: (
-      payload: Auth.Http.CreateOrganizationPayload,
-    ) => Promise<Auth.Http.OrganizationView>;
+    readonly create: (payload: Http.CreateOrganizationPayload) => Promise<Http.OrganizationView>;
     /** Organizations the signed-in user is a member of. */
-    readonly list: () => Promise<Auth.Http.OrganizationListView>;
+    readonly list: () => Promise<Http.OrganizationListView>;
     /** One organization together with its members. */
-    readonly get: (organizationId: string) => Promise<Auth.Http.FullOrganizationView>;
+    readonly get: (organizationId: string) => Promise<Http.FullOrganizationView>;
     readonly update: (
       organizationId: string,
-      payload: Auth.Http.UpdateOrganizationPayload,
-    ) => Promise<Auth.Http.OrganizationView>;
+      payload: Http.UpdateOrganizationPayload,
+    ) => Promise<Http.OrganizationView>;
     readonly delete: (organizationId: string) => Promise<void>;
     /** Record the active organization on the session (`null` clears it). */
     readonly setActive: (
-      payload: Auth.Http.SetActiveOrganizationPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
+      payload: Http.SetActiveOrganizationPayload,
+    ) => Promise<Http.StatusResponse>;
 
     /** Omit `role` to use the organization's default role. */
     readonly addMember: (
       organizationId: string,
-      payload: Auth.Http.AddMemberPayload,
-    ) => Promise<Auth.Http.MemberView>;
+      payload: Http.AddMemberPayload,
+    ) => Promise<Http.MemberView>;
     readonly updateMemberRole: (
       organizationId: string,
-      payload: Auth.Http.UpdateMemberRolePayload,
-    ) => Promise<Auth.Http.MemberView>;
+      payload: Http.UpdateMemberRolePayload,
+    ) => Promise<Http.MemberView>;
     readonly removeMember: (organizationId: string, userId: string) => Promise<void>;
     /**
      * Suspend a membership without deleting it: the row (and the member's
@@ -390,34 +366,28 @@ export interface AuthClient {
      * the server exposes an `onMemberDeactivated` hook for apps that want to
      * end them.
      */
-    readonly deactivateMember: (
-      organizationId: string,
-      userId: string,
-    ) => Promise<Auth.Http.MemberView>;
-    readonly reactivateMember: (
-      organizationId: string,
-      userId: string,
-    ) => Promise<Auth.Http.MemberView>;
+    readonly deactivateMember: (organizationId: string, userId: string) => Promise<Http.MemberView>;
+    readonly reactivateMember: (organizationId: string, userId: string) => Promise<Http.MemberView>;
     /** Set the role members added without one receive (owner-only). */
     readonly setDefaultRole: (
       organizationId: string,
-      payload: Auth.Http.SetDefaultRolePayload,
-    ) => Promise<Auth.Http.OrganizationView>;
+      payload: Http.SetDefaultRolePayload,
+    ) => Promise<Http.OrganizationView>;
 
     readonly invite: (
       organizationId: string,
-      payload: Auth.Http.InviteMemberPayload,
-    ) => Promise<Auth.Http.InvitationView>;
-    readonly listInvitations: (organizationId: string) => Promise<Auth.Http.InvitationListView>;
+      payload: Http.InviteMemberPayload,
+    ) => Promise<Http.InvitationView>;
+    readonly listInvitations: (organizationId: string) => Promise<Http.InvitationListView>;
     /** Accept an invitation addressed to the signed-in user's email. */
-    readonly acceptInvitation: (invitationId: string) => Promise<Auth.Http.MemberView>;
-    readonly rejectInvitation: (invitationId: string) => Promise<Auth.Http.InvitationView>;
-    readonly cancelInvitation: (invitationId: string) => Promise<Auth.Http.InvitationView>;
+    readonly acceptInvitation: (invitationId: string) => Promise<Http.MemberView>;
+    readonly rejectInvitation: (invitationId: string) => Promise<Http.InvitationView>;
+    readonly cancelInvitation: (invitationId: string) => Promise<Http.InvitationView>;
     /** Re-send a pending invitation: same id, fresh expiry, delivered again. */
-    readonly resendInvitation: (invitationId: string) => Promise<Auth.Http.InvitationView>;
+    readonly resendInvitation: (invitationId: string) => Promise<Http.InvitationView>;
 
     /** Email domains the organization has claimed, and their verification state. */
-    readonly listDomains: (organizationId: string) => Promise<Auth.Http.OrganizationDomainListView>;
+    readonly listDomains: (organizationId: string) => Promise<Http.OrganizationDomainListView>;
     /**
      * Claim a domain. The `dns` strategy (the default) answers with the
      * `verificationToken` to publish as a TXT record; `manual` is attested by
@@ -425,8 +395,8 @@ export interface AuthClient {
      */
     readonly addDomain: (
       organizationId: string,
-      payload: Auth.Http.AddOrganizationDomainPayload,
-    ) => Promise<Auth.Http.OrganizationDomainView>;
+      payload: Http.AddOrganizationDomainPayload,
+    ) => Promise<Http.OrganizationDomainView>;
     readonly removeDomain: (organizationId: string, domainId: string) => Promise<void>;
     /**
      * Run the verification check. A DNS claim whose record is not published
@@ -435,82 +405,69 @@ export interface AuthClient {
     readonly verifyDomain: (
       organizationId: string,
       domainId: string,
-    ) => Promise<Auth.Http.OrganizationDomainView>;
+    ) => Promise<Http.OrganizationDomainView>;
 
     /** Define (or redefine) a role's permissions for one organization. */
     readonly upsertRole: (
       organizationId: string,
       role: string,
-      payload: Auth.Http.UpsertOrgRolePayload,
-    ) => Promise<Auth.Http.OrgRoleView>;
-    readonly listRoles: (organizationId: string) => Promise<Auth.Http.OrgRoleListView>;
+      payload: Http.UpsertOrgRolePayload,
+    ) => Promise<Http.OrgRoleView>;
+    readonly listRoles: (organizationId: string) => Promise<Http.OrgRoleListView>;
     readonly deleteRole: (organizationId: string, role: string) => Promise<void>;
 
     readonly createTeam: (
       organizationId: string,
-      payload: Auth.Http.CreateTeamPayload,
-    ) => Promise<Auth.Http.TeamView>;
-    readonly listTeams: (organizationId: string) => Promise<Auth.Http.TeamListView>;
+      payload: Http.CreateTeamPayload,
+    ) => Promise<Http.TeamView>;
+    readonly listTeams: (organizationId: string) => Promise<Http.TeamListView>;
     readonly listTeamsForMember: (
       organizationId: string,
       userId: string,
-    ) => Promise<Auth.Http.TeamListView>;
+    ) => Promise<Http.TeamListView>;
     readonly updateTeam: (
       teamId: string,
-      payload: Auth.Http.UpdateTeamPayload,
-    ) => Promise<Auth.Http.TeamView>;
+      payload: Http.UpdateTeamPayload,
+    ) => Promise<Http.TeamView>;
     readonly deleteTeam: (teamId: string) => Promise<void>;
     readonly addTeamMember: (
       teamId: string,
-      payload: Auth.Http.AddTeamMemberPayload,
-    ) => Promise<Auth.Http.TeamMemberView>;
-    readonly listTeamMembers: (teamId: string) => Promise<Auth.Http.TeamMemberListView>;
+      payload: Http.AddTeamMemberPayload,
+    ) => Promise<Http.TeamMemberView>;
+    readonly listTeamMembers: (teamId: string) => Promise<Http.TeamMemberListView>;
     readonly removeTeamMember: (teamId: string, userId: string) => Promise<void>;
   };
 
   /** API keys owned by the signed-in user. 404 when unconfigured. */
   readonly apiKeys: {
     /** The plaintext key is returned exactly once — show it, then discard. */
-    readonly create: (
-      payload: Auth.Http.ApiKeyCreatePayload,
-    ) => Promise<Auth.Http.ApiKeyCreatedView>;
-    readonly list: () => Promise<Auth.Http.ApiKeyListView>;
-    readonly update: (
-      keyId: string,
-      payload: Auth.Http.ApiKeyUpdatePayload,
-    ) => Promise<Auth.Http.ApiKeyView>;
+    readonly create: (payload: Http.ApiKeyCreatePayload) => Promise<Http.ApiKeyCreatedView>;
+    readonly list: () => Promise<Http.ApiKeyListView>;
+    readonly update: (keyId: string, payload: Http.ApiKeyUpdatePayload) => Promise<Http.ApiKeyView>;
     readonly delete: (keyId: string) => Promise<void>;
   };
 
   /** Administration. The actor must satisfy the server's `isAdmin`; 403 otherwise. */
   readonly admin: {
-    readonly listUsers: (
-      payload: Auth.Http.AdminListUsersPayload,
-    ) => Promise<Auth.Http.AdminUserListView>;
-    readonly setRole: (payload: Auth.Http.AdminSetRolePayload) => Promise<Auth.Http.UserView>;
-    readonly banUser: (payload: Auth.Http.AdminBanUserPayload) => Promise<Auth.Http.UserView>;
-    readonly unbanUser: (payload: Auth.Http.AdminUserActionPayload) => Promise<Auth.Http.UserView>;
-    readonly removeUser: (payload: Auth.Http.AdminUserActionPayload) => Promise<void>;
-    readonly revokeSessions: (
-      payload: Auth.Http.AdminUserActionPayload,
-    ) => Promise<Auth.Http.StatusResponse>;
+    readonly listUsers: (payload: Http.AdminListUsersPayload) => Promise<Http.AdminUserListView>;
+    readonly setRole: (payload: Http.AdminSetRolePayload) => Promise<Http.UserView>;
+    readonly banUser: (payload: Http.AdminBanUserPayload) => Promise<Http.UserView>;
+    readonly unbanUser: (payload: Http.AdminUserActionPayload) => Promise<Http.UserView>;
+    readonly removeUser: (payload: Http.AdminUserActionPayload) => Promise<void>;
+    readonly revokeSessions: (payload: Http.AdminUserActionPayload) => Promise<Http.StatusResponse>;
     /** Assume another user's identity — swaps the session cookie. */
-    readonly impersonate: (
-      payload: Auth.Http.AdminUserActionPayload,
-    ) => Promise<Auth.Http.AuthSuccess>;
-    readonly stopImpersonating: () => Promise<Auth.Http.StatusResponse>;
+    readonly impersonate: (payload: Http.AdminUserActionPayload) => Promise<Http.AuthSuccess>;
+    readonly stopImpersonating: () => Promise<Http.StatusResponse>;
   };
 
   /** Enterprise SSO (this server as an OIDC/SAML relying party). */
   readonly sso: {
     /** Register a connection (admin-gated). */
-    readonly register: (
-      payload: Auth.Http.SsoRegisterPayload,
-    ) => Promise<Auth.Http.SsoProviderView>;
+    readonly register: (payload: Http.SsoRegisterPayload) => Promise<Http.SsoProviderView>;
     /** Resolve the IdP authorization URL to redirect the browser to. */
-    readonly signIn: (payload: Auth.Http.SsoSignInPayload) => Promise<Auth.Http.SsoUrlView>;
+    readonly signIn: (payload: Http.SsoSignInPayload) => Promise<Http.SsoUrlView>;
     /** Complete the callback and issue a session. */
-    readonly callback: (payload: Auth.Http.SsoCallbackPayload) => Promise<Auth.Http.AuthSuccess>;
+    readonly callback: (payload: Http.SsoCallbackPayload) => Promise<Http.AuthSuccess>;
   };
 
   /**
@@ -521,18 +478,16 @@ export interface AuthClient {
    */
   readonly oidc: {
     readonly registerClient: (
-      payload: Auth.Http.OidcRegisterClientPayload,
-    ) => Promise<Auth.Http.OidcClientCreatedView>;
-    readonly listClients: () => Promise<Auth.Http.OidcClientListView>;
+      payload: Http.OidcRegisterClientPayload,
+    ) => Promise<Http.OidcClientCreatedView>;
+    readonly listClients: () => Promise<Http.OidcClientListView>;
     readonly updateClient: (
       clientId: string,
-      payload: Auth.Http.OidcClientUpdatePayload,
-    ) => Promise<Auth.Http.OidcClientView>;
+      payload: Http.OidcClientUpdatePayload,
+    ) => Promise<Http.OidcClientView>;
     readonly deleteClient: (clientId: string) => Promise<void>;
     /** Post the consent decision; the response carries the redirect URL. */
-    readonly consent: (
-      payload: Auth.Http.OidcConsentPayload,
-    ) => Promise<Auth.Http.OidcRedirectView>;
+    readonly consent: (payload: Http.OidcConsentPayload) => Promise<Http.OidcRedirectView>;
   };
 
   /** Extend this client with a plugin's typed methods. */
@@ -617,8 +572,8 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     }
   };
 
-  const getSession = (): Promise<Auth.Http.SessionWithUserView | null> =>
-    request<Auth.Http.SessionWithUserView>("GET", "/session").catch((error) => {
+  const getSession = (): Promise<Http.SessionWithUserView | null> =>
+    request<Http.SessionWithUserView>("GET", "/session").catch((error) => {
       if (error instanceof AuthClientError && error.status === 401) return null;
       throw error;
     });
@@ -669,7 +624,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         const channelName = cfg.crossTab === true ? "effect-auth-session" : cfg.crossTab;
         broadcastChannel = new BroadcastChannel(channelName);
         broadcastChannel.onmessage = (
-          event: MessageEvent<{ data: Auth.Http.SessionWithUserView | null }>,
+          event: MessageEvent<{ data: Http.SessionWithUserView | null }>,
         ) => {
           setState({ data: event.data.data, isPending: false, error: null }, false);
         };
@@ -740,11 +695,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
    * client-side once the challenge window has passed (the server enforces the
    * same expiry — this just saves a doomed round trip).
    */
-  const continuation = (
-    challenge: Auth.Http.SecondFactorChallengeView,
-  ): SecondFactorContinuation => {
+  const continuation = (challenge: Http.SecondFactorChallengeView): SecondFactorContinuation => {
     const isExpired = (): boolean => Date.now() >= challenge.expiresAt;
-    const verify = (path: string, code: string): Promise<Auth.Http.AuthSuccess> => {
+    const verify = (path: string, code: string): Promise<Http.AuthSuccess> => {
       if (isExpired()) {
         return Promise.reject(
           new SecondFactorChallengeError(
@@ -754,7 +707,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         );
       }
       return mutating(() =>
-        request<Auth.Http.AuthSuccess>("POST", path, { token: challenge.token, code }),
+        request<Http.AuthSuccess>("POST", path, { token: challenge.token, code }),
       );
     };
     return {
@@ -771,117 +724,102 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   self = {
     session,
 
-    signUp: (payload) =>
-      mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-up", payload)),
-    signIn: (payload) =>
-      mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-in", payload)),
+    signUp: (payload) => mutating(() => request<Http.AuthSuccess>("POST", "/sign-up", payload)),
+    signIn: (payload) => mutating(() => request<Http.AuthSuccess>("POST", "/sign-in", payload)),
     signOut: () =>
       mutating(async () => {
         await request<void>("POST", "/sign-out");
       }),
-    signInAnonymous: () =>
-      mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-in/anonymous")),
+    signInAnonymous: () => mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/anonymous")),
     signInUsername: (payload) =>
-      mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-in/username", payload)),
+      mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/username", payload)),
     getSession,
     sendVerificationEmail: (payload) =>
-      request<Auth.Http.StatusResponse>("POST", "/email-verification/send", payload),
+      request<Http.StatusResponse>("POST", "/email-verification/send", payload),
     verifyEmail: (payload) =>
-      mutating(() => request<Auth.Http.AuthSuccess>("POST", "/email-verification/verify", payload)),
+      mutating(() => request<Http.AuthSuccess>("POST", "/email-verification/verify", payload)),
     passwordResetRequest: (payload) =>
-      request<Auth.Http.StatusResponse>("POST", "/password-reset/request", payload),
+      request<Http.StatusResponse>("POST", "/password-reset/request", payload),
     passwordResetConfirm: (payload) =>
-      request<Auth.Http.StatusResponse>("POST", "/password-reset/reset", payload),
+      request<Http.StatusResponse>("POST", "/password-reset/reset", payload),
     changePassword: (payload) => request<void>("POST", "/change-password", payload),
-    updateUser: (payload) => mutating(() => request<Auth.Http.UserView>("PATCH", "/user", payload)),
-    listSessions: () => request<readonly Auth.Http.SessionView[]>("GET", "/sessions"),
+    updateUser: (payload) => mutating(() => request<Http.UserView>("PATCH", "/user", payload)),
+    listSessions: () => request<readonly Http.SessionView[]>("GET", "/sessions"),
     revokeSession: (sessionId) =>
       request<void>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`),
     revokeOtherSessions: () => request<void>("POST", "/sessions/revoke-others"),
-    jwtToken: () => request<Auth.Http.JwtTokenView>("GET", "/token"),
-    jwks: () => request<Auth.Http.JwksView>("GET", "/jwks"),
+    jwtToken: () => request<Http.JwtTokenView>("GET", "/token"),
+    jwks: () => request<Http.JwksView>("GET", "/jwks"),
 
     identifiers: {
-      list: () => request<Auth.Http.IdentifierListView>("GET", "/identifiers"),
+      list: () => request<Http.IdentifierListView>("GET", "/identifiers"),
       delete: (identifierId) =>
         request<void>("DELETE", `/identifiers/${encodeURIComponent(identifierId)}`),
     },
 
     changeEmail: {
-      request: (payload) =>
-        request<Auth.Http.StatusResponse>("POST", "/change-email/request", payload),
+      request: (payload) => request<Http.StatusResponse>("POST", "/change-email/request", payload),
       confirm: (payload) =>
-        mutating(() => request<Auth.Http.StatusResponse>("POST", "/change-email/confirm", payload)),
+        mutating(() => request<Http.StatusResponse>("POST", "/change-email/confirm", payload)),
     },
 
     deleteUser: {
-      request: () => request<Auth.Http.StatusResponse>("POST", "/delete-user/request"),
+      request: () => request<Http.StatusResponse>("POST", "/delete-user/request"),
       confirm: (payload) =>
-        mutating(() => request<Auth.Http.StatusResponse>("POST", "/delete-user/confirm", payload)),
+        mutating(() => request<Http.StatusResponse>("POST", "/delete-user/confirm", payload)),
     },
 
     multiSession: {
-      list: () => request<Auth.Http.MultiSessionListView>("GET", "/multi-session/list"),
+      list: () => request<Http.MultiSessionListView>("GET", "/multi-session/list"),
       setActive: (payload) =>
-        mutating(() =>
-          request<Auth.Http.StatusResponse>("POST", "/multi-session/set-active", payload),
-        ),
-      revoke: (payload) =>
-        request<Auth.Http.StatusResponse>("POST", "/multi-session/revoke", payload),
+        mutating(() => request<Http.StatusResponse>("POST", "/multi-session/set-active", payload)),
+      revoke: (payload) => request<Http.StatusResponse>("POST", "/multi-session/revoke", payload),
     },
 
     magicLink: {
-      send: (payload) => request<Auth.Http.StatusResponse>("POST", "/magic-link/send", payload),
+      send: (payload) => request<Http.StatusResponse>("POST", "/magic-link/send", payload),
       verify: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/magic-link/verify", payload)),
+        mutating(() => request<Http.AuthSuccess>("POST", "/magic-link/verify", payload)),
     },
 
     emailOtp: {
-      send: (payload) => request<Auth.Http.StatusResponse>("POST", "/email-otp/send", payload),
+      send: (payload) => request<Http.StatusResponse>("POST", "/email-otp/send", payload),
       signIn: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-in/email-otp", payload)),
+        mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/email-otp", payload)),
     },
 
     phoneOtp: {
-      send: (payload) => request<Auth.Http.StatusResponse>("POST", "/phone-otp/send", payload),
+      send: (payload) => request<Http.StatusResponse>("POST", "/phone-otp/send", payload),
       signIn: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-in/phone-otp", payload)),
+        mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/phone-otp", payload)),
     },
 
     googleOneTap: {
-      nonce: () => request<Auth.Http.GoogleOneTapNonceView>("GET", "/sign-in/google-one-tap/nonce"),
+      nonce: () => request<Http.GoogleOneTapNonceView>("GET", "/sign-in/google-one-tap/nonce"),
       signIn: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sign-in/google-one-tap", payload)),
+        mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/google-one-tap", payload)),
     },
 
     device: {
-      code: (payload) => request<Auth.Http.DeviceCodeView>("POST", "/device/code", payload ?? {}),
+      code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload ?? {}),
       token: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/device/token", payload)),
-      approve: (payload) => request<Auth.Http.StatusResponse>("POST", "/device/approve", payload),
-      deny: (payload) => request<Auth.Http.StatusResponse>("POST", "/device/deny", payload),
+        mutating(() => request<Http.AuthSuccess>("POST", "/device/token", payload)),
+      approve: (payload) => request<Http.StatusResponse>("POST", "/device/approve", payload),
+      deny: (payload) => request<Http.StatusResponse>("POST", "/device/deny", payload),
     },
 
     multiFactor: {
       enable: (payload) =>
-        request<Auth.Http.MultiFactorEnableView>("POST", "/multi-factor/enable", payload),
-      confirm: (payload) =>
-        request<Auth.Http.StatusResponse>("POST", "/multi-factor/confirm", payload),
-      disable: (payload) =>
-        request<Auth.Http.StatusResponse>("POST", "/multi-factor/disable", payload),
+        request<Http.MultiFactorEnableView>("POST", "/multi-factor/enable", payload),
+      confirm: (payload) => request<Http.StatusResponse>("POST", "/multi-factor/confirm", payload),
+      disable: (payload) => request<Http.StatusResponse>("POST", "/multi-factor/disable", payload),
       regenerateBackupCodes: (payload) =>
-        request<Auth.Http.BackupCodesView>(
-          "POST",
-          "/multi-factor/regenerate-backup-codes",
-          payload,
-        ),
+        request<Http.BackupCodesView>("POST", "/multi-factor/regenerate-backup-codes", payload),
       verifyTotp: (payload) =>
-        mutating(() =>
-          request<Auth.Http.AuthSuccess>("POST", "/multi-factor/verify-totp", payload),
-        ),
+        mutating(() => request<Http.AuthSuccess>("POST", "/multi-factor/verify-totp", payload)),
       verifyBackupCode: (payload) =>
         mutating(() =>
-          request<Auth.Http.AuthSuccess>("POST", "/multi-factor/verify-backup-code", payload),
+          request<Http.AuthSuccess>("POST", "/multi-factor/verify-backup-code", payload),
         ),
       challenge: continuation,
       continueChallenge: (result) => {
@@ -896,16 +834,15 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     organization: {
-      create: (payload) =>
-        request<Auth.Http.OrganizationView>("POST", "/organization/create", payload),
-      list: () => request<Auth.Http.OrganizationListView>("GET", "/organizations"),
+      create: (payload) => request<Http.OrganizationView>("POST", "/organization/create", payload),
+      list: () => request<Http.OrganizationListView>("GET", "/organizations"),
       get: (organizationId) =>
-        request<Auth.Http.FullOrganizationView>(
+        request<Http.FullOrganizationView>(
           "GET",
           `/organization/${encodeURIComponent(organizationId)}`,
         ),
       update: (organizationId, payload) =>
-        request<Auth.Http.OrganizationView>(
+        request<Http.OrganizationView>(
           "PATCH",
           `/organization/${encodeURIComponent(organizationId)}`,
           payload,
@@ -914,18 +851,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         request<void>("DELETE", `/organization/${encodeURIComponent(organizationId)}`),
       // The active organization is stored on the session, so refresh the store.
       setActive: (payload) =>
-        mutating(() =>
-          request<Auth.Http.StatusResponse>("POST", "/organization/set-active", payload),
-        ),
+        mutating(() => request<Http.StatusResponse>("POST", "/organization/set-active", payload)),
 
       addMember: (organizationId, payload) =>
-        request<Auth.Http.MemberView>(
+        request<Http.MemberView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/members`,
           payload,
         ),
       updateMemberRole: (organizationId, payload) =>
-        request<Auth.Http.MemberView>(
+        request<Http.MemberView>(
           "PATCH",
           `/organization/${encodeURIComponent(organizationId)}/members`,
           payload,
@@ -936,61 +871,58 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
         ),
       deactivateMember: (organizationId, userId) =>
-        request<Auth.Http.MemberView>(
+        request<Http.MemberView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/deactivate`,
         ),
       reactivateMember: (organizationId, userId) =>
-        request<Auth.Http.MemberView>(
+        request<Http.MemberView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/reactivate`,
         ),
       setDefaultRole: (organizationId, payload) =>
-        request<Auth.Http.OrganizationView>(
+        request<Http.OrganizationView>(
           "PUT",
           `/organization/${encodeURIComponent(organizationId)}/default-role`,
           payload,
         ),
 
       invite: (organizationId, payload) =>
-        request<Auth.Http.InvitationView>(
+        request<Http.InvitationView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/invitations`,
           payload,
         ),
       listInvitations: (organizationId) =>
-        request<Auth.Http.InvitationListView>(
+        request<Http.InvitationListView>(
           "GET",
           `/organization/${encodeURIComponent(organizationId)}/invitations`,
         ),
       acceptInvitation: (invitationId) =>
-        request<Auth.Http.MemberView>(
-          "POST",
-          `/invitations/${encodeURIComponent(invitationId)}/accept`,
-        ),
+        request<Http.MemberView>("POST", `/invitations/${encodeURIComponent(invitationId)}/accept`),
       rejectInvitation: (invitationId) =>
-        request<Auth.Http.InvitationView>(
+        request<Http.InvitationView>(
           "POST",
           `/invitations/${encodeURIComponent(invitationId)}/reject`,
         ),
       cancelInvitation: (invitationId) =>
-        request<Auth.Http.InvitationView>(
+        request<Http.InvitationView>(
           "POST",
           `/invitations/${encodeURIComponent(invitationId)}/cancel`,
         ),
       resendInvitation: (invitationId) =>
-        request<Auth.Http.InvitationView>(
+        request<Http.InvitationView>(
           "POST",
           `/invitations/${encodeURIComponent(invitationId)}/resend`,
         ),
 
       listDomains: (organizationId) =>
-        request<Auth.Http.OrganizationDomainListView>(
+        request<Http.OrganizationDomainListView>(
           "GET",
           `/organization/${encodeURIComponent(organizationId)}/domains`,
         ),
       addDomain: (organizationId, payload) =>
-        request<Auth.Http.OrganizationDomainView>(
+        request<Http.OrganizationDomainView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/domains`,
           payload,
@@ -1001,19 +933,19 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           `/organization/${encodeURIComponent(organizationId)}/domains/${encodeURIComponent(domainId)}`,
         ),
       verifyDomain: (organizationId, domainId) =>
-        request<Auth.Http.OrganizationDomainView>(
+        request<Http.OrganizationDomainView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/domains/${encodeURIComponent(domainId)}/verify`,
         ),
 
       upsertRole: (organizationId, role, payload) =>
-        request<Auth.Http.OrgRoleView>(
+        request<Http.OrgRoleView>(
           "PUT",
           `/organization/${encodeURIComponent(organizationId)}/roles/${encodeURIComponent(role)}`,
           payload,
         ),
       listRoles: (organizationId) =>
-        request<Auth.Http.OrgRoleListView>(
+        request<Http.OrgRoleListView>(
           "GET",
           `/organization/${encodeURIComponent(organizationId)}/roles`,
         ),
@@ -1024,35 +956,32 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         ),
 
       createTeam: (organizationId, payload) =>
-        request<Auth.Http.TeamView>(
+        request<Http.TeamView>(
           "POST",
           `/organization/${encodeURIComponent(organizationId)}/teams`,
           payload,
         ),
       listTeams: (organizationId) =>
-        request<Auth.Http.TeamListView>(
+        request<Http.TeamListView>(
           "GET",
           `/organization/${encodeURIComponent(organizationId)}/teams`,
         ),
       listTeamsForMember: (organizationId, userId) =>
-        request<Auth.Http.TeamListView>(
+        request<Http.TeamListView>(
           "GET",
           `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/teams`,
         ),
       updateTeam: (teamId, payload) =>
-        request<Auth.Http.TeamView>("PATCH", `/teams/${encodeURIComponent(teamId)}`, payload),
+        request<Http.TeamView>("PATCH", `/teams/${encodeURIComponent(teamId)}`, payload),
       deleteTeam: (teamId) => request<void>("DELETE", `/teams/${encodeURIComponent(teamId)}`),
       addTeamMember: (teamId, payload) =>
-        request<Auth.Http.TeamMemberView>(
+        request<Http.TeamMemberView>(
           "POST",
           `/teams/${encodeURIComponent(teamId)}/members`,
           payload,
         ),
       listTeamMembers: (teamId) =>
-        request<Auth.Http.TeamMemberListView>(
-          "GET",
-          `/teams/${encodeURIComponent(teamId)}/members`,
-        ),
+        request<Http.TeamMemberListView>("GET", `/teams/${encodeURIComponent(teamId)}/members`),
       removeTeamMember: (teamId, userId) =>
         request<void>(
           "DELETE",
@@ -1061,49 +990,48 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     apiKeys: {
-      create: (payload) => request<Auth.Http.ApiKeyCreatedView>("POST", "/api-keys", payload),
-      list: () => request<Auth.Http.ApiKeyListView>("GET", "/api-keys"),
+      create: (payload) => request<Http.ApiKeyCreatedView>("POST", "/api-keys", payload),
+      list: () => request<Http.ApiKeyListView>("GET", "/api-keys"),
       update: (keyId, payload) =>
-        request<Auth.Http.ApiKeyView>("PATCH", `/api-keys/${encodeURIComponent(keyId)}`, payload),
+        request<Http.ApiKeyView>("PATCH", `/api-keys/${encodeURIComponent(keyId)}`, payload),
       delete: (keyId) => request<void>("DELETE", `/api-keys/${encodeURIComponent(keyId)}`),
     },
 
     admin: {
-      listUsers: (payload) =>
-        request<Auth.Http.AdminUserListView>("POST", "/admin/users/list", payload),
-      setRole: (payload) => request<Auth.Http.UserView>("POST", "/admin/users/set-role", payload),
-      banUser: (payload) => request<Auth.Http.UserView>("POST", "/admin/users/ban", payload),
-      unbanUser: (payload) => request<Auth.Http.UserView>("POST", "/admin/users/unban", payload),
+      listUsers: (payload) => request<Http.AdminUserListView>("POST", "/admin/users/list", payload),
+      setRole: (payload) => request<Http.UserView>("POST", "/admin/users/set-role", payload),
+      banUser: (payload) => request<Http.UserView>("POST", "/admin/users/ban", payload),
+      unbanUser: (payload) => request<Http.UserView>("POST", "/admin/users/unban", payload),
       removeUser: (payload) => request<void>("POST", "/admin/users/remove", payload),
       revokeSessions: (payload) =>
-        request<Auth.Http.StatusResponse>("POST", "/admin/users/revoke-sessions", payload),
+        request<Http.StatusResponse>("POST", "/admin/users/revoke-sessions", payload),
       // Impersonation swaps the session cookie in both directions.
       impersonate: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/admin/impersonate", payload)),
+        mutating(() => request<Http.AuthSuccess>("POST", "/admin/impersonate", payload)),
       stopImpersonating: () =>
-        mutating(() => request<Auth.Http.StatusResponse>("POST", "/admin/stop-impersonating")),
+        mutating(() => request<Http.StatusResponse>("POST", "/admin/stop-impersonating")),
     },
 
     sso: {
-      register: (payload) => request<Auth.Http.SsoProviderView>("POST", "/sso/register", payload),
-      signIn: (payload) => request<Auth.Http.SsoUrlView>("POST", "/sign-in/sso", payload),
+      register: (payload) => request<Http.SsoProviderView>("POST", "/sso/register", payload),
+      signIn: (payload) => request<Http.SsoUrlView>("POST", "/sign-in/sso", payload),
       callback: (payload) =>
-        mutating(() => request<Auth.Http.AuthSuccess>("POST", "/sso/callback", payload)),
+        mutating(() => request<Http.AuthSuccess>("POST", "/sso/callback", payload)),
     },
 
     oidc: {
       registerClient: (payload) =>
-        request<Auth.Http.OidcClientCreatedView>("POST", "/oauth2/register", payload),
-      listClients: () => request<Auth.Http.OidcClientListView>("GET", "/oauth2/clients"),
+        request<Http.OidcClientCreatedView>("POST", "/oauth2/register", payload),
+      listClients: () => request<Http.OidcClientListView>("GET", "/oauth2/clients"),
       updateClient: (clientId, payload) =>
-        request<Auth.Http.OidcClientView>(
+        request<Http.OidcClientView>(
           "PATCH",
           `/oauth2/clients/${encodeURIComponent(clientId)}`,
           payload,
         ),
       deleteClient: (clientId) =>
         request<void>("DELETE", `/oauth2/clients/${encodeURIComponent(clientId)}`),
-      consent: (payload) => request<Auth.Http.OidcRedirectView>("POST", "/oauth2/consent", payload),
+      consent: (payload) => request<Http.OidcRedirectView>("POST", "/oauth2/consent", payload),
     },
 
     extend: <TExtension extends object>(

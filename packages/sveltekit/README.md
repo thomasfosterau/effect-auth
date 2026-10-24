@@ -19,7 +19,7 @@ pnpm add @thomasfosterau/effect-auth-sveltekit @thomasfosterau/effect-auth effec
 // src/hooks.server.ts
 import { sequence } from "@sveltejs/kit/hooks";
 import { Effect } from "effect";
-import { Http } from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 import { handle as auth } from "@thomasfosterau/effect-auth-sveltekit";
 
 const authHook = auth({

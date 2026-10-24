@@ -70,7 +70,7 @@ Every request is sent with `credentials: "include"`, so the session cookie flows
 
 ## Methods
 
-Each method resolves to the contract's own view type (`Auth.Http.*`). Groups:
+Each method resolves to the contract's own view type (`Http.*`). Groups:
 
 | Group            | Methods                                                                                                                                                                                                                           |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -107,7 +107,7 @@ const profile = await client.profile();
 
 ## Testing: `@thomasfosterau/effect-auth-client/testing`
 
-An in-process effect-auth server for end-to-end client tests: the real `Auth.Http.make` handler over in-memory stores, and a `fetch` that emulates the browser's cookie jar. Unlike the main entry, it imports `@thomasfosterau/effect-auth` and `effect` at runtime, so keep it to tests.
+An in-process effect-auth server for end-to-end client tests: the real `Http.make` handler over in-memory stores, and a `fetch` that emulates the browser's cookie jar. Unlike the main entry, it imports `@thomasfosterau/effect-auth` and `effect` at runtime, so keep it to tests.
 
 ```ts
 import { createAuthClient } from "@thomasfosterau/effect-auth-client";
