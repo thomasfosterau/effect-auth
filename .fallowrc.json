@@ -12,7 +12,7 @@
     "packages/effect-auth/src/testing/index.ts",
     "packages/client/src/index.ts",
     "packages/client/src/testing/fixture.ts",
-    "packages/{alchemy,argon2,drizzle,react,resend,saml,solid,sql,svelte,twilio,vue}/src/index.ts",
+    "packages/{alchemy,argon2,drizzle,react,resend,saml,solid,sql,svelte,sveltekit,twilio,vue}/src/index.ts",
     "packages/alchemy/src/Postgres.ts",
     "packages/*/src/testing/PgliteTemplate.setup.ts",
     "packages/*/src/**/*.test.{ts,tsx}",
@@ -84,6 +84,10 @@
         "patterns": ["packages/client/**"]
       },
       {
+        "name": "server-bindings",
+        "patterns": ["packages/sveltekit/**"]
+      },
+      {
         "name": "bindings",
         "patterns": [
           "packages/react/**",
@@ -112,6 +116,10 @@
       },
       {
         "from": "client",
+        "allow": ["core", "ladder"]
+      },
+      {
+        "from": "server-bindings",
         "allow": ["core", "ladder"]
       },
       {

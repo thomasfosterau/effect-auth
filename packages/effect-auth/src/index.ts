@@ -389,6 +389,11 @@ export * as ReadScope from "./ReadScope.ts";
  * freshness (`bypassesForFreshness`)?
  */
 export * as Cacheability from "./Cacheability.ts";
+/**
+ * `safeRedirect(target, fallback)`: follow a client-supplied post-sign-in
+ * redirect only when it is a same-origin path (`/login?redirect=…`).
+ */
+export { safeRedirect } from "./Redirect.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,

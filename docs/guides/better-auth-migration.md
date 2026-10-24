@@ -218,7 +218,86 @@ Better Auth's generic `verification` table backs email verification, password re
 4. Write the routes with no contract equivalent: social OAuth start/callback, and passkeys if you use them.
 5. Swap the browser client, then cut over and accept the forced re-authentication.
 
-## 7. Not covered, or different by design
+## 7. SvelteKit on Workers, with auth in its own Worker
+
+This section covers one deployment shape in particular: a SvelteKit app on Cloudflare Workers, with
+Better Auth in its own internal Worker that the app reaches over a service binding.
+
+### The split-service topology
+
+The topology carries over unchanged, and the library owns its two seams:
+
+- **Session resolution over the binding.** `Http.RemoteSession` resolves the session, with the
+  cookieless skip and an explicit fail-open or fail-closed choice.
+- **The `Set-Cookie` relay.** Covered in [Auth as a separate service](split-auth-service.md).
+
+Three points carry over from the Better Auth setup:
+
+- The app's public origin must be in the auth Worker's `trustedOrigins`, because the browser's
+  `Origin` arrives through a server-to-server call.
+- The auth Worker stays internal only if `workers.dev` is turned off explicitly. An un-routed
+  Worker is still a published Worker.
+- effect-auth's handler serves more than Better Auth's (API keys, admin, SCIM, and the OIDC
+  provider when configured), so exposing it by mistake costs more.
+
+On the SvelteKit side, [`@thomasfosterau/effect-auth-sveltekit`](../../packages/sveltekit/README.md)
+replaces the hand-written `hooks.server.ts` and form-action glue. Its `handle` resolves the session
+before `load` and sets `Cache-Control` after authentication, so a page rendered for a signed-in
+viewer is never cached for an anonymous one. Its `credentialAction` relays `Set-Cookie`, validates
+the redirect target with `safeRedirect`, and reports `401` and `429` as distinct failures (a
+throttled sign-in no longer reads as "the form did nothing").
+
+### Cookie-name cutover
+
+Better Auth's session cookie is `better-auth.session_token`, or
+`__Secure-better-auth.session_token` over HTTPS. effect-auth's is computed by
+`SessionCookies.cookieNames`: `conduit_session` by default, with a `__Host-` prefix when the cookie
+is `Secure` and its path is `/`. The two names never coincide, and Better Auth's session rows don't
+carry over (§6), so **every session ends at the switch**. You have two options:
+
+- **Accept a forced re-login.** Deploy, and every signed-in browser becomes anonymous. This is the
+  simple option, and the right one unless the re-login itself is a problem.
+- **Run both readers through a window.** Keep the Better Auth Worker answering for its own cookie
+  while effect-auth issues new sessions, and in the app's hook fall back to the old reader when
+  only the old cookie is present. Retire the fallback after the old sessions' maximum lifetime.
+
+Either way, the **fast-path predicate has to change with the name**. The check that skips session
+resolution for a cookieless request must look for the new cookie. Configure
+`SessionResolution.detectCredential` (or the SvelteKit hook's `cookies` option) with the same
+`SessionCookieNaming` the auth handler uses. A predicate still looking for
+`better-auth.session_token` makes every signed-in request skip resolution.
+
+### The `role` additional field
+
+Better Auth's most common customisation is a `role` `additionalField` on the user. In effect-auth:
+
+- **Storage.** The role lives in the user's attribute bag (`auth_users.attributes.role`). The data
+  migration copies the column into the bag, as for any additional field (§6).
+- **Writes.** `role` is a server-only attribute by default (`UserServiceConfig.serverOnlyAttributes`,
+  default `["role"]`). A user can't set it through the profile update, and the session cookie
+  cache never carries it to the browser. Change it with the admin endpoints, or with
+  `UserService` from trusted code.
+- **Meaning.** An ordered set of roles is a `Ladder`. `Ladder.make(["user", "moderator", "admin"])`
+  gives `atLeast` checks, named axes, and `Policy.roleAtLeast` for the policy kernel.
+- **The database `CHECK`.** effect-auth-drizzle's `ladderCheck` renders the ladder as a `CHECK`
+  constraint, so the column rejects a role off the ladder, as the Better Auth app's own `CHECK`
+  did. Keep the constraint and the ladder in one place.
+
+### The `apiKey` plugin
+
+| Better Auth `apiKey`                         | effect-auth                                                                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `x-api-key` header                           | Read by default (`CredentialConfig.apiKeyHeaders`, default `["x-api-key"]`). A request carrying one resolves as a `machine` credential (`Authorizer.CredentialClass`).                                 |
+| Session from key (`enableSessionForAPIKeys`) | No synthetic session. The key resolves the principal directly. Policies that should not admit machine callers ask for the `interactive` credential class instead of relying on a session being absent. |
+| Per-key rate limit                           | `ApiKey.rateLimit` (`{ maxRequests, windowMs }`), enforced by `ApiKeyService.verifyWithRateLimit`.                                                                                                     |
+| `remaining` / refill                         | `remaining`, `refillAmount`, `refillInterval` and `refillMax` on the key ([ADR 0012](../adr/0012-api-key-design.md)).                                                                                  |
+| `referenceId`                                | A key belongs to `userId`. Carry any other owner reference in `metadata`.                                                                                                                              |
+| Stored key                                   | Digest only (`keyHash`), with `start` and `prefix` kept for display. Better Auth's stored hashes do not carry over: re-issue keys, or verify old ones through a custom path during a window.           |
+
+`ApiKeyStore` has no effect-auth-sql implementation (see below): use the `KeyValueStore` default
+or bring your own.
+
+## 8. Not covered, or different by design
 
 Be honest with yourself about these before committing:
 
