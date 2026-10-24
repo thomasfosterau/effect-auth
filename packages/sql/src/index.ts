@@ -20,3 +20,4 @@
 
 export * from "./Schema.ts";
 export * from "./Stores.ts";
+export * from "./ReadScope.ts";
