@@ -648,9 +648,10 @@ Per-IP rate limits (and any hook of your own that reads `ClientIP`) need the vis
 
 ```typescript
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 
 // `services` is the layer graph from the sections above.
-const { handler } = Auth.Http.make({
+const { handler } = Http.make({
   services,
   trustedProxy: Auth.ClientIP.cloudflare, // trusts CF-Connecting-IP alone
   ipRateLimit: {},
@@ -680,9 +681,10 @@ For those, `make` cannot throw: the same checks fail the handler's build instead
 
 ```typescript
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 
 // `services` connects to a database while it builds.
-const { handler, dispose } = await Auth.Http.makeAsync({
+const { handler, dispose } = await Http.makeAsync({
   services,
   trustedProxy: Auth.ClientIP.cloudflare,
   ipRateLimit: {},
@@ -693,7 +695,7 @@ To keep `Http.make` and have it refuse a build it cannot finish, set `strict: tr
 
 ```typescript
 // Throws ServicesBuildPendingError if `services` cannot finish building synchronously.
-const { handler } = Auth.Http.make({ services, strict: true });
+const { handler } = Http.make({ services, strict: true });
 ```
 
 ## Abuse protection
@@ -773,7 +775,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 
 ## API
 
-`import * as Auth from "@thomasfosterau/effect-auth"` reaches the whole surface. Each cluster is also a subpath export for a narrower import:
+`import * as Auth from "@thomasfosterau/effect-auth"` reaches the whole headless surface. Each cluster is also a subpath export for a narrower import. The HTTP tier is the exception: it is published only as the `./http` subpath, so importing the root never pulls in `effect/http-api`:
 
 | Entry                                     | Root namespace     | Contents                                                                                                                                                                              |
 | ----------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -783,7 +785,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | `@thomasfosterau/effect-auth/multifactor` | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
 | `@thomasfosterau/effect-auth/oauth`       | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
 | `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
-| `@thomasfosterau/effect-auth/http`        | `Auth.Http`        | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
+| `@thomasfosterau/effect-auth/http`        | — (subpath only)   | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
 | `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                                                                                       |
 | `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
 

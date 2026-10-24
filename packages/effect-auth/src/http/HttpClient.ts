@@ -14,7 +14,7 @@ import { AuthApi } from "./HttpApi.ts";
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
  * import { FetchHttpClient } from "effect/http"
- * import { Http } from "@thomasfosterau/effect-auth"
+ * import * as Http from "@thomasfosterau/effect-auth/http"
  *
  * // A stand-in for the auth service at http://localhost:5173, answering in-process.
  * const authService = async (request: Request): Promise<Response> => {

@@ -64,11 +64,9 @@ const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: stri
   );
 
 describe("module graph", () => {
-  // TODO(#205): Http.ts — reached from src/index.ts's
-  // `export * as Http from "./http/index.ts"` — imports from
-  // `effect/http-api`, which is exactly the coupling #205's HTTP-tier
-  // restructure exists to remove. Un-skip once that lands.
-  it.skip("root barrel does not reach effect/http-api or effect-jsonapi", async () => {
+  // The HTTP tier is reachable only through the `./http` subpath (#205), so
+  // the headless core costs a consumer no `effect/http-api` and no JSON:API.
+  it("root barrel does not reach effect/http-api or effect-jsonapi", async () => {
     const { externalSpecifiers } = await walkModuleGraph(entryFile);
 
     expect(reachesModule(externalSpecifiers, "effect/http-api")).toBe(false);

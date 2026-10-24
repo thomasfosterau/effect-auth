@@ -456,7 +456,6 @@ export * as SessionCookies from "./SessionCookies.ts";
 
 // Cluster namespaces (also available as `effect-auth/<cluster>` subpaths)
 export * as Email from "./email/index.ts";
-export * as Http from "./http/index.ts";
 export * as OAuth from "./oauth/index.ts";
 export * as Password from "./password/index.ts";
 export * as Plugins from "./plugins/index.ts";

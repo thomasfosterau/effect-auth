@@ -8,7 +8,7 @@ Archetype **Client** (`.fallowrc.json` zone `client`, which may import `core` an
 
 ## Invariants
 
-- **The `.` entry has no runtime imports.** `Client.ts` imports core with `import type` only (the wire types under `Auth.Http`), so nothing server-side and no Effect runtime reaches a browser bundle. A value import from core or `effect` in `Client.ts` breaks that; only `./testing` may import core at runtime.
+- **The `.` entry has no runtime imports.** `Client.ts` imports core with `import type` only (the wire types from `@thomasfosterau/effect-auth/http`), so nothing server-side and no Effect runtime reaches a browser bundle. A value import from core or `effect` in `Client.ts` breaks that; only `./testing` may import core at runtime.
 - **One method per contract endpoint, named after it**, typed with the contract's own payload and view types, so a contract change is a compile error here. Optional server modules answer `404`; a method existing does not mean the server mounted the feature.
 - **Every request sends `credentials: "include"`**; a non-2xx rejects with `AuthClientError` carrying `status` and the server's JSON `message` (else the status text). JSON is detected by the media-type essence (`application/json` or `+json`), not a substring.
 - **The session store is lazy and refetch-skipping**: the first `subscribe` triggers the `/session` fetch; the state starts `isPending: true`; a `401` is `data: null`, not an error; a transient failure keeps the last `data` and sets `error`; session-changing calls refetch only while something is subscribed; an out-of-order refetch result is dropped.

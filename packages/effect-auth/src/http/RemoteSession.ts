@@ -119,7 +119,7 @@ const asFetch =
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import { Http } from "@thomasfosterau/effect-auth"
+ * import * as Http from "@thomasfosterau/effect-auth/http"
  *
  * // A stand-in for the auth worker behind the service binding (`env.AUTH` on
  * // Cloudflare), answering in-process: sign-in succeeds for any credentials.
@@ -381,7 +381,7 @@ export interface RemoteSessionClient {
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Option } from "effect"
- * import { Http } from "@thomasfosterau/effect-auth"
+ * import * as Http from "@thomasfosterau/effect-auth/http"
  *
  * // A stand-in for the auth worker behind the service binding (`env.AUTH` on
  * // Cloudflare): it answers the session read for any request carrying a cookie.
@@ -612,7 +612,8 @@ export const resolveAtEdge = (
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Option } from "effect"
- * import { Http, SessionCookies } from "@thomasfosterau/effect-auth"
+ * import { SessionCookies } from "@thomasfosterau/effect-auth"
+ * import * as Http from "@thomasfosterau/effect-auth/http"
  *
  * // A stand-in for the auth worker behind the service binding: it answers the
  * // session read for any request carrying a cookie.
