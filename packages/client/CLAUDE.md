@@ -14,7 +14,7 @@ Archetype **Client** (`.fallowrc.json` zone `client`, which may import `core` an
 - **The session store is lazy and refetch-skipping**: the first `subscribe` triggers the `/session` fetch; the state starts `isPending: true`; a `401` is `data: null`, not an error; a transient failure keeps the last `data` and sets `error`; session-changing calls refetch only while something is subscribed; an out-of-order refetch result is dropped.
 - **Background refresh is opt-in and degrades to a no-op** outside a browser (`intervalMs`, `onFocus`, `crossTab` via `BroadcastChannel`); it starts with the first subscriber and stops with the last.
 - **The second-factor continuation refuses an expired challenge locally**, without a request; the server enforces expiry regardless.
-- **`./testing` runs the real `Auth.Http.make` handler** over in-memory stores with features off by default (so unconfigured endpoints answer `404`), and `makeCookieJarFetch` emulates the browser's cookie jar. It is published (`tsconfig.json` includes it); the module header that says otherwise is stale.
+- **`./testing` runs the real `Http.make` handler (from `@thomasfosterau/effect-auth/http`)** over in-memory stores with features off by default (so unconfigured endpoints answer `404`), and `makeCookieJarFetch` emulates the browser's cookie jar. It is published (`tsconfig.json` includes it); the module header that says otherwise is stale.
 
 ## Terms
 

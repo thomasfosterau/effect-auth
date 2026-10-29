@@ -16,7 +16,7 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 | `./multifactor` | `multifactor/`     | `Auth.MultiFactor`                |
 | `./oauth`       | `oauth/`           | `Auth.OAuth`                      |
 | `./plugins`     | `plugins/`         | `Auth.Plugins`                    |
-| `./http`        | `http/`            | `Auth.Http`                       |
+| `./http`        | `http/`            | — (subpath only, #205)            |
 | `./ladder`      | `Ladder.ts`        | `Auth.Ladder`                     |
 | `./testing`     | `testing/index.ts` | — (not re-exported from the root) |
 
@@ -25,7 +25,7 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 ## Invariants
 
 - **`./ladder` imports nothing**, not even `effect`: browser bundles load it. `ModuleGraph.test.ts` pins it; `.fallowrc.json` gives `Ladder.ts` its own zone with no outbound rule.
-- **The root barrel must not pull the HTTP tier** (`http/`, `effect/http-api`, effect-jsonapi) into a consumer's graph. Today it does (`export * as Http` in `src/index.ts`) and the `ModuleGraph.test.ts` guard is `it.skip` until #205. Add no other root-reachable import of `effect/http-api`.
+- **The root barrel must not pull the HTTP tier** (`http/`, `effect/http-api`, effect-jsonapi) into a consumer's graph: the tier is published only on the `./http` subpath (#205), and `ModuleGraph.test.ts` fails on any root-reachable import of either.
 - **Services are `Context.Service` classes with a static `layer`**; stores, hooks and `Crypto` are resolved once in the module-scoped `make`, so service methods carry `R = never`. Implementations are typed `typeof X.Service`; there are no `*Shape` interfaces.
 - **Stores are dumb persistence**: a lookup returns `X | null` on a miss and fails only with `AuthError` (infrastructure). Services turn a miss into a typed domain error.
 - **Errors**: domain errors are `Data.TaggedError` with a stable `code` (`Errors.ts` when two modules raise them, else module-local); HTTP-boundary errors are the `Schema.TaggedError` classes in `http/HttpApiSchema.ts` with fixed statuses (`RateLimitError` → 429, `AuthError` → 500). Nothing subclasses `AuthError`.
