@@ -922,7 +922,16 @@ type AuthFlow =
   | "request-reset"
   | "reset-password"
   | "verify-totp"
-  | "verify-backup-code";
+  | "verify-backup-code"
+  | "change-password"
+  | "change-email"
+  | "confirm-email-change"
+  | "delete-account"
+  | "confirm-account-deletion"
+  | "enable-mfa"
+  | "confirm-mfa"
+  | "disable-mfa"
+  | "regenerate-backup-codes";
 
 /** A JSON:API write request (`application/vnd.api+json`). */
 const writeRequest = (
@@ -1006,9 +1015,43 @@ const authRequest = (
       create("/password-resets/redemptions", "password-reset-redemptions", { token: id, ...rest }),
     "verify-totp": () => verifySecondFactor("totp"),
     "verify-backup-code": () => verifySecondFactor("backup-code"),
+    "change-password": () =>
+      writeRequest(
+        "PATCH",
+        "/users/me/password",
+        { data: { type: "user-passwords", id: "me", attributes: rest } },
+        headers,
+      ),
+    "change-email": () => create("/email-changes", "email-changes", rest),
+    "confirm-email-change": () =>
+      create("/email-changes/redemptions", "email-change-redemptions", { token: id }),
+    "delete-account": () =>
+      writeRequest("POST", "/account-deletions", { data: { type: "account-deletions" } }, headers),
+    "confirm-account-deletion": () =>
+      create("/account-deletions/redemptions", "account-deletion-redemptions", { token: id }),
+    "enable-mfa": () => create("/multi-factor-enrollments", "multi-factor-enrollments", rest),
+    "confirm-mfa": () =>
+      writeRequest(
+        "PATCH",
+        "/multi-factor-enrollments/current",
+        { data: { type: "multi-factor-enrollments", id: "current", attributes: rest } },
+        headers,
+      ),
+    "disable-mfa": () =>
+      writeRequest("DELETE", "/multi-factor-enrollments/current", { meta: rest }, headers),
+    "regenerate-backup-codes": () => create("/backup-code-sets", "backup-code-sets", rest),
   };
   return requests[flow]();
 };
+
+/** A JSON:API document's `meta`, decoded against the shape the test reads. */
+const metaBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> =>
+  Schema.decodeUnknownSync(schema)(
+    Schema.decodeUnknownSync(Schema.Struct({ meta: Schema.Unknown }))(await response.json()).meta,
+  );
 
 /** The `POST /users` (sign-up) document carrying `attributes`. */
 const signUpDocument = (attributes: Schema.Json) => ({ data: { type: "users", attributes } });
@@ -1547,8 +1590,8 @@ describe("change-password and update-user", () => {
     const sid2 = await signIn(handler, "a@b.com");
 
     const res = await handler(
-      jsonRequest(
-        "/change-password",
+      authRequest(
+        "change-password",
         { currentPassword: PW, newPassword: PW2, revokeOtherSessions: true },
         asCookie(sid1),
       ),
@@ -1574,7 +1617,7 @@ describe("change-password and update-user", () => {
     const sid2 = await signIn(handler, "a@b.com");
 
     const res = await handler(
-      jsonRequest("/change-password", { currentPassword: PW, newPassword: PW2 }, asCookie(sid1)),
+      authRequest("change-password", { currentPassword: PW, newPassword: PW2 }, asCookie(sid1)),
     );
     expect(res.status).toBe(204);
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(200);
@@ -1585,8 +1628,8 @@ describe("change-password and update-user", () => {
     const sid = await signUp(handler, "a@b.com");
 
     const res = await handler(
-      jsonRequest(
-        "/change-password",
+      authRequest(
+        "change-password",
         { currentPassword: "not-the-password", newPassword: PW2 },
         asCookie(sid),
       ),
@@ -1924,9 +1967,7 @@ describe("optional features return 404 when not configured", () => {
     const verifyTotp = await handler(authRequest("verify-totp", { token: "x", code: "000000" }));
     expect(verifyTotp.status).toBe(404);
 
-    const enable = await handler(
-      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
-    );
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
     expect(enable.status).toBe(404);
   });
 });
@@ -2026,15 +2067,13 @@ describe("multi-factor", () => {
 
     // Wrong password cannot enable.
     const denied = await handler(
-      jsonRequest("/multi-factor/enable", { password: "wrong-password" }, asCookie(sid)),
+      authRequest("enable-mfa", { password: "wrong-password" }, asCookie(sid)),
     );
     expect(denied.status).toBe(400);
 
-    const enable = await handler(
-      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
-    );
-    expect(enable.status).toBe(200);
-    const enrollment = await jsonBody(
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
+    expect(enable.status).toBe(201);
+    const enrollment = await metaBody(
       enable,
       Schema.Struct({
         secret: Schema.String,
@@ -2052,14 +2091,9 @@ describe("multi-factor", () => {
     expect(ungated.headers.get("set-cookie")).toContain("conduit_session=");
 
     const confirm = await handler(
-      jsonRequest(
-        "/multi-factor/confirm",
-        { code: await previousTotpFor(enrollment.secret) },
-        asCookie(sid),
-      ),
+      authRequest("confirm-mfa", { code: await previousTotpFor(enrollment.secret) }, asCookie(sid)),
     );
     expect(confirm.status).toBe(200);
-    expect(await confirm.json()).toEqual({ status: true });
 
     // Sign-in now returns a second-factor challenge and NO session cookie.
     const gated = await handler(
@@ -2113,16 +2147,10 @@ describe("multi-factor", () => {
     const handler = handlerFor(fixture, { features: true });
     const sid = await signUp(handler, "2fa@example.com");
 
-    const enable = await handler(
-      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
-    );
-    const enrollment = await jsonBody(enable, TotpEnrollmentBody);
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
+    const enrollment = await metaBody(enable, TotpEnrollmentBody);
     await handler(
-      jsonRequest(
-        "/multi-factor/confirm",
-        { code: await totpFor(enrollment.secret) },
-        asCookie(sid),
-      ),
+      authRequest("confirm-mfa", { code: await totpFor(enrollment.secret) }, asCookie(sid)),
     );
 
     const challengeToken = async (): Promise<string> => {
@@ -2159,23 +2187,17 @@ describe("multi-factor", () => {
     const handler = handlerFor(fixture, { features: true });
     const sid = await signUp(handler, "2fa@example.com");
 
-    const enable = await handler(
-      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
-    );
-    const enrollment = await jsonBody(enable, TotpEnrollmentBody);
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
+    const enrollment = await metaBody(enable, TotpEnrollmentBody);
     await handler(
-      jsonRequest(
-        "/multi-factor/confirm",
-        { code: await totpFor(enrollment.secret) },
-        asCookie(sid),
-      ),
+      authRequest("confirm-mfa", { code: await totpFor(enrollment.secret) }, asCookie(sid)),
     );
 
     const regen = await handler(
-      jsonRequest("/multi-factor/regenerate-backup-codes", { password: PW }, asCookie(sid)),
+      authRequest("regenerate-backup-codes", { password: PW }, asCookie(sid)),
     );
-    expect(regen.status).toBe(200);
-    const regenBody = await jsonBody(
+    expect(regen.status).toBe(201);
+    const regenBody = await metaBody(
       regen,
       Schema.Struct({ backupCodes: Schema.Array(Schema.String) }),
     );
@@ -2198,15 +2220,12 @@ describe("multi-factor", () => {
 
     // Disable requires the password; afterwards sign-in is no longer gated.
     const disableDenied = await handler(
-      jsonRequest("/multi-factor/disable", { password: "wrong-password" }, asCookie(sid)),
+      authRequest("disable-mfa", { password: "wrong-password" }, asCookie(sid)),
     );
     expect(disableDenied.status).toBe(400);
 
-    const disable = await handler(
-      jsonRequest("/multi-factor/disable", { password: PW }, asCookie(sid)),
-    );
-    expect(disable.status).toBe(200);
-    expect(await disable.json()).toEqual({ status: true });
+    const disable = await handler(authRequest("disable-mfa", { password: PW }, asCookie(sid)));
+    expect(disable.status).toBe(204);
 
     const after = await handler(
       authRequest("password", { email: "2fa@example.com", password: PW }),
@@ -2593,17 +2612,16 @@ describe("HTTP account management (change email / delete user)", () => {
     const sid = await signUp(handler, "alice@example.com");
 
     const reqRes = await handler(
-      jsonRequest("/change-email/request", { newEmail: "alice2@example.com" }, asCookie(sid)),
+      authRequest("change-email", { newEmail: "alice2@example.com" }, asCookie(sid)),
     );
-    expect(reqRes.status).toBe(200);
-    expect(await reqRes.json()).toEqual({ status: true });
+    expect(reqRes.status).toBe(202);
     expect(fixture.sentChangeEmail).toHaveLength(1);
     const [sent] = fixture.sentChangeEmail;
     assert(sent !== undefined);
     const token = sent.token;
 
-    const confRes = await handler(jsonRequest("/change-email/confirm", { token }));
-    expect(confRes.status).toBe(200);
+    const confRes = await handler(authRequest("confirm-email-change", { token }));
+    expect(confRes.status).toBe(204);
 
     // Email change revoked the old session; sign in with the new address.
     const newSid = await signIn(handler, "alice2@example.com");
@@ -2621,22 +2639,21 @@ describe("HTTP account management (change email / delete user)", () => {
     const sid = await signUp(handler, "alice@example.com");
 
     const res = await handler(
-      jsonRequest("/change-email/request", { newEmail: "bob@example.com" }, asCookie(sid)),
+      authRequest("change-email", { newEmail: "bob@example.com" }, asCookie(sid)),
     );
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: true });
+    expect(res.status).toBe(202);
     expect(fixture.sentChangeEmail).toHaveLength(0);
   });
 
   it("requires authentication for change-email/request", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const res = await handler(jsonRequest("/change-email/request", { newEmail: "x@example.com" }));
+    const res = await handler(authRequest("change-email", { newEmail: "x@example.com" }));
     expect(res.status).toBe(401);
   });
 
   it("rejects an invalid change-email confirm token with 400", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const res = await handler(jsonRequest("/change-email/confirm", { token: "nope" }));
+    const res = await handler(authRequest("confirm-email-change", { token: "nope" }));
     expect(res.status).toBe(400);
   });
 
@@ -2645,14 +2662,14 @@ describe("HTTP account management (change email / delete user)", () => {
     const handler = handlerFor(fixture, { features: true });
     const sid = await signUp(handler, "carol@example.com");
 
-    const reqRes = await handler(jsonRequest("/delete-user/request", undefined, asCookie(sid)));
-    expect(reqRes.status).toBe(200);
+    const reqRes = await handler(authRequest("delete-account", {}, asCookie(sid)));
+    expect(reqRes.status).toBe(202);
     expect(fixture.sentDeleteTokens).toHaveLength(1);
     const [token] = fixture.sentDeleteTokens;
     assert(token !== undefined);
 
-    const confRes = await handler(jsonRequest("/delete-user/confirm", { token }));
-    expect(confRes.status).toBe(200);
+    const confRes = await handler(authRequest("confirm-account-deletion", { token }));
+    expect(confRes.status).toBe(204);
     expect(fixture.beforeDeleteCalls).toHaveLength(1);
 
     // Sessions were invalidated and the user is gone.
@@ -2662,7 +2679,7 @@ describe("HTTP account management (change email / delete user)", () => {
 
   it("returns 404 when account management is not configured", async () => {
     const handler = handlerFor(makeFixture(), { features: false });
-    const res = await handler(jsonRequest("/change-email/confirm", { token: "whatever" }));
+    const res = await handler(authRequest("confirm-email-change", { token: "whatever" }));
     expect(res.status).toBe(404);
   });
 });

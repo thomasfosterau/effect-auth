@@ -946,7 +946,10 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       jsonApi<void>("POST", "/password-resets/redemptions", {
         data: { type: "password-reset-redemptions", attributes: { token, newPassword } },
       }).then(() => ({ status: true })),
-    changePassword: (payload) => request<void>("POST", "/change-password", payload),
+    changePassword: (payload) =>
+      jsonApi<void>("PATCH", "/users/me/password", {
+        data: { type: "user-passwords", id: "me", attributes: payload },
+      }),
     updateUser: (payload) =>
       mutating(() =>
         jsonApi<DataDocument<WireUser>>("PATCH", "/users/me", {
@@ -973,15 +976,29 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     changeEmail: {
-      request: (payload) => request<Http.StatusResponse>("POST", "/change-email/request", payload),
+      request: (payload) =>
+        jsonApi<void>("POST", "/email-changes", {
+          data: { type: "email-changes", attributes: payload },
+        }).then(() => ({ status: true })),
       confirm: (payload) =>
-        mutating(() => request<Http.StatusResponse>("POST", "/change-email/confirm", payload)),
+        mutating(() =>
+          jsonApi<void>("POST", "/email-changes/redemptions", {
+            data: { type: "email-change-redemptions", attributes: payload },
+          }).then(() => ({ status: true })),
+        ),
     },
 
     deleteUser: {
-      request: () => request<Http.StatusResponse>("POST", "/delete-user/request"),
+      request: () =>
+        jsonApi<void>("POST", "/account-deletions", {
+          data: { type: "account-deletions" },
+        }).then(() => ({ status: true })),
       confirm: (payload) =>
-        mutating(() => request<Http.StatusResponse>("POST", "/delete-user/confirm", payload)),
+        mutating(() =>
+          jsonApi<void>("POST", "/account-deletions/redemptions", {
+            data: { type: "account-deletion-redemptions", attributes: payload },
+          }).then(() => ({ status: true })),
+        ),
     },
 
     multiSession: {
@@ -1025,11 +1042,25 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
 
     multiFactor: {
       enable: (payload) =>
-        request<Http.MultiFactorEnableView>("POST", "/multi-factor/enable", payload),
-      confirm: (payload) => request<Http.StatusResponse>("POST", "/multi-factor/confirm", payload),
-      disable: (payload) => request<Http.StatusResponse>("POST", "/multi-factor/disable", payload),
+        jsonApi<{ readonly meta: Http.MultiFactorEnableView }>(
+          "POST",
+          "/multi-factor-enrollments",
+          {
+            data: { type: "multi-factor-enrollments", attributes: payload },
+          },
+        ).then((document) => document.meta),
+      confirm: (payload) =>
+        jsonApi<void>("PATCH", "/multi-factor-enrollments/current", {
+          data: { type: "multi-factor-enrollments", id: "current", attributes: payload },
+        }).then(() => ({ status: true })),
+      disable: (payload) =>
+        jsonApi<void>("DELETE", "/multi-factor-enrollments/current", { meta: payload }).then(
+          () => ({ status: true }),
+        ),
       regenerateBackupCodes: (payload) =>
-        request<Http.BackupCodesView>("POST", "/multi-factor/regenerate-backup-codes", payload),
+        jsonApi<{ readonly meta: Http.BackupCodesView }>("POST", "/backup-code-sets", {
+          data: { type: "backup-code-sets", attributes: payload },
+        }).then((document) => document.meta),
       verifyTotp: ({ token, code }) => verifySecondFactor(token, "totp", code),
       verifyBackupCode: ({ token, code }) => verifySecondFactor(token, "backup-code", code),
       challenge: continuation,

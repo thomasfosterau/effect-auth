@@ -178,3 +178,49 @@ export const GoogleOneTapNonce = Resource.make("google-one-tap-nonces", {
  * @category resources
  */
 export type GoogleOneTapNonce = typeof GoogleOneTapNonce.Type;
+
+/**
+ * The signed-in user's multi-factor enrolment (`multi-factor-enrollments`).
+ * There is at most one, so its id is always `current`. `verified` turns `true`
+ * once a TOTP code confirms the enrolment. The secret and backup codes are
+ * never attributes: they are shown once, in the `meta` of the answer that
+ * creates them.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export const MultiFactorEnrollment = Resource.make("multi-factor-enrollments", {
+  id: Schema.String,
+  attributes: {
+    verified: Resource.readOnlyAttribute(Schema.Boolean),
+  },
+});
+
+/**
+ * The decoded `multi-factor-enrollments` resource object.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export type MultiFactorEnrollment = typeof MultiFactorEnrollment.Type;
+
+/**
+ * A fresh set of multi-factor backup codes (`backup-code-sets`), replacing the
+ * previous set. Its id is the user's; the codes themselves are shown once, in
+ * the `meta` of the answer that creates them.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export const BackupCodeSet = Resource.make("backup-code-sets", {
+  id: Schema.String,
+  attributes: {},
+});
+
+/**
+ * The decoded `backup-code-sets` resource object.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export type BackupCodeSet = typeof BackupCodeSet.Type;
