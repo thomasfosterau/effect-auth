@@ -127,6 +127,19 @@ export const SignUpDocument = writeDocument("users", S.SignUpPayload);
 export type SignUpDocument = typeof SignUpDocument.Type;
 
 /**
+ * The body of `PATCH /users/me/password`: the current password, the new one,
+ * and whether to revoke the user's other sessions.
+ */
+export const PasswordChangeDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("user-passwords"),
+    id: Schema.Literal("me"),
+    attributes: S.ChangePasswordPayload,
+  }),
+});
+export type PasswordChangeDocument = typeof PasswordChangeDocument.Type;
+
+/**
  * The body of `POST /second-factor-challenges/verifications`: a TOTP code or a
  * single-use backup code, and the challenge it redeems as the `challenge`
  * relationship. The challenge token travels in the body, never in the URL, so
@@ -421,6 +434,13 @@ export const usersGroup = Group.make(
   Endpoint.update(R.User, {
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
+  HttpApiEndpoint.patch("changePassword", "/users/me/password", {
+    payload: jsonApiPayload(PasswordChangeDocument),
+    success: HttpApiSchema.NoContent,
+    error: [E.BadRequest.wire, E.Unauthorized.wire, E.InternalServerError.wire],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
   HttpApiEndpoint.post("create", "/users", {
     payload: jsonApiPayload(SignUpDocument),
     success: [
@@ -433,35 +453,208 @@ export const usersGroup = Group.make(
     .middleware(Middleware.SchemaErrors),
 );
 
+// -----------------------------------------------------------------------------
+// Account management (#205): password, email change, deletion, multi-factor
+// -----------------------------------------------------------------------------
+
+/** The body of `POST /email-changes`: the address to move the account to. */
+export const EmailChangeDocument = writeDocument("email-changes", S.ChangeEmailRequestPayload);
+export type EmailChangeDocument = typeof EmailChangeDocument.Type;
+
+/**
+ * The body of `POST /email-changes/redemptions`: the token from the
+ * confirmation link. It travels in the body, never in the URL.
+ */
+export const EmailChangeRedemptionDocument = writeDocument(
+  "email-change-redemptions",
+  S.ChangeEmailConfirmPayload,
+);
+export type EmailChangeRedemptionDocument = typeof EmailChangeRedemptionDocument.Type;
+
+/** The body of `POST /account-deletions`: a request, with nothing to say. */
+export const AccountDeletionDocument = Schema.Struct({
+  data: Schema.Struct({ type: Schema.Literal("account-deletions") }),
+});
+export type AccountDeletionDocument = typeof AccountDeletionDocument.Type;
+
+/**
+ * The body of `POST /account-deletions/redemptions`: the token from the
+ * confirmation link. It travels in the body, never in the URL.
+ */
+export const AccountDeletionRedemptionDocument = writeDocument(
+  "account-deletion-redemptions",
+  S.DeleteUserConfirmPayload,
+);
+export type AccountDeletionRedemptionDocument = typeof AccountDeletionRedemptionDocument.Type;
+
+/** The body of `POST /multi-factor-enrollments`: the password, re-proved. */
+export const MultiFactorEnrollmentDocument = writeDocument(
+  "multi-factor-enrollments",
+  S.MultiFactorPasswordPayload,
+);
+export type MultiFactorEnrollmentDocument = typeof MultiFactorEnrollmentDocument.Type;
+
+/**
+ * What `POST /multi-factor-enrollments` answers: the unverified enrolment, and
+ * in `meta` the TOTP secret, its `otpauth://` URI and the backup codes, shown
+ * this once.
+ */
+export const EnrolledDocument = Document.DataDocument(R.MultiFactorEnrollment, {
+  meta: S.MultiFactorEnableView,
+});
+
+/**
+ * The body of `PATCH /multi-factor-enrollments/current`: a TOTP code from the
+ * new authenticator, which confirms the enrolment.
+ */
+export const MultiFactorConfirmationDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("multi-factor-enrollments"),
+    id: Schema.Literal("current"),
+    attributes: S.MultiFactorConfirmPayload,
+  }),
+});
+export type MultiFactorConfirmationDocument = typeof MultiFactorConfirmationDocument.Type;
+
+/**
+ * The body of `DELETE /multi-factor-enrollments/current`: the password,
+ * re-proved, in `meta` (a deletion carries no resource).
+ */
+export const MultiFactorRemovalDocument = Schema.Struct({ meta: S.MultiFactorPasswordPayload });
+export type MultiFactorRemovalDocument = typeof MultiFactorRemovalDocument.Type;
+
+/** The body of `POST /backup-code-sets`: the password, re-proved. */
+export const BackupCodeSetDocument = writeDocument(
+  "backup-code-sets",
+  S.MultiFactorPasswordPayload,
+);
+export type BackupCodeSetDocument = typeof BackupCodeSetDocument.Type;
+
+/** What `POST /backup-code-sets` answers: the new set, its codes in `meta`. */
+export const BackupCodesDocument = Document.DataDocument(R.BackupCodeSet, {
+  meta: S.BackupCodesView,
+});
+
+/** The errors an account-management request can answer with. */
+const accountErrors = [
+  E.BadRequest.wire,
+  E.Unauthorized.wire,
+  E.NotFound.wire,
+  E.InternalServerError.wire,
+];
+
+/**
+ * `email-changes`: move the account to a new address, proved by a link sent
+ * there.
+ *
+ * - `POST /email-changes`: signed in; `202` whether or not the new address is
+ *   taken (anti-enumeration).
+ * - `POST /email-changes/redemptions`: the link's token; `204`.
+ *
+ * `404` when account management is not configured.
+ */
+export const emailChangesGroup = Group.make(
+  "email-changes",
+  HttpApiEndpoint.post("create", "/email-changes", {
+    payload: jsonApiPayload(EmailChangeDocument),
+    success: Accepted,
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("redeem", "/email-changes/redemptions", {
+    payload: jsonApiPayload(EmailChangeRedemptionDocument),
+    success: HttpApiSchema.NoContent,
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `account-deletions`: delete the account, confirmed by a link sent to its
+ * address.
+ *
+ * - `POST /account-deletions`: signed in; `202`.
+ * - `POST /account-deletions/redemptions`: the link's token; `204` once the
+ *   account and its sessions are gone.
+ *
+ * `404` when account management is not configured.
+ */
+export const accountDeletionsGroup = Group.make(
+  "account-deletions",
+  HttpApiEndpoint.post("create", "/account-deletions", {
+    payload: jsonApiPayload(AccountDeletionDocument),
+    success: Accepted,
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("redeem", "/account-deletions/redemptions", {
+    payload: jsonApiPayload(AccountDeletionRedemptionDocument),
+    success: HttpApiSchema.NoContent,
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `multi-factor-enrollments`: the signed-in user's TOTP enrolment.
+ *
+ * - `POST /multi-factor-enrollments`: start one with the password; `201`, the
+ *   secret and backup codes in `meta`.
+ * - `PATCH /multi-factor-enrollments/current`: confirm it with a TOTP code;
+ *   `200`, now `verified`.
+ * - `DELETE /multi-factor-enrollments/current`: remove it with the password
+ *   (in the document's `meta`); `204`.
+ *
+ * A wrong password or code answers `400`; `404` when multi-factor is not
+ * configured.
+ */
+export const multiFactorEnrollmentsGroup = Group.make(
+  R.MultiFactorEnrollment,
+  HttpApiEndpoint.post("create", "/multi-factor-enrollments", {
+    payload: jsonApiPayload(MultiFactorEnrollmentDocument),
+    success: MediaType.asJsonApi(EnrolledDocument, 201),
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.patch("confirm", "/multi-factor-enrollments/current", {
+    payload: jsonApiPayload(MultiFactorConfirmationDocument),
+    success: MediaType.asJsonApi(Document.DataDocument(R.MultiFactorEnrollment), 200),
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.delete("remove", "/multi-factor-enrollments/current", {
+    payload: jsonApiPayload(MultiFactorRemovalDocument),
+    success: HttpApiSchema.NoContent,
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `backup-code-sets`: `POST /backup-code-sets` with the password replaces the
+ * user's backup codes; `201`, the new codes in `meta`. A wrong password, or no
+ * enrolment, answers `400`.
+ */
+export const backupCodeSetsGroup = Group.make(
+  R.BackupCodeSet,
+  HttpApiEndpoint.post("create", "/backup-code-sets", {
+    payload: jsonApiPayload(BackupCodeSetDocument),
+    success: MediaType.asJsonApi(BackupCodesDocument, 201),
+    error: accountErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
 /** Email/password + session endpoints. */
 export const authGroup = HttpApiGroup.make("auth").add(
-  HttpApiEndpoint.post("changePassword", "/change-password", {
-    payload: S.ChangePasswordPayload,
-    success: HttpApiSchema.NoContent,
-    error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // Account management: verification-gated email change & self-service deletion.
-  // Request endpoints are session-authenticated; confirm endpoints are by token.
-  // Anti-enumeration: request endpoints always answer `{ status: true }`.
-  HttpApiEndpoint.post("changeEmailRequest", "/change-email/request", {
-    payload: S.ChangeEmailRequestPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("changeEmailConfirm", "/change-email/confirm", {
-    payload: S.ChangeEmailConfirmPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("deleteUserRequest", "/delete-user/request", {
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("deleteUserConfirm", "/delete-user/confirm", {
-    payload: S.DeleteUserConfirmPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
-  }),
   // Multi-session (several accounts per device). 404 when not enabled.
   HttpApiEndpoint.get("multiSessionList", "/multi-session/list", {
     success: S.MultiSessionListView,
@@ -511,34 +704,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.StatusResponse,
     error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
   }),
-  // Authenticated; wrong password -> 400 BadRequest (mirrors change-password).
-  HttpApiEndpoint.post("multiFactorEnable", "/multi-factor/enable", {
-    payload: S.MultiFactorPasswordPayload,
-    success: S.MultiFactorEnableView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // Authenticated; invalid TOTP code or no pending enrollment -> 400 BadRequest.
-  HttpApiEndpoint.post("multiFactorConfirm", "/multi-factor/confirm", {
-    payload: S.MultiFactorConfirmPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // Authenticated; wrong password -> 400 BadRequest.
-  HttpApiEndpoint.post("multiFactorDisable", "/multi-factor/disable", {
-    payload: S.MultiFactorPasswordPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // Authenticated; wrong password or multi-factor not enabled -> 400 BadRequest.
-  HttpApiEndpoint.post(
-    "multiFactorRegenerateBackupCodes",
-    "/multi-factor/regenerate-backup-codes",
-    {
-      payload: S.MultiFactorPasswordPayload,
-      success: S.BackupCodesView,
-      error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-    },
-  ),
   // --- Organization (session-authenticated). 404 when the module is absent;
   // --- 403 when the actor's role lacks the required permission.
   HttpApiEndpoint.post("orgCreate", "/organization/create", {
@@ -1353,6 +1518,10 @@ export const AuthApi = HttpApi.make("AuthApi")
   .add(emailVerificationsGroup)
   .add(passwordResetsGroup)
   .add(googleOneTapNoncesGroup)
+  .add(emailChangesGroup)
+  .add(accountDeletionsGroup)
+  .add(multiFactorEnrollmentsGroup)
+  .add(backupCodeSetsGroup)
   .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({

@@ -93,7 +93,7 @@ Names below are the exact exports; `Auth` is `import * as Auth from "@thomasfost
 
 ### Email + password
 
-`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /users` (sign-up), `POST /sessions` (sign-in), `POST /email-verifications` and `POST /email-verifications/redemptions`, `POST /password-resets` and `POST /password-resets/redemptions`, and `POST /change-password`: JSON:API resources since #205.
+`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /users` (sign-up), `POST /sessions` (sign-in), `POST /email-verifications` and `POST /email-verifications/redemptions`, `POST /password-resets` and `POST /password-resets/redemptions`, and `PATCH /users/me/password`: JSON:API resources since #205.
 
 The default hasher is PBKDF2-SHA256; Argon2id lives in `@thomasfosterau/effect-auth-argon2` as a drop-in `PasswordHasher`. Better Auth hashes with scrypt by default, so **existing password hashes do not verify** — see §6.
 
@@ -119,7 +119,7 @@ The default hasher is PBKDF2-SHA256; Argon2id lives in `@thomasfosterau/effect-a
 
 ### Two-factor
 
-`Auth.MultiFactor.MultiFactorService` (`enable`, `confirmEnable`, `disable`, `isEnabled`, `beginChallenge`, `verifyTotp`, `verifyBackupCode`, `regenerateBackupCodes`) over `MultiFactorStore` + `PendingMultiFactorStore`, on `POST /multi-factor/enable|confirm|disable|verify-totp|verify-backup-code|regenerate-backup-codes`. TOTP/HOTP primitives are in `Auth.MultiFactor` (`generateTotp`, `verifyTotp`, `generateHotp`, `verifyHotp`, `generateOtpUri`).
+`Auth.MultiFactor.MultiFactorService` (`enable`, `confirmEnable`, `disable`, `isEnabled`, `beginChallenge`, `verifyTotp`, `verifyBackupCode`, `regenerateBackupCodes`) over `MultiFactorStore` + `PendingMultiFactorStore`, on `POST /multi-factor-enrollments` (enable), `PATCH` / `DELETE /multi-factor-enrollments/current` (confirm, disable), `POST /second-factor-challenges/verifications` (verify a TOTP or backup code) and `POST /backup-code-sets` (regenerate), JSON:API resources since #205. TOTP/HOTP primitives are in `Auth.MultiFactor` (`generateTotp`, `verifyTotp`, `generateHotp`, `verifyHotp`, `generateOtpUri`).
 
 Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiFactorGateLayer` (or `OtpSecondFactorGateLayer` for emailed/texted codes, or `TrustedDeviceWithMultiFactorGateLayer` / `TrustedDeviceWithOtpSecondFactorGateLayer` to honour remembered devices) and `signIn` returns a challenge instead of a session until the second factor clears. That replaces Better Auth's `twoFactor()` plugin plus its `trustDevice` option.
 

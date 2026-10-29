@@ -1362,6 +1362,30 @@ export const usersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessi
 
   return HttpApiBuilder.group(AuthApi, "users", (handlers) =>
     handlers
+      .handle("changePassword", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const { currentPassword, newPassword, revokeOtherSessions } = payload.data.attributes;
+          const emailPassword = yield* EmailPassword.make();
+          yield* emailPassword
+            .changePassword({
+              userId: resolved.user.id,
+              currentPassword,
+              newPassword,
+              ...(revokeOtherSessions !== undefined && { revokeOtherSessions }),
+              currentSessionId: resolved.session.id,
+            })
+            .pipe(
+              Effect.catchTags({
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
+                AuthError: (e) => internalServerError(e),
+                HashingError: (e) => internalServerError(e),
+                PasswordPolicyError: passwordPolicyFailure,
+              }),
+            );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
       // Sign up: `201` with the new session, or `202` when none was issued
       // (always, under `antiEnumeration`, so a held address answers alike).
       .handle("create", ({ payload }) =>
@@ -1923,6 +1947,198 @@ export const googleOneTapNoncesGroupLayer = () =>
     ),
   );
 
+// -----------------------------------------------------------------------------
+// Account management (#205)
+// -----------------------------------------------------------------------------
+
+/**
+ * Clear the signed session-data cookie on the response: after an email change
+ * or a deletion, a cached snapshot would describe a user who no longer exists
+ * as it says.
+ */
+const clearDataCookie = (cfg: ResolvedCookieConfig) =>
+  cfg.cache === undefined
+    ? Effect.void
+    : setResponseCookie(dataCookieName(cfg), "", clearCookieOptions(cfg));
+
+/** A redeemed account token that does not verify: `400`. */
+const accountTokenFailures = {
+  AccountTokenError: (e: { readonly message: string }) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  UserNotFoundError: (e: { readonly message: string }) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+};
+
+/** Layer implementing the `email-changes` group. */
+export const emailChangesGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  return HttpApiBuilder.group(AuthApi, "email-changes", (handlers) =>
+    handlers
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const account = yield* resolveAccountManagement;
+          yield* account.service
+            .requestEmailChange(resolved.user.id, payload.data.attributes.newEmail)
+            .pipe(
+              Effect.catchTags({
+                // Anti-enumeration: never reveal whether the target address is taken.
+                EmailInUseError: () => Effect.void,
+                UserNotFoundError: () =>
+                  Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("redeem", ({ payload }) =>
+        Effect.gen(function* () {
+          const account = yield* resolveAccountManagement;
+          yield* account.service.confirmEmailChange(payload.data.attributes.token).pipe(
+            Effect.catchTags({
+              ...accountTokenFailures,
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+          yield* clearDataCookie(cfg);
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** Layer implementing the `account-deletions` group. */
+export const accountDeletionsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  return HttpApiBuilder.group(AuthApi, "account-deletions", (handlers) =>
+    handlers
+      .handle("create", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const account = yield* resolveAccountManagement;
+          yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("redeem", ({ payload }) =>
+        Effect.gen(function* () {
+          const account = yield* resolveAccountManagement;
+          yield* account.service.confirmAccountDeletion(payload.data.attributes.token).pipe(
+            Effect.catchTags({
+              ...accountTokenFailures,
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+          yield* clearDataCookie(cfg);
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** The `multi-factor-enrollments` resource: always `current`. */
+const enrollmentResource = (verified: boolean): R.MultiFactorEnrollment =>
+  R.MultiFactorEnrollment.make({ id: "current", attributes: { verified } });
+
+/** Layer implementing the `multi-factor-enrollments` group. */
+export const multiFactorEnrollmentsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  return HttpApiBuilder.group(AuthApi, "multi-factor-enrollments", (handlers) =>
+    handlers
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const multiFactor = yield* resolveMultiFactor;
+          const enrolled = yield* multiFactor.service
+            .enable(resolved.user.id, payload.data.attributes.password)
+            .pipe(
+              Effect.catchTags({
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
+                MultiFactorError: (e) => internalServerError(e),
+                UserNotFoundError: (e) => internalServerError(e),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          // The secret and backup codes are shown this once, in `meta`.
+          return Handlers.data(enrollmentResource(false), {
+            meta: {
+              secret: enrolled.secret,
+              totpUri: enrolled.totpUri,
+              backupCodes: enrolled.backupCodes,
+            },
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("confirm", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const multiFactor = yield* resolveMultiFactor;
+          yield* multiFactor.service
+            .confirmEnable(resolved.user.id, payload.data.attributes.code)
+            .pipe(
+              Effect.catchTags({
+                MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return Handlers.data(enrollmentResource(true));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("remove", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const multiFactor = yield* resolveMultiFactor;
+          yield* multiFactor.service.disable(resolved.user.id, payload.meta.password).pipe(
+            Effect.catchTags({
+              InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              HashingError: (e) => internalServerError(e),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** Layer implementing the `backup-code-sets` group. */
+export const backupCodeSetsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  return HttpApiBuilder.group(AuthApi, "backup-code-sets", (handlers) =>
+    handlers.handle("create", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const resolved = yield* requireSession(request, cfg);
+        const multiFactor = yield* resolveMultiFactor;
+        const backupCodes = yield* multiFactor.service
+          .regenerateBackupCodes(resolved.user.id, payload.data.attributes.password)
+          .pipe(
+            Effect.catchTags({
+              MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              HashingError: (e) => internalServerError(e),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+        // The codes are shown this once, in `meta`.
+        return Handlers.data(R.BackupCodeSet.make({ id: resolved.user.id, attributes: {} }), {
+          meta: { backupCodes },
+        });
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
 /**
  * Every group of the {@link AuthApi} contract, with the JSON:API protocol
  * middleware its resource groups declare: what `HttpApiBuilder.layer(AuthApi)`
@@ -1944,6 +2160,10 @@ export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionCo
     emailVerificationsGroupLayer(config, multiSession),
     passwordResetsGroupLayer(),
     googleOneTapNoncesGroupLayer(),
+    emailChangesGroupLayer(config, multiSession),
+    accountDeletionsGroupLayer(config, multiSession),
+    multiFactorEnrollmentsGroupLayer(config, multiSession),
+    backupCodeSetsGroupLayer(config, multiSession),
     scimGroupLayer(),
   ).pipe(
     // The protocol middleware the JSON:API endpoints declare: content
@@ -1958,105 +2178,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
-      .handle("changePassword", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const emailPassword = yield* EmailPassword.make();
-          yield* emailPassword
-            .changePassword({
-              userId: resolved.user.id,
-              currentPassword: payload.currentPassword,
-              newPassword: payload.newPassword,
-              ...(payload.revokeOtherSessions !== undefined && {
-                revokeOtherSessions: payload.revokeOtherSessions,
-              }),
-              currentSessionId: resolved.session.id,
-            })
-            .pipe(
-              Effect.catchTags({
-                InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
-                AuthError: (e) => internalServerError(e),
-                HashingError: (e) => internalServerError(e),
-                PasswordPolicyError: passwordPolicyFailure,
-              }),
-            );
-        }),
-      )
-      .handle("changeEmailRequest", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const account = yield* resolveAccountManagement;
-          yield* account.service.requestEmailChange(resolved.user.id, payload.newEmail).pipe(
-            Effect.catchTags({
-              // Anti-enumeration: never reveal whether the target email exists.
-              EmailInUseError: () => Effect.void,
-              UserNotFoundError: () =>
-                Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("changeEmailConfirm", ({ payload, request: _r }) =>
-        Effect.gen(function* () {
-          const account = yield* resolveAccountManagement;
-          yield* account.service.confirmEmailChange(payload.token).pipe(
-            Effect.catchTags({
-              AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return yield* HttpServerResponse.json({ status: true }).pipe(
-            Effect.flatMap((response) =>
-              cfg.cache !== undefined
-                ? HttpServerResponse.setCookie(
-                    response,
-                    dataCookieName(cfg),
-                    "",
-                    clearCookieOptions(cfg),
-                  )
-                : Effect.succeed(response),
-            ),
-            Effect.orDie,
-          );
-        }),
-      )
-      .handle("deleteUserRequest", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const account = yield* resolveAccountManagement;
-          yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
-          return { status: true };
-        }),
-      )
-      .handle("deleteUserConfirm", ({ payload, request: _r }) =>
-        Effect.gen(function* () {
-          const account = yield* resolveAccountManagement;
-          yield* account.service.confirmAccountDeletion(payload.token).pipe(
-            Effect.catchTags({
-              AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return yield* HttpServerResponse.json({ status: true }).pipe(
-            Effect.flatMap((response) =>
-              cfg.cache !== undefined
-                ? HttpServerResponse.setCookie(
-                    response,
-                    dataCookieName(cfg),
-                    "",
-                    clearCookieOptions(cfg),
-                  )
-                : Effect.succeed(response),
-            ),
-            Effect.orDie,
-          );
-        }),
-      )
       .handle("multiSessionList", ({ request }) =>
         Effect.gen(function* () {
           if (cfg.multiSession === undefined) {
@@ -2259,67 +2380,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           return { status: true };
-        }),
-      )
-      .handle("multiFactorEnable", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const multiFactor = yield* resolveMultiFactor;
-          return yield* multiFactor.service.enable(resolved.user.id, payload.password).pipe(
-            Effect.catchTags({
-              InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              MultiFactorError: (e) => internalServerError(e),
-              UserNotFoundError: (e) => internalServerError(e),
-              HashingError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-        }),
-      )
-      .handle("multiFactorConfirm", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const multiFactor = yield* resolveMultiFactor;
-          yield* multiFactor.service.confirmEnable(resolved.user.id, payload.code).pipe(
-            Effect.catchTags({
-              MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              HashingError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("multiFactorDisable", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const multiFactor = yield* resolveMultiFactor;
-          yield* multiFactor.service.disable(resolved.user.id, payload.password).pipe(
-            Effect.catchTags({
-              InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              HashingError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("multiFactorRegenerateBackupCodes", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const multiFactor = yield* resolveMultiFactor;
-          const backupCodes = yield* multiFactor.service
-            .regenerateBackupCodes(resolved.user.id, payload.password)
-            .pipe(
-              Effect.catchTags({
-                MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.BadRequest({ message: e.message })),
-                HashingError: (e) => internalServerError(e),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return { backupCodes };
         }),
       )
       // --- Organization -----------------------------------------------------
