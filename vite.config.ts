@@ -79,10 +79,6 @@ export default defineConfig({
       // attributes, metadata, JWT claims, drizzle column types); narrowing
       // them is an API change (60 / 0).
       "effect/no-unsafe-dictionary-type": "warn",
-      // Public guards, decoders and error callbacks over genuinely unknown
-      // input (16 / 4, and 1 / 1 for `no-unknown-returns`).
-      "effect/no-unknown-parameters": "warn",
-      "effect/no-unknown-returns": "warn",
       // Exported `Map` parameters and `ReadonlyMap` results (10 / 284).
       "effect/avoid-native-object-helpers": "warn",
     },
@@ -171,6 +167,35 @@ export default defineConfig({
           "packages/effect-auth/src/Cipher.ts",
         ],
         rules: { "effect/avoid-node-imports": "off" },
+      },
+      {
+        // Decoders, guards and sinks over untrusted input take `unknown`: that
+        // is the convention, since narrowing the parameter would move the
+        // parse to every caller (#443). Each file's sites: the policy and
+        // template document decoders (`PolicyStore`), the owned-read
+        // subquery's raw query value (`OwnedAccess.subquery`), the role-rung
+        // guard (`Admin`), the cache-safety predicate over wire attributes
+        // (`Cacheability.publiclyServeable`), the OAuth userinfo readers
+        // (`str`, `nested`), SCIM patch values (`Scim`), the conformance
+        // suite's record comparison (`StoreConformance`), the bindings'
+        // `onError(cause)` and the client plugin's `request` body.
+        files: [
+          "packages/effect-auth/src/PolicyStore.ts",
+          "packages/effect-auth/src/OwnedAccess.ts",
+          "packages/effect-auth/src/Admin.ts",
+          "packages/effect-auth/src/Cacheability.ts",
+          "packages/effect-auth/src/oauth/OAuth.ts",
+          "packages/effect-auth/src/Scim.ts",
+          "packages/effect-auth/src/testing/StoreConformance.ts",
+          "packages/{react,solid}/src/forms/internal.tsx",
+          "packages/svelte/src/forms/internal.ts",
+          "packages/svelte/src/forms/submission.svelte.ts",
+          "packages/client/src/Client.ts",
+        ],
+        rules: {
+          "effect/no-unknown-parameters": "off",
+          "effect/no-unknown-returns": "off",
+        },
       },
       {
         // The Promise-facing web handler is an entrypoint: it runs effects.
