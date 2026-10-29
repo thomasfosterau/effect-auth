@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
-import { Document, Endpoint, Group, Middleware } from "@thomasfosterau/effect-jsonapi";
+import { Document, Endpoint, Group, MediaType, Middleware } from "@thomasfosterau/effect-jsonapi";
 import * as S from "./HttpApiSchema.ts";
 import * as E from "./JsonApiErrors.ts";
 import * as R from "./Resources.ts";
@@ -26,6 +26,225 @@ import * as R from "./Resources.ts";
 export const SessionDocument = Document.DataDocument(R.Session, {
   included: Schema.Union([R.User]),
 });
+
+/**
+ * A JSON:API write document: one resource object of `type` carrying
+ * `attributes`, the shape every command endpoint below accepts.
+ */
+const writeDocument = <const T extends string, A extends Schema.Top>(type: T, attributes: A) =>
+  Schema.Struct({ data: Schema.Struct({ type: Schema.Literal(type), attributes }) });
+
+/** A JSON:API body accepted as `application/vnd.api+json`. */
+const jsonApiPayload = <S extends Schema.Top>(schema: S) =>
+  MediaType.asMediaType(schema, "application/vnd.api+json");
+
+/** The `meta` of a sign-in or sign-up answer. */
+const SignInMeta = Schema.Struct({
+  /** Whether the user's email address still awaits verification. */
+  needsEmailVerification: Schema.Boolean,
+});
+
+/**
+ * How a `POST /sessions` proves who the caller is: the `credential` attribute,
+ * a union tagged by `method`. It is write-only: no answer carries it back.
+ *
+ * - `password`: email and password (`captchaToken` for the captcha plugin).
+ * - `username`: username and password.
+ * - `email-otp` / `phone-otp`: a one-time code sent through
+ *   `POST /otp-challenges`.
+ * - `magic-link`: the token from a magic-link email.
+ * - `anonymous`: a guest user, created on the spot.
+ * - `google-one-tap`: a Google-signed id token and the nonce from
+ *   `POST /google-one-tap-nonces`.
+ */
+export const SignInCredential = Schema.Union([
+  Schema.Struct({
+    method: Schema.Literal("password"),
+    email: Schema.String,
+    password: Schema.String,
+    captchaToken: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    method: Schema.Literal("username"),
+    username: Schema.String,
+    password: Schema.String,
+  }),
+  Schema.Struct({ method: Schema.Literal("email-otp"), email: Schema.String, otp: Schema.String }),
+  Schema.Struct({
+    method: Schema.Literal("phone-otp"),
+    phoneNumber: Schema.String,
+    otp: Schema.String,
+  }),
+  Schema.Struct({ method: Schema.Literal("magic-link"), token: Schema.String }),
+  Schema.Struct({ method: Schema.Literal("anonymous") }),
+  Schema.Struct({
+    method: Schema.Literal("google-one-tap"),
+    idToken: Schema.String,
+    nonce: Schema.String,
+  }),
+]);
+export type SignInCredential = typeof SignInCredential.Type;
+
+/** The body of `POST /sessions`: a `sessions` write document carrying the credential. */
+export const SignInDocument = writeDocument(
+  "sessions",
+  Schema.Struct({
+    credential: SignInCredential,
+    /**
+     * When `false`, the session cookie lasts until the browser closes; omit or
+     * pass `true` for a cookie that matches the session's expiry.
+     */
+    rememberMe: Schema.optional(Schema.Boolean),
+  }),
+);
+export type SignInDocument = typeof SignInDocument.Type;
+
+/**
+ * A new session, answered with `201` by every endpoint that signs someone in:
+ * the `sessions` resource, its user in `included`, and whether the address
+ * still awaits verification in `meta`.
+ */
+export const SignedInDocument = Document.DataDocument(R.Session, {
+  included: Schema.Union([R.User]),
+  meta: SignInMeta,
+});
+
+/**
+ * A sign-in or sign-up accepted without a session, answered with `202`. Either
+ * `data` is the `second-factor-challenges` resource to redeem, or there is no
+ * primary data and `meta.needsEmailVerification` says the address must be
+ * verified first (a sign-up under `antiEnumeration` answers this way for a
+ * fresh address and a held one alike).
+ */
+export const PendingDocument = Schema.Struct({
+  data: Schema.optionalKey(R.SecondFactorChallenge),
+  meta: SignInMeta,
+});
+export type PendingDocument = typeof PendingDocument.Type;
+
+/** The body of `POST /users`: a `users` write document with the sign-up fields. */
+export const SignUpDocument = writeDocument("users", S.SignUpPayload);
+export type SignUpDocument = typeof SignUpDocument.Type;
+
+/**
+ * The body of `POST /second-factor-challenges/verifications`: a TOTP code or a
+ * single-use backup code, and the challenge it redeems as the `challenge`
+ * relationship. The challenge token travels in the body, never in the URL, so
+ * no access log or `Referer` carries it, and one rate-limit bucket covers every
+ * challenge.
+ */
+export const SecondFactorVerificationDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("second-factor-verifications"),
+    attributes: Schema.Struct({
+      method: Schema.Literals(["totp", "backup-code"]),
+      code: Schema.String,
+    }),
+    relationships: Schema.Struct({
+      /** The challenge to redeem: its id is the challenge token. */
+      challenge: Schema.Struct({
+        data: Schema.Struct({
+          type: Schema.Literal("second-factor-challenges"),
+          id: Schema.String,
+        }),
+      }),
+    }),
+  }),
+});
+export type SecondFactorVerificationDocument = typeof SecondFactorVerificationDocument.Type;
+
+/**
+ * The body of `POST /otp-challenges`: which channel to send a one-time code or
+ * link through, and to whom.
+ */
+export const OtpChallengeDocument = writeDocument(
+  "otp-challenges",
+  Schema.Union([
+    Schema.Struct({
+      channel: Schema.Literal("email"),
+      email: Schema.String,
+      purpose: S.EmailOtpPurpose,
+    }),
+    Schema.Struct({
+      channel: Schema.Literal("phone"),
+      phoneNumber: Schema.String,
+      purpose: S.PhoneOtpPurpose,
+    }),
+    Schema.Struct({ channel: Schema.Literal("magic-link"), email: Schema.String }),
+  ]),
+);
+export type OtpChallengeDocument = typeof OtpChallengeDocument.Type;
+
+/** The body of `POST /email-verifications`: the address to (re)send a link to. */
+export const EmailVerificationRequestDocument = writeDocument(
+  "email-verifications",
+  Schema.Struct({ email: Schema.String }),
+);
+export type EmailVerificationRequestDocument = typeof EmailVerificationRequestDocument.Type;
+
+/** The body of `POST /password-resets`: the address to send a reset link to. */
+export const PasswordResetRequestDocument = writeDocument(
+  "password-resets",
+  Schema.Struct({ email: Schema.String }),
+);
+export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.Type;
+
+/**
+ * The body of `POST /email-verifications/redemptions`: the token from a
+ * verification link. It travels in the body, never in the URL.
+ */
+export const EmailVerificationRedemptionDocument = writeDocument(
+  "email-verification-redemptions",
+  Schema.Struct({ token: Schema.String }),
+);
+export type EmailVerificationRedemptionDocument = typeof EmailVerificationRedemptionDocument.Type;
+
+/**
+ * The body of `POST /password-resets/redemptions`: the token from a reset link
+ * and the new password. The token travels in the body, never in the URL.
+ */
+export const PasswordResetRedemptionDocument = writeDocument(
+  "password-reset-redemptions",
+  Schema.Struct({ token: Schema.String, newPassword: Schema.String }),
+);
+export type PasswordResetRedemptionDocument = typeof PasswordResetRedemptionDocument.Type;
+
+/** `202 Accepted` with no body: the request is taken, and the answer says nothing more. */
+const Accepted = HttpApiSchema.NoContent.pipe(HttpApiSchema.status(202));
+
+/**
+ * The errors a sign-in can answer with: `401` for credentials that do not
+ * authenticate, `403` for a locked or banned account, `404` for a method that
+ * is not configured, `400` for a refused code or captcha.
+ */
+const signInErrors = [
+  E.BadRequest.wire,
+  E.Unauthorized.wire,
+  E.Forbidden.wire,
+  E.NotFound.wire,
+  E.TooManyRequests.wire,
+  E.InternalServerError.wire,
+];
+
+/**
+ * The errors a sign-up can answer with: `409` for an address held verified,
+ * `403` when sign-up is disabled, `400` for a refused password or input.
+ */
+const signUpErrors = [
+  E.BadRequest.wire,
+  E.Forbidden.wire,
+  E.Conflict.wire,
+  E.TooManyRequests.wire,
+  E.InternalServerError.wire,
+];
+
+/** The errors a send (a verification or reset link) can answer with. */
+const sendErrors = [
+  E.BadRequest.wire,
+  E.Forbidden.wire,
+  E.TooManyRequests.wire,
+  E.InternalServerError.wire,
+];
 
 /**
  * `sessions`: the signed-in user's sessions.
@@ -61,6 +280,117 @@ export const sessionsGroup = Group.make(
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("create", "/sessions", {
+    payload: jsonApiPayload(SignInDocument),
+    success: [
+      MediaType.asJsonApi(SignedInDocument, 201),
+      MediaType.asJsonApi(PendingDocument, 202),
+    ],
+    error: signInErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `second-factor-challenges`: redeem the challenge a sign-in answered with.
+ *
+ * - `POST /second-factor-challenges/verifications`: a TOTP or backup code for
+ *   the challenge its `challenge` relationship names; `201` with the new
+ *   session. A wrong code or an unknown, expired or spent challenge answers
+ *   `401`.
+ */
+export const secondFactorChallengesGroup = Group.make(
+  R.SecondFactorChallenge,
+  HttpApiEndpoint.post("verify", "/second-factor-challenges/verifications", {
+    payload: jsonApiPayload(SecondFactorVerificationDocument),
+    success: MediaType.asJsonApi(SignedInDocument, 201),
+    error: signInErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `otp-challenges`: send a one-time code (`email`, `phone`) or a magic link.
+ * Answers `202` whether or not the address or number has an account.
+ */
+export const otpChallengesGroup = Group.make(
+  "otp-challenges",
+  HttpApiEndpoint.post("create", "/otp-challenges", {
+    payload: jsonApiPayload(OtpChallengeDocument),
+    success: Accepted,
+    error: [E.NotFound.wire, E.TooManyRequests.wire, E.InternalServerError.wire],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `email-verifications`: prove an email address.
+ *
+ * - `POST /email-verifications`: (re)send a verification link; `202` whether or
+ *   not the address has an account.
+ * - `POST /email-verifications/redemptions`: verify with the link's token.
+ *   Answers `201` with the new session when verification signs the user in,
+ *   else `204`.
+ */
+export const emailVerificationsGroup = Group.make(
+  "email-verifications",
+  HttpApiEndpoint.post("create", "/email-verifications", {
+    payload: jsonApiPayload(EmailVerificationRequestDocument),
+    success: Accepted,
+    error: sendErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("redeem", "/email-verifications/redemptions", {
+    payload: jsonApiPayload(EmailVerificationRedemptionDocument),
+    success: [MediaType.asJsonApi(SignedInDocument, 201), HttpApiSchema.NoContent],
+    error: sendErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `password-resets`: reset a forgotten password.
+ *
+ * - `POST /password-resets`: send a reset link; `202` whether or not the address
+ *   has an account.
+ * - `POST /password-resets/redemptions`: set the new password with the link's
+ *   token; `204`.
+ */
+export const passwordResetsGroup = Group.make(
+  "password-resets",
+  HttpApiEndpoint.post("create", "/password-resets", {
+    payload: jsonApiPayload(PasswordResetRequestDocument),
+    success: Accepted,
+    error: sendErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("redeem", "/password-resets/redemptions", {
+    payload: jsonApiPayload(PasswordResetRedemptionDocument),
+    success: HttpApiSchema.NoContent,
+    error: sendErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `google-one-tap-nonces`: `POST /google-one-tap-nonces` mints the nonce to
+ * hand to Google's One Tap library; `404` when One Tap is not configured.
+ */
+export const googleOneTapNoncesGroup = Group.make(
+  R.GoogleOneTapNonce,
+  HttpApiEndpoint.post("create", "/google-one-tap-nonces", {
+    success: MediaType.asJsonApi(Document.DataDocument(R.GoogleOneTapNonce), 201),
+    error: [E.NotFound.wire, E.InternalServerError.wire],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
 );
 
 /**
@@ -91,76 +421,24 @@ export const usersGroup = Group.make(
   Endpoint.update(R.User, {
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
+  HttpApiEndpoint.post("create", "/users", {
+    payload: jsonApiPayload(SignUpDocument),
+    success: [
+      MediaType.asJsonApi(SignedInDocument, 201),
+      MediaType.asJsonApi(PendingDocument, 202),
+    ],
+    error: signUpErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
 );
 
 /** Email/password + session endpoints. */
 export const authGroup = HttpApiGroup.make("auth").add(
-  HttpApiEndpoint.post("signUp", "/sign-up", {
-    payload: S.SignUpPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.ConflictError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
-  HttpApiEndpoint.post("signIn", "/sign-in", {
-    payload: S.SignInPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
-  HttpApiEndpoint.post("sendVerificationEmail", "/email-verification/send", {
-    payload: S.SendVerificationEmailPayload,
-    success: S.StatusResponse,
-    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
-  }),
-  HttpApiEndpoint.post("verifyEmail", "/email-verification/verify", {
-    payload: S.VerifyEmailPayload,
-    success: S.AuthSuccess,
-    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
-  }),
-  HttpApiEndpoint.post("passwordResetRequest", "/password-reset/request", {
-    payload: S.RequestPasswordResetPayload,
-    success: S.StatusResponse,
-    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
-  }),
-  HttpApiEndpoint.post("passwordResetConfirm", "/password-reset/reset", {
-    payload: S.ResetPasswordPayload,
-    success: S.StatusResponse,
-    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
-  }),
   HttpApiEndpoint.post("changePassword", "/change-password", {
     payload: S.ChangePasswordPayload,
     success: HttpApiSchema.NoContent,
     error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // --- Optional features (magic link / email OTP / multi-factor). Each fails
-  // --- with 404 NotFound when the corresponding service layer is absent.
-  // Anti-enumeration: always `{ status: true }`; 500 only on store/delivery failure.
-  HttpApiEndpoint.post("magicLinkSend", "/magic-link/send", {
-    payload: S.MagicLinkSendPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
-  }),
-  // Invalid/expired/replayed magic link tokens -> 400 BadRequest.
-  HttpApiEndpoint.post("magicLinkVerify", "/magic-link/verify", {
-    payload: S.MagicLinkVerifyPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
   }),
   // Account management: verification-gated email change & self-service deletion.
   // Request endpoints are session-authenticated; confirm endpoints are by token.
@@ -183,48 +461,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     payload: S.DeleteUserConfirmPayload,
     success: S.StatusResponse,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
-  }),
-  // Anti-enumeration: always `{ status: true }`; 500 only on store/delivery failure.
-  HttpApiEndpoint.post("emailOtpSend", "/email-otp/send", {
-    payload: S.EmailOtpSendPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
-  }),
-  // Invalid/expired OTPs and exhausted attempts -> 400 BadRequest.
-  HttpApiEndpoint.post("signInEmailOtp", "/sign-in/email-otp", {
-    payload: S.EmailOtpSignInPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
-  // Guest sign-in: creates an anonymous user + session. 404 when unconfigured.
-  HttpApiEndpoint.post("signInAnonymous", "/sign-in/anonymous", {
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
-  // Username + password sign-in. Invalid credentials -> 401 (uniform message).
-  HttpApiEndpoint.post("signInUsername", "/sign-in/username", {
-    payload: S.UsernameSignInPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
   }),
   // Multi-session (several accounts per device). 404 when not enabled.
   HttpApiEndpoint.get("multiSessionList", "/multi-session/list", {
@@ -275,23 +511,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.StatusResponse,
     error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
   }),
-  // Phone (SMS) OTP. Anti-enumeration: send always answers `{ status: true }`.
-  HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {
-    payload: S.PhoneOtpSendPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("signInPhoneOtp", "/sign-in/phone-otp", {
-    payload: S.PhoneOtpSignInPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
   // Authenticated; wrong password -> 400 BadRequest (mirrors change-password).
   HttpApiEndpoint.post("multiFactorEnable", "/multi-factor/enable", {
     payload: S.MultiFactorPasswordPayload,
@@ -320,33 +539,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
       error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
     },
   ),
-  // Failed second factor (bad/expired challenge token or wrong code) -> 401
-  // Unauthorized: redeeming a challenge is an authentication attempt.
-  HttpApiEndpoint.post("multiFactorVerifyTotp", "/multi-factor/verify-totp", {
-    payload: S.MultiFactorVerifyPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
-  // Same convention as verify-totp; backup codes are single-use.
-  HttpApiEndpoint.post("multiFactorVerifyBackupCode", "/multi-factor/verify-backup-code", {
-    payload: S.MultiFactorVerifyPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
   // --- Organization (session-authenticated). 404 when the module is absent;
   // --- 403 when the actor's role lacks the required permission.
   HttpApiEndpoint.post("orgCreate", "/organization/create", {
@@ -859,26 +1051,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.SamlMetadataView,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
-  // --- Google One Tap: generate a server-side nonce for the One Tap prompt.
-  // --- 404 when unconfigured.
-  HttpApiEndpoint.get("getGoogleOneTapNonce", "/sign-in/google-one-tap/nonce", {
-    success: S.GoogleOneTapNonceView,
-    error: [S.NotFoundError, S.InternalError],
-  }),
-  // --- Google One Tap: verify the credential (a Google-signed id_token) and
-  // --- sign in by verified email. 404 when unconfigured.
-  HttpApiEndpoint.post("signInGoogleOneTap", "/sign-in/google-one-tap", {
-    payload: S.GoogleOneTapPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
   // --- JWT: issue a token for the session (`/token`) and serve the JWKS.
   HttpApiEndpoint.get("jwtToken", "/token", {
     success: S.JwtTokenView,
@@ -1176,6 +1348,11 @@ export const AuthApi = HttpApi.make("AuthApi")
   .add(sessionsGroup)
   .add(identifiersGroup)
   .add(usersGroup)
+  .add(secondFactorChallengesGroup)
+  .add(otpChallengesGroup)
+  .add(emailVerificationsGroup)
+  .add(passwordResetsGroup)
+  .add(googleOneTapNoncesGroup)
   .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({

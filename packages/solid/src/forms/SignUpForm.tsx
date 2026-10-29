@@ -51,7 +51,7 @@ export interface SignUpFormProps extends AuthFormBaseProps<AuthSuccess> {
  * A registration form that owns its own submit, pending and error state.
  *
  * ```tsx
- * <SignUpForm showName={false} onSuccess={(result) => console.log(result.user.id)} />
+ * <SignUpForm showName={false} onSuccess={(result) => console.log(result.user?.id)} />
  * ```
  */
 export const SignUpForm = (props: SignUpFormProps): JSX.Element => {

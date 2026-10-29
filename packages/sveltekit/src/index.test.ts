@@ -177,10 +177,18 @@ const signInWith = (answer: () => Promise<Response>, seen?: Array<Request>) =>
       seen?.push(request);
       return answer();
     },
-    endpoint: "https://auth.internal/api/auth/sign-in",
+    endpoint: "https://auth.internal/api/auth/sessions",
     body: (form) => ({
-      email: String(form.get("email") ?? ""),
-      password: String(form.get("password") ?? ""),
+      data: {
+        type: "sessions",
+        attributes: {
+          credential: {
+            method: "password",
+            email: String(form.get("email") ?? ""),
+            password: String(form.get("password") ?? ""),
+          },
+        },
+      },
     }),
     fields: (form) => ({ email: String(form.get("email") ?? "") }),
     fallback: "/home",
@@ -206,7 +214,16 @@ describe("credentialAction", () => {
     const [request] = seen;
     assert(request !== undefined);
     expect(request.headers.get("origin")).toBe("https://app.example");
-    expect(await request.json()).toEqual({ email: "ada@example.com", password: "hunter2" });
+    // A JSON:API document, as the auth handler's credential flows accept.
+    expect(request.headers.get("content-type")).toBe("application/vnd.api+json");
+    expect(await request.json()).toEqual({
+      data: {
+        type: "sessions",
+        attributes: {
+          credential: { method: "password", email: "ada@example.com", password: "hunter2" },
+        },
+      },
+    });
   });
 
   it("refuses an off-site redirect target", async () => {

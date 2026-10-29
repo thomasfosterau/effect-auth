@@ -153,8 +153,9 @@ header has no representation in a typed JSON success value. Sign-in, sign-up and
 therefore need a raw passthrough:
 
 ```ts
-// POST /session/sign-in on the app's Worker
-const signIn = (request: Request) => auth.relay(request, "/sign-in");
+// POST /session/sign-in on the app's Worker: the browser posts a JSON:API
+// `sessions` document, which the auth service answers at `POST /sessions`.
+const signIn = (request: Request) => auth.relay(request, "/sessions");
 ```
 
 `relay` forwards the request and returns the upstream response verbatim — status, body and

@@ -827,7 +827,6 @@ const UserVerificationBody = Schema.Struct({
   needsEmailVerification: Schema.Boolean,
 });
 const MessageBody = Schema.Struct({ message: Schema.String });
-const TagBody = Schema.Struct({ _tag: Schema.String });
 const IdListBody = Schema.Array(Schema.Struct({ id: Schema.String }));
 const TotpEnrollmentBody = Schema.Struct({
   secret: Schema.String,
@@ -901,17 +900,159 @@ const jsonApiRequest = (
     body: toJson(body),
   });
 
+/**
+ * The flows `/sessions`, `/users` and the verification groups serve (#205),
+ * by name: each sign-in credential method, sign-up, and the sends and
+ * redemptions that prove an address or a second factor.
+ */
+type AuthFlow =
+  | "password"
+  | "username"
+  | "email-otp"
+  | "phone-otp"
+  | "anonymous"
+  | "magic-link"
+  | "google-one-tap"
+  | "sign-up"
+  | "send-magic-link"
+  | "send-email-otp"
+  | "send-phone-otp"
+  | "send-verification"
+  | "verify-email"
+  | "request-reset"
+  | "reset-password"
+  | "verify-totp"
+  | "verify-backup-code";
+
+/** A JSON:API write request (`application/vnd.api+json`). */
+const writeRequest = (
+  method: string,
+  path: string,
+  body: Schema.Json,
+  headers: Record<string, string> = {},
+) =>
+  new Request(`http://test${path}`, {
+    method,
+    headers: { "content-type": "application/vnd.api+json", ...headers },
+    body: toJson(body),
+  });
+
+/**
+ * The JSON:API request for `flow` with the fields a caller supplies: a sign-in
+ * is `POST /sessions` carrying them as its `credential` (`rememberMe` beside
+ * it), sign-up `POST /users`, a send `POST /otp-challenges`, and so on.
+ */
+const authRequest = (
+  flow: AuthFlow,
+  fields: { readonly [key: string]: Schema.Json } = {},
+  headers: Record<string, string> = {},
+): Request => {
+  const { rememberMe, token, ...rest } = fields;
+  const signIn = (credential: { readonly [key: string]: Schema.Json }) =>
+    writeRequest(
+      "POST",
+      "/sessions",
+      {
+        data: {
+          type: "sessions",
+          attributes: { credential, ...(rememberMe !== undefined && { rememberMe }) },
+        },
+      },
+      headers,
+    );
+  const create = (path: string, type: string, attributes: Schema.Json) =>
+    writeRequest("POST", path, { data: { type, attributes } }, headers);
+  const verifySecondFactor = (method: "totp" | "backup-code") =>
+    writeRequest(
+      "POST",
+      "/second-factor-challenges/verifications",
+      {
+        data: {
+          type: "second-factor-verifications",
+          attributes: { method, ...rest },
+          relationships: {
+            challenge: { data: { type: "second-factor-challenges", id: String(token) } },
+          },
+        },
+      },
+      headers,
+    );
+  const id = String(token);
+  const requests: Record<AuthFlow, () => Request> = {
+    password: () => signIn({ method: "password", ...rest }),
+    username: () => signIn({ method: "username", ...rest }),
+    "email-otp": () => signIn({ method: "email-otp", ...rest }),
+    "phone-otp": () => signIn({ method: "phone-otp", ...rest }),
+    anonymous: () => signIn({ method: "anonymous", ...rest }),
+    "magic-link": () => signIn({ method: "magic-link", token: id }),
+    "google-one-tap": () =>
+      signIn({
+        method: "google-one-tap",
+        idToken: rest["credential"] ?? null,
+        nonce: rest["nonce"] ?? null,
+      }),
+    "sign-up": () => create("/users", "users", rest),
+    "send-magic-link": () =>
+      create("/otp-challenges", "otp-challenges", { channel: "magic-link", ...rest }),
+    "send-email-otp": () =>
+      create("/otp-challenges", "otp-challenges", { channel: "email", ...rest }),
+    "send-phone-otp": () =>
+      create("/otp-challenges", "otp-challenges", { channel: "phone", ...rest }),
+    "send-verification": () => create("/email-verifications", "email-verifications", rest),
+    "verify-email": () =>
+      create("/email-verifications/redemptions", "email-verification-redemptions", { token: id }),
+    "request-reset": () => create("/password-resets", "password-resets", rest),
+    "reset-password": () =>
+      create("/password-resets/redemptions", "password-reset-redemptions", { token: id, ...rest }),
+    "verify-totp": () => verifySecondFactor("totp"),
+    "verify-backup-code": () => verifySecondFactor("backup-code"),
+  };
+  return requests[flow]();
+};
+
+/** The `POST /users` (sign-up) document carrying `attributes`. */
+const signUpDocument = (attributes: Schema.Json) => ({ data: { type: "users", attributes } });
+
+/** The document a sign-in, sign-up or verification answers with. */
+const SignInAnswer = Schema.Struct({
+  data: Schema.optional(WireResource),
+  included: Schema.optional(Schema.Array(WireResource)),
+  meta: Schema.optional(Schema.Struct({ needsEmailVerification: Schema.Boolean })),
+});
+
+/**
+ * A sign-in answer read as `{ user, needsEmailVerification, secondFactor }`:
+ * the included user flattened as {@link flatten} does, the challenge a `202`
+ * carries as `{ token, expiresAt }`. Decoded against the shape the test reads.
+ */
+const authBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => {
+  const text = await response.text();
+  const document = Schema.decodeUnknownSync(SignInAnswer)(text === "" ? {} : parseJson(text));
+  const user = document.included?.find((resource) => resource.type === "users");
+  const challenge = document.data?.type === "second-factor-challenges" ? document.data : undefined;
+  return Schema.decodeUnknownSync(schema)({
+    ...(user !== undefined && { user: flatten(user) }),
+    needsEmailVerification: document.meta?.needsEmailVerification ?? false,
+    ...(challenge !== undefined && {
+      secondFactor: { token: challenge.id, ...challenge.attributes },
+    }),
+  });
+};
+
 /** Sign a user up and return their session id (from the cookie). */
 const signUp = async (handler: Handler, email: string, password: string = PW): Promise<string> => {
-  const res = await handler(jsonRequest("/sign-up", { email, password }));
-  expect(res.status).toBe(200);
+  const res = await handler(authRequest("sign-up", { email, password }));
+  expect(res.status).toBe(201);
   return sessionIdFromSetCookie(res.headers.get("set-cookie"));
 };
 
 /** Sign an existing user in and return their session id. */
 const signIn = async (handler: Handler, email: string, password: string = PW): Promise<string> => {
-  const res = await handler(jsonRequest("/sign-in", { email, password }));
-  expect(res.status).toBe(200);
+  const res = await handler(authRequest("password", { email, password }));
+  expect(res.status).toBe(201);
   return sessionIdFromSetCookie(res.headers.get("set-cookie"));
 };
 
@@ -920,11 +1061,10 @@ const signIn = async (handler: Handler, email: string, password: string = PW): P
 describe("anti-enumeration sign-up over HTTP (#414)", () => {
   const VICTIM = "victim@example.com";
   const FRESH = "fresh1@example.com"; // As long as VICTIM, so bodies match in length.
-  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
   const signUpAs = (handler: Handler, email: string) =>
     handler(
-      jsonRequest("/sign-up", {
+      authRequest("sign-up", {
         email,
         password: PW,
         name: "Probe",
@@ -933,47 +1073,17 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
     );
 
   /**
-   * Everything a caller can compare across two sign-up responses, bar the
-   * values that differ for any two users: the status, every header (and
-   * `Set-Cookie` on its own), and the body's fields in order with each
-   * value's type, plus the values that must match exactly.
+   * Everything a caller can compare across two sign-up responses: the status,
+   * every header (and `Set-Cookie` on its own) and the body, byte for byte.
+   * Under `antiEnumeration` no session is issued, so both are a `202` that
+   * names no user (#205).
    */
-  const observe = async (res: Response) => {
-    const json: unknown = await res.json();
-    const body = Schema.decodeUnknownSync(SignUpBody)(json);
-    const fields = Schema.decodeUnknownSync(JsonFields)(json);
-    // The JSON type of a body value: `typeof`'s name, with null and arrays apart.
-    const typeOf = (value: Schema.Json) =>
-      value === null
-        ? "null"
-        : Array.isArray(value)
-          ? "array"
-          : Predicate.isString(value)
-            ? "string"
-            : Predicate.isNumber(value)
-              ? "number"
-              : Predicate.isBoolean(value)
-                ? "boolean"
-                : "object";
-    return {
-      shape: {
-        status: res.status,
-        headers: [...res.headers.entries()].map(([name, value]) =>
-          name === "content-length" ? [name, "<length>"] : [name, value],
-        ),
-        setCookie: res.headers.getSetCookie(),
-        bodyFields: Object.entries(fields).map(([key, value]) => [key, typeOf(value)]),
-        userFields: Object.entries(body.user).map(([key, value]) => [key, typeOf(value)]),
-        emailVerified: body.user["emailVerified"],
-        name: body.user["name"],
-        attributes: body.user["attributes"],
-        needsEmailVerification: body.needsEmailVerification,
-        sameTimestamps: body.user["createdAt"] === body.user["updatedAt"],
-      },
-      id: body.user["id"],
-      email: body.user["email"],
-    };
-  };
+  const observe = async (res: Response) => ({
+    status: res.status,
+    headers: [...res.headers.entries()],
+    setCookie: res.headers.getSetCookie(),
+    body: await res.text(),
+  });
 
   // How sign-up finds VICTIM held by another user. The fixture's store holds
   // the owner back until the sign-up for VICTIM reaches `createUser`, after
@@ -1052,30 +1162,20 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
       }
       const taken = await observe(await signUpAs(handler, VICTIM));
 
-      expect(taken.shape).toEqual(fresh.shape);
-      expect(fresh.shape.status).toBe(200);
-      expect(fresh.shape.setCookie).toEqual([]);
-      expect(fresh.shape.userFields).toEqual([
-        ["id", "string"],
-        ["email", "string"],
-        ["emailVerified", "boolean"],
-        ["name", "string"],
-        ["createdAt", "number"],
-        ["updatedAt", "number"],
-        ["attributes", "object"],
-      ]);
-      expect(fresh.shape.emailVerified).toBe(false);
-      expect(fresh.shape.needsEmailVerification).toBe(verification);
-      expect(fresh.email).toBe(preCheck ? VICTIM : FRESH);
-      expect(taken.email).toBe(VICTIM);
-      expect(taken.id).not.toBe(fresh.id);
+      expect(taken).toEqual(fresh);
+      expect(fresh.status).toBe(202);
+      expect(fresh.setCookie).toEqual([]);
+      // No primary data: neither answer names a user, real or stand-in.
+      expect(parseJson(fresh.body)).toEqual({
+        meta: { needsEmailVerification: verification },
+      });
 
-      // Only the fresh sign-up gets a verification record and link, and both
-      // name a real user; the stand-in gets neither, so VICTIM's holder is
+      // Only the fresh sign-up gets a verification record and link, and it
+      // names a real user; the stand-in gets neither, so VICTIM's holder is
       // never sent a link that can't verify (#422).
       const records = fixture.verificationRecords();
-      expect(records.map((record) => [record.userId, record.email])).toEqual(
-        verification ? [[fresh.id, fresh.email]] : [],
+      expect(records.map((record) => record.email)).toEqual(
+        verification ? [preCheck ? VICTIM : FRESH] : [],
       );
       expect(records.every((record) => fixture.userExists(record.userId))).toBe(true);
       expect(fixture.sentVerificationTokens.map((token) => hashToken(token))).toEqual(
@@ -1084,29 +1184,6 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
       expect(notices).toEqual(verification && notice ? [VICTIM] : []);
     },
   );
-
-  it("the stand-in's id has the store's shape when the store mints one", async () => {
-    const minting = handlerFor(
-      makeFixture({
-        emailPassword: { antiEnumeration: true },
-        emailPasswordStore: (base, state) => ({
-          ...base,
-          newUserId: () => Effect.sync(state.nextUserId),
-        }),
-      }),
-    );
-    const fresh = await observe(await signUpAs(minting, VICTIM));
-    const taken = await observe(await signUpAs(minting, VICTIM));
-    expect(fresh.id).toBe("user-1");
-    expect(taken.id).toBe("user-2");
-    expect(taken.shape).toEqual(fresh.shape);
-
-    // Without the seam the stand-in's id is a random UUID, unlike this
-    // fixture's `user-N` ids: the residual `newUserId` closes.
-    const fallback = handlerFor(makeFixture({ emailPassword: { antiEnumeration: true } }));
-    await signUpAs(fallback, VICTIM);
-    expect((await observe(await signUpAs(fallback, VICTIM))).id).toMatch(UUID);
-  });
 });
 
 describe("sign-up for an address held unverified over HTTP (#421)", () => {
@@ -1135,14 +1212,15 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
       const handler = handlerFor(fixture);
 
       const res = await handler(
-        jsonRequest("/sign-up", {
+        authRequest("sign-up", {
           email: " Held@Example.com ",
           password: PW,
           name: "Probe",
           attributes: { plan: "free" },
         }),
       );
-      expect(res.status).toBe(200);
+      // No session, so a `202` that names no user (#205).
+      expect(res.status).toBe(202);
       expect(res.headers.getSetCookie()).toEqual([]);
       const text = await res.text();
 
@@ -1162,25 +1240,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
         },
       );
 
-      const body = Schema.decodeUnknownSync(SignUpBody)(parseJson(text));
-      expect(body.needsEmailVerification).toBe(true);
-      expect(Object.keys(body.user)).toEqual([
-        "id",
-        "email",
-        "emailVerified",
-        "name",
-        "createdAt",
-        "updatedAt",
-        "attributes",
-      ]);
-      expect(body.user["id"]).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      );
-      expect(body.user["email"]).toBe(HELD);
-      expect(body.user["emailVerified"]).toBe(false);
-      expect(body.user["name"]).toBe("Probe");
-      expect(body.user["attributes"]).toEqual({ plan: "free" });
-      expect(body.user["createdAt"]).toBe(body.user["updatedAt"]);
+      expect(parseJson(text)).toEqual({ meta: { needsEmailVerification: true } });
 
       // The verification is re-issued to the holder when sign-up sends one:
       // its token verifies the holder's address.
@@ -1191,9 +1251,9 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
         Promise.resolve(),
         async (previous, token) => {
           await previous;
-          const verify = await handler(jsonRequest("/email-verification/verify", { token }));
-          expect(verify.status).toBe(200);
-          const verified = await jsonBody(verify, SignUpBody);
+          const verify = await handler(authRequest("verify-email", { token }));
+          expect(verify.status).toBe(201);
+          const verified = await authBody(verify, SignUpBody);
           expect(verified.user["id"]).toBe(holder.id);
           expect(verified.user["emailVerified"]).toBe(true);
         },
@@ -1206,13 +1266,13 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
     fixture.seedUnverifiedEmailUser(holder, HELD);
     const handler = handlerFor(fixture);
     // The holder verifies the address through the token a sign-up re-issued.
-    await handler(jsonRequest("/sign-up", { email: HELD, password: PW }));
+    await handler(authRequest("sign-up", { email: HELD, password: PW }));
     const verify = await handler(
-      jsonRequest("/email-verification/verify", { token: fixture.sentVerificationTokens[0] }),
+      authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
     );
-    expect(verify.status).toBe(200);
+    expect(verify.status).toBe(201);
 
-    const res = await handler(jsonRequest("/sign-up", { email: HELD, password: PW }));
+    const res = await handler(authRequest("sign-up", { email: HELD, password: PW }));
     expect(res.status).toBe(409);
     expect(await res.text()).not.toContain(holder.id);
   });
@@ -1221,11 +1281,11 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
 describe("HTTP auth protocol", () => {
   it("signs up, sets a session cookie, and returns the user", async () => {
     const handler = handlerFor();
-    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
+    const res = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }));
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
-    const body = await jsonBody(res, UserVerificationBody);
+    const body = await authBody(res, UserVerificationBody);
     expect(body.user.email).toBe("a@b.com");
     expect(body.user.emailVerified).toBe(false);
     expect(body.needsEmailVerification).toBe(false);
@@ -1258,17 +1318,17 @@ describe("HTTP auth protocol", () => {
   it("returns 401 for invalid sign-in credentials", async () => {
     const handler = handlerFor();
     await signUp(handler, "a@b.com");
-    const res = await handler(jsonRequest("/sign-in", { email: "a@b.com", password: "wrong-pw" }));
+    const res = await handler(authRequest("password", { email: "a@b.com", password: "wrong-pw" }));
     expect(res.status).toBe(401);
-    const body = await jsonBody(res, TagBody);
-    expect(body._tag).toBe("Unauthorized");
+    const body = await jsonBody(res, ErrorDocumentBody);
+    expect(body.errors[0]?.status).toBe("401");
   });
 
   it("signs in an existing user and returns a fresh cookie", async () => {
     const handler = handlerFor();
     await signUp(handler, "a@b.com");
-    const res = await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("password", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(201);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
   });
 
@@ -1286,8 +1346,10 @@ describe("HTTP auth protocol", () => {
 
   it("routes under a mount prefix", async () => {
     const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
-    const res = await handler(jsonRequest("/api/auth/sign-up", { email: "a@b.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(
+      writeRequest("POST", "/api/auth/users", signUpDocument({ email: "a@b.com", password: PW })),
+    );
+    expect(res.status).toBe(201);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
   });
 
@@ -1295,13 +1357,13 @@ describe("HTTP auth protocol", () => {
     const handler = handlerFor(makeFixture(), { secure: true });
     // Use a full https URL so the CSRF origin check passes for the same-origin case.
     const res = await handler(
-      new Request("https://example.com/sign-up", {
+      new Request("https://example.com/users", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: toJson({ email: "a@b.com", password: PW }),
+        headers: { "content-type": "application/vnd.api+json" },
+        body: toJson(signUpDocument({ email: "a@b.com", password: PW })),
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const setCookie = res.headers.get("set-cookie");
     expect(setCookie).toContain("__Host-conduit_session=");
     expect(setCookie).toContain("; Secure");
@@ -1309,8 +1371,8 @@ describe("HTTP auth protocol", () => {
 
   it("does not apply __Host- prefix when secure is false", async () => {
     const handler = handlerFor(makeFixture(), { secure: false });
-    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(201);
     const setCookie = res.headers.get("set-cookie");
     expect(setCookie).toContain("conduit_session=");
     expect(setCookie).not.toContain("__Host-");
@@ -1325,12 +1387,16 @@ describe("HTTP auth protocol", () => {
 
     const program = Effect.gen(function* () {
       const client = yield* HttpClient.client("http://test");
-      return yield* client.auth.signUp({ payload: { email: "c@d.com", password: PW } });
+      return yield* client.users.create({
+        payload: { data: { type: "users", attributes: { email: "c@d.com", password: PW } } },
+      });
     }).pipe(Effect.provide(ClientLayer));
 
     const result = await Effect.runPromise(program);
-    expect(result.user.email).toBe("c@d.com");
-    expect(result.needsEmailVerification).toBe(false);
+    // A `201`: the session, its user included.
+    assert("included" in result, "sign-up issued a session");
+    expect(result.included?.[0]?.attributes.email).toBe("c@d.com");
+    expect(result.meta?.needsEmailVerification).toBe(false);
   });
 });
 
@@ -1430,9 +1496,9 @@ describe("identifier endpoints", () => {
   it("deletes an identifier but refuses foreign, unknown, and last ones", async () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture);
-    const up = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
-    expect(up.status).toBe(200);
-    const userId = (await jsonBody(up, UserIdBody)).user.id;
+    const up = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }));
+    expect(up.status).toBe(201);
+    const userId = (await authBody(up, UserIdBody)).user.id;
     const sid = sessionIdFromSetCookie(up.headers.get("set-cookie"));
     fixture.registerUsername(userId, "cooluser");
     const otherSid = await signUp(handler, "other@b.com");
@@ -1495,11 +1561,11 @@ describe("change-password and update-user", () => {
 
     // The old password no longer works; the new one does.
     expect(
-      (await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW }))).status,
+      (await handler(authRequest("password", { email: "a@b.com", password: PW }))).status,
     ).toBe(401);
     expect(
-      (await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW2 }))).status,
-    ).toBe(200);
+      (await handler(authRequest("password", { email: "a@b.com", password: PW2 }))).status,
+    ).toBe(201);
   });
 
   it("keeps other sessions when revokeOtherSessions is not set", async () => {
@@ -1528,8 +1594,8 @@ describe("change-password and update-user", () => {
     expect(res.status).toBe(400);
     // Password unchanged.
     expect(
-      (await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW }))).status,
-    ).toBe(200);
+      (await handler(authRequest("password", { email: "a@b.com", password: PW }))).status,
+    ).toBe(201);
   });
 
   it("updates the user's profile via PATCH /users/me", async () => {
@@ -1571,8 +1637,8 @@ describe("change-password and update-user", () => {
   it("answers 404 for another user's profile", async () => {
     const handler = handlerFor();
     const sid = await signUp(handler, "a@b.com");
-    const otherUp = await handler(jsonRequest("/sign-up", { email: "o@b.com", password: PW }));
-    const otherId = (await jsonBody(otherUp, UserIdBody)).user.id;
+    const otherUp = await handler(authRequest("sign-up", { email: "o@b.com", password: PW }));
+    const otherId = (await authBody(otherUp, UserIdBody)).user.id;
 
     const res = await handler(
       jsonApiRequest(
@@ -1611,15 +1677,15 @@ describe("email verification roundtrip", () => {
     const handler = handlerFor(fixture);
     await signUp(handler, "a@b.com");
 
-    const send = await handler(jsonRequest("/email-verification/send", { email: "a@b.com" }));
-    expect(send.status).toBe(200);
-    expect(await send.json()).toEqual({ status: true });
+    const send = await handler(authRequest("send-verification", { email: "a@b.com" }));
+    expect(send.status).toBe(202);
+    expect(await send.text()).toBe("");
     expect(fixture.sentVerificationTokens).toHaveLength(1);
 
     const token = fixture.sentVerificationTokens[0];
-    const verify = await handler(jsonRequest("/email-verification/verify", { token }));
-    expect(verify.status).toBe(200);
-    const body = await jsonBody(
+    const verify = await handler(authRequest("verify-email", { token }));
+    expect(verify.status).toBe(201);
+    const body = await authBody(
       verify,
       Schema.Struct({ user: Schema.Struct({ emailVerified: Schema.Boolean }) }),
     );
@@ -1628,7 +1694,7 @@ describe("email verification roundtrip", () => {
     expect(verify.headers.get("set-cookie")).toContain("conduit_session=");
 
     // Tokens are single use.
-    const replay = await handler(jsonRequest("/email-verification/verify", { token }));
+    const replay = await handler(authRequest("verify-email", { token }));
     expect(replay.status).toBe(400);
   });
 
@@ -1636,9 +1702,9 @@ describe("email verification roundtrip", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture);
 
-    const res = await handler(jsonRequest("/email-verification/send", { email: "no@one.com" }));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: true });
+    const res = await handler(authRequest("send-verification", { email: "no@one.com" }));
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe("");
     expect(fixture.sentVerificationTokens).toHaveLength(0);
   });
 });
@@ -1649,27 +1715,26 @@ describe("password reset roundtrip", () => {
     const handler = handlerFor(fixture);
     await signUp(handler, "a@b.com");
 
-    const request = await handler(jsonRequest("/password-reset/request", { email: "a@b.com" }));
-    expect(request.status).toBe(200);
-    expect(await request.json()).toEqual({ status: true });
+    const request = await handler(authRequest("request-reset", { email: "a@b.com" }));
+    expect(request.status).toBe(202);
+    expect(await request.text()).toBe("");
     expect(fixture.sentResetTokens).toHaveLength(1);
 
     const token = fixture.sentResetTokens[0];
-    const reset = await handler(jsonRequest("/password-reset/reset", { token, newPassword: PW2 }));
-    expect(reset.status).toBe(200);
-    expect(await reset.json()).toEqual({ status: true });
+    const reset = await handler(authRequest("reset-password", { token, newPassword: PW2 }));
+    expect(reset.status).toBe(204);
 
     // Old password fails, new password works.
     expect(
-      (await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW }))).status,
+      (await handler(authRequest("password", { email: "a@b.com", password: PW }))).status,
     ).toBe(401);
     expect(
-      (await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW2 }))).status,
-    ).toBe(200);
+      (await handler(authRequest("password", { email: "a@b.com", password: PW2 }))).status,
+    ).toBe(201);
 
     // Reset tokens are single use.
     const replay = await handler(
-      jsonRequest("/password-reset/reset", { token, newPassword: "another-pw-789" }),
+      authRequest("reset-password", { token, newPassword: "another-pw-789" }),
     );
     expect(replay.status).toBe(400);
   });
@@ -1678,9 +1743,9 @@ describe("password reset roundtrip", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture);
 
-    const res = await handler(jsonRequest("/password-reset/request", { email: "no@one.com" }));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: true });
+    const res = await handler(authRequest("request-reset", { email: "no@one.com" }));
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe("");
     expect(fixture.sentResetTokens).toHaveLength(0);
   });
 });
@@ -1691,8 +1756,8 @@ describe("CSRF protection (trusted origins)", () => {
       trustedOrigins: ["https://app.example.com"],
     });
     const res = await handler(
-      jsonRequest(
-        "/sign-up",
+      authRequest(
+        "sign-up",
         { email: "a@b.com", password: PW },
         { origin: "https://evil.example" },
       ),
@@ -1707,23 +1772,23 @@ describe("CSRF protection (trusted origins)", () => {
 
     // Same origin as the request URL.
     const same = await handler(
-      jsonRequest("/sign-up", { email: "s@b.com", password: PW }, { origin: "http://test" }),
+      authRequest("sign-up", { email: "s@b.com", password: PW }, { origin: "http://test" }),
     );
-    expect(same.status).toBe(200);
+    expect(same.status).toBe(201);
 
     // Explicitly trusted cross-origin.
     const trusted = await handler(
-      jsonRequest(
-        "/sign-up",
+      authRequest(
+        "sign-up",
         { email: "t@b.com", password: PW },
         { origin: "https://app.example.com" },
       ),
     );
-    expect(trusted.status).toBe(200);
+    expect(trusted.status).toBe(201);
 
     // No Origin header (curl / server-to-server).
-    const none = await handler(jsonRequest("/sign-up", { email: "n@b.com", password: PW }));
-    expect(none.status).toBe(200);
+    const none = await handler(authRequest("sign-up", { email: "n@b.com", password: PW }));
+    expect(none.status).toBe(201);
   });
 
   it("does not block safe methods on origin mismatch", async () => {
@@ -1738,23 +1803,23 @@ describe("CSRF protection (trusted origins)", () => {
 
     // Referer with a matching origin → allowed.
     const sameReferer = await handler(
-      new Request("http://test/sign-up", {
+      new Request("http://test/users", {
         method: "POST",
-        headers: { "content-type": "application/json", referer: "http://test/page" },
-        body: toJson({ email: "a@b.com", password: PW }),
+        headers: { "content-type": "application/vnd.api+json", referer: "http://test/page" },
+        body: toJson(signUpDocument({ email: "a@b.com", password: PW })),
       }),
     );
-    expect(sameReferer.status).toBe(200);
+    expect(sameReferer.status).toBe(201);
 
     // Referer with a cross-origin → blocked.
     const crossReferer = await handler(
-      new Request("http://test/sign-up", {
+      new Request("http://test/users", {
         method: "POST",
         headers: {
-          "content-type": "application/json",
+          "content-type": "application/vnd.api+json",
           referer: "https://evil.example/page",
         },
-        body: toJson({ email: "b@b.com", password: PW }),
+        body: toJson(signUpDocument({ email: "b@b.com", password: PW })),
       }),
     );
     expect(crossReferer.status).toBe(403);
@@ -1779,10 +1844,10 @@ describe("request body size limit", () => {
   it("rejects requests whose Content-Length exceeds maxBodySize with 413", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 100 });
     const res = await handler(
-      new Request("http://test/sign-up", {
+      new Request("http://test/users", {
         method: "POST",
-        headers: { "content-type": "application/json", "content-length": "101" },
-        body: toJson({ email: "a@b.com", password: PW }),
+        headers: { "content-type": "application/vnd.api+json", "content-length": "101" },
+        body: toJson(signUpDocument({ email: "a@b.com", password: PW })),
       }),
     );
     expect(res.status).toBe(413);
@@ -1792,18 +1857,18 @@ describe("request body size limit", () => {
 
   it("allows requests within the body size limit", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 65536 });
-    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(201);
   });
 
   it("allows requests when Content-Length is absent even if body would exceed limit", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 1 });
     // No Content-Length header — the check is advisory and cannot reject without reading.
     const res = await handler(
-      new Request("http://test/sign-up", {
+      new Request("http://test/users", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: toJson({ email: "a@b.com", password: PW }),
+        headers: { "content-type": "application/vnd.api+json" },
+        body: toJson(signUpDocument({ email: "a@b.com", password: PW })),
       }),
     );
     // Should pass the size gate (no Content-Length) and either succeed or fail
@@ -1815,7 +1880,7 @@ describe("request body size limit", () => {
 describe("mount prefix: 404 for out-of-prefix paths", () => {
   it("returns 404 for paths outside the configured prefix", async () => {
     const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
-    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
+    const res = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }));
     expect(res.status).toBe(404);
     const body = await jsonBody(res, MessageBody);
     expect(body.message).toBe("Not Found");
@@ -1830,14 +1895,14 @@ describe("mount prefix: 404 for out-of-prefix paths", () => {
   it("routes prefixed paths correctly and leaves non-prefixed as 404", async () => {
     const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
 
-    // Correct prefixed path → 200.
+    // Correct prefixed path → 201.
     const prefixed = await handler(
-      jsonRequest("/api/auth/sign-up", { email: "a@b.com", password: PW }),
+      writeRequest("POST", "/api/auth/users", signUpDocument({ email: "a@b.com", password: PW })),
     );
-    expect(prefixed.status).toBe(200);
+    expect(prefixed.status).toBe(201);
 
     // Same path without prefix → 404.
-    const unprefixed = await handler(jsonRequest("/sign-up", { email: "b@b.com", password: PW }));
+    const unprefixed = await handler(authRequest("sign-up", { email: "b@b.com", password: PW }));
     expect(unprefixed.status).toBe(404);
   });
 });
@@ -1847,18 +1912,16 @@ describe("optional features return 404 when not configured", () => {
     const handler = handlerFor(); // base services: no MagicLink/EmailOtp/MultiFactor layers
     const sid = await signUp(handler, "a@b.com");
 
-    const magicLink = await handler(jsonRequest("/magic-link/send", { email: "a@b.com" }));
+    const magicLink = await handler(authRequest("send-magic-link", { email: "a@b.com" }));
     expect(magicLink.status).toBe(404);
-    expect((await jsonBody(magicLink, TagBody))._tag).toBe("NotFound");
+    expect((await jsonBody(magicLink, ErrorDocumentBody)).errors[0]?.status).toBe("404");
 
     const emailOtp = await handler(
-      jsonRequest("/email-otp/send", { email: "a@b.com", purpose: "sign-in" }),
+      authRequest("send-email-otp", { email: "a@b.com", purpose: "sign-in" }),
     );
     expect(emailOtp.status).toBe(404);
 
-    const verifyTotp = await handler(
-      jsonRequest("/multi-factor/verify-totp", { token: "x", code: "000000" }),
-    );
+    const verifyTotp = await handler(authRequest("verify-totp", { token: "x", code: "000000" }));
     expect(verifyTotp.status).toBe(404);
 
     const enable = await handler(
@@ -1873,15 +1936,15 @@ describe("magic link", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
 
-    const send = await handler(jsonRequest("/magic-link/send", { email: "ml@example.com" }));
-    expect(send.status).toBe(200);
-    expect(await send.json()).toEqual({ status: true });
+    const send = await handler(authRequest("send-magic-link", { email: "ml@example.com" }));
+    expect(send.status).toBe(202);
+    expect(await send.text()).toBe("");
     expect(fixture.sentMagicLinkTokens).toHaveLength(1);
 
     const token = fixture.sentMagicLinkTokens[0];
-    const verify = await handler(jsonRequest("/magic-link/verify", { token }));
-    expect(verify.status).toBe(200);
-    const body = await jsonBody(verify, UserVerificationBody);
+    const verify = await handler(authRequest("magic-link", { token }));
+    expect(verify.status).toBe(201);
+    const body = await authBody(verify, UserVerificationBody);
     // A verified link proves email ownership: the user is auto-created verified.
     expect(body.user.email).toBe("ml@example.com");
     expect(body.user.emailVerified).toBe(true);
@@ -1891,13 +1954,13 @@ describe("magic link", () => {
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid)))).status).toBe(200);
 
     // Tokens are single use.
-    const replay = await handler(jsonRequest("/magic-link/verify", { token }));
+    const replay = await handler(authRequest("magic-link", { token }));
     expect(replay.status).toBe(400);
   });
 
   it("rejects unknown tokens with 400", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const res = await handler(jsonRequest("/magic-link/verify", { token: "nope" }));
+    const res = await handler(authRequest("magic-link", { token: "nope" }));
     expect(res.status).toBe(400);
   });
 });
@@ -1908,17 +1971,17 @@ describe("email OTP", () => {
     const handler = handlerFor(fixture, { features: true });
 
     const send = await handler(
-      jsonRequest("/email-otp/send", { email: "otp@example.com", purpose: "sign-in" }),
+      authRequest("send-email-otp", { email: "otp@example.com", purpose: "sign-in" }),
     );
-    expect(send.status).toBe(200);
-    expect(await send.json()).toEqual({ status: true });
+    expect(send.status).toBe(202);
+    expect(await send.text()).toBe("");
     expect(fixture.sentOtps).toHaveLength(1);
     expect(fixture.sentOtps[0].purpose).toBe("sign-in");
 
     const otp = fixture.sentOtps[0].otp;
-    const res = await handler(jsonRequest("/sign-in/email-otp", { email: "otp@example.com", otp }));
-    expect(res.status).toBe(200);
-    const body = await jsonBody(res, UserEmailVerifiedBody);
+    const res = await handler(authRequest("email-otp", { email: "otp@example.com", otp }));
+    expect(res.status).toBe(201);
+    const body = await authBody(res, UserEmailVerifiedBody);
     expect(body.user.email).toBe("otp@example.com");
     expect(body.user.emailVerified).toBe(true);
 
@@ -1930,18 +1993,16 @@ describe("email OTP", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
 
-    await handler(jsonRequest("/email-otp/send", { email: "otp@example.com", purpose: "sign-in" }));
+    await handler(authRequest("send-email-otp", { email: "otp@example.com", purpose: "sign-in" }));
     const otp = fixture.sentOtps[0].otp;
     const wrong = otp === "000000" ? "111111" : "000000";
 
-    const res = await handler(
-      jsonRequest("/sign-in/email-otp", { email: "otp@example.com", otp: wrong }),
-    );
+    const res = await handler(authRequest("email-otp", { email: "otp@example.com", otp: wrong }));
     expect(res.status).toBe(400);
 
     // The correct code still works after a single failed attempt.
-    const ok = await handler(jsonRequest("/sign-in/email-otp", { email: "otp@example.com", otp }));
-    expect(ok.status).toBe(200);
+    const ok = await handler(authRequest("email-otp", { email: "otp@example.com", otp }));
+    expect(ok.status).toBe(201);
   });
 });
 
@@ -1986,7 +2047,7 @@ describe("multi-factor", () => {
 
     // Until confirmed, sign-in is not gated.
     const ungated = await handler(
-      jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
+      authRequest("password", { email: "2fa@example.com", password: PW }),
     );
     expect(ungated.headers.get("set-cookie")).toContain("conduit_session=");
 
@@ -2002,26 +2063,28 @@ describe("multi-factor", () => {
 
     // Sign-in now returns a second-factor challenge and NO session cookie.
     const gated = await handler(
-      jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
+      authRequest("password", { email: "2fa@example.com", password: PW }),
     );
-    expect(gated.status).toBe(200);
+    // `202`: the challenge to redeem, and no user until it is redeemed.
+    expect(gated.status).toBe(202);
     expect(gated.headers.get("set-cookie")).toBeNull();
-    const gatedBody = await jsonBody(
+    const gatedBody = await authBody(
       gated,
       Schema.Struct({
-        user: Schema.Struct({ email: Schema.String }),
+        user: Schema.optional(Schema.Unknown),
         secondFactor: Schema.optional(
           Schema.Struct({ token: Schema.String, expiresAt: Schema.Number }),
         ),
       }),
     );
+    expect(gatedBody.user).toBeUndefined();
     assert(gatedBody.secondFactor !== undefined, "sign-in is gated on the second factor");
 
     // Wrong TOTP code -> 401 (the challenge remains redeemable).
     const code = await totpFor(enrollment.secret);
     const badCode = code === "000000" ? "111111" : "000000";
     const rejected = await handler(
-      jsonRequest("/multi-factor/verify-totp", {
+      authRequest("verify-totp", {
         token: gatedBody.secondFactor.token,
         code: badCode,
       }),
@@ -2030,17 +2093,17 @@ describe("multi-factor", () => {
 
     // Correct TOTP code redeems the challenge into a session.
     const verified = await handler(
-      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor.token, code }),
+      authRequest("verify-totp", { token: gatedBody.secondFactor.token, code }),
     );
-    expect(verified.status).toBe(200);
-    const verifiedBody = await jsonBody(verified, UserEmailBody);
+    expect(verified.status).toBe(201);
+    const verifiedBody = await authBody(verified, UserEmailBody);
     expect(verifiedBody.user.email).toBe("2fa@example.com");
     const newSid = sessionIdFromSetCookie(verified.headers.get("set-cookie"));
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(newSid)))).status).toBe(200);
 
     // The pending token was consumed (one-time use).
     const replay = await handler(
-      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor.token, code }),
+      authRequest("verify-totp", { token: gatedBody.secondFactor.token, code }),
     );
     expect(replay.status).toBe(401);
   });
@@ -2064,26 +2127,26 @@ describe("multi-factor", () => {
 
     const challengeToken = async (): Promise<string> => {
       const res = await handler(
-        jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
+        authRequest("password", { email: "2fa@example.com", password: PW }),
       );
-      const body = await jsonBody(res, SecondFactorBody);
+      const body = await authBody(res, SecondFactorBody);
       assert(body.secondFactor !== undefined, "sign-in is gated on the second factor");
       return body.secondFactor.token;
     };
 
     const backupCode = enrollment.backupCodes[0];
     const first = await handler(
-      jsonRequest("/multi-factor/verify-backup-code", {
+      authRequest("verify-backup-code", {
         token: await challengeToken(),
         code: backupCode,
       }),
     );
-    expect(first.status).toBe(200);
+    expect(first.status).toBe(201);
     expect(first.headers.get("set-cookie")).toContain("conduit_session=");
 
     // The same backup code cannot be used again.
     const second = await handler(
-      jsonRequest("/multi-factor/verify-backup-code", {
+      authRequest("verify-backup-code", {
         token: await challengeToken(),
         code: backupCode,
       }),
@@ -2121,12 +2184,12 @@ describe("multi-factor", () => {
 
     // Old backup codes were invalidated by regeneration.
     const gated = await handler(
-      jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
+      authRequest("password", { email: "2fa@example.com", password: PW }),
     );
-    const gatedBody = await jsonBody(gated, SecondFactorBody);
+    const gatedBody = await authBody(gated, SecondFactorBody);
     assert(gatedBody.secondFactor !== undefined, "sign-in is gated on the second factor");
     const staleCode = await handler(
-      jsonRequest("/multi-factor/verify-backup-code", {
+      authRequest("verify-backup-code", {
         token: gatedBody.secondFactor.token,
         code: enrollment.backupCodes[0],
       }),
@@ -2146,9 +2209,9 @@ describe("multi-factor", () => {
     expect(await disable.json()).toEqual({ status: true });
 
     const after = await handler(
-      jsonRequest("/sign-in", { email: "2fa@example.com", password: PW }),
+      authRequest("password", { email: "2fa@example.com", password: PW }),
     );
-    expect(after.status).toBe(200);
+    expect(after.status).toBe(201);
     expect(after.headers.get("set-cookie")).toContain("conduit_session=");
   });
 });
@@ -2202,37 +2265,31 @@ describe("HTTP username sign-in", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
     // Create the account (email/password) and register a username for it.
-    const up = await handler(jsonRequest("/sign-up", { email: "u@example.com", password: PW }));
-    const user = (await jsonBody(up, UserIdBody)).user;
+    const up = await handler(authRequest("sign-up", { email: "u@example.com", password: PW }));
+    const user = (await authBody(up, UserIdBody)).user;
     fixture.registerUsername(user.id, "cooluser");
 
-    const res = await handler(
-      jsonRequest("/sign-in/username", { username: "cooluser", password: PW }),
-    );
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("username", { username: "cooluser", password: PW }));
+    expect(res.status).toBe(201);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
   });
 
   it("returns 401 for a wrong password or unknown username", async () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
-    const up = await handler(jsonRequest("/sign-up", { email: "u2@example.com", password: PW }));
-    const user = (await jsonBody(up, UserIdBody)).user;
+    const up = await handler(authRequest("sign-up", { email: "u2@example.com", password: PW }));
+    const user = (await authBody(up, UserIdBody)).user;
     fixture.registerUsername(user.id, "someone");
 
-    const wrong = await handler(
-      jsonRequest("/sign-in/username", { username: "someone", password: "nope" }),
-    );
+    const wrong = await handler(authRequest("username", { username: "someone", password: "nope" }));
     expect(wrong.status).toBe(401);
-    const unknown = await handler(
-      jsonRequest("/sign-in/username", { username: "ghost", password: PW }),
-    );
+    const unknown = await handler(authRequest("username", { username: "ghost", password: PW }));
     expect(unknown.status).toBe(401);
   });
 
   it("returns 404 when username sign-in is not configured", async () => {
     const handler = handlerFor(makeFixture(), { features: false });
-    const res = await handler(jsonRequest("/sign-in/username", { username: "x", password: PW }));
+    const res = await handler(authRequest("username", { username: "x", password: PW }));
     expect(res.status).toBe(404);
   });
 });
@@ -2243,19 +2300,17 @@ describe("HTTP phone OTP", () => {
     const handler = handlerFor(fixture, { features: true });
 
     const send = await handler(
-      jsonRequest("/phone-otp/send", { phoneNumber: "+15551234567", purpose: "sign-in" }),
+      authRequest("send-phone-otp", { phoneNumber: "+15551234567", purpose: "sign-in" }),
     );
-    expect(send.status).toBe(200);
-    expect(await send.json()).toEqual({ status: true });
+    expect(send.status).toBe(202);
+    expect(await send.text()).toBe("");
     expect(fixture.sentPhoneOtps).toHaveLength(1);
     const [sent] = fixture.sentPhoneOtps;
     assert(sent !== undefined);
     const otp = sent.otp;
 
-    const signIn = await handler(
-      jsonRequest("/sign-in/phone-otp", { phoneNumber: "+15551234567", otp }),
-    );
-    expect(signIn.status).toBe(200);
+    const signIn = await handler(authRequest("phone-otp", { phoneNumber: "+15551234567", otp }));
+    expect(signIn.status).toBe(201);
     const sid = sessionIdFromSetCookie(signIn.headers.get("set-cookie"));
 
     const sess = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
@@ -2277,10 +2332,10 @@ describe("HTTP phone OTP", () => {
   it("rejects a wrong OTP with 400", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
     await handler(
-      jsonRequest("/phone-otp/send", { phoneNumber: "+15550000000", purpose: "sign-in" }),
+      authRequest("send-phone-otp", { phoneNumber: "+15550000000", purpose: "sign-in" }),
     );
     const res = await handler(
-      jsonRequest("/sign-in/phone-otp", { phoneNumber: "+15550000000", otp: "000000" }),
+      authRequest("phone-otp", { phoneNumber: "+15550000000", otp: "000000" }),
     );
     expect(res.status).toBe(400);
   });
@@ -2288,7 +2343,7 @@ describe("HTTP phone OTP", () => {
   it("returns 404 when phone OTP is not configured", async () => {
     const handler = handlerFor(makeFixture(), { features: false });
     const res = await handler(
-      jsonRequest("/phone-otp/send", { phoneNumber: "+15551234567", purpose: "sign-in" }),
+      authRequest("send-phone-otp", { phoneNumber: "+15551234567", purpose: "sign-in" }),
     );
     expect(res.status).toBe(404);
   });
@@ -2309,25 +2364,25 @@ describe("passwordless send within the resend cooldown", () => {
     {
       flow: "magic link sign-in",
       disableSignUp: true,
-      path: "/magic-link/send",
+      path: "send-magic-link",
       payload: (email: string, _phone: string) => ({ email }),
     },
     {
       flow: "email OTP sign-in",
       disableSignUp: true,
-      path: "/email-otp/send",
+      path: "send-email-otp",
       payload: (email: string, _phone: string) => ({ email, purpose: "sign-in" }),
     },
     {
       flow: "email OTP forget-password",
       disableSignUp: false,
-      path: "/email-otp/send",
+      path: "send-email-otp",
       payload: (email: string, _phone: string) => ({ email, purpose: "forget-password" }),
     },
     {
       flow: "phone OTP sign-in",
       disableSignUp: true,
-      path: "/phone-otp/send",
+      path: "send-phone-otp",
       payload: (_email: string, phoneNumber: string) => ({ phoneNumber, purpose: "sign-in" }),
     },
   ] as const;
@@ -2339,23 +2394,23 @@ describe("passwordless send within the resend cooldown", () => {
       const handler = handlerFor(fixture, { features: true });
 
       const up = await handler(
-        jsonRequest("/sign-up", { email: "member@example.com", password: PW }),
+        authRequest("sign-up", { email: "member@example.com", password: PW }),
       );
-      expect(up.status).toBe(200);
-      const user = (await jsonBody(up, UserIdBody)).user;
+      expect(up.status).toBe(201);
+      const user = (await authBody(up, UserIdBody)).user;
       fixture.registerPhone(user.id, "+15557770001");
       const sentBefore =
         fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length;
 
       const twice = async (email: string, phoneNumber: string) => [
-        await observe(await handler(jsonRequest(path, payload(email, phoneNumber)))),
-        await observe(await handler(jsonRequest(path, payload(email, phoneNumber)))),
+        await observe(await handler(authRequest(path, payload(email, phoneNumber)))),
+        await observe(await handler(authRequest(path, payload(email, phoneNumber)))),
       ];
       const known = await twice("member@example.com", "+15557770001");
       const unknown = await twice("missing@example.com", "+15557770002");
 
       expect(unknown).toEqual(known);
-      expect(known.map((response) => response.status)).toEqual([200, 429]);
+      expect(known.map((response) => response.status)).toEqual([202, 429]);
       // Only the account holder was sent anything.
       expect(
         fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length,
@@ -2389,15 +2444,15 @@ describe("passwordless verify where send hides the account", () => {
   const flows = [
     {
       flow: "email OTP sign-in",
-      send: "/email-otp/send",
-      verify: "/sign-in/email-otp",
+      send: "send-email-otp",
+      verify: "email-otp",
       sendPayload: (email: string, _phone: string) => ({ email, purpose: "sign-in" }),
       verifyPayload: (email: string, _phone: string) => ({ email, otp: wrongCode }),
     },
     {
       flow: "phone OTP sign-in",
-      send: "/phone-otp/send",
-      verify: "/sign-in/phone-otp",
+      send: "send-phone-otp",
+      verify: "phone-otp",
       sendPayload: (_email: string, phoneNumber: string) => ({ phoneNumber, purpose: "sign-in" }),
       verifyPayload: (_email: string, phoneNumber: string) => ({ phoneNumber, otp: wrongCode }),
     },
@@ -2407,11 +2462,9 @@ describe("passwordless verify where send hides the account", () => {
   const setUp = async (disableSignUp: boolean) => {
     const fixture = makeFixture({ passwordless: { disableSignUp } });
     const handler = handlerFor(fixture, { features: true });
-    const up = await handler(
-      jsonRequest("/sign-up", { email: "member@example.com", password: PW }),
-    );
-    expect(up.status).toBe(200);
-    const user = (await jsonBody(up, UserIdBody)).user;
+    const up = await handler(authRequest("sign-up", { email: "member@example.com", password: PW }));
+    expect(up.status).toBe(201);
+    const user = (await authBody(up, UserIdBody)).user;
     fixture.registerPhone(user.id, "+15557770001");
     return { fixture, handler };
   };
@@ -2426,7 +2479,7 @@ describe("passwordless verify where send hides the account", () => {
     const steps: Array<Awaited<ReturnType<typeof observe>>> = [];
     if (address.send) {
       steps.push(
-        await observe(await handler(jsonRequest(send, sendPayload(address.email, address.phone)))),
+        await observe(await handler(authRequest(send, sendPayload(address.email, address.phone)))),
       );
     }
     if (sequence === "expired code") {
@@ -2437,17 +2490,16 @@ describe("passwordless verify where send hides the account", () => {
       await previous;
       steps.push(
         await observe(
-          await handler(jsonRequest(verify, verifyPayload(address.email, address.phone))),
+          await handler(authRequest(verify, verifyPayload(address.email, address.phone))),
         ),
       );
     });
     return steps;
   };
 
+  /** The message of a JSON:API error document: its first error's `detail`. */
   const messageOf = (response: { readonly body: string }) =>
-    Schema.decodeUnknownSync(Schema.Struct({ message: Schema.optional(Schema.String) }))(
-      parseJson(response.body),
-    ).message;
+    Schema.decodeUnknownSync(ErrorDocumentBody)(parseJson(response.body)).errors[0]?.detail;
 
   it.each(flows.flatMap((flow) => verifySequences.map((sequence) => ({ ...flow, sequence }))))(
     "answers $sequence alike for every address: $flow (disableSignUp: true)",
@@ -2472,7 +2524,7 @@ describe("passwordless verify where send hides the account", () => {
 
       expect(unknown).toEqual(known);
       expect(unrequested).toEqual(known.slice(1));
-      expect(known[0]?.status).toBe(200);
+      expect(known[0]?.status).toBe(202);
       expect(known.slice(1).map((response) => [response.status, messageOf(response)])).toEqual(
         known.slice(1).map(() => [400, "Invalid or expired OTP"]),
       );
@@ -2507,8 +2559,8 @@ describe("passwordless verify where send hides the account", () => {
 describe("HTTP anonymous sign-in", () => {
   it("creates a guest user + session and returns 404 when unconfigured", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const res = await handler(jsonRequest("/sign-in/anonymous", undefined));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("anonymous"));
+    expect(res.status).toBe(201);
     const sid = sessionIdFromSetCookie(res.headers.get("set-cookie"));
 
     const sess = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
@@ -2529,7 +2581,7 @@ describe("HTTP anonymous sign-in", () => {
 
   it("returns 404 when anonymous sign-in is not configured", async () => {
     const handler = handlerFor(makeFixture(), { features: false });
-    const res = await handler(jsonRequest("/sign-in/anonymous", undefined));
+    const res = await handler(authRequest("anonymous"));
     expect(res.status).toBe(404);
   });
 });
@@ -2759,15 +2811,15 @@ describe("HTTP multi-session", () => {
     const handler = handlerFor(makeFixture(), { multiSession: { maximumSessions: 5 } });
 
     // Sign in account A.
-    const a = await handler(jsonRequest("/sign-up", { email: "a@example.com", password: PW }));
+    const a = await handler(authRequest("sign-up", { email: "a@example.com", password: PW }));
     const sidA = requireSetCookie(a, "conduit_session");
     const multiA = requireSetCookie(a, "conduit_session_multi");
     expect(multiA).toBe(sidA);
 
     // Sign in account B, carrying account A's device list.
     const b = await handler(
-      jsonRequest(
-        "/sign-up",
+      authRequest(
+        "sign-up",
         { email: "b@example.com", password: PW },
         { cookie: `conduit_session_multi=${multiA}` },
       ),
@@ -2825,8 +2877,8 @@ describe("HTTP multi-session", () => {
       async (previous, email) => {
         await previous;
         const res = await handler(
-          jsonRequest(
-            "/sign-up",
+          authRequest(
+            "sign-up",
             { email, password: PW },
             { cookie: `conduit_session_multi=${multi}` },
           ),
@@ -2868,8 +2920,8 @@ describe("rememberMe cookie behaviour", () => {
   it("sign-in without rememberMe emits a persistent cookie with Expires", async () => {
     const handler = handlerFor();
     await signUp(handler, "a@b.com");
-    const res = await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("password", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(201);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeDefined();
   });
@@ -2878,9 +2930,9 @@ describe("rememberMe cookie behaviour", () => {
     const handler = handlerFor();
     await signUp(handler, "a@b.com");
     const res = await handler(
-      jsonRequest("/sign-in", { email: "a@b.com", password: PW, rememberMe: true }),
+      authRequest("password", { email: "a@b.com", password: PW, rememberMe: true }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeDefined();
   });
@@ -2889,9 +2941,9 @@ describe("rememberMe cookie behaviour", () => {
     const handler = handlerFor();
     await signUp(handler, "a@b.com");
     const res = await handler(
-      jsonRequest("/sign-in", { email: "a@b.com", password: PW, rememberMe: false }),
+      authRequest("password", { email: "a@b.com", password: PW, rememberMe: false }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeUndefined();
     expect(directives["max-age"]).toBeUndefined();
@@ -2899,8 +2951,8 @@ describe("rememberMe cookie behaviour", () => {
 
   it("sign-up always emits a persistent cookie regardless of rememberMe", async () => {
     const handler = handlerFor();
-    const res = await handler(jsonRequest("/sign-up", { email: "b@b.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("sign-up", { email: "b@b.com", password: PW }));
+    expect(res.status).toBe(201);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeDefined();
   });
@@ -2909,15 +2961,15 @@ describe("rememberMe cookie behaviour", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
 
-    const up = await handler(jsonRequest("/sign-up", { email: "u@b.com", password: PW }));
-    expect(up.status).toBe(200);
-    const userId = (await jsonBody(up, UserIdBody)).user.id;
+    const up = await handler(authRequest("sign-up", { email: "u@b.com", password: PW }));
+    expect(up.status).toBe(201);
+    const userId = (await authBody(up, UserIdBody)).user.id;
     fixture.registerUsername(userId, "testuser");
 
     const res = await handler(
-      jsonRequest("/sign-in/username", { username: "testuser", password: PW, rememberMe: false }),
+      authRequest("username", { username: "testuser", password: PW, rememberMe: false }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeUndefined();
     expect(directives["max-age"]).toBeUndefined();
@@ -2927,15 +2979,15 @@ describe("rememberMe cookie behaviour", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
 
-    const up = await handler(jsonRequest("/sign-up", { email: "u2@b.com", password: PW }));
-    expect(up.status).toBe(200);
-    const userId = (await jsonBody(up, UserIdBody)).user.id;
+    const up = await handler(authRequest("sign-up", { email: "u2@b.com", password: PW }));
+    expect(up.status).toBe(201);
+    const userId = (await authBody(up, UserIdBody)).user.id;
     fixture.registerUsername(userId, "testuser2");
 
     const res = await handler(
-      jsonRequest("/sign-in/username", { username: "testuser2", password: PW, rememberMe: true }),
+      authRequest("username", { username: "testuser2", password: PW, rememberMe: true }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeDefined();
   });
@@ -2948,9 +3000,9 @@ describe("rememberMe cookie behaviour", () => {
 describe("bearer mode", () => {
   it("opt-in: sign-in without x-use-bearer does NOT emit set-auth-token", async () => {
     const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
-    await handler(jsonRequest("/sign-up", { email: "bearer@test.com", password: PW }));
-    const res = await handler(jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }));
-    expect(res.status).toBe(200);
+    await handler(authRequest("sign-up", { email: "bearer@test.com", password: PW }));
+    const res = await handler(authRequest("password", { email: "bearer@test.com", password: PW }));
+    expect(res.status).toBe(201);
     expect(res.headers.get(BEARER_TOKEN_HEADER)).toBeNull();
     // Cookie still set in opt-in mode when x-use-bearer absent
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
@@ -2958,11 +3010,11 @@ describe("bearer mode", () => {
 
   it("opt-in: sign-in with x-use-bearer: 1 emits set-auth-token header", async () => {
     const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
-    await handler(jsonRequest("/sign-up", { email: "bearer@test.com", password: PW }));
+    await handler(authRequest("sign-up", { email: "bearer@test.com", password: PW }));
     const res = await handler(
-      jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
+      authRequest("password", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(token)).toBe(true);
     expect(token?.length).toBeGreaterThan(0);
@@ -2970,11 +3022,11 @@ describe("bearer mode", () => {
 
   it("opt-in: token from set-auth-token can be used as Authorization: Bearer", async () => {
     const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
-    await handler(jsonRequest("/sign-up", { email: "bearer@test.com", password: PW }));
+    await handler(authRequest("sign-up", { email: "bearer@test.com", password: PW }));
     const signInRes = await handler(
-      jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
+      authRequest("password", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
     );
-    expect(signInRes.status).toBe(200);
+    expect(signInRes.status).toBe(201);
     const rawToken = signInRes.headers.get(BEARER_TOKEN_HEADER);
     assert(rawToken !== null, "opt-in sign-in sets the bearer token header");
 
@@ -2989,9 +3041,9 @@ describe("bearer mode", () => {
   it("opt-in: sign-up with x-use-bearer: 1 also emits set-auth-token", async () => {
     const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
     const res = await handler(
-      jsonRequest("/sign-up", { email: "bearer2@test.com", password: PW }, { "x-use-bearer": "1" }),
+      authRequest("sign-up", { email: "bearer2@test.com", password: PW }, { "x-use-bearer": "1" }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(token)).toBe(true);
     expect(token?.length).toBeGreaterThan(0);
@@ -3001,9 +3053,9 @@ describe("bearer mode", () => {
     const handler = handlerFor(makeFixture(), { bearerMode: true });
 
     const signUpRes = await handler(
-      jsonRequest("/sign-up", { email: "always@test.com", password: PW }),
+      authRequest("sign-up", { email: "always@test.com", password: PW }),
     );
-    expect(signUpRes.status).toBe(200);
+    expect(signUpRes.status).toBe(201);
     const signUpToken = signUpRes.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(signUpToken)).toBe(true);
     expect(signUpToken?.length).toBeGreaterThan(0);
@@ -3019,8 +3071,8 @@ describe("bearer mode", () => {
 
   it("always mode: set-auth-token is present without x-use-bearer header", async () => {
     const handler = handlerFor(makeFixture(), { bearerMode: true });
-    const res = await handler(jsonRequest("/sign-up", { email: "always2@test.com", password: PW }));
-    expect(res.status).toBe(200);
+    const res = await handler(authRequest("sign-up", { email: "always2@test.com", password: PW }));
+    expect(res.status).toBe(201);
     // No x-use-bearer sent — header still present in "always" mode
     expect(res.headers.get(BEARER_TOKEN_HEADER)).not.toBeNull();
   });
@@ -3028,9 +3080,9 @@ describe("bearer mode", () => {
   it("bearerMode false (default): no set-auth-token header even with x-use-bearer", async () => {
     const handler = handlerFor(makeFixture());
     const res = await handler(
-      jsonRequest("/sign-up", { email: "nobear@test.com", password: PW }, { "x-use-bearer": "1" }),
+      authRequest("sign-up", { email: "nobear@test.com", password: PW }, { "x-use-bearer": "1" }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(res.headers.get(BEARER_TOKEN_HEADER)).toBeNull();
   });
 
@@ -3039,17 +3091,15 @@ describe("bearer mode", () => {
     const handler = handlerFor(fixture, { features: true, bearerMode: "opt-in" });
 
     // Register user
-    await handler(jsonRequest("/sign-up", { email: "ml@test.com", password: PW }));
+    await handler(authRequest("sign-up", { email: "ml@test.com", password: PW }));
     // Send magic link
-    await handler(jsonRequest("/magic-link/send", { email: "ml@test.com" }));
+    await handler(authRequest("send-magic-link", { email: "ml@test.com" }));
     const token = fixture.sentMagicLinkTokens.at(-1);
     assert(token !== undefined);
 
     // Verify with x-use-bearer
-    const verifyRes = await handler(
-      jsonRequest("/magic-link/verify", { token }, { "x-use-bearer": "1" }),
-    );
-    expect(verifyRes.status).toBe(200);
+    const verifyRes = await handler(authRequest("magic-link", { token }, { "x-use-bearer": "1" }));
+    expect(verifyRes.status).toBe(201);
     const bearerToken = verifyRes.headers.get(BEARER_TOKEN_HEADER);
     expect(Predicate.isString(bearerToken)).toBe(true);
     expect(bearerToken?.length).toBeGreaterThan(0);
@@ -3067,7 +3117,7 @@ describe("bearer mode", () => {
 describe("client IP at the HTTP boundary", () => {
   // One sign-in attempt per window per resolved client address.
   const signInOncePerHour = {
-    rules: [{ path: "/sign-in", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
+    rules: [{ path: "/sessions", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
   };
 
   // Builds the limited handler and returns every limiter key it touched, so a
@@ -3076,6 +3126,7 @@ describe("client IP at the HTTP boundary", () => {
     options: {
       readonly trustedProxy?: TrustedProxyConfig | undefined;
       readonly allowMissingClientIp?: boolean | undefined;
+      readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
     } = {},
   ): { readonly handler: Handler; readonly keys: ReadonlySet<string> } => {
     const entries = new Map<string, RateLimitEntry>();
@@ -3113,7 +3164,7 @@ describe("client IP at the HTTP boundary", () => {
     const handler = HttpServer.make({
       services,
       cookie: { secure: false },
-      ipRateLimit: signInOncePerHour,
+      ipRateLimit: options.ipRateLimit ?? signInOncePerHour,
       trustedProxy: options.trustedProxy,
       allowMissingClientIp: options.allowMissingClientIp,
     }).handler;
@@ -3124,8 +3175,8 @@ describe("client IP at the HTTP boundary", () => {
   // the response status only shows whether the attempt was refused.
   const attempt = (handler: Handler, cfConnectingIp: string, xForwardedFor: string) =>
     handler(
-      jsonRequest(
-        "/sign-in",
+      authRequest(
+        "password",
         { email: "nobody@example.com", password: PW },
         {
           "cf-connecting-ip": cfConnectingIp,
@@ -3142,6 +3193,28 @@ describe("client IP at the HTTP boundary", () => {
     expect((await attempt(handler, "203.0.113.2", "7.7.7.7")).status).not.toBe(429);
     // The same visitor, with a different forged X-Forwarded-For, is still limited.
     expect((await attempt(handler, "203.0.113.1", "8.8.8.8")).status).toBe(429);
+  });
+
+  it("counts a pattern rule in one bucket across every path it matches", async () => {
+    // Were the bucket keyed on the path, a path that varies (an id in it)
+    // would earn a fresh bucket on every request.
+    const { handler, keys } = limitedHandler({
+      trustedProxy: ClientIP.cloudflare,
+      ipRateLimit: {
+        rules: [
+          { path: /^\/(sessions|users)$/, methods: ["POST"], maxRequests: 1, windowMs: HOUR },
+        ],
+      },
+    });
+    const from = { "cf-connecting-ip": "203.0.113.30" };
+
+    const signIn = await handler(
+      authRequest("password", { email: "nobody@example.com", password: PW }, from),
+    );
+    expect(signIn.status).not.toBe(429);
+    const signUp = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }, from));
+    expect(signUp.status).toBe(429);
+    expect([...keys].filter((key) => key.includes("203.0.113.30"))).toHaveLength(1);
   });
 
   it("sends Retry-After in whole seconds, rounded up, with a matching body field", async () => {
@@ -3177,7 +3250,7 @@ describe("client IP at the HTTP boundary", () => {
     await Arr.reduce(Arr.range(1, 2), Promise.resolve(), async (previous) => {
       await previous;
       const res = await handler(
-        jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+        authRequest("password", { email: "nobody@example.com", password: PW }),
       );
       expect(res.status).toBe(429);
       expect(await res.json()).toEqual({
@@ -3199,7 +3272,7 @@ describe("client IP at the HTTP boundary", () => {
     expect((await attempt(handler, "not-an-ip", "6.6.6.6")).status).toBe(429);
     expect((await attempt(handler, "203.0.113.1, 198.51.100.7", "6.6.6.6")).status).toBe(429);
     const bare = await handler(
-      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(bare.status).toBe(429);
     expect([...keys]).toEqual([]);
@@ -3309,8 +3382,8 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     });
 
     const res = await handler(
-      jsonRequest(
-        "/sign-in",
+      authRequest(
+        "password",
         { email: "nobody@example.com", password: PW },
         { "cf-connecting-ip": "203.0.113.5" },
       ),
@@ -3326,7 +3399,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     });
 
     const res = await handler(
-      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(res.status).toBe(401);
   });
@@ -3347,7 +3420,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     });
     expect(builds).toBe(1);
     const res = await handler(
-      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(res.status).toBe(401);
     expect(builds).toBe(1);
@@ -3385,7 +3458,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     });
 
     await expect(
-      handler(jsonRequest("/sign-in", { email: "nobody@example.com", password: PW })),
+      handler(authRequest("password", { email: "nobody@example.com", password: PW })),
     ).rejects.toBeInstanceOf(RateLimiterConfigError);
   });
 });
@@ -3410,8 +3483,8 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
     });
     const signIn = (ip: string) =>
       handler(
-        jsonRequest(
-          "/sign-in",
+        authRequest(
+          "password",
           { email: "nobody@example.com", password: PW },
           { "cf-connecting-ip": ip },
         ),
@@ -3431,11 +3504,16 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
     });
 
     const res = await handler(
-      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({
-      message: "Client address unavailable; this request cannot be rate limited",
+      errors: [
+        {
+          status: "429",
+          detail: "Client address unavailable; this request cannot be rate limited",
+        },
+      ],
     });
   });
 });
@@ -3473,11 +3551,16 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
   it("refuses a sign-in through IPRateLimitPlugin with 429 when no ClientIP is in scope", async () => {
     const handler = handBuiltHandler(makeFixture({ hooks: ipRateLimitHooks() }).services);
     const res = await handler(
-      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({
-      message: "No ClientIP service in scope; this request cannot be rate limited",
+      errors: [
+        {
+          status: "429",
+          detail: "No ClientIP service in scope; this request cannot be rate limited",
+        },
+      ],
     });
   });
 });
@@ -3547,7 +3630,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     // The fiber runs on after make returns, and the handler is served beside it.
     const res = await handler(
-      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(res.status).toBe(401);
     const running = spins;
@@ -3604,7 +3687,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     // The startup check runs when the build finishes, and fails the handler's build.
     await expect(
-      handler(jsonRequest("/sign-in", { email: "nobody@example.com", password: PW })),
+      handler(authRequest("password", { email: "nobody@example.com", password: PW })),
     ).rejects.toBeInstanceOf(RateLimiterConfigError);
     await dispose();
   });
@@ -3873,7 +3956,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
   const rejectionOf = (promise: Promise<HttpServer.AuthWebHandler>): Promise<Error> =>
     promise.then(() => expect.unreachable("expected a rejection"), thrownError);
 
-  const signIn = () => jsonRequest("/sign-in", { email: "nobody@example.com", password: PW });
+  const signIn = () => authRequest("password", { email: "nobody@example.com", password: PW });
 
   // `ipRateLimit` with no RateLimiter in services: the startup check refuses it.
   const limitWithoutLimiter = {
@@ -4113,8 +4196,8 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     });
     expect(builds).toBe(1);
     const res = await handler(
-      jsonRequest(
-        "/sign-in",
+      authRequest(
+        "password",
         { email: "nobody@example.com", password: PW },
         { "cf-connecting-ip": "203.0.113.5" },
       ),
@@ -4230,7 +4313,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
 });
 
 describe("make with strict (#416)", () => {
-  const signIn = () => jsonRequest("/sign-in", { email: "nobody@example.com", password: PW });
+  const signIn = () => authRequest("password", { email: "nobody@example.com", password: PW });
 
   // Services whose build has not finished when make has run it synchronously.
   // Each settles without a timer, so the fallback below finishes deterministically.

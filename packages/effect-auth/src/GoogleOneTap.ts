@@ -12,12 +12,12 @@
  * To prevent a captured id_token from being replayed, this module enforces a
  * server-side nonce:
  *
- * 1. Call `createNonce()` (or `GET /sign-in/google-one-tap/nonce`) before
+ * 1. Call `createNonce()` (or `POST /google-one-tap-nonces`) before
  *    rendering the One Tap prompt. Pass the returned nonce as the `data-nonce`
  *    attribute to Google's One Tap library.
  * 2. Google embeds the nonce (SHA-256 hex-hashed per spec) in the id_token's
  *    `nonce` claim. Pass the **unhashed** nonce alongside the credential when
- *    calling `signIn` (or `POST /sign-in/google-one-tap`).
+ *    calling `signIn` (or `POST /sessions` with a `google-one-tap` credential).
  * 3. `signIn` verifies that the stored nonce matches and consumes it — a
  *    replayed credential is rejected even if it is otherwise still valid.
  *

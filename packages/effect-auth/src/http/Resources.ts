@@ -131,3 +131,50 @@ export const Identifier = Resource.make("identifiers", {
  * @category resources
  */
 export type Identifier = typeof Identifier.Type;
+
+/**
+ * A pending second factor (`second-factor-challenges`): what `POST /sessions`
+ * answers, with `202`, for a user enrolled in multi-factor authentication.
+ * The id is the challenge token, presented again (as the `challenge`
+ * relationship) to `POST /second-factor-challenges/verifications` with a TOTP
+ * or backup code to obtain the session. It is created only by a sign-in, so no
+ * attribute is writable.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export const SecondFactorChallenge = Resource.make("second-factor-challenges", {
+  id: Schema.String,
+  attributes: {
+    expiresAt: instant,
+  },
+});
+
+/**
+ * The decoded `second-factor-challenges` resource object.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export type SecondFactorChallenge = typeof SecondFactorChallenge.Type;
+
+/**
+ * A Google One Tap nonce (`google-one-tap-nonces`): the id is the nonce to pass
+ * to Google's One Tap library (`data-nonce`), then back in a `google-one-tap`
+ * sign-in credential.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export const GoogleOneTapNonce = Resource.make("google-one-tap-nonces", {
+  id: Schema.String,
+  attributes: {},
+});
+
+/**
+ * The decoded `google-one-tap-nonces` resource object.
+ *
+ * @since 0.2.0
+ * @category resources
+ */
+export type GoogleOneTapNonce = typeof GoogleOneTapNonce.Type;

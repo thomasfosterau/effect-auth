@@ -110,10 +110,20 @@ export interface CredentialActionOptions<Fields> {
    * the in-process handler.
    */
   readonly fetch: (request: Request) => Promise<Response>;
-  /** The auth endpoint to POST to, as an absolute URL (for example `https://auth.internal/api/auth/sign-in`). */
+  /** The auth endpoint to POST to, as an absolute URL (for example `https://auth.internal/api/auth/sessions`). */
   readonly endpoint: string;
-  /** The JSON body to send, built from the submitted form. */
+  /**
+   * The body to send, built from the submitted form: for the auth handler's
+   * credential flows, a JSON:API document (`POST /sessions` takes a `sessions`
+   * document whose `credential` attribute names the method).
+   */
   readonly body: (form: FormData) => Schema.Json;
+  /**
+   * The body's media type. Default `application/vnd.api+json`, what the auth
+   * handler's credential flows accept; pass `application/json` for an endpoint
+   * that takes plain JSON.
+   */
+  readonly contentType?: string | undefined;
   /** The form fields to echo back on failure (never the password). */
   readonly fields: (form: FormData) => Fields;
   /** The query parameter that carries the post-sign-in target. Default `redirect`. */
@@ -230,7 +240,7 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
 /**
  * Build a form action for a credential flow.
  *
- * The action POSTs the form to `endpoint` as JSON, forwarding the browser's
+ * The action POSTs the form to `endpoint` as a JSON:API document, forwarding the browser's
  * `Origin`, `User-Agent` and `X-Forwarded-For` so the handler's CSRF check and
  * rate limits see the real client. On a 2xx it relays the `Set-Cookie`
  * headers and redirects (303) to the validated target. Otherwise it returns
@@ -251,10 +261,19 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
  *
  * const signIn = credentialAction(kit, {
  *   fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
- *   endpoint: "https://auth.internal/api/auth/sign-in",
+ *   endpoint: "https://auth.internal/api/auth/sessions",
+ *   // Sign in with a password credential: a `sessions` document.
  *   body: (form) => ({
- *     email: String(form.get("email") ?? ""),
- *     password: String(form.get("password") ?? ""),
+ *     data: {
+ *       type: "sessions",
+ *       attributes: {
+ *         credential: {
+ *           method: "password",
+ *           email: String(form.get("email") ?? ""),
+ *           password: String(form.get("password") ?? ""),
+ *         },
+ *       },
+ *     },
  *   }),
  *   fields: (form) => ({ email: String(form.get("email") ?? "") }),
  *   fallback: "/",
@@ -286,7 +305,9 @@ export const credentialAction =
   <Failure, Fields>(kit: Kit<Failure, Fields>, options: CredentialActionOptions<Fields>) =>
   async (event: ActionEvent): Promise<Failure> => {
     const form = await event.request.formData();
-    const forwarded = new Headers({ "content-type": "application/json" });
+    const forwarded = new Headers({
+      "content-type": options.contentType ?? "application/vnd.api+json",
+    });
     Arr.forEach(["origin", "user-agent", "x-forwarded-for", "cf-connecting-ip"], (name) => {
       const value = event.request.headers.get(name);
       if (value !== null) forwarded.set(name, value);

@@ -46,7 +46,9 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
 ): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
-const NonceBody = Schema.Struct({ nonce: Schema.String });
+const NonceDocument = Schema.Struct({
+  data: Schema.Struct({ type: Schema.String, id: Schema.String }),
+});
 
 const b64 = (value: Schema.Json): string =>
   Buffer.from(encodeJson(value), "utf8").toString("base64url");
@@ -521,46 +523,57 @@ const makeHttpFixture = () => {
   };
 };
 
-const get = (path: string): Request => new Request(`http://test${path}`, { method: "GET" });
+/** `POST /google-one-tap-nonces`: mint a nonce (#205). */
+const nonceRequest = (): Request =>
+  new Request("http://test/google-one-tap-nonces", { method: "POST" });
 
-const post = (path: string, body: Schema.Json): Request =>
-  new Request(`http://test${path}`, {
+/** `POST /sessions` with a `google-one-tap` credential (#205). */
+const signInRequest = (idToken: string, nonce: string): Request =>
+  new Request("http://test/sessions", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: encodeJson(body),
+    headers: { "content-type": "application/vnd.api+json" },
+    body: encodeJson({
+      data: {
+        type: "sessions",
+        attributes: { credential: { method: "google-one-tap", idToken, nonce } },
+      },
+    }),
   });
 
+/** The nonce a `google-one-tap-nonces` document carries as its id. */
+const nonceOf = async (response: Response): Promise<string> =>
+  (await jsonBody(response, NonceDocument)).data.id;
+
 describe("HTTP Google One Tap endpoint", () => {
-  it("GET /sign-in/google-one-tap/nonce returns a nonce", async () => {
+  it("POST /google-one-tap-nonces returns a nonce", async () => {
     const fx = makeHttpFixture();
-    const res = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    expect(res.status).toBe(200);
-    const body = await jsonBody(res, NonceBody);
-    expect(Predicate.isString(body.nonce)).toBe(true);
-    expect(body.nonce.length).toBeGreaterThan(0);
+    const res = await fx.handler(nonceRequest());
+    expect(res.status).toBe(201);
+    const body = await jsonBody(res, NonceDocument);
+    expect(body.data.type).toBe("google-one-tap-nonces");
+    expect(Predicate.isString(body.data.id)).toBe(true);
+    expect(body.data.id.length).toBeGreaterThan(0);
   });
 
   it("signs in with a valid credential + nonce and sets cookies", async () => {
     const fx = makeHttpFixture();
 
     // Obtain a server-issued nonce
-    const nonceRes = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    const { nonce } = await jsonBody(nonceRes, NonceBody);
+    const nonce = await nonceOf(await fx.handler(nonceRequest()));
 
     const res = await withJwks(() =>
-      fx.handler(
-        post("/sign-in/google-one-tap", {
-          credential: signCredential(validClaims({ nonce: hashNonce(nonce) })),
-          nonce,
-        }),
-      ),
+      fx.handler(signInRequest(signCredential(validClaims({ nonce: hashNonce(nonce) })), nonce)),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const body = await jsonBody(
       res,
-      Schema.Struct({ user: Schema.Struct({ email: Schema.String }) }),
+      Schema.Struct({
+        included: Schema.Array(
+          Schema.Struct({ attributes: Schema.Struct({ email: Schema.String }) }),
+        ),
+      }),
     );
-    expect(body.user.email).toBe("alice@gmail.test");
+    expect(body.included[0]?.attributes.email).toBe("alice@gmail.test");
     const cookies = res.headers.getSetCookie();
     expect(cookies.some((c) => c.startsWith("conduit_session="))).toBe(true);
     expect(cookies.some((c) => c.startsWith("conduit_session_last_method=google"))).toBe(true);
@@ -568,15 +581,14 @@ describe("HTTP Google One Tap endpoint", () => {
 
   it("answers 401 for an invalid credential", async () => {
     const fx = makeHttpFixture();
-    const nonceRes = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    const { nonce } = await jsonBody(nonceRes, NonceBody);
+    const nonce = await nonceOf(await fx.handler(nonceRequest()));
 
     const res = await withJwks(() =>
       fx.handler(
-        post("/sign-in/google-one-tap", {
-          credential: signCredential(validClaims({ aud: "someone-else", nonce: hashNonce(nonce) })),
+        signInRequest(
+          signCredential(validClaims({ aud: "someone-else", nonce: hashNonce(nonce) })),
           nonce,
-        }),
+        ),
       ),
     );
     expect(res.status).toBe(401);
@@ -584,28 +596,21 @@ describe("HTTP Google One Tap endpoint", () => {
 
   it("answers 401 for a replayed credential (nonce already used)", async () => {
     const fx = makeHttpFixture();
-    const nonceRes = await fx.handler(get("/sign-in/google-one-tap/nonce"));
-    const { nonce } = await jsonBody(nonceRes, NonceBody);
+    const nonce = await nonceOf(await fx.handler(nonceRequest()));
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
     // First sign-in consumes the nonce
-    const first = await withJwks(() =>
-      fx.handler(post("/sign-in/google-one-tap", { credential, nonce })),
-    );
-    expect(first.status).toBe(200);
+    const first = await withJwks(() => fx.handler(signInRequest(credential, nonce)));
+    expect(first.status).toBe(201);
 
     // Replay with the same credential and nonce is rejected
-    const replay = await withJwks(() =>
-      fx.handler(post("/sign-in/google-one-tap", { credential, nonce })),
-    );
+    const replay = await withJwks(() => fx.handler(signInRequest(credential, nonce)));
     expect(replay.status).toBe(401);
   });
 
   it("returns 404 when One Tap is not configured", async () => {
     const fx = makeHttpFixture();
-    const res = await fx.handlerWithoutOneTap(
-      post("/sign-in/google-one-tap", { credential: "x", nonce: "y" }),
-    );
+    const res = await fx.handlerWithoutOneTap(signInRequest("x", "y"));
     expect(res.status).toBe(404);
   });
 });

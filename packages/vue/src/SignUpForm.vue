@@ -33,8 +33,9 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   /**
-   * The `AuthSuccess` the client resolved. Its `needsEmailVerification` flag
-   * says whether a session was created or a verification email was sent.
+   * The `AuthSuccess` the client resolved. `user` is set when a session was
+   * created; without one, `needsEmailVerification` says whether a
+   * verification email was sent.
    */
   success: [result: AuthSuccess];
   /** The thrown cause, normally an `AuthClientError`. */

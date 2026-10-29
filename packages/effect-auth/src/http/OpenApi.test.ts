@@ -40,28 +40,24 @@ const stubServices = (): Layer.Layer<AuthServices> =>
 
 /** Every path the auth contract exposes (kept in sync with `HttpApi.ts`). */
 const EXPECTED_PATHS = [
-  "/sign-up",
-  "/sign-in",
   "/sessions",
   "/sessions/{id}",
   "/identifiers",
   "/identifiers/{id}",
+  "/users",
   "/users/{id}",
+  "/second-factor-challenges/verifications",
+  "/otp-challenges",
+  "/email-verifications",
+  "/email-verifications/redemptions",
+  "/password-resets",
+  "/password-resets/redemptions",
+  "/google-one-tap-nonces",
   "/change-password",
-  "/email-verification/send",
-  "/email-verification/verify",
-  "/password-reset/request",
-  "/password-reset/reset",
-  "/magic-link/send",
-  "/magic-link/verify",
   "/change-email/request",
   "/change-email/confirm",
   "/delete-user/request",
   "/delete-user/confirm",
-  "/email-otp/send",
-  "/sign-in/email-otp",
-  "/sign-in/anonymous",
-  "/sign-in/username",
   "/multi-session/list",
   "/multi-session/set-active",
   "/multi-session/revoke",
@@ -69,13 +65,9 @@ const EXPECTED_PATHS = [
   "/device/token",
   "/device/approve",
   "/device/deny",
-  "/phone-otp/send",
-  "/sign-in/phone-otp",
   "/multi-factor/enable",
   "/multi-factor/confirm",
   "/multi-factor/disable",
-  "/multi-factor/verify-totp",
-  "/multi-factor/verify-backup-code",
   "/multi-factor/regenerate-backup-codes",
   "/organization/create",
   "/organizations",
@@ -130,8 +122,6 @@ const EXPECTED_PATHS = [
   "/.well-known/openid-configuration",
   "/.well-known/oauth-authorization-server",
   "/.well-known/jwks.json",
-  "/sign-in/google-one-tap/nonce",
-  "/sign-in/google-one-tap",
   // SCIM 2.0 provisioning (its own group, mounted under /scim/v2).
   "/scim/v2/Users",
   "/scim/v2/Users/{id}",
@@ -163,22 +153,31 @@ describe("getOpenApiSpec", () => {
   it("documents each error schema under its HTTP status code", () => {
     const spec = getOpenApiSpec();
 
-    const signUp = spec.paths["/sign-up"]?.post?.responses ?? {};
+    // Sign-up and sign-in answer `201` with a session or `202` without one,
+    // and JSON:API's negotiation errors (406 / 415) besides their own.
+    const signUp = spec.paths["/users"]?.post?.responses ?? {};
     expect(Arr.sort(Object.keys(signUp), Order.String)).toEqual([
-      "200",
+      "201",
+      "202",
       "400",
       "403",
+      "406",
       "409",
+      "415",
       "429",
       "500",
     ]);
 
-    const signIn = spec.paths["/sign-in"]?.post?.responses ?? {};
+    const signIn = spec.paths["/sessions"]?.post?.responses ?? {};
     expect(Arr.sort(Object.keys(signIn), Order.String)).toEqual([
-      "200",
+      "201",
+      "202",
       "400",
       "401",
       "403",
+      "404",
+      "406",
+      "415",
       "429",
       "500",
     ]);
@@ -217,7 +216,7 @@ describe("HttpServer.make docs routes", () => {
     expect(jsonRes.headers.get("content-type")).toContain("application/json");
     const doc = Schema.decodeUnknownSync(OpenApiDocument)(await jsonRes.json());
     expect(doc.openapi).toBe("3.1.0");
-    expect(Object.keys(doc.paths)).toContain("/sign-in");
+    expect(Object.keys(doc.paths)).toContain("/sessions");
 
     const refRes = await handler(new Request("http://test/api/auth/reference"));
     expect(refRes.status).toBe(200);
