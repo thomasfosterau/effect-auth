@@ -4429,10 +4429,9 @@ describe("make with strict (#416)", () => {
     expect(logged).not.toContainEqual(expect.stringMatching(/ServicesBuildPendingError/));
   });
 
-  it("is the same class from the http subpath and as Http.ServicesBuildPendingError", () => {
+  it("is the same class from the http subpath and from the root", () => {
     expect(HttpServer.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
     expect(HttpSubpath.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
-    expect(Root.Http.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
     expect(Root.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
   });
 

@@ -160,7 +160,7 @@ directories, each with its own `index.ts` barrel and matching
   `IPRateLimit.ts`, `LastLoginMethod.ts`, `NormalizeEmail.ts`, `RateLimit.ts`
   — first-party Hooks plugins (exported values keep the `*Plugin` suffix,
   e.g. `AuditPlugin`, even though the file names dropped it).
-- **`http/` cluster** (also the `Auth.Http` namespace): `HttpApiSchema.ts`
+- **`http/` cluster** (the `./http` subpath only; not on the root barrel): `HttpApiSchema.ts`
   (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi`
   contract), `HttpServer.ts` (handlers + mountable web handler),
   `HttpClient.ts` (typed Effect client derived from the contract),
@@ -191,12 +191,14 @@ directories, each with its own `index.ts` barrel and matching
   tokens/OTPs, pending multi-factor) over `effect/persistence`
   `KeyValueStore` (in-memory, file system, Redis, …).
 
-Every cluster namespace is also re-exported from the package root (`Auth.Email`,
-`Auth.Http`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
+Every cluster namespace except `http` is also re-exported from the package
+root (`Auth.Email`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
 `Auth.MultiFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
-whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
-`/oauth`, `/password`, `/plugins`, `/multifactor`) exist for
-consumers who want a narrower import.
+whole headless surface; the per-cluster subpaths (`effect-auth/email`,
+`/oauth`, `/password`, `/plugins`, `/multifactor`) exist for consumers who
+want a narrower import. The HTTP tier is published only as the
+`effect-auth/http` subpath (#205), so the root import's module graph never
+reaches `effect/http-api`; `ModuleGraph.test.ts` holds that line.
 
 `effect-auth/testing` is the one subpath with no root namespace: server-side
 test helpers (`runAs`, `runAsViewer`, over `SessionContext`), kept off the

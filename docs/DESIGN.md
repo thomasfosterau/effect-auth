@@ -53,7 +53,7 @@ const app = Effect.gen(function* () {
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
   for flow outcomes; lookups that can legitimately miss return `X | null` from
   stores and surface typed errors from services.
-- **HTTP:** the `AuthApi` contract under `Auth.Http`, one flat `auth` group,
+- **HTTP:** the `AuthApi` contract on the `./http` subpath, one flat `auth` group,
   404-until-configured for optional features, trusted-origin CSRF gate.
 
 ---

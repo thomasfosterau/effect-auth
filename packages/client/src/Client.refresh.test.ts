@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
-import type * as Auth from "@thomasfosterau/effect-auth";
+import type * as Http from "@thomasfosterau/effect-auth/http";
 import { createAuthClient } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
@@ -26,7 +26,7 @@ class FakeBroadcastChannel {
     ch.add(this);
   }
 
-  postMessage(data: { readonly data: Auth.Http.SessionWithUserView | null }): void {
+  postMessage(data: { readonly data: Http.SessionWithUserView | null }): void {
     FakeBroadcastChannel._channels.get(this.name)?.forEach((peer) => {
       if (peer !== this) peer.onmessage?.(new MessageEvent("message", { data }));
     });

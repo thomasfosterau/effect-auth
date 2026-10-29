@@ -1,11 +1,12 @@
 /**
  * Test-only fixture: a fully functional in-memory effect-auth server (the
- * real `Auth.Http.make` handler over in-memory stores) plus a cookie-jar `fetch`
+ * real `Http.make` handler over in-memory stores) plus a cookie-jar `fetch`
  * so the browser-oriented client can be exercised end to end in-process.
  *
  * Published as the `./testing` entry point (`@thomasfosterau/effect-auth-client/testing`).
  */
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 import { Array as Arr, Clock, DateTime, Effect, Layer } from "effect";
 
 const HOUR = 60 * 60 * 1000;
@@ -453,13 +454,13 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Layer.provide(Layer.succeed(Auth.RateLimitStore, rateLimitStore)),
   );
 
-  const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
+  const services: Layer.Layer<Http.AuthServices> = Layer.mergeAll(
     core,
     options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
   );
 
-  const { handler } = Auth.Http.make({
+  const { handler } = Http.make({
     services,
     cookie: { secure: false },
     ...(options.multiSession !== undefined && { multiSession: options.multiSession }),

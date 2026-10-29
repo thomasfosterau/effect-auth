@@ -38,7 +38,7 @@ const scim = ScimService.layer({
 }).pipe(Layer.provide(scimStores));
 ```
 
-Merge `scim` into the layer you hand `Auth.Http.make`. Until you do, every SCIM route answers `404` — the same 404-until-configured rule the rest of the optional modules follow.
+Merge `scim` into the layer you hand `Http.make`. Until you do, every SCIM route answers `404` — the same 404-until-configured rule the rest of the optional modules follow.
 
 `ScimUserStore` is a three-method contract (`create` / `get` / `update`) over the same `User` table everything else uses; declaring its own tag follows the convention `OAuthUserStore`, `MagicLinkUserStore` and `AdminUserStore` already set.
 

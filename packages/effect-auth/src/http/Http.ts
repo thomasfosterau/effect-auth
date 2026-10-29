@@ -1,9 +1,10 @@
 /**
  * HTTP protocol for effect-auth (optional; requires `effect/http-api`).
  *
- * Re-exported from the package root under the `Http` namespace, e.g.
- * `Auth.Http.AuthApi`, `Auth.Http.make`, `Auth.Http.client`.
- * Also available as the `effect-auth/http` subpath export.
+ * Published only as the `@thomasfosterau/effect-auth/http` subpath, never from
+ * the package root, so the headless core stays free of `effect/http-api`:
+ * `import * as Http from "@thomasfosterau/effect-auth/http"`, then
+ * `Http.AuthApi`, `Http.make`, `Http.client`.
  */
 
 /** Wire schemas, views, encoders, and HTTP error types. */

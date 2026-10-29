@@ -23,24 +23,25 @@ The practical consequences are worth internalising before you start:
 | `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                           |
 | `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                              |
 | `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth-sql`, `-drizzle`, `-alchemy`, or your own                       |
-| `auth.handler` (mounted at `/api/auth/*`)        | `(await Auth.Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`   |
+| `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`        |
 | `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /session` over HTTP                           |
 | `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration) |
 | `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                         |
 | `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`   |
 | `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret       |
-| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Auth.Http.makeAsync` (`SessionCookieCache.ts`)                                         |
-| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Auth.Http.makeAsync`                                                    |
+| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Http.makeAsync` (`SessionCookieCache.ts`)                                              |
+| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Http.makeAsync`                                                         |
 | `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth-client`                                                          |
 | `better-auth/react` \| `/svelte` \| `/vue`       | `@thomasfosterau/effect-auth-react` \| `-svelte` \| `-vue` \| `-solid`                                                |
 
 ### Config → layers, concretely
 
-A minimal Better Auth instance with email+password and GitHub becomes a layer graph. Each service asks for its stores; you provide them once, and `Auth.Http.makeAsync` takes the whole thing as `services`:
+A minimal Better Auth instance with email+password and GitHub becomes a layer graph. Each service asks for its stores; you provide them once, and `Http.makeAsync` takes the whole thing as `services`:
 
 ```ts
 import { Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Http from "@thomasfosterau/effect-auth/http";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
 
 const stores = Sql.layer.pipe(Layer.provide(SqlClientLayer));
@@ -56,18 +57,18 @@ const services = Layer.mergeAll(
   Auth.Hooks.Default,
 ).pipe(Layer.provideMerge(stores));
 
-const { handler } = await Auth.Http.makeAsync({
+const { handler } = await Http.makeAsync({
   services,
   prefix: "/api/auth",
   trustedOrigins: ["https://app.example.com"],
 });
 ```
 
-`Auth.Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
+`Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
 
-`services` connects to the database while it builds, so the example uses `Auth.Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter`, for example), so the app fails to start. `Auth.Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
+`services` connects to the database while it builds, so the example uses `Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter`, for example), so the app fails to start. `Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
 
-The set of services `Auth.Http.makeAsync` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
+The set of services `Http.makeAsync` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
 
 ### Plugins vs hooks
 
@@ -155,7 +156,7 @@ Better Auth leaves it to the app to schedule a send outside the response (the `w
 
 - **No client plugins to mirror.** Better Auth requires the client plugin list to match the server's. The effect-auth client exposes every endpoint a browser would call up front — `signUp`, `signIn`, `signOut`, `getSession`, `identifiers`, `magicLink`, `emailOtp`, `phoneOtp`, `multiFactor`, `organization`, `apiKeys`, `admin`, `sso`, `oidc`, `device`, `googleOneTap`, `multiSession`, `changeEmail`, `deleteUser` — and endpoints whose server layer is absent simply reject with `404`. `extend()` is there for your own additions.
 - **Framework bindings are separate packages**, not subpath imports: `@thomasfosterau/effect-auth-react`, `-svelte`, `-vue`, `-solid`, each built on the vanilla client with out-of-the-box form components (`SignInForm`, `SignUpForm`, password reset, magic link, email OTP).
-- **Types come from the server package's `Http` namespace** (`Auth.Http.SessionWithUserView`, `Auth.Http.SignUpPayload`, …) and erase at compile time, so nothing server-side reaches the bundle.
+- **Types come from the server package's `./http` subpath** (`Http.SessionWithUserView`, `Http.SignUpPayload`, …) and erase at compile time, so nothing server-side reaches the bundle.
 - **Errors reject with `AuthClientError`** carrying the HTTP `status` and the server's message — no `{ data, error }` tuple.
 - **Trusted origins are mandatory for cross-origin deployments.** Every call sends `credentials: "include"`, and the server rejects state-changing cross-origin requests whose `Origin` is not in `trustedOrigins`.
 
@@ -214,7 +215,7 @@ Better Auth's generic `verification` table backs email verification, password re
 
 1. Stand up the new schema (`Sql.migrate`, or your own DDL) alongside the running Better Auth database.
 2. Backfill `auth_users` → `auth_identifiers` → `auth_oauth_accounts` → plugin tables, in that order (identifiers depend on users; everything depends on both).
-3. Wire the layers and mount `Auth.Http.makeAsync` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`, `/sign-out`, `/session`) keep working.
+3. Wire the layers and mount `Http.makeAsync` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`, `/sign-out`, `/session`) keep working.
 4. Write the routes with no contract equivalent: social OAuth start/callback, and passkeys if you use them.
 5. Swap the browser client, then cut over and accept the forced re-authentication.
 
