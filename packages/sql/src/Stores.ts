@@ -29,7 +29,17 @@
  * bearer token.
  */
 
-import { Array as Arr, Clock, DateTime, Effect, Layer, Order, Record as Rec, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Record as Rec,
+  Schema,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -65,7 +75,19 @@ const decodeAttributes = (
   });
 
 const dateToMs = (date: Date): number => date.getTime();
-const msToDate = (ms: number): Date => new Date(ms);
+const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
+
+/**
+ * A stored epoch-millis column back to a `Date`, decoded with
+ * `Schema.DateFromMillis`: a value outside the `Date` range fails as an
+ * `AuthError` instead of becoming an Invalid Date.
+ */
+const msToDate = (ms: number, label: string): Effect.Effect<Date, Auth.AuthError> =>
+  decodeMillis(ms).pipe(
+    Effect.mapError(
+      (cause) => new Auth.AuthError({ message: `${label}: stored instant did not decode`, cause }),
+    ),
+  );
 
 /**
  * Map a `SqlError` (or any defect from the driver) to the `AuthError` the
@@ -119,11 +141,18 @@ interface UserRow {
 }
 
 const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.AuthError> =>
-  decodeAttributes(row.attributes, label).pipe(
-    Effect.map((attributes) => ({
+  Effect.all(
+    {
+      attributes: decodeAttributes(row.attributes, label),
+      createdAt: msToDate(row.created_at, label),
+      updatedAt: msToDate(row.updated_at, label),
+    },
+    { concurrency: 1 },
+  ).pipe(
+    Effect.map(({ attributes, createdAt, updatedAt }) => ({
       id: row.id,
-      createdAt: msToDate(row.created_at),
-      updatedAt: msToDate(row.updated_at),
+      createdAt,
+      updatedAt,
       attributes,
       ...(row.name != null ? { name: row.name } : {}),
       ...(row.image != null ? { image: row.image } : {}),
@@ -216,13 +245,21 @@ const rowToSession = (
   row: SessionRow,
   label: string,
 ): Effect.Effect<Auth.Session, Auth.AuthError> =>
-  decodeAttributes(row.attributes, label).pipe(
-    Effect.map((attributes) => ({
+  Effect.all(
+    {
+      attributes: decodeAttributes(row.attributes, label),
+      expiresAt: msToDate(row.expires_at, label),
+      createdAt: msToDate(row.created_at, label),
+      lastActivityAt: msToDate(row.last_activity_at, label),
+    },
+    { concurrency: 1 },
+  ).pipe(
+    Effect.map(({ attributes, expiresAt, createdAt, lastActivityAt }) => ({
       id: row.id,
       userId: row.user_id,
-      expiresAt: msToDate(row.expires_at),
-      createdAt: msToDate(row.created_at),
-      lastActivityAt: msToDate(row.last_activity_at),
+      expiresAt,
+      createdAt,
+      lastActivityAt,
       attributes,
     })),
   );
@@ -1232,17 +1269,32 @@ interface IdentifierRow {
   readonly created_at: number;
 }
 
-const rowToIdentifier = (row: IdentifierRow): Auth.Identifier => ({
-  id: row.id,
-  userId: row.user_id,
-  // SAFETY: `type` is only ever written from an `Identifier`'s `type` (see
-  // `insert`), so every stored value is an `IdentifierType`.
-  type: row.type as Auth.IdentifierType,
-  value: row.value,
-  verified: row.verified !== 0,
-  ...(row.verified_at != null ? { verifiedAt: msToDate(row.verified_at) } : {}),
-  createdAt: msToDate(row.created_at),
-});
+const rowToIdentifier = (
+  row: IdentifierRow,
+  label: string,
+): Effect.Effect<Auth.Identifier, Auth.AuthError> =>
+  Effect.all(
+    {
+      verifiedAt:
+        row.verified_at != null
+          ? Effect.asSome(msToDate(row.verified_at, label))
+          : Effect.succeedNone,
+      createdAt: msToDate(row.created_at, label),
+    },
+    { concurrency: 1 },
+  ).pipe(
+    Effect.map(({ verifiedAt, createdAt }) => ({
+      id: row.id,
+      userId: row.user_id,
+      // SAFETY: `type` is only ever written from an `Identifier`'s `type` (see
+      // `insert`), so every stored value is an `IdentifierType`.
+      type: row.type as Auth.IdentifierType,
+      value: row.value,
+      verified: row.verified !== 0,
+      ...(Option.isSome(verifiedAt) ? { verifiedAt: verifiedAt.value } : {}),
+      createdAt,
+    })),
+  );
 
 /** `Auth.IdentifierStore` over the `auth_identifiers` table; requires `SqlClient`. */
 export const makeIdentifierStore: Effect.Effect<
@@ -1264,13 +1316,23 @@ export const makeIdentifierStore: Effect.Effect<
       firstRow(
         "identifier.getByValue",
         sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE type = ${type} AND value = ${value}`,
-      ).pipe(Effect.map((row) => (row ? rowToIdentifier(row) : null))),
+      ).pipe(
+        Effect.flatMap((row) =>
+          row ? rowToIdentifier(row, "identifier.getByValue") : Effect.succeed(null),
+        ),
+      ),
 
     listByUser: (userId) =>
       allRows(
         "identifier.listByUser",
         sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE user_id = ${userId} ORDER BY created_at ASC`,
-      ).pipe(Effect.map((rows) => rows.map(rowToIdentifier))),
+      ).pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => rowToIdentifier(row, "identifier.listByUser"), {
+            concurrency: 1,
+          }),
+        ),
+      ),
 
     create: (identifier) => insert(identifier, "identifier.create"),
 
@@ -1320,7 +1382,11 @@ export const makeIdentifierStore: Effect.Effect<
         return yield* firstRow(
           "identifier.setVerified",
           sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE id = ${id}`,
-        ).pipe(Effect.map((row) => (row ? rowToIdentifier(row) : null)));
+        ).pipe(
+          Effect.flatMap((row) =>
+            row ? rowToIdentifier(row, "identifier.setVerified") : Effect.succeed(null),
+          ),
+        );
       }),
 
     delete: (id) => asVoid("identifier.delete", sql`DELETE FROM auth_identifiers WHERE id = ${id}`),

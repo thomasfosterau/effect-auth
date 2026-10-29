@@ -61,7 +61,13 @@ export interface SingleTableHarness extends StoreHarness {
 }
 
 const emailFor = (userId: string, value: string, verified = false): Auth.Identifier =>
-  Auth.makeIdentifier({ userId, type: "email", value, verified });
+  Auth.makeIdentifier({
+    userId,
+    type: "email",
+    value,
+    verified,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
 
 /** The semantics every `IdentifierStore` states, over email identifiers. */
 export const identifierStoreContract = (label: string, harness: StoreHarness) =>
@@ -319,7 +325,12 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
             otherType: yield* Effect.flip(
               store.replace(
                 ada,
-                Auth.makeIdentifier({ userId: USER.ada, type: "username", value: "ada" }),
+                Auth.makeIdentifier({
+                  userId: USER.ada,
+                  type: "username",
+                  value: "ada",
+                  now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+                }),
               ),
             ),
             sameId: yield* Effect.flip(
@@ -381,6 +392,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
               value: "ada@example.com",
               verified: true,
               verifiedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
             }),
           );
           return {
@@ -402,11 +414,23 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           const store = yield* Auth.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           const username = yield* Effect.flip(
-            store.create(Auth.makeIdentifier({ userId: USER.ada, type: "username", value: "ada" })),
+            store.create(
+              Auth.makeIdentifier({
+                userId: USER.ada,
+                type: "username",
+                value: "ada",
+                now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+              }),
+            ),
           );
           const phone = yield* Effect.flip(
             store.create(
-              Auth.makeIdentifier({ userId: USER.grace, type: "phone", value: "+61400000000" }),
+              Auth.makeIdentifier({
+                userId: USER.grace,
+                type: "phone",
+                value: "+61400000000",
+                now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+              }),
             ),
           );
           return {
@@ -765,6 +789,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
               value: "ada@example.com",
               verified: true,
               verifiedAt,
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
             }),
           );
         }),
@@ -800,6 +825,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
               value: "ada-new@example.com",
               verified: true,
               verifiedAt,
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
             }),
           );
           const storedVerifiedAt = yield* Effect.orDie(

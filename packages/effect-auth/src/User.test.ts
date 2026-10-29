@@ -54,6 +54,7 @@ describe("UserService", () => {
       userId: seeded.id,
       type: "email",
       value: "user@example.com",
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifierRecords.set(emailIdentifier.id, emailIdentifier);
   });

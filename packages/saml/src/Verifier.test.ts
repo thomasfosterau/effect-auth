@@ -267,6 +267,18 @@ describe("SamlVerifier.verify — addressing and validity", () => {
     expect(assertion.nameId).toBe("worker@acme.test");
   });
 
+  it("rejects an instant with no time zone rather than reading it as local time", async () => {
+    // SAML instants are UTC `xs:dateTime`s; a zone-less one is ambiguous.
+    const zoneless = iso(5 * 60_000).replace(/Z$/, "");
+    const err = await flip(validResponse({ notOnOrAfter: zoneless }));
+    expect(err.message).toMatch(/no time zone/i);
+  });
+
+  it("rejects an instant that is not a date at all", async () => {
+    const err = await flip(validResponse({ notOnOrAfter: "not-a-dateZ" }));
+    expect(err.message).toMatch(/not a valid instant|invalid|NotOnOrAfter/i);
+  });
+
   it("rejects a foreign issuer", async () => {
     const err = await flip(validResponse({ issuer: "https://evil.test/metadata" }));
     expect(err.message).toMatch(/issuer/i);

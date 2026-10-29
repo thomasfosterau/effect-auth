@@ -131,7 +131,12 @@ describe("createUserWithIdentifier", () => {
 
   it("fails with IdentifierTakenError when another user holds the address before the claim", async () => {
     const records = new Map<string, Identifier>();
-    const other = makeIdentifier({ userId: "u-0", type: "email", value: email.value });
+    const other = makeIdentifier({
+      userId: "u-0",
+      type: "email",
+      value: email.value,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    });
     records.set(other.id, other);
     const writer = tableWriter("u-1");
 
@@ -145,7 +150,12 @@ describe("createUserWithIdentifier", () => {
 
   it("fails with IdentifierTakenError when the row's unique index rejects the insert", async () => {
     const records = new Map<string, Identifier>();
-    const other = makeIdentifier({ userId: "u-0", type: "email", value: email.value });
+    const other = makeIdentifier({
+      userId: "u-0",
+      type: "email",
+      value: email.value,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    });
     records.set(other.id, other);
     const writer = rowWriter(records, "u-1");
 

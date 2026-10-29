@@ -140,6 +140,7 @@ export const createUserWithIdentifier = <E, R>(
     );
     // Only a fresh insert may treat the address it holds as its own.
     if (!created) return yield* takenError(identifier);
+    const now = yield* DateTime.nowAsDate;
     const claimed = yield* claimIdentifier(
       store,
       makeIdentifier({
@@ -148,6 +149,7 @@ export const createUserWithIdentifier = <E, R>(
         value: identifier.value,
         verified: identifier.verified,
         ...(identifier.verifiedAt !== undefined && { verifiedAt: identifier.verifiedAt }),
+        now,
       }),
     ).pipe(
       Effect.catchTags({

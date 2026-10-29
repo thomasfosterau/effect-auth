@@ -117,7 +117,14 @@ describe("PolicyStore CRUD", () => {
     await run(store.createLink(link("l1", alice, doc1)));
     await run(store.createLink(link("l2", bob, doc1)));
     await run(
-      store.createLink(PolicyStore.makeLink({ id: "l3", templateId: "other", principal: carol })),
+      store.createLink(
+        PolicyStore.makeLink({
+          id: "l3",
+          templateId: "other",
+          principal: carol,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        }),
+      ),
     );
 
     await run(store.deleteTemplate("share-doc"));
@@ -168,6 +175,7 @@ describe("instantiate", () => {
         templateId: "org-members",
         principal: Entity.ref("Role", "admin"),
         resource: Entity.ref("Org", "acme"),
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
       }),
     );
     expect(result.ok).toBe(true);
@@ -182,7 +190,12 @@ describe("instantiate", () => {
   it("errors when a slot has no value", () => {
     const result = PolicyStore.instantiate(
       shareTemplate,
-      PolicyStore.makeLink({ id: "l1", templateId: "share-doc", principal: alice }),
+      PolicyStore.makeLink({
+        id: "l1",
+        templateId: "share-doc",
+        principal: alice,
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -193,7 +206,11 @@ describe("instantiate", () => {
     const flat = PolicyStore.template({ id: "flat", action: Policy.eq(readDoc) });
     const result = PolicyStore.instantiate(
       flat,
-      PolicyStore.makeLink({ id: "l1", templateId: "flat" }),
+      PolicyStore.makeLink({
+        id: "l1",
+        templateId: "flat",
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -206,7 +223,13 @@ describe("instantiate", () => {
     const flat = PolicyStore.template({ id: "flat", principal: PolicyStore.eqSlot });
     const result = PolicyStore.instantiate(
       flat,
-      PolicyStore.makeLink({ id: "l1", templateId: "flat", principal: alice, resource: doc1 }),
+      PolicyStore.makeLink({
+        id: "l1",
+        templateId: "flat",
+        principal: alice,
+        resource: doc1,
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -216,7 +239,13 @@ describe("instantiate", () => {
   it("errors when the link targets another template", () => {
     const result = PolicyStore.instantiate(
       shareTemplate,
-      PolicyStore.makeLink({ id: "l1", templateId: "elsewhere", principal: alice, resource: doc1 }),
+      PolicyStore.makeLink({
+        id: "l1",
+        templateId: "elsewhere",
+        principal: alice,
+        resource: doc1,
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      }),
     );
     expect(result.ok).toBe(false);
   });
@@ -262,7 +291,12 @@ describe("effectivePolicies", () => {
     await run(store.createTemplate(shareTemplate));
     await run(
       store.createLink(
-        PolicyStore.makeLink({ id: "broken", templateId: "share-doc", principal: alice }),
+        PolicyStore.makeLink({
+          id: "broken",
+          templateId: "share-doc",
+          principal: alice,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        }),
       ),
     );
 
@@ -285,7 +319,15 @@ describe("effectivePolicies", () => {
         }),
       ),
     );
-    await run(store.createLink(PolicyStore.makeLink({ id: "ban-bob", templateId: "ban" })));
+    await run(
+      store.createLink(
+        PolicyStore.makeLink({
+          id: "ban-bob",
+          templateId: "ban",
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        }),
+      ),
+    );
 
     const failure = await run(Effect.flip(PolicyStore.effectivePolicies(store)));
     expect(failure._tag).toBe("AuthError");

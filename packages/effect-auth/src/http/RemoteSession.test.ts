@@ -203,6 +203,25 @@ describe("RemoteSession session reads", () => {
     expect(error.status).toBe(503);
   });
 
+  it("an instant outside the Date range is a RemoteSessionError, not an Invalid Date", async () => {
+    const outOfRange = {
+      ...sessionBody,
+      session: { ...sessionBody.session, expiresAt: 9e15 },
+    };
+    const { fetcher } = spy(
+      () =>
+        new Response(toJson(outOfRange), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const client = RemoteSession.make({ fetcher });
+
+    const error = await Effect.runPromise(Effect.flip(client.read(inbound(withSession))));
+    expect(error._tag).toBe("RemoteSessionError");
+    expect(error.message).toMatch(/did not decode/);
+  });
+
   it("honours a custom baseUrl and prefix", async () => {
     const { calls, fetcher } = spy(() => okSession());
     const client = RemoteSession.make({

@@ -339,7 +339,13 @@ describe("UsernameService under anti-enumeration (#414)", () => {
   const PASSWORD = "password-123";
 
   const claimEmail = (userId: string, email: string): void => {
-    const identifier = makeIdentifier({ userId, type: "email", value: email, verified: false });
+    const identifier = makeIdentifier({
+      userId,
+      type: "email",
+      value: email,
+      verified: false,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    });
     identifierRecords.set(identifier.id, identifier);
   };
 
@@ -614,6 +620,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
               type: "username",
               value: "contested",
               verified: true,
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
             });
             identifierRecords.set(identifier.id, identifier);
           }

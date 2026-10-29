@@ -183,10 +183,20 @@ describe("D1-backed effect-auth storage", () => {
       Effect.gen(function* () {
         const identifiers = yield* Auth.IdentifierStore;
         const ada = yield* identifiers.create(
-          Auth.makeIdentifier({ userId: "user-1", type: "email", value: "ada@example.com" }),
+          Auth.makeIdentifier({
+            userId: "user-1",
+            type: "email",
+            value: "ada@example.com",
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          }),
         );
         yield* identifiers.create(
-          Auth.makeIdentifier({ userId: "user-2", type: "email", value: "grace@example.com" }),
+          Auth.makeIdentifier({
+            userId: "user-2",
+            type: "email",
+            value: "grace@example.com",
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          }),
         );
         const replaced = yield* Auth.replaceIdentifier(
           identifiers,
@@ -196,13 +206,19 @@ describe("D1-backed effect-auth storage", () => {
             type: "email",
             value: "ada-new@example.com",
             verified: true,
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           }),
         );
         const taken = yield* Effect.flip(
           Auth.replaceIdentifier(
             identifiers,
             replaced,
-            Auth.makeIdentifier({ userId: "user-1", type: "email", value: "grace@example.com" }),
+            Auth.makeIdentifier({
+              userId: "user-1",
+              type: "email",
+              value: "grace@example.com",
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            }),
           ),
         );
         // A concurrent claim the read-before-write cannot see: the store's own
@@ -210,7 +226,12 @@ describe("D1-backed effect-auth storage", () => {
         const raced = yield* Effect.flip(
           identifiers.replace(
             replaced,
-            Auth.makeIdentifier({ userId: "user-1", type: "email", value: "grace@example.com" }),
+            Auth.makeIdentifier({
+              userId: "user-1",
+              type: "email",
+              value: "grace@example.com",
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            }),
           ),
         );
         return {
@@ -241,13 +262,24 @@ describe("D1-backed effect-auth storage", () => {
       Effect.gen(function* () {
         const identifiers = yield* Auth.IdentifierStore;
         const ada = yield* identifiers.create(
-          Auth.makeIdentifier({ userId: "user-1", type: "email", value: "ada@example.com" }),
+          Auth.makeIdentifier({
+            userId: "user-1",
+            type: "email",
+            value: "ada@example.com",
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          }),
         );
         const outcomes = yield* Effect.all(
           ["ada-a@example.com", "ada-b@example.com"].map((value) =>
             identifiers.replace(
               ada,
-              Auth.makeIdentifier({ userId: "user-1", type: "email", value, verified: true }),
+              Auth.makeIdentifier({
+                userId: "user-1",
+                type: "email",
+                value,
+                verified: true,
+                now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+              }),
             ),
           ),
           { concurrency: "unbounded" },

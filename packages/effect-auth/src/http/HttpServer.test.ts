@@ -290,7 +290,13 @@ const makeFixture = (
     options.emailPasswordStore?.(baseEmailPasswordStore, {
       createUser,
       claimEmail: (userId, email) => {
-        const identifier = makeIdentifier({ userId, type: "email", value: email, verified: false });
+        const identifier = makeIdentifier({
+          userId,
+          type: "email",
+          value: email,
+          verified: false,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        });
         identifierRecords.set(identifier.id, identifier);
       },
       nextUserId: () => `user-${++userSeq}`,
@@ -536,6 +542,7 @@ const makeFixture = (
       type: "username",
       value: username,
       verified: true,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifierRecords.set(identifier.id, identifier);
   };
@@ -547,6 +554,7 @@ const makeFixture = (
       type: "email",
       value: email,
       verified: false,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifierRecords.set(identifier.id, identifier);
   };
@@ -557,6 +565,7 @@ const makeFixture = (
       type: "phone",
       value: phoneNumber,
       verified: true,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifierRecords.set(identifier.id, identifier);
   };

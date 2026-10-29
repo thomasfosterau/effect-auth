@@ -132,19 +132,24 @@ export const TemplateLink = Schema.Struct({
 });
 export type TemplateLink = typeof TemplateLink.Type;
 
-/** Construct a new (unpersisted) link record with a random id. */
+/**
+ * Construct a new (unpersisted) link record with a random id.
+ *
+ * `now` is the link's `createdAt`, required so the time comes from the
+ * caller's `Clock` (`yield* DateTime.nowAsDate`) rather than the wall clock.
+ */
 export const makeLink = (input: {
   readonly templateId: string;
   readonly id?: string;
   readonly principal?: Entity.EntityRef;
   readonly resource?: Entity.EntityRef;
-  readonly now?: Date;
+  readonly now: Date;
 }): TemplateLink => ({
   id: input.id ?? globalThis.crypto.randomUUID(),
   templateId: input.templateId,
   ...(input.principal !== undefined ? { principal: input.principal } : {}),
   ...(input.resource !== undefined ? { resource: input.resource } : {}),
-  createdAt: input.now ?? new Date(),
+  createdAt: input.now,
 });
 
 // ---------------------------------------------------------------------------

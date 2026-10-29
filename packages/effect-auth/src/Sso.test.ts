@@ -413,7 +413,12 @@ describe("SsoService", () => {
     });
     await Effect.runPromise(
       fx.identifiers.create(
-        makeIdentifier({ userId: "user-squat", type: "email", value: "worker@acme.test" }),
+        makeIdentifier({
+          userId: "user-squat",
+          type: "email",
+          value: "worker@acme.test",
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        }),
       ),
     );
     fx.passwordHashes.set("user-squat", "squatter-hash");
@@ -992,6 +997,7 @@ const makeHttpFixture = () => {
       value: email,
       verified: true,
       verifiedAt: now,
+      now,
     });
     identifierRecords.set(identifier.id, identifier);
     return id;

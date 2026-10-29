@@ -506,6 +506,7 @@ export const make = (
           return yield* new PhoneOtpError({ message: "This phone number is already in use" });
         }
         if (existing === null) {
+          const verifiedAt = yield* DateTime.nowAsDate;
           yield* claimIdentifier(
             identifiers,
             makeIdentifier({
@@ -513,7 +514,8 @@ export const make = (
               type: "phone",
               value: phoneNumber,
               verified: true,
-              verifiedAt: yield* DateTime.nowAsDate,
+              verifiedAt,
+              now: verifiedAt,
             }),
           ).pipe(
             Effect.catchTags({

@@ -54,6 +54,7 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     value: email,
     verified,
     ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   identifierRecords.set(identifier.id, identifier);
 };

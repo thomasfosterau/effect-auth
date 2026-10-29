@@ -289,12 +289,14 @@ const make = (
         // The identifier holding the confirmed address once this user has it.
         let confirmed: Identifier;
         if (clash === null) {
+          const verifiedAt = yield* DateTime.nowAsDate;
           const next = makeIdentifier({
             userId: user.id,
             type: "email",
             value: newEmail,
             verified: true,
-            verifiedAt: yield* DateTime.nowAsDate,
+            verifiedAt,
+            now: verifiedAt,
           });
           const outcome = yield* (
             current === null

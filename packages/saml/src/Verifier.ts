@@ -7,6 +7,7 @@
 import {
   Array as Arr,
   Clock,
+  DateTime,
   Effect,
   Layer,
   Option,
@@ -210,10 +211,27 @@ const pick = (
 ): string | undefined =>
   Option.getOrUndefined(Arr.findFirst(keys, (key) => firstNonEmpty(attributes[key])));
 
-const parseInstant = (value: string | undefined): number | undefined => {
-  if (value === undefined) return undefined;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? undefined : ms;
+/** An `xs:dateTime` that names its zone: `Z` or a `±hh:mm` offset. */
+const zonedInstant = /(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Read a SAML instant attribute as epoch millis. SAML requires UTC
+ * (`xs:dateTime` with a zone), so an instant with no zone is rejected rather
+ * than read as the server's local time, and so is one that does not parse.
+ * An absent attribute is `None`.
+ */
+const parseInstant = (
+  value: string | undefined,
+  what: string,
+): Effect.Effect<Option.Option<number>, SamlError> => {
+  if (value === undefined) return Effect.succeedNone;
+  if (!zonedInstant.test(value)) {
+    return fail(`SAML ${what} "${value}" has no time zone; SAML instants must be UTC`);
+  }
+  return Option.match(DateTime.make(value), {
+    onNone: () => fail(`SAML ${what} "${value}" is not a valid instant`),
+    onSome: (instant) => Effect.succeed(Option.some(DateTime.toEpochMillis(instant))),
+  });
 };
 
 /**
@@ -232,22 +250,25 @@ interface SubjectConfirmation {
   readonly notOnOrAfter?: number;
 }
 
-const readSubjectConfirmation = (assertion: XmlNode): SubjectConfirmation => {
+const readSubjectConfirmation = (
+  assertion: XmlNode,
+): Effect.Effect<SubjectConfirmation, SamlError> => {
   const subject = firstChild(assertion, "Subject");
   // The first confirmation that carries `SubjectConfirmationData` attributes.
   const attributes = Arr.findFirst(children(subject, "SubjectConfirmation"), (confirmation) =>
     Option.fromUndefinedOr(firstChild(confirmation, "SubjectConfirmationData")?.$),
   );
   return Option.match(attributes, {
-    onNone: (): SubjectConfirmation => ({}),
-    onSome: (data): SubjectConfirmation => {
-      const notOnOrAfter = parseInstant(data["NotOnOrAfter"]);
-      return {
-        ...(data["Recipient"] !== undefined && { recipient: data["Recipient"] }),
-        ...(data["InResponseTo"] !== undefined && { inResponseTo: data["InResponseTo"] }),
-        ...(notOnOrAfter !== undefined && { notOnOrAfter }),
-      };
-    },
+    onNone: (): Effect.Effect<SubjectConfirmation, SamlError> => Effect.succeed({}),
+    onSome: (data) =>
+      Effect.map(
+        parseInstant(data["NotOnOrAfter"], "SubjectConfirmationData NotOnOrAfter"),
+        (notOnOrAfter): SubjectConfirmation => ({
+          ...(data["Recipient"] !== undefined && { recipient: data["Recipient"] }),
+          ...(data["InResponseTo"] !== undefined && { inResponseTo: data["InResponseTo"] }),
+          ...(Option.isSome(notOnOrAfter) && { notOnOrAfter: notOnOrAfter.value }),
+        }),
+      ),
   });
 };
 
@@ -266,7 +287,7 @@ const checkSubjectConfirmation = (
   clockSkewMs: number,
 ): Effect.Effect<SubjectConfirmation, SamlError> =>
   Effect.gen(function* () {
-    const confirmation = readSubjectConfirmation(assertion);
+    const confirmation = yield* readSubjectConfirmation(assertion);
     if (confirmation.recipient !== undefined && confirmation.recipient !== acsUrl) {
       return yield* fail(
         `SAML assertion was issued for "${confirmation.recipient}", not this SP's ACS URL`,
@@ -419,9 +440,14 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
         : undefined;
     const email = profile.email ?? profile.mail ?? pick(attributes, EMAIL_KEYS) ?? nameIdEmail;
     const displayName = pick(attributes, NAME_KEYS);
-    const notOnOrAfter =
-      parseInstant(firstChild(assertion, "Conditions")?.$?.["NotOnOrAfter"]) ??
-      confirmation.notOnOrAfter;
+    const conditionsNotOnOrAfter = yield* parseInstant(
+      firstChild(assertion, "Conditions")?.$?.["NotOnOrAfter"],
+      "Conditions NotOnOrAfter",
+    );
+    const notOnOrAfter = Option.getOrElse(
+      conditionsNotOnOrAfter,
+      (): number | undefined => confirmation.notOnOrAfter,
+    );
 
     return {
       id,

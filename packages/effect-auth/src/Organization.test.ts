@@ -41,7 +41,12 @@ const orgRoleKey = (organizationId: string, role: string): string =>
 /** Give a user an email identifier so invitations addressed to it can be
  * accepted/rejected by that user. */
 const seedEmail = (userId: string, email: string): void => {
-  const identifier = makeIdentifier({ userId, type: "email", value: email });
+  const identifier = makeIdentifier({
+    userId,
+    type: "email",
+    value: email,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
   identifierRecords.set(identifier.id, identifier);
 };
 

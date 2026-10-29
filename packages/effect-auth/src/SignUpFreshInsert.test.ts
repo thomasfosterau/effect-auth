@@ -71,7 +71,13 @@ const makeWorld = (type: IdentifierType, value: string) => {
   const createUser = (): Effect.Effect<CreateUserResult> =>
     Effect.sync(() => {
       writes++;
-      const held = makeIdentifier({ userId: owner.id, type, value, verified: false });
+      const held = makeIdentifier({
+        userId: owner.id,
+        type,
+        value,
+        verified: false,
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      });
       identifierRecords.set(held.id, held);
       return { user: owner, created: false };
     });

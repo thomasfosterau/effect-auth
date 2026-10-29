@@ -206,7 +206,12 @@ describe("single-table MySQL / statements", () => {
         const store = yield* Auth.IdentifierStore;
         return yield* Effect.flip(
           store.create(
-            Auth.makeIdentifier({ userId: USER_ID, type: "phone", value: "+61400000000" }),
+            Auth.makeIdentifier({
+              userId: USER_ID,
+              type: "phone",
+              value: "+61400000000",
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            }),
           ),
         );
       }),
@@ -251,6 +256,7 @@ describe("single-table MySQL / replace", () => {
     type: "email",
     value: "ada-new@example.com",
     verified: true,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
 
   it("rewrites the address with one UPDATE guarded on the old address, then reads the row", async () => {
