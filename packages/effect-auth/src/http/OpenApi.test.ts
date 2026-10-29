@@ -42,14 +42,11 @@ const stubServices = (): Layer.Layer<AuthServices> =>
 const EXPECTED_PATHS = [
   "/sign-up",
   "/sign-in",
-  "/sign-out",
-  "/session",
   "/sessions",
-  "/sessions/revoke-others",
-  "/sessions/{sessionId}",
+  "/sessions/{id}",
   "/identifiers",
-  "/identifiers/{identifierId}",
-  "/user",
+  "/identifiers/{id}",
+  "/users/{id}",
   "/change-password",
   "/email-verification/send",
   "/email-verification/verify",
@@ -186,8 +183,18 @@ describe("getOpenApiSpec", () => {
       "500",
     ]);
 
-    const session = spec.paths["/session"]?.get?.responses ?? {};
-    expect(Arr.sort(Object.keys(session), Order.String)).toEqual(["200", "401"]);
+    // A JSON:API resource endpoint documents its own errors and the
+    // protocol's (400 for a malformed query, 406 / 415 for negotiation).
+    const session = spec.paths["/sessions/{id}"]?.get?.responses ?? {};
+    expect(Arr.sort(Object.keys(session), Order.String)).toEqual([
+      "200",
+      "400",
+      "401",
+      "404",
+      "406",
+      "415",
+      "500",
+    ]);
   });
 });
 

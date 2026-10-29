@@ -183,6 +183,91 @@ const isJson = (response: Response): boolean => {
   return essence === "application/json" || essence.endsWith("+json");
 };
 
+// --- JSON:API wire shapes ------------------------------------------------------
+//
+// The resource groups (`sessions`, `identifiers`, `users`) answer JSON:API
+// documents (#205). The client keeps its view types and maps the documents onto
+// them here, so callers see the same shapes as before.
+
+const JSON_API = "application/vnd.api+json";
+
+interface ResourceLinkage {
+  readonly type: string;
+  readonly id: string;
+}
+
+interface WireResource<A> {
+  readonly type: string;
+  readonly id: string;
+  readonly attributes: A;
+  readonly relationships?: { readonly user?: { readonly data: ResourceLinkage } };
+}
+
+interface WireUser {
+  readonly name?: string;
+  readonly image?: string;
+  readonly email?: string;
+  readonly emailVerified?: boolean;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly attributes: Http.Attributes;
+}
+
+interface WireSession {
+  readonly expiresAt: number;
+  readonly createdAt: number;
+  readonly lastActivityAt: number;
+  readonly attributes: Http.Attributes;
+}
+
+interface WireIdentifier {
+  readonly kind: Http.IdentifierView["type"];
+  readonly value: string;
+  readonly verified: boolean;
+  readonly verifiedAt?: number;
+  readonly createdAt: number;
+}
+
+interface DataDocument<A> {
+  readonly data: WireResource<A>;
+  readonly included?: ReadonlyArray<WireResource<WireUser>>;
+}
+
+interface CollectionDocument<A> {
+  readonly data: ReadonlyArray<WireResource<A>>;
+}
+
+const userView = (resource: WireResource<WireUser>): Http.UserView => ({
+  id: resource.id,
+  ...resource.attributes,
+});
+
+const sessionView = (resource: WireResource<WireSession>): Http.SessionView => ({
+  id: resource.id,
+  userId: resource.relationships?.user?.data.id ?? "",
+  ...resource.attributes,
+});
+
+const identifierView = ({ id, attributes }: WireResource<WireIdentifier>): Http.IdentifierView => {
+  const { kind, ...rest } = attributes;
+  return { id, type: kind, ...rest };
+};
+
+/** The message of an error body: a JSON:API error document's first `detail`, or `{ message }`. */
+const errorMessage = (body: unknown): string | undefined => {
+  if (typeof body !== "object" || body === null) return undefined;
+  if ("errors" in body && Array.isArray(body.errors)) {
+    const first: unknown = body.errors[0];
+    return typeof first === "object" &&
+      first !== null &&
+      "detail" in first &&
+      typeof first.detail === "string"
+      ? first.detail
+      : undefined;
+  }
+  return "message" in body && typeof body.message === "string" ? body.message : undefined;
+};
+
 /** The auth client: typed methods over the contract + the session store. */
 export interface AuthClient {
   readonly session: SessionStore;
@@ -511,12 +596,18 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   const doFetch: typeof globalThis.fetch =
     options.fetch ?? ((...args) => globalThis.fetch(...args));
 
-  const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+  const send = async <T>(
+    method: string,
+    path: string,
+    body: unknown,
+    mediaType: string | undefined,
+  ): Promise<T> => {
     const response = await doFetch(`${baseUrl}${path}`, {
       method,
       credentials: "include",
       headers: {
-        ...(body !== undefined && { "content-type": "application/json" }),
+        ...(mediaType !== undefined && { accept: mediaType }),
+        ...(body !== undefined && { "content-type": mediaType ?? "application/json" }),
         ...options.headers,
       },
       ...(body !== undefined && { body: JSON.stringify(body) }),
@@ -524,11 +615,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     if (!response.ok) {
       let message = response.statusText || `HTTP ${response.status}`;
       if (isJson(response)) {
-        // SAFETY: a JSON error body from the auth server is an HTTP-boundary
-        // error encoding, whose `message`, when present, is a string; a body
-        // that fails to parse becomes `null`.
-        const parsed = (await response.json().catch(() => null)) as { message?: string } | null;
-        if (parsed?.message !== undefined) message = parsed.message;
+        // A body that fails to parse leaves the status text as the message.
+        const parsed: unknown = await response.json().catch(() => null);
+        message = errorMessage(parsed) ?? message;
       }
       throw new AuthClientError(response.status, message);
     }
@@ -541,6 +630,13 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     // declares for that endpoint, which is what the server encodes.
     return (await response.json()) as T;
   };
+
+  const request = <T>(method: string, path: string, body?: unknown): Promise<T> =>
+    send<T>(method, path, body, undefined);
+
+  /** A request to a JSON:API resource group: `application/vnd.api+json` both ways. */
+  const jsonApi = <T>(method: string, path: string, body?: unknown): Promise<T> =>
+    send<T>(method, path, body, JSON_API);
 
   // --- Session store ----------------------------------------------------------
 
@@ -573,10 +669,20 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   };
 
   const getSession = (): Promise<Http.SessionWithUserView | null> =>
-    request<Http.SessionWithUserView>("GET", "/session").catch((error) => {
-      if (error instanceof AuthClientError && error.status === 401) return null;
-      throw error;
-    });
+    jsonApi<DataDocument<WireSession>>("GET", "/sessions/current?include=user").then(
+      (document): Http.SessionWithUserView => {
+        const session = sessionView(document.data);
+        const user = document.included?.find((resource) => resource.id === session.userId);
+        if (user === undefined) {
+          throw new AuthClientError(0, "The session document did not include its user");
+        }
+        return { session, user: userView(user) };
+      },
+      (error) => {
+        if (error instanceof AuthClientError && error.status === 401) return null;
+        throw error;
+      },
+    );
 
   const refetch = async (): Promise<void> => {
     const seq = ++refetchSeq;
@@ -728,7 +834,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     signIn: (payload) => mutating(() => request<Http.AuthSuccess>("POST", "/sign-in", payload)),
     signOut: () =>
       mutating(async () => {
-        await request<void>("POST", "/sign-out");
+        await jsonApi<void>("DELETE", "/sessions/current");
       }),
     signInAnonymous: () => mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/anonymous")),
     signInUsername: (payload) =>
@@ -743,18 +849,29 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     passwordResetConfirm: (payload) =>
       request<Http.StatusResponse>("POST", "/password-reset/reset", payload),
     changePassword: (payload) => request<void>("POST", "/change-password", payload),
-    updateUser: (payload) => mutating(() => request<Http.UserView>("PATCH", "/user", payload)),
-    listSessions: () => request<readonly Http.SessionView[]>("GET", "/sessions"),
+    updateUser: (payload) =>
+      mutating(() =>
+        jsonApi<DataDocument<WireUser>>("PATCH", "/users/me", {
+          data: { type: "users", id: "me", attributes: payload },
+        }).then((document) => userView(document.data)),
+      ),
+    listSessions: () =>
+      jsonApi<CollectionDocument<WireSession>>("GET", "/sessions").then((document) =>
+        document.data.map(sessionView),
+      ),
     revokeSession: (sessionId) =>
-      request<void>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`),
-    revokeOtherSessions: () => request<void>("POST", "/sessions/revoke-others"),
+      jsonApi<void>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`),
+    revokeOtherSessions: () => jsonApi<void>("DELETE", "/sessions?filter%5Bcurrent%5D=false"),
     jwtToken: () => request<Http.JwtTokenView>("GET", "/token"),
     jwks: () => request<Http.JwksView>("GET", "/jwks"),
 
     identifiers: {
-      list: () => request<Http.IdentifierListView>("GET", "/identifiers"),
+      list: () =>
+        jsonApi<CollectionDocument<WireIdentifier>>("GET", "/identifiers").then((document) =>
+          document.data.map(identifierView),
+        ),
       delete: (identifierId) =>
-        request<void>("DELETE", `/identifiers/${encodeURIComponent(identifierId)}`),
+        jsonApi<void>("DELETE", `/identifiers/${encodeURIComponent(identifierId)}`),
     },
 
     changeEmail: {

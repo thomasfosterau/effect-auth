@@ -45,7 +45,7 @@ await client.session.refetch(); // manual refresh
 
 Two behaviours worth knowing:
 
-- **Lazy**: the first subscriber triggers the initial `/session` fetch. The store starts as `isPending: true` so a UI never flashes "signed out" on first paint.
+- **Lazy**: the first subscriber triggers the initial `GET /sessions/current` read. The store starts as `isPending: true` so a UI never flashes "signed out" on first paint.
 - **Refetch-skipping**: session-changing calls (sign-in/up/out, second-factor redemption, `setActive`, impersonation, …) refresh the store only while something is subscribed — with no observers, the round trip is skipped.
 
 Background refresh is opt-in per client:

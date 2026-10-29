@@ -731,7 +731,7 @@ describe("HTTP admin endpoints", () => {
     ).toBe(true);
 
     // The victim's session was revoked.
-    const check = await fx.handler(req("GET", "/session", victimSid));
+    const check = await fx.handler(req("GET", "/sessions/current?include=user", victimSid));
     expect(check.status).toBe(401);
   });
 

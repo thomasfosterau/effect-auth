@@ -141,6 +141,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       }),
     listSessions: (userId) =>
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+    revokeSessionById: () => Effect.succeed(false),
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
   };

@@ -189,6 +189,16 @@ export const make = (
         return sessions.filter((session) => session.expiresAt.getTime() >= now);
       }),
 
+      revokeSessionById: Effect.fn("SessionService.revokeSessionById")(function* (
+        userId: string,
+        storedSessionId: string,
+      ) {
+        const sessions = yield* sessionStore.listByUserId(userId);
+        const held = sessions.some((session) => session.id === storedSessionId);
+        if (held) yield* sessionStore.delete(storedSessionId);
+        return held;
+      }),
+
       revokeOtherSessions: Effect.fn("SessionService.revokeOtherSessions")(function* (
         userId: string,
         currentSessionId: string,
@@ -273,6 +283,19 @@ export class SessionService extends Context.Service<
     readonly listSessions: (
       userId: string,
     ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
+
+    /**
+     * Revoke one of a user's sessions by its stored id (the hash of its token,
+     * as `listSessions` reports it), so a client can revoke a session it can
+     * see but whose token it never held. Returns `false`, deleting nothing,
+     * when the user holds no session with that id. Like
+     * `revokeOtherSessions`, it runs no sign-out hook: those receive the raw
+     * token, which a revocation by id does not have.
+     */
+    readonly revokeSessionById: (
+      userId: string,
+      storedSessionId: string,
+    ) => Effect.Effect<boolean, Errors.AuthError>;
 
     /**
      * Invalidate every session for a user except the given one (e.g. keep the

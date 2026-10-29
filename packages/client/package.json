@@ -49,6 +49,12 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
+    "@thomasfosterau/effect-jsonapi": "catalog:peers",
     "effect": "catalog:peers"
+  },
+  "peerDependenciesMeta": {
+    "@thomasfosterau/effect-jsonapi": {
+      "optional": true
+    }
   }
 }

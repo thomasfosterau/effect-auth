@@ -3,6 +3,10 @@ import { Predicate, Schema } from "effect";
 import { createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
+/** Whether a request is the store's session read (`GET /sessions/current`). */
+const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
+  String(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
+
 const EMAIL = "alice@client.test";
 const PW = "password-123";
 
@@ -140,7 +144,7 @@ describe("session store correctness", () => {
     const client = createAuthClient({
       baseUrl: "http://client.test",
       fetch: (input, init?) => {
-        if (injectError && String(input).endsWith("/session")) {
+        if (injectError && String(input).includes("/sessions/current")) {
           return Promise.resolve(
             new Response(toJson({ message: "Service Unavailable" }), {
               status: 503,
@@ -176,7 +180,7 @@ describe("session store correctness", () => {
     const client = createAuthClient({
       baseUrl: "http://client.test",
       fetch: (input) => {
-        if (String(input).endsWith("/session")) {
+        if (String(input).includes("/sessions/current")) {
           callCount++;
           if (callCount === 1) {
             // First (stale) call: held until manually released with a 500.
@@ -215,7 +219,7 @@ describe("session store correctness", () => {
     expect(client.session.get().isPending).toBe(false);
   });
 
-  it("skips /session refetch after a mutation when there are no subscribers", async () => {
+  it("skips the session refetch after a mutation when there are no subscribers", async () => {
     let sessionFetchCount = 0;
     const server = makeServerFixture();
     const base = makeCookieJarFetch(server.handler);
@@ -223,12 +227,12 @@ describe("session store correctness", () => {
     const client = createAuthClient({
       baseUrl: "http://client.test",
       fetch: (input, init?) => {
-        if (String(input).endsWith("/session")) sessionFetchCount++;
+        if (isSessionRead(input, init)) sessionFetchCount++;
         return base(input, init);
       },
     });
 
-    // No subscribers: signUp should not trigger a /session refetch.
+    // No subscribers: signUp should not trigger a session refetch.
     await client.signUp({ email: EMAIL, password: PW });
     expect(sessionFetchCount).toBe(0);
     // Store state is unchanged (no refetch ran).
@@ -257,8 +261,8 @@ describe("background refresh", () => {
 
     const client = createAuthClient({
       baseUrl: "http://refresh.test",
-      fetch: (input) => {
-        if (String(input).endsWith("/session")) sessionFetchCount++;
+      fetch: (input, init?) => {
+        if (isSessionRead(input, init)) sessionFetchCount++;
         return Promise.resolve(new Response(null, { status: 401 }));
       },
       refresh: { intervalMs: 500 },
@@ -291,8 +295,8 @@ describe("background refresh", () => {
 
     const client = createAuthClient({
       baseUrl: "http://refresh.test",
-      fetch: (input) => {
-        if (String(input).endsWith("/session")) sessionFetchCount++;
+      fetch: (input, init?) => {
+        if (isSessionRead(input, init)) sessionFetchCount++;
         return Promise.resolve(new Response(null, { status: 401 }));
       },
       refresh: { intervalMs: 500 },
@@ -317,6 +321,8 @@ describe("background refresh", () => {
 });
 
 describe("JSON response detection", () => {
+  // `GET /token` answers plain JSON, so it probes the response handling
+  // every non-JSON:API endpoint shares.
   /** A client whose every request answers with `response`. */
   const clientReturning = (response: () => Response) =>
     createAuthClient({ baseUrl: "http://client.test", fetch: () => Promise.resolve(response()) });
@@ -328,7 +334,7 @@ describe("JSON response detection", () => {
     const client = clientReturning(() =>
       respond(toJson([{ id: "s1" }]), "application/json; charset=utf-8"),
     );
-    expect(await client.listSessions()).toEqual([{ id: "s1" }]);
+    expect(await client.jwtToken()).toEqual([{ id: "s1" }]);
   });
 
   it("reads the server's message from a `+json` suffix media type", async () => {
@@ -339,14 +345,14 @@ describe("JSON response detection", () => {
       }),
     );
 
-    const error = await rejectionOf(client.listSessions(), AuthClientError);
+    const error = await rejectionOf(client.jwtToken(), AuthClientError);
     assert.instanceOf(error, AuthClientError);
     expect(error.message).toBe("Session expired");
   });
 
   it("does not parse a non-JSON body", async () => {
     const client = clientReturning(() => respond("<html>ok</html>", "text/html"));
-    expect(await client.listSessions()).toBeUndefined();
+    expect(await client.jwtToken()).toBeUndefined();
   });
 
   it("matches the media type, not a substring of the header", async () => {
@@ -359,7 +365,7 @@ describe("JSON response detection", () => {
       }),
     );
 
-    const error = await rejectionOf(client.listSessions(), AuthClientError);
+    const error = await rejectionOf(client.jwtToken(), AuthClientError);
     assert.instanceOf(error, AuthClientError);
     expect(error.message).toBe("Bad Request");
   });
@@ -370,7 +376,7 @@ describe("JSON response detection", () => {
       response.headers.delete("content-type");
       return response;
     });
-    expect(await client.listSessions()).toBeUndefined();
+    expect(await client.jwtToken()).toBeUndefined();
   });
 });
 
@@ -381,8 +387,12 @@ describe("plugin extension", () => {
 
     const sessionPlugin = definePlugin((ctx) => ({
       sessionCount: async () => {
-        const sessions = await ctx.request<readonly { id: string }[]>("GET", "/sessions");
-        return sessions.length;
+        // `GET /sessions` answers a JSON:API collection document.
+        const sessions = await ctx.request<{ readonly data: readonly { id: string }[] }>(
+          "GET",
+          "/sessions",
+        );
+        return sessions.data.length;
       },
     }));
 
@@ -401,7 +411,7 @@ describe("plugin extension", () => {
     });
 
     const signOutPlugin = definePlugin((ctx) => ({
-      logOut: () => ctx.mutating(() => ctx.request<void>("POST", "/sign-out")),
+      logOut: () => ctx.mutating(() => ctx.request<void>("DELETE", "/sessions/current")),
     }));
 
     const ext = client.extend(signOutPlugin);

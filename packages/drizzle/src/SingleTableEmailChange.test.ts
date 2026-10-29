@@ -173,6 +173,7 @@ const makeHarness = (
     invalidateUserSessions: () => Effect.void,
     listSessions: () => Effect.succeed([]),
     revokeOtherSessions: () => Effect.void,
+    revokeSessionById: () => Effect.succeed(false),
     setSessionAttributes: () => Effect.die("unused"),
   };
 

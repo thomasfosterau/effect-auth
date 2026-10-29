@@ -1,6 +1,9 @@
 import { Schema } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
+import { Document, Endpoint, Group, Middleware } from "@thomasfosterau/effect-jsonapi";
 import * as S from "./HttpApiSchema.ts";
+import * as E from "./JsonApiErrors.ts";
+import * as R from "./Resources.ts";
 
 /**
  * The auth HTTP contract.
@@ -10,6 +13,85 @@ import * as S from "./HttpApiSchema.ts";
  * and an OpenAPI document. Mounted under a configurable prefix (default
  * `/api/auth`).
  */
+
+// -----------------------------------------------------------------------------
+// JSON:API resource groups (#205)
+// -----------------------------------------------------------------------------
+
+/**
+ * The document `GET /sessions/:id` answers: one `sessions` resource, with the
+ * `users` resource it names in `included` when the request asks for
+ * `?include=user`.
+ */
+export const SessionDocument = Document.DataDocument(R.Session, {
+  included: Schema.Union([R.User]),
+});
+
+/**
+ * `sessions`: the signed-in user's sessions.
+ *
+ * - `GET /sessions`: every unexpired session of the caller.
+ * - `GET /sessions/:id`: one of them; `current` names the session the request
+ *   carries, and `?include=user` adds its user (what `GET /session` answered).
+ * - `DELETE /sessions/:id`: revoke one; `DELETE /sessions/current` signs out,
+ *   clearing the session cookies.
+ * - `DELETE /sessions?filter[current]=false`: revoke every session but the
+ *   current one.
+ *
+ * An id is the stored id (the hash of the session token), so a listed session
+ * can be revoked by the id the list gave.
+ */
+export const sessionsGroup = Group.make(
+  R.Session,
+  Endpoint.list(R.Session, {
+    errors: [E.Unauthorized, E.InternalServerError],
+  }),
+  Endpoint.get(R.Session, {
+    include: true,
+    success: SessionDocument,
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
+  Endpoint.delete(R.Session, {
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
+  HttpApiEndpoint.delete("deleteOthers", "/sessions", {
+    query: { "filter[current]": Schema.Literal("false") },
+    success: HttpApiSchema.NoContent,
+    error: [E.Unauthorized.wire, E.InternalServerError.wire],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `identifiers`: the signed-in user's login handles.
+ *
+ * - `GET /identifiers`: every identifier the caller holds.
+ * - `DELETE /identifiers/:id`: remove one. A foreign or unknown id answers
+ *   `404`, and the last identifier on an account cannot be removed (`403`).
+ */
+export const identifiersGroup = Group.make(
+  R.Identifier,
+  Endpoint.list(R.Identifier, {
+    errors: [E.Unauthorized, E.InternalServerError],
+  }),
+  Endpoint.delete(R.Identifier, {
+    errors: [E.Unauthorized, E.NotFound, E.Forbidden, E.InternalServerError],
+  }),
+);
+
+/**
+ * `users`: the signed-in user's own profile.
+ *
+ * - `PATCH /users/:id`: update `name` / `image`. `:id` is `me` or the caller's
+ *   own id; any other id answers `404`. No other attribute is writable (#193).
+ */
+export const usersGroup = Group.make(
+  R.User,
+  Endpoint.update(R.User, {
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
+);
 
 /** Email/password + session endpoints. */
 export const authGroup = HttpApiGroup.make("auth").add(
@@ -35,13 +117,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.TooManyRequestsError,
     ],
   }),
-  HttpApiEndpoint.post("signOut", "/sign-out", {
-    success: HttpApiSchema.NoContent,
-  }),
-  HttpApiEndpoint.get("getSession", "/session", {
-    success: S.SessionWithUserView,
-    error: [S.UnauthorizedError],
-  }),
   HttpApiEndpoint.post("sendVerificationEmail", "/email-verification/send", {
     payload: S.SendVerificationEmailPayload,
     success: S.StatusResponse,
@@ -66,34 +141,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     payload: S.ChangePasswordPayload,
     success: HttpApiSchema.NoContent,
     error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.patch("updateUser", "/user", {
-    payload: S.UpdateUserPayload,
-    success: S.UserView,
-    error: [S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.get("listSessions", "/sessions", {
-    success: S.SessionListView,
-    error: [S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.delete("revokeSession", "/sessions/:sessionId", {
-    params: { sessionId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // Login-handle identifiers (email/username/phone) of the signed-in user.
-  HttpApiEndpoint.get("listIdentifiers", "/identifiers", {
-    success: S.IdentifierListView,
-    error: [S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.delete("deleteIdentifier", "/identifiers/:identifierId", {
-    params: { identifierId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("revokeOtherSessions", "/sessions/revoke-others", {
-    success: HttpApiSchema.NoContent,
-    error: [S.UnauthorizedError, S.InternalError],
   }),
   // --- Optional features (magic link / email OTP / multi-factor). Each fails
   // --- with 404 NotFound when the corresponding service layer is absent.
@@ -1126,6 +1173,9 @@ export const scimGroup = HttpApiGroup.make("scim")
 /** The complete auth API, annotated with OpenAPI document metadata. */
 export const AuthApi = HttpApi.make("AuthApi")
   .add(authGroup)
+  .add(sessionsGroup)
+  .add(identifiersGroup)
+  .add(usersGroup)
   .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({

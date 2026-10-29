@@ -31,7 +31,7 @@ function Devices() {
 }
 ```
 
-`useSession` reads the client's session store through `useSyncExternalStore`, so the first mounted hook triggers the initial `/session` fetch and every auth mutation on the client refreshes it.
+`useSession` reads the client's session store through `useSyncExternalStore`, so the first mounted hook triggers the initial `GET /sessions/current` read and every auth mutation on the client refreshes it.
 
 See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) for the rest of the client API.
 

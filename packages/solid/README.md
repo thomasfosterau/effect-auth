@@ -33,7 +33,7 @@ render(
 );
 ```
 
-`useSession()` reads that client and returns an accessor over its session store — subscribing triggers the initial `/session` fetch, every auth mutation on the client refreshes it, and the subscription is released with the owning component.
+`useSession()` reads that client and returns an accessor over its session store — subscribing triggers the initial `GET /sessions/current` read, every auth mutation on the client refreshes it, and the subscription is released with the owning component.
 
 ```tsx
 import { Show } from "solid-js";

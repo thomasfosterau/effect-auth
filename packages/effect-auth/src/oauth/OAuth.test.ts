@@ -1306,6 +1306,7 @@ describe("OAuthService linking controls", () => {
       invalidateSession: () => Effect.void,
       invalidateUserSessions: () => Effect.void,
       listSessions: () => Effect.succeed([]),
+      revokeSessionById: () => Effect.succeed(false),
       revokeOtherSessions: () => Effect.void,
       setSessionAttributes: () => Effect.succeed(session),
     });

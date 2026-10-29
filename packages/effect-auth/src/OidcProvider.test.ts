@@ -1131,8 +1131,7 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
     Layer.provideMerge(FileSystem.layerNoop({})),
   );
   const api = HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(HttpServer.authGroupLayer({ secure: false })),
-    Layer.provide(HttpServer.scimGroupLayer()),
+    Layer.provide(HttpServer.groupLayers({ secure: false })),
     Layer.provide(platform),
   );
   // SAFETY: the handlers' phantom requirements are satisfied by `services` at
