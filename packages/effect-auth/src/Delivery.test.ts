@@ -35,6 +35,7 @@ const identifierStoreWith = (
       type: entry.type,
       value: entry.value,
       verified: entry.verified ?? true,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     records.set(identifier.id, identifier);
   });

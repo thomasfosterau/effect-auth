@@ -181,6 +181,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
     value: email,
     verified: true,
     verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   identifiers.set(identifier.id, identifier);
 

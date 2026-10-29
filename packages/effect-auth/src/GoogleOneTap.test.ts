@@ -314,7 +314,12 @@ describe("GoogleOneTapService", () => {
     users.set("user-squat", { id: "user-squat", createdAt: now, updatedAt: now, attributes: {} });
     await Effect.runPromise(
       identifiers.create(
-        makeIdentifier({ userId: "user-squat", type: "email", value: "alice@gmail.test" }),
+        makeIdentifier({
+          userId: "user-squat",
+          type: "email",
+          value: "alice@gmail.test",
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        }),
       ),
     );
     passwordHashes.set("user-squat", "squatter-hash");

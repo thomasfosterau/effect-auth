@@ -740,7 +740,7 @@ export const identifierStoreConformance = <E = never, R = never>(
             "replace with another type",
             store.replace(
               from,
-              Identifier.makeIdentifier({ userId, type: "username", value: uuid() }),
+              Identifier.makeIdentifier({ userId, type: "username", value: uuid(), now: at() }),
             ),
             "AuthError",
           );

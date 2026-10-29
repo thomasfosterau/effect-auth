@@ -30,7 +30,13 @@ const identifierStore = memoryIdentifierStore(identifierRecords);
 
 /** Seed an email identifier for a user (the old `email`/`emailVerified` fields). */
 const seedEmailIdentifier = (userId: string, email: string, verified: boolean): Identifier => {
-  const identifier = makeIdentifier({ userId, type: "email", value: email, verified });
+  const identifier = makeIdentifier({
+    userId,
+    type: "email",
+    value: email,
+    verified,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
   identifierRecords.set(identifier.id, identifier);
   return identifier;
 };

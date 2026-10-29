@@ -20,7 +20,7 @@
  *
  * @module testing
  */
-import { type Context, DateTime, Effect, Layer, type Option } from "effect";
+import { type Context, DateTime, Effect, Layer, type Option, Schema } from "effect";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "../Authorizer.ts";
 import * as SessionContext from "../SessionContext.ts";
 import type * as Types from "../Types.ts";
@@ -57,8 +57,14 @@ export interface RunAsOptions {
 
 const sessionLifetimeMillis = 24 * 60 * 60 * 1000;
 
+const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
+
 /**
  * A fixture session for `user`, started at `now` and expiring 24 hours later.
+ *
+ * Fails with a `SchemaError` when `now` is an Invalid Date (or the expiry
+ * falls outside the `Date` range), rather than building a session whose
+ * instants are Invalid Dates.
  *
  * @since 1.0.0
  * @category constructors
@@ -67,29 +73,36 @@ export const sessionFor = (
   user: Types.User,
   now: Date,
   overrides?: Partial<Omit<Types.Session, "userId">> | undefined,
-): Types.SessionWithUser => ({
-  session: {
-    id: `fixture-session-${user.id}`,
-    expiresAt: new Date(now.getTime() + sessionLifetimeMillis),
-    createdAt: now,
-    lastActivityAt: now,
-    attributes: {},
-    ...overrides,
-    userId: user.id,
-  },
-  user,
-});
+): Effect.Effect<Types.SessionWithUser, Schema.SchemaError> =>
+  Effect.map(decodeMillis(now.getTime() + sessionLifetimeMillis), (expiresAt) => ({
+    session: {
+      id: `fixture-session-${user.id}`,
+      expiresAt,
+      createdAt: now,
+      lastActivityAt: now,
+      attributes: {},
+      ...overrides,
+      userId: user.id,
+    },
+    user,
+  }));
 
 const authenticated = (
   user: (now: Date) => Types.User,
   options: RunAsOptions | undefined,
 ): Layer.Layer<AuthenticatedServices> =>
   Layer.unwrap(
-    Effect.map(DateTime.nowAsDate, (now) => {
-      return SessionContext.authenticatedLayer(sessionFor(user(now), now, options?.session), {
-        credentialClass: options?.credentialClass ?? "interactive",
-      });
-    }),
+    DateTime.nowAsDate.pipe(
+      // The Clock's own instant is always a valid Date, so a failure here is a
+      // defect rather than an expected error.
+      Effect.flatMap((now) => sessionFor(user(now), now, options?.session)),
+      Effect.orDie,
+      Effect.map((sessionWithUser) =>
+        SessionContext.authenticatedLayer(sessionWithUser, {
+          credentialClass: options?.credentialClass ?? "interactive",
+        }),
+      ),
+    ),
   );
 
 /**

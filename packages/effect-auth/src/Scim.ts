@@ -867,6 +867,7 @@ export const make = (
               // The IdP is the system of record for its users' addresses.
               verified: true,
               verifiedAt,
+              now: verifiedAt,
             }),
           ),
         ),

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order } from "effect";
+import { Array as Arr, Effect, Layer, Order, DateTime } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
@@ -401,6 +401,7 @@ describe("Authorizer + PolicyStore", () => {
             templateId: "share-doc",
             principal: bob,
             resource: doc1,
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           }),
         );
         yield* store.createPolicy(

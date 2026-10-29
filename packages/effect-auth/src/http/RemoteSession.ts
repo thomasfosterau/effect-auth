@@ -276,8 +276,14 @@ const emptyResult: RemoteSessionResult = { session: Option.none(), setCookie: []
 
 const decodeView = Schema.decodeUnknownEffect(S.SessionWithUserView);
 
+const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
+
 /**
  * Rebuild the domain record from the wire view: epoch millis back to `Date`s.
+ *
+ * The instants come from a remote server, so each is decoded with
+ * `Schema.DateFromMillis`: a value that is not a valid `Date` fails with a
+ * `SchemaError` instead of becoming an Invalid Date.
  *
  * `UserView` also carries derived `email`/`emailVerified`, which are not
  * `Types.User` fields (login handles are `Identifier` records). They are
@@ -287,24 +293,38 @@ const decodeView = Schema.decodeUnknownEffect(S.SessionWithUserView);
  * @since 1.0.0
  * @category conversions
  */
-export const fromSessionWithUserView = (view: S.SessionWithUserView): Types.SessionWithUser => ({
-  session: {
-    id: view.session.id,
-    userId: view.session.userId,
-    expiresAt: new Date(view.session.expiresAt),
-    createdAt: new Date(view.session.createdAt),
-    lastActivityAt: new Date(view.session.lastActivityAt),
-    attributes: view.session.attributes,
-  },
-  user: {
-    id: view.user.id,
-    ...(view.user.name !== undefined && { name: view.user.name }),
-    ...(view.user.image !== undefined && { image: view.user.image }),
-    createdAt: new Date(view.user.createdAt),
-    updatedAt: new Date(view.user.updatedAt),
-    attributes: view.user.attributes,
-  },
-});
+export const fromSessionWithUserView = (
+  view: S.SessionWithUserView,
+): Effect.Effect<Types.SessionWithUser, Schema.SchemaError> =>
+  Effect.all(
+    {
+      expiresAt: decodeMillis(view.session.expiresAt),
+      sessionCreatedAt: decodeMillis(view.session.createdAt),
+      lastActivityAt: decodeMillis(view.session.lastActivityAt),
+      userCreatedAt: decodeMillis(view.user.createdAt),
+      updatedAt: decodeMillis(view.user.updatedAt),
+    },
+    { concurrency: 1 },
+  ).pipe(
+    Effect.map((at) => ({
+      session: {
+        id: view.session.id,
+        userId: view.session.userId,
+        expiresAt: at.expiresAt,
+        createdAt: at.sessionCreatedAt,
+        lastActivityAt: at.lastActivityAt,
+        attributes: view.session.attributes,
+      },
+      user: {
+        id: view.user.id,
+        ...(view.user.name !== undefined && { name: view.user.name }),
+        ...(view.user.image !== undefined && { image: view.user.image }),
+        createdAt: at.userCreatedAt,
+        updatedAt: at.updatedAt,
+        attributes: view.user.attributes,
+      },
+    })),
+  );
 
 /**
  * Configuration for {@link make}.
@@ -443,13 +463,14 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
           new RemoteSessionError({ message: "Session read body was not JSON", cause }),
       });
 
-      const view = yield* decodeView(body).pipe(
+      const session = yield* decodeView(body).pipe(
+        Effect.flatMap(fromSessionWithUserView),
         Effect.mapError(
           (cause) => new RemoteSessionError({ message: "Session read body did not decode", cause }),
         ),
       );
 
-      return { session: Option.some(fromSessionWithUserView(view)), setCookie };
+      return { session: Option.some(session), setCookie };
     }).pipe(Effect.withSpan(spanNames.remoteSessionRead));
 
   const relay = (request: Request, path?: string): Effect.Effect<Response> =>

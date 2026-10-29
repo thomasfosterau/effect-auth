@@ -133,6 +133,7 @@ const seedPhoneUser = (phoneNumber: string, verified: boolean): Types.User => {
     value: phoneNumber,
     verified,
     ...(verified ? { verifiedAt: now } : {}),
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   identifierRecords.set(identifier.id, identifier);
   return user;

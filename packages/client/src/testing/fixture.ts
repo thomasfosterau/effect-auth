@@ -470,7 +470,12 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
    * it: usernames are registered by the app, then used at `/sign-in/username`).
    */
   const registerUsername = (userId: string, username: string): Auth.Identifier => {
-    const identifier = Auth.makeIdentifier({ userId, type: "username", value: username });
+    const identifier = Auth.makeIdentifier({
+      userId,
+      type: "username",
+      value: username,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    });
     identifierRecords.set(identifier.id, identifier);
     return identifier;
   };

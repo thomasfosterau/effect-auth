@@ -1276,6 +1276,7 @@ describe("OAuthService linking controls", () => {
         type: "email",
         value: seed.email,
         verified: seed.verified ?? true,
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
       });
       records.set(identifier.id, identifier);
     });
@@ -1597,6 +1598,7 @@ describe("OAuthService linking controls", () => {
             type: "email",
             value: "owner@example.com",
             verified: false,
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           });
           identifiers.records.set(held.id, held);
           return { user: owner, created: false };

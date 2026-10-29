@@ -231,7 +231,12 @@ const makeUser = (email: string) =>
     const identifiers = yield* Auth.IdentifierStore;
     const { user } = yield* store.createUser({ name: "Test User", attributes: { plan: "pro" } });
     yield* identifiers.create(
-      Auth.makeIdentifier({ userId: user.id, type: "email", value: email }),
+      Auth.makeIdentifier({
+        userId: user.id,
+        type: "email",
+        value: email,
+        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      }),
     );
     return user;
   });
@@ -1046,7 +1051,13 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("IdentifierStore.replace swaps a user's identifier in one transaction, and keeps it on any refusal", async () => {
       const email = (userId: string, value: string, verified = false) =>
-        Auth.makeIdentifier({ userId, type: "email", value, verified });
+        Auth.makeIdentifier({
+          userId,
+          type: "email",
+          value,
+          verified,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -1121,7 +1132,13 @@ const storeContract = (engine: StoreEngine): void => {
       // released: its INSERT lands, its guarded DELETE matches nothing, and the
       // claim is taken back.
       const email = (value: string) =>
-        Auth.makeIdentifier({ userId: "user-ada", type: "email", value, verified: true });
+        Auth.makeIdentifier({
+          userId: "user-ada",
+          type: "email",
+          value,
+          verified: true,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -1493,7 +1510,13 @@ storeContract(postgres);
 
 describe("@thomasfosterau/effect-auth-sql IdentifierStore.replace on SQLite: transaction and order", () => {
   const email = (value: string) =>
-    Auth.makeIdentifier({ userId: "user-ada", type: "email", value, verified: true });
+    Auth.makeIdentifier({
+      userId: "user-ada",
+      type: "email",
+      value,
+      verified: true,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    });
 
   const replaceUnder = (trigger: string) =>
     Effect.runPromise(

@@ -246,16 +246,22 @@ export const anyEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | n
 export const anyEmailValue = (identifiers: ReadonlyArray<Identifier>): string | null =>
   anyEmail(identifiers)?.value ?? null;
 
-/** Construct a new (unpersisted) identifier record with a random id. */
+/**
+ * Construct a new (unpersisted) identifier record with a random id.
+ *
+ * `now` is the record's `createdAt`. It is required so the time comes from
+ * the caller's `Clock` (`yield* DateTime.nowAsDate`), which `TestClock`
+ * controls, rather than from the wall clock.
+ */
 export const makeIdentifier = (input: {
   readonly userId: string;
   readonly type: IdentifierType;
   readonly value: string;
   readonly verified?: boolean;
   readonly verifiedAt?: Date;
-  readonly now?: Date;
+  readonly now: Date;
 }): Identifier => {
-  const now = input.now ?? new Date();
+  const now = input.now;
   return {
     id: globalThis.crypto.randomUUID(),
     userId: input.userId,

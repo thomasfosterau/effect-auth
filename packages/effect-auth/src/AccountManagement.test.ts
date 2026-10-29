@@ -72,6 +72,7 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
       value: email,
       verified: true,
       verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifiers.set(identifier.id, identifier);
   };
@@ -244,7 +245,13 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         Effect.suspend(() => {
           records.set(
             "rival",
-            makeIdentifier({ userId: "user-2", type: "email", value: NEW_EMAIL, verified: true }),
+            makeIdentifier({
+              userId: "user-2",
+              type: "email",
+              value: NEW_EMAIL,
+              verified: true,
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            }),
           );
           return store.replace(from, to);
         }),
@@ -385,7 +392,13 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         Effect.gen(function* () {
           yield* store.replace(
             from,
-            makeIdentifier({ userId: to.userId, type: "email", value: to.value, verified }),
+            makeIdentifier({
+              userId: to.userId,
+              type: "email",
+              value: to.value,
+              verified,
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            }),
           );
           // A store that claims `to` before it looks at `from` (effect-auth-sql's
           // INSERT first) refuses the now-held value instead of resolving to null.
@@ -436,7 +449,12 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         Effect.gen(function* () {
           yield* store.replace(
             from,
-            makeIdentifier({ userId: to.userId, type: "email", value: to.value }),
+            makeIdentifier({
+              userId: to.userId,
+              type: "email",
+              value: to.value,
+              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            }),
           );
           return yield* store.getByValue(to.type, to.value);
         }),
@@ -534,6 +552,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
             userId: owner,
             type: "email",
             value: identifier.value,
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           });
           records.set(concurrent.id, concurrent);
           return store.create(identifier);

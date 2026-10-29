@@ -211,16 +211,19 @@ export const isAdmin = (user: Types.User, config: AdminConfig = {}): boolean => 
 /**
  * Whether a user is currently banned. A ban with `attributes.banExpires` in
  * the past has lapsed and no longer counts.
+ *
+ * An Effect because "the past" is read from the `Clock`, so `TestClock`
+ * decides whether a ban has lapsed.
  */
-export const isBanned = (user: Types.User): boolean => {
+export const isBanned = (user: Types.User): Effect.Effect<boolean> => {
   if (user.attributes["banned"] !== true) {
-    return false;
+    return Effect.succeed(false);
   }
   const banExpires = user.attributes["banExpires"];
-  if (Predicate.isNumber(banExpires) && banExpires <= Date.now()) {
-    return false;
+  if (!Predicate.isNumber(banExpires)) {
+    return Effect.succeed(true);
   }
-  return true;
+  return Effect.map(Clock.currentTimeMillis, (now) => banExpires > now);
 };
 
 /**
@@ -681,7 +684,9 @@ export const make = (
  */
 export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
   afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
-    isBanned(sessionWithUser.user)
-      ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been suspended" }))
-      : Effect.succeed(sessionWithUser),
+    Effect.flatMap(isBanned(sessionWithUser.user), (banned) =>
+      banned
+        ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been suspended" }))
+        : Effect.succeed(sessionWithUser),
+    ),
 });

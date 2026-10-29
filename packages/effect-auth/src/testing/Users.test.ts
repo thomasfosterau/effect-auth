@@ -91,7 +91,8 @@ describe("fixtureUser", () => {
       updatedAt: Testing.fixtureEpoch,
       attributes: { team: "docs", role: "editor" },
     });
-    expect(SessionContext.withRole()(Testing.sessionFor(user, Testing.fixtureEpoch))).toEqual(
+    const sessionWithUser = Effect.runSync(Testing.sessionFor(user, Testing.fixtureEpoch));
+    expect(SessionContext.withRole()(sessionWithUser)).toEqual(
       Option.some({ ...user, role: "editor" }),
     );
   });

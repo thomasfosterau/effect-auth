@@ -10,7 +10,7 @@
  * anti-enumeration error and the same `SecondFactorGate` seam as
  * email/password sign-in.
  */
-import { Array as Arr, Context, Data, Effect, Layer, Option } from "effect";
+import { Array as Arr, Context, Data, DateTime, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.ts";
 import {
   answeredByStandIn,
@@ -229,6 +229,7 @@ const make = (
 
         // Usernames carry no external proof-of-ownership, so the identifier
         // is created verified.
+        const now = yield* DateTime.nowAsDate;
         yield* claimIdentifier(
           identifiers,
           makeIdentifier({
@@ -236,6 +237,7 @@ const make = (
             type: "username",
             value: username,
             verified: true,
+            now,
           }),
         ).pipe(
           Effect.catchTags({
@@ -338,9 +340,10 @@ const make = (
           (id) => identifiers.delete(id.id),
           { concurrency: 1, discard: true },
         );
+        const now = yield* DateTime.nowAsDate;
         yield* claimIdentifier(
           identifiers,
-          makeIdentifier({ userId, type: "username", value: username, verified: true }),
+          makeIdentifier({ userId, type: "username", value: username, verified: true, now }),
         ).pipe(
           Effect.catchTags({
             IdentifierTakenError: () =>

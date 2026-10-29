@@ -1,4 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { TestClock } from "effect/testing";
 import {
   Array as Arr,
   Context,
@@ -217,6 +218,7 @@ const seedUser = (id: string, email: string, attributes: Attributes = {}): User 
     value: email,
     verified: true,
     verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   identifiers.set(identifier.id, identifier);
   return user;
@@ -397,12 +399,12 @@ describe("AdminService", () => {
     expect(result.banned.attributes["banned"]).toBe(true);
     expect(result.banned.attributes["banReason"]).toBe("Spamming");
     expect(result.banned.attributes["banExpires"]).toBeUndefined();
-    expect(isBanned(result.banned)).toBe(true);
+    expect(Effect.runSync(isBanned(result.banned))).toBe(true);
     expect(result.banSelf._tag).toBe("Failure");
     expect(result.banAdmin._tag).toBe("Failure");
     const storedAdmin = users.get("admin-2");
     assert(storedAdmin !== undefined, "admin-2 is seeded");
-    expect(isBanned(storedAdmin)).toBe(false);
+    expect(Effect.runSync(isBanned(storedAdmin))).toBe(false);
   });
 
   it("applies the default ban reason and defaultBanExpiresIn", async () => {
@@ -420,7 +422,26 @@ describe("AdminService", () => {
     const banExpires = banned.attributes["banExpires"];
     assert(Predicate.isNumber(banExpires));
     expect(banExpires).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
-    expect(isBanned(banned)).toBe(true);
+    expect(Effect.runSync(isBanned(banned))).toBe(true);
+  });
+
+  it("reads ban expiry from the Clock, so TestClock decides when a ban lapses", async () => {
+    const user: User = {
+      id: "user-clock",
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+      updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+      attributes: { banned: true, banExpires: 10_000 },
+    };
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(9_999);
+        const before = yield* isBanned(user);
+        yield* TestClock.setTime(10_000);
+        const at = yield* isBanned(user);
+        return { before, at };
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(result).toEqual({ before: true, at: false });
   });
 
   it("treats an expired ban as not banned and unbans cleanly", async () => {
@@ -431,10 +452,10 @@ describe("AdminService", () => {
     const result = await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
         const expired = yield* service.banUser(admin, "user-1", { expiresIn: -1000 });
-        const bannedWhileExpired = isBanned(expired);
+        const bannedWhileExpired = yield* isBanned(expired);
 
         const permanent = yield* service.banUser(admin, "user-1");
-        const bannedPermanent = isBanned(permanent);
+        const bannedPermanent = yield* isBanned(permanent);
 
         const unbanned = yield* service.unbanUser(admin, "user-1");
         return { bannedWhileExpired, bannedPermanent, unbanned };
@@ -446,7 +467,7 @@ describe("AdminService", () => {
     expect(result.unbanned.attributes["banned"]).toBe(false);
     expect(result.unbanned.attributes["banReason"]).toBeUndefined();
     expect(result.unbanned.attributes["banExpires"]).toBeUndefined();
-    expect(isBanned(result.unbanned)).toBe(false);
+    expect(Effect.runSync(isBanned(result.unbanned))).toBe(false);
   });
 
   it("BannedUserPlugin blocks session validation for banned users", async () => {
@@ -758,6 +779,7 @@ describe("AdminService", () => {
       type: "email",
       value: "owner@example.com",
       verified: false,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
     identifiers.set(ownerEmail.id, ownerEmail);
     passwordHashes.set(owner.id, "owner-hash");

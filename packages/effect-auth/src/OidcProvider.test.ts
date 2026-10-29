@@ -940,6 +940,7 @@ const makeHttpFixture = (
       value: email,
       verified: true,
       verifiedAt: now,
+      now,
     });
     identifiers.set(identifier.id, identifier);
     return id;

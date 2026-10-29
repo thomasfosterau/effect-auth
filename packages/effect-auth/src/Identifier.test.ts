@@ -266,7 +266,13 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
   const runOn = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
     Effect.runPromise(effect.pipe(Effect.provide(makeLayer())));
   const email = (userId: string, value: string, verified = false) =>
-    makeIdentifier({ userId, type: "email", value, verified });
+    makeIdentifier({
+      userId,
+      type: "email",
+      value,
+      verified,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    });
 
   describe(`${label}: replace`, () => {
     it("swaps the user's identifier for the new one and releases the old value", async () => {
@@ -346,7 +352,12 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
             otherType: yield* Effect.flip(
               store.replace(
                 alice,
-                makeIdentifier({ userId: "user-1", type: "username", value: "alice" }),
+                makeIdentifier({
+                  userId: "user-1",
+                  type: "username",
+                  value: "alice",
+                  now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+                }),
               ),
             ),
             // Reusing `from`'s id would make the claim overwrite `from`, so the
