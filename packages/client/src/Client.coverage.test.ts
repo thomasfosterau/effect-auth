@@ -12,7 +12,12 @@
 import * as Auth from "@thomasfosterau/effect-auth";
 import { Array as Arr, DateTime, Effect, Order, Predicate, Schema } from "effect";
 import { assert, describe, expect, it } from "vite-plus/test";
-import { AuthClientError, SecondFactorChallengeError, createAuthClient } from "./Client.ts";
+import {
+  AuthClientError,
+  type AuthResult,
+  SecondFactorChallengeError,
+  createAuthClient,
+} from "./Client.ts";
 import {
   makeCookieJarFetch,
   makeServerFixture,
@@ -70,10 +75,16 @@ const recordingFetch = (body: Schema.Json) => {
 // Identifiers
 // -----------------------------------------------------------------------------
 
+/** The user a call that issued a session resolved with. */
+const signedInUser = (result: AuthResult) => {
+  assert(result.user !== undefined, "the call issued a session");
+  return result.user;
+};
+
 describe("identifiers", () => {
   it("lists the user's login handles and deletes one", async () => {
     const { server, client } = withServer();
-    const { user } = await client.signUp({ email: "ids@client.test", password: PW });
+    const user = signedInUser(await client.signUp({ email: "ids@client.test", password: PW }));
 
     expect((await client.identifiers.list()).map((i) => i.type)).toEqual(["email"]);
 
@@ -112,12 +123,12 @@ describe("identifiers", () => {
 describe("username and anonymous sign-in", () => {
   it("signs in with a username + password", async () => {
     const { server, client } = withServer({ features: true });
-    const { user } = await client.signUp({ email: "name@client.test", password: PW });
+    const user = signedInUser(await client.signUp({ email: "name@client.test", password: PW }));
     server.registerUsername(user.id, "cooluser");
     await client.signOut();
 
     const signedIn = await client.signInUsername({ username: "cooluser", password: PW });
-    expect(signedIn.user.id).toBe(user.id);
+    expect(signedInUser(signedIn).id).toBe(user.id);
     expect((await client.getSession())?.user.id).toBe(user.id);
   });
 
@@ -125,8 +136,8 @@ describe("username and anonymous sign-in", () => {
     const { client } = withServer({ features: true });
 
     const guest = await client.signInAnonymous();
-    expect(guest.user.attributes["isAnonymous"]).toBe(true);
-    expect((await client.getSession())?.user.id).toBe(guest.user.id);
+    expect(signedInUser(guest).attributes["isAnonymous"]).toBe(true);
+    expect((await client.getSession())?.user.id).toBe(signedInUser(guest).id);
   });
 });
 
@@ -145,7 +156,7 @@ describe("phone OTP", () => {
       phoneNumber: "+15550001",
       otp: sent.otp,
     });
-    expect(signedIn.user.id).toBeTypeOf("string");
+    expect(signedInUser(signedIn).id).toBeTypeOf("string");
     expect(await client.getSession()).not.toBeNull();
   });
 });
@@ -183,7 +194,7 @@ describe("multi-session", () => {
 
     const first = await client.signUp({ email: "a@client.test", password: PW });
     const second = await client.signUp({ email: "b@client.test", password: PW });
-    expect((await client.getSession())?.user.id).toBe(second.user.id);
+    expect((await client.getSession())?.user.id).toBe(signedInUser(second).id);
 
     const list = await client.multiSession.list();
     expect(
@@ -196,16 +207,16 @@ describe("multi-session", () => {
       ),
     ).toEqual(["a@client.test", "b@client.test"]);
 
-    const firstEntry = list.find((entry) => entry.user.id === first.user.id);
+    const firstEntry = list.find((entry) => entry.user.id === signedInUser(first).id);
     assert(firstEntry !== undefined, "the first account is listed");
     expect(await client.multiSession.setActive({ sessionId: firstEntry.session.id })).toEqual({
       status: true,
     });
-    expect((await client.getSession())?.user.id).toBe(first.user.id);
+    expect((await client.getSession())?.user.id).toBe(signedInUser(first).id);
 
     await client.multiSession.revoke({ sessionId: firstEntry.session.id });
     expect((await client.multiSession.list()).map((entry) => entry.user.id)).toEqual([
-      second.user.id,
+      signedInUser(second).id,
     ]);
   });
 });
@@ -251,7 +262,7 @@ describe("multi-factor challenge continuation", () => {
     expect(challenge.isExpired()).toBe(false);
 
     const verified = await challenge.verifyTotp(await totpFor(enrollment.secret));
-    expect(verified.user.email).toBe("totp@client.test");
+    expect(signedInUser(verified).email).toBe("totp@client.test");
     expect((await client.getSession())?.user.email).toBe("totp@client.test");
   });
 
@@ -265,7 +276,7 @@ describe("multi-factor challenge continuation", () => {
     const challenge = client.multiFactor.continueChallenge(gated);
 
     const verified = await challenge.verifyBackupCode(backupCode);
-    expect(verified.user.email).toBe("backup@client.test");
+    expect(signedInUser(verified).email).toBe("backup@client.test");
 
     // Backup codes are single-use: a fresh challenge rejects the same code.
     await client.signOut();
@@ -325,7 +336,7 @@ describe("change email and delete user", () => {
 
     // Confirming revokes the old session; the new address is now the handle.
     const signedIn = await client.signIn({ email: "new@client.test", password: PW });
-    expect(signedIn.user.email).toBe("new@client.test");
+    expect(signedInUser(signedIn).email).toBe("new@client.test");
   });
 
   it("requests and confirms account deletion", async () => {
@@ -375,15 +386,19 @@ describe("organizations", () => {
     ]);
 
     const member = await invitee.organization.acceptInvitation(invitation.id);
-    expect(member).toMatchObject({ organizationId: org.id, userId: guest.user.id, role: "member" });
+    expect(member).toMatchObject({
+      organizationId: org.id,
+      userId: signedInUser(guest).id,
+      role: "member",
+    });
 
     // Direct role management, then removal.
     const promoted = await owner.organization.updateMemberRole(org.id, {
-      userId: guest.user.id,
+      userId: signedInUser(guest).id,
       role: "admin",
     });
     expect(promoted.role).toBe("admin");
-    await owner.organization.removeMember(org.id, guest.user.id);
+    await owner.organization.removeMember(org.id, signedInUser(guest).id);
     expect((await owner.organization.get(org.id)).members).toHaveLength(1);
 
     // A second invitation, cancelled instead of accepted.
@@ -409,19 +424,21 @@ describe("organizations", () => {
     const mate = await teammate.signUp({ email: "mate@client.test", password: PW });
 
     const org = await owner.organization.create({ name: "Globex", slug: "globex" });
-    await owner.organization.addMember(org.id, { userId: mate.user.id, role: "member" });
+    await owner.organization.addMember(org.id, { userId: signedInUser(mate).id, role: "member" });
 
     const team = await owner.organization.createTeam(org.id, { name: "Engineering" });
     expect(team.organizationId).toBe(org.id);
     expect((await teammate.organization.listTeams(org.id)).map((t) => t.id)).toEqual([team.id]);
 
-    const teamMember = await owner.organization.addTeamMember(team.id, { userId: mate.user.id });
-    expect(teamMember).toMatchObject({ teamId: team.id, userId: mate.user.id });
+    const teamMember = await owner.organization.addTeamMember(team.id, {
+      userId: signedInUser(mate).id,
+    });
+    expect(teamMember).toMatchObject({ teamId: team.id, userId: signedInUser(mate).id });
     expect((await owner.organization.listTeamMembers(team.id)).map((m) => m.userId)).toEqual([
-      mate.user.id,
+      signedInUser(mate).id,
     ]);
     expect(
-      (await owner.organization.listTeamsForMember(org.id, mate.user.id)).map((t) => t.id),
+      (await owner.organization.listTeamsForMember(org.id, signedInUser(mate).id)).map((t) => t.id),
     ).toEqual([team.id]);
 
     expect((await owner.organization.updateTeam(team.id, { name: "Platform" })).name).toBe(
@@ -447,7 +464,7 @@ describe("organizations", () => {
     assert.instanceOf(denied, AuthClientError);
     expect(denied.status).toBe(403);
 
-    await owner.organization.removeTeamMember(team.id, mate.user.id);
+    await owner.organization.removeTeamMember(team.id, signedInUser(mate).id);
     expect(await owner.organization.listTeamMembers(team.id)).toEqual([]);
     await owner.organization.deleteTeam(team.id);
     expect((await owner.organization.listTeams(org.id)).map((t) => t.name)).toEqual(["Design"]);
@@ -462,9 +479,15 @@ describe("organizations", () => {
     const employee = await staff.signUp({ email: "staff@client.test", password: PW });
 
     const org = await owner.organization.create({ name: "Initech", slug: "initech" });
-    await owner.organization.addMember(org.id, { userId: employee.user.id, role: "admin" });
+    await owner.organization.addMember(org.id, {
+      userId: signedInUser(employee).id,
+      role: "admin",
+    });
 
-    const deactivated = await owner.organization.deactivateMember(org.id, employee.user.id);
+    const deactivated = await owner.organization.deactivateMember(
+      org.id,
+      signedInUser(employee).id,
+    );
     expect(deactivated).toMatchObject({
       status: "inactive",
       role: "member",
@@ -481,9 +504,12 @@ describe("organizations", () => {
     // ...but the row is still on the organization.
     expect((await owner.organization.get(org.id)).members).toHaveLength(2);
     // The session survives: deactivation is organization-scoped.
-    expect((await staff.getSession())?.user.id).toBe(employee.user.id);
+    expect((await staff.getSession())?.user.id).toBe(signedInUser(employee).id);
 
-    const reactivated = await owner.organization.reactivateMember(org.id, employee.user.id);
+    const reactivated = await owner.organization.reactivateMember(
+      org.id,
+      signedInUser(employee).id,
+    );
     expect(reactivated).toMatchObject({ status: "active", role: "admin" });
     expect((await staff.organization.createTeam(org.id, { name: "Platform" })).name).toBe(
       "Platform",
@@ -517,7 +543,7 @@ describe("organizations", () => {
     const updated = await owner.organization.setDefaultRole(org.id, { role: "contributor" });
     expect(updated.defaultRole).toBe("contributor");
 
-    const member = await owner.organization.addMember(org.id, { userId: hire.user.id });
+    const member = await owner.organization.addMember(org.id, { userId: signedInUser(hire).id });
     expect(member.role).toBe("contributor");
     expect(member.status).toBe("active");
 

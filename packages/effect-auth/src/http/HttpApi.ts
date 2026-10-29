@@ -127,16 +127,30 @@ export const SignUpDocument = writeDocument("users", S.SignUpPayload);
 export type SignUpDocument = typeof SignUpDocument.Type;
 
 /**
- * The body of `POST /second-factor-challenges/:id/verifications`: a TOTP code
- * or a single-use backup code.
+ * The body of `POST /second-factor-challenges/verifications`: a TOTP code or a
+ * single-use backup code, and the challenge it redeems as the `challenge`
+ * relationship. The challenge token travels in the body, never in the URL, so
+ * no access log or `Referer` carries it, and one rate-limit bucket covers every
+ * challenge.
  */
-export const SecondFactorVerificationDocument = writeDocument(
-  "second-factor-verifications",
-  Schema.Struct({
-    method: Schema.Literals(["totp", "backup-code"]),
-    code: Schema.String,
+export const SecondFactorVerificationDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("second-factor-verifications"),
+    attributes: Schema.Struct({
+      method: Schema.Literals(["totp", "backup-code"]),
+      code: Schema.String,
+    }),
+    relationships: Schema.Struct({
+      /** The challenge to redeem: its id is the challenge token. */
+      challenge: Schema.Struct({
+        data: Schema.Struct({
+          type: Schema.Literal("second-factor-challenges"),
+          id: Schema.String,
+        }),
+      }),
+    }),
   }),
-);
+});
 export type SecondFactorVerificationDocument = typeof SecondFactorVerificationDocument.Type;
 
 /**
@@ -176,26 +190,24 @@ export const PasswordResetRequestDocument = writeDocument(
 export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.Type;
 
 /**
- * The body of `PATCH /email-verifications/:id`: the verification named by its
- * token, which must equal the path's.
+ * The body of `POST /email-verifications/redemptions`: the token from a
+ * verification link. It travels in the body, never in the URL.
  */
-export const EmailVerificationDocument = Schema.Struct({
-  data: Schema.Struct({ type: Schema.Literal("email-verifications"), id: Schema.String }),
-});
-export type EmailVerificationDocument = typeof EmailVerificationDocument.Type;
+export const EmailVerificationRedemptionDocument = writeDocument(
+  "email-verification-redemptions",
+  Schema.Struct({ token: Schema.String }),
+);
+export type EmailVerificationRedemptionDocument = typeof EmailVerificationRedemptionDocument.Type;
 
 /**
- * The body of `PATCH /password-resets/:id`: the reset named by its token, which
- * must equal the path's, and the new password.
+ * The body of `POST /password-resets/redemptions`: the token from a reset link
+ * and the new password. The token travels in the body, never in the URL.
  */
-export const PasswordResetDocument = Schema.Struct({
-  data: Schema.Struct({
-    type: Schema.Literal("password-resets"),
-    id: Schema.String,
-    attributes: Schema.Struct({ newPassword: Schema.String }),
-  }),
-});
-export type PasswordResetDocument = typeof PasswordResetDocument.Type;
+export const PasswordResetRedemptionDocument = writeDocument(
+  "password-reset-redemptions",
+  Schema.Struct({ token: Schema.String, newPassword: Schema.String }),
+);
+export type PasswordResetRedemptionDocument = typeof PasswordResetRedemptionDocument.Type;
 
 /** `202 Accepted` with no body: the request is taken, and the answer says nothing more. */
 const Accepted = HttpApiSchema.NoContent.pipe(HttpApiSchema.status(202));
@@ -233,9 +245,6 @@ const sendErrors = [
   E.TooManyRequests.wire,
   E.InternalServerError.wire,
 ];
-
-/** The errors redeeming a token can answer with: {@link sendErrors}, and `409` for an id mismatch. */
-const redeemErrors = [...sendErrors, E.Conflict.wire];
 
 /**
  * `sessions`: the signed-in user's sessions.
@@ -286,14 +295,14 @@ export const sessionsGroup = Group.make(
 /**
  * `second-factor-challenges`: redeem the challenge a sign-in answered with.
  *
- * - `POST /second-factor-challenges/:id/verifications`: a TOTP or backup code
- *   for the challenge `:id`; `201` with the new session. A wrong code or an
- *   unknown, expired or spent challenge answers `401`.
+ * - `POST /second-factor-challenges/verifications`: a TOTP or backup code for
+ *   the challenge its `challenge` relationship names; `201` with the new
+ *   session. A wrong code or an unknown, expired or spent challenge answers
+ *   `401`.
  */
 export const secondFactorChallengesGroup = Group.make(
   R.SecondFactorChallenge,
-  HttpApiEndpoint.post("verify", "/second-factor-challenges/:id/verifications", {
-    params: { id: Schema.String },
+  HttpApiEndpoint.post("verify", "/second-factor-challenges/verifications", {
     payload: jsonApiPayload(SecondFactorVerificationDocument),
     success: MediaType.asJsonApi(SignedInDocument, 201),
     error: signInErrors,
@@ -322,8 +331,9 @@ export const otpChallengesGroup = Group.make(
  *
  * - `POST /email-verifications`: (re)send a verification link; `202` whether or
  *   not the address has an account.
- * - `PATCH /email-verifications/:id`: verify with the link's token. Answers
- *   `200` with the new session when verification signs the user in, else `204`.
+ * - `POST /email-verifications/redemptions`: verify with the link's token.
+ *   Answers `201` with the new session when verification signs the user in,
+ *   else `204`.
  */
 export const emailVerificationsGroup = Group.make(
   "email-verifications",
@@ -334,11 +344,10 @@ export const emailVerificationsGroup = Group.make(
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
-  HttpApiEndpoint.patch("update", "/email-verifications/:id", {
-    params: { id: Schema.String },
-    payload: jsonApiPayload(EmailVerificationDocument),
-    success: [MediaType.asJsonApi(SignedInDocument, 200), HttpApiSchema.NoContent],
-    error: redeemErrors,
+  HttpApiEndpoint.post("redeem", "/email-verifications/redemptions", {
+    payload: jsonApiPayload(EmailVerificationRedemptionDocument),
+    success: [MediaType.asJsonApi(SignedInDocument, 201), HttpApiSchema.NoContent],
+    error: sendErrors,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -349,8 +358,8 @@ export const emailVerificationsGroup = Group.make(
  *
  * - `POST /password-resets`: send a reset link; `202` whether or not the address
  *   has an account.
- * - `PATCH /password-resets/:id`: set the new password with the link's token;
- *   `204`.
+ * - `POST /password-resets/redemptions`: set the new password with the link's
+ *   token; `204`.
  */
 export const passwordResetsGroup = Group.make(
   "password-resets",
@@ -361,11 +370,10 @@ export const passwordResetsGroup = Group.make(
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
-  HttpApiEndpoint.patch("update", "/password-resets/:id", {
-    params: { id: Schema.String },
-    payload: jsonApiPayload(PasswordResetDocument),
+  HttpApiEndpoint.post("redeem", "/password-resets/redemptions", {
+    payload: jsonApiPayload(PasswordResetRedemptionDocument),
     success: HttpApiSchema.NoContent,
-    error: redeemErrors,
+    error: sendErrors,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),

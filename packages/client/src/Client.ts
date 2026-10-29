@@ -862,11 +862,14 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     code: string,
   ): Promise<AuthResult> =>
     mutating(() =>
-      jsonApi<SignInDocument>(
-        "POST",
-        `/second-factor-challenges/${encodeURIComponent(token)}/verifications`,
-        { data: { type: "second-factor-verifications", attributes: { method, code } } },
-      ).then(authResult),
+      jsonApi<SignInDocument>("POST", "/second-factor-challenges/verifications", {
+        data: {
+          type: "second-factor-verifications",
+          attributes: { method, code },
+          // The challenge token travels in the body, never in the URL.
+          relationships: { challenge: { data: { type: "second-factor-challenges", id: token } } },
+        },
+      }).then(authResult),
     );
 
   /**
@@ -931,19 +934,17 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       }).then(() => ({ status: true })),
     verifyEmail: ({ token }) =>
       mutating(() =>
-        jsonApi<SignInDocument | undefined>(
-          "PATCH",
-          `/email-verifications/${encodeURIComponent(token)}`,
-          { data: { type: "email-verifications", id: token } },
-        ).then(authResult),
+        jsonApi<SignInDocument | undefined>("POST", "/email-verifications/redemptions", {
+          data: { type: "email-verification-redemptions", attributes: { token } },
+        }).then(authResult),
       ),
     passwordResetRequest: ({ email }) =>
       jsonApi<void>("POST", "/password-resets", {
         data: { type: "password-resets", attributes: { email } },
       }).then(() => ({ status: true })),
     passwordResetConfirm: ({ token, newPassword }) =>
-      jsonApi<void>("PATCH", `/password-resets/${encodeURIComponent(token)}`, {
-        data: { type: "password-resets", id: token, attributes: { newPassword } },
+      jsonApi<void>("POST", "/password-resets/redemptions", {
+        data: { type: "password-reset-redemptions", attributes: { token, newPassword } },
       }).then(() => ({ status: true })),
     changePassword: (payload) => request<void>("POST", "/change-password", payload),
     updateUser: (payload) =>

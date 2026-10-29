@@ -963,10 +963,19 @@ const authRequest = (
   const create = (path: string, type: string, attributes: Schema.Json) =>
     writeRequest("POST", path, { data: { type, attributes } }, headers);
   const verifySecondFactor = (method: "totp" | "backup-code") =>
-    create(
-      `/second-factor-challenges/${encodeURIComponent(String(token))}/verifications`,
-      "second-factor-verifications",
-      { method, ...rest },
+    writeRequest(
+      "POST",
+      "/second-factor-challenges/verifications",
+      {
+        data: {
+          type: "second-factor-verifications",
+          attributes: { method, ...rest },
+          relationships: {
+            challenge: { data: { type: "second-factor-challenges", id: String(token) } },
+          },
+        },
+      },
+      headers,
     );
   const id = String(token);
   const requests: Record<AuthFlow, () => Request> = {
@@ -991,20 +1000,10 @@ const authRequest = (
       create("/otp-challenges", "otp-challenges", { channel: "phone", ...rest }),
     "send-verification": () => create("/email-verifications", "email-verifications", rest),
     "verify-email": () =>
-      writeRequest(
-        "PATCH",
-        `/email-verifications/${encodeURIComponent(id)}`,
-        { data: { type: "email-verifications", id } },
-        headers,
-      ),
+      create("/email-verifications/redemptions", "email-verification-redemptions", { token: id }),
     "request-reset": () => create("/password-resets", "password-resets", rest),
     "reset-password": () =>
-      writeRequest(
-        "PATCH",
-        `/password-resets/${encodeURIComponent(id)}`,
-        { data: { type: "password-resets", id, attributes: rest } },
-        headers,
-      ),
+      create("/password-resets/redemptions", "password-reset-redemptions", { token: id, ...rest }),
     "verify-totp": () => verifySecondFactor("totp"),
     "verify-backup-code": () => verifySecondFactor("backup-code"),
   };
@@ -1253,7 +1252,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
         async (previous, token) => {
           await previous;
           const verify = await handler(authRequest("verify-email", { token }));
-          expect(verify.status).toBe(200);
+          expect(verify.status).toBe(201);
           const verified = await authBody(verify, SignUpBody);
           expect(verified.user["id"]).toBe(holder.id);
           expect(verified.user["emailVerified"]).toBe(true);
@@ -1271,7 +1270,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
     const verify = await handler(
       authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
     );
-    expect(verify.status).toBe(200);
+    expect(verify.status).toBe(201);
 
     const res = await handler(authRequest("sign-up", { email: HELD, password: PW }));
     expect(res.status).toBe(409);
@@ -1685,7 +1684,7 @@ describe("email verification roundtrip", () => {
 
     const token = fixture.sentVerificationTokens[0];
     const verify = await handler(authRequest("verify-email", { token }));
-    expect(verify.status).toBe(200);
+    expect(verify.status).toBe(201);
     const body = await authBody(
       verify,
       Schema.Struct({ user: Schema.Struct({ emailVerified: Schema.Boolean }) }),
@@ -3127,6 +3126,7 @@ describe("client IP at the HTTP boundary", () => {
     options: {
       readonly trustedProxy?: TrustedProxyConfig | undefined;
       readonly allowMissingClientIp?: boolean | undefined;
+      readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
     } = {},
   ): { readonly handler: Handler; readonly keys: ReadonlySet<string> } => {
     const entries = new Map<string, RateLimitEntry>();
@@ -3164,7 +3164,7 @@ describe("client IP at the HTTP boundary", () => {
     const handler = HttpServer.make({
       services,
       cookie: { secure: false },
-      ipRateLimit: signInOncePerHour,
+      ipRateLimit: options.ipRateLimit ?? signInOncePerHour,
       trustedProxy: options.trustedProxy,
       allowMissingClientIp: options.allowMissingClientIp,
     }).handler;
@@ -3193,6 +3193,28 @@ describe("client IP at the HTTP boundary", () => {
     expect((await attempt(handler, "203.0.113.2", "7.7.7.7")).status).not.toBe(429);
     // The same visitor, with a different forged X-Forwarded-For, is still limited.
     expect((await attempt(handler, "203.0.113.1", "8.8.8.8")).status).toBe(429);
+  });
+
+  it("counts a pattern rule in one bucket across every path it matches", async () => {
+    // Were the bucket keyed on the path, a path that varies (an id in it)
+    // would earn a fresh bucket on every request.
+    const { handler, keys } = limitedHandler({
+      trustedProxy: ClientIP.cloudflare,
+      ipRateLimit: {
+        rules: [
+          { path: /^\/(sessions|users)$/, methods: ["POST"], maxRequests: 1, windowMs: HOUR },
+        ],
+      },
+    });
+    const from = { "cf-connecting-ip": "203.0.113.30" };
+
+    const signIn = await handler(
+      authRequest("password", { email: "nobody@example.com", password: PW }, from),
+    );
+    expect(signIn.status).not.toBe(429);
+    const signUp = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }, from));
+    expect(signUp.status).toBe(429);
+    expect([...keys].filter((key) => key.includes("203.0.113.30"))).toHaveLength(1);
   });
 
   it("sends Retry-After in whole seconds, rounded up, with a matching body field", async () => {

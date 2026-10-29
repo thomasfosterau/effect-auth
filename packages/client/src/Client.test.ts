@@ -1,6 +1,6 @@
 import { assert, describe, it, expect, vi } from "vite-plus/test";
 import { Predicate, Schema } from "effect";
-import { createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
+import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
 /** Whether a request is the store's session read (`GET /sessions/current`). */
@@ -34,12 +34,18 @@ const makeClient = () => {
   return { client, server };
 };
 
+/** The user a call that issued a session resolved with. */
+const signedInUser = (result: AuthResult) => {
+  assert(result.user !== undefined, "the call issued a session");
+  return result.user;
+};
+
 describe("createAuthClient", () => {
   it("signs up, reads the session, and signs out", async () => {
     const { client } = makeClient();
 
     const signedUp = await client.signUp({ email: EMAIL, password: PW, name: "Alice" });
-    expect(signedUp.user.email).toBe(EMAIL);
+    expect(signedInUser(signedUp).email).toBe(EMAIL);
 
     const session = await client.getSession();
     expect(session?.user.email).toBe(EMAIL);
@@ -61,7 +67,7 @@ describe("createAuthClient", () => {
     expect(err.status).toBe(401);
 
     const ok = await client.signIn({ email: EMAIL, password: PW });
-    expect(ok.user.email).toBe(EMAIL);
+    expect(signedInUser(ok).email).toBe(EMAIL);
   });
 
   it("keeps the session store in sync across auth mutations", async () => {
@@ -116,7 +122,7 @@ describe("createAuthClient", () => {
     await client.changePassword({ currentPassword: PW, newPassword: "new-password-456" });
     await client.signOut();
     const back = await client.signIn({ email: EMAIL, password: "new-password-456" });
-    expect(back.user.email).toBe(EMAIL);
+    expect(signedInUser(back).email).toBe(EMAIL);
   });
 
   it("answers 404 feature errors for unconfigured optional modules", async () => {

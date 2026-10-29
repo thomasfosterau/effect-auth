@@ -1758,8 +1758,11 @@ export const secondFactorChallengesGroupLayer = (
 ) => {
   const cfg = resolveCookieConfig(config, multiSession);
   return HttpApiBuilder.group(AuthApi, "second-factor-challenges", (handlers) =>
-    handlers.handle("verify", ({ params, payload }) =>
-      verifySecondFactor(params.id, payload.data.attributes).pipe(
+    handlers.handle("verify", ({ payload }) =>
+      verifySecondFactor(
+        payload.data.relationships.challenge.data.id,
+        payload.data.attributes,
+      ).pipe(
         Effect.flatMap((outcome) =>
           Effect.flatMap(issueSession(outcome.session, cfg, outcome.method, undefined), () =>
             signedIn(outcome),
@@ -1819,15 +1822,6 @@ export const otpChallengesGroupLayer = () =>
     ),
   );
 
-/**
- * Fail with `409` when a write document's id is not the one its URL names, as
- * JSON:API requires of an update.
- */
-const requireMatchingId = (urlId: string, documentId: string): Effect.Effect<void, S.Conflict> =>
-  urlId === documentId
-    ? Effect.void
-    : Effect.fail(new S.Conflict({ message: "The document's id does not match the URL" }));
-
 /** Layer implementing the `email-verifications` group. */
 export const emailVerificationsGroupLayer = (
   config?: CookieConfig,
@@ -1857,19 +1851,21 @@ export const emailVerificationsGroupLayer = (
           }
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle("update", ({ params, payload }) =>
+      .handle("redeem", ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireMatchingId(params.id, payload.data.id);
           const lifecycle = yield* AuthLifecycleService;
-          const result = yield* lifecycle.verifyEmail({ token: params.id }).pipe(
-            Effect.catchTags({
-              EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              ...hookFailures,
-            }),
-          );
-          // `200` with the session when verification signs the user in.
+          const result = yield* lifecycle
+            .verifyEmail({ token: payload.data.attributes.token })
+            .pipe(
+              Effect.catchTags({
+                EmailVerificationError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
+                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+                ...hookFailures,
+              }),
+            );
+          // `201` with the session when verification signs the user in.
           if (result.session === undefined) return;
           yield* issueSession(result.session, cfg, "email-password", undefined);
           return yield* signedIn({ ...result, session: result.session, method: "email-password" });
@@ -1894,11 +1890,11 @@ export const passwordResetsGroupLayer = () =>
           );
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle("update", ({ params, payload }) =>
+      .handle("redeem", ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireMatchingId(params.id, payload.data.id);
+          const { token, newPassword } = payload.data.attributes;
           const passwordReset = yield* PasswordResetService;
-          yield* passwordReset.resetPassword(params.id, payload.data.attributes.newPassword).pipe(
+          yield* passwordReset.resetPassword(token, newPassword).pipe(
             Effect.catchTags({
               PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
@@ -4305,6 +4301,10 @@ const PlatformLayer = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer)
  * A single per-endpoint IP rate-limit rule.
  * `path` is matched against the request pathname (exact string or regex).
  * `methods` limits the rule to specific HTTP methods (default: all methods).
+ *
+ * Each rule counts in one bucket per client address, whatever path matched it:
+ * a regex rule shares its bucket across every path it matches, so a caller
+ * cannot reset its count by varying the path.
  */
 export interface EndpointRateLimitRule {
   readonly path: string | RegExp;
@@ -4338,7 +4338,7 @@ export interface HttpIPRateLimitConfig {
  * | `POST /users` (sign-up)                            | 5 req  | 1 hr   | 24 hr  |
  * | `POST /otp-challenges` (email / SMS code, link)    | 5 req  | 10 min | 30 min |
  * | `POST /password-resets`                            | 5 req  | 1 hr   | 2 hr   |
- * | `POST /second-factor-challenges/:id/verifications` | 10 req | 5 min  | 30 min |
+ * | `POST /second-factor-challenges/verifications`     | 10 req | 5 min  | 30 min |
  * | `POST /register` (dynamic client registration)     | 10 req | 1 hr   | 1 hr   |
  */
 export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
@@ -4371,7 +4371,7 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
     blockDurationMs: 2 * 60 * 60 * 1000,
   },
   {
-    path: /^\/second-factor-challenges\/[^/]+\/verifications$/,
+    path: "/second-factor-challenges/verifications",
     methods: ["POST"],
     maxRequests: 10,
     windowMs: 5 * 60 * 1000,
@@ -4395,6 +4395,14 @@ const matchesEndpointRule = (
   if (rule.methods !== undefined && !rule.methods.includes(method.toUpperCase())) return false;
   return Predicate.isString(rule.path) ? rule.path === pathname : rule.path.test(pathname);
 };
+
+/**
+ * The rate-limit bucket a rule counts in: its path. A pattern rule keeps one
+ * bucket for every path it matches, so varying the path (an id in it, say)
+ * never earns a caller a fresh bucket.
+ */
+const ruleKey = (rule: EndpointRateLimitRule): string =>
+  Predicate.isString(rule.path) ? rule.path : `pattern:${rule.path.source}`;
 
 const findEndpointRule = (
   rules: ReadonlyArray<EndpointRateLimitRule>,
@@ -4800,7 +4808,7 @@ const serve = (
               }),
             };
             const denied = yield* rateLimiterOpt.value
-              .consumeToken(`ip:${url.pathname}:${ip}`, limitConfig)
+              .consumeToken(`ip:${ruleKey(rule)}:${ip}`, limitConfig)
               .pipe(
                 Effect.as(null),
                 Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
