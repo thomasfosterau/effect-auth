@@ -84,7 +84,7 @@ Each method resolves to the contract's own view type (`Http.*`). Groups:
 | Admin            | `admin.listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeSessions`, `impersonate`, `stopImpersonating`                                                                                                          |
 | SSO and OIDC     | `sso.register` / `.signIn` / `.callback`; `oidc.registerClient`, `listClients`, `updateClient`, `deleteClient`, `consent`                                                                                                         |
 
-`multiFactor.continueChallenge(result)` takes the `AuthSuccess` a sign-in returned and binds its pending challenge, so the caller passes only the code. It throws `SecondFactorChallengeError` (`reason: "missing"`) when the result carries no challenge, and its `verifyTotp` / `verifyBackupCode` reject with `reason: "expired"` once the challenge window has passed, without a request.
+`multiFactor.continueChallenge(result)` takes the `AuthResult` a sign-in returned and binds its pending challenge, so the caller passes only the code. It throws `SecondFactorChallengeError` (`reason: "missing"`) when the result carries no challenge, and its `verifyTotp` / `verifyBackupCode` reject with `reason: "expired"` once the challenge window has passed, without a request.
 
 ## Plugins
 

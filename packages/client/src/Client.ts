@@ -43,11 +43,27 @@ export class SecondFactorChallengeError extends Error {
 }
 
 /**
+ * What a sign-in, sign-up or email verification resolves with.
+ *
+ * `user` is present when the call issued a session. Without one, either
+ * `secondFactor` is the challenge to redeem (see
+ * {@link AuthClient.multiFactor}'s `continueChallenge`), or
+ * `needsEmailVerification` is `true` and the address must be verified first. A
+ * sign-up under the server's `antiEnumeration` mode always resolves without a
+ * `user`, for a fresh address and a held one alike.
+ */
+export interface AuthResult {
+  readonly user?: Http.UserView;
+  readonly needsEmailVerification: boolean;
+  readonly secondFactor?: Http.SecondFactorChallengeView;
+}
+
+/**
  * A pending second-factor challenge with the verify calls pre-bound to its
  * token. Obtained from {@link AuthClient.multiFactor}'s `continueChallenge`.
  */
 export interface SecondFactorContinuation {
-  /** The challenge token carried by `AuthSuccess.secondFactor`. */
+  /** The challenge token carried by `AuthResult.secondFactor`. */
   readonly token: string;
   /** Challenge expiry, epoch millis. */
   readonly expiresAt: number;
@@ -58,9 +74,9 @@ export interface SecondFactorContinuation {
    * {@link SecondFactorChallengeError} (`reason: "expired"`) without issuing a
    * request when the challenge has already expired.
    */
-  readonly verifyTotp: (code: string) => Promise<Http.AuthSuccess>;
+  readonly verifyTotp: (code: string) => Promise<AuthResult>;
   /** Redeem the challenge with a single-use backup code. */
-  readonly verifyBackupCode: (code: string) => Promise<Http.AuthSuccess>;
+  readonly verifyBackupCode: (code: string) => Promise<AuthResult>;
 }
 
 /** The session store's state. */
@@ -237,6 +253,18 @@ interface CollectionDocument<A> {
   readonly data: ReadonlyArray<WireResource<A>>;
 }
 
+/**
+ * What `POST /sessions`, `POST /users` and the verifications answer: `201`
+ * with the session (its user included), or `202` with a second-factor
+ * challenge or no primary data. Sessions and challenges both carry
+ * `expiresAt`.
+ */
+interface SignInDocument {
+  readonly data?: WireResource<{ readonly expiresAt: number }>;
+  readonly included?: ReadonlyArray<WireResource<WireUser>>;
+  readonly meta?: { readonly needsEmailVerification?: boolean };
+}
+
 const userView = (resource: WireResource<WireUser>): Http.UserView => ({
   id: resource.id,
   ...resource.attributes,
@@ -251,6 +279,21 @@ const sessionView = (resource: WireResource<WireSession>): Http.SessionView => (
 const identifierView = ({ id, attributes }: WireResource<WireIdentifier>): Http.IdentifierView => {
   const { kind, ...rest } = attributes;
   return { id, type: kind, ...rest };
+};
+
+/** The {@link AuthResult} of a sign-in answer (`undefined` for a bodiless `204` / `202`). */
+const authResult = (document: SignInDocument | undefined): AuthResult => {
+  const needsEmailVerification = document?.meta?.needsEmailVerification ?? false;
+  const data = document?.data;
+  if (data === undefined) return { needsEmailVerification };
+  if (data.type === "second-factor-challenges") {
+    return {
+      needsEmailVerification,
+      secondFactor: { token: data.id, expiresAt: data.attributes.expiresAt },
+    };
+  }
+  const user = document?.included?.find((resource) => resource.type === "users");
+  return { ...(user !== undefined && { user: userView(user) }), needsEmailVerification };
 };
 
 /** The message of an error body: a JSON:API error document's first `detail`, or `{ message }`. */
@@ -272,17 +315,17 @@ const errorMessage = (body: unknown): string | undefined => {
 export interface AuthClient {
   readonly session: SessionStore;
 
-  readonly signUp: (payload: Http.SignUpPayload) => Promise<Http.AuthSuccess>;
-  readonly signIn: (payload: Http.SignInPayload) => Promise<Http.AuthSuccess>;
+  readonly signUp: (payload: Http.SignUpPayload) => Promise<AuthResult>;
+  readonly signIn: (payload: Http.SignInPayload) => Promise<AuthResult>;
   readonly signOut: () => Promise<void>;
   /** Guest sign-in — creates an anonymous user + session. 404 when unconfigured. */
-  readonly signInAnonymous: () => Promise<Http.AuthSuccess>;
+  readonly signInAnonymous: () => Promise<AuthResult>;
   /** Username + password sign-in. 404 when unconfigured. */
-  readonly signInUsername: (payload: Http.UsernameSignInPayload) => Promise<Http.AuthSuccess>;
+  readonly signInUsername: (payload: Http.UsernameSignInPayload) => Promise<AuthResult>;
   /** Resolves `null` when not authenticated (401). */
   readonly getSession: () => Promise<Http.SessionWithUserView | null>;
   readonly sendVerificationEmail: (payload: { email: string }) => Promise<Http.StatusResponse>;
-  readonly verifyEmail: (payload: { token: string }) => Promise<Http.AuthSuccess>;
+  readonly verifyEmail: (payload: { token: string }) => Promise<AuthResult>;
   readonly passwordResetRequest: (payload: { email: string }) => Promise<Http.StatusResponse>;
   readonly passwordResetConfirm: (payload: {
     token: string;
@@ -328,7 +371,7 @@ export interface AuthClient {
 
   readonly magicLink: {
     readonly send: (payload: { email: string }) => Promise<Http.StatusResponse>;
-    readonly verify: (payload: { token: string }) => Promise<Http.AuthSuccess>;
+    readonly verify: (payload: { token: string }) => Promise<AuthResult>;
   };
 
   readonly emailOtp: {
@@ -336,7 +379,7 @@ export interface AuthClient {
       email: string;
       purpose: Http.EmailOtpPurpose;
     }) => Promise<Http.StatusResponse>;
-    readonly signIn: (payload: { email: string; otp: string }) => Promise<Http.AuthSuccess>;
+    readonly signIn: (payload: { email: string; otp: string }) => Promise<AuthResult>;
   };
 
   /** SMS one-time passcodes. 404 when unconfigured. */
@@ -345,14 +388,14 @@ export interface AuthClient {
       phoneNumber: string;
       purpose: Http.PhoneOtpPurpose;
     }) => Promise<Http.StatusResponse>;
-    readonly signIn: (payload: { phoneNumber: string; otp: string }) => Promise<Http.AuthSuccess>;
+    readonly signIn: (payload: { phoneNumber: string; otp: string }) => Promise<AuthResult>;
   };
 
   /** Google One Tap. 404 when unconfigured. */
   readonly googleOneTap: {
     /** Server-generated nonce to hand to Google's One Tap prompt. */
     readonly nonce: () => Promise<Http.GoogleOneTapNonceView>;
-    readonly signIn: (payload: Http.GoogleOneTapPayload) => Promise<Http.AuthSuccess>;
+    readonly signIn: (payload: Http.GoogleOneTapPayload) => Promise<AuthResult>;
   };
 
   /**
@@ -375,11 +418,8 @@ export interface AuthClient {
     readonly regenerateBackupCodes: (payload: {
       password: string;
     }) => Promise<Http.BackupCodesView>;
-    readonly verifyTotp: (payload: { token: string; code: string }) => Promise<Http.AuthSuccess>;
-    readonly verifyBackupCode: (payload: {
-      token: string;
-      code: string;
-    }) => Promise<Http.AuthSuccess>;
+    readonly verifyTotp: (payload: { token: string; code: string }) => Promise<AuthResult>;
+    readonly verifyBackupCode: (payload: { token: string; code: string }) => Promise<AuthResult>;
     /**
      * Bind a pending challenge so the caller only needs to pass the code.
      *
@@ -393,7 +433,7 @@ export interface AuthClient {
     readonly challenge: (challenge: Http.SecondFactorChallengeView) => SecondFactorContinuation;
     /**
      * Carry a gated sign-in straight into the second-factor step: takes the
-     * `AuthSuccess` a sign-in returned and hands back the verify calls bound
+     * `AuthResult` a sign-in returned and hands back the verify calls bound
      * to its challenge.
      *
      * ```ts
@@ -409,7 +449,7 @@ export interface AuthClient {
      * and the verify calls reject with `reason: "expired"` once the challenge
      * window has passed.
      */
-    readonly continueChallenge: (result: Http.AuthSuccess) => SecondFactorContinuation;
+    readonly continueChallenge: (result: AuthResult) => SecondFactorContinuation;
   };
 
   /**
@@ -796,6 +836,39 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
 
   const pluginContext: AuthClientPluginContext = { request, mutating, session };
 
+  /** Sign in with `credential` (`POST /sessions`), refreshing the session store. */
+  const signInWith = (credential: Http.SignInCredential, rememberMe?: boolean) =>
+    mutating(() =>
+      jsonApi<SignInDocument>("POST", "/sessions", {
+        data: {
+          type: "sessions",
+          attributes: { credential, ...(rememberMe !== undefined && { rememberMe }) },
+        },
+      }).then(authResult),
+    );
+
+  /** Send a one-time code or a magic link (`POST /otp-challenges`). */
+  const sendChallenge = (
+    attributes: Http.OtpChallengeDocument["data"]["attributes"],
+  ): Promise<Http.StatusResponse> =>
+    jsonApi<void>("POST", "/otp-challenges", { data: { type: "otp-challenges", attributes } }).then(
+      () => ({ status: true }),
+    );
+
+  /** Redeem a second-factor challenge with a TOTP or backup code. */
+  const verifySecondFactor = (
+    token: string,
+    method: "totp" | "backup-code",
+    code: string,
+  ): Promise<AuthResult> =>
+    mutating(() =>
+      jsonApi<SignInDocument>(
+        "POST",
+        `/second-factor-challenges/${encodeURIComponent(token)}/verifications`,
+        { data: { type: "second-factor-verifications", attributes: { method, code } } },
+      ).then(authResult),
+    );
+
   /**
    * Bind a pending second-factor challenge to the verify endpoints, refusing
    * client-side once the challenge window has passed (the server enforces the
@@ -803,7 +876,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
    */
   const continuation = (challenge: Http.SecondFactorChallengeView): SecondFactorContinuation => {
     const isExpired = (): boolean => Date.now() >= challenge.expiresAt;
-    const verify = (path: string, code: string): Promise<Http.AuthSuccess> => {
+    const verify = (method: "totp" | "backup-code", code: string): Promise<AuthResult> => {
       if (isExpired()) {
         return Promise.reject(
           new SecondFactorChallengeError(
@@ -812,16 +885,14 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           ),
         );
       }
-      return mutating(() =>
-        request<Http.AuthSuccess>("POST", path, { token: challenge.token, code }),
-      );
+      return verifySecondFactor(challenge.token, method, code);
     };
     return {
       token: challenge.token,
       expiresAt: challenge.expiresAt,
       isExpired,
-      verifyTotp: (code) => verify("/multi-factor/verify-totp", code),
-      verifyBackupCode: (code) => verify("/multi-factor/verify-backup-code", code),
+      verifyTotp: (code) => verify("totp", code),
+      verifyBackupCode: (code) => verify("backup-code", code),
     };
   };
 
@@ -830,24 +901,50 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   self = {
     session,
 
-    signUp: (payload) => mutating(() => request<Http.AuthSuccess>("POST", "/sign-up", payload)),
-    signIn: (payload) => mutating(() => request<Http.AuthSuccess>("POST", "/sign-in", payload)),
+    signUp: (payload) =>
+      mutating(() =>
+        jsonApi<SignInDocument>("POST", "/users", {
+          data: { type: "users", attributes: payload },
+        }).then(authResult),
+      ),
+    signIn: ({ email, password, captchaToken, rememberMe }) =>
+      signInWith(
+        {
+          method: "password",
+          email,
+          password,
+          ...(captchaToken !== undefined && { captchaToken }),
+        },
+        rememberMe,
+      ),
     signOut: () =>
       mutating(async () => {
         await jsonApi<void>("DELETE", "/sessions/current");
       }),
-    signInAnonymous: () => mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/anonymous")),
-    signInUsername: (payload) =>
-      mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/username", payload)),
+    signInAnonymous: () => signInWith({ method: "anonymous" }),
+    signInUsername: ({ username, password, rememberMe }) =>
+      signInWith({ method: "username", username, password }, rememberMe),
     getSession,
-    sendVerificationEmail: (payload) =>
-      request<Http.StatusResponse>("POST", "/email-verification/send", payload),
-    verifyEmail: (payload) =>
-      mutating(() => request<Http.AuthSuccess>("POST", "/email-verification/verify", payload)),
-    passwordResetRequest: (payload) =>
-      request<Http.StatusResponse>("POST", "/password-reset/request", payload),
-    passwordResetConfirm: (payload) =>
-      request<Http.StatusResponse>("POST", "/password-reset/reset", payload),
+    sendVerificationEmail: ({ email }) =>
+      jsonApi<void>("POST", "/email-verifications", {
+        data: { type: "email-verifications", attributes: { email } },
+      }).then(() => ({ status: true })),
+    verifyEmail: ({ token }) =>
+      mutating(() =>
+        jsonApi<SignInDocument | undefined>(
+          "PATCH",
+          `/email-verifications/${encodeURIComponent(token)}`,
+          { data: { type: "email-verifications", id: token } },
+        ).then(authResult),
+      ),
+    passwordResetRequest: ({ email }) =>
+      jsonApi<void>("POST", "/password-resets", {
+        data: { type: "password-resets", attributes: { email } },
+      }).then(() => ({ status: true })),
+    passwordResetConfirm: ({ token, newPassword }) =>
+      jsonApi<void>("PATCH", `/password-resets/${encodeURIComponent(token)}`, {
+        data: { type: "password-resets", id: token, attributes: { newPassword } },
+      }).then(() => ({ status: true })),
     changePassword: (payload) => request<void>("POST", "/change-password", payload),
     updateUser: (payload) =>
       mutating(() =>
@@ -894,27 +991,27 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     magicLink: {
-      send: (payload) => request<Http.StatusResponse>("POST", "/magic-link/send", payload),
-      verify: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/magic-link/verify", payload)),
+      send: ({ email }) => sendChallenge({ channel: "magic-link", email }),
+      verify: ({ token }) => signInWith({ method: "magic-link", token }),
     },
 
     emailOtp: {
-      send: (payload) => request<Http.StatusResponse>("POST", "/email-otp/send", payload),
-      signIn: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/email-otp", payload)),
+      send: ({ email, purpose }) => sendChallenge({ channel: "email", email, purpose }),
+      signIn: ({ email, otp }) => signInWith({ method: "email-otp", email, otp }),
     },
 
     phoneOtp: {
-      send: (payload) => request<Http.StatusResponse>("POST", "/phone-otp/send", payload),
-      signIn: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/phone-otp", payload)),
+      send: ({ phoneNumber, purpose }) => sendChallenge({ channel: "phone", phoneNumber, purpose }),
+      signIn: ({ phoneNumber, otp }) => signInWith({ method: "phone-otp", phoneNumber, otp }),
     },
 
     googleOneTap: {
-      nonce: () => request<Http.GoogleOneTapNonceView>("GET", "/sign-in/google-one-tap/nonce"),
-      signIn: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/sign-in/google-one-tap", payload)),
+      nonce: () =>
+        jsonApi<DataDocument<Record<string, never>>>("POST", "/google-one-tap-nonces").then(
+          (document) => ({ nonce: document.data.id }),
+        ),
+      signIn: ({ credential, nonce }) =>
+        signInWith({ method: "google-one-tap", idToken: credential, nonce }),
     },
 
     device: {
@@ -932,12 +1029,8 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       disable: (payload) => request<Http.StatusResponse>("POST", "/multi-factor/disable", payload),
       regenerateBackupCodes: (payload) =>
         request<Http.BackupCodesView>("POST", "/multi-factor/regenerate-backup-codes", payload),
-      verifyTotp: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/multi-factor/verify-totp", payload)),
-      verifyBackupCode: (payload) =>
-        mutating(() =>
-          request<Http.AuthSuccess>("POST", "/multi-factor/verify-backup-code", payload),
-        ),
+      verifyTotp: ({ token, code }) => verifySecondFactor(token, "totp", code),
+      verifyBackupCode: ({ token, code }) => verifySecondFactor(token, "backup-code", code),
       challenge: continuation,
       continueChallenge: (result) => {
         if (result.secondFactor === undefined) {

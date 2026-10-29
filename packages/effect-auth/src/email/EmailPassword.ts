@@ -105,19 +105,21 @@ export interface EmailPasswordConfig {
    *
    * A fresh sign-up gets no session either (as if `autoSignIn: false`), so
    * "a session came back" cannot itself tell the two apart. Over HTTP
-   * (`POST /sign-up` through `Http.make`), both answers are a `200` with the
-   * same headers (`Content-Length` follows the body, so it matches while the
-   * ids have the same length), no `Set-Cookie` and no bearer-token header,
-   * and a body with the same fields: `needsEmailVerification`, and a `user`
-   * whose `email` is the submitted address, trimmed and lower-cased (after
-   * the `beforeSignUp` hooks), with `emailVerified: false`. The stand-in's
-   * other fields are what a store that keeps its input as given (as
-   * effect-auth-sql's does) returns for a new user: the submitted `name` and
-   * `attributes` (`{}` when none), no `image`, and one timestamp, taken
-   * during the request, for both `createdAt` and `updatedAt`. Its `id` is a
-   * random UUID unless the store implements `EmailPasswordStore.newUserId`;
-   * a store whose ids have another shape needs that seam for the two ids to
-   * look alike.
+   * (`POST /users` through `Http.make`), both answers are the same
+   * `202 Accepted`: no primary data, only `meta.needsEmailVerification`, the
+   * same headers, no `Set-Cookie` and no bearer-token header. Neither names a
+   * user, real or stand-in (#205).
+   *
+   * Called directly, the service still answers with the stand-in user: its
+   * `email` is the submitted address, trimmed and lower-cased (after the
+   * `beforeSignUp` hooks), with `emailVerified: false`, and its other fields
+   * are what a store that keeps its input as given (as effect-auth-sql's
+   * does) returns for a new user: the submitted `name` and `attributes` (`{}`
+   * when none), no `image`, and one timestamp, taken during the request, for
+   * both `createdAt` and `updatedAt`. Its `id` is a random UUID unless the
+   * store implements `EmailPasswordStore.newUserId`; a store whose ids have
+   * another shape needs that seam for the two ids to look alike to a caller
+   * that sees them.
    *
    * What still differs: the time a response takes (a fresh sign-up also
    * creates the user, claims the address and stores the hash), what a fresh

@@ -31,7 +31,14 @@ import {
   HttpServerResponse,
 } from "effect/http";
 import { Handlers, Middleware as JsonApiMiddleware } from "@thomasfosterau/effect-jsonapi";
-import { AuthApi, getOpenApiSpec } from "./HttpApi.ts";
+import {
+  AuthApi,
+  getOpenApiSpec,
+  type PendingDocument,
+  type SecondFactorVerificationDocument,
+  type SignedInDocument,
+  type SignInDocument,
+} from "./HttpApi.ts";
 import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
@@ -1289,6 +1296,14 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
             .revokeOtherSessions(resolved.user.id, resolved.session.id)
             .pipe(Effect.catch(internalServerError));
         }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // Sign in: `201` with the session, or `202` when it awaits a second
+      // factor or a verified address.
+      .handle("create", ({ payload }) =>
+        signInWith(payload.data.attributes).pipe(
+          Effect.flatMap((outcome) => answerSignIn(outcome, cfg)),
+          JsonApiErrors.mapHttpErrors,
+        ),
       ),
   );
 };
@@ -1346,27 +1361,571 @@ export const usersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessi
   const cfg = resolveCookieConfig(config, multiSession);
 
   return HttpApiBuilder.group(AuthApi, "users", (handlers) =>
-    handlers.handle("update", ({ params, payload, request }) =>
-      Effect.gen(function* () {
-        const resolved = yield* requireSession(request, cfg);
-        // `me` or the caller's own id; any other user is not the caller's to
-        // edit, and gets the answer an unknown id would.
-        if (params.id !== ME && params.id !== resolved.user.id) {
-          return yield* new S.NotFound({ message: "User not found" });
-        }
-        const attributes = payload.data.attributes ?? {};
-        const userService = yield* UserService;
-        const updated = yield* userService
-          .updateUser(resolved.user.id, {
-            ...(attributes.name !== undefined && { name: attributes.name }),
-            ...(attributes.image !== undefined && { image: attributes.image }),
-          })
-          .pipe(asCaller);
-        return Handlers.data(yield* loadUserResource(updated));
-      }).pipe(JsonApiErrors.mapHttpErrors),
+    handlers
+      // Sign up: `201` with the new session, or `202` when none was issued
+      // (always, under `antiEnumeration`, so a held address answers alike).
+      .handle("create", ({ payload }) =>
+        signUpWith(payload.data.attributes).pipe(
+          Effect.flatMap((outcome) => answerSignIn(outcome, cfg)),
+          JsonApiErrors.mapHttpErrors,
+        ),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          // `me` or the caller's own id; any other user is not the caller's to
+          // edit, and gets the answer an unknown id would.
+          if (params.id !== ME && params.id !== resolved.user.id) {
+            return yield* new S.NotFound({ message: "User not found" });
+          }
+          const attributes = payload.data.attributes ?? {};
+          const userService = yield* UserService;
+          const updated = yield* userService
+            .updateUser(resolved.user.id, {
+              ...(attributes.name !== undefined && { name: attributes.name }),
+              ...(attributes.image !== undefined && { image: attributes.image }),
+            })
+            .pipe(asCaller);
+          return Handlers.data(yield* loadUserResource(updated));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Signing in and proving an address (#205)
+// -----------------------------------------------------------------------------
+
+/** Fail with `403`, the message resolved through the message catalogue. */
+const forbiddenFor = (e: { readonly code: string; readonly message: string }) =>
+  resolveMessage(e.code, e.message).pipe(
+    Effect.flatMap((message) => Effect.fail(new S.Forbidden({ message, code: e.code }))),
+  );
+
+/** Fail with `400`, the message resolved through the message catalogue. */
+const badRequestFor = (e: { readonly code: string; readonly message: string }) =>
+  resolveMessage(e.code, e.message).pipe(
+    Effect.flatMap((message) => Effect.fail(new S.BadRequest({ message, code: e.code }))),
+  );
+
+/** A password the policy refuses: `400`, the message resolved with its parameters. */
+const passwordPolicyFailure = (e: {
+  readonly code: string;
+  readonly message: string;
+  readonly params?: Readonly<Record<string, string | number>> | undefined;
+}) =>
+  resolveMessage(e.code, e.message, e.params).pipe(
+    Effect.flatMap((message) => Effect.fail(new S.BadRequest({ message, code: e.code }))),
+  );
+
+/**
+ * The failures every hook-guarded flow can meet, as `catchTags` cases: a rate
+ * limit, a locked or banned account, and the captcha and pwned-password
+ * plugins' refusals.
+ */
+const hookFailures = {
+  RateLimitError: (e: { readonly code: string; readonly message: string }) =>
+    Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
+  AccountLockedError: forbiddenFor,
+  UserBannedError: forbiddenFor,
+  CaptchaError: badRequestFor,
+  PwnedPasswordError: badRequestFor,
+};
+
+/** What a sign-in, sign-up or verification produced, before it is answered. */
+interface SignInOutcome {
+  readonly user: Types.User;
+  readonly session?: Types.Session | undefined;
+  readonly needsEmailVerification: boolean;
+  readonly secondFactor?: { readonly token: string; readonly expiresAt: number } | undefined;
+  readonly rememberMe?: boolean | undefined;
+  /** The method the last-login-method hint records. */
+  readonly method: string;
+  /** The user as the answer shows it, when the flow builds it itself (sign-up). */
+  readonly userResource?: R.User | undefined;
+}
+
+/** The `201` / `200` answer for a new session. */
+type SignedIn = typeof SignedInDocument.Type;
+
+/** The `202` answer for a sign-in or sign-up that issued no session. */
+type Pending = typeof PendingDocument.Type;
+
+/**
+ * Attach a new session to the response a JSON:API handler is about to send:
+ * the cookies and, in bearer mode, the `set-auth-token` header, as
+ * {@link withSessionCookie} does for a JSON body.
+ */
+const issueSession = (
+  session: Types.Session,
+  cfg: ResolvedCookieConfig,
+  method: string,
+  rememberMe: boolean | undefined,
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((request, response) =>
+    decorateSessionResponse(response, session, cfg, method, rememberMe).pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+    ),
+  );
+
+/** The `sessions` document a new session is answered with: its user included. */
+const signedIn = (
+  outcome: SignInOutcome & { readonly session: Types.Session },
+): Effect.Effect<SignedIn, never, IdentifierStore> =>
+  Effect.map(
+    outcome.userResource === undefined
+      ? loadUserResource(outcome.user)
+      : Effect.succeed(outcome.userResource),
+    (user) =>
+      Handlers.data(sessionResource(outcome.session), {
+        included: [user],
+        meta: { needsEmailVerification: outcome.needsEmailVerification },
+      }),
+  );
+
+/**
+ * Answer a sign-in or sign-up: `201` with the session when one was issued,
+ * else `202` with the second-factor challenge to redeem, or with only
+ * `meta.needsEmailVerification` when the address must be verified first.
+ */
+const answerSignIn = (
+  outcome: SignInOutcome,
+  cfg: ResolvedCookieConfig,
+): Effect.Effect<
+  SignedIn | Pending,
+  never,
+  IdentifierStore | HttpServerRequest.HttpServerRequest
+> =>
+  Effect.gen(function* () {
+    const meta = { needsEmailVerification: outcome.needsEmailVerification };
+    if (outcome.session !== undefined) {
+      yield* issueSession(outcome.session, cfg, outcome.method, outcome.rememberMe);
+      return yield* signedIn({ ...outcome, session: outcome.session });
+    }
+    if (outcome.secondFactor !== undefined) {
+      return {
+        data: R.SecondFactorChallenge.make({
+          id: outcome.secondFactor.token,
+          attributes: {
+            expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(outcome.secondFactor.expiresAt)),
+          },
+        }),
+        meta,
+      };
+    }
+    return { meta };
+  });
+
+/** Sign in with an email address and password. */
+const signInWithPassword = (
+  credential: {
+    readonly email: string;
+    readonly password: string;
+    readonly captchaToken?: string | undefined;
+  },
+  rememberMe: boolean | undefined,
+) =>
+  Effect.gen(function* () {
+    const lifecycle = yield* AuthLifecycleService;
+    const result = yield* lifecycle
+      .signIn({
+        email: credential.email,
+        password: credential.password,
+        ...(credential.captchaToken !== undefined && { captchaToken: credential.captchaToken }),
+        ...(rememberMe !== undefined && { rememberMe }),
+      })
+      .pipe(
+        Effect.catchTags({
+          InvalidCredentialsError: (e) =>
+            Effect.fail(new S.Unauthorized({ message: e.message, code: e.code })),
+          AuthError: (e) => internalServerError(e),
+          HashingError: (e) => internalServerError(e),
+          EmailVerificationError: (e) => internalServerError(e),
+          ...hookFailures,
+        }),
+      );
+    return { ...result, method: "email-password" } satisfies SignInOutcome;
+  });
+
+/** Sign in with a username and password. */
+const signInWithUsername = (
+  credential: { readonly username: string; readonly password: string },
+  rememberMe: boolean | undefined,
+) =>
+  Effect.gen(function* () {
+    const username = yield* resolveUsername;
+    const result = yield* username.service
+      .signIn({
+        username: credential.username,
+        password: credential.password,
+        ...(rememberMe !== undefined && { rememberMe }),
+      })
+      .pipe(
+        Effect.catchTags({
+          UsernameError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+          InvalidCredentialsError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+          EmailNotVerifiedError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+          HashingError: (e) => internalServerError(e),
+          AuthError: (e) => internalServerError(e),
+          ...hookFailures,
+        }),
+      );
+    return {
+      ...result,
+      needsEmailVerification: false,
+      method: "username",
+    } satisfies SignInOutcome;
+  });
+
+/** A code or link that does not verify: `400`, uniformly (anti-enumeration). */
+const invalidCode = (e: { readonly message: string }) =>
+  Effect.fail(new S.BadRequest({ message: e.message }));
+
+/** The outcome of a passwordless sign-in, which never awaits a verification. */
+const passwordless =
+  (method: string) =>
+  (result: { readonly user: Types.User; readonly session: Types.Session }): SignInOutcome => ({
+    ...result,
+    needsEmailVerification: false,
+    method,
+  });
+
+/** Sign in with a one-time code sent by email. */
+const signInWithEmailOtp = (credential: { readonly email: string; readonly otp: string }) =>
+  Effect.flatMap(resolveEmailOtp, ({ service }) =>
+    service.signIn(credential.email, credential.otp).pipe(
+      Effect.catchTags({
+        EmailOtpError: invalidCode,
+        AuthError: internalServerError,
+        ...hookFailures,
+      }),
+      Effect.map(passwordless("email-otp")),
+    ),
+  );
+
+/** Sign in with a one-time code sent by SMS. */
+const signInWithPhoneOtp = (credential: { readonly phoneNumber: string; readonly otp: string }) =>
+  Effect.flatMap(resolvePhoneOtp, ({ service }) =>
+    service.signIn(credential.phoneNumber, credential.otp).pipe(
+      Effect.catchTags({
+        PhoneOtpError: invalidCode,
+        AuthError: internalServerError,
+        ...hookFailures,
+      }),
+      Effect.map(passwordless("phone-otp")),
+    ),
+  );
+
+/** Sign in with the token from a magic-link email. */
+const signInWithMagicLink = (credential: { readonly token: string }) =>
+  Effect.flatMap(resolveMagicLink, ({ service }) =>
+    service.verify(credential.token).pipe(
+      Effect.catchTags({
+        MagicLinkError: invalidCode,
+        AuthError: internalServerError,
+        ...hookFailures,
+      }),
+      Effect.map(passwordless("magic-link")),
+    ),
+  );
+
+/** Sign in as a new guest user. */
+const signInAnonymously = Effect.fn("signInAnonymously")(function* () {
+  const anonymous = yield* resolveAnonymous;
+  const result = yield* anonymous.service.signInAnonymous().pipe(
+    Effect.catchTags({
+      AuthError: (e) => internalServerError(e),
+      ...hookFailures,
+    }),
+  );
+  return { ...result, needsEmailVerification: false, method: "anonymous" } satisfies SignInOutcome;
+});
+
+/** Sign in with a Google One Tap id token. */
+const signInWithGoogleOneTap = (credential: { readonly idToken: string; readonly nonce: string }) =>
+  Effect.gen(function* () {
+    const oneTap = yield* resolveGoogleOneTap;
+    const result = yield* oneTap.service.signIn(credential.idToken, credential.nonce).pipe(
+      Effect.catchTags({
+        GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+        AuthError: (e) => internalServerError(e),
+        ...hookFailures,
+      }),
+    );
+    return { ...result, needsEmailVerification: false, method: "google" } satisfies SignInOutcome;
+  });
+
+/** Sign in with the credential a `POST /sessions` carries. */
+const signInWith = ({ credential, rememberMe }: typeof SignInDocument.Type.data.attributes) =>
+  Match.value(credential).pipe(
+    Match.discriminatorsExhaustive("method")({
+      password: (password) => signInWithPassword(password, rememberMe),
+      username: (username) => signInWithUsername(username, rememberMe),
+      "email-otp": signInWithEmailOtp,
+      "phone-otp": signInWithPhoneOtp,
+      "magic-link": signInWithMagicLink,
+      anonymous: () => signInAnonymously(),
+      "google-one-tap": signInWithGoogleOneTap,
+    }),
+  );
+
+/** Redeem a second-factor challenge with a TOTP or backup code. */
+const verifySecondFactor = (
+  token: string,
+  attributes: typeof SecondFactorVerificationDocument.Type.data.attributes,
+) =>
+  Effect.gen(function* () {
+    const multiFactor = yield* resolveMultiFactor;
+    // A failed second factor is a failed authentication attempt: `401`.
+    const rejected = (e: { readonly message: string }) =>
+      Effect.fail(new S.Unauthorized({ message: e.message }));
+    const result =
+      attributes.method === "totp"
+        ? yield* multiFactor.service.verifyTotp(token, attributes.code).pipe(
+            Effect.catchTags({
+              MultiFactorError: rejected,
+              HashingError: (e) => internalServerError(e),
+              AuthError: (e) => internalServerError(e),
+              ...hookFailures,
+            }),
+          )
+        : yield* multiFactor.service.verifyBackupCode(token, attributes.code).pipe(
+            Effect.catchTags({
+              MultiFactorError: rejected,
+              AuthError: (e) => internalServerError(e),
+              ...hookFailures,
+            }),
+          );
+    const userService = yield* UserService;
+    const user = yield* userService.getUser(result.userId).pipe(Effect.catch(internalServerError));
+    return {
+      user,
+      session: result.session,
+      needsEmailVerification: false,
+      method: "multi-factor",
+    } satisfies SignInOutcome;
+  });
+
+/**
+ * The user a sign-up answers with, taking `email` from the address the sign-up
+ * was made with (unverified, as every address is at sign-up) rather than from
+ * the identifier store. For an address held unverified by another user (see
+ * `AuthLifecycleResult.identifier`) the user is a stand-in no identifier names,
+ * so a store lookup would leave its `email` fields out and give the address
+ * away; this builds every answer the same way.
+ */
+const signUpUserResource = (user: Types.User, email: string): R.User => {
+  const resource = userResource(user);
+  return R.User.make({
+    id: resource.id,
+    attributes: { ...resource.attributes, email, emailVerified: false },
+  });
+};
+
+/** Sign up with an email address and password. */
+const signUpWith = (payload: S.SignUpPayload) =>
+  Effect.gen(function* () {
+    const lifecycle = yield* AuthLifecycleService;
+    const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
+      Effect.catchTags({
+        AuthError: (e) => internalServerError(e),
+        EmailInUseError: (e) => Effect.fail(new S.Conflict({ message: e.message, code: e.code })),
+        EmailNotVerifiedError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+        HashingError: (e) => internalServerError(e),
+        EmailVerificationError: (e) => internalServerError(e),
+        PasswordPolicyError: passwordPolicyFailure,
+        SignUpDisabledError: forbiddenFor,
+        InvalidInputError: badRequestFor,
+        ...hookFailures,
+      }),
+    );
+    return {
+      ...result,
+      method: "email-password",
+      ...(result.identifier?.type === "email" && {
+        userResource: signUpUserResource(result.user, result.identifier.value),
+      }),
+    } satisfies SignInOutcome;
+  });
+
+/**
+ * Layer implementing `POST /sessions` (sign-in) and the
+ * `second-factor-challenges` group.
+ */
+export const secondFactorChallengesGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  return HttpApiBuilder.group(AuthApi, "second-factor-challenges", (handlers) =>
+    handlers.handle("verify", ({ params, payload }) =>
+      verifySecondFactor(params.id, payload.data.attributes).pipe(
+        Effect.flatMap((outcome) =>
+          Effect.flatMap(issueSession(outcome.session, cfg, outcome.method, undefined), () =>
+            signedIn(outcome),
+          ),
+        ),
+        JsonApiErrors.mapHttpErrors,
+      ),
     ),
   );
 };
+
+/** Layer implementing the `otp-challenges` group: send a code or a magic link. */
+export const otpChallengesGroupLayer = () =>
+  HttpApiBuilder.group(AuthApi, "otp-challenges", (handlers) =>
+    handlers.handle("create", ({ payload }) =>
+      Effect.gen(function* () {
+        // Anti-enumeration: each service succeeds silently for an unknown
+        // address or number; only store and delivery failures surface (500).
+        const challenge = payload.data.attributes;
+        const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
+          Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
+        return yield* Match.value(challenge).pipe(
+          Match.discriminatorsExhaustive("channel")({
+            email: ({ email, purpose }) =>
+              Effect.flatMap(resolveEmailOtp, ({ service }) =>
+                service.send(email, purpose).pipe(
+                  Effect.catchTags({
+                    AuthError: (e) => internalServerError(e),
+                    EmailOtpError: (e) => internalServerError(e),
+                    ResendTooSoonError: resendTooSoon,
+                  }),
+                ),
+              ),
+            phone: ({ phoneNumber, purpose }) =>
+              Effect.flatMap(resolvePhoneOtp, ({ service }) =>
+                service.send(phoneNumber, purpose).pipe(
+                  Effect.catchTags({
+                    PhoneOtpError: (e) => internalServerError(e),
+                    AuthError: (e) => internalServerError(e),
+                    ResendTooSoonError: resendTooSoon,
+                  }),
+                ),
+              ),
+            "magic-link": ({ email }) =>
+              Effect.flatMap(resolveMagicLink, ({ service }) =>
+                service.send(email).pipe(
+                  Effect.catchTags({
+                    AuthError: (e) => internalServerError(e),
+                    MagicLinkError: (e) => internalServerError(e),
+                    ResendTooSoonError: resendTooSoon,
+                  }),
+                ),
+              ),
+          }),
+        );
+      }).pipe(Effect.asVoid, JsonApiErrors.mapHttpErrors),
+    ),
+  );
+
+/**
+ * Fail with `409` when a write document's id is not the one its URL names, as
+ * JSON:API requires of an update.
+ */
+const requireMatchingId = (urlId: string, documentId: string): Effect.Effect<void, S.Conflict> =>
+  urlId === documentId
+    ? Effect.void
+    : Effect.fail(new S.Conflict({ message: "The document's id does not match the URL" }));
+
+/** Layer implementing the `email-verifications` group. */
+export const emailVerificationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  return HttpApiBuilder.group(AuthApi, "email-verifications", (handlers) =>
+    handlers
+      .handle("create", ({ payload }) =>
+        Effect.gen(function* () {
+          const identifiers = yield* IdentifierStore;
+          const verification = yield* EmailVerificationService;
+          const email = payload.data.attributes.email.trim().toLowerCase();
+          const identifier = yield* identifiers
+            .getByValue("email", email)
+            .pipe(Effect.catch(internalServerError));
+          // Anti-enumeration: the same answer whether or not the address has
+          // an account, or is already verified.
+          if (identifier !== null && !identifier.verified) {
+            yield* verification.resendVerification(identifier.userId, email).pipe(
+              Effect.catchTags({
+                AuthError: (e) => internalServerError(e),
+                EmailVerificationError: (e) => internalServerError(e),
+                ...hookFailures,
+              }),
+            );
+          }
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload }) =>
+        Effect.gen(function* () {
+          yield* requireMatchingId(params.id, payload.data.id);
+          const lifecycle = yield* AuthLifecycleService;
+          const result = yield* lifecycle.verifyEmail({ token: params.id }).pipe(
+            Effect.catchTags({
+              EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+              ...hookFailures,
+            }),
+          );
+          // `200` with the session when verification signs the user in.
+          if (result.session === undefined) return;
+          yield* issueSession(result.session, cfg, "email-password", undefined);
+          return yield* signedIn({ ...result, session: result.session, method: "email-password" });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** Layer implementing the `password-resets` group. */
+export const passwordResetsGroupLayer = () =>
+  HttpApiBuilder.group(AuthApi, "password-resets", (handlers) =>
+    handlers
+      .handle("create", ({ payload }) =>
+        Effect.gen(function* () {
+          const passwordReset = yield* PasswordResetService;
+          yield* passwordReset.requestPasswordReset(payload.data.attributes.email).pipe(
+            Effect.catchTags({
+              AuthError: (e) => internalServerError(e),
+              PasswordResetError: (e) => internalServerError(e),
+              ...hookFailures,
+            }),
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload }) =>
+        Effect.gen(function* () {
+          yield* requireMatchingId(params.id, payload.data.id);
+          const passwordReset = yield* PasswordResetService;
+          yield* passwordReset.resetPassword(params.id, payload.data.attributes.newPassword).pipe(
+            Effect.catchTags({
+              PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+              HashingError: (e) => internalServerError(e),
+              ...hookFailures,
+            }),
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+
+/** Layer implementing the `google-one-tap-nonces` group. */
+export const googleOneTapNoncesGroupLayer = () =>
+  HttpApiBuilder.group(AuthApi, "google-one-tap-nonces", (handlers) =>
+    handlers.handle("create", () =>
+      Effect.gen(function* () {
+        const oneTap = yield* resolveGoogleOneTap;
+        const nonce = yield* oneTap.service.createNonce().pipe(
+          Effect.catchTags({
+            GoogleOneTapError: (e) => internalServerError(e),
+            AuthError: (e) => internalServerError(e),
+          }),
+        );
+        return Handlers.data(R.GoogleOneTapNonce.make({ id: nonce, attributes: {} }));
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
 
 /**
  * Every group of the {@link AuthApi} contract, with the JSON:API protocol
@@ -1384,6 +1943,11 @@ export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionCo
     sessionsGroupLayer(config, multiSession),
     identifiersGroupLayer(config, multiSession),
     usersGroupLayer(config, multiSession),
+    secondFactorChallengesGroupLayer(config, multiSession),
+    otpChallengesGroupLayer(),
+    emailVerificationsGroupLayer(config, multiSession),
+    passwordResetsGroupLayer(),
+    googleOneTapNoncesGroupLayer(),
     scimGroupLayer(),
   ).pipe(
     // The protocol middleware the JSON:API endpoints declare: content
@@ -1398,298 +1962,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
-      .handle("signUp", ({ payload }) =>
-        Effect.gen(function* () {
-          const lifecycle = yield* AuthLifecycleService;
-          const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-              EmailInUseError: (e) =>
-                Effect.fail(new S.Conflict({ message: e.message, code: e.code })),
-              EmailNotVerifiedError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              HashingError: (e) => internalServerError(e),
-              EmailVerificationError: (e) => internalServerError(e),
-              RateLimitError: (e) =>
-                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
-              PasswordPolicyError: (e) =>
-                resolveMessage(e.code, e.message, e.params).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              SignUpDisabledError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              InvalidInputError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user:
-              result.identifier?.type === "email"
-                ? encodeSignUpUserView(result.user, result.identifier.value)
-                : yield* encodeUserView(result.user),
-            needsEmailVerification: result.needsEmailVerification,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "email-password");
-        }),
-      )
-      .handle("signIn", ({ payload }) =>
-        Effect.gen(function* () {
-          const lifecycle = yield* AuthLifecycleService;
-          const result = yield* lifecycle
-            .signIn({
-              email: payload.email,
-              password: payload.password,
-              ...(payload.captchaToken !== undefined && { captchaToken: payload.captchaToken }),
-              ...(payload.rememberMe !== undefined && { rememberMe: payload.rememberMe }),
-            })
-            .pipe(
-              Effect.catchTags({
-                InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.Unauthorized({ message: e.message, code: e.code })),
-                AuthError: (e) => internalServerError(e),
-                HashingError: (e) => internalServerError(e),
-                EmailVerificationError: (e) => internalServerError(e),
-                RateLimitError: (e) =>
-                  Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
-                AccountLockedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                UserBannedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                CaptchaError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-                PwnedPasswordError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-              }),
-            );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: result.needsEmailVerification,
-            ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
-          };
-          return yield* withSessionCookie(
-            body,
-            result.session,
-            cfg,
-            "email-password",
-            result.rememberMe,
-          );
-        }),
-      )
-      .handle("sendVerificationEmail", ({ payload }) =>
-        Effect.gen(function* () {
-          const identifiers = yield* IdentifierStore;
-          const verification = yield* EmailVerificationService;
-          const email = payload.email.trim().toLowerCase();
-
-          const identifier = yield* identifiers
-            .getByValue("email", email)
-            .pipe(Effect.catch(internalServerError));
-
-          // Anti-enumeration: succeed uniformly whether or not the identifier
-          // exists (or is already verified).
-          if (identifier !== null && !identifier.verified) {
-            yield* verification.resendVerification(identifier.userId, email).pipe(
-              Effect.catchTags({
-                AuthError: (e) => internalServerError(e),
-                EmailVerificationError: (e) => internalServerError(e),
-                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-                AccountLockedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                UserBannedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                CaptchaError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-                PwnedPasswordError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-              }),
-            );
-          }
-
-          return { status: true };
-        }),
-      )
-      .handle("verifyEmail", ({ payload }) =>
-        Effect.gen(function* () {
-          const lifecycle = yield* AuthLifecycleService;
-          const result = yield* lifecycle.verifyEmail({ token: payload.token }).pipe(
-            Effect.catchTags({
-              EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: result.needsEmailVerification,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "email-password");
-        }),
-      )
-      .handle("passwordResetRequest", ({ payload }) =>
-        Effect.gen(function* () {
-          const passwordReset = yield* PasswordResetService;
-          yield* passwordReset.requestPasswordReset(payload.email).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-              PasswordResetError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("passwordResetConfirm", ({ payload }) =>
-        Effect.gen(function* () {
-          const passwordReset = yield* PasswordResetService;
-          yield* passwordReset.resetPassword(payload.token, payload.newPassword).pipe(
-            Effect.catchTags({
-              PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              HashingError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          return { status: true };
-        }),
-      )
       .handle("changePassword", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
@@ -1710,12 +1982,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                   Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
                 AuthError: (e) => internalServerError(e),
                 HashingError: (e) => internalServerError(e),
-                PasswordPolicyError: (e) =>
-                  resolveMessage(e.code, e.message, e.params).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
+                PasswordPolicyError: passwordPolicyFailure,
               }),
             );
         }),
@@ -1792,213 +2059,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             ),
             Effect.orDie,
           );
-        }),
-      )
-      .handle("magicLinkSend", ({ payload }) =>
-        Effect.gen(function* () {
-          const magicLink = yield* resolveMagicLink;
-          // Anti-enumeration: the service succeeds silently for unknown
-          // accounts; only store/delivery failures surface (as 500).
-          yield* magicLink.service.send(payload.email).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-              MagicLinkError: (e) => internalServerError(e),
-              ResendTooSoonError: (e) =>
-                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("magicLinkVerify", ({ payload }) =>
-        Effect.gen(function* () {
-          const magicLink = yield* resolveMagicLink;
-          const result = yield* magicLink.service.verify(payload.token).pipe(
-            Effect.catchTags({
-              MagicLinkError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "magic-link");
-        }),
-      )
-      .handle("emailOtpSend", ({ payload }) =>
-        Effect.gen(function* () {
-          const emailOtp = yield* resolveEmailOtp;
-          // Anti-enumeration: the service succeeds silently for unknown
-          // accounts; only store/delivery failures surface (as 500).
-          yield* emailOtp.service.send(payload.email, payload.purpose).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-              EmailOtpError: (e) => internalServerError(e),
-              ResendTooSoonError: (e) =>
-                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("signInEmailOtp", ({ payload }) =>
-        Effect.gen(function* () {
-          const emailOtp = yield* resolveEmailOtp;
-          const result = yield* emailOtp.service.signIn(payload.email, payload.otp).pipe(
-            Effect.catchTags({
-              EmailOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "email-otp");
-        }),
-      )
-      .handle("signInAnonymous", () =>
-        Effect.gen(function* () {
-          const anonymous = yield* resolveAnonymous;
-          const result = yield* anonymous.service.signInAnonymous().pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "anonymous");
-        }),
-      )
-      .handle("signInUsername", ({ payload }) =>
-        Effect.gen(function* () {
-          const username = yield* resolveUsername;
-          const result = yield* username.service
-            .signIn({
-              username: payload.username,
-              password: payload.password,
-              ...(payload.rememberMe !== undefined && { rememberMe: payload.rememberMe }),
-            })
-            .pipe(
-              Effect.catchTags({
-                UsernameError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-                InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.Unauthorized({ message: e.message })),
-                EmailNotVerifiedError: (e) =>
-                  Effect.fail(new S.Unauthorized({ message: e.message })),
-                HashingError: (e) => internalServerError(e),
-                AuthError: (e) => internalServerError(e),
-                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-                AccountLockedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                UserBannedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                CaptchaError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-                PwnedPasswordError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-              }),
-            );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-            ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "username", result.rememberMe);
         }),
       )
       .handle("multiSessionList", ({ request }) =>
@@ -2205,62 +2265,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("phoneOtpSend", ({ payload }) =>
-        Effect.gen(function* () {
-          const phoneOtp = yield* resolvePhoneOtp;
-          yield* phoneOtp.service.send(payload.phoneNumber, payload.purpose).pipe(
-            Effect.catchTags({
-              // Anti-enumeration: send never signals whether the number exists.
-              PhoneOtpError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-              ResendTooSoonError: (e) =>
-                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("signInPhoneOtp", ({ payload }) =>
-        Effect.gen(function* () {
-          const phoneOtp = yield* resolvePhoneOtp;
-          const result = yield* phoneOtp.service.signIn(payload.phoneNumber, payload.otp).pipe(
-            Effect.catchTags({
-              PhoneOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "phone-otp");
-        }),
-      )
       .handle("multiFactorEnable", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
@@ -2320,83 +2324,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               }),
             );
           return { backupCodes };
-        }),
-      )
-      .handle("multiFactorVerifyTotp", ({ payload }) =>
-        Effect.gen(function* () {
-          const multiFactor = yield* resolveMultiFactor;
-          const result = yield* multiFactor.service.verifyTotp(payload.token, payload.code).pipe(
-            Effect.catchTags({
-              MultiFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-              HashingError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          return yield* secondFactorSuccess(result, cfg, "multi-factor");
-        }),
-      )
-      .handle("multiFactorVerifyBackupCode", ({ payload }) =>
-        Effect.gen(function* () {
-          const multiFactor = yield* resolveMultiFactor;
-          const result = yield* multiFactor.service
-            .verifyBackupCode(payload.token, payload.code)
-            .pipe(
-              Effect.catchTags({
-                MultiFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-                AccountLockedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                UserBannedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                CaptchaError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-                PwnedPasswordError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-              }),
-            );
-          return yield* secondFactorSuccess(result, cfg, "multi-factor");
         }),
       )
       // --- Organization -----------------------------------------------------
@@ -3697,60 +3624,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
           return { keys: jwks.keys.map((k) => ({ ...k })) };
         }),
-      )
-      // --- Google One Tap -------------------------------------------------------
-      .handle("getGoogleOneTapNonce", () =>
-        Effect.gen(function* () {
-          const oneTap = yield* resolveGoogleOneTap;
-          const nonce = yield* oneTap.service.createNonce().pipe(
-            Effect.catchTags({
-              GoogleOneTapError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { nonce };
-        }),
-      )
-      .handle("signInGoogleOneTap", ({ payload }) =>
-        Effect.gen(function* () {
-          const oneTap = yield* resolveGoogleOneTap;
-          const result = yield* oneTap.service.signIn(payload.credential, payload.nonce).pipe(
-            Effect.catchTags({
-              GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "google");
-        }),
       ),
   );
 };
@@ -4250,21 +4123,6 @@ export const scimGroupLayer = () =>
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
-/**
- * Encode the user a sign-up answers with, taking `email` from the address the
- * sign-up was made with (unverified, as every address is at sign-up) rather
- * than from the identifier store. For an address another user holds (under
- * `antiEnumeration`, or held unverified with it off; see
- * `AuthLifecycleResult.identifier`) the user is a stand-in no identifier
- * names, so a store lookup would leave its `email` fields out and give the
- * address away; this builds every answer the same way. The field order is
- * {@link S.encodeUser}'s.
- */
-const encodeSignUpUserView = (user: Types.User, email: string): S.UserView => {
-  const { id, ...rest } = S.encodeUser(user);
-  return { id, email, emailVerified: false, ...rest };
-};
-
 /** {@link encodeUserView} over a session+user pair. */
 const encodeSessionWithUserView = (
   resolved: Types.SessionWithUser,
@@ -4273,26 +4131,6 @@ const encodeSessionWithUserView = (
     session: S.encodeSession(resolved.session),
     user,
   }));
-
-/**
- * Build the `AuthSuccess` response (with session cookie) for a redeemed
- * second-factor challenge. The multi-factor service returns only `userId` +
- * `session`, so the full user is fetched through the core `UserService`.
- */
-const secondFactorSuccess = (
-  result: { readonly userId: string; readonly session: Types.Session },
-  cfg: ResolvedCookieConfig,
-  method?: string,
-) =>
-  Effect.gen(function* () {
-    const userService = yield* UserService;
-    const user = yield* userService.getUser(result.userId).pipe(Effect.catch(internalServerError));
-    const body: S.AuthSuccess = {
-      user: yield* encodeUserView(user),
-      needsEmailVerification: false,
-    };
-    return yield* withSessionCookie(body, result.session, cfg, method);
-  });
 
 /** Resolve and validate the request's session or fail with 401. */
 /**
@@ -4384,6 +4222,22 @@ const withSessionCookie = (
   Effect.gen(function* () {
     const json = yield* HttpServerResponse.json(body);
     if (session === undefined) return json;
+    return yield* decorateSessionResponse(json, session, cfg, method, rememberMe);
+  }).pipe(Effect.orDie);
+
+/**
+ * Carry a new session on `response`: the session cookie (a browser-session one
+ * when `rememberMe` is `false`), the device's multi-session list, the
+ * last-login-method hint and, in bearer mode, the `set-auth-token` header.
+ */
+const decorateSessionResponse = (
+  json: HttpServerResponse.HttpServerResponse,
+  session: Types.Session,
+  cfg: ResolvedCookieConfig,
+  method?: string,
+  rememberMe?: boolean,
+) =>
+  Effect.gen(function* () {
     const cookieOpts =
       rememberMe === false
         ? sessionOnlyCookieOptions(cfg)
@@ -4478,47 +4332,46 @@ export interface HttpIPRateLimitConfig {
 /**
  * Sane default IP rate-limit rules applied to sensitive auth endpoints.
  *
- * | Endpoint(s)                            | Limit            | Window   | Block    |
- * |----------------------------------------|------------------|----------|----------|
- * | `/sign-in`, `/sign-in/*`               | 10 req           | 15 min   | 30 min   |
- * | `/sign-up`                             | 5 req            | 1 hr     | 24 hr    |
- * | `/magic-link/send`, `/email-otp/send`  | 5 req            | 10 min   | 30 min   |
- * | `/phone-otp/send`                      | 5 req            | 10 min   | 30 min   |
- * | `/password-reset/request`              | 5 req            | 1 hr     | 2 hr     |
- * | `/multi-factor/verify-*`                 | 10 req           | 5 min    | 30 min   |
- * | `/register` (dynamic client registration) | 10 req          | 1 hr     | 1 hr     |
+ * | Endpoint(s)                                        | Limit  | Window | Block  |
+ * |----------------------------------------------------|--------|--------|--------|
+ * | `POST /sessions` (every sign-in method)            | 10 req | 15 min | 30 min |
+ * | `POST /users` (sign-up)                            | 5 req  | 1 hr   | 24 hr  |
+ * | `POST /otp-challenges` (email / SMS code, link)    | 5 req  | 10 min | 30 min |
+ * | `POST /password-resets`                            | 5 req  | 1 hr   | 2 hr   |
+ * | `POST /second-factor-challenges/:id/verifications` | 10 req | 5 min  | 30 min |
+ * | `POST /register` (dynamic client registration)     | 10 req | 1 hr   | 1 hr   |
  */
 export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   {
-    path: /^\/sign-in(\/.*)?$/,
+    path: "/sessions",
     methods: ["POST"],
     maxRequests: 10,
     windowMs: 15 * 60 * 1000,
     blockDurationMs: 30 * 60 * 1000,
   },
   {
-    path: "/sign-up",
+    path: "/users",
     methods: ["POST"],
     maxRequests: 5,
     windowMs: 60 * 60 * 1000,
     blockDurationMs: 24 * 60 * 60 * 1000,
   },
   {
-    path: /^\/(magic-link|email-otp|phone-otp)\/send$/,
+    path: "/otp-challenges",
     methods: ["POST"],
     maxRequests: 5,
     windowMs: 10 * 60 * 1000,
     blockDurationMs: 30 * 60 * 1000,
   },
   {
-    path: "/password-reset/request",
+    path: "/password-resets",
     methods: ["POST"],
     maxRequests: 5,
     windowMs: 60 * 60 * 1000,
     blockDurationMs: 2 * 60 * 60 * 1000,
   },
   {
-    path: /^\/multi-factor\/verify-/,
+    path: /^\/second-factor-challenges\/[^/]+\/verifications$/,
     methods: ["POST"],
     maxRequests: 10,
     windowMs: 5 * 60 * 1000,
@@ -4572,7 +4425,7 @@ export interface AuthWebHandlerOptions {
   readonly multiSession?: MultiSessionConfig;
   /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
-   * request to `/api/auth/sign-in` is routed to the `/sign-in` endpoint.
+   * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
    */
   readonly prefix?: string;
   /**
@@ -4749,7 +4602,7 @@ const referenceResponse = (): Response =>
  *
  * Returns `true` when the request may proceed.
  *
- * @param inner - The path relative to the mount prefix (e.g. `/sign-in`), or
+ * @param inner - The path relative to the mount prefix (e.g. `/sessions`), or
  *   `null` when the request is outside the prefix.  Used to detect `GET /token`
  *   which issues a JWT and must be treated as state-changing.
  */

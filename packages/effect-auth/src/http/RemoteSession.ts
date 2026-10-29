@@ -127,29 +127,51 @@ const asFetch =
  * // Cloudflare), answering in-process: sign-in succeeds for any credentials.
  * const authWorker = async (request: Request): Promise<Response> => {
  *   const { pathname } = new URL(request.url)
- *   if (request.method === "POST" && pathname.endsWith("/sign-in")) {
- *     const user = {
- *       id: "u-1",
- *       email: "user@example.com",
- *       emailVerified: true,
- *       createdAt: 1_700_000_000_000,
- *       updatedAt: 1_700_000_000_000,
- *       attributes: {},
+ *   if (request.method === "POST" && pathname.endsWith("/sessions")) {
+ *     const at = 1_700_000_000_000
+ *     const document = {
+ *       data: {
+ *         type: "sessions",
+ *         id: "s-1",
+ *         attributes: { expiresAt: at + 3_600_000, createdAt: at, lastActivityAt: at, attributes: {} },
+ *         relationships: { user: { data: { type: "users", id: "u-1" } } },
+ *       },
+ *       included: [
+ *         {
+ *           type: "users",
+ *           id: "u-1",
+ *           attributes: { email: "user@example.com", emailVerified: true, createdAt: at, updatedAt: at, attributes: {} },
+ *         },
+ *       ],
+ *       meta: { needsEmailVerification: false },
  *     }
- *     return Response.json({ user, needsEmailVerification: false })
+ *     return new Response(JSON.stringify(document), {
+ *       status: 201,
+ *       headers: { "content-type": "application/vnd.api+json" },
+ *     })
  *   }
  *   return new Response(null, { status: 404 })
  * }
  * const env = { AUTH: authWorker }
- * const payload = { email: "user@example.com", password: "password-123" }
+ * // Sign in: `POST /sessions` with a password credential.
+ * const payload = {
+ *   data: {
+ *     type: "sessions",
+ *     attributes: {
+ *       credential: { method: "password", email: "user@example.com", password: "password-123" },
+ *     },
+ *   },
+ * } as const
  *
  * const program = Effect.gen(function* () {
  *   const client = yield* Http.client("https://auth.internal")
- *   return yield* client.auth.signIn({ payload })
+ *   return yield* client.sessions.create({ payload })
  * }).pipe(Effect.provide(Http.RemoteSession.layerFetcher(env.AUTH)))
  *
  * const result = await Effect.runPromise(program)
- * assert.equal(result.user.id, "u-1")
+ * // A `201` carries the session, its user included; a `202` carries neither.
+ * assert("included" in result)
+ * assert.equal(result.included?.[0]?.id, "u-1")
  * ```
  *
  * @since 1.0.0

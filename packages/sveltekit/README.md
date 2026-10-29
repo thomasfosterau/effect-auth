@@ -62,8 +62,20 @@ export const actions = {
       { redirect, fail },
       {
         fetch: (request) => event.platform!.env.AUTH.fetch(request),
-        endpoint: "https://auth.internal/api/auth/sign-in",
-        body: (form) => ({ email: form.get("email"), password: form.get("password") }),
+        endpoint: "https://auth.internal/api/auth/sessions",
+        // Sign in with a password credential: a JSON:API `sessions` document.
+        body: (form) => ({
+          data: {
+            type: "sessions",
+            attributes: {
+              credential: {
+                method: "password",
+                email: String(form.get("email") ?? ""),
+                password: String(form.get("password") ?? ""),
+              },
+            },
+          },
+        }),
         fields: (form) => ({ email: String(form.get("email") ?? "") }),
         fallback: "/",
       },

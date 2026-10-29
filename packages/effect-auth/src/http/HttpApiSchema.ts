@@ -810,7 +810,7 @@ export const GoogleOneTapPayload = Schema.Struct({
   /** The One Tap `credential` (a Google-signed id_token). */
   credential: Schema.String,
   /**
-   * The **unhashed** nonce returned by `GET /sign-in/google-one-tap/nonce`.
+   * The **unhashed** nonce returned by `POST /google-one-tap-nonces`.
    * Must match the nonce claim embedded by Google in the id_token.
    */
   nonce: Schema.String,

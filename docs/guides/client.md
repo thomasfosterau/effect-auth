@@ -201,7 +201,7 @@ Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefa
 
 ## 6. Continuing a second-factor challenge
 
-When multi-factor is enrolled, a password sign-in issues **no session**. It returns an `AuthSuccess` whose `secondFactor` carries `{ token, expiresAt }`, and the challenge must be redeemed for a session. `continueChallenge` takes that result and hands back the verify calls already bound to the token:
+When multi-factor is enrolled, a password sign-in issues **no session**. It returns an `AuthResult` with no `user` and a `secondFactor` carrying `{ token, expiresAt }`, and the challenge must be redeemed for a session. `continueChallenge` takes that result and hands back the verify calls already bound to the token:
 
 ```ts
 const result = await client.signIn({ email, password });

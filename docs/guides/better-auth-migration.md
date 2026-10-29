@@ -93,7 +93,7 @@ Names below are the exact exports; `Auth` is `import * as Auth from "@thomasfost
 
 ### Email + password
 
-`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /sign-up`, `POST /sign-in`, `POST /email-verification/send|verify`, `POST /password-reset/request|reset`, `POST /change-password`.
+`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /users` (sign-up), `POST /sessions` (sign-in), `POST /email-verifications` and `PATCH /email-verifications/:id`, `POST /password-resets` and `PATCH /password-resets/:id`, and `POST /change-password`: JSON:API resources since #205.
 
 The default hasher is PBKDF2-SHA256; Argon2id lives in `@thomasfosterau/effect-auth-argon2` as a drop-in `PasswordHasher`. Better Auth hashes with scrypt by default, so **existing password hashes do not verify** — see §6.
 
@@ -105,11 +105,11 @@ The default hasher is PBKDF2-SHA256; Argon2id lives in `@thomasfosterau/effect-a
 
 ### Magic link
 
-`Auth.MagicLinkService` (`send`, `verify`) over `MagicLinkStore` + `MagicLinkUserStore`, on `POST /magic-link/send` and `POST /magic-link/verify`. Delivery is the `sendMagicLink` callback in `MagicLinkConfig`.
+`Auth.MagicLinkService` (`send`, `verify`) over `MagicLinkStore` + `MagicLinkUserStore`, on `POST /otp-challenges` (channel `magic-link`) and `POST /sessions` (a `magic-link` credential). Delivery is the `sendMagicLink` callback in `MagicLinkConfig`.
 
 ### Email OTP and phone OTP
 
-`Auth.Email.EmailOtpService` (`send`, `signIn`, `check`) on `POST /email-otp/send` and `POST /sign-in/email-otp`, and `Auth.PhoneOtpService` on `POST /phone-otp/send` and `POST /sign-in/phone-otp`. Both hash the code at rest, scope it by purpose, and limit attempts. Better Auth's `emailOtp` and `phoneNumber` plugins map here one for one.
+`Auth.Email.EmailOtpService` (`send`, `signIn`, `check`) on `POST /otp-challenges` (channel `email`) and `POST /sessions` (an `email-otp` credential), and `Auth.PhoneOtpService` on `POST /otp-challenges` (channel `phone`) and `POST /sessions` (a `phone-otp` credential). Both hash the code at rest, scope it by purpose, and limit attempts. Better Auth's `emailOtp` and `phoneNumber` plugins map here one for one.
 
 ### Passkeys / WebAuthn
 
@@ -215,7 +215,7 @@ Better Auth's generic `verification` table backs email verification, password re
 
 1. Stand up the new schema (`Sql.migrate`, or your own DDL) alongside the running Better Auth database.
 2. Backfill `auth_users` → `auth_identifiers` → `auth_oauth_accounts` → plugin tables, in that order (identifiers depend on users; everything depends on both).
-3. Wire the layers and mount `Http.makeAsync` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`) keep working; reading the session is `GET /sessions/current?include=user` and signing out is `DELETE /sessions/current`, JSON:API resources since #205.
+3. Wire the layers and mount `Http.makeAsync` at the same prefix Better Auth used, and move the client to effect-auth's paths, JSON:API resources since #205: sign-in is `POST /sessions`, sign-up `POST /users`, reading the session `GET /sessions/current?include=user` and signing out `DELETE /sessions/current`.
 4. Write the routes with no contract equivalent: social OAuth start/callback, and passkeys if you use them.
 5. Swap the browser client, then cut over and accept the forced re-authentication.
 

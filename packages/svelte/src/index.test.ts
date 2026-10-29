@@ -27,7 +27,7 @@ const stub = (methods: ClientStub): AuthClient =>
 
 /**
  * A client backed by a stand-in server covering only the endpoints these
- * stores touch (`/sign-up`, `/sign-out`, `/session`, `/sessions`). The
+ * stores touch (`/users`, `/sessions/current`, `/sessions`). The
  * bindings care about nothing but the session store moving, so the in-process
  * auth server the client package tests against would only add a dependency
  * here.
@@ -60,9 +60,15 @@ const makeClient = () => {
     fetch: (input, init) => {
       const { pathname } = new URL(String(input));
       switch (`${init?.method ?? "GET"} ${pathname}`) {
-        case "POST /sign-up":
+        case "POST /users":
           signedIn = true;
-          return Promise.resolve(json({ user, needsEmailVerification: false }));
+          return Promise.resolve(
+            json({
+              data: sessionResource(),
+              included: [userResource()],
+              meta: { needsEmailVerification: false },
+            }),
+          );
         case "DELETE /sessions/current":
           signedIn = false;
           return Promise.resolve(new Response(null, { status: 204 }));

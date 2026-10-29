@@ -85,8 +85,9 @@ export interface AuthLifecycleResult {
   readonly user: Types.User;
   /**
    * The login handle a sign-up was made with, trimmed and lower-cased. The
-   * caller has proven nothing about it yet, so the HTTP sign-up response
-   * reports it as the user's `email` with `emailVerified: false`. Set by
+   * caller has proven nothing about it yet, so a sign-up answer that names the
+   * user (over HTTP, the `201` of a sign-up that issued a session) reports it
+   * as the user's `email` with `emailVerified: false`. Set by
    * `signUp`. It is one of:
    *
    * - the email address the sign-up claimed;
