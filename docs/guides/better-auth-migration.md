@@ -24,7 +24,7 @@ The practical consequences are worth internalising before you start:
 | `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                              |
 | `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth-sql`, `-drizzle`, `-alchemy`, or your own                       |
 | `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`        |
-| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /session` over HTTP                           |
+| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP     |
 | `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration) |
 | `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                         |
 | `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`   |
@@ -215,7 +215,7 @@ Better Auth's generic `verification` table backs email verification, password re
 
 1. Stand up the new schema (`Sql.migrate`, or your own DDL) alongside the running Better Auth database.
 2. Backfill `auth_users` → `auth_identifiers` → `auth_oauth_accounts` → plugin tables, in that order (identifiers depend on users; everything depends on both).
-3. Wire the layers and mount `Http.makeAsync` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`, `/sign-out`, `/session`) keep working.
+3. Wire the layers and mount `Http.makeAsync` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`) keep working; reading the session is `GET /sessions/current?include=user` and signing out is `DELETE /sessions/current`, JSON:API resources since #205.
 4. Write the routes with no contract equivalent: social OAuth start/callback, and passkeys if you use them.
 5. Swap the browser client, then cut over and accept the forced re-authentication.
 

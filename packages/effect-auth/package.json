@@ -72,12 +72,19 @@
     "docs": "docgen"
   },
   "devDependencies": {
+    "@thomasfosterau/effect-jsonapi": "catalog:",
     "@types/node": "catalog:",
     "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {
+    "@thomasfosterau/effect-jsonapi": "catalog:peers",
     "effect": "catalog:peers"
+  },
+  "peerDependenciesMeta": {
+    "@thomasfosterau/effect-jsonapi": {
+      "optional": true
+    }
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

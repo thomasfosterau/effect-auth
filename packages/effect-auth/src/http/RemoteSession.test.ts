@@ -12,26 +12,37 @@ import { CurrentUser } from "../SessionContext.ts";
 
 const NOW = 1_760_000_000_000;
 
-const sessionBody = {
-  session: {
+/** What `GET /sessions/current?include=user` answers: the session, its user included. */
+const sessionDocument = (expiresAt: number = NOW + 3_600_000) => ({
+  data: {
+    type: "sessions",
     id: "session-1",
-    userId: "user-42",
-    expiresAt: NOW + 3_600_000,
-    createdAt: NOW,
-    lastActivityAt: NOW,
-    attributes: { ip: "203.0.113.4" },
+    attributes: {
+      expiresAt,
+      createdAt: NOW,
+      lastActivityAt: NOW,
+      attributes: { ip: "203.0.113.4" },
+    },
+    relationships: { user: { data: { type: "users", id: "user-42" } } },
   },
-  user: {
-    id: "user-42",
-    // Derived on the wire, not a `Types.User` field.
-    email: "user@example.com",
-    emailVerified: true,
-    name: "Ada",
-    createdAt: NOW,
-    updatedAt: NOW,
-    attributes: { role: "admin" },
-  },
-};
+  included: [
+    {
+      type: "users",
+      id: "user-42",
+      attributes: {
+        // Derived on the wire, not a `Types.User` field.
+        email: "user@example.com",
+        emailVerified: true,
+        name: "Ada",
+        createdAt: NOW,
+        updatedAt: NOW,
+        attributes: { role: "admin" },
+      },
+    },
+  ],
+});
+
+const JSON_API = "application/vnd.api+json";
 
 /** A JSON request or response body, as the wire carries it. */
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
@@ -59,10 +70,10 @@ const spy = (respond: (request: Request) => Response | Promise<Response>) => {
 };
 
 const okSession = (setCookie: ReadonlyArray<string> = []) =>
-  new Response(toJson(sessionBody), {
+  new Response(toJson(sessionDocument()), {
     status: 200,
     headers: [
-      ["content-type", "application/json"],
+      ["content-type", JSON_API],
       ...setCookie.map((value): [string, string] => ["set-cookie", value]),
     ],
   });
@@ -100,8 +111,10 @@ describe("RemoteSession session reads", () => {
     expect(calls).toHaveLength(1);
     const call = calls[0];
     assert(call !== undefined);
-    expect(call.url).toBe("https://auth.internal/api/auth/session");
+    expect(call.url).toBe("https://auth.internal/api/auth/sessions/current?include=user");
     expect(call.method).toBe("GET");
+    // A JSON:API read, whatever the inbound request accepted.
+    expect(call.headers["accept"]).toBe(JSON_API);
   });
 
   it("the resolved session runs gated code through SessionContext", async () => {
@@ -204,15 +217,11 @@ describe("RemoteSession session reads", () => {
   });
 
   it("an instant outside the Date range is a RemoteSessionError, not an Invalid Date", async () => {
-    const outOfRange = {
-      ...sessionBody,
-      session: { ...sessionBody.session, expiresAt: 9e15 },
-    };
     const { fetcher } = spy(
       () =>
-        new Response(toJson(outOfRange), {
+        new Response(toJson(sessionDocument(9e15)), {
           status: 200,
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": JSON_API },
         }),
     );
     const client = RemoteSession.make({ fetcher });
@@ -220,6 +229,18 @@ describe("RemoteSession session reads", () => {
     const error = await Effect.runPromise(Effect.flip(client.read(inbound(withSession))));
     expect(error._tag).toBe("RemoteSessionError");
     expect(error.message).toMatch(/did not decode/);
+  });
+
+  it("a document that leaves the user out is a RemoteSessionError", async () => {
+    const { data } = sessionDocument();
+    const { fetcher } = spy(
+      () => new Response(toJson({ data }), { status: 200, headers: { "content-type": JSON_API } }),
+    );
+    const client = RemoteSession.make({ fetcher });
+
+    const error = await Effect.runPromise(Effect.flip(client.read(inbound(withSession))));
+    expect(error._tag).toBe("RemoteSessionError");
+    expect(error.message).toMatch(/did not include the session's user/);
   });
 
   it("honours a custom baseUrl and prefix", async () => {
@@ -232,7 +253,7 @@ describe("RemoteSession session reads", () => {
     await Effect.runPromise(client.read(inbound(withSession)));
     const call = calls[0];
     assert(call !== undefined);
-    expect(call.url).toBe("https://auth.svc.local/auth/session");
+    expect(call.url).toBe("https://auth.svc.local/auth/sessions/current?include=user");
   });
 });
 

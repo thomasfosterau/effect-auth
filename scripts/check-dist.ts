@@ -128,8 +128,11 @@ interface Target {
 }
 
 const allTargets: ReadonlyArray<Target> = [
-  { dir: "effect-auth" },
-  { dir: "client" },
+  // effect-jsonapi is the optional peer of the `./http` entry (#205), and of
+  // the client's `./testing` entry through it: installed at its floor so those
+  // entries import like the rest.
+  { dir: "effect-auth", peers: ["@thomasfosterau/effect-jsonapi"] },
+  { dir: "client", peers: ["@thomasfosterau/effect-jsonapi"] },
   { dir: "sql" },
   { dir: "argon2" },
   { dir: "resend" },

@@ -62,6 +62,9 @@ catalog:
   "@testing-library/react": ^16.3.3
   "@testing-library/svelte": ^5.4.2
   "@types/better-sqlite3": ^9.6.0
+  # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
+  # peer of effect-auth, needed only by that subpath.
+  "@thomasfosterau/effect-jsonapi": ^0.19.0
   "@types/node": ^26.6.5
   "@types/pg": ^8.15.0
   "@types/react": ^19.3.0
@@ -129,6 +132,8 @@ catalog:
 # floor, proven by `vp run check:dist`.
 catalogs:
   peers:
+    # 0.x minors break, so the peer range is the minor line.
+    "@thomasfosterau/effect-jsonapi": ^0.19.0
     "@types/pg": ^8.15.0
     # beta.80 is the first alchemy release that imports only `effect/*` paths;
     # beta.79 and earlier import the `effect/unstable/*` that rc.118 removed.

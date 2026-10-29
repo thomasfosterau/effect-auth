@@ -54,7 +54,7 @@ Every request is sent with `credentials: "include"`, so the session cookie flows
 | `headers` | `Record<string, string>` | Extra headers on every request.                                          |
 | `refresh` | `RefreshOptions`         | Opt-in background refresh: `intervalMs`, `onFocus`, `crossTab`. All off. |
 
-`refresh.intervalMs` polls `/session` while something is subscribed; `onFocus` refetches on window focus and when the tab becomes visible; `crossTab` mirrors session changes across tabs over a `BroadcastChannel` (`true` for the default channel name `"effect-auth-session"`, or a name of your own). Each degrades to a no-op outside a browser.
+`refresh.intervalMs` polls `GET /sessions/current` while something is subscribed; `onFocus` refetches on window focus and when the tab becomes visible; `crossTab` mirrors session changes across tabs over a `BroadcastChannel` (`true` for the default channel name `"effect-auth-session"`, or a name of your own). Each degrades to a no-op outside a browser.
 
 ## The session store
 
@@ -64,7 +64,7 @@ Every request is sent with `credentials: "include"`, so the session cookie flows
 | --------------------- | --------------------------------------------------------------------------- |
 | `get()`               | The current `SessionState`: `{ data, isPending, error }`. Stable reference. |
 | `subscribe(listener)` | Returns an unsubscribe function. The first subscriber triggers the fetch.   |
-| `refetch()`           | Re-reads `/session` and notifies subscribers.                               |
+| `refetch()`           | Re-reads `GET /sessions/current` and notifies subscribers.                  |
 
 `data` is the `SessionWithUserView` or `null` when signed out. The store starts at `isPending: true`, so a UI never flashes "signed out" before the first fetch. A `401` resolves to `data: null`, not an error; any other failure keeps the last `data` and sets `error`. Session-changing calls (every sign-in and sign-up, sign-out, second-factor redemption, email verification, the email-change and account-deletion confirmations, `updateUser`, `multiSession.setActive`, `organization.setActive`, impersonation, the SSO callback and the device token poll) refetch the store only while something is subscribed.
 

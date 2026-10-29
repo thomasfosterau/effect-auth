@@ -101,7 +101,7 @@ describe("identifiers", () => {
 
     const error = await rejectionOf(client.identifiers.delete(only.id), AuthClientError);
     assert.instanceOf(error, AuthClientError);
-    expect(error.status).toBe(400);
+    expect(error.status).toBe(403);
   });
 });
 

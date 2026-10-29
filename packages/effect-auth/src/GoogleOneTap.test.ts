@@ -153,6 +153,7 @@ const makeStores = () => {
     invalidateSession: () => Effect.die("unused"),
     invalidateUserSessions: (userId) => Effect.sync(() => void sessionsCleared.push(userId)),
     listSessions: () => Effect.succeed([]),
+    revokeSessionById: () => Effect.succeed(false),
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
   };

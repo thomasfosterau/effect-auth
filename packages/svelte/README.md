@@ -32,7 +32,7 @@ pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth-client e
 
 The stores implement Svelte's readable-store contract directly, so the `$store` syntax works without importing anything from `svelte/store`.
 
-Subscribing to `sessionStore` triggers the initial `/session` fetch; every auth mutation on the client refreshes it.
+Subscribing to `sessionStore` triggers the initial `GET /sessions/current` read; every auth mutation on the client refreshes it.
 
 See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) for the rest of the client API.
 

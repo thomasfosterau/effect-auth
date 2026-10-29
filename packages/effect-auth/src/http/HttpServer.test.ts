@@ -741,6 +741,78 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
 ): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
+/** A body's own fields, in the order the wire carried them. */
+const JsonFields = Schema.Record(Schema.String, Schema.Json);
+
+/** A JSON:API resource object, as the wire carries it. */
+const WireResource = Schema.Struct({
+  type: Schema.String,
+  id: Schema.String,
+  attributes: JsonFields,
+  relationships: Schema.optional(
+    Schema.Struct({
+      user: Schema.optional(Schema.Struct({ data: Schema.Struct({ id: Schema.String }) })),
+    }),
+  ),
+});
+type WireResource = typeof WireResource.Type;
+
+const SessionDocumentBody = Schema.Struct({
+  data: WireResource,
+  included: Schema.optional(Schema.Array(WireResource)),
+});
+const CollectionBody = Schema.Struct({ data: Schema.Array(WireResource) });
+
+/** A resource object flattened to the `{ id, ...attributes }` view the tests read. */
+const flatten = (resource: WireResource): Schema.Json => ({
+  id: resource.id,
+  ...(resource.relationships?.user !== undefined && {
+    userId: resource.relationships.user.data.id,
+  }),
+  ...resource.attributes,
+});
+
+/**
+ * The `GET /sessions/current?include=user` document as `{ session, user }`,
+ * decoded against the shape the test reads from it.
+ */
+const sessionBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => {
+  const document = Schema.decodeUnknownSync(SessionDocumentBody)(await response.json());
+  const user = document.included?.find((resource) => resource.type === "users");
+  return Schema.decodeUnknownSync(schema)({
+    session: flatten(document.data),
+    ...(user !== undefined && { user: flatten(user) }),
+  });
+};
+
+/** A JSON:API collection document's resources, flattened as {@link flatten} does. */
+const collectionBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => {
+  const document = Schema.decodeUnknownSync(CollectionBody)(await response.json());
+  return Schema.decodeUnknownSync(schema)(document.data.map(flatten));
+};
+
+/** A JSON:API data document's primary resource, flattened as {@link flatten} does. */
+const resourceBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => {
+  const document = Schema.decodeUnknownSync(SessionDocumentBody)(await response.json());
+  return Schema.decodeUnknownSync(schema)(flatten(document.data));
+};
+
+/** The first error object's `detail` and `status` of a JSON:API error document. */
+const ErrorDocumentBody = Schema.Struct({
+  errors: Schema.Array(
+    Schema.Struct({ status: Schema.String, detail: Schema.optional(Schema.String) }),
+  ),
+});
+
 // The response bodies several tests read.
 const UserIdBody = Schema.Struct({ user: Schema.Struct({ id: Schema.String }) });
 const UserEmailBody = Schema.Struct({ user: Schema.Struct({ email: Schema.String }) });
@@ -769,8 +841,6 @@ const SignUpBody = Schema.Struct({
   user: Schema.Record(Schema.String, Schema.Json),
   needsEmailVerification: Schema.Json,
 });
-/** A body's own fields, in the order the wire carried them. */
-const JsonFields = Schema.Record(Schema.String, Schema.Json);
 
 /** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
 class PromiseRejection extends Data.TaggedError("PromiseRejection")<{
@@ -814,6 +884,22 @@ const sessionIdFromSetCookie = (setCookie: string | null): string => {
 };
 
 const asCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
+
+/** `GET` this for the session the request carries, with its user included. */
+const CURRENT_SESSION = "/sessions/current?include=user";
+
+/** A JSON:API request document body. */
+const jsonApiRequest = (
+  path: string,
+  body: Schema.Json,
+  headers: Record<string, string> = {},
+  method: string = "PATCH",
+) =>
+  new Request(`http://test${path}`, {
+    method,
+    headers: { "content-type": "application/vnd.api+json", ...headers },
+    body: toJson(body),
+  });
 
 /** Sign a user up and return their session id (from the cookie). */
 const signUp = async (handler: Handler, email: string, password: string = PW): Promise<string> => {
@@ -1149,9 +1235,9 @@ describe("HTTP auth protocol", () => {
     const handler = handlerFor();
     const sid = await signUp(handler, "a@b.com");
 
-    const res = await handler(getRequest("/session", asCookie(sid)));
+    const res = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(res.status).toBe(200);
-    const body = await jsonBody(res, UserEmailBody);
+    const body = await sessionBody(res, UserEmailBody);
     expect(body.user.email).toBe("a@b.com");
   });
 
@@ -1159,13 +1245,13 @@ describe("HTTP auth protocol", () => {
     const handler = handlerFor();
     const sid = await signUp(handler, "a@b.com");
 
-    const res = await handler(getRequest("/session", { authorization: `Bearer ${sid}` }));
+    const res = await handler(getRequest(CURRENT_SESSION, { authorization: `Bearer ${sid}` }));
     expect(res.status).toBe(200);
   });
 
   it("returns 401 for /session without a session", async () => {
     const handler = handlerFor();
-    const res = await handler(getRequest("/session"));
+    const res = await handler(getRequest(CURRENT_SESSION));
     expect(res.status).toBe(401);
   });
 
@@ -1190,11 +1276,11 @@ describe("HTTP auth protocol", () => {
     const handler = handlerFor();
     const sid = await signUp(handler, "a@b.com");
 
-    const out = await handler(jsonRequest("/sign-out", undefined, asCookie(sid)));
+    const out = await handler(deleteRequest("/sessions/current", asCookie(sid)));
     expect(out.status).toBe(204);
     expect(out.headers.get("set-cookie")).toContain("conduit_session=");
 
-    const after = await handler(getRequest("/session", asCookie(sid)));
+    const after = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(after.status).toBe(401);
   });
 
@@ -1256,7 +1342,8 @@ describe("session management endpoints", () => {
 
     const res = await handler(getRequest("/sessions", asCookie(sid1)));
     expect(res.status).toBe(200);
-    const body = await jsonBody(res, IdListBody);
+    expect(res.headers.get("content-type")).toContain("application/vnd.api+json");
+    const body = await collectionBody(res, IdListBody);
     expect(
       Arr.sort(
         body.map((s) => s.id),
@@ -1276,11 +1363,12 @@ describe("session management endpoints", () => {
     const sid1 = await signUp(handler, "a@b.com");
     const sid2 = await signIn(handler, "a@b.com");
 
-    const res = await handler(deleteRequest(`/sessions/${sid2}`, asCookie(sid1)));
+    // A session is revoked by the id the list reports (the token's hash).
+    const res = await handler(deleteRequest(`/sessions/${hashToken(sid2)}`, asCookie(sid1)));
     expect(res.status).toBe(204);
 
-    expect((await handler(getRequest("/session", asCookie(sid2)))).status).toBe(401);
-    expect((await handler(getRequest("/session", asCookie(sid1)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(401);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid1)))).status).toBe(200);
   });
 
   it("rejects revoking a session the user does not own", async () => {
@@ -1288,10 +1376,11 @@ describe("session management endpoints", () => {
     const sid1 = await signUp(handler, "a@b.com");
     const otherSid = await signUp(handler, "other@b.com");
 
-    const res = await handler(deleteRequest(`/sessions/${otherSid}`, asCookie(sid1)));
-    expect(res.status).toBe(400);
+    const res = await handler(deleteRequest(`/sessions/${hashToken(otherSid)}`, asCookie(sid1)));
+    expect(res.status).toBe(404);
+    expect((await jsonBody(res, ErrorDocumentBody)).errors[0]?.status).toBe("404");
     // The other user's session is untouched.
-    expect((await handler(getRequest("/session", asCookie(otherSid)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(otherSid)))).status).toBe(200);
   });
 
   it("revokes all other sessions but keeps the current one", async () => {
@@ -1300,12 +1389,12 @@ describe("session management endpoints", () => {
     const sid2 = await signIn(handler, "a@b.com");
     const sid3 = await signIn(handler, "a@b.com");
 
-    const res = await handler(jsonRequest("/sessions/revoke-others", undefined, asCookie(sid1)));
+    const res = await handler(deleteRequest("/sessions?filter[current]=false", asCookie(sid1)));
     expect(res.status).toBe(204);
 
-    expect((await handler(getRequest("/session", asCookie(sid1)))).status).toBe(200);
-    expect((await handler(getRequest("/session", asCookie(sid2)))).status).toBe(401);
-    expect((await handler(getRequest("/session", asCookie(sid3)))).status).toBe(401);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid1)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(401);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid3)))).status).toBe(401);
   });
 });
 
@@ -1316,12 +1405,12 @@ describe("identifier endpoints", () => {
 
     const res = await handler(getRequest("/identifiers", asCookie(sid)));
     expect(res.status).toBe(200);
-    const list = await jsonBody(
+    const list = await collectionBody(
       res,
       Schema.Array(
         Schema.Struct({
           id: Schema.String,
-          type: Schema.String,
+          kind: Schema.String,
           value: Schema.String,
           verified: Schema.Boolean,
           createdAt: Schema.Number,
@@ -1329,7 +1418,7 @@ describe("identifier endpoints", () => {
       ),
     );
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ type: "email", value: "a@b.com", verified: false });
+    expect(list[0]).toMatchObject({ kind: "email", value: "a@b.com", verified: false });
   });
 
   it("requires authentication to list identifiers", async () => {
@@ -1349,33 +1438,33 @@ describe("identifier endpoints", () => {
     const otherSid = await signUp(handler, "other@b.com");
 
     const listRes = await handler(getRequest("/identifiers", asCookie(sid)));
-    const list = await jsonBody(
+    const list = await collectionBody(
       listRes,
-      Schema.Array(Schema.Struct({ id: Schema.String, type: Schema.String })),
+      Schema.Array(Schema.Struct({ id: Schema.String, kind: Schema.String })),
     );
     expect(list).toHaveLength(2);
-    const username = list.find((identifier) => identifier.type === "username");
-    const email = list.find((identifier) => identifier.type === "email");
+    const username = list.find((identifier) => identifier.kind === "username");
+    const email = list.find((identifier) => identifier.kind === "email");
     assert(username !== undefined && email !== undefined, "both identifiers are listed");
 
     // Another user cannot delete an identifier they do not own.
     const foreign = await handler(deleteRequest(`/identifiers/${username.id}`, asCookie(otherSid)));
-    expect(foreign.status).toBe(400);
+    expect(foreign.status).toBe(404);
 
-    // Unknown ids get the same 400 (anti-enumeration).
+    // Unknown ids get the same 404 (anti-enumeration).
     const unknown = await handler(deleteRequest("/identifiers/nope", asCookie(sid)));
-    expect(unknown.status).toBe(400);
+    expect(unknown.status).toBe(404);
 
     // The owner deletes their username identifier.
     const deleted = await handler(deleteRequest(`/identifiers/${username.id}`, asCookie(sid)));
     expect(deleted.status).toBe(204);
     const after = await handler(getRequest("/identifiers", asCookie(sid)));
-    const remaining = await jsonBody(after, IdListBody);
+    const remaining = await collectionBody(after, IdListBody);
     expect(remaining.map((identifier) => identifier.id)).toEqual([email.id]);
 
     // The account's only remaining identifier cannot be deleted.
     const last = await handler(deleteRequest(`/identifiers/${email.id}`, asCookie(sid)));
-    expect(last.status).toBe(400);
+    expect(last.status).toBe(403);
   });
 
   it("requires authentication to delete an identifier", async () => {
@@ -1401,8 +1490,8 @@ describe("change-password and update-user", () => {
     expect(res.status).toBe(204);
 
     // The other session was revoked; the current one survives.
-    expect((await handler(getRequest("/session", asCookie(sid2)))).status).toBe(401);
-    expect((await handler(getRequest("/session", asCookie(sid1)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(401);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid1)))).status).toBe(200);
 
     // The old password no longer works; the new one does.
     expect(
@@ -1422,7 +1511,7 @@ describe("change-password and update-user", () => {
       jsonRequest("/change-password", { currentPassword: PW, newPassword: PW2 }, asCookie(sid1)),
     );
     expect(res.status).toBe(204);
-    expect((await handler(getRequest("/session", asCookie(sid2)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(200);
   });
 
   it("rejects a wrong current password with 400", async () => {
@@ -1443,15 +1532,19 @@ describe("change-password and update-user", () => {
     ).toBe(200);
   });
 
-  it("updates the user's profile via PATCH /user", async () => {
+  it("updates the user's profile via PATCH /users/me", async () => {
     const handler = handlerFor();
     const sid = await signUp(handler, "a@b.com");
 
     const res = await handler(
-      jsonRequest("/user", { name: "Ada Lovelace" }, asCookie(sid), "PATCH"),
+      jsonApiRequest(
+        "/users/me",
+        { data: { type: "users", id: "me", attributes: { name: "Ada Lovelace" } } },
+        asCookie(sid),
+      ),
     );
     expect(res.status).toBe(200);
-    const body = await jsonBody(
+    const body = await resourceBody(
       res,
       Schema.Struct({ name: Schema.optional(Schema.String), email: Schema.String }),
     );
@@ -1459,18 +1552,56 @@ describe("change-password and update-user", () => {
     expect(body.email).toBe("a@b.com");
 
     // The update is visible on subsequent session reads.
-    const session = await handler(getRequest("/session", asCookie(sid)));
-    const sessionBody = await jsonBody(
+    const session = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
+    const read = await sessionBody(
       session,
       Schema.Struct({ user: Schema.Struct({ name: Schema.optional(Schema.String) }) }),
     );
-    expect(sessionBody.user.name).toBe("Ada Lovelace");
+    expect(read.user.name).toBe("Ada Lovelace");
   });
 
-  it("requires authentication for PATCH /user", async () => {
+  it("requires authentication for PATCH /users/me", async () => {
     const handler = handlerFor();
-    const res = await handler(jsonRequest("/user", { name: "x" }, {}, "PATCH"));
+    const res = await handler(
+      jsonApiRequest("/users/me", { data: { type: "users", id: "me", attributes: { name: "x" } } }),
+    );
     expect(res.status).toBe(401);
+  });
+
+  it("answers 404 for another user's profile", async () => {
+    const handler = handlerFor();
+    const sid = await signUp(handler, "a@b.com");
+    const otherUp = await handler(jsonRequest("/sign-up", { email: "o@b.com", password: PW }));
+    const otherId = (await jsonBody(otherUp, UserIdBody)).user.id;
+
+    const res = await handler(
+      jsonApiRequest(
+        `/users/${otherId}`,
+        { data: { type: "users", id: otherId, attributes: { name: "x" } } },
+        asCookie(sid),
+      ),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses a write to the attributes bag (#193)", async () => {
+    const handler = handlerFor();
+    const sid = await signUp(handler, "a@b.com");
+
+    const res = await handler(
+      jsonApiRequest(
+        "/users/me",
+        { data: { type: "users", id: "me", attributes: { attributes: { role: "admin" } } } },
+        asCookie(sid),
+      ),
+    );
+    expect(res.status).toBe(400);
+    const session = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
+    const read = await sessionBody(
+      session,
+      Schema.Struct({ user: Schema.Struct({ attributes: JsonFields }) }),
+    );
+    expect(read.user.attributes["role"]).toBeUndefined();
   });
 });
 
@@ -1597,7 +1728,7 @@ describe("CSRF protection (trusted origins)", () => {
 
   it("does not block safe methods on origin mismatch", async () => {
     const handler = handlerFor(makeFixture(), { trustedOrigins: [] });
-    const res = await handler(getRequest("/session", { origin: "https://evil.example" }));
+    const res = await handler(getRequest(CURRENT_SESSION, { origin: "https://evil.example" }));
     // Passes CSRF (GET) and reaches the handler, which answers 401.
     expect(res.status).toBe(401);
   });
@@ -1757,7 +1888,7 @@ describe("magic link", () => {
     expect(body.needsEmailVerification).toBe(false);
 
     const sid = sessionIdFromSetCookie(verify.headers.get("set-cookie"));
-    expect((await handler(getRequest("/session", asCookie(sid)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid)))).status).toBe(200);
 
     // Tokens are single use.
     const replay = await handler(jsonRequest("/magic-link/verify", { token }));
@@ -1792,7 +1923,7 @@ describe("email OTP", () => {
     expect(body.user.emailVerified).toBe(true);
 
     const sid = sessionIdFromSetCookie(res.headers.get("set-cookie"));
-    expect((await handler(getRequest("/session", asCookie(sid)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid)))).status).toBe(200);
   });
 
   it("rejects wrong OTP attempts with 400", async () => {
@@ -1905,7 +2036,7 @@ describe("multi-factor", () => {
     const verifiedBody = await jsonBody(verified, UserEmailBody);
     expect(verifiedBody.user.email).toBe("2fa@example.com");
     const newSid = sessionIdFromSetCookie(verified.headers.get("set-cookie"));
-    expect((await handler(getRequest("/session", asCookie(newSid)))).status).toBe(200);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(newSid)))).status).toBe(200);
 
     // The pending token was consumed (one-time use).
     const replay = await handler(
@@ -2127,20 +2258,20 @@ describe("HTTP phone OTP", () => {
     expect(signIn.status).toBe(200);
     const sid = sessionIdFromSetCookie(signIn.headers.get("set-cookie"));
 
-    const sess = await handler(getRequest("/session", asCookie(sid)));
+    const sess = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(sess.status).toBe(200);
 
     // The phone number was claimed as a verified `phone` identifier.
     const identifiers = await handler(getRequest("/identifiers", asCookie(sid)));
     expect(identifiers.status).toBe(200);
-    const list = await jsonBody(
+    const list = await collectionBody(
       identifiers,
       Schema.Array(
-        Schema.Struct({ type: Schema.String, value: Schema.String, verified: Schema.Boolean }),
+        Schema.Struct({ kind: Schema.String, value: Schema.String, verified: Schema.Boolean }),
       ),
     );
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ type: "phone", value: "+15551234567", verified: true });
+    expect(list[0]).toMatchObject({ kind: "phone", value: "+15551234567", verified: true });
   });
 
   it("rejects a wrong OTP with 400", async () => {
@@ -2380,9 +2511,9 @@ describe("HTTP anonymous sign-in", () => {
     expect(res.status).toBe(200);
     const sid = sessionIdFromSetCookie(res.headers.get("set-cookie"));
 
-    const sess = await handler(getRequest("/session", asCookie(sid)));
+    const sess = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(sess.status).toBe(200);
-    const body = await jsonBody(
+    const body = await sessionBody(
       sess,
       Schema.Struct({
         user: Schema.Struct({
@@ -2424,9 +2555,9 @@ describe("HTTP account management (change email / delete user)", () => {
 
     // Email change revoked the old session; sign in with the new address.
     const newSid = await signIn(handler, "alice2@example.com");
-    const sess = await handler(getRequest("/session", asCookie(newSid)));
+    const sess = await handler(getRequest(CURRENT_SESSION, asCookie(newSid)));
     expect(sess.status).toBe(200);
-    const body = await jsonBody(sess, UserEmailVerifiedBody);
+    const body = await sessionBody(sess, UserEmailVerifiedBody);
     expect(body.user.email).toBe("alice2@example.com");
     expect(body.user.emailVerified).toBe(true);
   });
@@ -2473,7 +2604,7 @@ describe("HTTP account management (change email / delete user)", () => {
     expect(fixture.beforeDeleteCalls).toHaveLength(1);
 
     // Sessions were invalidated and the user is gone.
-    const sess = await handler(getRequest("/session", asCookie(sid)));
+    const sess = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(sess.status).toBe(401);
   });
 
@@ -2504,9 +2635,9 @@ describe("HTTP session cookie cache", () => {
     // First /session: cache miss -> store read + issues the data cookie. The
     // store-served response carries the derived email fields.
     const before = fixture.sessionStoreReads();
-    const first = await handler(getRequest("/session", asCookie(sid)));
+    const first = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(first.status).toBe(200);
-    const firstBody = await jsonBody(first, UserIdEmailBody);
+    const firstBody = await sessionBody(first, UserIdEmailBody);
     expect(firstBody.user.email).toBe("cache@example.com");
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
     assert(data !== null, "the store-served response issues the data cookie");
@@ -2516,9 +2647,9 @@ describe("HTTP session cookie cache", () => {
     // Second /session with the data cookie: cache hit -> no store read. The
     // cache-served response skips the identifier lookup, so the derived
     // email fields are omitted.
-    const second = await handler(getRequest("/session", bothCookies(sid, data)));
+    const second = await handler(getRequest(CURRENT_SESSION, bothCookies(sid, data)));
     expect(second.status).toBe(200);
-    const body = await jsonBody(second, UserIdEmailBody);
+    const body = await sessionBody(second, UserIdEmailBody);
     expect(body.user.id).toBe(firstBody.user.id);
     expect(body.user.email).toBeUndefined();
     expect(fixture.sessionStoreReads()).toBe(afterFirst);
@@ -2528,13 +2659,13 @@ describe("HTTP session cookie cache", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { cache: { secret: SECRET } });
     const sid = await signUp(handler, "tamper@example.com");
-    const first = await handler(getRequest("/session", asCookie(sid)));
+    const first = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
     assert(data !== null, "the first /session issues the data cookie");
 
     const before = fixture.sessionStoreReads();
     const tampered = data.slice(0, -1) + (data.endsWith("A") ? "B" : "A");
-    const res = await handler(getRequest("/session", bothCookies(sid, tampered)));
+    const res = await handler(getRequest(CURRENT_SESSION, bothCookies(sid, tampered)));
     expect(res.status).toBe(200);
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });
@@ -2544,12 +2675,12 @@ describe("HTTP session cookie cache", () => {
     // maxAge 0 -> the cache cookie is already expired on the next request.
     const handler = handlerFor(fixture, { cache: { secret: SECRET, maxAge: 0 } });
     const sid = await signUp(handler, "expire@example.com");
-    const first = await handler(getRequest("/session", asCookie(sid)));
+    const first = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
     assert(data !== null, "the first /session issues the data cookie");
 
     const before = fixture.sessionStoreReads();
-    const res = await handler(getRequest("/session", bothCookies(sid, data)));
+    const res = await handler(getRequest(CURRENT_SESSION, bothCookies(sid, data)));
     expect(res.status).toBe(200);
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });
@@ -2565,9 +2696,9 @@ describe("HTTP session cookie cache", () => {
     const handler = handlerFor(fixture, { cache: { secret: SECRET } });
     const sid = await signUp(handler, "admin@example.com");
 
-    const first = await handler(getRequest("/session", asCookie(sid)));
+    const first = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(first.status).toBe(200);
-    const body = await jsonBody(
+    const body = await sessionBody(
       first,
       Schema.Struct({
         user: Schema.Struct({ attributes: Schema.Record(Schema.String, Schema.Unknown) }),
@@ -2577,7 +2708,7 @@ describe("HTTP session cookie cache", () => {
     expect(dataCookieFromSetCookie(first.headers.get("set-cookie"))).toBeNull();
 
     const before = fixture.sessionStoreReads();
-    await handler(getRequest("/session", asCookie(sid)));
+    await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });
 
@@ -2585,13 +2716,13 @@ describe("HTTP session cookie cache", () => {
     const fixture = makeFixture();
     const v1 = handlerFor(fixture, { cache: { secret: SECRET, version: "v1" } });
     const sid = await signUp(v1, "epoch@example.com");
-    const first = await v1(getRequest("/session", asCookie(sid)));
+    const first = await v1(getRequest(CURRENT_SESSION, asCookie(sid)));
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
     assert(data !== null, "the first /session issues the data cookie");
 
     const v2 = handlerFor(fixture, { cache: { secret: SECRET, version: "v2" } });
     const before = fixture.sessionStoreReads();
-    const res = await v2(getRequest("/session", bothCookies(sid, data)));
+    const res = await v2(getRequest(CURRENT_SESSION, bothCookies(sid, data)));
     expect(res.status).toBe(200);
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });
@@ -2600,9 +2731,9 @@ describe("HTTP session cookie cache", () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { cache: { secret: SECRET } });
     const sid = await signUp(handler, "out@example.com");
-    await handler(getRequest("/session", asCookie(sid))); // seed the data cookie
+    await handler(getRequest(CURRENT_SESSION, asCookie(sid))); // seed the data cookie
 
-    const out = await handler(jsonRequest("/sign-out", undefined, asCookie(sid)));
+    const out = await handler(deleteRequest("/sessions/current", asCookie(sid)));
     expect(out.status).toBe(204);
     const setCookie = out.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain("conduit_session=");
@@ -2677,10 +2808,10 @@ describe("HTTP multi-session", () => {
     expect(newMulti.split(".").filter(Boolean)).toEqual([sidA]);
     // B's session is now invalid, A still works.
     expect(
-      (await handler(getRequest("/session", { cookie: `conduit_session=${sidB}` }))).status,
+      (await handler(getRequest(CURRENT_SESSION, { cookie: `conduit_session=${sidB}` }))).status,
     ).toBe(401);
     expect(
-      (await handler(getRequest("/session", { cookie: `conduit_session=${sidA}` }))).status,
+      (await handler(getRequest(CURRENT_SESSION, { cookie: `conduit_session=${sidA}` }))).status,
     ).toBe(200);
   });
 
@@ -2848,10 +2979,10 @@ describe("bearer mode", () => {
     assert(rawToken !== null, "opt-in sign-in sets the bearer token header");
 
     const sessionRes = await handler(
-      getRequest("/session", { authorization: `Bearer ${rawToken}` }),
+      getRequest(CURRENT_SESSION, { authorization: `Bearer ${rawToken}` }),
     );
     expect(sessionRes.status).toBe(200);
-    const body = await jsonBody(sessionRes, UserEmailBody);
+    const body = await sessionBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("bearer@test.com");
   });
 
@@ -2879,10 +3010,10 @@ describe("bearer mode", () => {
 
     // Token from sign-up is usable as a bearer token
     const sessionRes = await handler(
-      getRequest("/session", { authorization: `Bearer ${signUpToken}` }),
+      getRequest(CURRENT_SESSION, { authorization: `Bearer ${signUpToken}` }),
     );
     expect(sessionRes.status).toBe(200);
-    const body = await jsonBody(sessionRes, UserEmailBody);
+    const body = await sessionBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("always@test.com");
   });
 
@@ -2925,10 +3056,10 @@ describe("bearer mode", () => {
 
     // Use the bearer token to fetch session
     const sessionRes = await handler(
-      getRequest("/session", { authorization: `Bearer ${bearerToken}` }),
+      getRequest(CURRENT_SESSION, { authorization: `Bearer ${bearerToken}` }),
     );
     expect(sessionRes.status).toBe(200);
-    const body = await jsonBody(sessionRes, UserEmailBody);
+    const body = await sessionBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("ml@test.com");
   });
 });
@@ -3056,7 +3187,7 @@ describe("client IP at the HTTP boundary", () => {
     expect([...keys]).toEqual([]);
 
     // An endpoint with no rule is not limited, so it needs no address.
-    const session = await handler(getRequest("/session"));
+    const session = await handler(getRequest(CURRENT_SESSION));
     expect(session.status).not.toBe(429);
   });
 
@@ -3091,8 +3222,7 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>): Handler => {
     Layer.provideMerge(FileSystem.layerNoop({})),
   );
   const api = HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(HttpServer.authGroupLayer({ secure: false })),
-    Layer.provide(HttpServer.scimGroupLayer()),
+    Layer.provide(HttpServer.groupLayers({ secure: false })),
     Layer.provide(platform),
   );
   // SAFETY: the handlers' phantom requirements are satisfied by `services` at

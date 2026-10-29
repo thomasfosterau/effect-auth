@@ -44,6 +44,16 @@ const makeClient = () => {
     attributes: {},
   };
   let signedIn = false;
+  // The JSON:API resources the server answers with (#205).
+  const { id: userId, ...userAttributes } = user;
+  const { id: sessionId, userId: _owner, ...sessionAttributes } = session;
+  const userResource = () => ({ type: "users", id: userId, attributes: userAttributes });
+  const sessionResource = () => ({
+    type: "sessions",
+    id: sessionId,
+    attributes: sessionAttributes,
+    relationships: { user: { data: { type: "users", id: userId } } },
+  });
 
   return createAuthClient({
     baseUrl: "http://svelte.test",
@@ -53,15 +63,17 @@ const makeClient = () => {
         case "POST /sign-up":
           signedIn = true;
           return Promise.resolve(json({ user, needsEmailVerification: false }));
-        case "POST /sign-out":
+        case "DELETE /sessions/current":
           signedIn = false;
           return Promise.resolve(new Response(null, { status: 204 }));
-        case "GET /session":
+        case "GET /sessions/current":
           return Promise.resolve(
-            signedIn ? json({ session, user }) : new Response(null, { status: 401 }),
+            signedIn
+              ? json({ data: sessionResource(), included: [userResource()] })
+              : new Response(null, { status: 401 }),
           );
         case "GET /sessions":
-          return Promise.resolve(json(signedIn ? [session] : []));
+          return Promise.resolve(json({ data: signedIn ? [sessionResource()] : [] }));
         default:
           return Promise.resolve(new Response(null, { status: 404 }));
       }

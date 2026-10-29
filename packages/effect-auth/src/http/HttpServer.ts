@@ -20,13 +20,24 @@ import {
   String as Str,
 } from "effect";
 import { resolveMessage } from "../Messages.ts";
+import type { AuthError, UserNotFoundError } from "../Errors.ts";
 import { HttpApiBuilder } from "effect/http-api";
-import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import {
+  Etag,
+  HttpEffect,
+  HttpPlatform,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
+import { Handlers, Middleware as JsonApiMiddleware } from "@thomasfosterau/effect-jsonapi";
 import { AuthApi, getOpenApiSpec } from "./HttpApi.ts";
 import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import * as S from "./HttpApiSchema.ts";
+import * as JsonApiErrors from "./JsonApiErrors.ts";
+import * as R from "./Resources.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
 import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
@@ -728,6 +739,18 @@ const internalServerError = (
   );
 
 /**
+ * Answer a lookup of the signed-in caller's own account: a user that has gone
+ * since the session was resolved is `401`, a store failure a generic `500`.
+ */
+const asCaller = <A, R>(
+  self: Effect.Effect<A, UserNotFoundError | AuthError, R>,
+): Effect.Effect<A, S.Unauthorized | S.InternalServerError, R> =>
+  Effect.catchTags(self, {
+    UserNotFoundError: () => Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
  * Per-user-code rate limit for device-authorization approve/deny endpoints
  * (RFC 8628 §5.2), through the `RateLimiter` in scope. `make` refuses to build
  * a handler whose `services` hold the device service and no `RateLimiter`
@@ -1048,6 +1071,327 @@ const runSynchronously = <A, E>(effect: Effect.Effect<A, E>): SynchronousRun<A, 
   };
 };
 
+// -----------------------------------------------------------------------------
+// JSON:API resource groups (#205)
+// -----------------------------------------------------------------------------
+
+/**
+ * Set a cookie on the response a JSON:API handler is about to send, so the
+ * handler can still answer with its typed document.
+ */
+const setResponseCookie = (
+  name: string,
+  value: string,
+  options: Parameters<typeof HttpServerResponse.setCookie>[3],
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    HttpServerResponse.setCookie(response, name, value, options).pipe(Effect.orDie),
+  );
+
+/** The `users` resource of a user, its `email` fields derived from `identifiers`. */
+const userResource = (user: Types.User, identifiers?: ReadonlyArray<Identifier>): R.User => {
+  const view = S.encodeUser(user, identifiers);
+  return R.User.make({
+    id: user.id,
+    attributes: {
+      ...(user.name !== undefined && { name: user.name }),
+      ...(user.image !== undefined && { image: user.image }),
+      ...(view.email !== undefined && { email: view.email }),
+      ...(view.emailVerified !== undefined && { emailVerified: view.emailVerified }),
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      attributes: user.attributes,
+    },
+  });
+};
+
+/**
+ * {@link userResource} with the user's identifiers read from the store. As in
+ * {@link encodeUserView}, a failed lookup only leaves the `email` fields out.
+ */
+const loadUserResource = (user: Types.User): Effect.Effect<R.User, never, IdentifierStore> =>
+  Effect.map(userIdentifiers(user), (list) => userResource(user, list));
+
+/**
+ * A user's identifiers, for the derived `email` fields of a user on the wire.
+ * Fail-soft: a failed lookup logs a warning and reads as no identifiers.
+ */
+const userIdentifiers = (
+  user: Types.User,
+): Effect.Effect<ReadonlyArray<Identifier>, never, IdentifierStore> =>
+  Effect.gen(function* () {
+    const identifiers = yield* IdentifierStore;
+    return yield* identifiers
+      .listByUser(user.id)
+      .pipe(
+        Effect.catchTag("AuthError", (error) =>
+          Effect.logWarning("Failed to resolve identifiers for user view", { error }).pipe(
+            Effect.as<ReadonlyArray<Identifier>>([]),
+          ),
+        ),
+      );
+  });
+
+/** The `sessions` resource of a stored session. */
+const sessionResource = (session: Types.Session): R.Session =>
+  R.Session.make({
+    id: session.id,
+    attributes: {
+      expiresAt: session.expiresAt,
+      createdAt: session.createdAt,
+      lastActivityAt: session.lastActivityAt,
+      attributes: session.attributes,
+    },
+    relationships: { user: { data: R.User.ref(session.userId) } },
+  });
+
+/** The `identifiers` resource of a stored identifier. */
+const identifierResource = (identifier: Identifier): R.Identifier =>
+  R.Identifier.make({
+    id: identifier.id,
+    attributes: {
+      kind: identifier.type,
+      value: identifier.value,
+      verified: identifier.verified,
+      ...(identifier.verifiedAt !== undefined && { verifiedAt: identifier.verifiedAt }),
+      createdAt: identifier.createdAt,
+    },
+    relationships: { user: { data: R.User.ref(identifier.userId) } },
+  });
+
+/** The id that names the session the request carries. */
+const CURRENT = "current";
+
+/** The id that names the signed-in user. */
+const ME = "me";
+
+/**
+ * Clear the session cookies the way signing out always has: the session
+ * cookie, the session-data cache cookie, and (multi-session) the signed-out
+ * session's entry in the device list, keeping the other accounts.
+ */
+const clearSessionCookies = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+  signedOut: string | undefined,
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  Effect.gen(function* () {
+    yield* setResponseCookie(cfg.name, "", clearCookieOptions(cfg));
+    if (cfg.cache !== undefined) {
+      yield* setResponseCookie(dataCookieName(cfg), "", clearCookieOptions(cfg));
+    }
+    if (cfg.multiSession !== undefined) {
+      const remaining = readDeviceSessionIds(request, cfg).filter((id) => id !== signedOut);
+      yield* setResponseCookie(
+        multiCookieName(cfg),
+        remaining.join("."),
+        sessionCookieOptions(
+          cfg,
+          DateTime.toDateUtc(DateTime.add(yield* DateTime.now, { days: 30 })),
+        ),
+      );
+    }
+  });
+
+/**
+ * Layer implementing the `sessions` group: list, read and revoke the
+ * signed-in user's sessions (see `sessionsGroup` in `HttpApi.ts`).
+ */
+export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "sessions", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionService;
+          const sessions = yield* sessionManager
+            .listSessions(resolved.user.id)
+            .pipe(Effect.catch(internalServerError));
+          return Handlers.collection(sessions.map(sessionResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("get", ({ params, query, request }) =>
+        Effect.gen(function* () {
+          const { resolved, cacheHit } = yield* resolveSession(request, cfg);
+          const withUser = query.include?.includes("user") === true;
+          if (params.id !== CURRENT && params.id !== resolved.session.id) {
+            const sessionManager = yield* SessionService;
+            const sessions = yield* sessionManager
+              .listSessions(resolved.user.id)
+              .pipe(Effect.catch(internalServerError));
+            const session = sessions.find((candidate) => candidate.id === params.id);
+            if (session === undefined) {
+              return yield* new S.NotFound({ message: "Session not found" });
+            }
+            return Handlers.data(sessionResource(session), {
+              included: withUser ? [yield* loadUserResource(resolved.user)] : undefined,
+            });
+          }
+          // On a store validation (cache miss) refresh the signed cache cookie
+          // so subsequent reads within `maxAge` skip the store.
+          if (cfg.cache !== undefined && !cacheHit) {
+            const value = encodeSessionCacheCookie(
+              resolved,
+              cfg.cache,
+              yield* Clock.currentTimeMillis,
+              resolved.session.id,
+              yield* sessionCacheGateAttributes,
+            );
+            // A user holding a server-only attribute is never snapshotted.
+            if (value !== undefined) {
+              yield* setResponseCookie(
+                dataCookieName(cfg),
+                value,
+                dataCookieOptions(cfg, cfg.cache),
+              );
+            }
+          }
+          // A cache-served answer deliberately skips the store round-trip, so
+          // the derived email fields are omitted there.
+          const user = cacheHit
+            ? userResource(resolved.user)
+            : yield* loadUserResource(resolved.user);
+          return Handlers.data(sessionResource(resolved.session), {
+            included: withUser ? [user] : undefined,
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const sessionManager = yield* SessionService;
+          const presented = sessionIdFromRequest(request, cfg);
+          const signsOut =
+            params.id === CURRENT ||
+            (presented !== undefined && hashToken(presented) === params.id);
+          if (signsOut) {
+            // Signing out answers 204 whether or not the session was still
+            // valid: the cookies are cleared either way.
+            if (presented !== undefined) {
+              yield* Effect.ignore(sessionManager.invalidateSession(presented));
+            }
+            return yield* clearSessionCookies(request, cfg, presented);
+          }
+          const resolved = yield* requireSession(request, cfg);
+          const revoked = yield* sessionManager
+            .revokeSessionById(resolved.user.id, params.id)
+            .pipe(Effect.catch(internalServerError));
+          // A foreign or unknown id gets the same answer (anti-enumeration).
+          if (!revoked) return yield* new S.NotFound({ message: "Session not found" });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("deleteOthers", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionService;
+          yield* sessionManager
+            .revokeOtherSessions(resolved.user.id, resolved.session.id)
+            .pipe(Effect.catch(internalServerError));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `identifiers` group: list and remove the signed-in
+ * user's login handles (see `identifiersGroup` in `HttpApi.ts`).
+ */
+export const identifiersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "identifiers", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const identifiers = yield* IdentifierStore;
+          const list = yield* identifiers
+            .listByUser(resolved.user.id)
+            .pipe(Effect.catch(internalServerError));
+          return Handlers.collection(list.map(identifierResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const identifiers = yield* IdentifierStore;
+          const list = yield* identifiers
+            .listByUser(resolved.user.id)
+            .pipe(Effect.catch(internalServerError));
+          // Only the owner may delete an identifier, and only their own: a
+          // foreign or unknown id gets the same answer (anti-enumeration).
+          const target = list.find((identifier) => identifier.id === params.id);
+          if (target === undefined) {
+            return yield* new S.NotFound({ message: "Identifier not found" });
+          }
+          // Refuse to orphan the account: the last identifier is the user's
+          // only login handle.
+          if (list.length === 1) {
+            return yield* new S.Forbidden({
+              message: "Cannot delete the only identifier on an account",
+            });
+          }
+          yield* identifiers.delete(target.id).pipe(Effect.catch(internalServerError));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `users` group: the signed-in user's own profile
+ * (see `usersGroup` in `HttpApi.ts`).
+ */
+export const usersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "users", (handlers) =>
+    handlers.handle("update", ({ params, payload, request }) =>
+      Effect.gen(function* () {
+        const resolved = yield* requireSession(request, cfg);
+        // `me` or the caller's own id; any other user is not the caller's to
+        // edit, and gets the answer an unknown id would.
+        if (params.id !== ME && params.id !== resolved.user.id) {
+          return yield* new S.NotFound({ message: "User not found" });
+        }
+        const attributes = payload.data.attributes ?? {};
+        const userService = yield* UserService;
+        const updated = yield* userService
+          .updateUser(resolved.user.id, {
+            ...(attributes.name !== undefined && { name: attributes.name }),
+            ...(attributes.image !== undefined && { image: attributes.image }),
+          })
+          .pipe(asCaller);
+        return Handlers.data(yield* loadUserResource(updated));
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
+/**
+ * Every group of the {@link AuthApi} contract, with the JSON:API protocol
+ * middleware its resource groups declare: what `HttpApiBuilder.layer(AuthApi)`
+ * needs to build. `make` and `makeAsync` use it; compose it yourself to serve
+ * the contract from your own `HttpApiBuilder` (the SCIM group is always
+ * mounted and answers `404` until `ScimService` is provided).
+ *
+ * @since 0.2.0
+ * @category layers
+ */
+export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionConfig) =>
+  Layer.mergeAll(
+    authGroupLayer(config, multiSession),
+    sessionsGroupLayer(config, multiSession),
+    identifiersGroupLayer(config, multiSession),
+    usersGroupLayer(config, multiSession),
+    scimGroupLayer(),
+  ).pipe(
+    // The protocol middleware the JSON:API endpoints declare: content
+    // negotiation, schema errors as error documents, and the create's
+    // `Location` header.
+    Layer.provideMerge(JsonApiMiddleware.layer),
+  );
+
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
   const cfg = resolveCookieConfig(config, multiSession);
@@ -1178,81 +1522,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             "email-password",
             result.rememberMe,
           );
-        }),
-      )
-      .handle("signOut", ({ request }) =>
-        Effect.gen(function* () {
-          const sessionId = sessionIdFromRequest(request, cfg);
-          if (sessionId !== undefined) {
-            const sessionManager = yield* SessionService;
-            yield* Effect.ignore(sessionManager.invalidateSession(sessionId));
-          }
-          let response = yield* HttpServerResponse.setCookie(
-            HttpServerResponse.empty({ status: 204 }),
-            cfg.name,
-            "",
-            clearCookieOptions(cfg),
-          );
-          // Also clear the session-data cache cookie (if in use).
-          if (cfg.cache !== undefined) {
-            response = yield* HttpServerResponse.setCookie(
-              response,
-              dataCookieName(cfg),
-              "",
-              clearCookieOptions(cfg),
-            );
-          }
-          // Multi-session: sign out only the active account; drop it from the
-          // device list and keep the others (switch via /multi-session/set-active).
-          if (cfg.multiSession !== undefined) {
-            const remaining = readDeviceSessionIds(request, cfg).filter((id) => id !== sessionId);
-            response = yield* HttpServerResponse.setCookie(
-              response,
-              multiCookieName(cfg),
-              remaining.join("."),
-              sessionCookieOptions(
-                cfg,
-                DateTime.toDateUtc(DateTime.add(yield* DateTime.now, { days: 30 })),
-              ),
-            );
-          }
-          return response;
-        }).pipe(Effect.orDie),
-      )
-      .handle("getSession", ({ request }) =>
-        Effect.gen(function* () {
-          const { resolved, cacheHit } = yield* resolveSession(request, cfg);
-          // A cache-served response deliberately skips the store round-trip,
-          // so the derived email fields are omitted there.
-          const body = cacheHit
-            ? S.encodeSessionWithUser(resolved)
-            : yield* encodeSessionWithUserView(resolved);
-          // On a store validation (cache miss) refresh the signed cache cookie
-          // so subsequent reads within `maxAge` skip the store.
-          if (cfg.cache !== undefined && !cacheHit) {
-            const cache = cfg.cache;
-            const value = encodeSessionCacheCookie(
-              resolved,
-              cache,
-              yield* Clock.currentTimeMillis,
-              resolved.session.id,
-              yield* sessionCacheGateAttributes,
-            );
-            // A user holding a server-only attribute is never snapshotted.
-            if (value === undefined) return body;
-            return yield* HttpServerResponse.json(body).pipe(
-              Effect.flatMap((response) =>
-                HttpServerResponse.setCookie(
-                  response,
-                  dataCookieName(cfg),
-                  value,
-                  dataCookieOptions(cfg, cache),
-                ),
-              ),
-              Effect.orDie,
-            );
-          }
-          return body;
         }),
       )
       .handle("sendVerificationEmail", ({ payload }) =>
@@ -1451,25 +1720,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             );
         }),
       )
-      .handle("updateUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const userService = yield* UserService;
-          const updated = yield* userService
-            .updateUser(resolved.user.id, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.image !== undefined && { image: payload.image }),
-            })
-            .pipe(
-              Effect.catchTags({
-                UserNotFoundError: () =>
-                  Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return yield* encodeUserView(updated);
-        }),
-      )
       .handle("changeEmailRequest", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
@@ -1515,13 +1765,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const account = yield* resolveAccountManagement;
-          yield* account.service.requestAccountDeletion(resolved.user.id).pipe(
-            Effect.catchTags({
-              UserNotFoundError: () =>
-                Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
+          yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
           return { status: true };
         }),
       )
@@ -1548,83 +1792,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             ),
             Effect.orDie,
           );
-        }),
-      )
-      .handle("listSessions", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionService;
-          const sessions = yield* sessionManager
-            .listSessions(resolved.user.id)
-            .pipe(Effect.catch(internalServerError));
-          return sessions.map(S.encodeSession);
-        }),
-      )
-      .handle("revokeSession", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionService;
-
-          const sessions = yield* sessionManager
-            .listSessions(resolved.user.id)
-            .pipe(Effect.catch(internalServerError));
-
-          // Only the owner may revoke a session, and only their own sessions.
-          // params.sessionId is the raw token from the URL; sessions in the list
-          // have hash ids (stored by hash), so compare against the hash.
-          const targetHash = hashToken(params.sessionId);
-          const target = sessions.find((session) => session.id === targetHash);
-          if (target === undefined) {
-            return yield* new S.BadRequest({ message: "Session not found" });
-          }
-
-          yield* sessionManager
-            .invalidateSession(params.sessionId)
-            .pipe(Effect.catch(internalServerError));
-        }),
-      )
-      .handle("revokeOtherSessions", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionService;
-          yield* sessionManager
-            .revokeOtherSessions(resolved.user.id, resolved.session.id)
-            .pipe(Effect.catch(internalServerError));
-        }),
-      )
-      .handle("listIdentifiers", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const identifiers = yield* IdentifierStore;
-          const list = yield* identifiers
-            .listByUser(resolved.user.id)
-            .pipe(Effect.catch(internalServerError));
-          return list.map(S.encodeIdentifier);
-        }),
-      )
-      .handle("deleteIdentifier", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const identifiers = yield* IdentifierStore;
-          const list = yield* identifiers
-            .listByUser(resolved.user.id)
-            .pipe(Effect.catch(internalServerError));
-
-          // Only the owner may delete an identifier, and only their own — a
-          // foreign or unknown id gets the same answer (anti-enumeration).
-          const target = list.find((identifier) => identifier.id === params.identifierId);
-          if (target === undefined) {
-            return yield* new S.BadRequest({ message: "Identifier not found" });
-          }
-          // Refuse to orphan the account: the last identifier is the user's
-          // only login handle.
-          if (list.length === 1) {
-            return yield* new S.BadRequest({
-              message: "Cannot delete the only identifier on an account",
-            });
-          }
-
-          yield* identifiers.delete(target.id).pipe(Effect.catch(internalServerError));
         }),
       )
       .handle("magicLinkSend", ({ payload }) =>
@@ -4081,19 +4248,7 @@ export const scimGroupLayer = () =>
  * (with a warning) rather than failing a flow that already succeeded.
  */
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
-  Effect.gen(function* () {
-    const identifiers = yield* IdentifierStore;
-    const list = yield* identifiers
-      .listByUser(user.id)
-      .pipe(
-        Effect.catchTag("AuthError", (error) =>
-          Effect.logWarning("Failed to resolve identifiers for user view", { error }).pipe(
-            Effect.as<ReadonlyArray<Identifier>>([]),
-          ),
-        ),
-      );
-    return S.encodeUser(user, list);
-  });
+  Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
 /**
  * Encode the user a sign-up answers with, taking `email` from the address the
@@ -4743,10 +4898,7 @@ const serve = (
   release: Effect.Effect<void>,
 ): AuthWebHandler => {
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
-    // The SCIM group is always mounted; its handlers resolve `ScimService`
-    // optionally and answer 404 when provisioning is not configured.
-    Layer.provide(scimGroupLayer()),
+    Layer.provide(groupLayers(options.cookie, options.multiSession)),
     Layer.provide(PlatformLayer),
   );
   // The handlers' service requirements are tracked as phantom

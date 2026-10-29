@@ -57,6 +57,7 @@ const mockSessionService: typeof SessionService.Service = {
   invalidateSession: () => Effect.die("unused"),
   invalidateUserSessions: () => Effect.die("unused"),
   listSessions: () => Effect.die("unused"),
+  revokeSessionById: () => Effect.die("unused"),
   revokeOtherSessions: () => Effect.die("unused"),
   setSessionAttributes: () => Effect.die("unused"),
 };

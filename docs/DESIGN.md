@@ -576,7 +576,7 @@ global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
   (earliest verified) falling back to `anyEmail` (earliest of any state).
   The HTTP `UserView` exposes derived optional `email`/`emailVerified`
   (omitted on cookie-cache-served responses) plus `GET /identifiers` /
-  `DELETE /identifiers/:identifierId`; the wire shape stays compatible for
+  `DELETE /identifiers/:id`; the wire shape stays compatible for
   clients that read `user.email` from store-served responses.
 - **Storage**: `auth_users` drops `email`/`email_verified` and
   `auth_users_email_idx`; `auth_identifiers` (unique `(type, value)`) is the

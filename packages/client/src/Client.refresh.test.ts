@@ -4,6 +4,10 @@ import type * as Http from "@thomasfosterau/effect-auth/http";
 import { createAuthClient } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
+/** Whether a request is the store's session read (`GET /sessions/current`). */
+const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
+  String(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
+
 const EMAIL = "alice@refresh.test";
 const PW = "password-123";
 
@@ -49,8 +53,8 @@ describe("onFocus refresh", () => {
 
     const client = createAuthClient({
       baseUrl: "http://focus.test",
-      fetch: (input) => {
-        if (String(input).endsWith("/session")) sessionFetchCount++;
+      fetch: (input, init?) => {
+        if (isSessionRead(input, init)) sessionFetchCount++;
         return Promise.resolve(new Response(null, { status: 401 }));
       },
       refresh: { onFocus: true },
@@ -74,8 +78,8 @@ describe("onFocus refresh", () => {
 
     const client = createAuthClient({
       baseUrl: "http://visibility.test",
-      fetch: (input) => {
-        if (String(input).endsWith("/session")) sessionFetchCount++;
+      fetch: (input, init?) => {
+        if (isSessionRead(input, init)) sessionFetchCount++;
         return Promise.resolve(new Response(null, { status: 401 }));
       },
       refresh: { onFocus: true },
@@ -102,8 +106,8 @@ describe("onFocus refresh", () => {
 
     const client = createAuthClient({
       baseUrl: "http://focus-stop.test",
-      fetch: (input) => {
-        if (String(input).endsWith("/session")) sessionFetchCount++;
+      fetch: (input, init?) => {
+        if (isSessionRead(input, init)) sessionFetchCount++;
         return Promise.resolve(new Response(null, { status: 401 }));
       },
       refresh: { onFocus: true },
@@ -177,7 +181,7 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     const client = createAuthClient({
       baseUrl: "http://cross.test",
       fetch: (input, init?) => {
-        if (String(input).endsWith("/session")) fetchCount++;
+        if (isSessionRead(input, init)) fetchCount++;
         return base(input, init);
       },
       refresh: { crossTab: "no-echo" },

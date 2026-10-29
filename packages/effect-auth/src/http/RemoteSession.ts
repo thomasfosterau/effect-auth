@@ -66,6 +66,8 @@ import { FetchHttpClient, HttpClient } from "effect/http";
 import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import type * as Types from "../Types.ts";
+import { MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi/schema";
+import { SessionDocument } from "./HttpApi.ts";
 import * as S from "./HttpApiSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -274,7 +276,46 @@ export interface RemoteSessionResult {
 
 const emptyResult: RemoteSessionResult = { session: Option.none(), setCookie: [] };
 
-const decodeView = Schema.decodeUnknownEffect(S.SessionWithUserView);
+const decodeDocument = Schema.decodeUnknownEffect(SessionDocument);
+
+/**
+ * The domain record from the `GET /sessions/current?include=user` document:
+ * the `sessions` primary data and the `users` resource it names in
+ * `included`, or `None` when the document leaves the user out.
+ *
+ * As with {@link fromSessionWithUserView}, the user's derived `email` fields
+ * are not `Types.User` fields and are dropped.
+ *
+ * @since 0.2.0
+ * @category conversions
+ */
+export const fromSessionDocument = (
+  document: typeof SessionDocument.Type,
+): Option.Option<Types.SessionWithUser> => {
+  const session = document.data;
+  const userId = session.relationships?.user.data.id;
+  return Option.map(
+    Arr.findFirst(document.included ?? [], (resource) => resource.id === userId),
+    (user): Types.SessionWithUser => ({
+      session: {
+        id: session.id,
+        userId: user.id,
+        expiresAt: session.attributes.expiresAt,
+        createdAt: session.attributes.createdAt,
+        lastActivityAt: session.attributes.lastActivityAt,
+        attributes: session.attributes.attributes,
+      },
+      user: {
+        id: user.id,
+        ...(user.attributes.name !== undefined && { name: user.attributes.name }),
+        ...(user.attributes.image !== undefined && { image: user.attributes.image }),
+        createdAt: user.attributes.createdAt,
+        updatedAt: user.attributes.updatedAt,
+        attributes: user.attributes.attributes,
+      },
+    }),
+  );
+};
 
 const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
 
@@ -387,25 +428,36 @@ export interface RemoteSessionClient {
  * // Cloudflare): it answers the session read for any request carrying a cookie.
  * const authWorker = async (request: Request): Promise<Response> => {
  *   const { pathname } = new URL(request.url)
- *   if (request.method === "GET" && pathname.endsWith("/session")) {
+ *   if (request.method === "GET" && pathname.endsWith("/sessions/current")) {
  *     if (request.headers.get("cookie") === null) return new Response(null, { status: 401 })
- *     const user = {
- *       id: "u-1",
- *       email: "user@example.com",
- *       emailVerified: true,
- *       createdAt: 1_700_000_000_000,
- *       updatedAt: 1_700_000_000_000,
- *       attributes: {},
+ *     // `GET /sessions/current?include=user`: the session, its user included.
+ *     const document = {
+ *       data: {
+ *         type: "sessions",
+ *         id: "session-1",
+ *         attributes: {
+ *           expiresAt: 4_102_444_800_000,
+ *           createdAt: 1_700_000_000_000,
+ *           lastActivityAt: 1_700_000_000_000,
+ *           attributes: {},
+ *         },
+ *         relationships: { user: { data: { type: "users", id: "u-1" } } },
+ *       },
+ *       included: [
+ *         {
+ *           type: "users",
+ *           id: "u-1",
+ *           attributes: {
+ *             email: "user@example.com",
+ *             emailVerified: true,
+ *             createdAt: 1_700_000_000_000,
+ *             updatedAt: 1_700_000_000_000,
+ *             attributes: {},
+ *           },
+ *         },
+ *       ],
  *     }
- *     const session = {
- *       id: "session-1",
- *       userId: "u-1",
- *       expiresAt: 4_102_444_800_000,
- *       createdAt: 1_700_000_000_000,
- *       lastActivityAt: 1_700_000_000_000,
- *       attributes: {},
- *     }
- *     return Response.json({ session, user })
+ *     return Response.json(document, { headers: { "content-type": "application/vnd.api+json" } })
  *   }
  *   return new Response(null, { status: 404 })
  * }
@@ -436,9 +488,13 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
   const read = (request: Request): Effect.Effect<RemoteSessionResult, RemoteSessionError> =>
     Effect.gen(function* () {
-      const outbound = new Request(url("/session"), {
+      const headers = forwardedHeaders(request, options.headers);
+      // The session read is a JSON:API request whatever the inbound request
+      // accepted (a browser navigation accepts `text/html`).
+      headers.set("accept", MEDIA_TYPE);
+      const outbound = new Request(url("/sessions/current?include=user"), {
         method: "GET",
-        headers: forwardedHeaders(request, options.headers),
+        headers,
       });
 
       const response = yield* promiseOrDie(() => send(outbound));
@@ -457,20 +513,25 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
       const body = yield* Effect.tryPromise({
         // SAFETY: widening `json()`'s `any` to `unknown` only drops trust in the
-        // body; `decodeView` parses it next.
+        // body; `decodeDocument` parses it next.
         try: () => response.json() as Promise<unknown>,
         catch: (cause) =>
           new RemoteSessionError({ message: "Session read body was not JSON", cause }),
       });
 
-      const session = yield* decodeView(body).pipe(
-        Effect.flatMap(fromSessionWithUserView),
+      const document = yield* decodeDocument(body).pipe(
         Effect.mapError(
           (cause) => new RemoteSessionError({ message: "Session read body did not decode", cause }),
         ),
       );
+      const session = fromSessionDocument(document);
+      if (Option.isNone(session)) {
+        return yield* new RemoteSessionError({
+          message: "Session read body did not include the session's user",
+        });
+      }
 
-      return { session: Option.some(session), setCookie };
+      return { session, setCookie };
     }).pipe(Effect.withSpan(spanNames.remoteSessionRead));
 
   const relay = (request: Request, path?: string): Effect.Effect<Response> =>
@@ -619,25 +680,36 @@ export const resolveAtEdge = (
  * // session read for any request carrying a cookie.
  * const authWorker = async (request: Request): Promise<Response> => {
  *   const { pathname } = new URL(request.url)
- *   if (request.method === "GET" && pathname.endsWith("/session")) {
+ *   if (request.method === "GET" && pathname.endsWith("/sessions/current")) {
  *     if (request.headers.get("cookie") === null) return new Response(null, { status: 401 })
- *     const user = {
- *       id: "u-1",
- *       email: "user@example.com",
- *       emailVerified: true,
- *       createdAt: 1_700_000_000_000,
- *       updatedAt: 1_700_000_000_000,
- *       attributes: {},
+ *     // `GET /sessions/current?include=user`: the session, its user included.
+ *     const document = {
+ *       data: {
+ *         type: "sessions",
+ *         id: "session-1",
+ *         attributes: {
+ *           expiresAt: 4_102_444_800_000,
+ *           createdAt: 1_700_000_000_000,
+ *           lastActivityAt: 1_700_000_000_000,
+ *           attributes: {},
+ *         },
+ *         relationships: { user: { data: { type: "users", id: "u-1" } } },
+ *       },
+ *       included: [
+ *         {
+ *           type: "users",
+ *           id: "u-1",
+ *           attributes: {
+ *             email: "user@example.com",
+ *             emailVerified: true,
+ *             createdAt: 1_700_000_000_000,
+ *             updatedAt: 1_700_000_000_000,
+ *             attributes: {},
+ *           },
+ *         },
+ *       ],
  *     }
- *     const session = {
- *       id: "session-1",
- *       userId: "u-1",
- *       expiresAt: 4_102_444_800_000,
- *       createdAt: 1_700_000_000_000,
- *       lastActivityAt: 1_700_000_000_000,
- *       attributes: {},
- *     }
- *     return Response.json({ session, user })
+ *     return Response.json(document, { headers: { "content-type": "application/vnd.api+json" } })
  *   }
  *   return new Response(null, { status: 404 })
  * }
