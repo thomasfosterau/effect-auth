@@ -12,6 +12,13 @@
     // specifier — `.ts` and `.vue` alike — untouched in the emitted types.
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": false,
+    // The build only ever emits declarations (`vue-tsc --emitDeclarationOnly`;
+    // the JavaScript is Vite's), and saying so here makes this config valid on
+    // its own: TypeScript rejects `allowImportingTsExtensions` unless
+    // `noEmit`, `emitDeclarationOnly` or `rewriteRelativeImportExtensions` is
+    // set, and type-aware lint (oxlint-tsgolint) reads this file without the
+    // CLI flags.
+    "emitDeclarationOnly": true,
     // `vp build` empties `dist` before `vue-tsc` runs, so a build-info file from
     // the previous run would report the declarations as up to date and emit
     // nothing into the freshly emptied directory.

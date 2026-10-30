@@ -55,7 +55,8 @@
     "drizzle-orm": "catalog:",
     "drizzle-orm-effect": "catalog:",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@types/pg": "catalog:peers",

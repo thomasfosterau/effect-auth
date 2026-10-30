@@ -10,12 +10,14 @@
 # - `toolchain`: `@effect/tsgo` patches the native `tsc` (`@typescript/native`)
 #   and the oxlint that `vite-plus` pins, and hard-errors at install on any
 #   pairing it has no artifact for; `vite`, `vitest` and `@vitest/*` must equal
-#   what `vite-plus` bundles; the oxlint plugin runs inside that oxlint. Check
+#   what `vite-plus` bundles; `@enfect/oxlint` runs inside that oxlint. Check
 #   the `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
 #   before merging one of these PRs (the catalog comments say why).
 # - `effect`: the Effect 4 release line is a lockstep singleton set (`effect`
 #   plus the `@effect/*` packages pinned to the same release).
-# - one group per framework family, the storage peers and Changesets.
+# - `docgen`: `@effect/docgen` runs every JSDoc example under `tsx`; claimed
+#   before `effect`, whose `@effect/*` pattern would otherwise take it.
+# - one group per framework family, the storage peers, Changesets and fallow.
 # - `minor-and-patch`: everything else's minor and patch updates in one PR, so
 #   PR volume stays low; a major outside a lockstep set stays its own PR.
 #
@@ -27,11 +29,22 @@
 # - `drizzle-orm-effect`: the commit-suffixed drizzle 1.0 prerelease is pinned
 #   to what the applications run; it moves with them, not with npm's `latest`.
 #
-# The transitive advisory floors in pnpm-workspace.yaml's `overrides` are not
-# dependencies Dependabot can bump; they are raised by hand (AGENTS.md).
+# Moved by hand, because Dependabot cannot (AGENTS.md lists them too):
+# - the npm-alias catalog entries: `vite` (`npm:@voidzero-dev/vite-plus-core`,
+#   must equal `vite-plus`; `pnpm exec vp migrate` re-pins it, then drop the
+#   `minimumReleaseAgeExclude` entries it adds), `typescript`
+#   (`npm:@typescript/typescript6`) and `@typescript/native` (`npm:typescript`,
+#   a version `@effect/tsgo`'s components table supports). Put them on the
+#   `toolchain` PR's branch.
+# - `@effect/tsgo` itself when a `vite-plus` bump outruns it: that PR fails at
+#   `pnpm install` until a release whose table covers the new oxlint lands.
+# - the transitive advisory floors in pnpm-workspace.yaml's `overrides`.
+#   (The `vite@*` / `vitest@*` overrides read the catalog, so they follow.)
 #
-# `cooldown` mirrors pnpm 11's default `minimumReleaseAge` (one day), with
-# `@thomasfosterau/*` exempt as `minimumReleaseAgeExclude` exempts it.
+# `cooldown` is 1 day (Dependabot counts whole days only), longer than pnpm's
+# `minimumReleaseAge` of 480 minutes (8 hours), so a Dependabot PR never
+# proposes a version pnpm would still refuse. `@thomasfosterau/*` is exempt
+# from both.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -64,7 +77,12 @@ updates:
           - "@typescript/native"
           - "typescript"
           - "@typescript/typescript6"
-          - "@mpsuesser/oxlint-plugin-effect"
+          - "@enfect/oxlint"
+      docgen:
+        applies-to: version-updates
+        patterns:
+          - "@effect/docgen"
+          - "tsx"
       effect:
         applies-to: version-updates
         patterns:
@@ -72,6 +90,7 @@ updates:
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
+          - "@effect/docgen"
       svelte:
         applies-to: version-updates
         patterns:
@@ -116,6 +135,10 @@ updates:
         applies-to: version-updates
         patterns:
           - "@changesets/*"
+      fallow:
+        applies-to: version-updates
+        patterns:
+          - "fallow"
       minor-and-patch:
         applies-to: version-updates
         patterns:

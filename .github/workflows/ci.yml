@@ -42,26 +42,28 @@ jobs:
           restore-keys: |
             vp-task-v1-${{ runner.os }}-
 
-      - name: Format & lint
-        run: vp check
-
+      # Build first: type-aware lint resolves each workspace import through
+      # the sibling's built `dist/` (vite.config.ts, `lint.options`).
       - name: Build packages
-        run: vp run build
+        run: pnpm exec vp run build
+
+      - name: Format & lint (type-aware)
+        run: pnpm exec vp check
 
       - name: API docs (docgen type-checks and runs every JSDoc example)
-        run: vp run docs
+        run: pnpm exec vp run docs
 
       - name: Dist import smoke (each package's effect peer floor)
-        run: vp run check:dist
+        run: pnpm exec vp run check:dist
 
       - name: Dist import smoke (catalog effect)
-        run: vp run check:dist -- --effect catalog
+        run: pnpm exec vp run check:dist -- --effect catalog
 
       - name: Type check
-        run: vp run check
+        run: pnpm exec vp run check
 
       - name: Unit tests
-        run: vp run -r test:unit
+        run: pnpm exec vp run -r test:unit
 
       - name: Audit
         run: pnpm audit --audit-level high
@@ -106,4 +108,4 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: AuthSchema tests against the alchemy runtime
-        run: vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy
+        run: pnpm exec vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy

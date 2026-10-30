@@ -16,7 +16,7 @@ What the repository does to keep a compromised dependency, action or credential 
 
 ### Dependencies
 
-- **Release-age cooldown.** pnpm 11 refuses to install a version published less than a day ago (its default `minimumReleaseAge`, 1440 minutes; only this project's own `@thomasfosterau/*` packages are exempt, via `minimumReleaseAgeExclude` in [pnpm-workspace.yaml](pnpm-workspace.yaml)). Dependabot's `cooldown` (`default-days: 1`, same exemption, [.github/dependabot.yml](.github/dependabot.yml)) mirrors it, so it never proposes a release pnpm would refuse.
+- **Release-age cooldown.** pnpm refuses to install a version published less than 8 hours ago (`minimumReleaseAge: 480` minutes in [pnpm-workspace.yaml](pnpm-workspace.yaml); only this project's own `@thomasfosterau/*` packages are exempt, via `minimumReleaseAgeExclude`). Dependabot's `cooldown` (`default-days: 1`, same exemption, [.github/dependabot.yml](.github/dependabot.yml)) counts whole days, so it waits longer than pnpm and never proposes a release pnpm would refuse.
 - **Install scripts are allow-listed.** pnpm runs a dependency's lifecycle scripts only when `allowBuilds` names it: `better-sqlite3`, `esbuild`, `fallow` and `msgpackr-extract` are allowed, and `workerd` is explicitly denied. Everything else installs without running code.
 - **One version of everything, from one catalog.** Every external version lives in the catalog in `pnpm-workspace.yaml`, and `catalogMode: strict` rejects any other specifier. `effect` is forced to a single copy (`overrides`). CI installs with `--frozen-lockfile`, so a drifted lockfile fails rather than resolves.
 - **Audit.** CI runs `pnpm audit --audit-level high` on every push and pull request. Advisories in transitive dev-toolchain dependencies are floored with scoped `overrides` (they never reach a published package's dependencies), and Dependabot keeps the catalog and the pinned actions current.
@@ -26,6 +26,7 @@ What the repository does to keep a compromised dependency, action or credential 
 
 - **Actions are pinned to full commit SHAs** (with the version in a comment), in the workflows and in the shared setup action; Dependabot moves the pins.
 - **No default token permissions.** Both workflows declare `permissions: {}`; each job opts into exactly what it needs (`contents: read` for CI).
+- **Dependabot-safe CI.** CI needs no secret and no OIDC, so a Dependabot pull request runs it with a read-only token; the release job never runs for `dependabot[bot]`. Every job sets `timeout-minutes`, installs with `--frozen-lockfile`, and calls the local bins through `pnpm exec` rather than a `GITHUB_PATH` entry. Node is `node-version: "*"` with `check-latest: true`, never `latest` (which resolves to a Node pre-release). `uvx zizmor --offline .github` audits the workflows (config in [.github/zizmor.yml](.github/zizmor.yml)).
 - **No persisted credentials.** CI's checkouts use `persist-credentials: false`. The release job is the one exception: the Changesets action pushes the version branch and tags with the job-scoped `GITHUB_TOKEN`, so its checkout keeps it.
 
 ### Publishing

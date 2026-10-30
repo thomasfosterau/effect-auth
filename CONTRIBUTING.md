@@ -12,7 +12,7 @@ cd effect-auth
 vp install   # or: pnpm install
 ```
 
-Either command installs against the lockfile and runs the root `prepare` script, which installs the Vite+ git hooks and patches the TypeScript 7 `tsc` (and oxlint) with `@effect/tsgo` so the Effect diagnostics run in every type check. The pre-commit hook runs `vp staged`: format and lint on the staged files. There is no pre-push hook.
+Either command installs against the lockfile and runs the root `prepare` script, which installs the Vite+ git hooks and patches the TypeScript 7 `tsc` (and oxlint) with `@effect/tsgo` so the Effect diagnostics run in every type check. The pre-commit hook runs `vp staged`: format (with fixes) and lint (without fixes, so a type-aware autofix never lands unverified) on the staged files. There is no pre-push hook.
 
 You don't need to build anything first: each package's `build`, `check` and `test:unit` tasks build the workspace packages they depend on.
 
@@ -50,7 +50,7 @@ The full gate list is in [AGENTS.md → Verification](AGENTS.md#verification). W
 
 | What                                   | Command                                                            |
 | -------------------------------------- | ------------------------------------------------------------------ |
-| Format and lint everything             | `vp check` (`vp check --fix` to apply fixes)                       |
+| Format and lint everything             | `vp check` (type-aware; build first; `--fix` applies fixes)        |
 | Lint one file                          | `vp lint <file>`                                                   |
 | Format files                           | `vp fmt <files> --write`                                           |
 | One package's unit tests               | `vp run --filter <pkg> test:unit`                                  |

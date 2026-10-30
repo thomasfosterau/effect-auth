@@ -28,7 +28,7 @@
     "@effect/docgen",
     "@effect/language-service",
     "@effect/tsgo",
-    "@mpsuesser/oxlint-plugin-effect",
+    "@enfect/oxlint",
     "@sveltejs/package",
     "@types/node",
     "@typescript/native",

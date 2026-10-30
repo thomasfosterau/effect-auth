@@ -15,7 +15,7 @@ jobs:
     name: Version or publish
     # Never run on forks (they have neither the environment nor the trusted
     # publisher binding, so a fork cannot publish on your behalf).
-    if: github.repository == 'thomasfosterau/effect-auth'
+    if: github.repository == 'thomasfosterau/effect-auth' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Requires manual approval via a protected GitHub Environment named
@@ -59,7 +59,7 @@ jobs:
         run: npm install -g npm@11
 
       - name: Build
-        run: vp run build
+        run: pnpm exec vp run build
 
       # When changesets are pending, this opens/updates a "Version Packages" PR
       # (via `pnpm run version`). Once that PR is merged (no changesets remain),
