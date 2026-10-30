@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-auth": patch
----
-
-`resendCooldown` answers a known and an unknown address alike in the passwordless flows that hide whether an account exists: magic-link, email OTP and phone OTP sign-in with `disableSignUp`, and email OTP `forget-password` (#415). A request for an address with no account stores an undelivered record as its cooldown marker, so a repeat within the window fails with `ResendTooSoonError` (HTTP 429, the same body and headers) exactly as it does for an account holder. The marker is never sent and can't be redeemed: a magic-link marker is a random 32-byte token, and an OTP marker holds the hash of a random 32-byte secret rather than of a code, so no code matches it. Every OTP send draws both the code and the marker secret, so the random work is the same for a known and an unknown address. If an address gains an account within the window, the marker delays its first send by up to the cooldown.
