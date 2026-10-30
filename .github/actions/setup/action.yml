@@ -1,9 +1,10 @@
 # Composite setup shared by every workflow that needs the toolchain: pnpm +
 # Node.js, the pnpm store cache (keyed on pnpm-lock.yaml by setup-node), a
 # frozen-lockfile install and the repository's own `prepare` script. `vp` and
-# the dev bins land in node_modules/.bin, which this adds to PATH so later
-# steps invoke them directly. Copied in shape from effect-jsonapi (the library
-# reference).
+# the dev bins land in node_modules/.bin; later steps call them through
+# `pnpm exec` rather than through a `GITHUB_PATH` entry, which zizmor flags
+# (a step that can write the path can shadow every later command). Copied in
+# shape from effect-jsonapi (the library reference).
 #
 # Install scripts: pnpm 11 runs a dependency's lifecycle scripts only when
 # pnpm-workspace.yaml's `allowBuilds` names it (better-sqlite3, the native
@@ -20,9 +21,13 @@ name: Setup toolchain
 description: Set up Node.js and pnpm, restore the package cache, install dependencies and patch the toolchain.
 inputs:
   node-version:
+    # Never `latest`: setup-node resolves it to the first entry of the
+    # nodejs.org index, pre-releases included (a v27 alpha since 2026-10-29),
+    # which would run CI and publish on an alpha. `*` with `check-latest` is
+    # the newest stable release from setup-node's manifest.
     description: The Node.js version to set up.
     required: false
-    default: latest
+    default: "*"
   ignore-scripts:
     description: Skip every dependency lifecycle script (the release job sets this).
     required: false
@@ -39,6 +44,7 @@ runs:
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: ${{ inputs.node-version }}
+        check-latest: true
         cache: pnpm
 
     # Retried: pnpm's linker can race itself when a package with a build
@@ -72,7 +78,3 @@ runs:
           # The one lifecycle script that does run: ours. See the header.
           pnpm run prepare
         fi
-
-    - name: Expose the local bins
-      shell: bash
-      run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"

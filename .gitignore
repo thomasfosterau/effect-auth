@@ -103,3 +103,6 @@ packages/effect-auth/docs/
 
 # Removed workspace directories (still present on disk)
 site/
+
+# Vitest 5's attachment / cache directory (added by `vp migrate`).
+.vitest/

@@ -1,5 +1,5 @@
 import { recommended } from "@effect/tsgo/oxlint-presets";
-import effect from "@mpsuesser/oxlint-plugin-effect";
+import effect from "@enfect/oxlint";
 import { defineConfig } from "vite-plus";
 
 // Code outside the published libraries' runtime: tests, test fixtures, build
@@ -14,19 +14,105 @@ const nonLibraryFiles = [
 ];
 
 export default defineConfig({
+  // Pre-commit (`vp staged`): format with fixes, lint without. Type-aware
+  // rules carry autofixes (even the ones at `warn`), so `vp check --fix` would
+  // rewrite staged files at commit time and the commit would differ from the
+  // tree the gates ran on.
   staged: {
-    "*": "vp check --fix",
+    "*": ["vp check --fix --no-lint", "vp check --no-fmt --no-error-on-unmatched-pattern"],
   },
   fmt: {},
   lint: {
-    // `@effect/tsgo`'s preset needs the Effect-patched oxlint (the root
-    // `prepare` script runs `effect-tsgo patch --typescript --oxlint`). Its
-    // rules are type-aware, so with `typeAware: false` below only the
-    // syntactic ones report.
+    // `@effect/tsgo`'s preset needs the Effect-patched oxlint and
+    // oxlint-tsgolint (the root `prepare` script runs `effect-tsgo patch
+    // --typescript --oxlint`). Its rules are type-aware, and so is lint here
+    // (`typeAware` below). `@enfect/oxlint`'s `recommended` is the `effect/*`
+    // rule set, every rule at `error` unless set below.
     extends: [recommended, effect.configs.recommended],
+    plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "vitest", "jsdoc"],
+    categories: {
+      correctness: "error",
+      suspicious: "error",
+      perf: "error",
+    },
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
       "vite-plus/prefer-vite-plus-imports": "error",
+
+      // ---- @effect/tsgo preset (type-aware, through oxlint-tsgolint) -------
+      // tsconfig.base.json downgrades `unstableApiUsage` to a suggestion: the
+      // HTTP tier is built on `effect/http-api` on purpose (#205), and the
+      // patched `tsc` in `vp run check` owns that diagnostic. The preset would
+      // re-report all ~560 call sites as warnings.
+      "effecttsgo/unstable-api-usage": "off",
+      // oxlint's `categories` below also cover the `effecttsgo` plugin's own
+      // rules. These three are outside the preset's `recommended`, so they stay
+      // at the level they report at without the categories: `strict` only
+      // (500 `Effect.provide` sites), and two awareness warnings.
+      "effecttsgo/strict-effect-provide": "off",
+      "effecttsgo/any-unknown-in-error-context": "warn",
+      "effecttsgo/unsafe-effect-type-assertion": "warn",
+
+      // ---- oxlint plugins (`correctness` / `suspicious` / `perf`) ----------
+      // `_tag` is the discriminant of every Effect tagged union and error
+      // class; reading it is the point, so a leading underscore is not a smell.
+      "eslint/no-underscore-dangle": "off",
+      // docgen's tags (`@since`, `@category`), the module header's `@module`
+      // and `@internal` are part of the doc-comment standard; the
+      // `@effect-*` tags are the Effect language service's directives.
+      "jsdoc/check-tag-names": [
+        "error",
+        {
+          definedTags: [
+            "since",
+            "category",
+            "module",
+            "internal",
+            "effect-expect-leaking",
+            "effect-leakable-service",
+          ],
+        },
+      ],
+      // Vitest's `expect(value, message)` takes the failure message second.
+      "vitest/valid-expect": ["error", { maxArgs: 2 }],
+      // It reads every two-argument `.catch(…)` as `Promise.prototype.catch`,
+      // so it fires on Effect's data-first `Effect.catch(self, f)`; no Promise
+      // `.catch` here takes two arguments.
+      "promise/valid-params": "off",
+
+      // ---- oxlint plugins: adoption allowances ----------------------------
+      // Sites that predate the `suspicious` / `perf` categories and the
+      // type-aware rules (#503). Same contract as the ported-code
+      // allowances below: each rule sits at `warn` so its sites stay
+      // reported, a new site is a defect, and once a count reaches zero the
+      // line is deleted so the rule is back at `error`. Counts are all sites
+      // (sources and tests) when the categories were turned on.
+      "unicorn/consistent-function-scoping": "warn", // 148
+      "typescript/no-unsafe-type-assertion": "warn", // 124
+      "eslint/no-shadow": "warn", // 120
+      "typescript/no-unnecessary-type-arguments": "warn", // 59
+      "typescript/consistent-return": "warn", // 45
+      "vitest/require-mock-type-parameters": "warn", // 32
+      // Type tests (expect-error directives) and tests that assert by running
+      // an Effect that fails on a mismatch.
+      "vitest/expect-expect": "warn", // 29
+      "typescript/no-base-to-string": "warn", // 23
+      "oxc/no-map-spread": "warn", // 10
+      "typescript/no-unnecessary-type-parameters": "warn", // 7
+      "typescript/no-unnecessary-type-assertion": "warn", // 7
+      "vitest/require-to-throw-message": "warn", // 6
+      "promise/always-return": "warn", // 5
+      "typescript/no-unnecessary-type-conversion": "warn", // 4
+      "typescript/no-useless-default-assignment": "warn", // 4
+      "unicorn/no-array-sort": "warn", // 3
+      "typescript/unbound-method": "warn", // 3
+      "typescript/no-duplicate-type-constituents": "warn", // 4
+      "typescript/no-unnecessary-boolean-literal-compare": "warn", // 2
+      "typescript/no-misused-spread": "warn", // 2
+      "typescript/restrict-template-expressions": "warn", // 2
+      "promise/no-promise-in-callback": "warn", // 1
+      "unicorn/require-post-message-target-origin": "warn", // 1
+      "unicorn/prefer-add-event-listener": "warn", // 1
 
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.
@@ -71,7 +157,7 @@ export default defineConfig({
       // attributes, metadata, JWT claims, drizzle column types); narrowing
       // them is an API change (60 / 0).
       "effect/no-unsafe-dictionary-type": "warn",
-      // Exported `Map` parameters and `ReadonlyMap` results (10 / 284).
+      // Exported `Map` parameters and `ReadonlyMap` results (14 / 292).
       "effect/avoid-native-object-helpers": "warn",
     },
     overrides: [
@@ -90,9 +176,23 @@ export default defineConfig({
         },
       },
       {
-        // Type tests assert rejections with an expect-error directive.
+        // Type tests assert rejections with an expect-error directive, and
+        // the barrel tests assert that a member is absent from a namespace.
         files: ["**/*.test.ts", "**/*.test.tsx"],
-        rules: { "effect/avoid-ts-ignore": "off" },
+        rules: { "effect/avoid-ts-ignore": "off", "import/namespace": "off" },
+      },
+      {
+        // The store conformance suites name each test from the typed case
+        // record they run (`it(testCase.name, …)`), which is a string the
+        // rule cannot see statically.
+        files: [
+          "packages/alchemy/src/Storage.test.ts",
+          "packages/drizzle/src/testing/Conformance.ts",
+          "packages/effect-auth/src/testing/MemoryStores.test.ts",
+          "packages/effect-auth/src/testing/StoreConformance.test.ts",
+          "packages/sql/src/Stores.test.ts",
+        ],
+        rules: { "vitest/valid-title": "off" },
       },
       {
         // Plain Node tooling that runs no Effect (the dist smoke test and the
@@ -201,11 +301,21 @@ export default defineConfig({
         rules: { "effect/effect-run-in-body": "off" },
       },
     ],
-    // Type checking is owned by each package's `check` task (tsc / vue-tsc /
-    // svelte-check), which understands the per-package NodeNext tsconfigs.
-    // Keeping it out of lint avoids one cross-package program mis-resolving
-    // per-package types (e.g. @types/node globals).
-    options: { typeAware: false, typeCheck: false },
+    // Type-aware rules run through oxlint-tsgolint (bundled with Vite+,
+    // patched by `@effect/tsgo`). They resolve each workspace import through
+    // its `exports`, i.e. the sibling's built `dist/`, so `vp check` runs after
+    // `vp run build` (CI's order; AGENTS.md, Verification): on an unbuilt tree
+    // every sibling import types as an error and the `effecttsgo` rules report
+    // false `missing-effect-context` errors.
+    //
+    // `typeCheck` stays off. Type checking is owned by each package's `check`
+    // task (Effect-patched tsc / vue-tsc / svelte-check against both
+    // tsconfig.json and tsconfig.test.json). tsgolint reads only each file's
+    // nearest tsconfig.json, which here leaves out the colocated tests and the
+    // per-package vite.config.ts: measured on a built tree it reported 70+
+    // false errors (Solid tests checked as React JSX, `toSorted` outside the
+    // test `lib`, the task-config types).
+    options: { typeAware: true, typeCheck: false },
   },
   run: {
     tasks: {
