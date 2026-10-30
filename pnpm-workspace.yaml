@@ -53,14 +53,14 @@ catalog:
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
   "@effect/tsgo": 0.63.0
-  "@electric-sql/pglite": ^0.5.11
+  "@electric-sql/pglite": ^0.5.13
   # The Effect lint rules (`effect/*`), `recommended` extended in the root
   # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, so
   # it moves in the `toolchain` Dependabot group. It depends on `effect` 4.1.0
   # exactly, but the `effect` override below puts it on the singleton, which
   # it lints fine on.
   "@enfect/oxlint": ^0.9.0
-  "@node-saml/node-saml": ^5.1.0
+  "@node-saml/node-saml": ^5.2.0
   "@solidjs/testing-library": ^0.8.10
   "@sveltejs/package": ^3.0.1
   "@sveltejs/vite-plugin-svelte": ^7.3.1
@@ -69,8 +69,8 @@ catalog:
   "@types/better-sqlite3": ^9.6.0
   # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
   # peer of effect-auth, needed only by that subpath.
-  "@thomasfosterau/effect-jsonapi": ^0.19.0
-  "@types/node": ^26.6.5
+  "@thomasfosterau/effect-jsonapi": ^0.20.0
+  "@types/node": ^26.6.6
   "@types/pg": ^8.15.0
   "@types/react": ^19.3.0
   "@types/react-dom": ^19.3.0
@@ -138,7 +138,7 @@ catalog:
 catalogs:
   peers:
     # 0.x minors break, so the peer range is the minor line.
-    "@thomasfosterau/effect-jsonapi": ^0.19.0
+    "@thomasfosterau/effect-jsonapi": ^0.20.0
     "@types/pg": ^8.15.0
     # beta.80 is the first alchemy release that imports only `effect/*` paths;
     # beta.79 and earlier import the `effect/unstable/*` that rc.118 removed.
