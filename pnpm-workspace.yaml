@@ -29,7 +29,7 @@ catalog:
   # the Effect-monorepo docgen (runs on `effect` and `@effect/platform-node`,
   # which the `effect` override keeps on the singleton); it reads the existing
   # docgen.json.
-  "@effect/docgen": ^4.0.0
+  "@effect/docgen": ^4.1.2
   "@effect/language-service": ^0.87.3
   "@effect/sql-pg": 4.0.0
   "@effect/sql-pglite": 4.0.0
