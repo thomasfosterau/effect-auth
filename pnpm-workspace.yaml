@@ -62,7 +62,7 @@ catalog:
   "@enfect/oxlint": ^0.9.0
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
-  "@sveltejs/package": ^3.0.1
+  "@sveltejs/package": ^3.0.2
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/react": ^16.3.3
   "@testing-library/svelte": ^5.4.2
@@ -106,7 +106,7 @@ catalog:
   semver: ^7.8.5
   solid-js: ^1.9.17
   svelte: ^5.57.3
-  svelte-check: ^4.7.7
+  svelte-check: ^4.7.8
   tsx: ^4.23.15
   # TypeScript 6/7 side by side. TS7 is the native Go compiler and ships no JS
   # compiler API until 7.1, so everything that `require("typescript")` stays on
