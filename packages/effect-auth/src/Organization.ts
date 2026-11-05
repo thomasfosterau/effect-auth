@@ -44,6 +44,7 @@
  */
 
 import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Order, Result } from "effect";
+import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
@@ -1076,7 +1077,7 @@ export const make = (
     /** Generate a random identifier for organizations, members, and invitations. */
     const generateId = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(16).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.map(Hex.encode),
         Effect.mapError(
           (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
         ),

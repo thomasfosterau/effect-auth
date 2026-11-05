@@ -13,6 +13,7 @@
  */
 
 import { Array as Arr, Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
@@ -24,7 +25,7 @@ import { type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
@@ -340,17 +341,10 @@ export const hashBackupCode = (code: string): string => hashToken(normalizeBacku
  * Find the index of a backup-code hash using timing-safe comparison.
  * Scans the full list (no early exit) to avoid leaking the match position.
  */
-const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): number => {
-  const candidate = Buffer.from(candidateHash, "hex");
-  return Arr.reduce(hashes, -1, (match, hash, i) => {
-    const stored = Buffer.from(hash, "hex");
-    return stored.length === candidate.length &&
-      timingSafeEqualBytes(stored, candidate) &&
-      match === -1
-      ? i
-      : match;
-  });
-};
+const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): number =>
+  Arr.reduce(hashes, -1, (match, hash, i) =>
+    constantTimeHashEqual(hash, candidateHash) && match === -1 ? i : match,
+  );
 
 /**
  * Create a multi-factor service
@@ -415,7 +409,7 @@ export const make = (
     const generateBackupCode = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(5).pipe(
         Effect.map((bytes) => {
-          const raw = Buffer.from(bytes).toString("hex");
+          const raw = Hex.encode(bytes);
           return `${raw.slice(0, 5)}-${raw.slice(5)}`;
         }),
         Effect.mapError(

@@ -3,7 +3,8 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Array as Arr, Clock, Context, Data, Effect, Layer } from "effect";
+import { Array as Arr, Clock, Context, Data, Effect, Layer, Result } from "effect";
+import { Base64, Base64Url, Hex } from "effect/encoding";
 import { Digest, SecureRandom } from "effect/crypto";
 import {
   parseAttestationObject,
@@ -237,7 +238,8 @@ export function base64UrlDecode(str: string): Uint8Array {
   const unpadded = str.replace(/-/g, "+").replace(/_/g, "/");
   // Add padding if needed
   const base64 = unpadded.padEnd(unpadded.length + ((4 - (unpadded.length % 4)) % 4), "=");
-  return new Uint8Array(Buffer.from(base64, "base64"));
+  // Input that is not base64url decodes to no bytes, which matches nothing.
+  return Result.getOrElse(Base64.decode(base64), () => new Uint8Array(0));
 }
 
 /**
@@ -726,7 +728,7 @@ class UnsupportedAlgorithmError extends Data.TaggedError("UnsupportedAlgorithmEr
   readonly message: string;
 }> {}
 
-const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
+const b64url = (bytes: Uint8Array): string => Base64Url.encode(bytes);
 
 /**
  * Serialize a COSE public key to SPKI DER for storage. Using a single
@@ -766,7 +768,8 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
   const hex = value.toString(16);
   const paddedHex = hex.length % 2 === 0 ? hex : "0" + hex;
   const finalHex = paddedHex.padStart(minLength ? minLength * 2 : 0, "0");
-  return new Uint8Array(Buffer.from(finalHex, "hex"));
+  // `finalHex` is even-length hex by construction, so the decode cannot fail.
+  return Result.getOrElse(Hex.decode(finalHex), () => new Uint8Array(0));
 }
 
 /**
@@ -791,10 +794,9 @@ function verifySignature(
 
     return yield* Effect.try({
       try: () => {
-        const message = Buffer.concat([
-          Buffer.from(authenticatorData),
-          Buffer.from(clientDataHash),
-        ]);
+        const message = new Uint8Array(authenticatorData.length + clientDataHash.length);
+        message.set(authenticatorData, 0);
+        message.set(clientDataHash, authenticatorData.length);
 
         if (algorithm === coseAlgorithmES256 || algorithm === coseAlgorithmRS256) {
           return Cipher.verifyDerSignature("sha256", publicKeyDer, message, signature);
@@ -825,6 +827,5 @@ function compareUint8Arrays(a: Uint8Array, b: Uint8Array): boolean {
  * Helper to encode Uint8Array to base64url
  */
 function base64UrlEncode(buffer: Uint8Array): string {
-  const base64 = Buffer.from(buffer).toString("base64");
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  return Base64Url.encode(buffer);
 }

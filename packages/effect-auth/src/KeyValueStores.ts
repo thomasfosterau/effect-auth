@@ -52,7 +52,9 @@ import {
   Order,
   Predicate,
   Schema,
+  Result,
 } from "effect";
+import { Base64 } from "effect/encoding";
 import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
@@ -86,8 +88,10 @@ const toAuthError =
       }`,
     });
 
-const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
-const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, "base64"));
+const toBase64 = (bytes: Uint8Array): string => Base64.encode(bytes);
+/** Bytes this module wrote with {@link toBase64}; a corrupted value decodes to no bytes. */
+const fromBase64 = (text: string): Uint8Array =>
+  Result.getOrElse(Base64.decode(text), () => new Uint8Array(0));
 
 /** Any JSON value to and from its JSON text; record shapes are this module's own. */
 const JsonText = Schema.fromJsonString(Schema.Unknown);

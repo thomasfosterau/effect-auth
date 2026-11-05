@@ -43,7 +43,8 @@
  * Without `encrypt`, the cookie is signed but NOT encrypted: session and user
  * data (including any PII in `attributes`) is readable by the browser.
  */
-import { Data, DateTime, Effect, Option, Redacted, Schema } from "effect";
+import { Data, DateTime, Effect, Option, Redacted, Result, Schema } from "effect";
+import { Base64Url } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
 import { timingSafeEqualBytes } from "./TokenHash.ts";
@@ -120,13 +121,13 @@ export const resolveSessionCache = (
 
 const PAYLOAD_VERSION = 1;
 
-const b64url = (data: Uint8Array): string => Buffer.from(data).toString("base64url");
+const b64url = (data: Uint8Array): string => Base64Url.encode(data);
 
 const sign = (data: string, secret: Redacted.Redacted<string>): string =>
   b64url(Cipher.hmac("sha256", Redacted.value(secret), data));
 
 const timingSafeEqualStr = (a: string, b: string): boolean =>
-  timingSafeEqualBytes(Buffer.from(a), Buffer.from(b));
+  timingSafeEqualBytes(new TextEncoder().encode(a), new TextEncoder().encode(b));
 
 // Schemas for the JSON-serialized payload form (dates stored as ms timestamps).
 const SerializedSession = Schema.Struct({
@@ -247,7 +248,7 @@ export const decodeSessionCacheCookie = (
   if (encrypted !== (cache.encryptionKey !== undefined)) return null;
   const json =
     cache.encryptionKey === undefined
-      ? Buffer.from(encoded, "base64url").toString("utf8")
+      ? Result.getOrNull(Base64Url.decodeString(encoded))
       : Cipher.aes256GcmOpen(cache.encryptionKey, encoded.slice(ENCRYPTED_PREFIX.length));
   if (json === null) return null;
 

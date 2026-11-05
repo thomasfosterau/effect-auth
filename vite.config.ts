@@ -73,6 +73,18 @@ export default defineConfig({
           ],
         },
       ],
+      // Core and the Workers-safe adapters run outside Node, so the Node
+      // `Buffer` global is off-limits outside the `node:crypto` corral and
+      // Node-only code (#481): use `effect/encoding`, `TextEncoder` and
+      // `Uint8Array`.
+      "eslint/no-restricted-globals": [
+        "error",
+        {
+          name: "Buffer",
+          message:
+            "Use `effect/encoding` (Base64, Base64Url, Hex), `TextEncoder` or `Uint8Array`: `Buffer` is a Node global.",
+        },
+      ],
       // Vitest's `expect(value, message)` takes the failure message second.
       "vitest/valid-expect": ["error", { maxArgs: 2 }],
       // It reads every two-argument `.catch(…)` as `Promise.prototype.catch`,
@@ -173,6 +185,7 @@ export default defineConfig({
           "effect/use-http-client-service": "off",
           "effect/use-path-service": "off",
           "effect/use-temp-file-scoped": "off",
+          "eslint/no-restricted-globals": "off",
         },
       },
       {
@@ -258,7 +271,7 @@ export default defineConfig({
           "packages/effect-auth/src/TokenHash.ts",
           "packages/effect-auth/src/Cipher.ts",
         ],
-        rules: { "effect/avoid-node-imports": "off" },
+        rules: { "effect/avoid-node-imports": "off", "eslint/no-restricted-globals": "off" },
       },
       {
         // Decoders, guards and sinks over untrusted input take `unknown`: that

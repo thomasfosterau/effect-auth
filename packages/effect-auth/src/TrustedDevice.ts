@@ -48,11 +48,12 @@
  */
 import { Clock, Config, Context, Effect, Layer, Redacted } from "effect";
 import { SecureRandom } from "effect/crypto";
+import { Hex } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import { SecondFactorGate } from "./email/EmailPassword.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { hashToken, timingSafeEqualBytes } from "./TokenHash.ts";
+import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { MultiFactorService } from "./multifactor/MultiFactor.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -231,11 +232,10 @@ export const trustedDeviceConfig: Config.Config<TrustedDeviceConfig> = Config.al
 const COOKIE_SEPARATOR = ".";
 
 const computeHmac = (secret: Redacted.Redacted<string>, rawToken: string): string =>
-  Buffer.from(Cipher.hmac("sha256", Redacted.value(secret), rawToken)).toString("hex");
+  Hex.encode(Cipher.hmac("sha256", Redacted.value(secret), rawToken));
 
 /** Constant-time comparison of two hex strings of equal expected length. */
-const timingSafeHexEqual = (a: string, b: string): boolean =>
-  timingSafeEqualBytes(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+const timingSafeHexEqual = constantTimeHashEqual;
 
 const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | null => {
   const idx = cookieValue.lastIndexOf(COOKIE_SEPARATOR);

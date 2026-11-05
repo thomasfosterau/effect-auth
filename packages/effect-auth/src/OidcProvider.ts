@@ -33,7 +33,7 @@ import {
   String as Str,
 } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
-import { Base64Url } from "effect/encoding";
+import { Base64Url, Hex } from "effect/encoding";
 import { AuthError } from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { JwtService } from "./Jwt.ts";
@@ -869,7 +869,7 @@ export const make = (
 
     const randomClientId = (): Effect.Effect<string, AuthError> =>
       crypto.randomBytes(16).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.map(Hex.encode),
         Effect.mapError(
           (cause) => new AuthError({ message: "Failed to generate client id", cause }),
         ),

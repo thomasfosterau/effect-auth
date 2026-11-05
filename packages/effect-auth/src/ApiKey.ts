@@ -17,6 +17,7 @@
  */
 
 import { Array as Arr, Clock, Context, Data, Effect, Layer, Record as Rec } from "effect";
+import { Base64Url } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -307,7 +308,7 @@ export const make = (
 
     const randomToken = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(keyLength).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.map(Base64Url.encode),
         Effect.mapError(
           (cause) => new Errors.AuthError({ message: "Failed to generate API key secret", cause }),
         ),

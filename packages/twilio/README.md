@@ -13,7 +13,7 @@ and `effect`.
 pnpm add @thomasfosterau/effect-auth-twilio @thomasfosterau/effect-auth effect
 ```
 
-`effect` (`>=4.1.0`) is a peer dependency. The sender needs only a global `fetch`. On Cloudflare Workers, enable the `nodejs_compat` flag: core effect-auth uses `node:crypto`, and this package builds its Basic-auth header with `Buffer`.
+`effect` (`>=4.1.0`) is a peer dependency. The sender needs only a global `fetch`. On Cloudflare Workers, enable the `nodejs_compat` flag: core effect-auth uses `node:crypto`. This package builds its Basic-auth header with `btoa` and needs no Node global.
 
 ## Usage
 

@@ -83,7 +83,7 @@ const bitGroups = (bits: string, size: number): ReadonlyArray<string> =>
 export const generateSecret = (
   crypto: typeof SecureRandom.SecureRandom.Service,
   length: number = 20,
-): Effect.Effect<Buffer, Errors.HashingError> =>
+): Effect.Effect<Uint8Array, Errors.HashingError> =>
   Effect.gen(function* () {
     if (!Number.isInteger(length) || length < 16) {
       return yield* new Errors.HashingError({
@@ -98,14 +98,17 @@ export const generateSecret = (
             new Errors.HashingError({ message: "Failed to generate random secret", cause }),
         ),
       );
-    return Buffer.from(bytes);
+    return bytes;
   });
+
+/** The UTF-8 bytes of a string, for the timing-safe code comparisons. */
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 /**
  * Encode bytes to base32 (RFC 4648)
  * Used for encoding OTP secrets
  */
-export const encodeBase32 = (buffer: Buffer): string => {
+export const encodeBase32 = (buffer: Uint8Array): string => {
   // Each byte contributes 8 bits; every 5 bits is one character, and a final
   // partial group is right-padded with zero bits.
   const bits = Arr.map(Arr.fromIterable(buffer), (byte) => byte.toString(2).padStart(8, "0")).join(
@@ -119,7 +122,7 @@ export const encodeBase32 = (buffer: Buffer): string => {
 /**
  * Decode base32 string to bytes (RFC 4648)
  */
-export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.HashingError> =>
+export const decodeBase32 = (base32: string): Effect.Effect<Uint8Array, Errors.HashingError> =>
   Effect.suspend(() => {
     // UTF-16 code units, so an invalid character is reported as it was indexed.
     const chars = base32.toUpperCase().replace(/[=\s]/g, "").split("");
@@ -145,7 +148,7 @@ export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.Hashi
             Arr.filter(bitGroups(bits, 8), (group) => group.length === 8),
             (group) => parseInt(group, 2),
           );
-          return Effect.succeed(Buffer.from(bytes));
+          return Effect.succeed(Uint8Array.from(bytes));
         },
       },
     );
@@ -155,13 +158,13 @@ export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.Hashi
  * Generate HMAC-based One-Time Password (HOTP)
  * Following RFC 4226
  *
- * @param secret - Base32-encoded secret or raw Buffer
+ * @param secret - Base32-encoded secret or raw bytes
  * @param counter - Counter value
  * @param config - HOTP configuration
  * @returns Effect that produces the OTP string
  */
 export const generateHotp = (
-  secret: string | Buffer,
+  secret: string | Uint8Array,
   counter: number,
   config: HotpConfig = {},
 ): Effect.Effect<string, Errors.HashingError> =>
@@ -204,8 +207,8 @@ export const generateHotp = (
     }
 
     // Create counter buffer (8 bytes, big-endian)
-    const counterBuffer = Buffer.alloc(8);
-    counterBuffer.writeBigUInt64BE(BigInt(counter), 0);
+    const counterBuffer = new Uint8Array(8);
+    new DataView(counterBuffer.buffer).setBigUint64(0, BigInt(counter));
 
     // Generate HMAC
     const hash = Cipher.hmac(algorithm, secretBuffer, counterBuffer);
@@ -227,14 +230,14 @@ export const generateHotp = (
  * Verify HMAC-based One-Time Password (HOTP)
  *
  * @param token - The OTP token to verify
- * @param secret - Base32-encoded secret or raw Buffer
+ * @param secret - Base32-encoded secret or raw bytes
  * @param counter - Counter value
  * @param config - HOTP configuration
  * @returns Effect that produces true if valid, false otherwise
  */
 export const verifyHotp = (
   token: string,
-  secret: string | Buffer,
+  secret: string | Uint8Array,
   counter: number,
   config: HotpConfig = {},
 ): Effect.Effect<boolean, Errors.HashingError> =>
@@ -251,19 +254,19 @@ export const verifyHotp = (
       return false;
     }
 
-    return timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken));
+    return timingSafeEqualBytes(utf8(token), utf8(expectedToken));
   });
 
 /**
  * Generate Time-based One-Time Password (TOTP)
  * Following RFC 6238
  *
- * @param secret - Base32-encoded secret or raw Buffer
+ * @param secret - Base32-encoded secret or raw bytes
  * @param config - TOTP configuration
  * @returns Effect that produces the OTP string
  */
 export const generateTotp = (
-  secret: string | Buffer,
+  secret: string | Uint8Array,
   config: TotpConfig = {},
 ): Effect.Effect<string, Errors.HashingError> =>
   Effect.flatMap(Clock.currentTimeMillis, (millis) => {
@@ -283,7 +286,7 @@ export const generateTotp = (
  * Checks the current time step and adjacent steps within the window.
  *
  * @param token - The OTP token to verify
- * @param secret - Base32-encoded secret or raw Buffer
+ * @param secret - Base32-encoded secret or raw bytes
  * @param config - TOTP configuration
  * @returns Effect that produces the matched time-step counter, or `null` if
  *   the token is invalid. Callers should persist the counter and reject
@@ -291,7 +294,7 @@ export const generateTotp = (
  */
 export const verifyTotp = (
   token: string,
-  secret: string | Buffer,
+  secret: string | Uint8Array,
   config: TotpConfig = {},
 ): Effect.Effect<number | null, Errors.HashingError> =>
   Effect.gen(function* () {
@@ -329,7 +332,7 @@ export const verifyTotp = (
           Effect.map(
             (expectedToken) =>
               token.length === expectedToken.length &&
-              timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken)),
+              timingSafeEqualBytes(utf8(token), utf8(expectedToken)),
           ),
         ),
     );

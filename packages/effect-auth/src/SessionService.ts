@@ -1,4 +1,5 @@
 import { Clock, Context, DateTime, Effect, Layer, Predicate } from "effect";
+import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
@@ -27,7 +28,7 @@ export const make = (
 
     const generateSessionId = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(20).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.map(Hex.encode),
         Effect.mapError(
           (cause) => new Errors.AuthError({ message: "Failed to generate session id", cause }),
         ),

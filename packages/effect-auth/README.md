@@ -370,12 +370,13 @@ console.log(await Effect.runPromise(example("JBSWY3DPEHPK3PXP")));
 
 ```typescript
 import { Effect, Layer } from "effect";
+import { Base64 } from "effect/encoding";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Challenges are short-lived (an in-memory or Redis store is fine); credentials
 // are persistent. Lookups return `null` on a miss.
 // Challenges are raw bytes; key them by their base64 form.
-const key = (challenge: Uint8Array) => Buffer.from(challenge).toString("base64");
+const key = (challenge: Uint8Array) => Base64.encode(challenge);
 const challenges = new Map<string, Auth.MultiFactor.WebAuthnChallenge>();
 const challengeStore: typeof Auth.MultiFactor.ChallengeStore.Service = {
   create: (c) => Effect.sync(() => (challenges.set(key(c.challenge), c), c)),

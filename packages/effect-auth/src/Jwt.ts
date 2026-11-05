@@ -38,9 +38,11 @@ import {
   Predicate,
   Redacted,
   Ref,
+  Result,
   Schema,
 } from "effect";
 import { SecureRandom } from "effect/crypto";
+import { Base64Url } from "effect/encoding";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -243,12 +245,8 @@ export const jwtServiceConfig = Config.all({
   ),
 });
 
-/**
- * Unpadded base64url of a UTF-8 string or byte buffer (Node's "base64url"
- * encoding is already unpadded, per RFC 7515).
- */
-const base64UrlEncode = (data: Buffer | string): string =>
-  (Predicate.isString(data) ? Buffer.from(data, "utf8") : data).toString("base64url");
+/** Unpadded base64url (RFC 7515) of a UTF-8 string or of bytes. */
+const base64UrlEncode = (data: Uint8Array | string): string => Base64Url.encode(data);
 
 /** A decoded JSON object (a JOSE header, a claims set, or a JWK). */
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
@@ -269,7 +267,12 @@ class JwksHttpError extends Data.TaggedError("JwksHttpError")<{
   readonly status: number;
 }> {}
 
-const base64UrlDecode = (segment: string): Buffer => Buffer.from(segment, "base64url");
+/**
+ * The bytes of a base64url segment. A segment that is not base64url decodes
+ * to no bytes, which no signature verifies against.
+ */
+const base64UrlDecode = (segment: string): Uint8Array =>
+  Result.getOrElse(Base64Url.decode(segment), () => new Uint8Array(0));
 
 /**
  * Generate a fresh signing key pair for the given algorithm.
@@ -312,9 +315,9 @@ export const generateKeyPair = (
  * raw JOSE `r || s` form (Node defaults to DER, which JWS does not accept);
  * Ed25519 signs with a null digest.
  */
-const signBytes = (pair: JwtKeyPair, data: Buffer): Effect.Effect<Buffer, JwtError> =>
+const signBytes = (pair: JwtKeyPair, data: Uint8Array): Effect.Effect<Uint8Array, JwtError> =>
   Effect.try({
-    try: () => Buffer.from(Cipher.signJws(pair.algorithm, data, pair.privateKeyPem)),
+    try: () => Cipher.signJws(pair.algorithm, data, pair.privateKeyPem),
     catch: (error) =>
       new JwtError({
         message: "Failed to sign token",
@@ -328,8 +331,8 @@ const signBytes = (pair: JwtKeyPair, data: Buffer): Effect.Effect<Buffer, JwtErr
 const verifyBytesFromJwk = (
   jwk: JsonObject,
   algorithm: JwtAlgorithm,
-  data: Buffer,
-  signature: Buffer,
+  data: Uint8Array,
+  signature: Uint8Array,
 ): Effect.Effect<boolean, JwtError> =>
   Effect.try({
     try: () => Cipher.verifyJws(algorithm, data, signature, jwk),
@@ -341,7 +344,8 @@ const verifyBytesFromJwk = (
   });
 
 const decodeJsonSegment = (segment: string, what: string): Effect.Effect<JsonObject, JwtError> =>
-  decodeJsonObject(base64UrlDecode(segment).toString("utf8")).pipe(
+  Effect.fromResult(Base64Url.decodeString(segment)).pipe(
+    Effect.flatMap(decodeJsonObject),
     Effect.mapError(
       (error) =>
         new JwtError({
@@ -420,7 +424,7 @@ const verifySignedPayload = (
     const validSignature = yield* verifyBytesFromJwk(
       jwk,
       algorithm,
-      Buffer.from(`${jws.headerSegment}.${jws.payloadSegment}`, "utf8"),
+      new TextEncoder().encode(`${jws.headerSegment}.${jws.payloadSegment}`),
       base64UrlDecode(jws.signatureSegment),
     );
     if (!validSignature) {
@@ -542,7 +546,7 @@ export const make = (
           const signingInput = `${base64UrlEncode(encodeJsonObject(header))}.${base64UrlEncode(
             encodeJsonObject(payload),
           )}`;
-          const signature = yield* signBytes(pair, Buffer.from(signingInput, "utf8"));
+          const signature = yield* signBytes(pair, new TextEncoder().encode(signingInput));
 
           return {
             token: `${signingInput}.${base64UrlEncode(signature)}`,

@@ -15,6 +15,7 @@ import {
   Record as Rec,
   String as Str,
 } from "effect";
+import { Base64 } from "effect/encoding";
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from "@node-saml/node-saml";
 import type { Profile } from "@node-saml/node-saml";
 import {
@@ -61,6 +62,17 @@ const messageOf = (cause: unknown): string =>
 // the alternative (parsing, then trusting the parse to tell signed content from
 // unsigned) is the exact confusion these CVEs are made of. It also keeps this
 // package's dependency surface to node-saml alone.
+
+/**
+ * The XML text of a base64 `SAMLResponse`. IdPs may line-wrap the base64, so
+ * whitespace is dropped before decoding.
+ */
+const decodeSamlResponse = (samlResponse: string): Effect.Effect<string, SamlError> =>
+  Effect.fromResult(Base64.decodeString(samlResponse.replace(/\s+/gu, ""))).pipe(
+    Effect.mapError(
+      (cause) => new SamlError({ message: "SAMLResponse is not valid base64", cause }),
+    ),
+  );
 
 /** Elements whose presence means "encrypted", which this version does not support. */
 const ENCRYPTED_ELEMENT = /<[A-Za-z0-9_.-]*:?Encrypted(Assertion|ID|Attribute)\b/;
@@ -332,10 +344,7 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
       return yield* fail("clockSkewMs must not be negative (node-saml reads -1 as 'skip checks')");
     }
 
-    const xml = yield* Effect.try({
-      try: () => Buffer.from(input.samlResponse, "base64").toString("utf8"),
-      catch: (cause) => new SamlError({ message: "SAMLResponse is not valid base64", cause }),
-    });
+    const xml = yield* decodeSamlResponse(input.samlResponse);
     if (!xml.includes("<")) {
       return yield* fail("SAMLResponse did not decode to XML");
     }

@@ -4,6 +4,7 @@
  */
 
 import { Effect } from "effect";
+import { Base64Url } from "effect/encoding";
 import type { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 
@@ -16,6 +17,6 @@ export const randomBase64UrlToken = (
   failureMessage = "Failed to generate token",
 ): Effect.Effect<string, Errors.AuthError> =>
   crypto.randomBytes(32).pipe(
-    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    Effect.map(Base64Url.encode),
     Effect.mapError((cause) => new Errors.AuthError({ message: failureMessage, cause })),
   );
