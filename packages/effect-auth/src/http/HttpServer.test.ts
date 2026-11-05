@@ -2933,7 +2933,7 @@ describe("HTTP multi-session", () => {
 const parseCookieDirectives = (res: Response, name: string): Record<string, string | true> => {
   const found = Arr.findFirst(
     Arr.map(res.headers.getSetCookie(), (header) => header.split(/;\s*/)),
-    ([pair]) => pair?.startsWith(`${name}=`) === true,
+    ([pair]) => pair.startsWith(`${name}=`),
   );
   const out: Record<string, string | true> = {};
   if (Option.isNone(found)) return out;

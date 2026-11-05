@@ -681,12 +681,10 @@ export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMi
       // actually authenticated, so they are added to the context but never
       // subtracted from the handler's requirements (see
       // `OptionalAuthMiddleware`).
-      // SAFETY: re-widening `R` after `provideService` is sound: providing a
-      // service only ever removes one.
       const withPrincipal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
         Option.isNone(maybeResolved)
           ? effect
-          : (Effect.provideService(
+          : Effect.provideService(
               Effect.provideService(
                 effect,
                 CurrentPrincipal,
@@ -694,7 +692,7 @@ export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMi
               ),
               CurrentCredential,
               credentialClassFromRequest(request),
-            ) as Effect.Effect<A, E, R>);
+            );
 
       return yield* withPrincipal(
         handler.pipe(Effect.provideService(MaybeCurrentSession, maybeResolved)),

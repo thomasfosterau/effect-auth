@@ -9,7 +9,6 @@ import {
   Order,
   Path,
   PlatformError,
-  Predicate,
   Schema,
 } from "effect";
 import { PGlite } from "@electric-sql/pglite";
@@ -213,8 +212,8 @@ describe("AuthSchema resource", () => {
     const provider = await Effect.runPromise(
       AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider({ database: makeTestD1() }))),
     );
-    expect(Predicate.isFunction(provider.reconcile)).toBe(true);
-    expect(Predicate.isFunction(provider.delete)).toBe(true);
+    expect(provider).toHaveProperty("reconcile", expect.any(Function));
+    expect(provider).toHaveProperty("delete", expect.any(Function));
     expect(await Effect.runPromise(provider.list())).toEqual([]);
   });
 

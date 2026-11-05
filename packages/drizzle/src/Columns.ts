@@ -309,9 +309,7 @@ export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSch
     // SAFETY: each column was named through a `ColumnKey`, which checked at the
     // caller's call site that it reads back as `TColumns` needs (see above).
     columns: columns as TColumns,
-    // SAFETY: `names` is the very mapping `columns` was resolved from, so its
-    // keys are `TColumns`' fields.
-    names: names as Readonly<Record<keyof TColumns & string, string>>,
+    names,
   };
 };
 

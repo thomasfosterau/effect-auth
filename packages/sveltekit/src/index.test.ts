@@ -106,7 +106,7 @@ describe("handle", () => {
     });
     await expect(
       hook({ event: event(sessionCookie), resolve: () => new Response("page") }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/binding unreachable/);
   });
 });
 

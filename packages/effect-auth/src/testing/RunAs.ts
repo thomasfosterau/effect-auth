@@ -72,7 +72,7 @@ const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
 export const sessionFor = (
   user: Types.User,
   now: Date,
-  overrides?: Partial<Omit<Types.Session, "userId">> | undefined,
+  overrides?: Partial<Omit<Types.Session, "userId">>,
 ): Effect.Effect<Types.SessionWithUser, Schema.SchemaError> =>
   Effect.map(decodeMillis(now.getTime() + sessionLifetimeMillis), (expiresAt) => ({
     session: {

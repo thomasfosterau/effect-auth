@@ -444,7 +444,7 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     // An emailAddress-format NameID *is* the email claim; plenty of IdPs send
     // nothing else. It is inside the signature either way.
     const nameIdEmail =
-      profile.nameIDFormat?.endsWith(":emailAddress") === true && profile.nameID.includes("@")
+      profile.nameIDFormat?.endsWith(":emailAddress") && profile.nameID.includes("@")
         ? profile.nameID
         : undefined;
     const email = profile.email ?? profile.mail ?? pick(attributes, EMAIL_KEYS) ?? nameIdEmail;

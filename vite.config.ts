@@ -111,15 +111,13 @@ export default defineConfig({
       "typescript/no-base-to-string": "warn", // 23
       "oxc/no-map-spread": "warn", // 10
       "typescript/no-unnecessary-type-parameters": "warn", // 7
-      "typescript/no-unnecessary-type-assertion": "warn", // 7
-      "vitest/require-to-throw-message": "warn", // 6
+      "typescript/no-unnecessary-type-assertion": "warn", // 2
       "promise/always-return": "warn", // 5
-      "typescript/no-unnecessary-type-conversion": "warn", // 4
-      "typescript/no-useless-default-assignment": "warn", // 4
       "unicorn/no-array-sort": "warn", // 3
-      "typescript/unbound-method": "warn", // 3
-      "typescript/no-duplicate-type-constituents": "warn", // 4
-      "typescript/no-unnecessary-boolean-literal-compare": "warn", // 2
+      "typescript/unbound-method": "warn", // 1
+      // alchemy's lifecycle props are typed required but arrive `undefined`
+      // on a first deploy (`AuthSchema.ts`): the defaults are load-bearing.
+      "typescript/no-useless-default-assignment": "warn", // 3
       "typescript/no-misused-spread": "warn", // 2
       "typescript/restrict-template-expressions": "warn", // 2
       "promise/no-promise-in-callback": "warn", // 1

@@ -123,7 +123,7 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
       return invalidHash(`malformed parameter "${malformed.value.parameter}"`);
     }
     const costs: Record<string, number> = Rec.fromEntries(
-      Arr.map(pairs, ({ name = "", value }): readonly [string, number] => [
+      Arr.map(pairs, ({ name, value }): readonly [string, number] => [
         name,
         parsePositiveInt(value),
       ]),

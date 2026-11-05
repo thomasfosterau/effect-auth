@@ -83,7 +83,7 @@ export class EmailVerificationService extends Context.Service<
     readonly createVerification: (
       userId: string,
       email: string,
-      options?: CreateVerificationOptions | undefined,
+      options?: CreateVerificationOptions,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
       AuthError | EmailVerificationError | HookError
@@ -125,7 +125,7 @@ export class EmailVerificationService extends Context.Service<
     readonly resendVerification: (
       userId: string,
       email: string,
-      options?: CreateVerificationOptions | undefined,
+      options?: CreateVerificationOptions,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
       AuthError | RateLimitError | EmailVerificationError | HookError

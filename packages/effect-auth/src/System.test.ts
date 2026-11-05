@@ -110,7 +110,7 @@ const captureLogs = <A, E>(effect: Effect.Effect<A, E>) => {
   const records: Array<{ readonly level: string; readonly text: string }> = [];
   const collector = Logger.make((options) => {
     records.push({
-      level: String(options.logLevel),
+      level: options.logLevel,
       text: encodeJson(options.message),
     });
   });

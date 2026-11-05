@@ -147,8 +147,7 @@ export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): bool
   return Arr.every(
     entriesA,
     // SAFETY: `key in recordB` holds, so the read is defined.
-    ([key, valueA]) =>
-      key in recordB && attributeValueEquals(valueA, recordB[key] as AttributeValue),
+    ([key, valueA]) => key in recordB && attributeValueEquals(valueA, recordB[key]),
   );
 };
 

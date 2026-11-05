@@ -221,7 +221,7 @@ export const generateJwsKeyPair = (
 
   return {
     publicKeyJwk: { ...publicKey.export({ format: "jwk" }) },
-    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
 
@@ -254,7 +254,7 @@ export const verifyJws = (
 ): boolean => {
   // SAFETY: `jwk` is a JSON Web Key object (from a JWKS or a stored key pair);
   // `createPublicKey` validates its members and throws on a malformed key.
-  const key = crypto.createPublicKey({ key: jwk as crypto.webcrypto.JsonWebKey, format: "jwk" });
+  const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
   if (algorithm === "RS256") return crypto.verify("sha256", data, key, signature);
   if (algorithm === "ES256")
     return crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, signature);

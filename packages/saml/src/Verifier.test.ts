@@ -32,8 +32,8 @@ const REQUEST_ID = "_req00000000000000000000000000000001";
 const keyPair = () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   return {
-    publicPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
-    privatePem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    publicPem: publicKey.export({ type: "spki", format: "pem" }),
+    privatePem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
 

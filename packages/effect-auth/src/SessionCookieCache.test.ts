@@ -84,13 +84,15 @@ describe("resolveSessionCache", () => {
   });
 
   it("rejects an empty secret", () => {
-    expect(() => resolveSessionCache({ enabled: true, secret: Redacted.make("") })).toThrow();
+    expect(() => resolveSessionCache({ enabled: true, secret: Redacted.make("") })).toThrow(
+      /HMAC secret must be at least/,
+    );
   });
 
   it("rejects a short secret (< 32 chars)", () => {
-    expect(() =>
-      resolveSessionCache({ enabled: true, secret: Redacted.make("tooshort") }),
-    ).toThrow();
+    expect(() => resolveSessionCache({ enabled: true, secret: Redacted.make("tooshort") })).toThrow(
+      /HMAC secret must be at least/,
+    );
   });
 
   it("accepts a secret of exactly 32 chars", () => {
