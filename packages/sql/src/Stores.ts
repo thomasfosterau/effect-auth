@@ -17,8 +17,9 @@
  * `multiFactor`) and counters (`rateLimit.increment`,
  * `emailOtp.incrementAttempts`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. Multi-step writes (challenge, oauthState, emailOtp.upsert, and
- * identifier.replace's claim-then-release) run inside `sql.withTransaction`.
+ * races. Multi-step writes (challenge, oauthState, emailOtp.upsert,
+ * pendingMultiFactor.delete, and identifier.replace's claim-then-release) run
+ * inside `sql.withTransaction`.
  * `ON CONFLICT` targets a declared primary key or unique index. MySQL has no
  * `ON CONFLICT` clause, so these statements fail there, and MySQL is not a
  * supported dialect (#260). For MySQL, use `@thomasfosterau/effect-auth-drizzle`'s
@@ -1235,6 +1236,7 @@ export const makePendingMultiFactorStore: Effect.Effect<
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
+  const tx = makeTx(sql);
   return {
     create: (pending) =>
       asVoid(
@@ -1247,10 +1249,40 @@ export const makePendingMultiFactorStore: Effect.Effect<
         "pendingMultiFactor.get",
         sql<PendingMultiFactorRow>`SELECT * FROM auth_pending_multi_factor WHERE token = ${token}`,
       ).pipe(Effect.map((row) => (row ? rowToPendingMultiFactor(row) : null))),
+    // One atomic statement: count the attempt only for a challenge that
+    // exists, starting at 1 and incrementing in place after that.
+    recordFailedAttempt: (token) =>
+      firstRow(
+        "pendingMultiFactor.recordFailedAttempt",
+        sql<{ attempts: number }>`INSERT INTO auth_pending_multi_factor_attempts (token, attempts)
+            SELECT token, 1 FROM auth_pending_multi_factor WHERE token = ${token}
+            ON CONFLICT(token) DO UPDATE SET attempts = auth_pending_multi_factor_attempts.attempts + 1
+            RETURNING attempts`,
+      ).pipe(
+        Effect.flatMap((row) =>
+          row
+            ? Effect.succeed(row.attempts)
+            : Effect.fail(
+                new Auth.AuthError({ message: "Pending multi-factor challenge not found" }),
+              ),
+        ),
+      ),
+    // The challenge goes first: interrupted in between (D1 has no
+    // transactions), the leftover is an orphaned count, never a live
+    // challenge whose count was reset.
     delete: (token) =>
-      asVoid(
+      tx(
         "pendingMultiFactor.delete",
-        sql`DELETE FROM auth_pending_multi_factor WHERE token = ${token}`,
+        Effect.andThen(
+          asVoid(
+            "pendingMultiFactor.delete",
+            sql`DELETE FROM auth_pending_multi_factor WHERE token = ${token}`,
+          ),
+          asVoid(
+            "pendingMultiFactor.delete",
+            sql`DELETE FROM auth_pending_multi_factor_attempts WHERE token = ${token}`,
+          ),
+        ),
       ),
   } satisfies typeof Auth.MultiFactor.PendingMultiFactorStore.Service;
 });

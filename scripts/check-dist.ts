@@ -6,8 +6,9 @@
  * that imports Effect at module load. By default each package is
  * installed beside exactly the lowest `effect` its own range admits (its
  * floor): packages that share a floor share one scratch project, and a
- * package with a higher floor (effect-auth-alchemy's `>=4.0.0`, above the
- * programme's `>=4.0.0-rc.118`) gets a project of its own. Each project
+ * package with a higher floor (effect-auth-alchemy's `catalogs.alchemy-peers`
+ * range, when it sits above the programme's `catalogs.peers` one) gets a
+ * project of its own. Each project
  * imports every `exports` entry of its packages from the packed `dist/`, and
  * the project holding `@thomasfosterau/effect-auth` runs a behaviour phase.
  * A stale `dist/`, or source that calls an API the floor does not have, fails

@@ -12,7 +12,7 @@
 pnpm add @thomasfosterau/effect-auth-resend @thomasfosterau/effect-auth effect
 ```
 
-`effect` (`>=4.0.0-rc.118`) is a peer dependency. The sender needs only a global `fetch` and imports no `node:` module.
+`effect` (`>=4.1.0`) is a peer dependency. The sender needs only a global `fetch` and imports no `node:` module.
 
 ## Usage
 

@@ -19,6 +19,7 @@ import {
   Scope,
   String as Str,
 } from "effect";
+import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
 import type { AuthError, UserNotFoundError } from "../Errors.ts";
 import { HttpApiBuilder } from "effect/http-api";
@@ -3512,7 +3513,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           let clientSecret = payload.client_secret;
           const auth = request.headers["authorization"];
           if (auth !== undefined && auth.startsWith("Basic ")) {
-            const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
+            // Not base64: no Basic credentials, so the body's (if any) apply.
+            const decoded = Result.getOrElse(Base64.decodeString(auth.slice(6)), () => "");
             const sep = decoded.indexOf(":");
             if (sep >= 0) {
               clientId = decodeURIComponent(decoded.slice(0, sep));

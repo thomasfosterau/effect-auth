@@ -19,6 +19,7 @@ import {
   FileSystem,
   Layer,
   Logger,
+  MutableHashMap,
   Option,
   Order,
   Path,
@@ -456,6 +457,7 @@ const makeFixture = (
     delete: (userId) => Effect.sync(() => void multiFactorRecords.delete(userId)),
   };
   const pendingMultiFactors = new Map<string, PendingMultiFactor>();
+  const pendingMultiFactorAttempts = MutableHashMap.empty<string, number>();
   const pendingMultiFactorStore: typeof PendingMultiFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => {
@@ -463,7 +465,18 @@ const makeFixture = (
         return pending;
       }),
     get: (token) => Effect.sync(() => pendingMultiFactors.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void pendingMultiFactors.delete(token)),
+    recordFailedAttempt: (token) =>
+      Effect.sync(() => {
+        const attempts =
+          Option.getOrElse(MutableHashMap.get(pendingMultiFactorAttempts, token), () => 0) + 1;
+        MutableHashMap.set(pendingMultiFactorAttempts, token, attempts);
+        return attempts;
+      }),
+    delete: (token) =>
+      Effect.sync(() => {
+        pendingMultiFactors.delete(token);
+        MutableHashMap.remove(pendingMultiFactorAttempts, token);
+      }),
   };
 
   const accountTokens = new Map<string, AccountToken>();
@@ -2920,7 +2933,7 @@ describe("HTTP multi-session", () => {
 const parseCookieDirectives = (res: Response, name: string): Record<string, string | true> => {
   const found = Arr.findFirst(
     Arr.map(res.headers.getSetCookie(), (header) => header.split(/;\s*/)),
-    ([pair]) => pair?.startsWith(`${name}=`) === true,
+    ([pair]) => pair.startsWith(`${name}=`),
   );
   const out: Record<string, string | true> = {};
   if (Option.isNone(found)) return out;

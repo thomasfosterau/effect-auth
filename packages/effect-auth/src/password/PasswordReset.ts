@@ -1,4 +1,5 @@
-import { Clock, Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
 import { UserStore } from "../UserStore.ts";
@@ -127,7 +128,7 @@ export const make = (
   | PasswordHasher
   | SessionService
   | Hooks
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
@@ -142,7 +143,7 @@ export const make = (
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
     const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>

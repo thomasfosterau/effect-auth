@@ -12,6 +12,7 @@ Archetype **Server binding** (`.fallowrc.json` zone `server-bindings`, which may
 - **Resolution is the core's.** The cookieless skip, the fail-open and fail-closed directions and the outcome metric come from `SessionResolution`. The hook never derives an outcome itself, and `failure` has no default.
 - **The redirect target is always `safeRedirect`'s answer** (core `Redirect.ts`). It is never the raw query parameter.
 - **`Set-Cookie` is relayed through `event.cookies.set`**, attribute for attribute. Absent `HttpOnly` and `Secure` are passed as `false`, because SvelteKit would otherwise default them to `true`.
+- **A `202` never redirects.** It issued no session, so the action returns a `pending` result (the second-factor challenge, or `needsEmailVerification`) for the form's next step; only another 2xx relays cookies and redirects.
 - **Failures are distinguishable.** `400` and `401` map to `invalid`, `429` to `rate-limited` (with `Retry-After` seconds), and anything else, including the call throwing, to `unavailable`. Each kind has its own `fail` status. The password is never echoed back: `fields` is the caller's choice.
 
 ## Terms

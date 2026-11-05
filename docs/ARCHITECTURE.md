@@ -40,14 +40,14 @@ export class SessionService extends Context.Service<
 }
 
 // 2. The module-scoped constructor, for embedding in custom layers. Stores,
-//    Hooks, and Crypto are resolved once here — methods on the returned
+//    Hooks, and SecureRandom are resolved once here — methods on the returned
 //    object carry only the error channel (R = never).
 export const make = (config: Types.SessionConfig) =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
     const hooks = yield* Hooks;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     return { createSession: Effect.fn("SessionService.createSession")((...) => ...), ... };
   });
 ```
@@ -87,8 +87,9 @@ await Effect.runPromise(Effect.provide(program, layer));
   never`). Callers wire store layers into the service layer instead of
   providing stores per call.
 - `SessionService.layer` composes `PlatformCrypto.layer` (the default
-  `Crypto.Crypto` implementation) internally, so consumers don't provide
-  `Crypto` themselves unless they want to override it.
+  `SecureRandom.SecureRandom` and `Digest.Digest` implementations from
+  `effect/crypto`, over Web Crypto) internally, so consumers don't provide
+  them themselves unless they want to override them.
 - Constructors are module-scoped `make`/`layer` exports, not
   `makeFooService`/`FooServiceLayer` — disambiguate with a namespace import
   (`EmailPassword.make(config)`) when working inside the package; `X.layer`

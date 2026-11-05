@@ -194,6 +194,13 @@ export const schemaStatements: readonly string[] = [
   // `purgeExpired` deletes by expiry (#420).
   `CREATE INDEX IF NOT EXISTS auth_magic_links_expires_idx ON auth_magic_links (expires_at)`,
   `CREATE INDEX IF NOT EXISTS auth_email_otps_expires_idx ON auth_email_otps (expires_at)`,
+  // Wrong second-factor codes per pending challenge (#496). A table of its
+  // own rather than a column on `auth_pending_multi_factor`: SQLite has no
+  // `ADD COLUMN IF NOT EXISTS`, and every statement here must be idempotent.
+  `CREATE TABLE IF NOT EXISTS auth_pending_multi_factor_attempts (
+    token TEXT PRIMARY KEY,
+    attempts INTEGER NOT NULL
+  )`,
 ];
 
 /**

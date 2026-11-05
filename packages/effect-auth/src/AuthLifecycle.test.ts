@@ -1,5 +1,6 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
+import { Context, DateTime, Effect, Layer, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -182,7 +183,7 @@ const makeTestContext = async (
 ) => {
   const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 
-  const cryptoContext = Context.make(Crypto.Crypto, PlatformCrypto.instance);
+  const cryptoContext = Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance);
 
   const sessionManager = await Effect.runPromise(
     Effect.provide(

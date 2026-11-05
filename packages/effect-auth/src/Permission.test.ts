@@ -13,15 +13,15 @@ describe("Permission", () => {
     });
 
     it("throws on missing colon", () => {
-      expect(() => parsePermission("posts")).toThrow();
+      expect(() => parsePermission("posts")).toThrow(/must be in "resource:action" format/);
     });
 
     it("throws on empty resource", () => {
-      expect(() => parsePermission(":read")).toThrow();
+      expect(() => parsePermission(":read")).toThrow(/resource must not be empty/);
     });
 
     it("throws on empty action", () => {
-      expect(() => parsePermission("posts:")).toThrow();
+      expect(() => parsePermission("posts:")).toThrow(/action must not be empty/);
     });
 
     it("parses superadmin wildcard", () => {

@@ -1113,7 +1113,7 @@ const makeHttpFixture = () => {
 
   // `SsoService` only needs `SsoProviderStore` to construct; `OAuthStateStore`/
   // `OAuthUserStore`/`IdentifierStore`/`UserStore`/`SessionService`/
-  // `Crypto.Crypto` are required dynamically by its `signIn`/`handleCallback`
+  // `SecureRandom.SecureRandom` are required dynamically by its `signIn`/`handleCallback`
   // methods, and `OrganizationStore` is resolved optionally at call time — all
   // are provided here as ambient context.
   // SAML is resolved optionally by `SsoService`, so the HTTP fixture installs

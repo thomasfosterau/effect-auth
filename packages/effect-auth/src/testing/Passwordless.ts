@@ -5,9 +5,9 @@
  * Never published (`tsconfig.json` excludes this file; the rest of `src/testing/`
  * is the public `./testing` subpath).
  */
-import { Array as Arr, Crypto, DateTime, Effect, Predicate } from "effect";
+import { Array as Arr, DateTime, Effect, Predicate } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { vi } from "vite-plus/test";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 /** A `send` outcome as a caller sees it, apart from the time-dependent `retryAfter`. */
 export const observable = (
@@ -23,14 +23,13 @@ export const observable = (
     : { _tag: "Success" };
 
 /**
- * A deterministic `Crypto` whose every random byte is 0. Every random integer
- * it derives is the range's lower bound, so the only OTP it can produce is all
- * zeros. Digests are the platform's.
+ * A deterministic `SecureRandom` whose every random byte is 0. Every random
+ * integer it derives is the range's lower bound, so the only OTP it can
+ * produce is all zeros.
  */
-export const zeroCrypto: Crypto.Crypto = Crypto.make({
-  randomBytes: (size) => new Uint8Array(size),
-  digest: (algorithm, data) => PlatformCrypto.instance.digest(algorithm, data),
-});
+export const zeroCrypto: typeof SecureRandom.SecureRandom.Service = SecureRandom.make(
+  (size) => new Uint8Array(size),
+);
 
 /** A code no OTP matches: OTPs are digits only. */
 export const wrongCode = "not-a-code";

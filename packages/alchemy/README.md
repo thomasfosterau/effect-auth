@@ -30,10 +30,11 @@ deployment. D1 is SQLite, so the same tables and the same queries apply.
 pnpm add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect alchemy
 ```
 
-`alchemy` (`>=2.0.0-beta.80`) and `effect` (`>=4.0.0`) are required peer
-dependencies. The `effect` floor is 4.0.0 because alchemy beta.80 itself peers
-on `effect ^4.0.0`; the other effect-auth packages accept `effect`
-`>=4.0.0-rc.118`.
+`alchemy` (`>=2.0.0-beta.85`) and `effect` (`>=4.1.0`) are required peer
+dependencies. alchemy beta.85 is the first release on Effect 4.1's
+`effect/crypto` modules (beta.84 and earlier import `effect/Crypto`, which
+4.1 removed), and it peers on `effect ^4.1.0` itself; the other effect-auth
+packages share the same `effect` floor.
 `@thomasfosterau/effect-auth-sql` comes along as a dependency.
 
 ## Storage layers
@@ -241,7 +242,7 @@ export default Cloudflare.Worker(
 
 `@thomasfosterau/effect-auth-alchemy/postgres` is the Postgres counterpart of
 the D1 wiring, for an Alchemy app whose database is Postgres reached through
-Hyperdrive. It needs the optional peer `@effect/sql-pg` (`>=4.0.0`):
+Hyperdrive. It needs the optional peer `@effect/sql-pg` (`>=4.1.0`):
 
 ```sh
 pnpm add @effect/sql-pg

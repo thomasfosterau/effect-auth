@@ -12,6 +12,8 @@
  * @module token-hash
  */
 import { createHash, timingSafeEqual } from "node:crypto";
+import { Result } from "effect";
+import { Hex } from "effect/encoding";
 
 /**
  * SHA-256 hex digest of a token string.
@@ -38,7 +40,14 @@ export const timingSafeEqualBytes = (a: Uint8Array, b: Uint8Array): boolean => {
  * Constant-time comparison of two hex-encoded SHA-256 digests.
  *
  * Always compare hashes with this function rather than `===` to prevent
- * timing side-channels.
+ * timing side-channels. A value that is not hex equals nothing.
  */
-export const constantTimeHashEqual = (a: string, b: string): boolean =>
-  timingSafeEqualBytes(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+export const constantTimeHashEqual = (a: string, b: string): boolean => {
+  const left = Hex.decode(a);
+  const right = Hex.decode(b);
+  return (
+    Result.isSuccess(left) &&
+    Result.isSuccess(right) &&
+    timingSafeEqualBytes(left.success, right.success)
+  );
+};

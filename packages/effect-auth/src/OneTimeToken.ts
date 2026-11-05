@@ -12,7 +12,8 @@
  *
  * @module one-time-token
  */
-import { Clock, Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -137,11 +138,15 @@ export class OneTimeTokenService extends Context.Service<
 
 export const make = (
   config: OneTimeTokenConfig,
-): Effect.Effect<typeof OneTimeTokenService.Service, never, OneTimeTokenStore | Crypto.Crypto> =>
+): Effect.Effect<
+  typeof OneTimeTokenService.Service,
+  never,
+  OneTimeTokenStore | SecureRandom.SecureRandom
+> =>
   Effect.gen(function* () {
     const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
     const store = yield* OneTimeTokenStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
       randomBase64UrlToken(crypto);

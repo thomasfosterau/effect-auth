@@ -33,8 +33,8 @@
  *
  * ## Atomicity caveat
  *
- * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts` / the
- * secondary index updates) are implemented as read-modify-write, which is not
+ * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts`,
+ * `PendingMultiFactorStore.recordFailedAttempt` / the secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
  * the same count and only bump it once. This is acceptable for the KV
  * backend's intended use (best-effort rate limiting / attempt counting);
@@ -52,7 +52,9 @@ import {
   Order,
   Predicate,
   Schema,
+  Result,
 } from "effect";
+import { Base64 } from "effect/encoding";
 import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
@@ -86,8 +88,10 @@ const toAuthError =
       }`,
     });
 
-const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
-const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, "base64"));
+const toBase64 = (bytes: Uint8Array): string => Base64.encode(bytes);
+/** Bytes this module wrote with {@link toBase64}; a corrupted value decodes to no bytes. */
+const fromBase64 = (text: string): Uint8Array =>
+  Result.getOrElse(Base64.decode(text), () => new Uint8Array(0));
 
 /** Any JSON value to and from its JSON text; record shapes are this module's own. */
 const JsonText = Schema.fromJsonString(Schema.Unknown);
@@ -609,6 +613,7 @@ export const layerMemoryKeyValueStore: Layer.Layer<
           remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
           clear: Effect.sync(() => void MutableHashMap.clear(entries)),
           size: Effect.sync(() => MutableHashMap.size(entries)),
+          keys: Effect.sync(() => Arr.fromIterable(MutableHashMap.keys(entries))),
         }),
       ),
       Layer.succeed(KeyValueStoreKeys, {
@@ -760,6 +765,15 @@ export const purgeExpiredKV: Effect.Effect<
 const pendingMultiFactorKey = (token: string) => `pending-multi-factor:${token}`;
 
 /**
+ * A pending challenge as stored: the record plus its failed-attempt count, so
+ * deleting (or purging) the challenge drops the count with it. Records
+ * written before the count existed read as zero attempts.
+ */
+interface StoredPendingMultiFactor extends PendingMultiFactor {
+  readonly failedAttempts?: number | undefined;
+}
+
+/**
  * Build a {@link PendingMultiFactorStore} over the ambient `KeyValueStore`.
  */
 export const pendingMultiFactorStoreKV: Effect.Effect<
@@ -768,13 +782,41 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
+  const read = (token: string, label: string) =>
+    kv.read<StoredPendingMultiFactor>(pendingMultiFactorKey(token), label);
   return {
     create: (pending) =>
       kv
-        .write(pendingMultiFactorKey(pending.token), pending, "pendingMultiFactor.create")
+        .write(
+          pendingMultiFactorKey(pending.token),
+          { ...pending, failedAttempts: 0 } satisfies StoredPendingMultiFactor,
+          "pendingMultiFactor.create",
+        )
         .pipe(Effect.as(pending)),
     get: (token) =>
-      kv.read<PendingMultiFactor>(pendingMultiFactorKey(token), "pendingMultiFactor.get"),
+      read(token, "pendingMultiFactor.get").pipe(
+        Effect.map((stored) => {
+          if (stored === null) return null;
+          const { failedAttempts: _, ...pending } = stored;
+          return pending;
+        }),
+      ),
+    recordFailedAttempt: (token) =>
+      Effect.gen(function* () {
+        const stored = yield* read(token, "pendingMultiFactor.recordFailedAttempt");
+        if (stored === null) {
+          return yield* new Errors.AuthError({
+            message: "Pending multi-factor challenge not found",
+          });
+        }
+        const failedAttempts = (stored.failedAttempts ?? 0) + 1;
+        yield* kv.write(
+          pendingMultiFactorKey(token),
+          { ...stored, failedAttempts },
+          "pendingMultiFactor.recordFailedAttempt",
+        );
+        return failedAttempts;
+      }),
     delete: (token) => kv.remove(pendingMultiFactorKey(token), "pendingMultiFactor.delete"),
   } satisfies typeof PendingMultiFactorStore.Service;
 });

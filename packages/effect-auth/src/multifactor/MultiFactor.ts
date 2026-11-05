@@ -12,17 +12,9 @@
  * @module multi-factor
  */
 
-import {
-  Array as Arr,
-  Clock,
-  Config,
-  Context,
-  Crypto,
-  Data,
-  Effect,
-  Layer,
-  Redacted,
-} from "effect";
+import { Array as Arr, Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import { Hex } from "effect/encoding";
+import { SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
@@ -33,7 +25,7 @@ import { type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
@@ -99,7 +91,15 @@ export interface PendingMultiFactor {
 }
 
 /**
- * Storage interface for pending multi-factor challenges
+ * Storage interface for pending multi-factor challenges.
+ *
+ * `recordFailedAttempt` counts one wrong code against a challenge and
+ * resolves to the count so far, this one included; `MultiFactorService` calls
+ * it only for a challenge it just read, and deletes the challenge once the
+ * count reaches `MultiFactorConfig.maxFailedAttempts`. Make it a single atomic
+ * increment where the backend has one (the SQL store's is an
+ * `INSERT … ON CONFLICT … DO UPDATE … RETURNING`), so concurrent wrong codes
+ * cannot share a count. `delete` removes the challenge and its count.
  */
 export class PendingMultiFactorStore extends Context.Service<
   PendingMultiFactorStore,
@@ -108,6 +108,7 @@ export class PendingMultiFactorStore extends Context.Service<
       pending: PendingMultiFactor,
     ) => Effect.Effect<PendingMultiFactor, Errors.AuthError>;
     readonly get: (token: string) => Effect.Effect<PendingMultiFactor | null, Errors.AuthError>;
+    readonly recordFailedAttempt: (token: string) => Effect.Effect<number, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/PendingMultiFactorStore") {}
@@ -124,6 +125,14 @@ export interface MultiFactorConfig {
   readonly backupCodeCount?: number;
   /** Lifetime of a pending challenge in milliseconds (default: 5 minutes) */
   readonly pendingExpiresIn?: number;
+  /**
+   * Wrong codes (TOTP and backup codes together) one pending challenge
+   * accepts before it is deleted (default: 5). The attempt that reaches the
+   * cap, and every later one against the same token, answers exactly as a
+   * wrong code does, so a caller cannot tell a capped challenge from a wrong
+   * code; the user signs in again for a fresh challenge.
+   */
+  readonly maxFailedAttempts?: number | undefined;
   /**
    * Mark the record verified immediately on enable, skipping the
    * `confirmEnable` TOTP confirmation step (default: false).
@@ -311,6 +320,12 @@ export const multiFactorConfig = Config.all({
   ),
 });
 
+/** The answer to a wrong TOTP code, and to any code against an unknown challenge. */
+const invalidTotpCode = "Invalid multi-factor code";
+
+/** The answer to a wrong backup code, and to any code against an unknown challenge. */
+const invalidBackupCode = "Invalid backup code";
+
 /**
  * Normalize a backup code for hashing/comparison (strip separators and
  * whitespace, lowercase) so `xxxxx-xxxxx` and `xxxxxxxxxx` both match.
@@ -326,17 +341,10 @@ export const hashBackupCode = (code: string): string => hashToken(normalizeBacku
  * Find the index of a backup-code hash using timing-safe comparison.
  * Scans the full list (no early exit) to avoid leaking the match position.
  */
-const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): number => {
-  const candidate = Buffer.from(candidateHash, "hex");
-  return Arr.reduce(hashes, -1, (match, hash, i) => {
-    const stored = Buffer.from(hash, "hex");
-    return stored.length === candidate.length &&
-      timingSafeEqualBytes(stored, candidate) &&
-      match === -1
-      ? i
-      : match;
-  });
-};
+const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): number =>
+  Arr.reduce(hashes, -1, (match, hash, i) =>
+    constantTimeHashEqual(hash, candidateHash) && match === -1 ? i : match,
+  );
 
 /**
  * Create a multi-factor service
@@ -353,7 +361,7 @@ export const make = (
   | PasswordHasher
   | UserStore
   | SessionService
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const backupCodeCount = config.backupCodeCount ?? 10;
@@ -373,7 +381,20 @@ export const make = (
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const sessionManager = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
+    const maxFailedAttempts = config.maxFailedAttempts ?? 5;
+
+    /**
+     * Count a wrong code against a pending challenge, deleting the challenge
+     * on the attempt that reaches `maxFailedAttempts`, then fail with the
+     * method's own wrong-code message.
+     */
+    const rejectCode = (pendingToken: string, message: string) =>
+      Effect.gen(function* () {
+        const attempts = yield* pendingStore.recordFailedAttempt(pendingToken);
+        if (attempts >= maxFailedAttempts) yield* pendingStore.delete(pendingToken);
+        return yield* new MultiFactorError({ message });
+      });
 
     /**
      * Generate a cryptographically secure pending-challenge token
@@ -388,7 +409,7 @@ export const make = (
     const generateBackupCode = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(5).pipe(
         Effect.map((bytes) => {
-          const raw = Buffer.from(bytes).toString("hex");
+          const raw = Hex.encode(bytes);
           return `${raw.slice(0, 5)}-${raw.slice(5)}`;
         }),
         Effect.mapError(
@@ -420,15 +441,16 @@ export const make = (
     /**
      * Resolve a pending challenge token, enforcing expiry. Expired tokens are
      * deleted eagerly; the token itself is only consumed on successful
-     * verification (see verifyTotp/verifyBackupCode).
+     * verification (see verifyTotp/verifyBackupCode). An unknown token fails
+     * with `invalidCode`, the method's wrong-code message, because a
+     * challenge deleted at the attempt cap is unknown from then on and must
+     * answer as a wrong code does.
      */
-    const resolvePending = (pendingToken: string) =>
+    const resolvePending = (pendingToken: string, invalidCode: string) =>
       Effect.gen(function* () {
         const pending = yield* pendingStore.get(pendingToken);
         if (!pending) {
-          return yield* new MultiFactorError({
-            message: "Invalid or expired multi-factor challenge token",
-          });
+          return yield* new MultiFactorError({ message: invalidCode });
         }
 
         if ((yield* Clock.currentTimeMillis) > pending.expiresAt) {
@@ -578,16 +600,14 @@ export const make = (
       verifyTotp: Effect.fn("MultiFactorService.verifyTotp")(
         (pendingToken: string, code: string, options?: MultiFactorVerifyOptions) =>
           Effect.gen(function* () {
-            const pending = yield* resolvePending(pendingToken);
+            const pending = yield* resolvePending(pendingToken, invalidTotpCode);
             const record = yield* getVerifiedRecord(pending.userId);
 
             const plainSecret =
               cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
             const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
             if (matchedCounter === null) {
-              return yield* new MultiFactorError({
-                message: "Invalid multi-factor code",
-              });
+              return yield* rejectCode(pendingToken, invalidTotpCode);
             }
 
             // Reject replays: a code whose matched counter has already been used.
@@ -624,14 +644,12 @@ export const make = (
       verifyBackupCode: Effect.fn("MultiFactorService.verifyBackupCode")(
         (pendingToken: string, code: string, options?: MultiFactorVerifyOptions) =>
           Effect.gen(function* () {
-            const pending = yield* resolvePending(pendingToken);
+            const pending = yield* resolvePending(pendingToken, invalidBackupCode);
             const record = yield* getVerifiedRecord(pending.userId);
 
             const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
             if (index === -1) {
-              return yield* new MultiFactorError({
-                message: "Invalid backup code",
-              });
+              return yield* rejectCode(pendingToken, invalidBackupCode);
             }
 
             // Remove the used code (single use)

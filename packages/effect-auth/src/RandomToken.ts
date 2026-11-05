@@ -3,18 +3,20 @@
  * Internal: not exported from any barrel.
  */
 
-import { type Crypto, Effect } from "effect";
+import { Effect } from "effect";
+import { Base64Url } from "effect/encoding";
+import type { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 
 /**
- * A 256-bit random token, base64url-encoded, drawn from the `Crypto` service.
+ * A 256-bit random token, base64url-encoded, drawn from the `SecureRandom` service.
  * A failure to draw randomness becomes an `AuthError` with `failureMessage`.
  */
 export const randomBase64UrlToken = (
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
   failureMessage = "Failed to generate token",
 ): Effect.Effect<string, Errors.AuthError> =>
   crypto.randomBytes(32).pipe(
-    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    Effect.map(Base64Url.encode),
     Effect.mapError((cause) => new Errors.AuthError({ message: failureMessage, cause })),
   );

@@ -17,7 +17,6 @@ import {
   Array as Arr,
   Clock,
   Context,
-  Crypto,
   Data,
   DateTime,
   Duration,
@@ -25,6 +24,7 @@ import {
   Layer,
   Order,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
@@ -270,7 +270,12 @@ export const make = (
 ): Effect.Effect<
   typeof PhoneOtpService.Service,
   never,
-  PhoneOtpStore | PhoneOtpUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
+  | PhoneOtpStore
+  | PhoneOtpUserStore
+  | IdentifierStore
+  | UserStore
+  | SessionService
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -283,14 +288,14 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
     /** Generate a numeric OTP with crypto-secure, unbiased randomness. */
     const generateOtp = (length: number): Effect.Effect<string> =>
       Effect.map(
         Effect.replicateEffect(
-          crypto.randomIntBetween(0, 10, { halfOpen: true }),
+          crypto.intBetween(0, 10, { halfOpen: true }),
           // The iteration count of `for (let i = 0; i < length; i++)`.
           Math.max(0, Math.ceil(length)),
           { concurrency: 1 },

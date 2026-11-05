@@ -29,7 +29,7 @@ Batteries-included authentication and authorization for [Effect](https://effect.
 pnpm add @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.118`; `>=4.0.0` for effect-auth-alchemy). Add a storage adapter, a vendor adapter or the client as you need them; each package's README lists its own peers.
+`effect` is a peer dependency (`>=4.1.0`). Add a storage adapter, a vendor adapter or the client as you need them; each package's README lists its own peers.
 
 ## Example
 

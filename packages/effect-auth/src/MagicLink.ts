@@ -8,7 +8,8 @@
  *
  * @module magic-link
  */
-import { Clock, Context, Crypto, DateTime, Duration, Effect, Layer } from "effect";
+import { Clock, Context, DateTime, Duration, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import {
@@ -132,7 +133,7 @@ export interface MagicLinkResult {
 /**
  * Magic link service.
  *
- * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `Crypto`.
+ * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -185,7 +186,7 @@ export class MagicLinkService extends Context.Service<
  * Generate a cryptographically secure magic link token
  */
 export const generateMagicLinkToken = (
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
 ): Effect.Effect<string, Errors.AuthError> =>
   randomBase64UrlToken(crypto, "Failed to generate magic link token");
 
@@ -203,7 +204,7 @@ export const make = (
   | UserStore
   | SessionService
   | EmailPasswordStore
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
@@ -215,7 +216,7 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
     return {

@@ -32,8 +32,8 @@ const REQUEST_ID = "_req00000000000000000000000000000001";
 const keyPair = () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   return {
-    publicPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
-    privatePem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    publicPem: publicKey.export({ type: "spki", format: "pem" }),
+    privatePem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
 
@@ -140,6 +140,12 @@ const flip = (xml: string, overrides: Partial<SamlVerifyInput> = {}): Promise<Sa
   Effect.runPromise(Effect.flip(verifier.verify(input(xml, overrides))));
 
 describe("SamlVerifier.verify — happy path", () => {
+  it("accepts a SAMLResponse whose base64 the IdP line-wrapped", async () => {
+    const wrapped = encode(validResponse()).replace(/(.{76})/gu, "$1\r\n");
+    const assertion = await run(verifier.verify({ ...input(""), samlResponse: wrapped }));
+    expect(assertion.nameId).toBe("worker@acme.test");
+  });
+
   it("accepts a correctly signed assertion and returns only signed data", async () => {
     const assertion = await run(verifier.verify(input(validResponse())));
 
@@ -334,6 +340,13 @@ describe("SamlVerifier.verify — algorithms and encryption", () => {
     const err = await flip(encrypted);
     expect(err.message).toMatch(/not supported/);
     expect(err.message).toMatch(/signed, unencrypted/);
+  });
+
+  it("rejects a SAMLResponse that is not base64", async () => {
+    const err = await Effect.runPromise(
+      Effect.flip(verifier.verify({ ...input(""), samlResponse: "not*base64!" })),
+    );
+    expect(err.message).toMatch(/not valid base64/);
   });
 
   it("rejects input that is not a SAML response at all", async () => {

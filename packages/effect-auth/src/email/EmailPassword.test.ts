@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, DateTime, Effect, Layer, Order, Result } from "effect";
+import { Array as Arr, Context, DateTime, Effect, Layer, Order, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as Errors from "../Errors.ts";
@@ -120,7 +121,7 @@ const makeTestContext = async (
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
@@ -138,7 +139,7 @@ const makeTestContext = async (
           ),
           Context.merge(
             Context.make(IdentifierStore, identifierStore),
-            Context.make(Crypto.Crypto, PlatformCrypto.instance),
+            Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
           ),
         ),
       ),
@@ -373,7 +374,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -390,7 +391,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, identifierStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ),
     );
@@ -441,7 +442,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -458,7 +459,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, identifierStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ),
     );
@@ -852,7 +853,7 @@ describe("EmailPasswordService - dangling session protection", () => {
             Context.make(SessionStore, localSessionStore),
             Context.make(UserStore, localUserStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -868,7 +869,7 @@ describe("EmailPasswordService - dangling session protection", () => {
             Context.make(UserStore, localUserStore),
             Context.make(IdentifierStore, localIdentifierStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ),
     );
@@ -1047,7 +1048,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -1064,7 +1065,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, identifierStore),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
         ),
       ),
     );

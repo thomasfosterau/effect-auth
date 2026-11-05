@@ -12,7 +12,8 @@
  * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
-import { Array as Arr, Clock, Context, Crypto, Data, DateTime, Effect, Layer } from "effect";
+import { Array as Arr, Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -195,7 +196,11 @@ const make = (
 ): Effect.Effect<
   typeof AccountManagementService.Service,
   never,
-  AccountManagementStore | UserServiceStore | IdentifierStore | SessionService | Crypto.Crypto
+  | AccountManagementStore
+  | UserServiceStore
+  | IdentifierStore
+  | SessionService
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
@@ -206,7 +211,7 @@ const make = (
     const identifiers = yield* IdentifierStore;
     const store = yield* AccountManagementStore;
     const sessions = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const generateToken = (): Effect.Effect<string, Errors.AuthError> =>
       randomBase64UrlToken(crypto);

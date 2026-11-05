@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Crypto, DateTime, Effect, Layer, Predicate, Redacted, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Predicate, Redacted, Schema } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
 import {
@@ -67,7 +68,7 @@ const StateStoreLive = () => {
 };
 
 const runWithState = <A, E>(
-  eff: Effect.Effect<A, E, OAuthStateStore | Crypto.Crypto>,
+  eff: Effect.Effect<A, E, OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest>,
 ): Promise<A> =>
   Effect.runPromise(
     eff.pipe(Effect.provide(Layer.mergeAll(StateStoreLive(), PlatformCrypto.layer))),

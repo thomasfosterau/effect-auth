@@ -43,18 +43,9 @@
  * @module organization
  */
 
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Crypto,
-  Data,
-  Effect,
-  Layer,
-  Option,
-  Order,
-  Result,
-} from "effect";
+import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Order, Result } from "effect";
+import { Hex } from "effect/encoding";
+import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
@@ -1060,7 +1051,7 @@ export const make = (
 ): Effect.Effect<
   typeof OrganizationService.Service,
   never,
-  OrganizationStore | IdentifierStore | Crypto.Crypto
+  OrganizationStore | IdentifierStore | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
@@ -1072,7 +1063,7 @@ export const make = (
 
     const store = yield* OrganizationStore;
     const identifiers = yield* IdentifierStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     /**
      * Domains are an optional half of the module: resolved from ambient
@@ -1086,7 +1077,7 @@ export const make = (
     /** Generate a random identifier for organizations, members, and invitations. */
     const generateId = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(16).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.map(Hex.encode),
         Effect.mapError(
           (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
         ),

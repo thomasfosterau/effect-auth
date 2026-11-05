@@ -7,7 +7,8 @@
  * House module pattern: store tag + `Context.Service` tag + `make*` +
  * `*ServiceLayer`, module-local `Data.TaggedError`s, epoch-ms timestamps.
  */
-import { Clock, Context, Crypto, Data, Effect, Layer } from "effect";
+import { Clock, Context, Data, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
@@ -183,12 +184,12 @@ const DEFAULT_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ0123456789";
 
 /** Generate a random code by drawing each character via unbiased rejection sampling. */
 const randomCode = (
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
   length: number,
   alphabet: string,
 ): Effect.Effect<string> =>
   Effect.replicateEffect(
-    Effect.map(crypto.randomIntBetween(0, alphabet.length, { halfOpen: true }), (index) =>
+    Effect.map(crypto.intBetween(0, alphabet.length, { halfOpen: true }), (index) =>
       alphabet.charAt(index),
     ),
     length,
@@ -210,7 +211,7 @@ const make = (
 ): Effect.Effect<
   typeof DeviceAuthorizationService.Service,
   never,
-  DeviceAuthorizationStore | SessionService | Crypto.Crypto
+  DeviceAuthorizationStore | SessionService | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 30 * 60 * 1000;
@@ -220,7 +221,7 @@ const make = (
 
     const store = yield* DeviceAuthorizationStore;
     const sessionManager = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const generateDeviceCode = (): Effect.Effect<string, Errors.AuthError> =>
       randomBase64UrlToken(crypto, "Failed to generate device code");

@@ -21,7 +21,6 @@ import {
   Array as Arr,
   Clock,
   Context,
-  Crypto,
   Data,
   Effect,
   HashMap,
@@ -33,6 +32,8 @@ import {
   Redacted,
   String as Str,
 } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
+import { Base64Url, Hex } from "effect/encoding";
 import { AuthError } from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { JwtService } from "./Jwt.ts";
@@ -802,7 +803,8 @@ export const make = (
   | UserStore
   | IdentifierStore
   | JwtService
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
@@ -860,26 +862,24 @@ export const make = (
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const jwt = yield* JwtService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
+    const digest = yield* Digest.Digest;
 
     const randomToken = (): Effect.Effect<string, AuthError> => randomBase64UrlToken(crypto);
 
     const randomClientId = (): Effect.Effect<string, AuthError> =>
       crypto.randomBytes(16).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.map(Hex.encode),
         Effect.mapError(
           (cause) => new AuthError({ message: "Failed to generate client id", cause }),
         ),
       );
 
     /** SHA-256 digest of the PKCE code verifier, base64url-encoded. */
-    const hashCodeVerifier = (verifier: string): Effect.Effect<string, AuthError> =>
-      crypto.digest("SHA-256", new TextEncoder().encode(verifier)).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new AuthError({ message: "Failed to hash code verifier", cause }),
-        ),
-      );
+    const hashCodeVerifier = (verifier: string): Effect.Effect<string> =>
+      digest
+        .digest(Digest.sha256, new TextEncoder().encode(verifier))
+        .pipe(Effect.map(Base64Url.encode));
 
     const getClient = (clientId: string) =>
       Effect.gen(function* () {

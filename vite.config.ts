@@ -73,6 +73,18 @@ export default defineConfig({
           ],
         },
       ],
+      // Core and the Workers-safe adapters run outside Node, so the Node
+      // `Buffer` global is off-limits outside the `node:crypto` corral and
+      // Node-only code (#481): use `effect/encoding`, `TextEncoder` and
+      // `Uint8Array`.
+      "eslint/no-restricted-globals": [
+        "error",
+        {
+          name: "Buffer",
+          message:
+            "Use `effect/encoding` (Base64, Base64Url, Hex), `TextEncoder` or `Uint8Array`: `Buffer` is a Node global.",
+        },
+      ],
       // Vitest's `expect(value, message)` takes the failure message second.
       "vitest/valid-expect": ["error", { maxArgs: 2 }],
       // It reads every two-argument `.catch(…)` as `Promise.prototype.catch`,
@@ -99,15 +111,13 @@ export default defineConfig({
       "typescript/no-base-to-string": "warn", // 23
       "oxc/no-map-spread": "warn", // 10
       "typescript/no-unnecessary-type-parameters": "warn", // 7
-      "typescript/no-unnecessary-type-assertion": "warn", // 7
-      "vitest/require-to-throw-message": "warn", // 6
+      "typescript/no-unnecessary-type-assertion": "warn", // 2
       "promise/always-return": "warn", // 5
-      "typescript/no-unnecessary-type-conversion": "warn", // 4
-      "typescript/no-useless-default-assignment": "warn", // 4
       "unicorn/no-array-sort": "warn", // 3
-      "typescript/unbound-method": "warn", // 3
-      "typescript/no-duplicate-type-constituents": "warn", // 4
-      "typescript/no-unnecessary-boolean-literal-compare": "warn", // 2
+      "typescript/unbound-method": "warn", // 1
+      // alchemy's lifecycle props are typed required but arrive `undefined`
+      // on a first deploy (`AuthSchema.ts`): the defaults are load-bearing.
+      "typescript/no-useless-default-assignment": "warn", // 3
       "typescript/no-misused-spread": "warn", // 2
       "typescript/restrict-template-expressions": "warn", // 2
       "promise/no-promise-in-callback": "warn", // 1
@@ -173,6 +183,7 @@ export default defineConfig({
           "effect/use-http-client-service": "off",
           "effect/use-path-service": "off",
           "effect/use-temp-file-scoped": "off",
+          "eslint/no-restricted-globals": "off",
         },
       },
       {
@@ -258,7 +269,7 @@ export default defineConfig({
           "packages/effect-auth/src/TokenHash.ts",
           "packages/effect-auth/src/Cipher.ts",
         ],
-        rules: { "effect/avoid-node-imports": "off" },
+        rules: { "effect/avoid-node-imports": "off", "eslint/no-restricted-globals": "off" },
       },
       {
         // Decoders, guards and sinks over untrusted input take `unknown`: that

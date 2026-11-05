@@ -10,7 +10,6 @@ import {
   Clock,
   Config,
   Context,
-  Crypto,
   Data,
   DateTime,
   Effect,
@@ -20,6 +19,7 @@ import {
   Redacted,
   Schema,
 } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
@@ -227,7 +227,7 @@ export interface OAuthProvider {
   ) => Effect.Effect<
     AuthorizationUrlResult,
     OAuthProviderError | AuthError,
-    OAuthStateStore | Crypto.Crypto
+    OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest
   >;
   readonly exchangeCode: (
     code: string,
@@ -341,9 +341,9 @@ export class OAuthUserStore extends Context.Service<
 /**
  * Generate a cryptographically secure random state parameter
  */
-export const generateState = (): Effect.Effect<string, never, Crypto.Crypto> =>
+export const generateState = (): Effect.Effect<string, never, SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     return yield* crypto.randomBytes(32).pipe(
       Effect.orDie,
       Effect.map((bytes) => Base64Url.encode(bytes)),
@@ -356,15 +356,17 @@ export const generateState = (): Effect.Effect<string, never, Crypto.Crypto> =>
 export const generatePKCE = (): Effect.Effect<
   { codeVerifier: string; codeChallenge: string },
   never,
-  Crypto.Crypto
+  SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
-    const codeVerifierBytes = yield* crypto.randomBytes(32).pipe(Effect.orDie);
+    const crypto = yield* SecureRandom.SecureRandom;
+    const digest = yield* Digest.Digest;
+    const codeVerifierBytes = yield* crypto.randomBytes(32);
     const codeVerifier = Base64Url.encode(codeVerifierBytes);
-    const codeChallengeBytes = yield* crypto
-      .digest("SHA-256", new TextEncoder().encode(codeVerifier))
-      .pipe(Effect.orDie);
+    const codeChallengeBytes = yield* digest.digest(
+      Digest.sha256,
+      new TextEncoder().encode(codeVerifier),
+    );
     const codeChallenge = Base64Url.encode(codeChallengeBytes);
     return { codeVerifier, codeChallenge };
   });
@@ -373,9 +375,9 @@ export const generatePKCE = (): Effect.Effect<
  * Generate a cryptographically secure random nonce for OIDC id_token replay
  * protection.
  */
-export const generateNonce = (): Effect.Effect<string, never, Crypto.Crypto> =>
+export const generateNonce = (): Effect.Effect<string, never, SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     return yield* crypto.randomBytes(16).pipe(
       Effect.orDie,
       Effect.map((bytes) => Base64Url.encode(bytes)),
@@ -1027,7 +1029,8 @@ export const make = (
   | IdentifierStore
   | UserStore
   | SessionService
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
@@ -1047,7 +1050,8 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const coreUsers = yield* UserStore;
     const sessionManager = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
+    const digest = yield* Digest.Digest;
 
     const randomAccountId = (): Effect.Effect<string, AuthError> =>
       crypto.randomBytes(16).pipe(
@@ -1211,7 +1215,8 @@ export const make = (
               .generateAuthorizationUrl(options?.scopes)
               .pipe(
                 Effect.provideService(OAuthStateStore, stateStore),
-                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.provideService(SecureRandom.SecureRandom, crypto),
+                Effect.provideService(Digest.Digest, digest),
               );
 
             // Update state with returnTo if provided

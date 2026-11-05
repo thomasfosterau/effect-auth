@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, Crypto, Data, Effect, Order, Schema } from "effect";
+import { Array as Arr, Clock, Context, Data, Effect, Order, Schema } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
 import * as WebAuthn from "./WebAuthn.ts";
@@ -90,12 +91,25 @@ const testUser: WebAuthnUser = {
   displayName: "Test User",
 };
 
+// `Digest.layerWebCrypto` builds synchronously, from the `WebCrypto` reference.
+const platformDigest = Effect.runSync(
+  Effect.provide(
+    Effect.gen(function* () {
+      return yield* Digest.Digest;
+    }),
+    Digest.layerWebCrypto,
+  ),
+);
+
 const dependencies = Context.merge(
   Context.merge(
     Context.make(ChallengeStore, mockChallengeStore),
     Context.make(CredentialStore, mockCredentialStore),
   ),
-  Context.make(Crypto.Crypto, PlatformCrypto.instance),
+  Context.merge(
+    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+    Context.make(Digest.Digest, platformDigest),
+  ),
 );
 
 describe("WebAuthn Service", () => {

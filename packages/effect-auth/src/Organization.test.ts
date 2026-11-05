@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, Crypto, DateTime, Effect, Order, Result } from "effect";
+import { Array as Arr, Clock, Context, DateTime, Effect, Order, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   IdentifierStore,
@@ -254,7 +255,7 @@ const baseContext = Context.merge(
     Context.make(OrganizationStore, organizationStore),
     Context.make(IdentifierStore, memoryIdentifierStore(identifierRecords)),
   ),
-  Context.make(Crypto.Crypto, PlatformCrypto.instance),
+  Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
 );
 
 const testContext = Context.merge(
@@ -264,11 +265,11 @@ const testContext = Context.merge(
 
 /** Run against an explicit context - used to exercise "domains not enabled". */
 const runServiceIn = <A, E>(
-  context: Context.Context<OrganizationStore | IdentifierStore | Crypto.Crypto>,
+  context: Context.Context<OrganizationStore | IdentifierStore | SecureRandom.SecureRandom>,
   config: OrganizationConfig,
   program: (
     service: typeof OrganizationService.Service,
-  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore | Crypto.Crypto>,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore | SecureRandom.SecureRandom>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(

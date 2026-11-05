@@ -58,7 +58,7 @@ export const authClientPlugin: Plugin<[AuthClientPluginOptions]> = {
  * `client` prop takes precedence over injection. Throws a message naming all
  * three ways to supply a client when none is found.
  */
-export const useAuthClient = (override?: AuthClient | undefined): AuthClient => {
+export const useAuthClient = (override?: AuthClient): AuthClient => {
   const injected = inject(authClientKey, null);
   const client = override ?? injected;
   if (client === null) throw new Error(missingClientMessage);

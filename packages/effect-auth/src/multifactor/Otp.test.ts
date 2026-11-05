@@ -7,7 +7,7 @@ describe("OTP Secret Generation", () => {
   it("should generate random bytes", async () => {
     const secret = await Effect.runPromise(Otp.generateSecret(PlatformCrypto.instance, 20));
 
-    expect(secret).toBeInstanceOf(Buffer);
+    expect(secret).toBeInstanceOf(Uint8Array);
     expect(secret.length).toBe(20);
   });
 
@@ -15,7 +15,7 @@ describe("OTP Secret Generation", () => {
     const secret1 = await Effect.runPromise(Otp.generateSecret(PlatformCrypto.instance, 20));
     const secret2 = await Effect.runPromise(Otp.generateSecret(PlatformCrypto.instance, 20));
 
-    expect(secret1.equals(secret2)).toBe(false);
+    expect(secret1).not.toEqual(secret2);
   });
 
   it("should generate base32-encoded secret", async () => {
@@ -34,7 +34,7 @@ describe("Base32 Encoding/Decoding", () => {
     const encoded = Otp.encodeBase32(original);
     const decoded = await Effect.runPromise(Otp.decodeBase32(encoded));
 
-    expect(decoded.toString()).toBe(original.toString());
+    expect(new TextDecoder().decode(decoded)).toBe(original.toString());
   });
 
   it("should handle empty buffer", async () => {
@@ -42,7 +42,7 @@ describe("Base32 Encoding/Decoding", () => {
     const encoded = Otp.encodeBase32(original);
     const decoded = await Effect.runPromise(Otp.decodeBase32(encoded));
 
-    expect(decoded.toString()).toBe("");
+    expect(new TextDecoder().decode(decoded)).toBe("");
   });
 
   it("should decode lowercase base32", async () => {
@@ -52,7 +52,7 @@ describe("Base32 Encoding/Decoding", () => {
     const decodedUpper = await Effect.runPromise(Otp.decodeBase32(uppercase));
     const decodedLower = await Effect.runPromise(Otp.decodeBase32(lowercase));
 
-    expect(decodedUpper.equals(decodedLower)).toBe(true);
+    expect(decodedUpper).toEqual(decodedLower);
   });
 
   it("should handle padding characters", async () => {
@@ -62,7 +62,7 @@ describe("Base32 Encoding/Decoding", () => {
     const decoded1 = await Effect.runPromise(Otp.decodeBase32(withPadding));
     const decoded2 = await Effect.runPromise(Otp.decodeBase32(withoutPadding));
 
-    expect(decoded1.equals(decoded2)).toBe(true);
+    expect(decoded1).toEqual(decoded2);
   });
 
   it("should fail on invalid base32 characters", async () => {

@@ -508,8 +508,5 @@ export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
     );
   }
 
-  // SAFETY: the local class's Self brand can never equal the shared interface's —
-  // the cast erases only that brand. Runtime identity lives in the unique
-  // tag id, which the cast does not touch; the type identity is `Id`.
-  return AuthorizationMiddleware as AuthorizationMiddlewareClass<R, Id>;
+  return AuthorizationMiddleware;
 };

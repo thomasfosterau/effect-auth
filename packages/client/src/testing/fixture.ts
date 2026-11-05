@@ -7,7 +7,7 @@
  */
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Http from "@thomasfosterau/effect-auth/http";
-import { Array as Arr, Clock, DateTime, Effect, Layer } from "effect";
+import { Array as Arr, Clock, DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -212,11 +212,23 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   };
 
   const pendingMultiFactors = new Map<string, Auth.MultiFactor.PendingMultiFactor>();
+  const pendingMultiFactorAttempts = MutableHashMap.empty<string, number>();
   const pendingMultiFactorStore: typeof Auth.MultiFactor.PendingMultiFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => (pendingMultiFactors.set(pending.token, pending), pending)),
     get: (token) => Effect.sync(() => pendingMultiFactors.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void pendingMultiFactors.delete(token)),
+    recordFailedAttempt: (token) =>
+      Effect.sync(() => {
+        const attempts =
+          Option.getOrElse(MutableHashMap.get(pendingMultiFactorAttempts, token), () => 0) + 1;
+        MutableHashMap.set(pendingMultiFactorAttempts, token, attempts);
+        return attempts;
+      }),
+    delete: (token) =>
+      Effect.sync(() => {
+        pendingMultiFactors.delete(token);
+        MutableHashMap.remove(pendingMultiFactorAttempts, token);
+      }),
   };
 
   const phoneRecords = new Map<string, Auth.PhoneOtpRecord>();
