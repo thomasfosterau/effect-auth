@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, Crypto, DateTime, Effect, Redacted, Result } from "effect";
+import { Array as Arr, Clock, Context, DateTime, Effect, Redacted, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService, make as makeSessionService } from "../SessionService.ts";
@@ -135,7 +136,7 @@ const makeTestContext = async () => {
       makeSessionService(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
@@ -158,7 +159,7 @@ const makeTestContext = async () => {
                 Context.make(PendingMultiFactorStore, pendingMultiFactorStore),
                 Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
               ),
-              Context.make(Crypto.Crypto, PlatformCrypto.instance),
+              Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
             ),
           ),
         ),

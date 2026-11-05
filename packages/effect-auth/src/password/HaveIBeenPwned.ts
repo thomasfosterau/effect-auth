@@ -12,7 +12,9 @@
  *
  * @module plugins/hibp
  */
-import { Array as Arr, Crypto, Effect, Option } from "effect";
+import { Array as Arr, Effect, Option } from "effect";
+import { Digest } from "effect/crypto";
+import { Hex } from "effect/encoding";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
@@ -30,8 +32,8 @@ const RANGE_URL = "https://api.pwnedpasswords.com/range";
 
 /**
  * Build the HIBP plugin. The resulting layer is
- * `Layer<Hooks, never, Hooks | HttpClient | Crypto.Crypto>` — provide
- * `FetchHttpClient.layer` (or a stub) and a `Crypto.Crypto` layer to satisfy
+ * `Layer<Hooks, never, Hooks | HttpClient | Digest.Digest>` — provide
+ * `FetchHttpClient.layer` (or a stub) and a `Digest.Digest` layer to satisfy
  * the dependencies.
  */
 export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
@@ -41,13 +43,12 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
   return makePlugin(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      const crypto = yield* Crypto.Crypto;
+      const digest = yield* Digest.Digest;
 
-      const sha1Upper = (password: string): Effect.Effect<string, AuthError> =>
-        crypto.digest("SHA-1", new TextEncoder().encode(password)).pipe(
-          Effect.map((bytes) => Buffer.from(bytes).toString("hex").toUpperCase()),
-          Effect.mapError((cause) => new AuthError({ message: "Failed to hash password", cause })),
-        );
+      const sha1Upper = (password: string): Effect.Effect<string> =>
+        digest
+          .digest(Digest.sha1, new TextEncoder().encode(password))
+          .pipe(Effect.map((bytes) => Hex.encode(bytes).toUpperCase()));
 
       const breachCount = (password: string): Effect.Effect<number, AuthError> =>
         Effect.gen(function* () {

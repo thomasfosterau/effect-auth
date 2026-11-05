@@ -20,7 +20,7 @@ Only the XML job lives here.
 pnpm add @thomasfosterau/effect-auth-saml @thomasfosterau/effect-auth effect
 ```
 
-`effect` (`>=4.0.0-rc.118`) is a peer dependency; `@node-saml/node-saml` comes along as a dependency. node-saml needs Node APIs, so on Cloudflare Workers this package requires the `nodejs_compat` flag at least.
+`effect` (`>=4.1.0`) is a peer dependency; `@node-saml/node-saml` comes along as a dependency. node-saml needs Node APIs, so on Cloudflare Workers this package requires the `nodejs_compat` flag at least.
 
 ## Usage
 

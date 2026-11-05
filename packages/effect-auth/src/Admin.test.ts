@@ -1,16 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { TestClock } from "effect/testing";
-import {
-  Array as Arr,
-  Context,
-  Crypto,
-  DateTime,
-  Effect,
-  Layer,
-  Order,
-  Predicate,
-  Result,
-} from "effect";
+import { Array as Arr, Context, DateTime, Effect, Layer, Order, Predicate, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   AdminUserStore,
@@ -188,7 +179,7 @@ const makeTestContext = async (
           Context.make(SessionStore, sessionStore),
           Context.make(UserStore, sessionUserStore),
         ),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(hooksLayer)),
   );
@@ -200,7 +191,7 @@ const makeTestContext = async (
     Context.add(AdminUserStore, store),
     Context.add(IdentifierStore, identifierStore),
     Context.add(PasswordHasher, testHasher),
-    Context.add(Crypto.Crypto, PlatformCrypto.instance),
+    Context.add(SecureRandom.SecureRandom, PlatformCrypto.instance),
   );
 };
 

@@ -12,7 +12,7 @@ Hashes are standard PHC strings (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), 
 pnpm add @thomasfosterau/effect-auth-argon2 @thomasfosterau/effect-auth effect
 ```
 
-`effect` (`>=4.0.0-rc.118`) is a peer dependency; `hash-wasm` comes along as a dependency.
+`effect` (`>=4.1.0`) is a peer dependency; `hash-wasm` comes along as a dependency.
 
 ## Usage
 

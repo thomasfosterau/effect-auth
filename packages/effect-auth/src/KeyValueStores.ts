@@ -609,6 +609,7 @@ export const layerMemoryKeyValueStore: Layer.Layer<
           remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
           clear: Effect.sync(() => void MutableHashMap.clear(entries)),
           size: Effect.sync(() => MutableHashMap.size(entries)),
+          keys: Effect.sync(() => Arr.fromIterable(MutableHashMap.keys(entries))),
         }),
       ),
       Layer.succeed(KeyValueStoreKeys, {

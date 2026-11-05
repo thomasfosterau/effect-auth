@@ -1,13 +1,5 @@
-import {
-  Array as Arr,
-  Clock,
-  Crypto,
-  Data,
-  Effect,
-  Option,
-  Predicate,
-  String as Str,
-} from "effect";
+import { Array as Arr, Clock, Data, Effect, Option, Predicate, String as Str } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
@@ -89,7 +81,7 @@ const bitGroups = (bits: string, size: number): ReadonlyArray<string> =>
  * @returns Effect that produces random bytes
  */
 export const generateSecret = (
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
   length: number = 20,
 ): Effect.Effect<Buffer, Errors.HashingError> =>
   Effect.gen(function* () {
@@ -407,7 +399,7 @@ export const generateOtpUri = (params: OtpUriParams): string => {
  * @returns Effect that produces a base32-encoded secret
  */
 export const generateBase32Secret = (
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
   length: number = 20,
 ): Effect.Effect<string, Errors.HashingError> =>
   Effect.gen(function* () {

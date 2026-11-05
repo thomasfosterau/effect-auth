@@ -10,7 +10,7 @@ The headless core is the whole library as far as a consumer is concerned; the HT
 pnpm add @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.118`). Storage comes from your own store implementations or an adapter package (`@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-drizzle`).
+`effect` is a peer dependency (`>=4.1.0`). Storage comes from your own store implementations or an adapter package (`@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-drizzle`).
 
 ## Usage
 
@@ -82,7 +82,7 @@ const sessionConfig: SessionConfig = {
   sessionExpiresIn: { activePeriod: 30 * 86_400_000, idlePeriod: 14 * 86_400_000 },
 };
 
-// Still requires SessionStore, UserStore, Hooks and Crypto, like `SessionService.layer`.
+// Still requires SessionStore, UserStore, Hooks and SecureRandom, like `SessionService.layer`.
 const customSessionLayer = Layer.effect(
   SessionService,
   Effect.gen(function* () {
@@ -296,24 +296,14 @@ console.log(await Effect.runPromise(Effect.provide(program, Auth.Password.Passwo
 TOTP (RFC 6238):
 
 ```typescript
-import { Crypto, Effect, Layer } from "effect";
+import { Effect } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// The OTP primitives take the `Crypto` service directly. Build one from the
-// platform's Web Crypto API (effect-auth's own layer for this is internal).
-const CryptoLive = Layer.succeed(
-  Crypto.Crypto,
-  Crypto.make({
-    randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
-    digest: (algorithm, data) =>
-      Effect.promise(() => globalThis.crypto.subtle.digest(algorithm, new Uint8Array(data))).pipe(
-        Effect.map((buf) => new Uint8Array(buf)),
-      ),
-  }),
-);
-
+// The OTP primitives take Effect's `SecureRandom` service directly;
+// `SecureRandom.layerWebCrypto` draws from the platform's Web Crypto API.
 const program = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   // 20 bytes = 160 bits, the RFC 4226 recommendation.
   const secret = yield* Auth.MultiFactor.generateBase32Secret(crypto, 20);
 
@@ -333,7 +323,7 @@ const program = Effect.gen(function* () {
   return { uri, valid: step !== null };
 });
 
-console.log(await Effect.runPromise(Effect.provide(program, CryptoLive)));
+console.log(await Effect.runPromise(Effect.provide(program, SecureRandom.layerWebCrypto)));
 ```
 
 HOTP (RFC 4226) and custom configuration:

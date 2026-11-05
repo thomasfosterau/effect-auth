@@ -16,7 +16,8 @@
  *
  * @module otp-second-factor
  */
-import { Clock, Context, Crypto, Data, Effect, Layer } from "effect";
+import { Clock, Context, Data, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { generateOtp } from "../email/EmailOtp.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
@@ -156,7 +157,7 @@ export const make = (
 ): Effect.Effect<
   typeof OtpSecondFactorService.Service,
   never,
-  OtpSecondFactorStore | SessionService | Crypto.Crypto
+  OtpSecondFactorStore | SessionService | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -165,7 +166,7 @@ export const make = (
 
     const store = yield* OtpSecondFactorStore;
     const sessionManager = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const invalidOtp = () =>
       Effect.fail(new OtpSecondFactorError({ message: "Invalid or expired OTP" }));

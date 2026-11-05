@@ -62,7 +62,6 @@ import {
   Array as Arr,
   Clock,
   Context,
-  Crypto,
   Data,
   DateTime,
   Effect,
@@ -74,6 +73,7 @@ import {
   Schema,
   String as Str,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { flow } from "effect/Function";
 import * as Errors from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -726,7 +726,7 @@ export const make = (
   | IdentifierStore
   | OrganizationStore
   | SessionService
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const baseUrl = (config.baseUrl ?? "/scim/v2").replace(/\/+$/, "");
@@ -737,14 +737,16 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const orgs = yield* OrganizationStore;
     const sessions = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomUUIDv4.pipe(
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
-        ),
-      );
+      crypto
+        .uuidV4()
+        .pipe(
+          Effect.mapError(
+            (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
+          ),
+        );
 
     const randomToken = (): Effect.Effect<string, Errors.AuthError> => randomBase64UrlToken(crypto);
 

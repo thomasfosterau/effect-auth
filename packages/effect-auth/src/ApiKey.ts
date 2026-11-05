@@ -16,7 +16,8 @@
  * @module api-key
  */
 
-import { Array as Arr, Clock, Context, Crypto, Data, Effect, Layer, Record as Rec } from "effect";
+import { Array as Arr, Clock, Context, Data, Effect, Layer, Record as Rec } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
@@ -289,7 +290,11 @@ const hasRequiredPermissions = (
  */
 export const make = (
   config: ApiKeyConfig = {},
-): Effect.Effect<typeof ApiKeyService.Service, never, ApiKeyStore | RateLimiter | Crypto.Crypto> =>
+): Effect.Effect<
+  typeof ApiKeyService.Service,
+  never,
+  ApiKeyStore | RateLimiter | SecureRandom.SecureRandom
+> =>
   Effect.gen(function* () {
     const defaultPrefix = config?.defaultPrefix ?? "ak_";
     const keyLength = config?.keyLength ?? 32;
@@ -298,7 +303,7 @@ export const make = (
 
     const store = yield* ApiKeyStore;
     const rateLimiter = yield* RateLimiter;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const randomToken = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(keyLength).pipe(
@@ -309,11 +314,13 @@ export const make = (
       );
 
     const randomId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomUUIDv4.pipe(
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate API key id", cause }),
-        ),
-      );
+      crypto
+        .uuidV4()
+        .pipe(
+          Effect.mapError(
+            (cause) => new Errors.AuthError({ message: "Failed to generate API key id", cause }),
+          ),
+        );
 
     /**
      * Load a key by id and enforce ownership.

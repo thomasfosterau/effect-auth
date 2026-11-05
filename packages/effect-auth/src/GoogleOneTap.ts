@@ -26,7 +26,8 @@
  *
  * @module google-one-tap
  */
-import { Clock, Context, Crypto, Data, DateTime, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer, Predicate } from "effect";
+import { SecureRandom } from "effect/crypto";
 import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -170,7 +171,7 @@ export const make = (
   | UserStore
   | SessionService
   | EmailPasswordStore
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
@@ -183,11 +184,13 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     return {
       createNonce: Effect.fn("GoogleOneTapService.createNonce")(function* () {
-        const nonce = yield* generateNonce().pipe(Effect.provideService(Crypto.Crypto, crypto));
+        const nonce = yield* generateNonce().pipe(
+          Effect.provideService(SecureRandom.SecureRandom, crypto),
+        );
         yield* nonceStore
           .create(nonce, (yield* Clock.currentTimeMillis) + nonceTtlMs)
           .pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));

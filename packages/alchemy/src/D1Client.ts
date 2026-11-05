@@ -147,6 +147,7 @@ export const make = (options: {
   SqlClient.make({
     acquirer: Effect.succeed(makeConnection(options.db)),
     compiler: Statement.makeCompilerSqlite(),
+    driver: "d1",
     spanAttributes: [["db.system.name", "sqlite"], ...(options.spanAttributes ?? [])],
   });
 

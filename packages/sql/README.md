@@ -8,7 +8,7 @@ Driver-agnostic SQL storage for [`@thomasfosterau/effect-auth`](https://www.npmj
 pnpm add @thomasfosterau/effect-auth-sql @thomasfosterau/effect-auth effect
 ```
 
-`effect` (`>=4.0.0-rc.118`) is a peer dependency. Add a `SqlClient` driver for a [supported dialect](#dialects) at the same version as `effect` (for example `@effect/sql-pg`); this package bundles none.
+`effect` (`>=4.1.0`) is a peer dependency. Add a `SqlClient` driver for a [supported dialect](#dialects) at the same version as `effect` (for example `@effect/sql-pg`); this package bundles none.
 
 ## Usage
 

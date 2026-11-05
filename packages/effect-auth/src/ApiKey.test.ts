@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, Crypto, Effect, Option, Result } from "effect";
+import { Array as Arr, Clock, Context, Effect, Option, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   type ApiKeyService,
@@ -92,7 +93,7 @@ const makeRateLimitContext = async () => {
         Context.make(RateLimiter, rateLimiter),
         Context.make(RateLimitStore, rateLimitStore),
       ),
-      Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
     ),
   );
 };

@@ -138,7 +138,7 @@ const makeEngine = (
         // SAFETY: `withRuntime` provides the engine services a deploy uses, and
         // `compiled.services` is the whole context the stack was built in, its
         // `State` and providers among it. `Stack.make` also declares
-        // `ChildProcessSpawner`, `Crypto` and `Interaction`, which an `AuthSchema`
+        // `ChildProcessSpawner`, `Digest`, `SecureRandom` and `Interaction`, which an `AuthSchema`
         // deploy never reaches: one that did would fail with a missing-service defect.
         program.pipe(
           makeStack({ name: STACK, providers, state }),

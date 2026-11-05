@@ -112,6 +112,7 @@ const sqlClientLayer = (): Layer.Layer<SqlClient.SqlClient> =>
       return yield* SqlClient.make({
         acquirer: Effect.succeed(connection),
         compiler: Statement.makeCompilerSqlite(),
+        driver: "better-sqlite3",
         spanAttributes: [],
       });
     }),
@@ -1367,6 +1368,7 @@ const storeContract = (engine: StoreEngine): void => {
         SqlClient.make({
           acquirer: Effect.succeed(brokenConnection),
           compiler: engine.compiler,
+          driver: "broken",
           spanAttributes: [],
         }),
       ).pipe(Layer.provide(Reactivity.layer));

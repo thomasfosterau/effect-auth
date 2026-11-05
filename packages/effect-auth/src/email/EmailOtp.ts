@@ -8,7 +8,8 @@
  *
  * @module email-otp
  */
-import { Clock, Context, Crypto, Data, DateTime, Duration, Effect, Layer } from "effect";
+import { Clock, Context, Data, DateTime, Duration, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore } from "../Identifier.ts";
 import {
@@ -172,7 +173,7 @@ export interface EmailOtpCheckResult {
 /**
  * Email OTP service.
  *
- * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `Crypto`.
+ * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -274,8 +275,11 @@ export const hashOtp = hashToken;
  * Generate a numeric OTP with crypto-secure randomness (one unbiased
  * `randomIntBetween` draw per digit — no modulo bias).
  */
-export const generateOtp = (crypto: Crypto.Crypto, length: number): Effect.Effect<string> =>
-  Effect.replicateEffect(crypto.randomIntBetween(0, 10, { halfOpen: true }), length, {
+export const generateOtp = (
+  crypto: typeof SecureRandom.SecureRandom.Service,
+  length: number,
+): Effect.Effect<string> =>
+  Effect.replicateEffect(crypto.intBetween(0, 10, { halfOpen: true }), length, {
     concurrency: 1,
   }).pipe(Effect.map((digits) => digits.join("")));
 
@@ -283,7 +287,9 @@ export const generateOtp = (crypto: Crypto.Crypto, length: number): Effect.Effec
  * The secret behind an unknown address's marker record: 32 random bytes,
  * base64url-encoded. It is hashed into the marker record and then discarded.
  */
-const generateMarkerSecret = (crypto: Crypto.Crypto): Effect.Effect<string, Errors.AuthError> =>
+const generateMarkerSecret = (
+  crypto: typeof SecureRandom.SecureRandom.Service,
+): Effect.Effect<string, Errors.AuthError> =>
   randomBase64UrlToken(crypto, "Failed to generate OTP marker");
 
 /**
@@ -300,7 +306,7 @@ export const make = (
   | UserStore
   | SessionService
   | EmailPasswordStore
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -314,7 +320,7 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
     /**

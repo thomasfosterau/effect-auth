@@ -1,9 +1,9 @@
 /**
  * Raw `node:crypto` primitives for effect-auth: the AEAD cipher seam shared
  * across JWT private-key storage, TOTP secret storage, and OAuth token
- * storage, plus every other primitive Effect's `Crypto` service does not
- * cover (keyed HMAC, and asymmetric key generation/signing/verification for
- * JWS and WebAuthn). This is one of the three modules allowed to import
+ * storage, plus the primitives effect-auth still takes from `node:crypto`
+ * rather than Effect's `effect/crypto` services (keyed HMAC, and asymmetric
+ * key generation/signing/verification for JWS and WebAuthn). This is one of the three modules allowed to import
  * `node:crypto` directly — see `docs/ARCHITECTURE.md` § Dependencies.
  *
  * @module cipher
@@ -144,7 +144,7 @@ export const aes256GcmCipher = (secret: string): TokenCipher => {
 /**
  * Synchronous SHA-256 digest.
  *
- * Prefer the `Crypto.Crypto` service (`crypto.digest`) wherever an `Effect` is
+ * Prefer the `Digest.Digest` service (`effect/crypto`) wherever an `Effect` is
  * available; this exists for the synchronous parsing paths that cannot suspend
  * — notably WebAuthn relying-party ID hash verification — and keeps
  * `node:crypto` corralled to this module.
@@ -159,7 +159,7 @@ export const sha256 = (data: Uint8Array | string): Uint8Array =>
 /**
  * Compute a keyed HMAC digest. Used for signed cookies (session cache,
  * trusted-device tokens) and RFC 4226/6238 HOTP/TOTP, none of which are
- * covered by Effect's `Crypto` service (digest-only, no HMAC).
+ * on the synchronous `node:crypto` path rather than `effect/crypto`'s `Mac`.
  */
 export const hmac = (
   algorithm: "sha1" | "sha256" | "sha512",

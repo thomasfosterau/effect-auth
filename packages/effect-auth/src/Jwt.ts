@@ -7,8 +7,8 @@
  * the matching public keys as a JWKS document.
  *
  * Key generation, signing, and verification delegate to the raw primitives
- * in `Cipher.ts`; the key id's randomness comes from Effect's `Crypto`
- * service:
+ * in `Cipher.ts`; the key id's randomness comes from Effect's `SecureRandom`
+ * service (`effect/crypto`):
  *
  * - `ES256` (ECDSA over P-256 with SHA-256) — the default. Node's ECDSA
  *   signatures are DER-encoded by default, but JOSE requires the raw
@@ -30,7 +30,6 @@ import {
   Clock,
   Config,
   Context,
-  Crypto,
   Data,
   Deferred,
   Effect,
@@ -41,6 +40,7 @@ import {
   Ref,
   Schema,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -279,14 +279,16 @@ const base64UrlDecode = (segment: string): Buffer => Buffer.from(segment, "base6
  */
 export const generateKeyPair = (
   algorithm: JwtAlgorithm,
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
 ): Effect.Effect<JwtKeyPair, JwtError> =>
   Effect.gen(function* () {
-    const id = yield* crypto.randomUUIDv4.pipe(
-      Effect.mapError(
-        (cause) => new JwtError({ message: `Failed to generate ${algorithm} key id`, cause }),
-      ),
-    );
+    const id = yield* crypto
+      .uuidV4()
+      .pipe(
+        Effect.mapError(
+          (cause) => new JwtError({ message: `Failed to generate ${algorithm} key id`, cause }),
+        ),
+      );
     const { publicKeyJwk, privateKeyPem } = yield* Effect.try({
       try: () => Cipher.generateJwsKeyPair(algorithm),
       catch: (error) =>
@@ -438,7 +440,7 @@ const verifySignedPayload = (
  */
 export const make = (
   config: JwtConfig,
-): Effect.Effect<typeof JwtService.Service, never, JwtKeyStore | Crypto.Crypto> =>
+): Effect.Effect<typeof JwtService.Service, never, JwtKeyStore | SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
     const algorithm = config.algorithm ?? "ES256";
@@ -452,7 +454,7 @@ export const make = (
       : null;
 
     const store = yield* JwtKeyStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     // Ref holding an in-progress key-creation Deferred; null when idle.
     // Prevents duplicate active keys when concurrent fibers both call sign()

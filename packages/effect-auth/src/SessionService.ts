@@ -1,4 +1,5 @@
-import { Clock, Context, Crypto, DateTime, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, DateTime, Effect, Layer, Predicate } from "effect";
+import { SecureRandom } from "effect/crypto";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -16,13 +17,13 @@ export const make = (
 ): Effect.Effect<
   typeof SessionService.Service,
   never,
-  SessionStore | UserStore | Hooks | Crypto.Crypto
+  SessionStore | UserStore | Hooks | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
     const hooks = yield* Hooks;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const generateSessionId = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(20).pipe(

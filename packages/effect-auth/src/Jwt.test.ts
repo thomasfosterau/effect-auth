@@ -5,7 +5,6 @@ import {
   Array as Arr,
   Clock,
   Context,
-  Crypto,
   DateTime,
   Effect,
   Predicate,
@@ -13,6 +12,7 @@ import {
   Result,
   Schema,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
@@ -45,7 +45,7 @@ const jwtKeyStore = {
 
 const storeContext = Context.merge(
   Context.make(JwtKeyStore, jwtKeyStore),
-  Context.make(Crypto.Crypto, PlatformCrypto.instance),
+  Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
 );
 
 const user: User = {
@@ -62,7 +62,7 @@ const baseConfig: JwtConfig = {
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | Crypto.Crypto>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | SecureRandom.SecureRandom>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
 describe("JwtService", () => {
@@ -535,9 +535,9 @@ describe("RemoteJwksVerifier", () => {
   };
   const remoteContext = Context.merge(
     Context.make(JwtKeyStore, remoteStore),
-    Context.make(Crypto.Crypto, PlatformCrypto.instance),
+    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
   );
-  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | Crypto.Crypto>) =>
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | SecureRandom.SecureRandom>) =>
     Effect.runPromise(Effect.provide(program, remoteContext));
 
   let server: Server;

@@ -2,7 +2,8 @@
  * Email verification types for effect-auth
  */
 
-import { Clock, Context, Crypto, Effect, Layer } from "effect";
+import { Clock, Context, Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { AuthError, EmailVerificationError, type RateLimitError } from "../Errors.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
@@ -142,7 +143,7 @@ export class EmailVerificationService extends Context.Service<
  * Generate a cryptographically secure verification token
  */
 export const generateVerificationToken = (
-  crypto: Crypto.Crypto,
+  crypto: typeof SecureRandom.SecureRandom.Service,
 ): Effect.Effect<string, AuthError> =>
   randomBase64UrlToken(crypto, "Failed to generate verification token");
 
@@ -154,13 +155,13 @@ export const make = (
 ): Effect.Effect<
   typeof EmailVerificationService.Service,
   never,
-  EmailVerificationStore | Hooks | Crypto.Crypto
+  EmailVerificationStore | Hooks | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
     const store = yield* EmailVerificationStore;
     const hooks = yield* Hooks;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
     const createVerification = Effect.fn("EmailVerificationService.createVerification")(function* (

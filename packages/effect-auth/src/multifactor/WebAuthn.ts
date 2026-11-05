@@ -3,7 +3,8 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Array as Arr, Clock, Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Clock, Context, Data, Effect, Layer } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -247,12 +248,13 @@ export const make = (
 ): Effect.Effect<
   typeof WebAuthnService.Service,
   never,
-  ChallengeStore | CredentialStore | Crypto.Crypto
+  ChallengeStore | CredentialStore | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
+    const digest = yield* Digest.Digest;
 
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
 
@@ -567,7 +569,7 @@ export const make = (
 
             // Verify signature
             const verified = yield* verifySignature(
-              crypto,
+              digest,
               credential.publicKey,
               credential.algorithm,
               response.authenticatorData,
@@ -777,7 +779,7 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
  * {@link serializePublicKey}.
  */
 function verifySignature(
-  crypto: Crypto.Crypto,
+  digest: typeof Digest.Digest.Service,
   publicKeyDer: Uint8Array,
   algorithm: number,
   authenticatorData: Uint8Array,
@@ -785,14 +787,7 @@ function verifySignature(
   signature: Uint8Array,
 ): Effect.Effect<boolean, Errors.WebAuthnVerificationError> {
   return Effect.gen(function* () {
-    const clientDataHash = yield* crypto
-      .digest("SHA-256", clientDataJSON)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new Errors.WebAuthnVerificationError({ message: "Failed to hash client data", cause }),
-        ),
-      );
+    const clientDataHash = yield* digest.digest(Digest.sha256, clientDataJSON);
 
     return yield* Effect.try({
       try: () => {

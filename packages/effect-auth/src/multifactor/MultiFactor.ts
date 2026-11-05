@@ -12,17 +12,8 @@
  * @module multi-factor
  */
 
-import {
-  Array as Arr,
-  Clock,
-  Config,
-  Context,
-  Crypto,
-  Data,
-  Effect,
-  Layer,
-  Redacted,
-} from "effect";
+import { Array as Arr, Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
@@ -353,7 +344,7 @@ export const make = (
   | PasswordHasher
   | UserStore
   | SessionService
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const backupCodeCount = config.backupCodeCount ?? 10;
@@ -373,7 +364,7 @@ export const make = (
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const sessionManager = yield* SessionService;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     /**
      * Generate a cryptographically secure pending-challenge token

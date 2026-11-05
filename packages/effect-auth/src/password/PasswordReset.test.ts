@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Context, Crypto, DateTime, Effect, Layer, Result } from "effect";
+import { Context, DateTime, Effect, Layer, Result } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -129,7 +130,7 @@ const makeTestContext = async () => {
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -149,7 +150,7 @@ const makeTestContext = async () => {
             ),
             Context.merge(
               Context.make(IdentifierStore, identifierStore),
-              Context.make(Crypto.Crypto, PlatformCrypto.instance),
+              Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
             ),
           ),
         ),

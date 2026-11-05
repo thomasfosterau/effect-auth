@@ -32,7 +32,6 @@ import {
   Array as Arr,
   Clock,
   Context,
-  Crypto,
   Data,
   DateTime,
   Effect,
@@ -40,6 +39,7 @@ import {
   Option,
   Redacted,
 } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -287,7 +287,7 @@ export class SsoService extends Context.Service<
     ) => Effect.Effect<
       { readonly url: string; readonly state: string },
       SsoError | AuthError,
-      OAuthStateStore | Crypto.Crypto
+      OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest
     >;
 
     /**
@@ -406,7 +406,7 @@ const toOAuthConfig = (provider: OidcSsoProvider): OAuthProviderConfig => ({
 
 export const make = (
   config: SsoConfig = {},
-): Effect.Effect<typeof SsoService.Service, never, SsoProviderStore | Crypto.Crypto> =>
+): Effect.Effect<typeof SsoService.Service, never, SsoProviderStore | SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
     const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
     const samlRequestTtl = config.samlRequestTtl ?? 10 * 60 * 1000;
@@ -415,12 +415,14 @@ export const make = (
     const allowIdpInitiated = config.allowIdpInitiated ?? false;
 
     const store = yield* SsoProviderStore;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string, AuthError> =>
-      crypto.randomUUIDv4.pipe(
-        Effect.mapError((cause) => new AuthError({ message: "Failed to generate id", cause })),
-      );
+      crypto
+        .uuidV4()
+        .pipe(
+          Effect.mapError((cause) => new AuthError({ message: "Failed to generate id", cause })),
+        );
 
     /**
      * SAML message ids are XML `NCName`s, which may not start with a digit —

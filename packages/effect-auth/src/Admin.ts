@@ -24,7 +24,6 @@
 import {
   Clock,
   Context,
-  Crypto,
   Data,
   DateTime,
   Effect,
@@ -33,6 +32,7 @@ import {
   Predicate,
   Record as Rec,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType, refusalAuthError } from "./Identifier.ts";
@@ -370,7 +370,7 @@ export const make = (
   | SessionService
   | IdentifierStore
   | PasswordHasher
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const defaultBanReason = config.defaultBanReason ?? "No reason";
@@ -410,14 +410,16 @@ export const make = (
     const sessionManager = yield* SessionService;
     const identifierStore = yield* IdentifierStore;
     const hasher = yield* PasswordHasher;
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomUUIDv4.pipe(
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate identifier id", cause }),
-        ),
-      );
+      crypto
+        .uuidV4()
+        .pipe(
+          Effect.mapError(
+            (cause) => new Errors.AuthError({ message: "Failed to generate identifier id", cause }),
+          ),
+        );
 
     return {
       listUsers: Effect.fn("AdminService.listUsers")(function* (

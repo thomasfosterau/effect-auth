@@ -4,7 +4,6 @@ import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
 import {
   Array as Arr,
   Context,
-  Crypto,
   DateTime,
   Duration,
   Effect,
@@ -13,6 +12,7 @@ import {
   Result,
   Tracer,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -199,7 +199,7 @@ const makeTestContext = async () => {
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -219,7 +219,7 @@ const makeTestContext = async () => {
           Context.make(IdentifierStore, identifierStore),
           Context.make(UserStore, userStore),
         ),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ),
   );
@@ -857,7 +857,7 @@ describe("EmailOtpService", () => {
               disableSignUp,
               resendCooldown: 60_000,
               sendVerificationOtp: recordingSend,
-            }).pipe(Effect.provideService(Crypto.Crypto, zeroCrypto));
+            }).pipe(Effect.provideService(SecureRandom.SecureRandom, zeroCrypto));
             yield* service.send("member@example.com", purpose);
             yield* service.send("missing@example.com", purpose);
             const marker = otpRecords.get(recordKey("missing@example.com", purpose));
@@ -961,7 +961,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       | UserStore
       | SessionService
       | EmailPasswordStore
-      | Crypto.Crypto
+      | SecureRandom.SecureRandom
     >,
   ) =>
     makeTestContext().then((context) =>

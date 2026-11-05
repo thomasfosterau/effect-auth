@@ -2,7 +2,6 @@ import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-pl
 import {
   Array as Arr,
   Context,
-  Crypto,
   DateTime,
   Duration,
   Effect,
@@ -10,6 +9,7 @@ import {
   Predicate,
   Result,
 } from "effect";
+import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,
@@ -176,7 +176,7 @@ const makeTestContext = async () => {
       makeSessionService(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -190,7 +190,7 @@ const makeTestContext = async () => {
         Context.make(PhoneOtpStore, phoneOtpStore),
         Context.make(PhoneOtpUserStore, phoneOtpUserStore),
       ),
-      Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
     ),
   );
 };
@@ -503,7 +503,7 @@ describe("PhoneOtpService", () => {
           disableSignUp: true,
           resendCooldown: 60_000,
           sendOtp: recordingSend,
-        }).pipe(Effect.provideService(Crypto.Crypto, zeroCrypto));
+        }).pipe(Effect.provideService(SecureRandom.SecureRandom, zeroCrypto));
         yield* service.send("+15559990020", "sign-in");
         yield* service.send("+15559990021", "sign-in");
         const marker = records.get(key("+15559990021", "sign-in"));
@@ -588,7 +588,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
       | IdentifierStore
       | UserStore
       | SessionService
-      | Crypto.Crypto
+      | SecureRandom.SecureRandom
     >,
   ) =>
     makeTestContext().then((context) =>

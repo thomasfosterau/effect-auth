@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Crypto, Effect, Layer, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
+import { Digest } from "effect/crypto";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { Hooks } from "../Hooks.ts";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
@@ -36,7 +37,7 @@ const capturingHttpClient = (onRequest: (req: Request) => void, respond: () => R
   );
 
 const drive = <A, E>(
-  pluginLayer: Layer.Layer<Hooks, never, Hooks | HttpClient.HttpClient | Crypto.Crypto>,
+  pluginLayer: Layer.Layer<Hooks, never, Hooks | HttpClient.HttpClient | Digest.Digest>,
   clientLayer: Layer.Layer<HttpClient.HttpClient>,
   f: (hooks: typeof Hooks.Service) => Effect.Effect<A, E, never>,
 ) =>
