@@ -3,7 +3,7 @@
 The server side of [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) in a SvelteKit app:
 
 - `handle`: the `handle` hook. It resolves the session once, before any `load`, puts it on `event.locals.auth`, and forces `Cache-Control: private, no-store` on pages rendered for a signed-in viewer.
-- `credentialAction`: the form action for sign-in, sign-up and the other credential flows. It relays the auth handler's `Set-Cookie`, redirects only to a validated target, and reports wrong credentials, throttling and service faults as distinct failures.
+- `credentialAction`: the form action for sign-in, sign-up and the other credential flows. It relays the auth handler's `Set-Cookie`, redirects only to a validated target, returns a `pending` result when no session was issued yet (a second factor, or email verification), and reports wrong credentials, throttling and service faults as distinct failures.
 
 The package is typed against the parts of SvelteKit's `RequestEvent` it uses, and takes `redirect` and `fail` from you, so it does not depend on `@sveltejs/kit`.
 
@@ -83,7 +83,14 @@ export const actions = {
 };
 ```
 
-On success the action relays every `Set-Cookie` onto `event.cookies` and redirects (303) to `?redirect=` when that is a same-origin path, or to `fallback` otherwise. On failure it returns `fail(status, { kind, message, retryAfterSeconds, fields })`:
+On success (a `201`, or any other 2xx but `202`) the action relays every `Set-Cookie` onto `event.cookies` and redirects (303) to `?redirect=` when that is a same-origin path, or to `fallback` otherwise.
+
+A `202` means the handler took the credential but issued no session, so the action does not redirect. It returns `{ kind: "pending", secondFactor, needsEmailVerification, fields }` as the action's data (`form` on the page):
+
+- `secondFactor: { token, expiresAt }` when a second factor is pending: show the code step, and redeem the challenge with `POST /second-factor-challenges/verifications`, citing `token`;
+- `secondFactor: null` with `needsEmailVerification: true` when the address must be verified first (a sign-up under `antiEnumeration` always answers this way): show a check-your-inbox step.
+
+A `202` whose body is not the handler's pending document counts as `unavailable`. On failure it returns `fail(status, { kind, message, retryAfterSeconds, fields })`:
 
 | Handler answered                 | `kind`                                                       | `fail` status |
 | -------------------------------- | ------------------------------------------------------------ | ------------- |
@@ -96,7 +103,7 @@ The action forwards the browser's `Origin`, `User-Agent`, `X-Forwarded-For` and 
 ## API
 
 - `handle(options): (input) => Promise<Response>`, with `HandleOptions` (`cookies?`, `lookup`, `failure`), `LocalsAuth`, `FailurePolicy`, `HandleEvent`, `HandleInput` and `PRIVATE_CACHE_CONTROL`.
-- `credentialAction(kit, options): (event) => Promise<Failure>`, with `CredentialActionOptions`, `CredentialFailure`, `CredentialFailureKind`, `Kit`, `ActionEvent` and `CookieOptions`.
+- `credentialAction(kit, options): (event) => Promise<Failure | CredentialPending<Fields>>`, with `CredentialActionOptions`, `CredentialFailure`, `CredentialFailureKind`, `CredentialPending`, `Kit`, `ActionEvent` and `CookieOptions`.
 - `parseSetCookie(header): Option<{ name, value, options }>`.
 - `safeRedirect(target, fallback)` itself lives in the core (`@thomasfosterau/effect-auth`).
 

@@ -15,6 +15,10 @@
  *   throttled, and before this helper a throttled sign-in read as "the form did
  *   nothing". Anything else means the service failed. Each gets its own
  *   {@link CredentialFailureKind} and status, so the form can say which.
+ * - **Tell "signed in" from "not yet".** A `202` issued no session: a second
+ *   factor is pending, or the address must be verified first. The action
+ *   returns a {@link CredentialPending} instead of redirecting, so the form can
+ *   move to its second-factor or check-your-inbox step.
  *
  * SvelteKit's `redirect` and `fail` are passed in, not imported, so this
  * package carries no SvelteKit dependency of its own.
@@ -85,6 +89,45 @@ export interface CredentialFailure<Fields> {
   readonly retryAfterSeconds: number | null;
   readonly fields: Fields;
 }
+
+/**
+ * What a credential action returns, as a successful action result, when the
+ * handler answered `202 Accepted`: it took the credential but issued no
+ * session. Either `secondFactor` is the challenge to redeem (`POST
+ * /second-factor-challenges/verifications`, citing `token`), or it is `null`
+ * and `needsEmailVerification` says the address must be verified first (a
+ * sign-up under `antiEnumeration` always answers this way). `fields` is what
+ * {@link CredentialActionOptions.fields} echoes back.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface CredentialPending<Fields> {
+  readonly kind: "pending";
+  readonly secondFactor: {
+    /** The challenge token: the id of the `second-factor-challenges` resource. */
+    readonly token: string;
+    /** When the challenge lapses, as the handler's ISO 8601 timestamp. */
+    readonly expiresAt: string;
+  } | null;
+  readonly needsEmailVerification: boolean;
+  readonly fields: Fields;
+}
+
+/** The `202` body: the JSON:API `PendingDocument` of the core's HTTP API. */
+const PendingBody = Schema.fromJsonString(
+  Schema.Struct({
+    data: Schema.optionalKey(
+      Schema.Struct({
+        type: Schema.Literal("second-factor-challenges"),
+        id: Schema.String,
+        attributes: Schema.Struct({ expiresAt: Schema.String }),
+      }),
+    ),
+    meta: Schema.Struct({ needsEmailVerification: Schema.Boolean }),
+  }),
+);
+const decodePending = Schema.decodeUnknownOption(PendingBody);
 
 /**
  * SvelteKit's `redirect` and `fail`, passed in so this package doesn't import
@@ -242,10 +285,13 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
  *
  * The action POSTs the form to `endpoint` as a JSON:API document, forwarding the browser's
  * `Origin`, `User-Agent` and `X-Forwarded-For` so the handler's CSRF check and
- * rate limits see the real client. On a 2xx it relays the `Set-Cookie`
- * headers and redirects (303) to the validated target. Otherwise it returns
- * `fail(status, CredentialFailure)`, with a status per
- * {@link CredentialFailureKind}.
+ * rate limits see the real client. On a `202` (no session issued: a second
+ * factor is pending, or the address must be verified first) it returns a
+ * {@link CredentialPending} without redirecting; a `202` whose body is not
+ * the handler's pending document counts as `unavailable`. On any other 2xx it
+ * relays the `Set-Cookie` headers and redirects (303) to the validated
+ * target. Otherwise it returns `fail(status, CredentialFailure)`, with a
+ * status per {@link CredentialFailureKind}.
  *
  * @example
  * ```ts
@@ -303,7 +349,7 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
  */
 export const credentialAction =
   <Failure, Fields>(kit: Kit<Failure, Fields>, options: CredentialActionOptions<Fields>) =>
-  async (event: ActionEvent): Promise<Failure> => {
+  async (event: ActionEvent): Promise<Failure | CredentialPending<Fields>> => {
     const form = await event.request.formData();
     const forwarded = new Headers({
       "content-type": options.contentType ?? "application/vnd.api+json",
@@ -325,7 +371,22 @@ export const credentialAction =
         () => null,
       );
 
-    if (response !== null && response.ok) {
+    const pending =
+      response?.status === 202
+        ? decodePending(await response.text().catch(() => ""))
+        : Option.none();
+    if (Option.isSome(pending)) {
+      const { data, meta } = pending.value;
+      return {
+        kind: "pending",
+        secondFactor:
+          data === undefined ? null : { token: data.id, expiresAt: data.attributes.expiresAt },
+        needsEmailVerification: meta.needsEmailVerification,
+        fields: options.fields(form),
+      };
+    }
+
+    if (response !== null && response.ok && response.status !== 202) {
       relayCookies(event, response);
       const target = event.url.searchParams.get(options.redirectParam ?? "redirect");
       return kit.redirect(303, safeRedirect(target, options.fallback));

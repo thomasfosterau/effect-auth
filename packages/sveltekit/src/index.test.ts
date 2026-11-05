@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect, Option } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import type { SessionWithUser } from "@thomasfosterau/effect-auth";
 import {
   type ActionEvent,
@@ -143,6 +143,9 @@ class Redirect extends Error {
     super(`redirect ${status} ${location}`);
   }
 }
+/** A JSON body for a stubbed handler response. */
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
 const kit = {
   redirect: (status: 303, location: string): never => {
     throw new Redirect(status, location);
@@ -224,6 +227,61 @@ describe("credentialAction", () => {
         },
       },
     });
+  });
+
+  it("relays Set-Cookie and redirects on a 201 that issued a session", async () => {
+    const { event: input, cookies } = submit("https://app.example/login?redirect=/dashboard");
+    const headers = new Headers({ "content-type": "application/vnd.api+json" });
+    headers.append("set-cookie", "__Host-conduit_session=tok; Path=/; HttpOnly; Secure");
+    await expect(
+      signInWith(async () => new Response("{}", { status: 201, headers }))(input),
+    ).rejects.toMatchObject({ status: 303, location: "/dashboard" });
+    expect(cookies.map(([name]) => name)).toEqual(["__Host-conduit_session"]);
+  });
+
+  it("returns the second-factor challenge on a 202, without redirecting", async () => {
+    const { event: input, cookies } = submit("https://app.example/login?redirect=/dashboard");
+    const body = {
+      data: {
+        type: "second-factor-challenges",
+        id: "challenge-token",
+        attributes: { expiresAt: "2026-10-23T00:05:00.000Z" },
+      },
+      meta: { needsEmailVerification: false },
+    };
+    const result = await signInWith(async () => new Response(encodeJson(body), { status: 202 }))(
+      input,
+    );
+    expect(result).toEqual({
+      kind: "pending",
+      secondFactor: { token: "challenge-token", expiresAt: "2026-10-23T00:05:00.000Z" },
+      needsEmailVerification: false,
+      fields: { email: "ada@example.com" },
+    });
+    expect(cookies).toEqual([]);
+  });
+
+  it("returns needsEmailVerification on a 202 with no primary data", async () => {
+    const { event: input } = submit("https://app.example/login");
+    const result = await signInWith(
+      async () =>
+        new Response(encodeJson({ meta: { needsEmailVerification: true } }), {
+          status: 202,
+        }),
+    )(input);
+    expect(result).toEqual({
+      kind: "pending",
+      secondFactor: null,
+      needsEmailVerification: true,
+      fields: { email: "ada@example.com" },
+    });
+  });
+
+  it("reports a 202 whose body is not a pending document as unavailable", async () => {
+    const { event: input } = submit("https://app.example/login");
+    expect(
+      await signInWith(async () => new Response("not json", { status: 202 }))(input),
+    ).toMatchObject({ status: 503, data: { kind: "unavailable" } });
   });
 
   it("refuses an off-site redirect target", async () => {
