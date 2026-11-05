@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-vue",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Vue bindings for the effect-auth client.",
   "keywords": [
     "auth",

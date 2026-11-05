@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-argon2",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Argon2id PasswordHasher for effect-auth — pure WebAssembly (Cloudflare Workers safe).",
   "keywords": [
     "argon2",

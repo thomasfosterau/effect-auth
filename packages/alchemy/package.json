@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-alchemy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Alchemy v2 AuthSchema resource, and Cloudflare D1 and Postgres (Hyperdrive) storage wiring, for effect-auth.",
   "keywords": [
     "alchemy",

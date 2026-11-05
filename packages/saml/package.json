@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-saml",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SAML 2.0 service-provider verifier for effect-auth — signed-assertion validation, AuthnRequest generation and SP metadata over @node-saml/node-saml.",
   "keywords": [
     "auth",

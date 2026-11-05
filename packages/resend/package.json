@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-resend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Resend EmailSender adapter for effect-auth — plain fetch against Resend's REST API, no SDK.",
   "keywords": [
     "auth",
