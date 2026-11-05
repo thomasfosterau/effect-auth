@@ -40,31 +40,31 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 
 `layer` is `Layer<…every store…, never, SqlClient>`. Each store is also available on its own, as an `Effect` that builds it (`make<Name>`) and as a `Layer` (`<Name>Layer`), for wiring a subset:
 
-| Store (core tag)                           | Constructor / layer                                            | Table                       |
-| ------------------------------------------ | -------------------------------------------------------------- | --------------------------- |
-| `Auth.SessionStore`                        | `makeSessionStore` / `SessionStoreLayer`                       | `auth_sessions`             |
-| `Auth.UserStore`                           | `makeUserStore` / `UserStoreLayer`                             | `auth_users`                |
-| `Auth.UserServiceStore`                    | `makeUserServiceStore` / `UserServiceStoreLayer`               | `auth_users`                |
-| `Auth.IdentifierStore`                     | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`          |
-| `Auth.Email.EmailPasswordStore`            | `makeEmailPasswordStore` / `EmailPasswordStoreLayer`           | `auth_users`                |
-| `Auth.Email.EmailVerificationStore`        | `makeEmailVerificationStore` / `EmailVerificationStoreLayer`   | `auth_email_verifications`  |
-| `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`           |
-| `Auth.Email.EmailOtpUserStore`             | `makeEmailOtpUserStore` / `EmailOtpUserStoreLayer`             | `auth_users`                |
-| `Auth.Password.PasswordResetStore`         | `makePasswordResetStore` / `PasswordResetStoreLayer`           | `auth_password_resets`      |
-| `Auth.Password.PasswordResetUserStore`     | `makePasswordResetUserStore` / `PasswordResetUserStoreLayer`   | `auth_users`                |
-| `Auth.MagicLinkStore`                      | `makeMagicLinkStore` / `MagicLinkStoreLayer`                   | `auth_magic_links`          |
-| `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                |
-| `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`          |
-| `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`  |
-| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials` |
-| `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`         |
-| `Auth.MultiFactor.PendingMultiFactorStore` | `makePendingMultiFactorStore` / `PendingMultiFactorStoreLayer` | `auth_pending_multi_factor` |
-| `Auth.OAuth.OAuthStateStore`               | `makeOAuthStateStore` / `OAuthStateStoreLayer`                 | `auth_oauth_states`         |
-| `Auth.OAuth.OAuthAccountStore`             | `makeOAuthAccountStore` / `OAuthAccountStoreLayer`             | `auth_oauth_accounts`       |
-| `Auth.OAuth.OAuthUserStore`                | `makeOAuthUserStore` / `OAuthUserStoreLayer`                   | `auth_users`                |
-| `Auth.Plugins.AccountLockoutStore`         | `makeAccountLockoutStore` / `AccountLockoutStoreLayer`         | `auth_account_lockouts`     |
-| `Auth.ApiKeyStore`                         | `makeApiKeyStore` / `ApiKeyStoreLayer`                         | `auth_api_keys`             |
-| `Auth.AdminUserStore`                      | `makeAdminUserStore` / `AdminUserStoreLayer`                   | `auth_users`                |
+| Store (core tag)                           | Constructor / layer                                            | Table                                                             |
+| ------------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `Auth.SessionStore`                        | `makeSessionStore` / `SessionStoreLayer`                       | `auth_sessions`                                                   |
+| `Auth.UserStore`                           | `makeUserStore` / `UserStoreLayer`                             | `auth_users`                                                      |
+| `Auth.UserServiceStore`                    | `makeUserServiceStore` / `UserServiceStoreLayer`               | `auth_users`                                                      |
+| `Auth.IdentifierStore`                     | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`                                                |
+| `Auth.Email.EmailPasswordStore`            | `makeEmailPasswordStore` / `EmailPasswordStoreLayer`           | `auth_users`                                                      |
+| `Auth.Email.EmailVerificationStore`        | `makeEmailVerificationStore` / `EmailVerificationStoreLayer`   | `auth_email_verifications`                                        |
+| `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`                                                 |
+| `Auth.Email.EmailOtpUserStore`             | `makeEmailOtpUserStore` / `EmailOtpUserStoreLayer`             | `auth_users`                                                      |
+| `Auth.Password.PasswordResetStore`         | `makePasswordResetStore` / `PasswordResetStoreLayer`           | `auth_password_resets`                                            |
+| `Auth.Password.PasswordResetUserStore`     | `makePasswordResetUserStore` / `PasswordResetUserStoreLayer`   | `auth_users`                                                      |
+| `Auth.MagicLinkStore`                      | `makeMagicLinkStore` / `MagicLinkStoreLayer`                   | `auth_magic_links`                                                |
+| `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                                                      |
+| `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`                                                |
+| `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`                                        |
+| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`                                       |
+| `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`                                               |
+| `Auth.MultiFactor.PendingMultiFactorStore` | `makePendingMultiFactorStore` / `PendingMultiFactorStoreLayer` | `auth_pending_multi_factor`, `auth_pending_multi_factor_attempts` |
+| `Auth.OAuth.OAuthStateStore`               | `makeOAuthStateStore` / `OAuthStateStoreLayer`                 | `auth_oauth_states`                                               |
+| `Auth.OAuth.OAuthAccountStore`             | `makeOAuthAccountStore` / `OAuthAccountStoreLayer`             | `auth_oauth_accounts`                                             |
+| `Auth.OAuth.OAuthUserStore`                | `makeOAuthUserStore` / `OAuthUserStoreLayer`                   | `auth_users`                                                      |
+| `Auth.Plugins.AccountLockoutStore`         | `makeAccountLockoutStore` / `AccountLockoutStoreLayer`         | `auth_account_lockouts`                                           |
+| `Auth.ApiKeyStore`                         | `makeApiKeyStore` / `ApiKeyStoreLayer`                         | `auth_api_keys`                                                   |
+| `Auth.AdminUserStore`                      | `makeAdminUserStore` / `AdminUserStoreLayer`                   | `auth_users`                                                      |
 
 ```typescript
 import { Layer } from "effect";

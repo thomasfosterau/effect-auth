@@ -278,6 +278,7 @@ const storeContract = (engine: StoreEngine): void => {
         "auth_oauth_states",
         "auth_password_resets",
         "auth_pending_multi_factor",
+        "auth_pending_multi_factor_attempts",
         "auth_rate_limits",
         "auth_role_permissions",
         "auth_sessions",
@@ -899,9 +900,31 @@ const storeContract = (engine: StoreEngine): void => {
 
           yield* pendingStore.create(pending);
           const loadedPending = yield* pendingStore.get("p2f-1");
+          const attempts = [
+            yield* pendingStore.recordFailedAttempt("p2f-1"),
+            yield* pendingStore.recordFailedAttempt("p2f-1"),
+            yield* pendingStore.recordFailedAttempt("p2f-1"),
+          ];
+          const unknownAttempt = yield* Effect.flip(pendingStore.recordFailedAttempt("p2f-none"));
           yield* pendingStore.delete("p2f-1");
           const deletedPending = yield* pendingStore.get("p2f-1");
-          return { before, created, updated, deleted, loadedPending, deletedPending };
+          const attemptAfterDelete = yield* Effect.flip(pendingStore.recordFailedAttempt("p2f-1"));
+          // A challenge recreated under the same token starts its count over.
+          yield* pendingStore.create(pending);
+          const recreatedAttempt = yield* pendingStore.recordFailedAttempt("p2f-1");
+          yield* pendingStore.delete("p2f-1");
+          return {
+            before,
+            created,
+            updated,
+            deleted,
+            loadedPending,
+            deletedPending,
+            attempts,
+            unknownAttempt,
+            attemptAfterDelete,
+            recreatedAttempt,
+          };
         }),
       );
       expect(result.before).toBeNull();
@@ -913,6 +936,10 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.updated?.lastUsedCounter).toBe(42);
       expect(result.deleted).toBeNull();
       expect(result.loadedPending).toEqual(pending);
+      expect(result.attempts).toEqual([1, 2, 3]);
+      expect(result.unknownAttempt).toBeInstanceOf(Auth.AuthError);
+      expect(result.attemptAfterDelete).toBeInstanceOf(Auth.AuthError);
+      expect(result.recreatedAttempt).toBe(1);
       expect(result.deletedPending).toBeNull();
     });
 

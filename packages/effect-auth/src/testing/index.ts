@@ -46,6 +46,7 @@ export {
   type UserStoreConformanceOptions,
   apiKeyStoreConformance,
   identifierStoreConformance,
+  pendingMultiFactorStoreConformance,
   sessionStoreConformance,
   userStoreConformance,
 } from "./StoreConformance.ts";

@@ -33,8 +33,8 @@
  *
  * ## Atomicity caveat
  *
- * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts` / the
- * secondary index updates) are implemented as read-modify-write, which is not
+ * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts`,
+ * `PendingMultiFactorStore.recordFailedAttempt` / the secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
  * the same count and only bump it once. This is acceptable for the KV
  * backend's intended use (best-effort rate limiting / attempt counting);
@@ -761,6 +761,15 @@ export const purgeExpiredKV: Effect.Effect<
 const pendingMultiFactorKey = (token: string) => `pending-multi-factor:${token}`;
 
 /**
+ * A pending challenge as stored: the record plus its failed-attempt count, so
+ * deleting (or purging) the challenge drops the count with it. Records
+ * written before the count existed read as zero attempts.
+ */
+interface StoredPendingMultiFactor extends PendingMultiFactor {
+  readonly failedAttempts?: number | undefined;
+}
+
+/**
  * Build a {@link PendingMultiFactorStore} over the ambient `KeyValueStore`.
  */
 export const pendingMultiFactorStoreKV: Effect.Effect<
@@ -769,13 +778,41 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
+  const read = (token: string, label: string) =>
+    kv.read<StoredPendingMultiFactor>(pendingMultiFactorKey(token), label);
   return {
     create: (pending) =>
       kv
-        .write(pendingMultiFactorKey(pending.token), pending, "pendingMultiFactor.create")
+        .write(
+          pendingMultiFactorKey(pending.token),
+          { ...pending, failedAttempts: 0 } satisfies StoredPendingMultiFactor,
+          "pendingMultiFactor.create",
+        )
         .pipe(Effect.as(pending)),
     get: (token) =>
-      kv.read<PendingMultiFactor>(pendingMultiFactorKey(token), "pendingMultiFactor.get"),
+      read(token, "pendingMultiFactor.get").pipe(
+        Effect.map((stored) => {
+          if (stored === null) return null;
+          const { failedAttempts: _, ...pending } = stored;
+          return pending;
+        }),
+      ),
+    recordFailedAttempt: (token) =>
+      Effect.gen(function* () {
+        const stored = yield* read(token, "pendingMultiFactor.recordFailedAttempt");
+        if (stored === null) {
+          return yield* new Errors.AuthError({
+            message: "Pending multi-factor challenge not found",
+          });
+        }
+        const failedAttempts = (stored.failedAttempts ?? 0) + 1;
+        yield* kv.write(
+          pendingMultiFactorKey(token),
+          { ...stored, failedAttempts },
+          "pendingMultiFactor.recordFailedAttempt",
+        );
+        return failedAttempts;
+      }),
     delete: (token) => kv.remove(pendingMultiFactorKey(token), "pendingMultiFactor.delete"),
   } satisfies typeof PendingMultiFactorStore.Service;
 });

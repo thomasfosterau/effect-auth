@@ -1,5 +1,15 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, DateTime, Effect, Redacted, Result } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  MutableHashMap,
+  Option,
+  Redacted,
+  Result,
+} from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -31,6 +41,7 @@ const identifiers = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const multiFactorRecords = new Map<string, MultiFactorRecord>();
 const pendingChallenges = new Map<string, PendingMultiFactor>();
+const pendingAttempts = MutableHashMap.empty<string, number>();
 const sessions = new Map<string, Session>();
 
 const sessionStore = {
@@ -117,9 +128,17 @@ const pendingMultiFactorStore = {
 
   get: (token: string) => Effect.sync(() => pendingChallenges.get(token) ?? null),
 
+  recordFailedAttempt: (token: string) =>
+    Effect.sync(() => {
+      const attempts = Option.getOrElse(MutableHashMap.get(pendingAttempts, token), () => 0) + 1;
+      MutableHashMap.set(pendingAttempts, token, attempts);
+      return attempts;
+    }),
+
   delete: (token: string) =>
     Effect.sync(() => {
       pendingChallenges.delete(token);
+      MutableHashMap.remove(pendingAttempts, token);
     }),
 };
 
@@ -200,6 +219,7 @@ describe("MultiFactorService", () => {
     passwordHashes.clear();
     multiFactorRecords.clear();
     pendingChallenges.clear();
+    MutableHashMap.clear(pendingAttempts);
     sessions.clear();
   });
 
@@ -452,6 +472,88 @@ describe("MultiFactorService", () => {
     expect(sessions.size).toBe(1);
   });
 
+  it("caps wrong codes per challenge, and answers a capped challenge as a wrong code", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-2fa-cap", "cap@example.com", "correct-password");
+
+    const { wrong, rightAfterCap, pendingAfterFour } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+          const { secret } = yield* service.enable("user-2fa-cap", "correct-password");
+          const challenge = yield* service.beginChallenge("user-2fa-cap");
+
+          const wrongCode = () => Effect.flip(service.verifyTotp(challenge.token, "not-a-code"));
+          const errors = [yield* wrongCode(), yield* wrongCode(), yield* wrongCode()];
+          errors.push(yield* wrongCode());
+          const pendingAfter4 = pendingChallenges.has(challenge.token);
+          // The fifth wrong code (the default cap) deletes the challenge.
+          errors.push(yield* wrongCode());
+
+          // From then on even the right code answers exactly as a wrong one.
+          const code = yield* generateTotp(secret);
+          const afterCap = yield* Effect.flip(service.verifyTotp(challenge.token, code));
+          return { wrong: errors, rightAfterCap: afterCap, pendingAfterFour: pendingAfter4 };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(pendingAfterFour).toBe(true);
+    expect(wrong.map((error) => [error._tag, error.message])).toEqual(
+      Arr.replicate(["MultiFactorError", "Invalid multi-factor code"], 5),
+    );
+    expect([rightAfterCap._tag, rightAfterCap.message]).toEqual([
+      "MultiFactorError",
+      "Invalid multi-factor code",
+    ]);
+    expect(pendingChallenges.size).toBe(0);
+    expect(MutableHashMap.size(pendingAttempts)).toBe(0);
+    expect(sessions.size).toBe(0);
+  });
+
+  it("counts TOTP and backup codes against one cap, configurable per service", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-2fa-cap2", "cap2@example.com", "correct-password");
+
+    const { underCap, capped } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+            maxFailedAttempts: 2,
+          });
+          const { backupCodes } = yield* service.enable("user-2fa-cap2", "correct-password");
+
+          // One wrong code leaves the challenge redeemable.
+          const first = yield* service.beginChallenge("user-2fa-cap2");
+          yield* Effect.flip(service.verifyTotp(first.token, "not-a-code"));
+          const redeemed = yield* service.verifyBackupCode(first.token, backupCodes[0] ?? "");
+
+          // A wrong TOTP code and a wrong backup code reach the cap of 2.
+          const second = yield* service.beginChallenge("user-2fa-cap2");
+          yield* Effect.flip(service.verifyTotp(second.token, "not-a-code"));
+          yield* Effect.flip(service.verifyBackupCode(second.token, "wrong-backup"));
+          const refused = yield* Effect.flip(
+            service.verifyBackupCode(second.token, backupCodes[1] ?? ""),
+          );
+          return { underCap: redeemed, capped: refused };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(underCap.userId).toBe("user-2fa-cap2");
+    expect([capped._tag, capped.message]).toEqual(["MultiFactorError", "Invalid backup code"]);
+    expect(sessions.size).toBe(1);
+    // The unused backup code survives the capped challenge.
+    expect(multiFactorRecords.get("user-2fa-cap2")?.backupCodes).toHaveLength(9);
+  });
+
   it("should accept a backup code only once", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-8", "backup@example.com", "correct-password");
@@ -576,6 +678,7 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     passwordHashes.clear();
     multiFactorRecords.clear();
     pendingChallenges.clear();
+    MutableHashMap.clear(pendingAttempts);
     sessions.clear();
   });
 

@@ -67,6 +67,7 @@ import {
 import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
+import { type PendingMultiFactor, PendingMultiFactorStore } from "../multifactor/MultiFactor.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
@@ -906,6 +907,83 @@ export const apiKeyStoreConformance = <E = never, R = never>(
             "listByUserId of a user with none",
             yield* store.listByUserId(uuid()),
             [],
+          );
+        }),
+    },
+  ]);
+
+// ---------------------------------------------------------------------------
+// PendingMultiFactorStore
+// ---------------------------------------------------------------------------
+
+const makePending = (userId: string): PendingMultiFactor => ({
+  token: digest(),
+  userId,
+  expiresAt: at(5 * 60 * 1000).getTime(),
+  createdAt: at().getTime(),
+});
+
+/**
+ * The `PendingMultiFactorStore` contract: challenges round-trip, a miss is
+ * `null`, `recordFailedAttempt` counts each challenge's wrong codes from 1
+ * without touching the challenge or another challenge's count, and `delete`
+ * removes the challenge with its count (a no-op for an unknown token).
+ *
+ * @since 1.0.0
+ * @category suites
+ */
+export const pendingMultiFactorStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | PendingMultiFactorStore> =>
+  suite<E, R, PendingMultiFactorStore>("PendingMultiFactorStore", options, [
+    {
+      name: "create returns the challenge, get reads it back, and an unknown token is null",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* PendingMultiFactorStore;
+          const pending = makePending(yield* newUser());
+          yield* expectEqual("create", yield* store.create(pending), pending);
+          yield* expectEqual("get", yield* store.get(pending.token), pending);
+          yield* expectEqual("get of an unknown token", yield* store.get(digest()), null);
+        }),
+    },
+    {
+      name: "recordFailedAttempt counts each challenge's wrong codes from 1, independently",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* PendingMultiFactorStore;
+          const userId = yield* newUser();
+          const first = makePending(userId);
+          const second = makePending(userId);
+          yield* store.create(first);
+          yield* store.create(second);
+          const counts = [
+            yield* store.recordFailedAttempt(first.token),
+            yield* store.recordFailedAttempt(first.token),
+            yield* store.recordFailedAttempt(second.token),
+            yield* store.recordFailedAttempt(first.token),
+          ];
+          yield* expectEqual("counts", counts, [1, 2, 1, 3]);
+          yield* expectEqual("get after counting", yield* store.get(first.token), first);
+        }),
+    },
+    {
+      name: "delete removes the challenge and its count, and is a no-op for an unknown token",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* PendingMultiFactorStore;
+          const pending = makePending(yield* newUser());
+          yield* store.create(pending);
+          yield* store.recordFailedAttempt(pending.token);
+          yield* store.recordFailedAttempt(pending.token);
+          yield* store.delete(pending.token);
+          yield* store.delete(digest());
+          yield* expectEqual("get of the deleted challenge", yield* store.get(pending.token), null);
+          yield* store.create(pending);
+          yield* expectEqual(
+            "the first count of a challenge recreated under the same token",
+            yield* store.recordFailedAttempt(pending.token),
+            1,
           );
         }),
     },
