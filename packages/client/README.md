@@ -8,7 +8,7 @@ The browser half of [effect-auth](https://github.com/thomasfosterau/effect-auth)
 pnpm add @thomasfosterau/effect-auth-client effect
 ```
 
-`effect` (`>=4.1.0`) is a peer dependency, for the types; the client's runtime code imports nothing from it.
+`effect` (`^4.1.0`) is a peer dependency, for the types; the client's runtime code imports nothing from it.
 
 ## Usage
 
