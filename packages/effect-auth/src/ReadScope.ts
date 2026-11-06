@@ -57,7 +57,7 @@ import * as Policy from "./Policy.ts";
 /**
  * A value a database binds as a parameter, the only kind of value a
  * {@link Predicate} compares an attribute with. `Instant` is epoch
- * milliseconds, the form effect-auth-sql stores timestamps in.
+ * milliseconds, the form effect-auth/sql stores timestamps in.
  *
  * @since 0.1.0
  * @category models

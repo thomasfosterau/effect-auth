@@ -2,7 +2,7 @@
 
 An experimental Auth library for Effect: sessions, passwords, multi-factor, passkeys, OAuth, organizations and a policy-based authorization kernel, as Effect services and layers.
 
-The headless core is the whole library as far as a consumer is concerned; the HTTP API, the typed client and the framework bindings are tiers you opt into (the other `@thomasfosterau/effect-auth-*` packages). The core depends on `effect` only.
+The headless core is the whole library as far as a consumer is concerned; the HTTP API (`/http`), the typed browser client (`/client`), SQL storage (`/sql`) and SAML (`/saml`) are subpaths you opt into, and the framework bindings and the adapters that bring a dependency of their own are the other `@thomasfosterau/effect-auth-*` packages. The core's only required peer is `effect`; the root barrel loads none of the subpaths.
 
 ## Install
 
@@ -10,7 +10,7 @@ The headless core is the whole library as far as a consumer is concerned; the HT
 pnpm add @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`^4.1.0`). Storage comes from your own store implementations or an adapter package (`@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-drizzle`).
+`effect` is a peer dependency (`^4.1.0`). Two subpaths take an optional peer: `/http` (and `/client/testing` through it) needs `@thomasfosterau/effect-jsonapi`, and `/saml` needs `@node-saml/node-saml`. Storage comes from your own store implementations, the [`/sql` subpath](#sql-storage-sql) or an adapter package (`@thomasfosterau/effect-auth-drizzle`).
 
 ## Usage
 
@@ -100,7 +100,7 @@ export { customSessionLayer };
 - **Sign-in methods:** email and password, username (case-insensitive uniqueness), magic link, email OTP, phone (SMS) OTP with a pluggable E.164 normalizer, anonymous guests (`isAnonymousUser`, upgraded on sign-up through a `linkAccount` callback), Google One Tap, the RFC 8628 device authorization grant, passkeys (WebAuthn). Every password-based method honours the multi-factor gate.
 - **Multi-factor:** TOTP with backup codes integrated into sign-in, an OTP second factor, and the RFC 6238 / RFC 4226 primitives.
 - **OAuth 2.0 social login:** 20 provider presets (Google, GitHub, Discord, Microsoft, Apple, and more) plus custom providers, PKCE, and a complete sign-in flow with verified-email account linking.
-- **Enterprise:** OIDC and SAML SSO with per-organization connections and JIT provisioning, SCIM 2.0, and an OIDC provider with RFC 7591 dynamic client registration for MCP clients.
+- **Enterprise:** OIDC and SAML SSO with per-organization connections and JIT provisioning (the SAML XML verification is the Node-only [`/saml` subpath](#saml-saml)), SCIM 2.0, and an OIDC provider with RFC 7591 dynamic client registration for MCP clients.
 - **Account management:** verification-gated email change and self-service account deletion (single-use tokens, session revocation, a `beforeDelete` cleanup hook).
 - **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role, verified email domains with opt-in JIT provisioning; admin ban and impersonation.
 - **API keys and JWT:** hashed API keys with permissions and quotas; ES256 / EdDSA JWTs with JWKS.
@@ -465,7 +465,7 @@ const providers = {
 
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
 // OAuthUserStore, IdentifierStore, UserStore and SessionService; a storage
-// adapter such as @thomasfosterau/effect-auth-sql provides the stores.
+// adapter such as @thomasfosterau/effect-auth/sql provides the stores.
 const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
@@ -722,7 +722,7 @@ The captcha token is read from the optional `captchaToken` field on the sign-up 
 
 No store deletes an email OTP or a magic link that nobody redeems: it stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address. The services refuse an expired record, so this is about space, not access, but a caller can grow the store by one record per address it tries. Purge on a schedule the host owns (a cron trigger on Workers, a timer or job on a long-lived server):
 
-- `@thomasfosterau/effect-auth-sql`'s `purgeExpired` (and effect-auth-alchemy's `purgeExpired(db)` on D1) deletes the expired rows in one statement per table.
+- `@thomasfosterau/effect-auth/sql`'s `purgeExpired` (and `@thomasfosterau/effect-auth-alchemy-cloudflare`'s `purgeExpired(db)` on D1) deletes the expired rows in one statement per table.
 - `purgeExpiredKV` does the same for `MagicLinkStoreKV` and `EmailOtpStoreKV` (so `layerKV` and `Testing.memoryStores`). A `KeyValueStore` cannot list its keys, so the purge also requires `KeyValueStoreKeys`, whose `list(prefix)` you implement over your backend; `layerMemoryKeyValueStore` provides both over one in-memory map.
 
 ```ts
@@ -766,19 +766,23 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 
 ## API
 
-`import * as Auth from "@thomasfosterau/effect-auth"` reaches the whole headless surface. Each cluster is also a subpath export for a narrower import. The HTTP tier is the exception: it is published only as the `./http` subpath, so importing the root never pulls in `effect/http-api`:
+`import * as Auth from "@thomasfosterau/effect-auth"` reaches the whole headless surface. Each cluster is also a subpath export for a narrower import. The HTTP tier, the browser client, SQL storage and SAML are the exception: each is published only as its subpath, so importing the root never pulls in `effect/http-api`, `effect/sql` or `@node-saml/node-saml`:
 
-| Entry                                     | Root namespace     | Contents                                                                                                                                                                              |
-| ----------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@thomasfosterau/effect-auth`             | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, …                                                                    |
-| `@thomasfosterau/effect-auth/email`       | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                             |
-| `@thomasfosterau/effect-auth/password`    | `Auth.Password`    | `PasswordHasher` (PBKDF2, scrypt), password reset, `HaveIBeenPwnedPlugin`                                                                                                             |
-| `@thomasfosterau/effect-auth/multifactor` | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
-| `@thomasfosterau/effect-auth/oauth`       | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
-| `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
-| `@thomasfosterau/effect-auth/http`        | — (subpath only)   | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
-| `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                                                                                       |
-| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
+| Entry                                        | Root namespace     | Contents                                                                                                                                                                              |
+| -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@thomasfosterau/effect-auth`                | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, …                                                                    |
+| `@thomasfosterau/effect-auth/email`          | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                             |
+| `@thomasfosterau/effect-auth/password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2, scrypt), password reset, `HaveIBeenPwnedPlugin`                                                                                                             |
+| `@thomasfosterau/effect-auth/multifactor`    | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
+| `@thomasfosterau/effect-auth/oauth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
+| `@thomasfosterau/effect-auth/plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
+| `@thomasfosterau/effect-auth/http`           | — (subpath only)   | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
+| `@thomasfosterau/effect-auth/client`         | — (subpath only)   | The browser client over the HTTP contract and its observable session store ([below](#browser-client-client))                                                                          |
+| `@thomasfosterau/effect-auth/client/testing` | — (subpath only)   | An in-process server fixture and cookie-jar `fetch` for client tests                                                                                                                  |
+| `@thomasfosterau/effect-auth/sql`            | — (subpath only)   | Every store contract it covers over `effect/sql`'s `SqlClient`, plus the DDL ([below](#sql-storage-sql))                                                                              |
+| `@thomasfosterau/effect-auth/saml`           | — (subpath only)   | The `SamlVerifier` over `@node-saml/node-saml`; Node-only ([below](#saml-saml))                                                                                                       |
+| `@thomasfosterau/effect-auth/ladder`         | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                                                                                       |
+| `@thomasfosterau/effect-auth/testing`        | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
 
 The package root also carries these namespaces, each a module whose member names are too generic to sit flat:
 
@@ -829,6 +833,425 @@ The included HTTP API speaks [JSON:API](https://jsonapi.org/) through `@thomasfo
 | `POST /backup-code-sets`                                                               | A fresh set of backup codes, in `meta.backupCodes`; the old set stops working (was `POST /multi-factor/regenerate-backup-codes`)                                                                                                                                                                                                                                                                                                        |
 
 The externally specified endpoints (OAuth 2.0 and OIDC, RFC 8628 device flow, RFC 7591 / 7592 registration, JWKS, SCIM 2.0, the SSO callbacks) keep the wire formats their specifications mandate. `Http.groupLayers` is every group of the contract with the JSON:API protocol middleware, for serving `AuthApi` from your own `HttpApiBuilder`.
+
+## Browser client (`/client`)
+
+The browser half of [effect-auth](https://github.com/thomasfosterau/effect-auth): a small client over the effect-auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. Only the wire _types_ come from the `/http` subpath, and those erase at compile time, so nothing server-side reaches the browser bundle.
+
+`effect` is needed for the types only; the client's runtime code imports nothing from it, and the root barrel does not re-export the subpath.
+
+### Usage
+
+```ts
+import { AuthClientError, createAuthClient } from "@thomasfosterau/effect-auth/client";
+
+const client = createAuthClient({ baseUrl: "/api/auth" });
+
+// Typed methods named after the contract's endpoints.
+const result = await client.signIn({ email: "ada@example.com", password: "correct horse" });
+if (result.secondFactor) {
+  // Password accepted; a second factor is required before a session is issued.
+  await client.multiFactor.continueChallenge(result).verifyTotp("123456");
+}
+
+// The observable session store the framework bindings subscribe to.
+const unsubscribe = client.session.subscribe(() => {
+  const { data, isPending, error } = client.session.get();
+  console.log(isPending ? "loading" : (data?.user.id ?? "signed out"), error?.message);
+});
+
+try {
+  await client.signIn({ email: "ada@example.com", password: "wrong" });
+} catch (error) {
+  if (error instanceof AuthClientError && error.status === 401) {
+    console.log("bad credentials");
+  }
+}
+
+unsubscribe();
+```
+
+Every request is sent with `credentials: "include"`, so the session cookie flows on cross-origin deployments too (the server must list your origin in `trustedOrigins`). A non-2xx response rejects with an `AuthClientError` carrying the HTTP `status` and the server's `message`. Optional server features that are not configured answer `404`: a method existing on the client does not mean the server mounted it.
+
+### Options
+
+`createAuthClient(options: AuthClientOptions): AuthClient`
+
+| Option    | Type                     | Purpose                                                                  |
+| --------- | ------------------------ | ------------------------------------------------------------------------ |
+| `baseUrl` | `string`                 | Where the auth handler is mounted: `"/api/auth"` or an absolute URL.     |
+| `fetch`   | `typeof fetch`           | Custom `fetch`: SSR, tests, or an in-process handler.                    |
+| `headers` | `Record<string, string>` | Extra headers on every request.                                          |
+| `refresh` | `RefreshOptions`         | Opt-in background refresh: `intervalMs`, `onFocus`, `crossTab`. All off. |
+
+`refresh.intervalMs` polls `GET /sessions/current` while something is subscribed; `onFocus` refetches on window focus and when the tab becomes visible; `crossTab` mirrors session changes across tabs over a `BroadcastChannel` (`true` for the default channel name `"effect-auth-session"`, or a name of your own). Each degrades to a no-op outside a browser.
+
+### The session store
+
+`client.session` is a `SessionStore`:
+
+| Member                | Behaviour                                                                   |
+| --------------------- | --------------------------------------------------------------------------- |
+| `get()`               | The current `SessionState`: `{ data, isPending, error }`. Stable reference. |
+| `subscribe(listener)` | Returns an unsubscribe function. The first subscriber triggers the fetch.   |
+| `refetch()`           | Re-reads `GET /sessions/current` and notifies subscribers.                  |
+
+`data` is the `SessionWithUserView` or `null` when signed out. The store starts at `isPending: true`, so a UI never flashes "signed out" before the first fetch. A `401` resolves to `data: null`, not an error; any other failure keeps the last `data` and sets `error`. Session-changing calls (every sign-in and sign-up, sign-out, second-factor redemption, email verification, the email-change and account-deletion confirmations, `updateUser`, `multiSession.setActive`, `organization.setActive`, impersonation, the SSO callback and the device token poll) refetch the store only while something is subscribed.
+
+### Methods
+
+Each method resolves to the contract's own view type (`Http.*`). Groups:
+
+| Group            | Methods                                                                                                                                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session and user | `signUp`, `signIn`, `signOut`, `signInAnonymous`, `signInUsername`, `getSession` (`null` when signed out), `updateUser`, `changePassword`, `listSessions`, `revokeSession`, `revokeOtherSessions`, `jwtToken`, `jwks`             |
+| Email            | `sendVerificationEmail`, `verifyEmail`, `passwordResetRequest`, `passwordResetConfirm`, `magicLink.send` / `.verify`, `emailOtp.send` / `.signIn`, `changeEmail.request` / `.confirm`                                             |
+| Phone and others | `phoneOtp.send` / `.signIn`, `googleOneTap.nonce` / `.signIn`, `device.code` / `.token` / `.approve` / `.deny` (RFC 8628)                                                                                                         |
+| Account          | `identifiers.list` / `.delete`, `deleteUser.request` / `.confirm`, `multiSession.list` / `.setActive` / `.revoke`                                                                                                                 |
+| Multi-factor     | `multiFactor.enable`, `.confirm`, `.disable`, `.regenerateBackupCodes`, `.verifyTotp`, `.verifyBackupCode`, `.challenge(challenge)`, `.continueChallenge(result)`                                                                 |
+| Organizations    | `organization.create`, `list`, `get`, `update`, `delete`, `setActive`, members (`addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `setDefaultRole`), invitations, domains, roles and teams |
+| API keys         | `apiKeys.create` (the plaintext key is returned once), `list`, `update`, `delete`                                                                                                                                                 |
+| Admin            | `admin.listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeSessions`, `impersonate`, `stopImpersonating`                                                                                                          |
+| SSO and OIDC     | `sso.register` / `.signIn` / `.callback`; `oidc.registerClient`, `listClients`, `updateClient`, `deleteClient`, `consent`                                                                                                         |
+
+`multiFactor.continueChallenge(result)` takes the `AuthResult` a sign-in returned and binds its pending challenge, so the caller passes only the code. It throws `SecondFactorChallengeError` (`reason: "missing"`) when the result carries no challenge, and its `verifyTotp` / `verifyBackupCode` reject with `reason: "expired"` once the challenge window has passed, without a request.
+
+### Plugins
+
+`definePlugin(install)` builds a plugin whose `install(context)` returns extra methods; `client.extend(plugin)` returns the client with them added. The context (`AuthClientPluginContext`) exposes `request(method, path, body?)`, `mutating(run)` (run a session-changing call, then refetch when observed) and the `session` store.
+
+```ts
+import { createAuthClient, definePlugin } from "@thomasfosterau/effect-auth/client";
+
+interface Profile {
+  readonly bio: string;
+}
+
+const profilePlugin = definePlugin((ctx) => ({
+  profile: () => ctx.request<Profile>("GET", "/profile"),
+}));
+
+const client = createAuthClient({ baseUrl: "/api/auth" }).extend(profilePlugin);
+const profile = await client.profile();
+```
+
+### Testing: `/client/testing`
+
+An in-process effect-auth server for end-to-end client tests: the real `Http.make` handler over in-memory stores, and a `fetch` that emulates the browser's cookie jar. Unlike `/client`, it imports the core and `effect` at runtime (and `@thomasfosterau/effect-jsonapi`, through the HTTP tier), so keep it to tests.
+
+```ts
+import { createAuthClient } from "@thomasfosterau/effect-auth/client";
+import { makeCookieJarFetch, makeServerFixture } from "@thomasfosterau/effect-auth/client/testing";
+
+const server = makeServerFixture({ features: true });
+const client = createAuthClient({
+  baseUrl: "http://localhost", // the fixture handler is mounted at the root
+  fetch: makeCookieJarFetch(server.handler),
+});
+
+await client.signUp({ email: "ada@example.com", password: "correct horse battery staple" });
+console.log(server.sessions.size); // 1
+```
+
+`makeServerFixture(options?)` mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`), for assertions.
+
+### API
+
+- `createAuthClient(options)`, `AuthClient`, `AuthClientOptions`, `RefreshOptions`
+- `SessionStore`, `SessionState`
+- `AuthClientError` (`status`), `SecondFactorChallengeError` (`reason`), `SecondFactorContinuation`
+- `definePlugin`, `AuthClientPlugin`, `AuthClientPluginContext`
+- `./client/testing`: `makeServerFixture`, `ServerFixtureOptions`, `makeCookieJarFetch`
+
+### Framework bindings
+
+| Framework | Package                                                                                                  |
+| --------- | -------------------------------------------------------------------------------------------------------- |
+| Svelte    | [`@thomasfosterau/effect-auth-svelte`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-svelte) |
+
+The [client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) walks through the binding and its form components.
+
+## SQL storage (`/sql`)
+
+Driver-agnostic SQL storage, built on `effect/sql`: one `Layer` that implements the core's store contracts over any `SqlClient`, plus the DDL that creates their tables.
+
+`effect/sql` ships in `effect`, so the subpath adds no dependency. Add a `SqlClient` driver for a [supported dialect](#dialects) at the same version as `effect` (for example `@effect/sql-pg`); the package bundles none. On Alchemy, [`@thomasfosterau/effect-auth-alchemy-cloudflare`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/alchemy-cloudflare) (D1) and [`@thomasfosterau/effect-auth-alchemy-postgres`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/alchemy-postgres) wire these stores to a database and reconcile the schema on deploy.
+
+### Usage
+
+```typescript
+import { Effect, Layer } from "effect";
+import type { SqlClient } from "effect/sql";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as AuthSql from "@thomasfosterau/effect-auth/sql";
+
+// `SqlLive` is any layer providing `SqlClient` for a supported dialect (SQLite, D1, PostgreSQL).
+export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
+  // Creates the `auth_*` tables; idempotent, so it is safe on every deploy.
+  const migrate = AuthSql.migrate.pipe(Effect.provide(SqlLive));
+
+  const sessionConfig: Auth.SessionConfig = {
+    sessionExpiresIn: { activePeriod: 30 * 86_400_000, idlePeriod: 14 * 86_400_000 },
+  };
+  const AuthLive = Auth.SessionService.layer(sessionConfig).pipe(
+    Layer.provideMerge(Layer.mergeAll(AuthSql.layer, Auth.Hooks.Default)),
+    Layer.provide(SqlLive),
+  );
+  return { migrate, AuthLive };
+};
+```
+
+`AuthSql.layer` provides every store below at once, so any service built over them (`EmailPasswordService`, `OAuthService`, `WebAuthnService`, `MagicLinkService`, `MultiFactorService`, `ApiKeyService`, `AdminService`, …) has persistence once it is composed on top.
+
+### Stores
+
+`layer` is `Layer<…every store…, never, SqlClient>`. Each store is also available on its own, as an `Effect` that builds it (`make<Name>`) and as a `Layer` (`<Name>Layer`), for wiring a subset:
+
+| Store (core tag)                           | Constructor / layer                                            | Table                                                             |
+| ------------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `Auth.SessionStore`                        | `makeSessionStore` / `SessionStoreLayer`                       | `auth_sessions`                                                   |
+| `Auth.UserStore`                           | `makeUserStore` / `UserStoreLayer`                             | `auth_users`                                                      |
+| `Auth.UserServiceStore`                    | `makeUserServiceStore` / `UserServiceStoreLayer`               | `auth_users`                                                      |
+| `Auth.IdentifierStore`                     | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`                                                |
+| `Auth.Email.EmailPasswordStore`            | `makeEmailPasswordStore` / `EmailPasswordStoreLayer`           | `auth_users`                                                      |
+| `Auth.Email.EmailVerificationStore`        | `makeEmailVerificationStore` / `EmailVerificationStoreLayer`   | `auth_email_verifications`                                        |
+| `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`                                                 |
+| `Auth.Email.EmailOtpUserStore`             | `makeEmailOtpUserStore` / `EmailOtpUserStoreLayer`             | `auth_users`                                                      |
+| `Auth.Password.PasswordResetStore`         | `makePasswordResetStore` / `PasswordResetStoreLayer`           | `auth_password_resets`                                            |
+| `Auth.Password.PasswordResetUserStore`     | `makePasswordResetUserStore` / `PasswordResetUserStoreLayer`   | `auth_users`                                                      |
+| `Auth.MagicLinkStore`                      | `makeMagicLinkStore` / `MagicLinkStoreLayer`                   | `auth_magic_links`                                                |
+| `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                                                      |
+| `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`                                                |
+| `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`                                        |
+| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`                                       |
+| `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`                                               |
+| `Auth.MultiFactor.PendingMultiFactorStore` | `makePendingMultiFactorStore` / `PendingMultiFactorStoreLayer` | `auth_pending_multi_factor`, `auth_pending_multi_factor_attempts` |
+| `Auth.OAuth.OAuthStateStore`               | `makeOAuthStateStore` / `OAuthStateStoreLayer`                 | `auth_oauth_states`                                               |
+| `Auth.OAuth.OAuthAccountStore`             | `makeOAuthAccountStore` / `OAuthAccountStoreLayer`             | `auth_oauth_accounts`                                             |
+| `Auth.OAuth.OAuthUserStore`                | `makeOAuthUserStore` / `OAuthUserStoreLayer`                   | `auth_users`                                                      |
+| `Auth.Plugins.AccountLockoutStore`         | `makeAccountLockoutStore` / `AccountLockoutStoreLayer`         | `auth_account_lockouts`                                           |
+| `Auth.ApiKeyStore`                         | `makeApiKeyStore` / `ApiKeyStoreLayer`                         | `auth_api_keys`                                                   |
+| `Auth.AdminUserStore`                      | `makeAdminUserStore` / `AdminUserStoreLayer`                   | `auth_users`                                                      |
+
+```typescript
+import { Layer } from "effect";
+import type { SqlClient } from "effect/sql";
+import * as AuthSql from "@thomasfosterau/effect-auth/sql";
+
+// Only sessions, users and identifiers, on top of an existing `SqlClient` layer.
+export const coreStores = (SqlLive: Layer.Layer<SqlClient.SqlClient>) =>
+  Layer.mergeAll(
+    AuthSql.SessionStoreLayer,
+    AuthSql.UserStoreLayer,
+    AuthSql.IdentifierStoreLayer,
+  ).pipe(Layer.provide(SqlLive));
+```
+
+Not covered yet: the stores added to the core later (one-time tokens, trusted devices, phone OTP, organizations, the OIDC provider, SSO, device authorization). Implement those contracts yourself for now. (The core's `KeyValueStore`-backed layers, `OAuthStateStoreKV`, `ChallengeStoreKV`, `RateLimitStoreKV` and the rest, cover only the short-lived stores, not these.)
+
+### Schema and migration
+
+- `schemaStatements: readonly string[]` — the ordered DDL, one statement per entry, every one `CREATE TABLE IF NOT EXISTS` or `CREATE [UNIQUE] INDEX IF NOT EXISTS` over `auth_`-prefixed tables, so they live beside your own.
+- `migrate: Effect<void, Auth.AuthError, SqlClient>` — runs `schemaStatements` through the ambient `SqlClient`. Safe on every deploy and every cold start.
+
+Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 on every engine), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values (WebAuthn challenges and public keys) base64 `TEXT`. Token columns (`auth_sessions.id`, the magic-link, verification and reset tokens, `auth_api_keys.key_hash`) hold the SHA-256 digest the service layer computed: the database never sees a raw bearer token.
+
+- `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes the `auth_magic_links` and `auth_email_otps` rows whose `expires_at` has passed (read from the `Clock`) and reports how many went from each. No store deletes them on its own: a code or link nobody redeems stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address, so without a purge those tables grow with every distinct address a caller tries. Schedule it from the host: a cron trigger on Workers, a timer or job on a long-lived server. The services already refuse an expired row, so a purge changes no outcome.
+
+Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
+
+### Authorization
+
+Role data lives in two tables, `auth_user_roles` (user → role) and `auth_role_permissions` (role → `resource` / `action`), but `layer` does not wire authorization: an `EntityResolver` is one slot the application composes, not a store.
+
+- `makeRbacEntityResolver` / `RbacEntityResolverLayer` — an `Auth.EntityResolver` that answers `User::"<id>"` references with a `Role::"<role>"` parent per assigned role. It answers only `User` references and adds no role-to-role edges, so compose it with your own resolver when policies name other entities.
+- `readRbacPolicies: Effect<ReadonlyArray<Auth.Policy.DeclarativePolicy>, never, SqlClient>` — reads `auth_role_permissions` and compiles it with `Auth.Rbac.policies`, the same policies a hand-written `Auth.Rbac` configuration produces.
+
+```typescript
+import { Effect, Layer } from "effect";
+import type { SqlClient } from "effect/sql";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as AuthSql from "@thomasfosterau/effect-auth/sql";
+
+export const authorization = (SqlLive: Layer.Layer<SqlClient.SqlClient>) =>
+  Layer.unwrap(
+    Effect.map(AuthSql.readRbacPolicies, (policies) => Auth.Authorizer.layer({ policies })),
+  ).pipe(Layer.provide(AuthSql.RbacEntityResolverLayer), Layer.provide(SqlLive));
+```
+
+Policies are read once, when the layer is built; re-read them behind a `PolicyStore` if role edits must apply without a restart.
+
+### Read scopes
+
+`readScopeWhere(scope, { columns, sets? })` renders a core `Auth.ReadScope` as a `WHERE` fragment, so a LIST filters in the database rather than after the fact. `Auth.ReadScope.compile` produces the scope from a policy set (ADR-0020).
+
+```typescript
+import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as AuthSql from "@thomasfosterau/effect-auth/sql";
+
+export const listPosts = (scope: Auth.ReadScope.ReadScope, viewerId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const where = yield* AuthSql.readScopeWhere(scope, {
+      columns: { owner: sql("owner_id"), visibility: sql("visibility"), draft: sql("draft") },
+      sets: { following: sql`SELECT followee FROM follows WHERE follower = ${viewerId}` },
+    });
+    return yield* sql`SELECT * FROM posts WHERE ${where}`;
+  });
+```
+
+- `AllowAll` renders `1 = 1` and `Deny` renders `1 = 0`, so the fragment always splices in.
+- Every comparison carries an `IS NOT NULL` guard, so a NULL column decides as the core decides an absent attribute and never through SQL's third truth value.
+- A named set is a subquery and is never materialised. A set with no fragment in `sets` is dropped with `ReadScope.withoutSets`, which narrows the scope.
+- An attribute with no column in `columns` lists nothing.
+
+### Dialects
+
+- **SQLite:** supported. The test suite runs every store over `better-sqlite3`.
+- **Cloudflare D1:** supported. D1 is SQLite; [`@thomasfosterau/effect-auth-alchemy-cloudflare`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-alchemy-cloudflare) wires it, and its suite runs these stores over a SQLite-backed D1 shim. D1 has no transactions, so there the multi-step writes are not atomic (see that package's README).
+- **PostgreSQL:** supported. The same suite runs over PostgreSQL through PGlite (`@effect/sql-pglite`).
+- **MySQL:** not supported ([#260](https://github.com/thomasfosterau/effect-auth/issues/260)). MySQL has no `ON CONFLICT` clause, so the upserts and counters fail. For MySQL, use [`@thomasfosterau/effect-auth-drizzle`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-drizzle) with its MySQL tables (`Drizzle.MySql`). That package covers only `SessionStore`, `UserStore` and `IdentifierStore`, and its MySQL suite runs against `drizzle-orm/mysql-proxy`, not a MySQL server.
+
+### Errors
+
+Every store method fails only with `Auth.AuthError` (an infrastructure failure, the driver's error kept as `cause`); a lookup that finds nothing returns `null`, and the core services turn that into their typed errors. A unique-index violation (an identifier, an OAuth account, an API key hash) is an `AuthError` too, which the core resolves into the domain error (`IdentifierTakenError`, …).
+
+## SAML (`/saml`)
+
+SAML 2.0 service-provider support, as an Effect `Layer`.
+
+The root of the core declares the `SamlVerifier` contract but implements none
+of it: XML canonicalisation, XML-DSig verification and DEFLATE need a
+dependency the rest of the core does not carry. This subpath is the
+implementation, over [`@node-saml/node-saml`](https://github.com/node-saml/node-saml),
+an **optional peer** of `@thomasfosterau/effect-auth` that only `/saml`
+imports:
+
+```sh
+pnpm add @thomasfosterau/effect-auth @node-saml/node-saml effect
+```
+
+**`/saml` is Node-only.** node-saml needs Node APIs, so this subpath does not
+run on Cloudflare Workers or in a browser; the rest of the core does. The root
+barrel never reaches node-saml (`ModuleGraph.test.ts` pins it).
+
+The **flow** stays in the root's `SsoService` — domain routing, one-time use of
+the `AuthnRequest` and the assertion, issuer pinning, user provisioning,
+sessions. Only the XML job lives here.
+
+### Usage
+
+```ts
+import { Layer } from "effect";
+import * as Saml from "@thomasfosterau/effect-auth/saml";
+import { SamlReplayStore, SsoService, memorySamlReplayStore } from "@thomasfosterau/effect-auth";
+
+const samlSupport = Layer.mergeAll(
+  Saml.layer,
+  Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
+);
+
+const ssoLayer = SsoService.layer().pipe(Layer.provide(samlSupport));
+```
+
+Register a connection, then start and finish sign-ins:
+
+```ts
+import { Effect } from "effect";
+import { SsoService } from "@thomasfosterau/effect-auth";
+
+// Register once (admin-gated), with the IdP's signing certificate(s) pinned.
+const register = (adminUserId: string, idpCertificatePem: string) =>
+  Effect.gen(function* () {
+    const sso = yield* SsoService;
+    return yield* sso.registerSamlProvider(adminUserId, {
+      protocol: "saml",
+      domain: "acme.test",
+      entityId: "https://idp.acme.test/metadata", // the IdP's Issuer
+      ssoUrl: "https://idp.acme.test/sso", // HTTP-Redirect binding
+      idpCertificates: [idpCertificatePem], // pinned; rotation-ready
+      spEntityId: "https://app.test/saml/metadata",
+      acsUrl: "https://app.test/api/auth/sso/saml/acs",
+      organizationId: "org-1",
+    });
+  });
+
+// Start: redirect the browser to `url`; the IdP echoes `state` back as RelayState.
+const start = (email: string) =>
+  Effect.gen(function* () {
+    const sso = yield* SsoService;
+    return yield* sso.signIn({ email });
+  });
+
+// Finish, at the ACS endpoint: verify the posted SAMLResponse and issue a session.
+const finish = (providerId: string, samlResponse: string, relayState: string) =>
+  Effect.gen(function* () {
+    const sso = yield* SsoService;
+    const { user, session, isNewUser } = yield* sso.handleSamlCallback(
+      providerId,
+      samlResponse,
+      relayState,
+    );
+    return { userId: user.id, sessionToken: session.id, isNewUser };
+  });
+
+export { register, start, finish };
+```
+
+`memorySamlReplayStore` is single-process. Behind more than one instance,
+implement `SamlReplayStore` against shared storage — a replay defence that only
+remembers what one process saw is not a replay defence. Both of its operations
+must be atomic; the tag's docs spell out what that means.
+
+### What gets checked
+
+`verify` refuses a response unless all of the following hold. Every one is a
+rejection, not a warning:
+
+| Check                                                                 | Enforced by                |
+| --------------------------------------------------------------------- | -------------------------- |
+| Signature verifies against a **pinned** certificate (never `KeyInfo`) | node-saml + xml-crypto     |
+| Profile data read only from signature-covered bytes                   | node-saml `getVerifiedXml` |
+| At most one `Assertion` per `Response`                                | node-saml                  |
+| No `ID` referring to more than one element                            | node-saml                  |
+| `Assertion` signed (or the whole `Response`, if you disable that)     | node-saml                  |
+| `Issuer` matches the connection's IdP entity id                       | node-saml + `/saml`        |
+| `AudienceRestriction` contains the SP entity id                       | node-saml                  |
+| `Conditions` `NotBefore`/`NotOnOrAfter`, within the clock-skew window | node-saml                  |
+| `SubjectConfirmationData` `Recipient` equals the ACS URL              | `/saml`                    |
+| `SubjectConfirmationData` `NotOnOrAfter`                              | `/saml`                    |
+| `Destination` equals the ACS URL                                      | `/saml`                    |
+| Signed `InResponseTo` agrees with the `Response` attribute            | `/saml`                    |
+| Signature/digest algorithms on an allow-list (SHA-256+ by default)    | `/saml`                    |
+| HMAC signature methods refused outright                               | `/saml`                    |
+| Encrypted assertions refused with an actionable message               | `/saml`                    |
+| `AuthnRequest` and `Assertion` ids each spendable once                | core `SsoService`          |
+
+`src/saml/Verifier.test.ts` reproduces the corresponding attack shapes against
+hand-built, signed XML fixtures.
+
+### Encrypted assertions
+
+Not supported in this version. Configure the IdP for **signed, unencrypted**
+assertions delivered over TLS; a half-implemented decryption path is worth less
+than a clear refusal.
+
+### Version floor
+
+`@node-saml/node-saml` is pinned to `^5.1.0` and must never be relaxed below it.
+5.1.0 is the release that fixed the July 2025 signature-scope vulnerabilities
+(CVE-2025-54419, CVE-2025-54369), where a crafted document could get profile
+data read from bytes the signature did not cover.
+
+### API
+
+- `layer: Layer<SamlVerifier>` — core's `SamlVerifier`, for the layer stack that builds `SsoService` (together with a `SamlReplayStore`).
+- `verifier` — the same implementation as a plain object (`verify`, `buildAuthnRequest`, `spMetadataXml`), for a call site with no Effect context, such as a metadata script.
+- `EMAIL_NAMEID_FORMAT` — the `emailAddress` NameID format, the default for `AuthnRequest`s and SP metadata.
+
+Every failure is core's `SamlError`. The input and output types (`SamlVerifyInput`, `SamlAssertion`, `SamlAuthnRequestInput`, `SamlMetadataInput`, `SamlSignatureAlgorithm`) and the defaults `defaultSignatureAlgorithms` (SHA-256, SHA-512) and `defaultClockSkewMs` (3 minutes) are exported by `@thomasfosterau/effect-auth`.
 
 ## Further reading
 

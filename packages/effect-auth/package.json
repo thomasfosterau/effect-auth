@@ -1,13 +1,17 @@
 {
   "name": "@thomasfosterau/effect-auth",
   "version": "0.0.0",
-  "description": "An experimental Auth library for Effect.",
+  "description": "An experimental Auth library for Effect: the headless core, plus the HTTP tier, the browser client, SQL storage and SAML as opt-in subpaths.",
   "keywords": [
     "auth",
     "authentication",
     "authorization",
+    "client",
     "effect",
-    "session"
+    "saml",
+    "session",
+    "sql",
+    "sso"
   ],
   "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
   "bugs": {
@@ -44,6 +48,14 @@
       "types": "./dist/http/index.d.ts",
       "import": "./dist/http/index.js"
     },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./client/testing": {
+      "types": "./dist/client/testing/fixture.d.ts",
+      "import": "./dist/client/testing/fixture.js"
+    },
     "./oauth": {
       "types": "./dist/oauth/index.d.ts",
       "import": "./dist/oauth/index.js"
@@ -60,6 +72,14 @@
       "types": "./dist/multifactor/index.d.ts",
       "import": "./dist/multifactor/index.js"
     },
+    "./sql": {
+      "types": "./dist/sql/index.d.ts",
+      "import": "./dist/sql/index.js"
+    },
+    "./saml": {
+      "types": "./dist/saml/index.d.ts",
+      "import": "./dist/saml/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"
@@ -72,16 +92,27 @@
     "docs": "docgen"
   },
   "devDependencies": {
+    "@effect/sql-pglite": "catalog:",
+    "@electric-sql/pglite": "catalog:",
+    "@node-saml/node-saml": "catalog:",
     "@thomasfosterau/effect-jsonapi": "catalog:",
+    "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
+    "better-sqlite3": "catalog:",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "xml-crypto": "catalog:"
   },
   "peerDependencies": {
+    "@node-saml/node-saml": "catalog:peers",
     "@thomasfosterau/effect-jsonapi": "catalog:peers",
     "effect": "catalog:peers"
   },
   "peerDependenciesMeta": {
+    "@node-saml/node-saml": {
+      "optional": true
+    },
     "@thomasfosterau/effect-jsonapi": {
       "optional": true
     }

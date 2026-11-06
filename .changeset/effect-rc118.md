@@ -1,11 +1,8 @@
 ---
 "@thomasfosterau/effect-auth": minor
 "@thomasfosterau/effect-auth-argon2": minor
-"@thomasfosterau/effect-auth-client": minor
 "@thomasfosterau/effect-auth-drizzle": minor
 "@thomasfosterau/effect-auth-resend": minor
-"@thomasfosterau/effect-auth-saml": minor
-"@thomasfosterau/effect-auth-sql": minor
 "@thomasfosterau/effect-auth-twilio": minor
 ---
 

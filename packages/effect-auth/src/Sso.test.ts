@@ -557,7 +557,7 @@ describe("SsoService", () => {
 
 // --- SAML --------------------------------------------------------------------
 //
-// The crypto lives in `@thomasfosterau/effect-auth-saml` and is exercised
+// The crypto lives in `@thomasfosterau/effect-auth/saml` and is exercised
 // there, against hand-built XML fixtures. These tests are about the half core
 // owns: protocol routing, one-time use of the AuthnRequest and the assertion,
 // issuer pinning, and the fact that both protocols end in the *same*
@@ -1119,7 +1119,7 @@ const makeHttpFixture = () => {
   // SAML is resolved optionally by `SsoService`, so the HTTP fixture installs
   // the same stub verifier the service-level tests use plus an in-memory
   // replay store — that is exactly what an app installing
-  // `@thomasfosterau/effect-auth-saml` would provide.
+  // `@thomasfosterau/effect-auth/saml` would provide.
   const samlRequests: SamlAuthnRequestInput[] = [];
   const ssoDeps = Layer.mergeAll(
     Layer.succeed(SsoProviderStore)(ssoStore),

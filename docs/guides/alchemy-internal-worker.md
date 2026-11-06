@@ -8,13 +8,14 @@ relay. This guide covers the deployment.
 
 ## 1. Storage: Hyperdrive at runtime, the origin URL on deploy
 
-`@thomasfosterau/effect-auth-alchemy/postgres` is the Postgres counterpart of the package's D1
-wiring. Install its optional peer, `@effect/sql-pg`, alongside it.
+`@thomasfosterau/effect-auth-alchemy-postgres` is the Postgres counterpart of
+`@thomasfosterau/effect-auth-alchemy-cloudflare`'s D1 wiring. Install its peers, `alchemy` and
+`@effect/sql-pg`, alongside it.
 
 **In the auth Worker**, provide every store over the Hyperdrive binding:
 
 ```ts
-import * as Postgres from "@thomasfosterau/effect-auth-alchemy/postgres";
+import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
 
 const stores = Postgres.layer(env.HYPERDRIVE);
 ```
@@ -28,15 +29,16 @@ database. A Hyperdrive binding exists only inside a Worker, so the deploy-time p
 to the origin directly:
 
 ```ts
-import { AuthSchema, AuthSchemaProvider } from "@thomasfosterau/effect-auth-alchemy";
-import * as Postgres from "@thomasfosterau/effect-auth-alchemy/postgres";
+import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
 
 const providers = Layer.mergeAll(
   Cloudflare.providers(),
-  AuthSchemaProvider({ database: Postgres.database(Redacted.make(process.env.DATABASE_URL)) }),
+  Postgres.AuthSchemaProvider({
+    database: Postgres.database(Redacted.make(process.env.DATABASE_URL)),
+  }),
 );
 // …inside the program:
-yield * AuthSchema("auth-schema");
+yield * Postgres.AuthSchema("auth-schema");
 ```
 
 Every deploy reconciles the `auth_*` tables in Postgres. The DDL is idempotent `CREATE … IF NOT
@@ -50,9 +52,9 @@ ways. Choose one, not both:
 - **`AuthSchema` owns them.** Keep the `auth_*` tables out of your Drizzle schema, or declare
   them with `tablesFilter: ["!auth_*"]` in `drizzle.config.ts`, so drizzle-kit neither generates
   nor drops them. `AuthSchema` reconciles them on each deploy.
-- **Your migrations own them.** Put effect-auth-sql's `schemaStatements` into a custom
+- **Your migrations own them.** Put `@thomasfosterau/effect-auth/sql`'s `schemaStatements` into a custom
   migration (`drizzle-kit generate --custom`), keep the tables out of drizzle-kit's diff as above,
-  and don't declare `AuthSchema`. On each effect-auth-sql upgrade, add the statements it gained to
+  and don't declare `AuthSchema`. On each effect-auth upgrade, add the statements it gained to
   a new custom migration.
 
 The first keeps the auth schema in step with the library version you deploy. The second keeps one

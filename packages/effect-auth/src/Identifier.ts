@@ -146,13 +146,13 @@ export class IdentifierStore extends Context.Service<
      * confirms through it.
      *
      * Two concurrent replaces of the same `from` with different values: the
-     * in-memory store (one synchronous step), effect-auth-sql (a compare-and-swap
+     * in-memory store (one synchronous step), effect-auth/sql (a compare-and-swap
      * on the release) and effect-auth-drizzle's single-table store (an `UPDATE`
      * guarded on `from`'s value) let one succeed, and the other resolves to
-     * `null`, writing nothing. For effect-auth-sql on PostgreSQL that holds at
+     * `null`, writing nothing. For effect-auth/sql on PostgreSQL that holds at
      * the default READ COMMITTED isolation; at stricter levels the losing call
      * fails with a serialization error, surfaced as `AuthError`. On D1
-     * (effect-auth-alchemy), which has no transactions, the losing call removes
+     * (effect-auth-alchemy-cloudflare), which has no transactions, the losing call removes
      * its claim in a statement of its own, so a failure before that statement
      * leaves the user holding both new values. `IdentifierStoreKV` and
      * effect-auth-drizzle's default store check `from` before they write and

@@ -1,11 +1,11 @@
 # The browser client
 
-`@thomasfosterau/effect-auth-client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
+`@thomasfosterau/effect-auth/client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
 
 ## 1. Setup
 
 ```ts
-import { createAuthClient } from "@thomasfosterau/effect-auth-client";
+import { createAuthClient } from "@thomasfosterau/effect-auth/client";
 
 export const client = createAuthClient({
   // Where the auth handler is mounted. Same-origin ("/api/auth") or absolute.
@@ -23,7 +23,7 @@ export const client = createAuthClient({
 Every call sends `credentials: "include"`, so the session cookie flows on cross-origin deployments too (the server must list your origin in `trustedOrigins`). A non-2xx response rejects with an `AuthClientError` carrying the HTTP `status` and the server's message:
 
 ```ts
-import { AuthClientError } from "@thomasfosterau/effect-auth-client";
+import { AuthClientError } from "@thomasfosterau/effect-auth/client";
 
 try {
   await client.signIn({ email, password });
@@ -65,7 +65,7 @@ The interval starts with the first subscriber and is cleared when the last one l
 
 ## 3. Framework binding
 
-The Svelte binding is its own package, depends on `@thomasfosterau/effect-auth-client`, and subscribes to the same store, so an app that doesn't use Svelte installs only the client:
+The Svelte binding is its own package, depends on the core for its `/client` subpath, and subscribes to the same store, so an app that doesn't use Svelte installs only the client:
 
 | Framework | Package                              | Exports                                              |
 | --------- | ------------------------------------ | ---------------------------------------------------- |
@@ -191,7 +191,7 @@ A wrong code is a server-side rejection (`AuthClientError`, status `401`) and le
 `extend` bolts typed methods onto a client — for endpoints a deployment adds itself, or for composing several calls into one app-level operation.
 
 ```ts
-import { definePlugin } from "@thomasfosterau/effect-auth-client";
+import { definePlugin } from "@thomasfosterau/effect-auth/client";
 
 const billingPlugin = definePlugin((ctx) => ({
   listInvoices: () => ctx.request<Invoice[]>("GET", "/billing/invoices"),

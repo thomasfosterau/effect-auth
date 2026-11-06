@@ -1,11 +1,11 @@
 # @thomasfosterau/effect-auth-svelte
 
-Svelte bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/client): readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
+Svelte bindings for [`@thomasfosterau/effect-auth/client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth#browser-client-client), the browser client subpath of the core: readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
 
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth-client effect
+pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth effect
 ```
 
 `svelte` (>= 5.20) is a peer dependency. The components are authored with runes, and the package is built with `svelte-package`, so it resolves through the `svelte` export condition like any other Svelte component library.
@@ -14,7 +14,7 @@ pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth-client e
 
 ```svelte
 <script lang="ts">
-  import { createAuthClient } from "@thomasfosterau/effect-auth-client";
+  import { createAuthClient } from "@thomasfosterau/effect-auth/client";
   import { sessionStore, listSessionsStore } from "@thomasfosterau/effect-auth-svelte";
 
   const client = createAuthClient({ baseUrl: "/api/auth" });
@@ -58,7 +58,7 @@ Put the client in context once, high in the tree, and every form below finds it.
 ```svelte
 <!-- src/routes/+layout.svelte -->
 <script lang="ts">
-  import { createAuthClient } from "@thomasfosterau/effect-auth-client";
+  import { createAuthClient } from "@thomasfosterau/effect-auth/client";
   import { setAuthClient } from "@thomasfosterau/effect-auth-svelte";
 
   const { children } = $props();

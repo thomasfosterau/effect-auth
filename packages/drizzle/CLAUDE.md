@@ -4,7 +4,7 @@
 
 ## Boundary
 
-Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers: `effect` and `drizzle-orm` (`catalog:peers`, floor `>=0.44.0`), `@types/pg` optional. Depends on `@thomasfosterau/effect-auth`. The package never opens a connection and bundles no driver: the consumer hands over a drizzle handle through `databaseLayer` / `effectDatabaseLayer`. `drizzle-orm-effect` (the aliased 1.0 prerelease), PGlite, `better-sqlite3` and `pg` are dev dependencies for the suites only. It stands alone: it does not wrap effect-auth-sql.
+Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers: `effect` and `drizzle-orm` (`catalog:peers`, floor `>=0.44.0`), `@types/pg` optional. Depends on `@thomasfosterau/effect-auth`. The package never opens a connection and bundles no driver: the consumer hands over a drizzle handle through `databaseLayer` / `effectDatabaseLayer`. `drizzle-orm-effect` (the aliased 1.0 prerelease), PGlite, `better-sqlite3` and `pg` are dev dependencies for the suites only. It stands alone: it does not wrap effect-auth/sql.
 
 ## Invariants
 

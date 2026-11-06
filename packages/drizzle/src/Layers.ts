@@ -29,7 +29,7 @@ import * as UserStore from "./UserStore.ts";
  *
  * Stores beyond these three — OAuth accounts, WebAuthn credentials, rate
  * limits, and the rest — are not covered here yet; use
- * `@thomasfosterau/effect-auth-sql` or a `KeyValueStore`-backed layer from
+ * `@thomasfosterau/effect-auth/sql` or a `KeyValueStore`-backed layer from
  * core for those.
  *
  * @example

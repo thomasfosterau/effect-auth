@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-auth-client": patch
+"@thomasfosterau/effect-auth": patch
 "@thomasfosterau/effect-auth-resend": patch
 "@thomasfosterau/effect-auth-twilio": patch
 ---

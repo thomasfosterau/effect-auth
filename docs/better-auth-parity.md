@@ -23,16 +23,16 @@ that needs a third-party runtime dependency — a database driver, an ORM, an em
 SMS provider SDK, a native module, infrastructure tooling — lives in its own adapter
 package that implements a core service contract.
 
-| Package                            | Role                                                                                | Allowed dependencies                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `packages/effect-auth`             | The monolithic core: every service, store contract, plugin, and the HTTP projection | `effect` v4 only (+ possibly `@effect/platform-browser` — see §2.2) |
-| `packages/client`                  | Vanilla typed client (the Svelte binding is `packages/svelte`)                      | core types                                                          |
-| `packages/sql`                     | Store layers over `effect/sql` (driver-agnostic)                                    | core; SQL drivers as peers                                          |
-| `packages/alchemy` _(reinstated)_  | Alchemy v2 infra resources + Cloudflare D1 storage layers                           | core; `alchemy` as optional peer                                    |
-| `packages/argon2` _(new, extract)_ | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
-| `packages/drizzle` _(M6, #171)_    | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
-| `packages/<email>` _(M6)_          | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
-| `packages/<sms>` _(M6)_            | `SmsSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
+| Package                                                                                     | Role                                                                                | Allowed dependencies                                                |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `packages/effect-auth`                                                                      | The monolithic core: every service, store contract, plugin, and the HTTP projection | `effect` v4 only (+ possibly `@effect/platform-browser` — see §2.2) |
+| `effect-auth/client` _(core subpath, ADR-0022)_                                             | Vanilla typed client (the Svelte binding is `packages/svelte`)                      | core types                                                          |
+| `effect-auth/sql` _(core subpath, ADR-0022)_                                                | Store layers over `effect/sql` (driver-agnostic)                                    | core; SQL drivers as peers                                          |
+| `packages/alchemy-cloudflare`, `packages/alchemy-postgres` _(split per provider, ADR-0022)_ | Alchemy v2 infra resources + D1 / Postgres storage layers                           | core; `alchemy` and the provider or driver as peers                 |
+| `packages/argon2` _(new, extract)_                                                          | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
+| `packages/drizzle` _(M6, #171)_                                                             | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
+| `packages/<email>` _(M6)_                                                                   | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
+| `packages/<sms>` _(M6)_                                                                     | `SmsSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
 
 Consequences for the current tree:
 

@@ -8,7 +8,7 @@
  *
  * @module forms/internal
  */
-import type { AuthClient } from "@thomasfosterau/effect-auth-client";
+import type { AuthClient } from "@thomasfosterau/effect-auth/client";
 
 /**
  * The result an authenticating call resolves to. Derived from the client rather

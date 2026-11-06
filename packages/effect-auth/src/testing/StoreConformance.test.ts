@@ -1,7 +1,7 @@
 /**
  * The conformance suites run against the core's own in-memory stores, and
- * against deliberately broken ones, which they must fail. effect-auth-sql runs
- * the same suites over SQLite and PostgreSQL (`packages/sql/src/Stores.test.ts`).
+ * against deliberately broken ones, which they must fail. effect-auth/sql runs
+ * the same suites over SQLite and PostgreSQL (`packages/effect-auth/src/sql/Stores.test.ts`).
  */
 import { assert, describe, expect, it } from "vite-plus/test";
 import { Array as Arr, Effect, Layer, Result } from "effect";

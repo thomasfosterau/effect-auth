@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { createAuthClient, type AuthClient } from "@thomasfosterau/effect-auth-client";
+import { createAuthClient, type AuthClient } from "@thomasfosterau/effect-auth/client";
 import { listSessionsStore, sessionStore, type ListSessionsState } from "./index.ts";
 
 const EMAIL = "alice@svelte.test";

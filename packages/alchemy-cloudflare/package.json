@@ -1,0 +1,66 @@
+{
+  "name": "@thomasfosterau/effect-auth-alchemy-cloudflare",
+  "version": "0.0.0",
+  "description": "Alchemy v2 AuthSchema resource and Cloudflare D1 storage wiring for effect-auth.",
+  "keywords": [
+    "alchemy",
+    "auth",
+    "authentication",
+    "cloudflare",
+    "d1",
+    "effect",
+    "effect-auth",
+    "iac",
+    "infrastructure",
+    "schema",
+    "sql",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git",
+    "directory": "packages/alchemy-cloudflare"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@thomasfosterau/effect-auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "catalog:",
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "alchemy": "catalog:",
+    "better-sqlite3": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "@alchemy.run/cloudflare": "catalog:alchemy-peers",
+    "alchemy": "catalog:alchemy-peers",
+    "effect": "catalog:alchemy-peers"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+  }
+}

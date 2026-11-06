@@ -6,7 +6,7 @@ The API layout: directory structure, package exports, service classes and naming
 Highlights:
 
 - The package is published as `@thomasfosterau/effect-auth` (the bare `effect-auth` npm name
-  belongs to an unrelated package), and the client as `@thomasfosterau/effect-auth-client`.
+  belongs to an unrelated package), and the client as `@thomasfosterau/effect-auth/client`.
 - Feature modules live in lowercase cluster directories (`email/`, `http/`, `oauth/`,
   `password/`, `plugins/`, `multifactor/`), and the package publishes
   per-cluster subpath exports (`@thomasfosterau/effect-auth/email`, `.../http`, ...) alongside

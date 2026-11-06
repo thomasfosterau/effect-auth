@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-auth-sql": minor
+"@thomasfosterau/effect-auth": minor
 ---
 
 Add `makeApiKeyStore`/`ApiKeyStoreLayer` and `makeAdminUserStore`/`AdminUserStoreLayer`, closing the two SQL storage gaps blocking the API-key and admin planes.

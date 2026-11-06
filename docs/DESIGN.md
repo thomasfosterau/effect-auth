@@ -49,7 +49,7 @@ const app = Effect.gen(function* () {
 - **Stores:** you implement a value of type `typeof Auth.XStore.Service` (no
   separate `XStoreShape` interface) and provide it with
   `Layer.succeed(Auth.XStore)(impl)` or a first-party layer from
-  `@effect-auth/sql`, `@effect-auth/alchemy`, or the KV layers in core.
+  `effect-auth/sql`, `effect-auth-alchemy-cloudflare`, or the KV layers in core.
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
   for flow outcomes; lookups that can legitimately miss return `X | null` from
   stores and surface typed errors from services.
@@ -206,7 +206,7 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
    `ChallengeStore.get`, `CredentialStore.get` become nullable (their services
    already own the typed errors); `OAuthStateStore.get` becomes nullable;
    `CredentialStore.getByUserId` → `listByUserId`; `ApiKeyStore.getById` → `get`.
-   `@effect-auth/sql` and `@effect-auth/alchemy` update in lockstep.
+   `effect-auth/sql` and `effect-auth-alchemy-cloudflare` update in lockstep.
 
 **Rationale.** The nullable convention is the de-facto majority (30+ of 38), is
 the easiest contract to implement correctly against any driver, and keeps typed
@@ -222,7 +222,7 @@ Changeset with a migration table.
 
 ### First-party implementation coverage
 
-`@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
+`effect-auth/sql` and `effect-auth-alchemy-cloudflare` both implement the same 20
 stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser,
 MultiFactor, PendingMultiFactor — was closed 2026-07-04). Neither implements the
 advanced-feature stores (Organization, ApiKey, SSO, Oidc\*,
@@ -422,7 +422,7 @@ they're batched for one 0.x minor with a rename table.
 
 **Status quo.** Two clients: the generated Effect client
 (`http/HttpClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
-zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
+zero-dependency browser client (`packages/effect-auth/src/client/Client.ts:136`) covering
 23/84 endpoints (core flows + magicLink/emailOtp/multiFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
 bindings: React has `useSession` + `useListSessions` (`react.ts:24,37`); Svelte
@@ -469,7 +469,7 @@ present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints in `http/HttpApi.ts
 - **Single root barrel stays** (plus `Auth.Http` namespace). Optional heavy
   features are already tree-shakeable via unused-layer elision and
   404-until-configured; subpath exports are reconsidered only if bundle-size
-  evidence appears. `@effect-auth/client` keeps its subpaths (framework entry
+  evidence appears. `effect-auth/client` keeps its subpaths (framework entry
   points genuinely need them).
 - **Applied now:** `@deprecated` on the `Effect`/`Context`/`Layer`/
   `RequestResolver` re-exports (users should import from `effect`; the aliases
@@ -521,7 +521,7 @@ platform neutrality and is recorded here as a candidate 1.x goal.
 Request/Resolver framing, WebAuthn as "future"); `CONTRIBUTING.md` shows a
 single-package flat layout and references a nonexistent `AGENT_GUIDELINES.md`;
 `HOOKS_DESIGN.md` says "Status: Proposed … effect v3.21.2" about a shipped
-system; README omits `@effect-auth/alchemy`/`@effect-auth/workos` from its
+system; README omits `effect-auth-alchemy-cloudflare`/`@effect-auth/workos` from its
 package table and headlines the Request/Resolver pattern.
 
 **Decision (applied now).** `ARCHITECTURE.md` rewritten to describe the settled
@@ -674,11 +674,11 @@ All approved items are applied and changeset-backed.
 2. Optional-config signature normalization to `config: XConfig = {}` — D5.
 3. `@deprecated` markers: `Requests.ts`/`Resolvers.ts` exports, barrel `effect`
    re-exports — D6/D9.
-4. Svelte/Vue `listSessions` parity in `@effect-auth/client` — D8.
+4. Svelte/Vue `listSessions` parity in `effect-auth/client` — D8.
 5. Docs reconciliation: `ARCHITECTURE.md` rewrite, README package
    table + framing + quick-start (the old §2 example never provided `Hooks`
    and would not have type-checked), `CONTRIBUTING.md` structure/paths,
    `HOOKS_DESIGN.md` status header — D11.
 6. Error-model overhaul (D4): specific flow-outcome tags, stable `code` field on all domain errors, `ErrorCode` const, `Messages` service + English catalog, HTTP status fixes — D4.
 
-Changesets accompany 1 (minor: effect-auth), 3 (patch: effect-auth), 4 (minor: @effect-auth/client), 6 (minor: effect-auth).
+Changesets accompany 1 (minor: effect-auth), 3 (patch: effect-auth), 4 (minor: effect-auth/client), 6 (minor: effect-auth).

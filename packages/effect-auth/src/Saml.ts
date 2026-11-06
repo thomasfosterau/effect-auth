@@ -10,7 +10,7 @@
  * Response, build an AuthnRequest, render SP metadata) and
  * {@link SamlReplayStore} (one-time records for AuthnRequest ids and seen
  * assertion ids). {@link module:sso} orchestrates them; the implementation
- * ships separately in `@thomasfosterau/effect-auth-saml`.
+ * ships separately in `@thomasfosterau/effect-auth/saml`.
  *
  * This is the same split as {@link module:password}'s `PasswordHasher`
  * (contract in core) and `@thomasfosterau/effect-auth-argon2` (implementation).
@@ -175,7 +175,7 @@ export interface SamlMetadataInput {
  * Parse, verify and generate SAML messages.
  *
  * Core declares this tag; provide it from
- * `@thomasfosterau/effect-auth-saml`'s `layer`. {@link module:sso} resolves it
+ * `@thomasfosterau/effect-auth/saml`'s `layer`. {@link module:sso} resolves it
  * *optionally*, so an app that registers no SAML connections never has to
  * install an XML stack — the SAML paths simply report that support is absent.
  */

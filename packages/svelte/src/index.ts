@@ -1,5 +1,5 @@
 /**
- * Svelte bindings for `@thomasfosterau/effect-auth-client`.
+ * Svelte bindings for `@thomasfosterau/effect-auth/client`.
  *
  * `sessionStore` implements Svelte's readable-store contract directly (no
  * `svelte` import needed), so it works with the `$store` syntax:
@@ -18,7 +18,7 @@
  *
  * @module effect-auth-svelte
  */
-import type { AuthClient, AuthClientError, SessionState } from "@thomasfosterau/effect-auth-client";
+import type { AuthClient, AuthClientError, SessionState } from "@thomasfosterau/effect-auth/client";
 
 export { authClientKey, getAuthClient, setAuthClient } from "./context.ts";
 

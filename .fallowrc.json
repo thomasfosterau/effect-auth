@@ -10,11 +10,12 @@
     "packages/effect-auth/src/plugins/index.ts",
     "packages/effect-auth/src/multifactor/index.ts",
     "packages/effect-auth/src/testing/index.ts",
-    "packages/client/src/index.ts",
-    "packages/client/src/testing/fixture.ts",
-    "packages/{alchemy,argon2,drizzle,resend,saml,sql,svelte,sveltekit,twilio}/src/index.ts",
-    "packages/alchemy/src/Postgres.ts",
-    "packages/*/src/testing/PgliteTemplate.setup.ts",
+    "packages/effect-auth/src/client/index.ts",
+    "packages/effect-auth/src/client/testing/fixture.ts",
+    "packages/effect-auth/src/sql/index.ts",
+    "packages/effect-auth/src/saml/index.ts",
+    "packages/{alchemy-cloudflare,alchemy-postgres,argon2,drizzle,resend,svelte,sveltekit,twilio}/src/index.ts",
+    "packages/*/src/**/PgliteTemplate.setup.ts",
     "packages/*/src/**/*.test.ts",
     "packages/svelte/scripts/postbuild.mjs",
     "packages/svelte/svelte.config.js",
@@ -68,20 +69,15 @@
       },
       {
         "name": "storage-adapters",
-        "patterns": ["packages/sql/**", "packages/drizzle/**", "packages/alchemy/**"]
-      },
-      {
-        "name": "vendor-adapters",
         "patterns": [
-          "packages/argon2/**",
-          "packages/resend/**",
-          "packages/twilio/**",
-          "packages/saml/**"
+          "packages/drizzle/**",
+          "packages/alchemy-cloudflare/**",
+          "packages/alchemy-postgres/**"
         ]
       },
       {
-        "name": "client",
-        "patterns": ["packages/client/**"]
+        "name": "vendor-adapters",
+        "patterns": ["packages/argon2/**", "packages/resend/**", "packages/twilio/**"]
       },
       {
         "name": "server-bindings",
@@ -110,21 +106,24 @@
         "allow": ["core", "ladder"]
       },
       {
-        "from": "client",
-        "allow": ["core", "ladder"]
-      },
-      {
         "from": "server-bindings",
         "allow": ["core", "ladder"]
       },
       {
         "from": "bindings",
-        "allow": ["client"]
+        "allow": ["core", "ladder"]
       }
     ]
   },
   "duplicates": {
-    "ignoredClones": ["dup:ceacb77f:2", "dup:9b4cf9c1:2", "dup:86e1ebad:2", "dup:0ef59962:2"]
+    "ignoredClones": [
+      "dup:ceacb77f:2",
+      "dup:9b4cf9c1:2",
+      "dup:86e1ebad:2",
+      "dup:0ef59962:2",
+      "dup:29b9eea2:2",
+      "dup:a50183b9:2"
+    ]
   },
   "health": {
     "maxCyclomatic": 20,
