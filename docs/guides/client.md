@@ -1,6 +1,6 @@
 # The browser client
 
-`@thomasfosterau/effect-auth-client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. Thin React / Svelte / Vue / Solid bindings — with out-of-the-box form components (§4) — ship as their own packages on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
+`@thomasfosterau/effect-auth-client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
 
 ## 1. Setup
 
@@ -63,27 +63,13 @@ createAuthClient({
 
 The interval starts with the first subscriber and is cleared when the last one leaves; `onFocus` and `crossTab` degrade to no-ops outside the browser.
 
-## 3. Framework bindings
+## 3. Framework binding
 
-Each binding is its own package, depends on `@thomasfosterau/effect-auth-client`, and subscribes to the same store — so an app installs only the framework it uses:
+The Svelte binding is its own package, depends on `@thomasfosterau/effect-auth-client`, and subscribes to the same store, so an app that doesn't use Svelte installs only the client:
 
-| Framework | Package                              | Exports                                                |
-| --------- | ------------------------------------ | ------------------------------------------------------ |
-| React     | `@thomasfosterau/effect-auth-react`  | `useSession`, `useListSessions`, form components       |
-| Svelte    | `@thomasfosterau/effect-auth-svelte` | `sessionStore`, `listSessionsStore`, form components   |
-| Vue       | `@thomasfosterau/effect-auth-vue`    | `useSession`, `useListSessions`, form components       |
-| Solid     | `@thomasfosterau/effect-auth-solid`  | `createSession`, `createListSessions`, form components |
-
-```tsx
-// React — @thomasfosterau/effect-auth-react
-import { useSession, useListSessions } from "@thomasfosterau/effect-auth-react";
-
-function Navbar() {
-  const { data, isPending } = useSession(client);
-  if (isPending) return <Spinner />;
-  return data ? <b>{data.user.email}</b> : <a href="/login">Sign in</a>;
-}
-```
+| Framework | Package                              | Exports                                              |
+| --------- | ------------------------------------ | ---------------------------------------------------- |
+| Svelte    | `@thomasfosterau/effect-auth-svelte` | `sessionStore`, `listSessionsStore`, form components |
 
 ```svelte
 <!-- Svelte — @thomasfosterau/effect-auth-svelte -->
@@ -94,34 +80,11 @@ function Navbar() {
 {#if $session.data}Signed in as {$session.data.user.email}{/if}
 ```
 
-```vue
-<!-- Vue — @thomasfosterau/effect-auth-vue -->
-<script setup>
-import { useSession } from "@thomasfosterau/effect-auth-vue";
-const session = useSession(client);
-</script>
-<template>
-  <span v-if="session.data">{{ session.data.user.email }}</span>
-</template>
-```
-
 The Svelte session stores implement Svelte's readable-store contract by hand; the components and context helpers use Svelte 5 runes, so the package requires `svelte >= 5.20` as a peer.
-
-The Vue composables unsubscribe with the current effect scope. Called outside one (plain scripts, tests) they warn and hand back a `dispose()` to call yourself.
-
-```tsx
-// Solid — @thomasfosterau/effect-auth-solid
-import { createSession } from "@thomasfosterau/effect-auth-solid";
-
-function Navbar() {
-  const session = createSession(client);
-  return <span>{session().data?.user.email}</span>;
-}
-```
 
 ## 4. Form components
 
-Every framework package ships the same six headless form components out of the box: `SignInForm` (email or `variant="username"`), `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, and `EmailOtpForm` (request + verify in one). Each owns its submit/pending/error state, calls the typed client from context (a provider per framework, overridable with a `client` prop), reports through `onSuccess`/`onError` (Vue: `success`/`error` events), never navigates, and renders semantic, unstyled markup addressable through stable `ea-*` classes (`ea-form`, `ea-field`, `ea-label`, `ea-input`, `ea-submit`, `ea-error`, ...) with every visible string overridable via a `labels` prop. Each package's README documents provider setup and a styling example.
+The Svelte package ships six headless form components out of the box: `SignInForm` (email or `variant="username"`), `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, and `EmailOtpForm` (request + verify in one). Each owns its submit/pending/error state, calls the typed client from context (`setAuthClient`, overridable with a `client` prop), reports through `onSuccess`/`onError`, never navigates, and renders semantic, unstyled markup addressable through stable `ea-*` classes (`ea-form`, `ea-field`, `ea-label`, `ea-input`, `ea-submit`, `ea-error`, ...) with every visible string overridable via a `labels` prop. The package's README documents context setup and a styling example.
 
 ## 5. Endpoint coverage
 

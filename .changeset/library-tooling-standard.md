@@ -4,14 +4,11 @@
 "@thomasfosterau/effect-auth-argon2": patch
 "@thomasfosterau/effect-auth-client": patch
 "@thomasfosterau/effect-auth-drizzle": patch
-"@thomasfosterau/effect-auth-react": patch
 "@thomasfosterau/effect-auth-resend": patch
 "@thomasfosterau/effect-auth-saml": patch
-"@thomasfosterau/effect-auth-solid": patch
 "@thomasfosterau/effect-auth-sql": patch
 "@thomasfosterau/effect-auth-svelte": patch
 "@thomasfosterau/effect-auth-twilio": patch
-"@thomasfosterau/effect-auth-vue": patch
 ---
 
 Publish from the library tooling standard (#222). Every package now takes its dependency versions

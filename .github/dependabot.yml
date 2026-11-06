@@ -18,7 +18,7 @@
 # - `effect`: the Effect 4 release line (`effect` plus the `@effect/*`
 #   packages pinned to the same release), with `@effect/docgen`, which depends
 #   on `effect` / `@effect/platform-node` at its own release's floor.
-# - `svelte`, `react`: each framework's packages peer on each other's exact
+# - `svelte`: svelte, the kit packages and svelte-check peer on each other's
 #   release line.
 #
 # Ignored version updates (security updates stay enabled, because each ignore
@@ -88,12 +88,6 @@ updates:
           - "svelte"
           - "@sveltejs/*"
           - "svelte-check"
-      # react-dom requires the identical react version.
-      react:
-        applies-to: version-updates
-        patterns:
-          - "react"
-          - "react-dom"
     ignore:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]

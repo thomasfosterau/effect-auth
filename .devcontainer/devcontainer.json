@@ -16,7 +16,7 @@
   "postCreateCommand": "bash .claude/hooks/session-start.sh",
   "customizations": {
     "vscode": {
-      "extensions": ["Anthropic.claude-code", "oxc.oxc-vscode", "svelte.svelte-vscode", "Vue.volar"]
+      "extensions": ["Anthropic.claude-code", "oxc.oxc-vscode", "svelte.svelte-vscode"]
     }
   },
   "workspaceFolder": "/workspaces/effect-auth"

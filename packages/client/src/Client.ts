@@ -3,8 +3,8 @@
  *
  * A small, dependency-free client (plain `fetch`, no Effect runtime in the
  * bundle) with methods mirroring the contract's endpoint names and an
- * observable session store that the framework binding packages subscribe to
- * (`@thomasfosterau/effect-auth-react`, `-svelte`, `-vue`).
+ * observable session store that the framework binding package subscribes to
+ * (`@thomasfosterau/effect-auth-svelte`).
  *
  * Only the wire *types* are imported from `effect-auth` — they erase at
  * compile time, so the browser bundle contains just this file.

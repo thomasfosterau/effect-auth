@@ -137,12 +137,9 @@ console.log(server.sessions.size); // 1
 
 | Framework | Package                                                                                                  |
 | --------- | -------------------------------------------------------------------------------------------------------- |
-| React     | [`@thomasfosterau/effect-auth-react`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-react)   |
 | Svelte    | [`@thomasfosterau/effect-auth-svelte`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-svelte) |
-| Vue       | [`@thomasfosterau/effect-auth-vue`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-vue)       |
-| Solid     | [`@thomasfosterau/effect-auth-solid`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-solid)   |
 
-The [client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) walks through the bindings and their form components.
+The [client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) walks through the binding and its form components.
 
 ## License
 

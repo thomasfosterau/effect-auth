@@ -32,7 +32,7 @@ The practical consequences are worth internalising before you start:
 | `session.cookieCache`                            | `cookie: { cache: { … } }` on `Http.makeAsync` (`SessionCookieCache.ts`)                                              |
 | `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Http.makeAsync`                                                         |
 | `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth-client`                                                          |
-| `better-auth/react` \| `/svelte` \| `/vue`       | `@thomasfosterau/effect-auth-react` \| `-svelte` \| `-vue` \| `-solid`                                                |
+| `better-auth/svelte`                             | `@thomasfosterau/effect-auth-svelte` (no React, Vue or Solid binding)                                                 |
 
 ### Config → layers, concretely
 
@@ -155,7 +155,7 @@ Better Auth leaves it to the app to schedule a send outside the response (the `w
 `better-auth/client` → `@thomasfosterau/effect-auth-client`. Both export `createAuthClient`; both send credentialed `fetch` requests at a base URL and keep an observable session store. The differences that matter:
 
 - **No client plugins to mirror.** Better Auth requires the client plugin list to match the server's. The effect-auth client exposes every endpoint a browser would call up front — `signUp`, `signIn`, `signOut`, `getSession`, `identifiers`, `magicLink`, `emailOtp`, `phoneOtp`, `multiFactor`, `organization`, `apiKeys`, `admin`, `sso`, `oidc`, `device`, `googleOneTap`, `multiSession`, `changeEmail`, `deleteUser` — and endpoints whose server layer is absent simply reject with `404`. `extend()` is there for your own additions.
-- **Framework bindings are separate packages**, not subpath imports: `@thomasfosterau/effect-auth-react`, `-svelte`, `-vue`, `-solid`, each built on the vanilla client with out-of-the-box form components (`SignInForm`, `SignUpForm`, password reset, magic link, email OTP).
+- **The framework binding is a separate package**, not a subpath import: `@thomasfosterau/effect-auth-svelte`, built on the vanilla client with out-of-the-box form components (`SignInForm`, `SignUpForm`, password reset, magic link, email OTP).
 - **Types come from the server package's `./http` subpath** (`Http.SessionWithUserView`, `Http.SignUpPayload`, …) and erase at compile time, so nothing server-side reaches the bundle.
 - **Errors reject with `AuthClientError`** carrying the HTTP `status` and the server's message — no `{ data, error }` tuple.
 - **Trusted origins are mandatory for cross-origin deployments.** Every call sends `credentials: "include"`, and the server rejects state-changing cross-origin requests whose `Origin` is not in `trustedOrigins`.

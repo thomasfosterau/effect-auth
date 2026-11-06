@@ -87,7 +87,6 @@ export interface ListSessionsStore extends Readable<ListSessionsState> {
 /**
  * Fetch the authenticated user's active sessions as a readable store. The
  * first subscription triggers the fetch; call `refetch()` to refresh.
- * Mirrors the React `useListSessions` hook.
  */
 export const listSessionsStore = (client: AuthClient): ListSessionsStore => {
   let state: ListSessionsState = { data: null, isPending: true, error: null };
