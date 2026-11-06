@@ -16,6 +16,8 @@ Either command installs against the lockfile and runs the root `prepare` script,
 
 You don't need to build anything first: each package's `build`, `check` and `test:unit` tasks build the workspace packages they depend on.
 
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions.
+
 For Effect APIs, read what the pinned `effect` ships: `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`, and the declarations in `node_modules/effect/dist/*.d.ts`.
 
 ## Making a change
