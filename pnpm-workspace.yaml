@@ -147,23 +147,27 @@ catalogs:
     # modules; beta.84 and earlier import the `effect/Crypto` that 4.1 removed.
     alchemy: ">=2.0.0-beta.85"
     drizzle-orm: ">=0.44.0"
-    # 4.1.0 replaced the root `Crypto` module with `effect/crypto`
-    # (`SecureRandom`, `Digest`), which the core's services yield.
-    effect: ">=4.1.0"
+    # `^4.0.0` by policy, raised here because the packages' own code needs an
+    # Effect module that first shipped in a later minor: `effect/crypto`
+    # (`SecureRandom`, `Digest`, which the core's services yield) is new in
+    # Effect 4.1, which also removed the root `Crypto` module. Proven by
+    # building, type-checking and testing on `effect` 4.1.0 exactly.
+    effect: ^4.1.0
     react: ">=18"
     solid-js: ">=1.9.17"
     svelte: ^5.20.0
     vue: ">=3"
   # effect-auth-alchemy's own `effect` floor, kept apart from the programme
   # floor in `peers` (today they are equal): its `alchemy` peer (beta.85, the
-  # floor above) itself peers on `effect ^4.1.0`.
+  # floor above) itself peers on `effect ^4.1.0`, so this floor stays at 4.1
+  # even if `peers.effect` ever drops back to `^4.0.0`.
   # `vp run check:dist` reads each packed range, so it checks effect-auth-alchemy
   # at this floor and the other packages at `peers.effect`.
   alchemy-peers:
     # The optional peer of effect-auth-alchemy's `./postgres` entry. 4.1.0 is
     # the first `@effect/sql-pg` on the `effect` 4.1 line this package floors.
-    "@effect/sql-pg": ">=4.1.0"
-    effect: ">=4.1.0"
+    "@effect/sql-pg": ^4.1.0
+    effect: ^4.1.0
 
 overrides:
   # `effect` MUST be a singleton (see the header): force every resolution to

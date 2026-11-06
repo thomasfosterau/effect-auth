@@ -4,7 +4,7 @@ Cloudflare D1 and Postgres (over Hyperdrive) for effect-auth on Alchemy v2: a `S
 
 ## Boundary
 
-Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers: `alchemy` (`catalog:peers`, `>=2.0.0-beta.85`), `@effect/sql-pg` (optional, `catalog:alchemy-peers`, needed only by `./postgres`) and `effect` through **`catalog:alchemy-peers`** (`>=4.1.0`, kept as its own catalog entry because alchemy beta.85 itself peers `effect ^4.1.0`; it currently equals the programme floor). Depends on `@thomasfosterau/effect-auth` and `@thomasfosterau/effect-auth-sql`. alchemy is a peer, never bundled, vendored or structurally copied: the resource, provider and lifecycle types come from `alchemy` itself.
+Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers: `alchemy` (`catalog:peers`, `>=2.0.0-beta.85`), `@effect/sql-pg` (optional, `catalog:alchemy-peers`, needed only by `./postgres`) and `effect` through **`catalog:alchemy-peers`** (`^4.1.0`, kept as its own catalog entry because alchemy beta.85 itself peers `effect ^4.1.0`; it currently equals the programme floor). Depends on `@thomasfosterau/effect-auth` and `@thomasfosterau/effect-auth-sql`. alchemy is a peer, never bundled, vendored or structurally copied: the resource, provider and lifecycle types come from `alchemy` itself.
 
 ## Invariants
 

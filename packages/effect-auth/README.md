@@ -10,7 +10,7 @@ The headless core is the whole library as far as a consumer is concerned; the HT
 pnpm add @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`>=4.1.0`). Storage comes from your own store implementations or an adapter package (`@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-drizzle`).
+`effect` is a peer dependency (`^4.1.0`). Storage comes from your own store implementations or an adapter package (`@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-drizzle`).
 
 ## Usage
 
