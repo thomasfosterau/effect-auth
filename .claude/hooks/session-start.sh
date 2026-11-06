@@ -5,34 +5,53 @@
 # One file, two callers — the Claude Code SessionStart hook and the
 # devcontainer's `postCreateCommand` (which invokes this file directly) — so a
 # container shell and an agent session are provisioned identically. Shape
-# copied from effect-jsonapi / effect-drizzle-ext (the library reference); the
+# copied from effect-ext (the library reference, effect-ext#47); the
 # `website#NNN` citations name the issues in that application's tracker that
 # are the evidence behind a decision, not tickets in this one.
 #
-# ## The problem it solves
+# ## Vite+ first
 #
 # A Claude Code session (local or on the web) runs every tool call in a
-# non-interactive shell. The toolchain a human gets from `~/.bashrc` (or from
-# corepack in the devcontainer) is not on that shell's PATH, and the repo's own
-# binaries — `vp`, `fallow` (which the PreToolUse fallow gate runs before
-# every agent `git commit` / `git push`) and `tsx` — live in
-# `node_modules`, which is on nobody's PATH. Rather than fight PATH — which this script cannot export into its
-# caller — it links the tools into `~/.local/bin`, which is on PATH in the
-# devcontainer image and the web sandbox alike. A symlink survives where an
-# `export` cannot.
+# non-interactive shell, and this script cannot export PATH into its caller.
+# Vite+ (`vp`) is the one tool it guarantees; everything else is reached
+# through it. The global CLI is installed at exactly the `vite-plus` version
+# pinned in `pnpm-workspace.yaml`'s catalog, using the official installer,
+# which takes the release from the npm registry, refuses a package without npm
+# provenance and checks its SHA-512 `dist.integrity`. It installs under
+# `~/.local/share/vite-plus` and touches no shell profile, so `vp` and `vpx`
+# are then linked into `~/.local/bin`, which is on PATH in the devcontainer
+# image and the web sandbox alike (a symlink to the real binary survives where
+# an `export` cannot). The installer needs `vite.plus` and `viteplus.dev` on
+# the session's network allowlist.
 #
-# ## What it does
+# From there:
 #
-# 1. Enables corepack when pnpm is missing, so the pinned `packageManager`
-#    version resolves.
-# 2. Installs dependencies against the lockfile — unconditionally, because a
-#    prebaked container can carry a tree built from an OLDER lockfile, and
-#    stale dependencies masquerade as trunk breakage. `--frozen-lockfile` is a
-#    fast no-op when in sync.
-# 3. Writes `vp`, `fallow` and `tsx` re-exec shims into ~/.local/bin.
+# - `vp install --frozen-lockfile` installs the dependencies, unconditionally,
+#   because a prebaked container can carry a tree built from an OLDER
+#   lockfile, and stale dependencies masquerade as trunk breakage.
+#   `--frozen-lockfile` is a fast no-op when in sync.
+# - The global `vp` delegates development commands to the project-local
+#   `vite-plus`, including inside `.claude/worktrees/*`, so each checkout runs
+#   its own vitest (two physical copies corrupt its suite-collector state,
+#   website#1663) without a shim.
+# - Project tools run through Vite+: `vp exec fallow …` for fallow (the commit
+#   gate does the same), `vpx <file>.ts` for TypeScript scripts. `tsx` stays
+#   installed only because `@effect/docgen` runs it itself. Nothing else is
+#   put on PATH: no shim walks a directory tree, and nothing runs a
+#   `node_modules/.bin` the session did not install.
 #
 # After it, `vp check`, `vp run check` and `vp run -r test:unit` run with no
 # manual setup.
+#
+# Earlier versions of this hook wrote `vp`, `fallow` and `tsx` re-exec shims
+# that walked up from `$PWD` into `~/.local/bin` (and before that, symlinks
+# into `node_modules/.bin`); those are removed or replaced when found (only
+# ones this hook made: a symlink into a `node_modules`, or a file carrying the
+# generator marker).
+#
+# If the installer cannot run (no network to vite.plus / viteplus.dev, or the
+# catalog pin cannot be read), `vp` falls back to a one-line re-exec of this
+# project's own `node_modules/vite-plus/bin/vp`, and the hook says so.
 #
 # ## Secrets
 #
@@ -48,11 +67,12 @@
 # the SessionStart hook must not block a session and a half-provisioned
 # container is more useful than one that refused to start.
 #
-# Untrusted-content note: this script reads only fixed, hardcoded paths. It
-# takes no input from repo content, issue or PR bodies, or anything an agent
-# could have been persuaded to write earlier in a session. Do not add such
-# input without revisiting this note — it runs on every session start and
-# container create.
+# Untrusted-content note: the only value read from the repository is the
+# `vite-plus` catalog version, and it is used only when it is a plain
+# `MAJOR.MINOR.PATCH`. It takes no other input from repo content, issue or PR
+# bodies, or anything an agent could have been persuaded to write earlier in
+# a session. Do not add such input without revisiting this note — it runs on
+# every session start and container create.
 
 set -uo pipefail
 
@@ -60,71 +80,93 @@ log() { printf '[session-start] %s\n' "$1" >&2; }
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 LOCAL_BIN="${HOME:-/root}/.local/bin"
+VP_GLOBAL_BIN="${HOME:-/root}/.local/share/vite-plus/bin"
+# A prefix of the earlier shims' marker
+# ("… (vp re-exec shim, gardeneria issue #1663)"), so those match too.
+SHIM_MARKER="# generated-by: .claude/hooks/session-start.sh"
 
 mkdir -p "$LOCAL_BIN" 2>/dev/null || log "cannot create $LOCAL_BIN; continuing"
 
-# Each tool gets a re-exec shim rather than a plain symlink, for two reasons.
-# pnpm's `node_modules/.bin/*` entries are shell scripts that locate their
-# package relative to their own path (`$0`), so a symlink to one in
-# ~/.local/bin resolves `~/.local/<pkg>` and dies with "Cannot find module".
-# And a symlink always resolves to $PROJECT_DIR's node_modules, even when
-# invoked with cwd inside a git worktree, so `vp` would load the primary
-# tree's vitest while the worktree's test modules resolve the worktree's own
-# copy; two physical instances of the same vitest corrupt its module-level
-# suite-collector state, and every describe() in the worktree throws `Cannot
-# read properties of undefined (reading 'config')` (website#1663). Each shim
-# walks up from $PWD for the nearest project-local copy and re-execs that,
-# falling back to the primary checkout's when none is found. The marker keeps
-# its original text (the issue is website#1663): shims written by earlier runs
-# are recognised, and so replaced, by an exact match on it.
-SHIM_MARKER="# generated-by: .claude/hooks/session-start.sh (vp re-exec shim, gardeneria issue #1663)"
-# write_shim <name> <path of the tool relative to a project root>
-write_shim() {
-  name="$1"
-  rel="$2"
-  dest="$LOCAL_BIN/$name"
-  # Leave a real, non-generated file alone (a globally installed tool). A
-  # symlink (stale, or the broken kind this script once wrote) or a shim
-  # generated earlier is fair game: the embedded fallback path can change
-  # across containers.
-  if [ -e "$dest" ] && [ ! -L "$dest" ] && ! grep -qF "$SHIM_MARKER" "$dest" 2>/dev/null; then
+# Replace $dest with a symlink to $src unless $dest is a real file this hook
+# did not make (something deliberately installed it).
+link_to() {
+  src="$1"
+  dest="$2"
+  if [ -e "$dest" ] && [ ! -L "$dest" ] \
+    && ! grep -qF "$SHIM_MARKER" "$dest" 2>/dev/null; then
     return 0
   fi
-  rm -f "$dest" 2>/dev/null
-  cat >"$dest.tmp" <<SHIM
-#!/usr/bin/env bash
-$SHIM_MARKER
-dir="\$PWD"
-while [ -n "\$dir" ]; do
-  if [ -x "\$dir/$rel" ]; then
-    exec "\$dir/$rel" "\$@"
-  fi
-  [ "\$dir" = "/" ] && break
-  dir="\$(dirname "\$dir")"
-done
-exec "$PROJECT_DIR/$rel" "\$@"
-SHIM
-  chmod +x "$dest.tmp" 2>/dev/null && mv -f "$dest.tmp" "$dest" 2>/dev/null \
-    || { rm -f "$dest.tmp" 2>/dev/null; log "could not write $name shim"; }
+  ln -sfn "$src" "$dest" 2>/dev/null || log "could not link $(basename "$dest")"
 }
 
-# ── 1. pnpm ─────────────────────────────────────────────────────────────────
-if ! command -v pnpm >/dev/null 2>&1; then
-  log "pnpm not found; enabling corepack…"
-  (corepack enable >/dev/null 2>&1 && cd "$PROJECT_DIR" && corepack install >/dev/null 2>&1) \
-    || log "corepack could not provide pnpm; continuing"
+# Remove a PATH entry an earlier version of this hook created.
+remove_old_link() {
+  dest="$LOCAL_BIN/$1"
+  if [ -L "$dest" ]; then
+    case "$(readlink "$dest")" in
+      */node_modules/*) rm -f "$dest" 2>/dev/null && log "removed old $1 link" ;;
+    esac
+  elif [ -f "$dest" ] && grep -qF "$SHIM_MARKER" "$dest" 2>/dev/null; then
+    rm -f "$dest" 2>/dev/null && log "removed old $1 shim"
+  fi
+}
+
+# ── 1. Vite+ at the catalog pin ──────────────────────────────────────────────
+VP_PIN="$(sed -nE 's/^  vite-plus: "?([0-9]+\.[0-9]+\.[0-9]+)"?$/\1/p' "$PROJECT_DIR/pnpm-workspace.yaml" 2>/dev/null | head -1)"
+VP_HAVE="$("$VP_GLOBAL_BIN/vp" --version 2>/dev/null | sed -nE '1s/^vp v([0-9.]+).*$/\1/p')"
+if [ -z "$VP_PIN" ]; then
+  log "could not read the vite-plus catalog pin; not installing Vite+"
+elif [ "$VP_HAVE" != "$VP_PIN" ]; then
+  log "installing Vite+ $VP_PIN (have: ${VP_HAVE:-none})…"
+  if command -v curl >/dev/null 2>&1 \
+    && curl -fsSL https://vite.plus | VP_VERSION="$VP_PIN" bash >/dev/null 2>&1; then
+    log "Vite+ $VP_PIN installed"
+  else
+    log "Vite+ installer failed (is vite.plus / viteplus.dev reachable?); continuing"
+  fi
+fi
+
+remove_old_link fallow
+remove_old_link tsx
+if [ -x "$VP_GLOBAL_BIN/vp" ]; then
+  link_to "$VP_GLOBAL_BIN/vp" "$LOCAL_BIN/vp"
+  link_to "$VP_GLOBAL_BIN/vpx" "$LOCAL_BIN/vpx"
+else
+  # Fallback: the project's own pinned copy, by its fixed path.
+  log "global Vite+ unavailable; \`vp\` runs $PROJECT_DIR's node_modules copy"
+  for name in vp vpx; do
+    dest="$LOCAL_BIN/$name"
+    if [ -e "$dest" ] && [ ! -L "$dest" ] \
+      && ! grep -qF "$SHIM_MARKER" "$dest" 2>/dev/null; then
+      continue
+    fi
+    target="$PROJECT_DIR/node_modules/vite-plus/bin/$name"
+    [ "$name" = vpx ] && target="$PROJECT_DIR/node_modules/.bin/vpx"
+    printf '#!/usr/bin/env bash\n%s (%s fallback)\nexec "%s" "$@"\n' \
+      "$SHIM_MARKER" "$name" "$target" >"$dest.tmp" \
+      && chmod +x "$dest.tmp" && mv -f "$dest.tmp" "$dest" \
+      || { rm -f "$dest.tmp" 2>/dev/null; log "could not write the $name fallback"; }
+  done
 fi
 
 # ── 2. Dependencies ─────────────────────────────────────────────────────────
+# `vp install` uses the `packageManager` pin. The fallback `vp` points into
+# node_modules, which may not exist yet, so only the global CLI installs;
+# without it, pnpm does, through corepack when pnpm itself is missing.
 if [ -f "$PROJECT_DIR/pnpm-lock.yaml" ]; then
   log "syncing dependencies against the lockfile…"
-  (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile >/dev/null 2>&1) \
-    || log "dependency install failed; continuing"
+  if [ -x "$VP_GLOBAL_BIN/vp" ]; then
+    (cd "$PROJECT_DIR" && "$VP_GLOBAL_BIN/vp" install --frozen-lockfile >/dev/null 2>&1) \
+      || log "dependency install failed; continuing"
+  else
+    if ! command -v pnpm >/dev/null 2>&1; then
+      log "pnpm not found; enabling corepack…"
+      (corepack enable >/dev/null 2>&1 && cd "$PROJECT_DIR" && corepack install >/dev/null 2>&1) \
+        || log "corepack could not provide pnpm; continuing"
+    fi
+    (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile >/dev/null 2>&1) \
+      || log "dependency install failed; continuing"
+  fi
 fi
-
-# ── 3. Repo binaries on PATH ────────────────────────────────────────────────
-write_shim vp node_modules/vite-plus/bin/vp
-write_shim fallow node_modules/.bin/fallow
-write_shim tsx node_modules/.bin/tsx
 
 exit 0
