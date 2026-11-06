@@ -55,8 +55,9 @@ catalog:
   "@effect/tsgo": 0.63.0
   "@electric-sql/pglite": ^0.5.11
   # The Effect lint rules (`effect/*`), `recommended` extended in the root
-  # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, so
-  # it moves in the `toolchain` Dependabot group. It depends on `effect` 4.1.0
+  # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, but
+  # ranges its plugin API (`@oxlint/plugins ^1.85.0`), so Dependabot moves it
+  # on its own. It depends on `effect` 4.1.0
   # exactly, but the `effect` override below puts it on the singleton, which
   # it lints fine on.
   "@enfect/oxlint": ^0.9.0
