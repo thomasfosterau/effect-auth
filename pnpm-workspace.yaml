@@ -60,7 +60,7 @@ catalog:
   # on its own. It depends on `effect` 4.1.0
   # exactly, but the `effect` override below puts it on the singleton, which
   # it lints fine on.
-  "@enfect/oxlint": ^0.9.0
+  "@enfect/oxlint": ^0.10.0
   # `@thomasfosterau/effect-auth/saml`'s XML-DSig and canonicalisation. 5.1.0
   # fixed CVE-2025-54419 / CVE-2025-54369; never relax the floor below it.
   "@node-saml/node-saml": ^5.1.0
