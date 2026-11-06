@@ -52,6 +52,8 @@ Applied:
   `Redacted<string>` that `database(url)` takes unchanged. Rule 2's fallback names the package for
   what it is. The two `AuthSchema` resources have distinct types (`effect-auth::D1AuthSchema`,
   `effect-auth::PostgresAuthSchema`), so one stack can mount both providers.
+  [ADR-0023](0023-alchemy-packages-on-provider-services.md) later rebuilt the D1 package on
+  `@alchemy.run/cloudflare`'s services: its D1 `AuthSchema` is now an Alchemy Action.
 - `effect-auth-argon2` (`hash-wasm`), `effect-auth-drizzle` (`drizzle-orm`) and the Svelte binding
   (`svelte`) bring dependencies and stay packages. `effect-auth-resend`, `effect-auth-twilio` and
   `effect-auth-sveltekit` stay as they are, by the owner's decision.

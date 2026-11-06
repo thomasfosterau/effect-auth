@@ -1,31 +1,40 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Clock, DateTime, Effect, Layer, Order, Schema } from "effect";
 import { SqlClient } from "effect/sql";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 import { authTableNames } from "@thomasfosterau/effect-auth/sql";
 import * as D1Client from "./D1Client.ts";
 import { layer, migrate, purgeExpired } from "./Storage.ts";
-import { makeTestD1 } from "./testShim.ts";
+import { makeTestD1, runtimeContext } from "./testShim.ts";
+
+/** Run an effect the way a Worker event does: with Alchemy's `RuntimeContext`. */
+const runPromise = <A, E>(effect: Effect.Effect<A, E, RuntimeContext>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(runtimeContext)));
 
 /**
  * Run an effect against a fresh D1-backed database with the schema applied and
  * every `@thomasfosterau/effect-auth/sql` store provided. Nothing is mocked
- * below the binding: the stores, the DDL and the `SqlClient` are the real
- * ones, and the binding is SQLite — which is what D1 is.
+ * above the raw binding: the stores, the DDL, the `SqlClient` and Alchemy's
+ * D1 client are the real ones, and the binding is SQLite — which is what D1 is.
  */
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Layer.Success<ReturnType<typeof layer>> | SqlClient.SqlClient>,
+  effect: Effect.Effect<
+    A,
+    E,
+    Layer.Success<ReturnType<typeof layer>> | SqlClient.SqlClient | RuntimeContext
+  >,
 ): Promise<A> => {
   const database = makeTestD1();
   const stores = layer(database).pipe(Layer.provideMerge(D1Client.layer({ db: database })));
-  return Effect.runPromise(migrate(database).pipe(Effect.andThen(effect), Effect.provide(stores)));
+  return runPromise(migrate(database).pipe(Effect.andThen(effect), Effect.provide(stores)));
 };
 
 describe("D1-backed effect-auth storage", () => {
   it("applies the shared schema and converges on a re-run", async () => {
     const database = makeTestD1();
-    const tables = await Effect.runPromise(
+    const tables = await runPromise(
       migrate(database).pipe(
         // Every statement is `IF NOT EXISTS`: a second apply is a no-op.
         Effect.andThen(migrate(database)),
@@ -95,7 +104,7 @@ describe("D1-backed effect-auth storage", () => {
 
   it("purges expired magic links and email OTPs through the binding", async () => {
     const database = makeTestD1();
-    const result = await Effect.runPromise(
+    const result = await runPromise(
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         yield* migrate(database);
@@ -123,8 +132,8 @@ describe("D1-backed effect-auth storage", () => {
   /**
    * These three stores wrap their DELETE-then-INSERT upsert in
    * `sql.withTransaction`. D1 rejects `BEGIN`/`COMMIT`, so {@link D1Client}
-   * answers those control statements locally and the writes autocommit — this
-   * asserts that path works end to end rather than dying.
+   * sends the transaction's writes as one `batch()` — this asserts that path
+   * works end to end rather than dying.
    */
   it("supports the stores that ask for a transaction", async () => {
     const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -174,9 +183,9 @@ describe("D1-backed effect-auth storage", () => {
   });
 
   /**
-   * `IdentifierStore.replace` asks for a transaction too: its INSERT-then-DELETE
-   * autocommits on D1, in that order, and a taken address is still refused by
-   * the unique index with the old address kept.
+   * `IdentifierStore.replace` asks for a transaction too: its INSERT and its
+   * `DELETE … RETURNING` go to D1 in one batch, and a taken address is refused
+   * by the unique index with the old address kept.
    */
   it("replaces an identifier, and refuses a taken address keeping the old one", async () => {
     const result = await run(
@@ -253,9 +262,9 @@ describe("D1-backed effect-auth storage", () => {
   });
 
   /**
-   * Without a transaction the release is still a compare-and-swap: two replaces
-   * of the same address run concurrently, their statements interleaving on the
-   * binding, and only one releases it. The other deletes its own claim again.
+   * The release is a compare-and-swap: two replaces of the same address run
+   * concurrently, their batches interleaving on the binding, and only one
+   * releases it. The other deletes its own claim again.
    */
   it("lets one of two concurrent replaces of the same address succeed", async () => {
     const result = await run(
@@ -340,4 +349,109 @@ describe("D1-backed effect-auth storage: conformance", () => {
       });
     },
   );
+});
+
+/** Run an effect with a `SqlClient` over `database`. */
+const withSql = <A, E>(
+  database: ReturnType<typeof makeTestD1>,
+  effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+): Promise<A> => runPromise(effect.pipe(Effect.provide(D1Client.layer({ db: database }))));
+
+// The transaction mapping itself (see `D1Client`'s module docs): a transaction's
+// writes go to D1 as `batch()`es, so they commit or fail together.
+describe("D1Client transactions", () => {
+  const setUp = Effect.fn("setUp")(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`CREATE TABLE t (id TEXT PRIMARY KEY, n INTEGER NOT NULL)`;
+    yield* sql`INSERT INTO t (id, n) VALUES ('a', 1)`;
+  });
+
+  const ids = Effect.fn("ids")(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly id: string }>`SELECT id FROM t ORDER BY id`;
+    return rows.map((row) => row.id);
+  });
+
+  it("rolls back every write of a transaction whose batch fails", async () => {
+    const database = makeTestD1();
+    const result = await withSql(
+      database,
+      Effect.gen(function* () {
+        yield* setUp();
+        const sql = yield* SqlClient.SqlClient;
+        const failure = yield* Effect.flip(
+          sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`DELETE FROM t WHERE id = 'a'`;
+              yield* sql`INSERT INTO t (id, n) VALUES ('b', 2)`;
+              // NOT NULL violation: the whole batch, the DELETE included, fails.
+              yield* sql`INSERT INTO t (id, n) VALUES ('c', NULL)`;
+            }),
+          ),
+        );
+        return { failure, ids: yield* ids() };
+      }),
+    );
+    expect(result.failure._tag).toBe("SqlError");
+    expect(result.ids).toEqual(["a"]);
+  });
+
+  it("lets a read inside a transaction see the writes buffered before it", async () => {
+    const database = makeTestD1();
+    const result = await withSql(
+      database,
+      Effect.gen(function* () {
+        yield* setUp();
+        const sql = yield* SqlClient.SqlClient;
+        const inside = yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO t (id, n) VALUES ('b', 2)`;
+            return yield* sql<{ readonly id: string }>`DELETE FROM t WHERE id = 'a' RETURNING id`;
+          }),
+        );
+        return { inside: inside.map((row) => row.id), ids: yield* ids() };
+      }),
+    );
+    expect(result.inside).toEqual(["a"]);
+    expect(result.ids).toEqual(["b"]);
+  });
+
+  it("discards a rolled-back transaction, and a nested one back to its savepoint", async () => {
+    const database = makeTestD1();
+    const result = await withSql(
+      database,
+      Effect.gen(function* () {
+        yield* setUp();
+        const sql = yield* SqlClient.SqlClient;
+        yield* Effect.flip(
+          sql.withTransaction(
+            Effect.andThen(sql`INSERT INTO t (id, n) VALUES ('x', 9)`, Effect.fail("abort")),
+          ),
+        );
+        const afterRollback = yield* ids();
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO t (id, n) VALUES ('b', 2)`;
+            yield* Effect.flip(
+              sql.withTransaction(
+                Effect.andThen(sql`INSERT INTO t (id, n) VALUES ('c', 3)`, Effect.fail("inner")),
+              ),
+            );
+          }),
+        );
+        return { afterRollback, afterNested: yield* ids() };
+      }),
+    );
+    expect(result.afterRollback).toEqual(["a"]);
+    expect(result.afterNested).toEqual(["a", "b"]);
+  });
+
+  it("reports a failed statement as a SqlError", async () => {
+    const database = makeTestD1();
+    const failure = await withSql(
+      database,
+      Effect.flip(Effect.flatMap(SqlClient.SqlClient, (sql) => sql`SELECT * FROM missing`)),
+    );
+    expect(failure._tag).toBe("SqlError");
+  });
 });

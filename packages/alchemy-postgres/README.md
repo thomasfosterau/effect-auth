@@ -10,9 +10,9 @@
 
 It is the Postgres counterpart of
 [`@thomasfosterau/effect-auth-alchemy-cloudflare`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/alchemy-cloudflare)
-(D1). The two `AuthSchema` resources are of different types
-(`effect-auth::D1AuthSchema`, `effect-auth::PostgresAuthSchema`), so one stack
-can mount both providers. Every store, statement and DDL comes from the core's
+(D1). Its `AuthSchema` is an Alchemy Action over the D1 provider's
+`QueryDatabase` (`effect-auth::D1AuthSchema`), this one a resource of its own
+type (`effect-auth::PostgresAuthSchema`), so one stack can declare both. Every store, statement and DDL comes from the core's
 [`/sql` subpath](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth#sql-storage-sql).
 
 The package is named for the database, not for an Alchemy provider: the

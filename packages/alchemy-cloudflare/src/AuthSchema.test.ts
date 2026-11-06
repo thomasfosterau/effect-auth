@@ -24,12 +24,16 @@ import { Stack } from "alchemy/Stack";
 import { make as makeStack, type StackServices } from "alchemy/Stack";
 import { Stage } from "alchemy/Stage";
 import * as State from "alchemy/State";
-import { AuthSchema, AuthSchemaProvider, authTableNames } from "./AuthSchema.ts";
+import { Database } from "@alchemy.run/cloudflare/D1/Database";
+import { QueryDatabase } from "@alchemy.run/cloudflare/D1/QueryDatabase";
+import { Providers } from "@alchemy.run/cloudflare/Providers";
+import * as Provider from "alchemy/Provider";
+import { AuthSchema, authTableNames } from "./AuthSchema.ts";
 import * as D1Client from "./D1Client.ts";
-import { makeTestD1 } from "./testShim.ts";
+import { clientOver, makeRawD1, type RawD1, runtimeContext } from "./testShim.ts";
 
 /**
- * The lifecycle below is driven by the **real** Alchemy engine — `Stack` +
+ * The Action below is driven by the **real** Alchemy engine — `Stack` +
  * `Plan.make` + `apply`, the same path `alchemy deploy` takes — against an
  * in-memory state store. This mirrors `alchemy/Test`'s own `scratchStack`.
  *
@@ -76,6 +80,55 @@ const DeployOutput = Schema.UndefinedOr(
     appliedAt: Schema.Number,
   }),
 );
+
+/** The attributes the stub `Database` provider reports for a logical id. */
+const attributes = (id: string) => ({
+  databaseId: `db-${id}`,
+  databaseName: id,
+  jurisdiction: "default" as const,
+  readReplication: undefined,
+  accountId: "account",
+  migrationsDir: undefined,
+  migrationsTable: undefined,
+  migrationsHashes: {},
+  importHashes: {},
+});
+
+/**
+ * The Cloudflare side, stubbed at the provider's seams: a `Cloudflare.D1.Database`
+ * provider that "creates" a database by minting an id, and a `QueryDatabase`
+ * that binds a database the way `Cloudflare.D1.QueryDatabaseLocal` does —
+ * resolving its `databaseId` at apply time — but over an in-memory SQLite
+ * database per id instead of the D1 HTTP API.
+ */
+const makeCloudflare = () => {
+  const databases: Record<string, RawD1> = {};
+  const rawFor = (id: string): RawD1 => (databases[id] ??= makeRawD1());
+  const databaseProvider = Provider.succeed(Database, {
+    read: ({ id, output }) =>
+      Effect.succeed(output ?? (`db-${id}` in databases ? attributes(id) : undefined)),
+    diff: () => Effect.void,
+    reconcile: ({ id }) => Effect.succeed(attributes(id)),
+    delete: () => Effect.void,
+    list: () => Effect.succeed([]),
+  });
+  const queryDatabase = Layer.succeed(
+    QueryDatabase,
+    Effect.fn("QueryDatabase")(function* (database: Database) {
+      // As `QueryDatabaseLocal` does: a deferred accessor, resolved at apply.
+      const databaseId = yield* database.databaseId;
+      return clientOver(Effect.map(databaseId, (id) => rawFor(id)));
+    }),
+  );
+  /** The SQLite database behind the D1 database with this logical id. */
+  const client = (id: string) => clientOver(Effect.sync(() => rawFor(`db-${id}`)));
+  // The provider collection a `Cloudflare.D1.Database` is deployed by
+  // (`Cloudflare.providers()`), holding only the stubbed `Database` provider.
+  const providers = Layer.effect(Providers, Provider.collection([Database])).pipe(
+    Layer.provideMerge(databaseProvider),
+  );
+  return { providers, queryDatabase, client };
+};
 const STAGE = "test";
 
 /**
@@ -84,12 +137,10 @@ const STAGE = "test";
  * the way a later `alchemy destroy` runs against state an earlier deploy left
  * behind.
  */
-const makeEngine = (
-  options: Parameters<typeof AuthSchemaProvider>[0],
-  store: Record<string, never> = {},
-) => {
+const makeEngine = (cloudflare: ReturnType<typeof makeCloudflare>) => {
+  const store: Record<string, never> = {};
   const state = Layer.succeed(State.State, State.InMemoryService(store));
-  const providers = AuthSchemaProvider(options);
+  const providers = cloudflare.providers;
 
   const withRuntime = <A>(effect: Effect.Effect<A, unknown, Stage>): Promise<A> =>
     Effect.runPromise(
@@ -116,10 +167,8 @@ const makeEngine = (
     );
 
   return {
-    /** The engine's persisted state, so another engine can pick it up. */
-    store,
     /** `alchemy deploy` for one program. */
-    deploy: <A, E, R extends Layer.Success<typeof providers> | StackServices>(
+    deploy: <A, E, R extends Layer.Success<typeof providers> | StackServices | QueryDatabase>(
       program: Effect.Effect<A, E, R>,
     ): Promise<typeof DeployOutput.Type> =>
       withRuntime(
@@ -129,6 +178,9 @@ const makeEngine = (
         // `ChildProcessSpawner`, `Digest`, `SecureRandom` and `Interaction`, which an `AuthSchema`
         // deploy never reaches: one that did would fail with a missing-service defect.
         program.pipe(
+          // What an application provides around `AuthSchema` on deploy
+          // (`Cloudflare.D1.QueryDatabaseLocal`), stubbed.
+          Effect.provide(cloudflare.queryDatabase),
           makeStack({ name: STACK, providers, state }),
           Effect.flatMap((compiled) =>
             Plan.make(compiled).pipe(Effect.flatMap(apply), Effect.provide(compiled.services)),
@@ -136,7 +188,7 @@ const makeEngine = (
           Effect.flatMap(Schema.decodeUnknownEffect(DeployOutput)),
         ) as Effect.Effect<typeof DeployOutput.Type, unknown, never>,
       ),
-    /** `alchemy destroy`: apply an empty plan, so every resource is deleted. */
+    /** `alchemy destroy`: apply an empty plan, so every resource and action is removed. */
     destroy: (): Promise<void> =>
       withRuntime(
         Plan.make({
@@ -168,44 +220,54 @@ const makeEngine = (
   };
 };
 
-const tablesIn = (database: D1Client.D1Database): Promise<readonly string[]> =>
+const query = <A, E>(
+  cloudflare: ReturnType<typeof makeCloudflare>,
+  id: string,
+  effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+): Promise<A> =>
   Effect.runPromise(
+    effect.pipe(
+      Effect.provide(
+        D1Client.layer({ db: cloudflare.client(id) }).pipe(Layer.provide(runtimeContext)),
+      ),
+    ),
+  );
+
+const tablesIn = (cloudflare: ReturnType<typeof makeCloudflare>, id: string) =>
+  query(
+    cloudflare,
+    id,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const rows = yield* sql<{
         readonly name: string;
       }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'auth_%' ORDER BY name`;
       return rows.map((row) => row.name);
-    }).pipe(Effect.provide(D1Client.layer({ db: database }))),
+    }),
   );
 
-const countUsers = (database: D1Client.D1Database): Promise<number> =>
-  Effect.runPromise(
+const countUsers = (cloudflare: ReturnType<typeof makeCloudflare>, id: string) =>
+  query(
+    cloudflare,
+    id,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const rows = yield* sql<{ readonly n: number }>`SELECT count(*) AS n FROM auth_users`;
       return rows[0]?.n ?? 0;
-    }).pipe(Effect.provide(D1Client.layer({ db: database }))),
+    }),
   );
 
-const insertUser = (database: D1Client.D1Database): Promise<void> =>
-  Effect.runPromise(
+const insertUser = (cloudflare: ReturnType<typeof makeCloudflare>, id: string) =>
+  query(
+    cloudflare,
+    id,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO auth_users (id, created_at, updated_at) VALUES ('u1', 1, 1)`;
-    }).pipe(Effect.provide(D1Client.layer({ db: database }))),
+    }),
   );
 
-describe("AuthSchema resource", () => {
-  it("is a real Alchemy resource whose provider mounts on Alchemy's own tag", async () => {
-    const provider = await Effect.runPromise(
-      AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider({ database: makeTestD1() }))),
-    );
-    expect(provider).toHaveProperty("reconcile", expect.any(Function));
-    expect(provider).toHaveProperty("delete", expect.any(Function));
-    expect(await Effect.runPromise(provider.list())).toEqual([]);
-  });
-
+describe("AuthSchema action", () => {
   it("derives its table list from the shared SQL schema", () => {
     expect(authTableNames).toContain("auth_users");
     expect(authTableNames).toContain("auth_sessions");
@@ -213,71 +275,47 @@ describe("AuthSchema resource", () => {
     expect(authTableNames.every((name) => name.startsWith("auth_"))).toBe(true);
   });
 
-  it("deploys the schema, converges on a redeploy, and keeps data by default", async () => {
-    const database = makeTestD1();
-    const engine = makeEngine({ database });
-    const program = AuthSchema("auth-schema");
+  it("applies the schema to a database created in the same deploy, and keeps data", async () => {
+    const cloudflare = makeCloudflare();
+    const engine = makeEngine(cloudflare);
+    const program = Effect.fn("program")(function* () {
+      const database = yield* Database("auth-db");
+      return yield* AuthSchema("auth-schema", database);
+    });
 
-    const created = await engine.deploy(program);
+    const created = await engine.deploy(program());
     assert(created !== undefined);
     expect(created.tables).toEqual(sortedTableNames);
     expect(created.statements).toBeGreaterThan(0);
     expect(created.appliedAt).toBeGreaterThan(0);
 
-    // Data written between deploys must survive the next reconcile.
-    await insertUser(database);
-    await engine.deploy(program);
-    expect(await countUsers(database)).toBe(1);
-    expect(await tablesIn(database)).toEqual(sortedTableNames);
+    // Data written between deploys survives the next one; the unchanged
+    // input leaves the action's last run standing.
+    await insertUser(cloudflare, "auth-db");
+    const redeployed = await engine.deploy(program());
+    expect(redeployed).toEqual(created);
+    expect(await countUsers(cloudflare, "auth-db")).toBe(1);
 
-    // Teardown leaves the tables alone unless `dropOnDelete` is set.
+    // An action has no delete: a teardown leaves the tables alone.
     await engine.destroy();
-    expect(await tablesIn(database)).toEqual(sortedTableNames);
-    expect(await countUsers(database)).toBe(1);
+    expect(await tablesIn(cloudflare, "auth-db")).toEqual(sortedTableNames);
+    expect(await countUsers(cloudflare, "auth-db")).toBe(1);
   });
 
-  it("drops every auth table on destroy when dropOnDelete is set", async () => {
-    const database = makeTestD1();
-    const engine = makeEngine({ database });
-    const program = AuthSchema("auth-schema", { dropOnDelete: true });
-
-    await engine.deploy(program);
-    expect(await tablesIn(database)).toEqual(sortedTableNames);
-
-    await engine.destroy();
-    expect(await tablesIn(database)).toEqual([]);
-  });
-
-  it("reconciles and drops the database each resource names", async () => {
-    const primary = makeTestD1();
-    const tenants = makeTestD1();
-    const engine = makeEngine({ databases: { primary, tenants } });
+  it("applies the schema to the database each action names", async () => {
+    const cloudflare = makeCloudflare();
+    const engine = makeEngine(cloudflare);
 
     await engine.deploy(
       Effect.gen(function* () {
-        yield* AuthSchema("primary-auth", { database: "primary" });
-        yield* AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
+        const primary = yield* Database("primary");
+        const tenants = yield* Database("tenants");
+        yield* AuthSchema("primary-auth", primary);
+        yield* AuthSchema("tenant-auth", tenants);
+        return undefined;
       }),
     );
-    expect(await tablesIn(primary)).toEqual(sortedTableNames);
-    expect(await tablesIn(tenants)).toEqual(sortedTableNames);
-
-    // Only the resource that opted in loses its tables.
-    await engine.destroy();
-    expect(await tablesIn(primary)).toEqual(sortedTableNames);
-    expect(await tablesIn(tenants)).toEqual([]);
-  });
-
-  it("fails the destroy rather than silently skipping an unregistered database", async () => {
-    const database = makeTestD1();
-    const engine = makeEngine({ databases: { primary: database } });
-    await engine.deploy(AuthSchema("auth-schema", { database: "primary", dropOnDelete: true }));
-
-    // The stack is torn down by a provider that no longer holds the binding:
-    // dropping is impossible, so the destroy must fail loudly and leave the
-    // tables (and the state row) alone.
-    const detached = makeEngine({ databases: {} }, engine.store);
-    await expect(detached.destroy()).rejects.toThrow(/UnknownDatabaseError/);
-    expect(await tablesIn(database)).toEqual(sortedTableNames);
+    expect(await tablesIn(cloudflare, "primary")).toEqual(sortedTableNames);
+    expect(await tablesIn(cloudflare, "tenants")).toEqual(sortedTableNames);
   });
 });
