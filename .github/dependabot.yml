@@ -2,24 +2,24 @@
 # workspace and its catalogs (pnpm-workspace.yaml), so one entry covers every
 # package under packages/*.
 #
-# Groups collect the sets that MUST move together, so a lockstep set arrives as
-# one PR and can never drift apart. Dependabot puts a dependency in the FIRST
-# group that matches, so the groups run specific → general and `exclude-patterns`
-# keeps a package out of a broader group that would otherwise claim it:
+# Groups exist only for sets that MUST move together (exact cross-pins or a
+# hard compatibility table), so updating one member alone breaks the install
+# or the build; everything else gets its own PR. Dependabot puts a dependency
+# in the FIRST group that matches, so `exclude-patterns` keeps a package out of
+# a broader group that would otherwise claim it:
 #
 # - `toolchain`: `@effect/tsgo` patches the native `tsc` (`@typescript/native`)
 #   and the oxlint that `vite-plus` pins, and hard-errors at install on any
-#   pairing it has no artifact for; `vite`, `vitest` and `@vitest/*` must equal
-#   what `vite-plus` bundles; `@enfect/oxlint` runs inside that oxlint. Check
-#   the `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
-#   before merging one of these PRs (the catalog comments say why).
-# - `effect`: the Effect 4 release line is a lockstep singleton set (`effect`
-#   plus the `@effect/*` packages pinned to the same release).
-# - `docgen`: `@effect/docgen` runs every JSDoc example under `tsx`; claimed
-#   before `effect`, whose `@effect/*` pattern would otherwise take it.
-# - one group per framework family, the storage peers, Changesets and fallow.
-# - `minor-and-patch`: everything else's minor and patch updates in one PR, so
-#   PR volume stays low; a major outside a lockstep set stays its own PR.
+#   pairing it has no artifact for; `vitest` and `@vitest/*` must equal what
+#   `vite-plus` bundles. Check the `components` table in
+#   node_modules/@effect/tsgo/dist/effect-tsgo.cjs before merging one of these
+#   PRs (the catalog comments say why). `@enfect/oxlint` ranges its oxlint
+#   plugin API (`@oxlint/plugins ^1.85.0`), so it moves on its own.
+# - `effect`: the Effect 4 release line (`effect` plus the `@effect/*`
+#   packages pinned to the same release), with `@effect/docgen`, which depends
+#   on `effect` / `@effect/platform-node` at its own release's floor.
+# - `svelte`, `react`: each framework's packages peer on each other's exact
+#   release line.
 #
 # Ignored version updates (security updates stay enabled, because each ignore
 # is scoped to `version-update:*` types):
@@ -63,26 +63,15 @@ updates:
       exclude:
         - "@thomasfosterau/*"
     groups:
+      # vite-plus pins vitest/oxlint exactly; @effect/tsgo's patch supports only listed oxlint versions.
       toolchain:
         applies-to: version-updates
         patterns:
           - "vite-plus"
-          - "vite"
           - "vitest"
           - "@vitest/*"
-          - "oxlint"
-          - "oxfmt"
-          - "oxlint-tsgolint"
           - "@effect/tsgo"
-          - "@typescript/native"
-          - "typescript"
-          - "@typescript/typescript6"
-          - "@enfect/oxlint"
-      docgen:
-        applies-to: version-updates
-        patterns:
-          - "@effect/docgen"
-          - "tsx"
+      # One release train; @effect/docgen depends on effect at its own release's floor.
       effect:
         applies-to: version-updates
         patterns:
@@ -90,62 +79,19 @@ updates:
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
-          - "@effect/docgen"
+      # svelte, the kit packages and svelte-check peer on each other's versions.
       svelte:
         applies-to: version-updates
         patterns:
           - "svelte"
           - "@sveltejs/*"
           - "svelte-check"
-          - "svelte2tsx"
-          - "@testing-library/svelte"
+      # react-dom requires the identical react version.
       react:
         applies-to: version-updates
         patterns:
           - "react"
           - "react-dom"
-          - "@types/react"
-          - "@types/react-dom"
-          - "@testing-library/react"
-      vue:
-        applies-to: version-updates
-        patterns:
-          - "vue"
-          - "@vue/*"
-          - "vue-tsc"
-          - "@vitejs/plugin-vue"
-      solid:
-        applies-to: version-updates
-        patterns:
-          - "solid-js"
-          - "@solidjs/*"
-          - "vite-plugin-solid"
-      drizzle:
-        applies-to: version-updates
-        patterns:
-          - "drizzle-orm"
-          - "drizzle-kit"
-      alchemy:
-        applies-to: version-updates
-        patterns:
-          - "alchemy"
-          - "wrangler"
-          - "@cloudflare/*"
-      changesets:
-        applies-to: version-updates
-        patterns:
-          - "@changesets/*"
-      fallow:
-        applies-to: version-updates
-        patterns:
-          - "fallow"
-      minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
     ignore:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
@@ -170,7 +116,3 @@ updates:
       prefix: "chore"
     cooldown:
       default-days: 1
-    groups:
-      github-actions:
-        patterns:
-          - "*"

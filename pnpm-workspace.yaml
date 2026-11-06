@@ -53,10 +53,11 @@ catalog:
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
   "@effect/tsgo": 0.63.0
-  "@electric-sql/pglite": ^0.5.11
+  "@electric-sql/pglite": ^0.5.15
   # The Effect lint rules (`effect/*`), `recommended` extended in the root
-  # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, so
-  # it moves in the `toolchain` Dependabot group. It depends on `effect` 4.1.0
+  # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, but
+  # ranges its plugin API (`@oxlint/plugins ^1.85.0`), so Dependabot moves it
+  # on its own. It depends on `effect` 4.1.0
   # exactly, but the `effect` override below puts it on the singleton, which
   # it lints fine on.
   "@enfect/oxlint": ^0.9.0
@@ -70,7 +71,7 @@ catalog:
   # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
   # peer of effect-auth, needed only by that subpath.
   "@thomasfosterau/effect-jsonapi": ^0.19.0
-  "@types/node": ^26.6.5
+  "@types/node": ^26.6.6
   "@types/pg": ^8.15.0
   "@types/react": ^19.3.0
   "@types/react-dom": ^19.3.0
@@ -103,7 +104,7 @@ catalog:
   # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
   # its peer range and checks a requested version against that range, with the
   # same semantics npm and pnpm apply to peers.
-  semver: ^7.8.5
+  semver: ^7.8.6
   solid-js: ^1.9.18
   svelte: ^5.57.3
   svelte-check: ^4.7.8
