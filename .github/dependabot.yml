@@ -40,6 +40,8 @@
 #   `pnpm install` until a release whose table covers the new oxlint lands.
 # - the transitive advisory floors in pnpm-workspace.yaml's `overrides`.
 #   (The `vite@*` / `vitest@*` overrides read the catalog, so they follow.)
+# - the `ghcr.io/voidzero-dev/vite-plus:<tag>` image in .devcontainer/devcontainer.json:
+#   it equals the catalog's `vite-plus` pin, moved on the toolchain PR.
 #
 # `cooldown` is 1 day (Dependabot counts whole days only), longer than pnpm's
 # `minimumReleaseAge` of 480 minutes (8 hours), so a Dependabot PR never
@@ -106,6 +108,21 @@ updates:
     directories:
       - "/"
       - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 1
+  # The dev container's features (.devcontainer/devcontainer.json) and their
+  # lockfile. The base image tag is not a feature: it is the catalog's
+  # `vite-plus` pin, moved by hand on the toolchain PR.
+  - package-ecosystem: "devcontainers"
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
