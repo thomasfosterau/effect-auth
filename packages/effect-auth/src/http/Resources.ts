@@ -35,7 +35,7 @@ const instant = Resource.readOnlyAttribute(Instant);
  *
  * Only `name` and `image` are writable, and only through `PATCH /users/me`.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const User = Resource.make("users", {
@@ -62,7 +62,7 @@ export const User = Resource.make("users", {
 /**
  * The decoded `users` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type User = typeof User.Type;
@@ -72,7 +72,7 @@ export type User = typeof User.Type;
  * relationship. The id is the stored id (the hash of the session token), never
  * the token itself, so listing sessions discloses no credential.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const Session = Resource.make("sessions", {
@@ -91,7 +91,7 @@ export const Session = Resource.make("sessions", {
 /**
  * The decoded `sessions` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type Session = typeof Session.Type;
@@ -101,7 +101,7 @@ export type Session = typeof Session.Type;
  * `user` relationship and its `type` as `kind` (JSON:API reserves `type`). Identifiers are created and verified through the flows
  * that prove them, so no attribute is writable here.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const Identifier = Resource.make("identifiers", {
@@ -127,7 +127,7 @@ export const Identifier = Resource.make("identifiers", {
 /**
  * The decoded `identifiers` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type Identifier = typeof Identifier.Type;
@@ -140,7 +140,7 @@ export type Identifier = typeof Identifier.Type;
  * or backup code to obtain the session. It is created only by a sign-in, so no
  * attribute is writable.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const SecondFactorChallenge = Resource.make("second-factor-challenges", {
@@ -153,7 +153,7 @@ export const SecondFactorChallenge = Resource.make("second-factor-challenges", {
 /**
  * The decoded `second-factor-challenges` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type SecondFactorChallenge = typeof SecondFactorChallenge.Type;
@@ -163,7 +163,7 @@ export type SecondFactorChallenge = typeof SecondFactorChallenge.Type;
  * to Google's One Tap library (`data-nonce`), then back in a `google-one-tap`
  * sign-in credential.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const GoogleOneTapNonce = Resource.make("google-one-tap-nonces", {
@@ -174,7 +174,7 @@ export const GoogleOneTapNonce = Resource.make("google-one-tap-nonces", {
 /**
  * The decoded `google-one-tap-nonces` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type GoogleOneTapNonce = typeof GoogleOneTapNonce.Type;
@@ -186,7 +186,7 @@ export type GoogleOneTapNonce = typeof GoogleOneTapNonce.Type;
  * never attributes: they are shown once, in the `meta` of the answer that
  * creates them.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const MultiFactorEnrollment = Resource.make("multi-factor-enrollments", {
@@ -199,7 +199,7 @@ export const MultiFactorEnrollment = Resource.make("multi-factor-enrollments", {
 /**
  * The decoded `multi-factor-enrollments` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type MultiFactorEnrollment = typeof MultiFactorEnrollment.Type;
@@ -209,7 +209,7 @@ export type MultiFactorEnrollment = typeof MultiFactorEnrollment.Type;
  * previous set. Its id is the user's; the codes themselves are shown once, in
  * the `meta` of the answer that creates them.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export const BackupCodeSet = Resource.make("backup-code-sets", {
@@ -220,7 +220,7 @@ export const BackupCodeSet = Resource.make("backup-code-sets", {
 /**
  * The decoded `backup-code-sets` resource object.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category resources
  */
 export type BackupCodeSet = typeof BackupCodeSet.Type;

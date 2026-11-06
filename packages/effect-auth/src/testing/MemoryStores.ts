@@ -62,7 +62,7 @@ import { type CreateUserResult, UserStore } from "../UserStore.ts";
  * The user rows the user-writing stores share: the records, and each user's
  * password hash.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface MemoryUserTable {
@@ -73,7 +73,7 @@ export interface MemoryUserTable {
 /**
  * An empty {@link MemoryUserTable}. Pre-seed `users` to start with accounts.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryUserTable = (): MemoryUserTable => ({
@@ -101,7 +101,7 @@ const insertUser = (
 /**
  * `UserStore` over a {@link MemoryUserTable}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryUserStore = (
@@ -115,7 +115,7 @@ export const memoryUserStore = (
  * inserts a new user with a random UUID id. The address itself lives in the
  * `IdentifierStore`, as with any store that has an identifiers table.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryEmailPasswordStore = (
@@ -130,7 +130,7 @@ export const memoryEmailPasswordStore = (
 /**
  * `OAuthUserStore` over a {@link MemoryUserTable}, with `updateUser`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOAuthUserStore = (
@@ -168,7 +168,7 @@ export const memoryOAuthUserStore = (
 /**
  * `SessionStore` over a `Map` keyed by the session's token hash.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memorySessionStore = (
@@ -191,7 +191,7 @@ export const memorySessionStore = (
 /**
  * `MultiFactorStore` over a `Map` keyed by user id.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryMultiFactorStore = (
@@ -205,7 +205,7 @@ export const memoryMultiFactorStore = (
 /**
  * `TrustedDeviceStore` over a `Map` keyed by the device token's hash.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryTrustedDeviceStore = (
@@ -225,7 +225,7 @@ export const memoryTrustedDeviceStore = (
 /**
  * `OtpSecondFactorStore` over a `Map` keyed by the pending token.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOtpSecondFactorStore = (
@@ -241,7 +241,7 @@ export const memoryOtpSecondFactorStore = (
  * `JwtKeyStore` over an array: the most recently created key is active, and
  * every key stays listed for verification.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeyStore.Service => ({
@@ -261,7 +261,7 @@ const accountKey = (provider: string, providerId: string) => `${provider}\u0000$
  * `hasPassword` reads the {@link MemoryUserTable}'s password hashes, so the
  * last-credential unlink guard is on.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOAuthAccountStore = (
@@ -297,7 +297,7 @@ export const memoryOAuthAccountStore = (
 /**
  * `OidcClientStore` over a `Map` keyed by client id.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcClientStore = (
@@ -313,7 +313,7 @@ export const memoryOidcClientStore = (
 /**
  * `OidcCodeStore` over a `Map` keyed by the code's hash.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcCodeStore = (
@@ -328,7 +328,7 @@ export const memoryOidcCodeStore = (
  * `OidcTokenStore` over a `Map` keyed by the token's hash, with
  * `listByFamily` (refresh-token reuse detection on).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcTokenStore = (
@@ -344,7 +344,7 @@ export const memoryOidcTokenStore = (
 /**
  * `OidcConsentStore` over a `Map` keyed by `(userId, clientId)`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcConsentStore = (
@@ -366,7 +366,7 @@ export const memoryOidcConsentStore = (
 /**
  * The stores {@link layer} provides.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type MemoryStores =
@@ -415,7 +415,7 @@ export type MemoryStores =
  * await Effect.runPromise(program.pipe(Effect.provide(Testing.memoryStores)))
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(

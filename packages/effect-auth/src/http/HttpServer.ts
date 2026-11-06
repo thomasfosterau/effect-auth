@@ -2147,7 +2147,7 @@ export const backupCodeSetsGroupLayer = (
  * the contract from your own `HttpApiBuilder` (the SCIM group is always
  * mounted and answers `404` until `ScimService` is provided).
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category layers
  */
 export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionConfig) =>

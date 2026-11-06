@@ -305,7 +305,7 @@ export const action = (
  * with no role attribute (anonymous, or an entity the resolver did not know)
  * is an evaluation error, which the decision treats fail-closed.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category conditions
  */
 export const roleAtLeastCondition = <Rung extends string>(
@@ -332,7 +332,7 @@ export const roleAtLeastCondition = <Rung extends string>(
  * the attribute to be checked. The zero-IO gates in `Guard.ts` decide the
  * same question from the same `ladder.atOrAbove(min)` set without a slice.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const roleAtLeast = <Rung extends string>(

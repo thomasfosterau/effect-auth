@@ -56,7 +56,7 @@ import type * as Ladder from "./Ladder.ts";
  *   (a tombstone's `deletedAt`: any value, `null` included, means not
  *   serveable).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type ServeableAxis =
@@ -72,7 +72,7 @@ export type ServeableAxis =
  * cache with no viewer in its key. Fails closed on every axis — see the
  * module docs. A non-object representation is never serveable.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category predicates
  */
 export const publiclyServeable =
@@ -98,7 +98,7 @@ export const publiclyServeable =
  *
  * Not an authorization gate — see the module docs.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category predicates
  */
 export const bypassesForFreshness = <Id, User extends Guard.ViewerShape, Rung extends string>(
@@ -115,7 +115,7 @@ export const bypassesForFreshness = <Id, User extends Guard.ViewerShape, Rung ex
  * without the rung changes nothing, so no caller can page tombstones by
  * setting a flag.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category predicates
  */
 export const shouldIncludeDeleted =

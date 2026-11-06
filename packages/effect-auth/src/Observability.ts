@@ -56,7 +56,7 @@ export const sessionsValidated = Metric.counter("effect_auth_sessions_validated_
  * One derivation, in `SessionResolution`, so two edges reporting the same fault
  * cannot label it differently.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthOutcome =

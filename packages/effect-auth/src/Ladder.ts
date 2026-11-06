@@ -40,7 +40,7 @@
  *
  * A usage example is on {@link make}, the entry point.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Ladder<Rung extends string> {
@@ -77,7 +77,7 @@ export interface Ladder<Rung extends string> {
  * a client-side session user and a test fixture all satisfy it, so the server
  * guard and the browser UX gate share one comparison.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RungHolder {
@@ -88,7 +88,7 @@ export interface RungHolder {
  * A named capability axis: "this capability needs at least `min`". Built by
  * {@link Ladder.axis} / {@link Ladder.axes}; accepted wherever a rung is.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Axis<Rung extends string = string> {
@@ -102,7 +102,7 @@ export interface Axis<Rung extends string = string> {
 /**
  * The rung union of a ladder: `RungOf<typeof Roles>`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type RungOf<L> = L extends Ladder<infer Rung> ? Rung : never;
@@ -110,7 +110,7 @@ export type RungOf<L> = L extends Ladder<infer Rung> ? Rung : never;
 /**
  * Whether a value is an {@link Axis}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category guards
  */
 export const isAxis = (value: unknown): value is Axis =>
@@ -119,7 +119,7 @@ export const isAxis = (value: unknown): value is Axis =>
 /**
  * The lowest rung a rung-or-axis names.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category getters
  */
 export const minOf = <Rung extends string>(min: Rung | Axis<Rung>): Rung =>
@@ -153,7 +153,7 @@ export const minOf = <Rung extends string>(min: Rung | Axis<Rung>): Rung =>
  * assert.equal(Roles.hasAtLeast(null, "user"), false) // anonymous
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const make = <const Rungs extends readonly [string, ...Array<string>]>(

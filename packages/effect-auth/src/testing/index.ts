@@ -3,7 +3,7 @@
  * applications built on effect-auth. Not reachable from the package root, and
  * free of the HTTP tier.
  *
- * @since 1.0.0
+ * @since 0.1.0
  */
 export {
   type AuthenticatedServices,

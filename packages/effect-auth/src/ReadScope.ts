@@ -59,7 +59,7 @@ import * as Policy from "./Policy.ts";
  * {@link Predicate} compares an attribute with. `Instant` is epoch
  * milliseconds, the form effect-auth-sql stores timestamps in.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type Scalar =
@@ -72,7 +72,7 @@ export type Scalar =
 /**
  * The kind of a {@link Scalar}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type ScalarKind = Scalar["_tag"];
@@ -80,7 +80,7 @@ export type ScalarKind = Scalar["_tag"];
 /**
  * A text scalar.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const text = (value: string): Scalar => ({ _tag: "Text", value });
@@ -88,7 +88,7 @@ export const text = (value: string): Scalar => ({ _tag: "Text", value });
 /**
  * An integer scalar.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const integer = (value: number): Scalar => ({ _tag: "Integer", value });
@@ -96,7 +96,7 @@ export const integer = (value: number): Scalar => ({ _tag: "Integer", value });
 /**
  * A double scalar.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const double = (value: number): Scalar => ({ _tag: "Double", value });
@@ -104,7 +104,7 @@ export const double = (value: number): Scalar => ({ _tag: "Double", value });
 /**
  * A boolean scalar.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const boolean = (value: boolean): Scalar => ({ _tag: "Boolean", value });
@@ -112,7 +112,7 @@ export const boolean = (value: boolean): Scalar => ({ _tag: "Boolean", value });
 /**
  * An instant scalar, in epoch milliseconds.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const instant = (epochMillis: number): Scalar => ({ _tag: "Instant", value: epochMillis });
@@ -124,7 +124,7 @@ export const instant = (epochMillis: number): Scalar => ({ _tag: "Instant", valu
 /**
  * Holds when every predicate in `predicates` holds.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface And {
@@ -135,7 +135,7 @@ export interface And {
 /**
  * Holds when at least one predicate in `predicates` holds.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Or {
@@ -146,7 +146,7 @@ export interface Or {
 /**
  * Holds when `predicate` does not.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Not {
@@ -158,7 +158,7 @@ export interface Not {
  * Holds when `attribute` is present and equal to `value`. An absent attribute
  * makes it false, never unknown.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Eq {
@@ -170,7 +170,7 @@ export interface Eq {
 /**
  * Holds when `attribute` is present and `attribute op value` holds.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Compare {
@@ -183,7 +183,7 @@ export interface Compare {
 /**
  * Holds when `attribute` is absent (SQL `NULL`).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface IsNull {
@@ -196,7 +196,7 @@ export interface IsNull {
  * set is resolved by the application: a subquery for a list, a membership test
  * for one row.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface InSet {
@@ -209,7 +209,7 @@ export interface InSet {
  * A two-valued boolean expression over one resource's attributes, comparing
  * them only with {@link Scalar}s and named sets.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type Predicate = And | Or | Not | Eq | Compare | IsNull | InSet;
@@ -221,7 +221,7 @@ export type Predicate = And | Or | Not | Eq | Compare | IsNull | InSet;
 /**
  * Every row: a renderer emits no filter.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface AllowAll {
@@ -231,7 +231,7 @@ export interface AllowAll {
 /**
  * No row: a renderer need not query at all.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Deny {
@@ -242,7 +242,7 @@ export interface Deny {
  * The rows `predicate` admits. `sets` names every set the predicate refers to,
  * sorted, so a renderer can check it can resolve each before it renders.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Filter {
@@ -255,7 +255,7 @@ export interface Filter {
  * Which rows a principal may read: all of them, none of them, or the ones a
  * {@link Predicate} admits.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type ReadScope = AllowAll | Deny | Filter;
@@ -263,7 +263,7 @@ export type ReadScope = AllowAll | Deny | Filter;
 /**
  * The scope that admits every row.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const allowAll: ReadScope = { _tag: "AllowAll" };
@@ -271,7 +271,7 @@ export const allowAll: ReadScope = { _tag: "AllowAll" };
 /**
  * The scope that admits no row.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const deny: ReadScope = { _tag: "Deny" };
@@ -333,7 +333,7 @@ const setsOf = (predicate: Predicate): ReadonlyArray<string> =>
  * Every attribute a predicate reads, sorted and without repeats: what a
  * renderer must have a column for.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category evaluation
  */
 export const attributes = (predicate: Predicate): ReadonlyArray<string> => {
@@ -366,7 +366,7 @@ const toScope = (expr: Expr): ReadScope =>
  * the {@link ScalarKind}s, or `{ entity: type }` for an attribute whose value
  * is an entity reference of one type, bound as that entity's id (text).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AttributeKind = ScalarKind | { readonly entity: string };
@@ -377,7 +377,7 @@ export type AttributeKind = ScalarKind | { readonly entity: string };
  * named set `set`". The row-level decision supplies the fact as a boolean;
  * the compiled scope names the set instead.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface SetFact {
@@ -390,7 +390,7 @@ export interface SetFact {
  * is for, the attributes a predicate may read and what each holds, and the
  * context facts that are set memberships.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Binding {
@@ -404,7 +404,7 @@ export interface Binding {
  * resource. `slice` holds the principal's side (its entity and ancestors);
  * `context` the request context, without the set facts.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ScopeRequest {
@@ -419,7 +419,7 @@ export interface ScopeRequest {
  * the reasons it doesn't. An inexact policy set has no scope, because an
  * approximate filter is either a privacy leak or a wrong total.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type Compiled =
@@ -739,7 +739,7 @@ const policyOutcomes = (env: Env, policy: Policy.DeclarativePolicy): Partial => 
  * When some applicable policy reads the row in a way a {@link Predicate} can't
  * express, the result is `Inexact` with the reasons, never an approximation.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category compilation
  */
 export const compile = (
@@ -793,7 +793,7 @@ export const compile = (
  * `null` / `undefined` for an absent attribute. An entity-valued attribute
  * holds the entity's id.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type Row = Readonly<Record<string, string | number | boolean | null | undefined>>;
@@ -831,7 +831,7 @@ const holds = (
  * answered by `inSet`. This is the same residual a list renders, so a row
  * check and a list filter compiled from one policy set cannot disagree.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category evaluation
  */
 export const matches = (
@@ -851,7 +851,7 @@ export const matches = (
  * negation becomes true, so an unresolvable set can only remove rows. Never
  * widens, never drops a conjunct.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category evaluation
  */
 export const withoutSets = (scope: ReadScope, isAvailable: (set: string) => boolean): ReadScope => {

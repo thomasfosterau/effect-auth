@@ -12,7 +12,7 @@ import { DeliveryScheduler } from "../DeliveryScheduler.ts";
 /**
  * Provide around a test program to run the flows' detached sends inline.
  *
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const inlineDeliveryScheduler: Layer.Layer<DeliveryScheduler> = Layer.succeed(
   DeliveryScheduler,

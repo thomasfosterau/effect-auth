@@ -28,7 +28,7 @@
  * holds the config it passed to `Http.make` can hand the same value to
  * {@link cookieNames}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface SessionCookieNaming {
@@ -49,7 +49,7 @@ export interface SessionCookieNaming {
  * The resolved naming triple: the effective cookie name (prefix applied), the
  * effective path (forced to `/` when the prefix is active), and `secure`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ResolvedNaming {
@@ -68,7 +68,7 @@ export const defaultCookieName = "conduit_session";
  * the path is `/`; the prefix forces `Path=/` so browsers enforce host-binding
  * (no `Domain`, `Secure`, `Path=/`). Opt out with `hostPrefix: false`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const resolveNaming = (config?: SessionCookieNaming): ResolvedNaming => {
@@ -87,7 +87,7 @@ export const resolveNaming = (config?: SessionCookieNaming): ResolvedNaming => {
 /**
  * Every cookie name the session machinery uses, derived from one config.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface SessionCookieNames {
@@ -113,7 +113,7 @@ export interface SessionCookieNames {
  * assert.equal(names.session, "__Host-app_session")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const cookieNames = (config?: SessionCookieNaming): SessionCookieNames => {
@@ -138,7 +138,7 @@ export const cookieNames = (config?: SessionCookieNaming): SessionCookieNames =>
  * should err toward not skipping — and a resolver on the far side of a service
  * binding need not share this middleware's cache precedence.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const credentialCookieNames = (

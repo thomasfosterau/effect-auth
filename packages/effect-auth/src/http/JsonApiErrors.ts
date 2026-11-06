@@ -29,7 +29,7 @@ const detail = (error: { readonly message: string }): string => error.message;
 /**
  * `401`: no session, or credentials that do not authenticate.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class Unauthorized extends ApiError.make<Unauthorized>("JsonApiUnauthorized")(
@@ -47,7 +47,7 @@ export class Unauthorized extends ApiError.make<Unauthorized>("JsonApiUnauthoriz
  * `403`: authenticated, but not allowed (an unverified email, a ban, a
  * resource that is not the caller's).
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class Forbidden extends ApiError.make<Forbidden>("JsonApiForbidden")("Forbidden", {
@@ -62,7 +62,7 @@ export class Forbidden extends ApiError.make<Forbidden>("JsonApiForbidden")("For
  * `404`: the resource does not exist, or is not the caller's to see (the same
  * answer for both, so the status discloses nothing).
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class NotFound extends ApiError.make<NotFound>("JsonApiNotFound")("NotFound", {
@@ -76,7 +76,7 @@ export class NotFound extends ApiError.make<NotFound>("JsonApiNotFound")("NotFou
 /**
  * `400`: a request the server will not act on as written.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class BadRequest extends ApiError.make<BadRequest>("JsonApiBadRequest")("BadRequest", {
@@ -90,7 +90,7 @@ export class BadRequest extends ApiError.make<BadRequest>("JsonApiBadRequest")("
 /**
  * `409`: the request conflicts with the current state (a handle already held).
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class Conflict extends ApiError.make<Conflict>("JsonApiConflict")("Conflict", {
@@ -104,7 +104,7 @@ export class Conflict extends ApiError.make<Conflict>("JsonApiConflict")("Confli
 /**
  * `429`: rate limited; retry later.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class TooManyRequests extends ApiError.make<TooManyRequests>("JsonApiTooManyRequests")(
@@ -122,7 +122,7 @@ export class TooManyRequests extends ApiError.make<TooManyRequests>("JsonApiTooM
  * `500`: an unexpected server failure. The detail is generic; the cause is
  * logged, never sent.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export class InternalServerError extends ApiError.make<InternalServerError>(
@@ -138,7 +138,7 @@ export class InternalServerError extends ApiError.make<InternalServerError>(
 /**
  * Any of the JSON:API errors above.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category errors
  */
 export type JsonApiError =
@@ -154,7 +154,7 @@ export type JsonApiError =
  * The JSON:API counterpart of an `HttpApiSchema.ts` error, by tag, so a
  * handler's error channel names exactly the documents it can answer with.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category type-level
  */
 export type FromHttpError<E> = E extends { readonly _tag: "Unauthorized" }
@@ -207,7 +207,7 @@ const carry = (error: {
  * strictEqual(error.message, "Not authenticated");
  * ```
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category conversions
  */
 export const fromHttpError = <E extends HttpError>(error: E): FromHttpError<E> =>
@@ -226,7 +226,7 @@ export const fromHttpError = <E extends HttpError>(error: E): FromHttpError<E> =
  * Re-type an effect that fails with `HttpApiSchema.ts` errors so it fails with
  * their JSON:API counterparts instead.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category combinators
  */
 export const mapHttpErrors = <A, E extends HttpError, R>(

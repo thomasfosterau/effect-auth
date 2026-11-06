@@ -176,7 +176,7 @@ import * as Policy from "./Policy.ts";
  * The same class the HTTP tier's error schemas carry (`Http` re-exports it),
  * so a guard's failure encodes at the edge with no translation.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category errors
  */
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
@@ -188,7 +188,7 @@ export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthoriz
  * 403 — there is a viewer, and the gate refuses them. Never the answer to a
  * **read** the viewer may not see (that is a 404; see the module docs).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category errors
  */
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
@@ -205,7 +205,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
  * user type is kept intact through every gate — `requireUser` yields `User`,
  * not this shape.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ViewerShape {
@@ -218,7 +218,7 @@ export interface ViewerShape {
  * edit and delete the resource. Advisory — it drives whether a client renders
  * a control; the write path still runs its gate.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Capabilities {
@@ -230,7 +230,7 @@ export interface Capabilities {
  * The guard kit for one viewer service and one ladder. Build it with
  * {@link make}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Guards<Id, User extends ViewerShape, Rung extends string> {
@@ -342,7 +342,7 @@ export interface Guards<Id, User extends ViewerShape, Rung extends string> {
 /**
  * Options for {@link make}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface GuardOptions<Id, User extends ViewerShape, Rung extends string> {
@@ -376,7 +376,7 @@ class ReservedPrincipalTypeError extends Data.TaggedError("ReservedPrincipalType
 /**
  * Build the guard kit for one viewer service and one ladder.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const make = <Id, User extends ViewerShape, Rung extends string>(
@@ -515,7 +515,7 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
  * included, and is logged as `authorization.decision` with the principal's
  * name. The module docs show it composed with a user gate.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category gates
  */
 export const requireSystem = (

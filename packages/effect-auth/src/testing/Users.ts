@@ -12,7 +12,7 @@ import { DateTime } from "effect";
  * The canonical fixtures' ids: fixed, valid version-4 UUIDs, so a test can
  * name them in SQL or a snapshot without threading the generated value.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constants
  */
 export const fixtureUserIds = {
@@ -25,7 +25,7 @@ export const fixtureUserIds = {
  * When the fixtures were created, unless a test says otherwise: a fixed
  * instant, so records compare equal across runs.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constants
  */
 export const fixtureEpoch: Date = DateTime.toDateUtc(
@@ -35,7 +35,7 @@ export const fixtureEpoch: Date = DateTime.toDateUtc(
 /**
  * A fixture user's fields. Everything is optional.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface FixtureUserOptions {
@@ -63,7 +63,7 @@ export interface FixtureUserOptions {
  * assert.equal(editor.attributes["role"], "editor")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const fixtureUser = (options: FixtureUserOptions = {}): Types.User => {
@@ -84,7 +84,7 @@ export const fixtureUser = (options: FixtureUserOptions = {}): Types.User => {
  * The canonical trio: an admin, a non-admin, and a second non-admin for
  * cross-author checks ("may a member edit another member's post?").
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface FixtureUsers {
@@ -96,7 +96,7 @@ export interface FixtureUsers {
 /**
  * Options for {@link fixtureUsers}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface FixtureUsersOptions {
@@ -133,7 +133,7 @@ export interface FixtureUsersOptions {
  * )
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const fixtureUsers = (options: FixtureUsersOptions = {}): FixtureUsers => {

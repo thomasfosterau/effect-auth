@@ -75,7 +75,7 @@ import { UserStore } from "../UserStore.ts";
 /**
  * A store did not behave as its contract states.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category errors
  */
 export class ConformanceError extends Data.TaggedError("ConformanceError")<{
@@ -89,7 +89,7 @@ export class ConformanceError extends Data.TaggedError("ConformanceError")<{
 /**
  * One executable case of a suite.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ConformanceCase<E, R> {
@@ -100,7 +100,7 @@ export interface ConformanceCase<E, R> {
 /**
  * A contract's cases.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ConformanceSuite<E, R> {
@@ -112,7 +112,7 @@ export interface ConformanceSuite<E, R> {
 /**
  * Options every suite takes.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ConformanceOptions<E = never, R = never> {
@@ -271,7 +271,7 @@ const sessionIds = (sessions: ReadonlyArray<Types.Session>): ReadonlyArray<strin
  * attributes, a miss is `null`, deletes of unknown ids are no-ops, and the
  * per-user operations touch that user's sessions only.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category suites
  */
 export const sessionStoreConformance = <E = never, R = never>(
@@ -385,7 +385,7 @@ export const sessionStoreConformance = <E = never, R = never>(
  * Options for {@link userStoreConformance}: `UserStore` only reads, so the
  * suite writes its users through `seedUser`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface UserStoreConformanceOptions<E = never, R = never> {
@@ -397,7 +397,7 @@ export interface UserStoreConformanceOptions<E = never, R = never> {
  * The `UserStore` contract: a seeded user reads back with its fields,
  * `Date`s and attributes, and a miss is `null`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category suites
  */
 export const userStoreConformance = <E = never, R = never>(
@@ -480,7 +480,7 @@ const values = (identifiers: ReadonlyArray<Identifier.Identifier>) =>
  * `claimIdentifier` relies on), listing, verification, deletes, and every
  * rule of `replace`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category suites
  */
 export const identifierStoreConformance = <E = never, R = never>(
@@ -811,7 +811,7 @@ const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
  * by id and by hash, misses are `null`, `update` writes, and the per-user list
  * is that user's keys only.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category suites
  */
 export const apiKeyStoreConformance = <E = never, R = never>(
@@ -929,7 +929,7 @@ const makePending = (userId: string): PendingMultiFactor => ({
  * without touching the challenge or another challenge's count, and `delete`
  * removes the challenge with its count (a no-op for an unknown token).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category suites
  */
 export const pendingMultiFactorStoreConformance = <E = never, R = never>(

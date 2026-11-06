@@ -28,7 +28,7 @@ import type * as Ladder from "./Ladder.ts";
 /**
  * A `Schema` accepting exactly the rungs of `ladder`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category schemas
  */
 export const rung = <Rung extends string>(ladder: Ladder.Ladder<Rung>): Schema.Codec<Rung> =>

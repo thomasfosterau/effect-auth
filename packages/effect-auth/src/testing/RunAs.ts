@@ -29,7 +29,7 @@ import type * as Types from "../Types.ts";
  * Everything {@link layerAs} provides for a signed-in fixture: the same
  * services the required-auth middleware provides.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthenticatedServices =
@@ -42,7 +42,7 @@ export type AuthenticatedServices =
 /**
  * How the fixture principal got in, and what its session looks like.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RunAsOptions {
@@ -66,7 +66,7 @@ const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
  * falls outside the `Date` range), rather than building a session whose
  * instants are Invalid Dates.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const sessionFor = (
@@ -109,7 +109,7 @@ const authenticated = (
  * The session context for a fixture principal, as a layer: the anonymous
  * context for `null` / `undefined`, the full authenticated context for a user.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export function layerAs(user: null | undefined): Layer.Layer<SessionContext.MaybeCurrentSession>;
@@ -157,7 +157,7 @@ export function layerAs(
  * assert.equal(await Effect.runPromise(greeting.pipe(Testing.runAs(null))), "hello stranger")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category combinators
  */
 export function runAs(
@@ -198,7 +198,7 @@ export function runAs(
  * The least an application's viewer must carry for {@link runAsViewer}: an id,
  * which becomes the fixture's `User::"<id>"` principal.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ViewerFixture {
@@ -209,7 +209,7 @@ export interface ViewerFixture {
  * {@link RunAsOptions}, plus how the app's viewer becomes this library's
  * `User`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ViewerOptions<User> extends RunAsOptions {
@@ -232,7 +232,7 @@ const defaultToUser = <User extends ViewerFixture>(viewer: User, now: Date): Typ
  * viewer through `SessionContext.viewerLayer`, and the session context for
  * the same principal.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export function viewerLayerAs<Id, User extends ViewerFixture>(
@@ -301,7 +301,7 @@ export function viewerLayerAs<Id, User extends ViewerFixture>(
  * assert.ok(Exit.isFailure(await Effect.runPromiseExit(asNobody)))
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category combinators
  */
 export function runAsViewer<Id, User extends ViewerFixture>(
