@@ -127,7 +127,7 @@ catalog:
   vite-plus: 1.4.0
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vitest: 5.0.5
-  vue: ^3.5.44
+  vue: ^3.5.45
   vue-tsc: ^3.3.14
   xml-crypto: ^6.4.0
 
