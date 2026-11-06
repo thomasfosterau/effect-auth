@@ -14,11 +14,11 @@ Who may release, and how: [AGENTS.md → Branches and pull requests](AGENTS.md#b
 
 ## Maintainer setup (one-time)
 
-None of the thirteen publishable packages is on npm yet. Trusted publishing can only be configured on a package that exists on npm, so the first release needs one bootstrap step:
+None of the nine publishable packages is on npm yet. Trusted publishing can only be configured on a package that exists on npm, so the first release needs one bootstrap step:
 
 1. **Allow Actions to open the Version Packages PR.** In the repo: **Settings → Actions → General → Workflow permissions** → enable **"Allow GitHub Actions to create and approve pull requests"**. Without this the built-in `GITHUB_TOKEN` is forbidden from opening pull requests and the workflow fails at the PR-creation step — even though the job already grants `pull-requests: write`.
 2. **Create and protect the `release` environment.** **Settings → Environments → New environment → `release`** → enable **Required reviewers** (yourself) and restrict deployment to the `trunk` branch, so publishing pauses for manual approval.
-3. **Bootstrap each package name on npm.** For each of the thirteen non-private packages under `packages/`, publish a placeholder once from a trusted machine (`pnpm publish --access public` of a `0.0.0` build, or npm's own placeholder flow), so the name exists and its settings page is reachable. That includes `@thomasfosterau/effect-auth-alchemy`, which was held private until #250 and so is the easiest one to miss.
+3. **Bootstrap each package name on npm.** For each of the nine non-private packages under `packages/`, publish a placeholder once from a trusted machine (`pnpm publish --access public` of a `0.0.0` build, or npm's own placeholder flow), so the name exists and its settings page is reachable. That includes `@thomasfosterau/effect-auth-alchemy-cloudflare` and `@thomasfosterau/effect-auth-alchemy-postgres`, the two halves of the former `effect-auth-alchemy` (ADR-0022), which are the easiest to miss.
 
 4. **Configure the trusted publisher** for each package. On npmjs.com, open the package → **Settings → Trusted Publisher** and add:
    - Provider: **GitHub Actions**

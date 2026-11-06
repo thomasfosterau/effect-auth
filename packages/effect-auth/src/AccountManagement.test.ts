@@ -401,7 +401,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
               now: DateTime.toDateUtc(DateTime.nowUnsafe()),
             }),
           );
-          // A store that claims `to` before it looks at `from` (effect-auth-sql's
+          // A store that claims `to` before it looks at `from` (effect-auth/sql's
           // INSERT first) refuses the now-held value instead of resolving to null.
           if (rejectTakenFirst && (yield* store.getByValue(to.type, to.value)) !== null) {
             return yield* new AuthError({ message: "unique index violation" });

@@ -1,10 +1,10 @@
 # @thomasfosterau/effect-auth-svelte
 
-Svelte 5 bindings over `@thomasfosterau/effect-auth-client`: `sessionStore` / `listSessionsStore` (readable stores), `setAuthClient` / `getAuthClient` context, and six unstyled rune-based form components.
+Svelte 5 bindings over the core's browser client, `@thomasfosterau/effect-auth/client`: `sessionStore` / `listSessionsStore` (readable stores), `setAuthClient` / `getAuthClient` context, and six unstyled rune-based form components.
 
 ## Boundary
 
-Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may import only `client`). Peer: `svelte` (`catalog:peers`, `^5.20.0`) and nothing else. Depends on `@thomasfosterau/effect-auth-client`, imported as types only. Imports nothing from `effect` or from core. Built with `svelte-package` and resolved through the `svelte` export condition; `scripts/postbuild.mjs` strips compiled tests and the `.svelte-kit/__package__` staging copy from `dist/`. Type-checked by `svelte-check` (TS6 JS API, no Effect plugin).
+Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may import `core` — in practice only its `/client` subpath — and `ladder`). Peer: `svelte` (`catalog:peers`, `^5.20.0`) and nothing else. Depends on `@thomasfosterau/effect-auth` for its `/client` subpath, imported as types only. Imports nothing from `effect` and nothing from the core's other entries. Built with `svelte-package` and resolved through the `svelte` export condition; `scripts/postbuild.mjs` strips compiled tests and the `.svelte-kit/__package__` staging copy from `dist/`. Type-checked by `svelte-check` (TS6 JS API, no Effect plugin).
 
 ## Invariants
 

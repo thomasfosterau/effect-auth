@@ -5,7 +5,7 @@
  * compiles a policy set once per viewer and requires the compiled scope's
  * single-row form (`ReadScope.matches`) to agree with the kernel's decision on
  * every row of a corpus that includes absent attributes. The SQL projection
- * is held to the same corpus in effect-auth-sql's `ReadScope.test.ts`.
+ * is held to the same corpus in effect-auth/sql's `ReadScope.test.ts`.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
 import { Array as Arr, Context, Match, Option, Predicate } from "effect";

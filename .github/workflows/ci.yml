@@ -68,13 +68,14 @@ jobs:
       - name: Audit
         run: pnpm audit --audit-level high
 
-  # The one suite that needs the alchemy runtime (`AuthSchema.test.ts`, the
-  # package's `test:alchemy` task), kept in its own job so an alchemy break
-  # shows up on its own line. alchemy 2.0.0-beta.80 is the first release that
-  # imports only `effect/*` paths (effect-auth#250). Do not skip the test.
+  # The suites that need the alchemy runtime (each Alchemy package's
+  # `AuthSchema.test.ts`, run by its `test:alchemy` task), kept in their own
+  # job so an alchemy break shows up on its own line. alchemy 2.0.0-beta.80 is
+  # the first release that imports only `effect/*` paths (effect-auth#250). Do
+  # not skip the tests.
   #
-  # The job also runs a Postgres server, so `test:alchemy`'s Postgres cases
-  # (`AuthSchema` and the `./postgres` stores over `@effect/sql-pg`, #184) run
+  # The job also runs a Postgres server, so effect-auth-alchemy-postgres's
+  # cases (`AuthSchema` and its stores over `@effect/sql-pg`, #184) run
   # against a real server rather than skipping.
   alchemy:
     name: "Alchemy runtime"
@@ -108,4 +109,4 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: AuthSchema tests against the alchemy runtime
-        run: pnpm exec vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy
+        run: pnpm exec vp run --filter @thomasfosterau/effect-auth-alchemy-cloudflare --filter @thomasfosterau/effect-auth-alchemy-postgres test:alchemy

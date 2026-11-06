@@ -6,7 +6,7 @@
  *
  * ```svelte
  * <script lang="ts">
- *   import { createAuthClient } from "@thomasfosterau/effect-auth-client";
+ *   import { createAuthClient } from "@thomasfosterau/effect-auth/client";
  *   import { setAuthClient } from "@thomasfosterau/effect-auth-svelte";
  *
  *   setAuthClient(createAuthClient({ baseUrl: "/api/auth" }));
@@ -18,7 +18,7 @@
  * @module context
  */
 import { getContext, setContext, untrack } from "svelte";
-import type { AuthClient } from "@thomasfosterau/effect-auth-client";
+import type { AuthClient } from "@thomasfosterau/effect-auth/client";
 
 /**
  * The context key the client is stored under. A `Symbol.for` key rather than a

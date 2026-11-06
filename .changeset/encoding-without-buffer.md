@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": patch
-"@thomasfosterau/effect-auth-sql": patch
 "@thomasfosterau/effect-auth-resend": patch
 ---
 

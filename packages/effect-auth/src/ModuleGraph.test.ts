@@ -72,6 +72,56 @@ describe("module graph", () => {
     expect(reachesModule(externalSpecifiers, "effect/http-api")).toBe(false);
     expect(reachesModule(externalSpecifiers, "effect-jsonapi")).toBe(false);
   });
+
+  // `./client`, `./sql` and `./saml` are subpaths a consumer opts into; the
+  // root barrel loads none of them, and in particular never the HTTP tier
+  // (which `./client` reaches for its wire types).
+  it("reaches neither the HTTP tier nor the client, SQL or SAML subpaths", async () => {
+    const { files } = await walkModuleGraph(entryFile);
+    const reached = (dir: string) => {
+      const root = path.resolve(import.meta.dirname, dir);
+      return [...files].filter((file) => file.startsWith(`${root}${path.sep}`));
+    };
+
+    expect(reached("http")).toEqual([]);
+    expect(reached("client")).toEqual([]);
+    expect(reached("sql")).toEqual([]);
+    expect(reached("saml")).toEqual([]);
+  });
+
+  // `@node-saml/node-saml` is an optional peer that only `./saml` imports: a
+  // consumer of the root never needs it installed, and the root stays
+  // runnable outside Node.
+  it("root barrel does not reach @node-saml/node-saml", async () => {
+    const { externalSpecifiers } = await walkModuleGraph(entryFile);
+
+    expect(reachesModule(externalSpecifiers, "@node-saml/node-saml")).toBe(false);
+    expect(reachesModule(externalSpecifiers, "xml-crypto")).toBe(false);
+  });
+});
+
+describe("the saml subpath", () => {
+  it("is the only entry that reaches @node-saml/node-saml", async () => {
+    const { externalSpecifiers } = await walkModuleGraph(
+      path.resolve(import.meta.dirname, "saml", "index.ts"),
+    );
+    expect(reachesModule(externalSpecifiers, "@node-saml/node-saml")).toBe(true);
+  });
+});
+
+describe("the client subpath", () => {
+  // The browser bundle holds only the client: its `http/` imports are type-only
+  // and erase, so its runtime graph is the client module alone.
+  it("imports the HTTP tier for types only", async () => {
+    const client = path.resolve(import.meta.dirname, "client", "Client.ts");
+    const code = (await readFile(client, "utf8"))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    const valueImports = [
+      ...code.matchAll(/^import\s+(?!type\b)[^;]*?from\s+["']([^"']+)["']/gm),
+    ].map((match) => match[1]);
+    expect(valueImports).toEqual([]);
+  });
 });
 
 describe("the ladder subpath", () => {

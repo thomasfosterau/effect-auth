@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": minor
-"@thomasfosterau/effect-auth-client": minor
 ---
 
 **Breaking (HTTP):** account management is JSON:API resources (#205). The endpoints take `application/vnd.api+json` documents and answer JSON:API documents and error documents.
@@ -16,4 +15,4 @@
 | `POST /multi-factor/regenerate-backup-codes`   | `POST /backup-code-sets`: `201`, the codes in `meta.backupCodes`                                                            |
 
 - The confirmation tokens travel in the request body, never in a URL.
-- effect-auth-client: `changePassword`, `changeEmail`, `deleteUser` and `multiFactor` keep their arguments and results and call the new endpoints.
+- effect-auth/client: `changePassword`, `changeEmail`, `deleteUser` and `multiFactor` keep their arguments and results and call the new endpoints.

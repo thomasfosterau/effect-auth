@@ -25,17 +25,31 @@ const entryPoints = {
   "./password": () => import("./password/index.ts"),
   "./plugins": () => import("./plugins/index.ts"),
   "./multifactor": () => import("./multifactor/index.ts"),
+  "./client": () => import("./client/index.ts"),
+  "./client/testing": () => import("./client/testing/fixture.ts"),
+  "./sql": () => import("./sql/index.ts"),
+  "./saml": () => import("./saml/index.ts"),
 } as const;
+
+// The first import of an entry transforms its whole module graph; the root
+// barrel's is the largest, and under the root coverage run (every package's
+// suite in one Vitest process, Istanbul-instrumented) it can outlast the
+// default 5 s.
+const IMPORT_TIMEOUT = 30_000;
 
 const withEnv = (env: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromEnv({ env }));
 
 describe("Effect floor compatibility", () => {
   Arr.forEach(Object.entries(entryPoints), ([name, load]) => {
-    it(`imports the ${name} entry point`, async () => {
-      const mod = await load();
-      expect(Object.keys(mod).length).toBeGreaterThan(0);
-    });
+    it(
+      `imports the ${name} entry point`,
+      async () => {
+        const mod = await load();
+        expect(Object.keys(mod).length).toBeGreaterThan(0);
+      },
+      IMPORT_TIMEOUT,
+    );
   });
 
   it("reads the JWT config from the environment", async () => {

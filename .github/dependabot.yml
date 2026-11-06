@@ -20,6 +20,8 @@
 #   on `effect` / `@effect/platform-node` at its own release's floor.
 # - `svelte`: svelte, the kit packages and svelte-check peer on each other's
 #   release line.
+# - `alchemy`: `alchemy` and its `@alchemy.run/*` provider packages, which
+#   share one exact release and peer on `alchemy` at it.
 #
 # Ignored version updates (security updates stay enabled, because each ignore
 # is scoped to `version-update:*` types):
@@ -38,6 +40,9 @@
 #   `toolchain` PR's branch.
 # - `@effect/tsgo` itself when a `vite-plus` bump outruns it: that PR fails at
 #   `pnpm install` until a release whose table covers the new oxlint lands.
+# - the exact `alchemy` / `@alchemy.run/cloudflare` peers in
+#   `catalogs.alchemy-peers`, moved on the `alchemy` PR's branch to the
+#   release the applications pin.
 # - the transitive advisory floors in pnpm-workspace.yaml's `overrides`.
 #   (The `vite@*` / `vitest@*` overrides read the catalog, so they follow.)
 # - the `ghcr.io/voidzero-dev/vite-plus:<tag>` image in .devcontainer/devcontainer.json:
@@ -88,6 +93,12 @@ updates:
           - "svelte"
           - "@sveltejs/*"
           - "svelte-check"
+      # Every `@alchemy.run/*` provider peers on `alchemy` at its own exact version.
+      alchemy:
+        applies-to: version-updates
+        patterns:
+          - "alchemy"
+          - "@alchemy.run/*"
     ignore:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]

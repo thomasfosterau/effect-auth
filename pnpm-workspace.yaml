@@ -1,4 +1,4 @@
-# pnpm workspace — the thirteen published packages under packages/*.
+# pnpm workspace — the nine published packages under packages/*.
 #
 # The `catalog:` protocol pins versions that MUST be singletons across the
 # workspace. Effect especially: two copies of `effect` break Context / Layer /
@@ -61,6 +61,8 @@ catalog:
   # exactly, but the `effect` override below puts it on the singleton, which
   # it lints fine on.
   "@enfect/oxlint": ^0.9.0
+  # `@thomasfosterau/effect-auth/saml`'s XML-DSig and canonicalisation. 5.1.0
+  # fixed CVE-2025-54419 / CVE-2025-54369; never relax the floor below it.
   "@node-saml/node-saml": ^5.1.0
   "@sveltejs/package": ^3.0.2
   "@sveltejs/vite-plugin-svelte": ^7.3.1
@@ -77,6 +79,12 @@ catalog:
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a
   # mismatch, so it moves with vite-plus.
   "@vitest/coverage-istanbul": 5.0.5
+  # alchemy 2.0.0-beta.84 split the providers out of `alchemy`: each is its own
+  # `@alchemy.run/*` package on the same exact version, peering on `alchemy`
+  # at that version, so they move together (Dependabot's `alchemy` group).
+  # effect-auth-alchemy-cloudflare peers on both; the applications pin the same
+  # release.
+  "@alchemy.run/cloudflare": 2.0.0-beta.85
   alchemy: 2.0.0-beta.85
   better-sqlite3: ^13.0.3
   # The classic drizzle line is what `packages/drizzle` tests its Promise
@@ -131,9 +139,9 @@ catalogs:
     # 0.x minors break, so the peer range is the minor line.
     "@thomasfosterau/effect-jsonapi": ^0.19.0
     "@types/pg": ^8.15.0
-    # beta.85 is the first alchemy release on effect 4.1's `effect/crypto`
-    # modules; beta.84 and earlier import the `effect/Crypto` that 4.1 removed.
-    alchemy: ">=2.0.0-beta.85"
+    # The optional peer of effect-auth's `./saml` subpath, at the same
+    # CVE-fixed floor as the catalog pin above.
+    "@node-saml/node-saml": ^5.1.0
     drizzle-orm: ">=0.44.0"
     # `^4.0.0` by policy, raised here because the packages' own code needs an
     # Effect module that first shipped in a later minor: `effect/crypto`
@@ -142,15 +150,22 @@ catalogs:
     # building, type-checking and testing on `effect` 4.1.0 exactly.
     effect: ^4.1.0
     svelte: ^5.20.0
-  # effect-auth-alchemy's own `effect` floor, kept apart from the programme
-  # floor in `peers` (today they are equal): its `alchemy` peer (beta.85, the
-  # floor above) itself peers on `effect ^4.1.0`, so this floor stays at 4.1
-  # even if `peers.effect` ever drops back to `^4.0.0`.
-  # `vp run check:dist` reads each packed range, so it checks effect-auth-alchemy
-  # at this floor and the other packages at `peers.effect`.
+  # The two Alchemy packages' peers (effect-auth-alchemy-cloudflare and
+  # effect-auth-alchemy-postgres), kept apart from the programme floor in
+  # `peers` (today the `effect` floors are equal): `alchemy` (beta.85) itself
+  # peers on `effect ^4.1.0`, so this floor stays at 4.1 even if
+  # `peers.effect` ever drops back to `^4.0.0`. `vp run check:dist` reads each
+  # packed range, so it checks both packages at these floors and the others at
+  # `peers.effect`.
   alchemy-peers:
-    # The optional peer of effect-auth-alchemy's `./postgres` entry. 4.1.0 is
-    # the first `@effect/sql-pg` on the `effect` 4.1 line this package floors.
+    # Exact, as the applications pin them: every `@alchemy.run/*` provider
+    # peers on `alchemy` at its own exact version, and beta.85 is the first
+    # alchemy on effect 4.1's `effect/crypto` modules (beta.84 and earlier
+    # import the `effect/Crypto` that 4.1 removed).
+    "@alchemy.run/cloudflare": 2.0.0-beta.85
+    alchemy: 2.0.0-beta.85
+    # effect-auth-alchemy-postgres's client. 4.1.0 is the first
+    # `@effect/sql-pg` on the `effect` 4.1 line this package floors.
     "@effect/sql-pg": ^4.1.0
     effect: ^4.1.0
 

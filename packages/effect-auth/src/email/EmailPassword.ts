@@ -62,7 +62,7 @@ export class EmailPasswordStore extends Context.Service<
      * the username for that user): draw it from the same sequence
      * `createUser` uses, reserving it. Minting it must not read or change any
      * existing user. Without it the stand-in's id is a random UUID
-     * (`crypto.randomUUID()`), the shape effect-auth-sql's `createUser`
+     * (`crypto.randomUUID()`), the shape effect-auth/sql's `createUser`
      * assigns.
      */
     readonly newUserId?: (() => Effect.Effect<string, Errors.AuthError>) | undefined;
@@ -113,7 +113,7 @@ export interface EmailPasswordConfig {
    * Called directly, the service still answers with the stand-in user: its
    * `email` is the submitted address, trimmed and lower-cased (after the
    * `beforeSignUp` hooks), with `emailVerified: false`, and its other fields
-   * are what a store that keeps its input as given (as effect-auth-sql's
+   * are what a store that keeps its input as given (as effect-auth/sql's
    * does) returns for a new user: the submitted `name` and `attributes` (`{}`
    * when none), no `image`, and one timestamp, taken during the request, for
    * both `createdAt` and `updatedAt`. Its `id` is a random UUID unless the

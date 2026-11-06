@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": minor
-"@thomasfosterau/effect-auth-sql": minor
 ---
 
 One authorization model: the policy kernel. RBAC is authoring sugar that compiles into it, and
@@ -32,7 +31,7 @@ also meant two places a security control could live, with no rule saying which o
 is a `Role -> Role` edge resolved by the kernel's cycle-safe `in` check rather than a pre-expanded
 permission set, so an inherited grant is determined by the _parent's_ policy id in the trace.
 
-**`@thomasfosterau/effect-auth-sql`.** The RBAC tables feed the kernel in two halves:
+**`@thomasfosterau/effect-auth/sql`.** The RBAC tables feed the kernel in two halves:
 `makeRbacEntityResolver` / `RbacEntityResolverLayer` project `auth_user_roles` into `Role::`
 parents, and `readRbacPolicies` compiles `auth_role_permissions` into declarative permits via
 `Rbac.policies`. Neither is part of the bundled `Sql.layer` — `EntityResolver` is a slot an

@@ -6,7 +6,7 @@
  * that imports Effect at module load. By default each package is
  * installed beside exactly the lowest `effect` its own range admits (its
  * floor): packages that share a floor share one scratch project, and a
- * package with a higher floor (effect-auth-alchemy's `catalogs.alchemy-peers`
+ * package with a higher floor (the Alchemy packages' `catalogs.alchemy-peers`
  * range, when it sits above the programme's `catalogs.peers` one) gets a
  * project of its own. Each project
  * imports every `exports` entry of its packages from the packed `dist/`, and
@@ -28,9 +28,11 @@
  *
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
  *
- * Third-party peers are installed the same way. `alchemy` and `@effect/sql-pg`
- * (beside effect-auth-alchemy; the latter is its `./postgres` entry's optional
- * peer) and `drizzle-orm` (beside effect-auth-drizzle) go in at
+ * Third-party peers are installed the same way. `alchemy` with
+ * `@alchemy.run/cloudflare` (beside effect-auth-alchemy-cloudflare) or with
+ * `@effect/sql-pg` (beside effect-auth-alchemy-postgres), the core's optional
+ * `@thomasfosterau/effect-jsonapi` and `@node-saml/node-saml`, and
+ * `drizzle-orm` (beside effect-auth-drizzle) go in at
  * `semver.minVersion` of the range the packed manifest declares for them, so a
  * default run proves each peer floor the way it proves `effect`. The floor must
  * be a version npm publishes: a strict bound such as `>X` can name one that was
@@ -79,7 +81,7 @@
  * is opened.
  *
  * Not covered: the Svelte binding, which imports Effect
- * only through `effect-auth-client`.
+ * only through the core's `./client` subpath.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -130,20 +132,17 @@ interface Target {
 
 const allTargets: ReadonlyArray<Target> = [
   // effect-jsonapi is the optional peer of the `./http` entry (#205), and of
-  // the client's `./testing` entry through it: installed at its floor so those
-  // entries import like the rest.
-  { dir: "effect-auth", peers: ["@thomasfosterau/effect-jsonapi"] },
-  { dir: "client", peers: ["@thomasfosterau/effect-jsonapi"] },
-  { dir: "sql" },
+  // the `./client/testing` entry through it; `@node-saml/node-saml` is the
+  // optional peer of the `./saml` entry. Both are installed at their floors so
+  // those entries import like the rest.
+  { dir: "effect-auth", peers: ["@thomasfosterau/effect-jsonapi", "@node-saml/node-saml"] },
   { dir: "argon2" },
   { dir: "resend" },
   { dir: "twilio" },
-  { dir: "saml" },
   { dir: "sveltekit" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
-  // `@effect/sql-pg` is the optional peer of the `./postgres` entry: installed
-  // at its floor so that entry imports like the rest.
-  { dir: "alchemy", peers: ["alchemy", "@effect/sql-pg"] },
+  { dir: "alchemy-cloudflare", peers: ["alchemy", "@alchemy.run/cloudflare"] },
+  { dir: "alchemy-postgres", peers: ["alchemy", "@effect/sql-pg"] },
 ];
 
 const arg = (flag: string): string | undefined => {

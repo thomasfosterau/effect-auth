@@ -58,17 +58,17 @@ The full gate list is in [AGENTS.md → Verification](AGENTS.md#verification). W
 | One package's unit tests               | `vp run --filter <pkg> test:unit`                                         |
 | One package's type check               | `vp run --filter <pkg> check`                                             |
 | One test file (from the package's dir) | `vp test run <file>`                                                      |
-| The alchemy runtime suite              | `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`        |
+| The alchemy runtime suites             | `vp run --filter './packages/alchemy-*' test:alchemy`                     |
 | Coverage map for fallow                | `vp run test:coverage` (writes `coverage/coverage-final.json`)            |
 | Dead code, unused exports, boundaries  | `vp exec fallow dead-code`                                                |
 | The changed-files gate                 | `vp exec fallow audit --base origin/trunk` (after `vp run test:coverage`) |
 | API docs and their runnable examples   | `vp run build && vp run docs`                                             |
 
-`<pkg>` is the package name, for example `@thomasfosterau/effect-auth-sql`. `vp check` (format and lint) and `vp run check` (the type gate) are different commands.
+`<pkg>` is the package name, for example `@thomasfosterau/effect-auth-drizzle`. `vp check` (format and lint) and `vp run check` (the type gate) are different commands.
 
 ## Before you open a pull request
 
-Run the gates in [AGENTS.md → Verification](AGENTS.md#verification), in that order, and record each result in the PR body; CI's `test` job runs the same list and its `alchemy` job runs the alchemy runtime suite. The PR template ([.github/pull_request_template.md](.github/pull_request_template.md)) asks for the rest.
+Run the gates in [AGENTS.md → Verification](AGENTS.md#verification), in that order, and record each result in the PR body; CI's `test` job runs the same list and its `alchemy` job runs the alchemy runtime suites. The PR template ([.github/pull_request_template.md](.github/pull_request_template.md)) asks for the rest.
 
 ## Reporting a vulnerability
 

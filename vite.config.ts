@@ -115,8 +115,9 @@ export default defineConfig({
       "unicorn/no-array-sort": "warn", // 3
       "typescript/unbound-method": "warn", // 1
       // alchemy's lifecycle props are typed required but arrive `undefined`
-      // on a first deploy (`AuthSchema.ts`): the defaults are load-bearing.
-      "typescript/no-useless-default-assignment": "warn", // 3
+      // on a first deploy (the two `AuthSchema.ts`): the defaults are
+      // load-bearing.
+      "typescript/no-useless-default-assignment": "warn", // 6
       "typescript/no-misused-spread": "warn", // 2
       "typescript/restrict-template-expressions": "warn", // 2
       "promise/no-promise-in-callback": "warn", // 1
@@ -196,11 +197,11 @@ export default defineConfig({
         // record they run (`it(testCase.name, …)`), which is a string the
         // rule cannot see statically.
         files: [
-          "packages/alchemy/src/Storage.test.ts",
+          "packages/alchemy-cloudflare/src/Storage.test.ts",
           "packages/drizzle/src/testing/Conformance.ts",
+          "packages/effect-auth/src/sql/Stores.test.ts",
           "packages/effect-auth/src/testing/MemoryStores.test.ts",
           "packages/effect-auth/src/testing/StoreConformance.test.ts",
-          "packages/sql/src/Stores.test.ts",
         ],
         rules: { "vitest/valid-title": "off" },
       },
@@ -226,7 +227,7 @@ export default defineConfig({
       {
         // Code that imports nothing from `effect`: the Svelte binding peers
         // only its framework (AGENTS.md), the browser client's runtime is
-        // plain `fetch` with no Effect in the bundle (`Client.ts`), and
+        // plain `fetch` with no Effect in the bundle (`client/Client.ts`), and
         // `./ladder` imports nothing at all because browser bundles load it
         // (`ModuleGraph.test.ts`). The
         // rules that steer to an `effect` module (`Array`, `Predicate`,
@@ -235,7 +236,7 @@ export default defineConfig({
         // has no typed error channel.
         files: [
           "packages/svelte/src/**",
-          "packages/client/src/Client.ts",
+          "packages/effect-auth/src/client/Client.ts",
           "packages/effect-auth/src/Ladder.ts",
         ],
         rules: {
@@ -285,7 +286,7 @@ export default defineConfig({
           "packages/effect-auth/src/testing/StoreConformance.ts",
           "packages/svelte/src/forms/internal.ts",
           "packages/svelte/src/forms/submission.svelte.ts",
-          "packages/client/src/Client.ts",
+          "packages/effect-auth/src/client/Client.ts",
         ],
         rules: {
           "effect/no-unknown-parameters": "off",
@@ -334,20 +335,19 @@ export default defineConfig({
       // below), so no `{ from: "dependencies" }` edge builds the siblings a
       // suite imports through `exports` (→ `dist/`): every package's `build`
       // is named explicitly (cached, so a warm tree pays nothing), and a new
-      // package adds itself here. The alchemy runtime suite stays in its own
-      // `test:alchemy` task, as in `test:unit`.
+      // package adds itself here. The alchemy runtime suites (and the Postgres
+      // suite that needs a server) stay in their own `test:alchemy` tasks, as
+      // in `test:unit`.
       "test:coverage": {
         command:
-          "vp test run --coverage --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude packages/alchemy/src/AuthSchema.test.ts",
+          "vp test run --coverage --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude 'packages/alchemy-*/src/AuthSchema.test.ts' --exclude packages/alchemy-postgres/src/Postgres.test.ts",
         dependsOn: [
           "@thomasfosterau/effect-auth#build",
-          "@thomasfosterau/effect-auth-alchemy#build",
+          "@thomasfosterau/effect-auth-alchemy-cloudflare#build",
+          "@thomasfosterau/effect-auth-alchemy-postgres#build",
           "@thomasfosterau/effect-auth-argon2#build",
-          "@thomasfosterau/effect-auth-client#build",
           "@thomasfosterau/effect-auth-drizzle#build",
           "@thomasfosterau/effect-auth-resend#build",
-          "@thomasfosterau/effect-auth-saml#build",
-          "@thomasfosterau/effect-auth-sql#build",
           "@thomasfosterau/effect-auth-svelte#build",
           "@thomasfosterau/effect-auth-sveltekit#build",
           "@thomasfosterau/effect-auth-twilio#build",

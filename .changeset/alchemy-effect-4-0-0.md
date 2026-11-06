@@ -1,8 +1,9 @@
 ---
-"@thomasfosterau/effect-auth-alchemy": minor
+"@thomasfosterau/effect-auth-alchemy-cloudflare": minor
+"@thomasfosterau/effect-auth-alchemy-postgres": minor
 ---
 
-First release of `@thomasfosterau/effect-auth-alchemy` on Effect 4, built and tested against `effect` `4.0.0` and `alchemy` `2.0.0-beta.80` (#250).
+First release of `@thomasfosterau/effect-auth-alchemy-cloudflare` on Effect 4, built and tested against `effect` `4.0.0` and `alchemy` `2.0.0-beta.80` (#250).
 
 **Breaking peer ranges:** the package now requires `alchemy >=2.0.0-beta.80` and `effect >=4.0.0`. alchemy beta.79 and earlier import `effect/unstable/*`, which Effect removed in rc.118, so they can't load beside any `effect` this package supports; beta.80 is the first alchemy release that imports only `effect/*` paths, and it peers on `effect ^4.0.0` itself. So this package's `effect` floor is `4.0.0`, above the `>=4.0.0-rc.118` floor the other effect-auth packages keep. The packed `dist/` is smoke-tested on `4.0.0`.
 

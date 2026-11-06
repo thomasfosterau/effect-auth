@@ -13,14 +13,18 @@ The settled API conventions — naming, export shapes, store contracts, error ta
 2. **Type-Safe**: schema'd domain models and precise tagged-error unions.
 3. **Composable**: features are independent layers; provide only what you use.
 4. **Storage-Agnostic**: bring your own store implementations (or use
-   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy`, or the built-in KeyValueStore
-   layers).
+   the core's `./sql` subpath, the Alchemy packages that wire it to D1 or
+   Postgres (`@thomasfosterau/effect-auth-alchemy-cloudflare`,
+   `@thomasfosterau/effect-auth-alchemy-postgres`), effect-auth-drizzle, or
+   the built-in KeyValueStore layers).
 5. **Secure by Default**: timing-safe comparisons, high-entropy tokens,
    HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration
    responses.
 6. **Minimal dependencies**: the core library depends on `effect` only (plus
    `node:crypto` for the three primitives it doesn't cover — see Dependencies
-   below). Native or third-party dependencies live in companion packages.
+   below). A subpath that needs a third-party library takes it as an optional
+   peer (`./saml`'s `@node-saml/node-saml`, `./http`'s effect-jsonapi); any
+   other dependency lives in a companion package ([ADR-0022](adr/0022-package-boundaries.md)).
 
 ## The service pattern
 
@@ -168,6 +172,16 @@ directories, each with its own `index.ts` barrel and matching
   `HttpMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
+- **`client/`** (the `./client` subpath only): `Client.ts`, the browser
+  client over the HTTP contract (plain `fetch`, type-only imports from
+  `http/`, so no Effect runtime reaches the bundle), and `testing/fixture.ts`
+  (`./client/testing`, an in-memory server and a cookie-jar `fetch`).
+- **`sql/`** (the `./sql` subpath only): `Stores.ts` (every store it covers
+  over `effect/sql`'s `SqlClient`, for SQLite, D1 and PostgreSQL), `Schema.ts`
+  (the `auth_*` DDL, `migrate`, `authTableNames`), `ReadScope.ts` (a read
+  scope as a SQL `WHERE`).
+- **`saml/`** (the `./saml` subpath only; Node-only): `Verifier.ts`, the
+  `SamlVerifier` over the optional peer `@node-saml/node-saml`.
 - **`multifactor/` cluster** (also the `Auth.MultiFactor` namespace):
   `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in
   via the `SecondFactorGate` seam), `OtpSecondFactor.ts` (OTP-based
@@ -183,7 +197,7 @@ directories, each with its own `index.ts` barrel and matching
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
   `OneTimeToken.ts`, `Scim.ts` (SCIM 2.0, see
   [guides/scim.md](guides/scim.md)), `Saml.ts` (the `SamlVerifier` seam that
-  `effect-auth-saml` implements), `Delivery.ts` (the `EmailSender` /
+  the `./saml` subpath implements), `Delivery.ts` (the `EmailSender` /
   `SmsSender` seams the delivery adapters implement), `DeliveryScheduler.ts`
   (the host seam that runs the sends of the flows that hide whether an
   account exists off the response path).
@@ -199,7 +213,11 @@ whole headless surface; the per-cluster subpaths (`effect-auth/email`,
 `/oauth`, `/password`, `/plugins`, `/multifactor`) exist for consumers who
 want a narrower import. The HTTP tier is published only as the
 `effect-auth/http` subpath (#205), so the root import's module graph never
-reaches `effect/http-api`; `ModuleGraph.test.ts` holds that line.
+reaches `effect/http-api`; `ModuleGraph.test.ts` holds that line. The same
+goes for `effect-auth/client`, `effect-auth/client/testing`,
+`effect-auth/sql` and `effect-auth/saml`: subpaths only, never reached from
+the root, so the root graph loads neither `effect/sql` nor
+`@node-saml/node-saml` (`ModuleGraph.test.ts` checks both).
 
 `effect-auth/testing` is the one subpath with no root namespace: server-side
 test helpers (`runAs`, `runAsViewer`, over `SessionContext`), kept off the
@@ -317,7 +335,8 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 ## Dependencies
 
 - **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256). Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
-- **Packages** isolate framework/storage-driver/native peer deps (`-client`, `-sql`, `-drizzle`, `-alchemy`, `-argon2`, `-resend`, `-twilio`, `-saml`, and the four framework bindings) so core stays lean.
+- **Optional peers of the core**, each reached from one subpath only: `@thomasfosterau/effect-jsonapi` (`./http`, and `./client/testing` through it) and `@node-saml/node-saml` (`./saml`, Node-only). `effect/sql`, behind `./sql`, ships in `effect`.
+- **Packages** hold the code that brings a dependency the core lacks (ADR-0022): `-drizzle` (`drizzle-orm`), `-alchemy-cloudflare` (`alchemy`, `@alchemy.run/cloudflare`), `-alchemy-postgres` (`alchemy`, `@effect/sql-pg`), `-argon2` (`hash-wasm`) and the Svelte binding (`svelte`). `-resend` and `-twilio` (plain `fetch`) stay packages because the owner decides vendor-adapter merges case by case, and `-sveltekit` is the server side of a framework. The browser client, the SQL stores and the SAML verifier, once packages of their own, are core subpaths.
 
 ## References
 

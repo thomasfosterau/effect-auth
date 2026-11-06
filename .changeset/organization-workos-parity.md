@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": minor
-"@thomasfosterau/effect-auth-client": minor
 ---
 
 Organizations: member deactivation, verified domains, JIT provisioning, invitation resend, and a per-organization default role.

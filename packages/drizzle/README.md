@@ -12,7 +12,7 @@ Implements the three stores every sign-in flow touches:
 | `IdentifierStore` | `effect_auth_identifiers` | Email / username / phone claims, unique per pair       |
 
 This package **stands alone** — it does not wrap
-[`@thomasfosterau/effect-auth-sql`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/sql). It speaks drizzle's query builder
+[`@thomasfosterau/effect-auth/sql`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth/src/sql). It speaks drizzle's query builder
 directly, so attribute bags and timestamps are round-tripped natively by the
 driver instead of being encoded into `TEXT`. If you want a driver-agnostic layer
 covering _every_ effect-auth store (OAuth, WebAuthn, rate limits, ...), reach

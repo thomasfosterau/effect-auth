@@ -10,5 +10,15 @@ export default defineConfig({
     globals: true,
     environment: "node",
     exclude: ["**/node_modules/**", "**/dist/**", "**/.reference/**"],
+    // One migrated PGlite data directory per run for the `./sql` suites, built
+    // outside any test or hook timeout; the PostgreSQL suites open their
+    // database from it (`src/sql/testing`).
+    globalSetup: ["./src/sql/testing/PgliteTemplate.setup.ts"],
+    // Vitest 5's file-system module cache is off for this package: a cached
+    // module reaches the globalSetup's module runner as a Buffer, and Vite+
+    // 1.4's stack-trace source mapping then throws `code.charCodeAt is not a
+    // function` (the first Effect stack capture in the setup), so every run
+    // after the first fails with "No test files found" (#502).
+    fsModuleCache: false,
   },
 });

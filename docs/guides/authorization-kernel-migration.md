@@ -161,7 +161,7 @@ same seam:
 ```ts
 import { Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
-import * as Sql from "@thomasfosterau/effect-auth-sql";
+import * as Sql from "@thomasfosterau/effect-auth/sql";
 
 const authorizer = Layer.unwrap(
   Effect.map(Sql.readRbacPolicies, (policies) =>

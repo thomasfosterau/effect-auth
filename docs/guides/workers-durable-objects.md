@@ -201,7 +201,7 @@ An exact store does not make `RateLimiter.layer()` strict. That limiter decides 
 
 ## 3. Sessions
 
-Sessions are not counters. Their risk is reading a stale session, for example a revoked one, not losing an update. Any strongly consistent store works, and if you already use D1, `@thomasfosterau/effect-auth-sql` (or effect-auth-alchemy) is the simpler choice. KV is the store to avoid: a deleted session can still be read for up to a minute after sign-out.
+Sessions are not counters. Their risk is reading a stale session, for example a revoked one, not losing an update. Any strongly consistent store works, and if you already use D1, `@thomasfosterau/effect-auth/sql` (or effect-auth-alchemy-cloudflare) is the simpler choice. KV is the store to avoid: a deleted session can still be read for up to a minute after sign-out.
 
 To keep sessions in Durable Objects, use two kinds of object:
 

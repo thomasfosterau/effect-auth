@@ -43,7 +43,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth-client": "workspace:*"
+    "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
     "@sveltejs/package": "catalog:",

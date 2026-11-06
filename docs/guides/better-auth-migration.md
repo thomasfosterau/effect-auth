@@ -2,7 +2,7 @@
 
 This guide is for an application that already runs on [Better Auth](https://www.better-auth.com/) and wants to move to effect-auth. It maps Better Auth's concepts onto effect-auth's, walks each auth flow, covers the browser client, gives concrete guidance for moving the data, and ends with an honest list of what effect-auth does not do or deliberately does differently.
 
-Everything claimed here about effect-auth is taken from the tree: `packages/effect-auth/src/index.ts` is the public surface, `packages/effect-auth/src/http/HttpApi.ts` is the HTTP contract, and `packages/sql/src/Schema.ts` is the reference schema.
+Everything claimed here about effect-auth is taken from the tree: `packages/effect-auth/src/index.ts` is the public surface, `packages/effect-auth/src/http/HttpApi.ts` is the HTTP contract, and `packages/effect-auth/src/sql/Schema.ts` is the reference schema.
 
 ## 1. The shape of the change
 
@@ -11,28 +11,28 @@ Better Auth is a **framework instance**: `betterAuth({ ... })` returns an object
 The practical consequences are worth internalising before you start:
 
 - There is no `auth` object and no `auth.api.*`. You get services from context (`yield* Auth.SessionService`) and compose them with `Layer.mergeAll` / `Layer.provide`.
-- There is no adapter for your ORM. Features depend on small store contracts (`SessionStore`, `UserStore`, `IdentifierStore`, …) that you either implement yourself or take from `@thomasfosterau/effect-auth-sql` / `-drizzle` / `-alchemy`.
+- There is no adapter for your ORM. Features depend on small store contracts (`SessionStore`, `UserStore`, `IdentifierStore`, …) that you either implement yourself or take from `@thomasfosterau/effect-auth/sql` / `-drizzle` / `-alchemy`.
 - A feature is "enabled" exactly when its layer is in the context. Optional HTTP routes answer `404` until the service behind them is provided — that is the whole configuration mechanism.
 - Errors are values in the typed error channel, not thrown exceptions; every service method has `R = never` once its layer is built.
-- There is no CLI. No `@better-auth/cli generate`, no `migrate` command that inspects your config. `@thomasfosterau/effect-auth-sql` ships a fixed DDL list (`schemaStatements`) and a `migrate` effect; everything else is your migration pipeline's job.
+- There is no CLI. No `@better-auth/cli generate`, no `migrate` command that inspects your config. `@thomasfosterau/effect-auth/sql` ships a fixed DDL list (`schemaStatements`) and a `migrate` effect; everything else is your migration pipeline's job.
 
 ## 2. Concept map
 
-| Better Auth                                      | effect-auth                                                                                                           |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                           |
-| `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                              |
-| `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth-sql`, `-drizzle`, `-alchemy`, or your own                       |
-| `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`        |
-| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP     |
-| `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration) |
-| `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                         |
-| `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`   |
-| `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret       |
-| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Http.makeAsync` (`SessionCookieCache.ts`)                                              |
-| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Http.makeAsync`                                                         |
-| `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth-client`                                                          |
-| `better-auth/svelte`                             | `@thomasfosterau/effect-auth-svelte` (no React, Vue or Solid binding)                                                 |
+| Better Auth                                      | effect-auth                                                                                                                      |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                                      |
+| `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                                         |
+| `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth/sql`, `-drizzle`, `-alchemy-cloudflare` / `-alchemy-postgres`, or your own |
+| `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`                   |
+| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP                |
+| `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration)            |
+| `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                                    |
+| `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`              |
+| `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret                  |
+| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Http.makeAsync` (`SessionCookieCache.ts`)                                                         |
+| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Http.makeAsync`                                                                    |
+| `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth/client`                                                                     |
+| `better-auth/svelte`                             | `@thomasfosterau/effect-auth-svelte` (no React, Vue or Solid binding)                                                            |
 
 ### Config → layers, concretely
 
@@ -42,7 +42,7 @@ A minimal Better Auth instance with email+password and GitHub becomes a layer gr
 import { Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Http from "@thomasfosterau/effect-auth/http";
-import * as Sql from "@thomasfosterau/effect-auth-sql";
+import * as Sql from "@thomasfosterau/effect-auth/sql";
 
 const stores = Sql.layer.pipe(Layer.provide(SqlClientLayer));
 
@@ -78,14 +78,14 @@ Better Auth's `plugins` array does two different jobs: it adds features, and it 
 
 Better Auth owns your tables through an adapter and generates the schema for you. effect-auth inverts this: it declares ~42 store contracts and never touches a driver. Three routes exist, and you can mix them:
 
-- **`@thomasfosterau/effect-auth-sql`** — driver-agnostic over `effect/sql` (SQLite, Cloudflare D1 and PostgreSQL; MySQL is not supported, see the drizzle route below). `Sql.layer` provides the implemented stores; `Sql.migrate` runs `Sql.schemaStatements`, all of them `CREATE TABLE IF NOT EXISTS`, so it is safe on every deploy. This is the closest analogue to a Better Auth adapter and the fastest path off it.
+- **`@thomasfosterau/effect-auth/sql`** — driver-agnostic over `effect/sql` (SQLite, Cloudflare D1 and PostgreSQL; MySQL is not supported, see the drizzle route below). `Sql.layer` provides the implemented stores; `Sql.migrate` runs `Sql.schemaStatements`, all of them `CREATE TABLE IF NOT EXISTS`, so it is safe on every deploy. This is the closest analogue to a Better Auth adapter and the fastest path off it.
 - **`@thomasfosterau/effect-auth-drizzle`** — for apps that already model their schema in Drizzle and want the auth tables inside the existing migration pipeline. It covers the three stores every credential sign-in touches (`SessionStore`, `UserStore`, `IdentifierStore`) on PostgreSQL, SQLite, or MySQL; see that package's README for its exact tables.
 - **Bring your own** — implement `typeof Auth.XStore.Service` over whatever client you have. [`byo-stores.md`](./byo-stores.md) is the reference, including which methods **must** be atomic.
 
 Two invariants differ from Better Auth and matter for both wiring and data migration:
 
 - **Bearer secrets are stored hashed.** Session ids, magic-link / verification / reset / one-time tokens, API keys and OIDC codes reach a store as the unsalted SHA-256 hex digest produced by `hashToken` (`src/TokenHash.ts`). Stores index on the digest; the raw secret exists only in transit.
-- **Timestamps are epoch-millisecond `BIGINT` in `packages/sql`,** because epoch-ms overflows Postgres `int4` and MySQL signed `INT`. At the store boundary the domain records still use real `Date` objects.
+- **Timestamps are epoch-millisecond `BIGINT` in `packages/effect-auth/src/sql`,** because epoch-ms overflows Postgres `int4` and MySQL signed `INT`. At the store boundary the domain records still use real `Date` objects.
 
 ## 4. Flow-by-flow equivalents
 
@@ -139,7 +139,7 @@ Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiF
 
 Two separate features, as in Better Auth:
 
-- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso/register`, `POST /sign-in/sso`, `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth-saml`.
+- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso/register`, `POST /sign-in/sso`, `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
 - **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*`, `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
 
 SCIM provisioning (`Auth.ScimService`) has no Better Auth counterpart; [`scim.md`](./scim.md) covers it.
@@ -152,7 +152,7 @@ Better Auth leaves it to the app to schedule a send outside the response (the `w
 
 ## 5. Client migration
 
-`better-auth/client` → `@thomasfosterau/effect-auth-client`. Both export `createAuthClient`; both send credentialed `fetch` requests at a base URL and keep an observable session store. The differences that matter:
+`better-auth/client` → `@thomasfosterau/effect-auth/client`. Both export `createAuthClient`; both send credentialed `fetch` requests at a base URL and keep an observable session store. The differences that matter:
 
 - **No client plugins to mirror.** Better Auth requires the client plugin list to match the server's. The effect-auth client exposes every endpoint a browser would call up front — `signUp`, `signIn`, `signOut`, `getSession`, `identifiers`, `magicLink`, `emailOtp`, `phoneOtp`, `multiFactor`, `organization`, `apiKeys`, `admin`, `sso`, `oidc`, `device`, `googleOneTap`, `multiSession`, `changeEmail`, `deleteUser` — and endpoints whose server layer is absent simply reject with `404`. `extend()` is there for your own additions.
 - **The framework binding is a separate package**, not a subpath import: `@thomasfosterau/effect-auth-svelte`, built on the vanilla client with out-of-the-box form components (`SignInForm`, `SignUpForm`, password reset, magic link, email OTP).
@@ -164,7 +164,7 @@ Better Auth leaves it to the app to schedule a send outside the response (the `w
 
 ## 6. Moving the data
 
-Better Auth's core schema is four tables — `user`, `session`, `account`, `verification` — plus one per plugin. effect-auth's reference schema is `packages/sql/src/Schema.ts`, `auth_`-prefixed so it can sit beside your application tables. Migrate table by table.
+Better Auth's core schema is four tables — `user`, `session`, `account`, `verification` — plus one per plugin. effect-auth's reference schema is `packages/effect-auth/src/sql/Schema.ts`, `auth_`-prefixed so it can sit beside your application tables. Migrate table by table.
 
 ### `user` → `auth_users` + `auth_identifiers`
 
@@ -295,14 +295,14 @@ Better Auth's most common customisation is a `role` `additionalField` on the use
 | `referenceId`                                | A key belongs to `userId`. Carry any other owner reference in `metadata`.                                                                                                                              |
 | Stored key                                   | Digest only (`keyHash`), with `start` and `prefix` kept for display. Better Auth's stored hashes do not carry over: re-issue keys, or verify old ones through a custom path during a window.           |
 
-`ApiKeyStore` has no effect-auth-sql implementation (see below): use the `KeyValueStore` default
+`ApiKeyStore` has no effect-auth/sql implementation (see below): use the `KeyValueStore` default
 or bring your own.
 
 ## 8. Not covered, or different by design
 
 Be honest with yourself about these before committing:
 
-- **No CLI and no schema generation.** Better Auth's `generate`/`migrate` inspect your config and emit a schema. effect-auth ships a fixed DDL list in `packages/sql` and otherwise expects you to own your migrations. An Alchemy app can let the `AuthSchema` resource reconcile that DDL on every deploy, on D1 or on Postgres over Hyperdrive; [Auth as an internal Worker on Alchemy](alchemy-internal-worker.md#living-with-drizzle-kit-migrations) covers how that sits beside drizzle-kit migrations.
+- **No CLI and no schema generation.** Better Auth's `generate`/`migrate` inspect your config and emit a schema. effect-auth ships a fixed DDL list in `packages/effect-auth/src/sql` and otherwise expects you to own your migrations. An Alchemy app can let the `AuthSchema` resource reconcile that DDL on every deploy, on D1 or on Postgres over Hyperdrive; [Auth as an internal Worker on Alchemy](alchemy-internal-worker.md#living-with-drizzle-kit-migrations) covers how that sits beside drizzle-kit migrations.
 - **No social OAuth HTTP endpoints and no passkey HTTP endpoints.** Both features exist as services with full functionality; the routes are yours to mount. This is the largest single chunk of work in a typical migration.
 - **No `auth.api.*` server-side call surface.** The equivalent is calling the service directly inside an `Effect`, which means your call sites become Effects (or `Effect.runPromise` boundaries).
 - **You must adopt Effect.** Layers, `Context.Service`, typed error channels and `Effect.gen` are not an implementation detail you can ignore — they are the API. This is the real cost of the migration and it is not small.
@@ -310,7 +310,7 @@ Be honest with yourself about these before committing:
 - **No user email on the user record.** Code that reads `user.email` must go through `IdentifierStore` (or the derived optional `email` / `emailVerified` fields the HTTP `UserView` still exposes for wire compatibility).
 - **Protocol _server_ plugins have no plugin-config equivalent.** The tier Better Auth exposes as plugins — OIDC provider, SSO, SCIM, MCP dynamic client registration, the device grant — ships here too ([ADR 0017](../adr/0017-batteries-included-auth-framework.md) supersedes the older "out of scope" record), but as services and stores you provide with layers; there is no plugin object to port across.
 - **Feature gaps at the edges.** Better Auth plugins with no effect-auth counterpart today include Stripe/polar-style billing integrations, SIWE, and the various framework-specific server helpers. Conversely, effect-auth has features Better Auth does not: SCIM 2.0 provisioning, a policy kernel with Cedar-shaped semantics (`Auth.Policy`, `Auth.Authorizer`, `protectedField`), and hierarchical teams.
-- **`packages/sql` does not implement every contract.** `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOtp*Store`, `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SsoProviderStore`, `SamlReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JwtKeyStore`, `OtpSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore` and `PolicyStore` are not covered — use the `KeyValueStore` defaults in `KeyValueStores.ts` or bring your own ([`byo-stores.md`](./byo-stores.md)).
+- **`packages/effect-auth/src/sql` does not implement every contract.** `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOtp*Store`, `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SsoProviderStore`, `SamlReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JwtKeyStore`, `OtpSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore` and `PolicyStore` are not covered — use the `KeyValueStore` defaults in `KeyValueStores.ts` or bring your own ([`byo-stores.md`](./byo-stores.md)).
 
 ## Further reading
 

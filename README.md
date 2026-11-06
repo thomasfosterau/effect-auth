@@ -6,19 +6,19 @@ Batteries-included authentication and authorization for [Effect](https://effect.
 
 ## Packages
 
-| Package                                                       | Purpose                                                                                                     |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [`@thomasfosterau/effect-auth`](packages/effect-auth)         | The core library; `effect` is its only dependency. Start with its [README](packages/effect-auth/README.md). |
-| [`@thomasfosterau/effect-auth-client`](packages/client)       | Typed browser client over the HTTP contract, with an observable session store                               |
-| [`@thomasfosterau/effect-auth-svelte`](packages/svelte)       | Svelte bindings and form components over the client                                                         |
-| [`@thomasfosterau/effect-auth-sveltekit`](packages/sveltekit) | SvelteKit server adapter: the `handle` hook and the credential form actions                                 |
-| [`@thomasfosterau/effect-auth-sql`](packages/sql)             | Driver-agnostic SQL storage layers (`effect/sql`)                                                           |
-| [`@thomasfosterau/effect-auth-drizzle`](packages/drizzle)     | Drizzle storage layers for PostgreSQL, SQLite and MySQL                                                     |
-| [`@thomasfosterau/effect-auth-alchemy`](packages/alchemy)     | Alchemy v2 `AuthSchema` resource and D1 storage layers                                                      |
-| [`@thomasfosterau/effect-auth-argon2`](packages/argon2)       | Argon2id `PasswordHasher` on WebAssembly (`hash-wasm`), Workers-safe                                        |
-| [`@thomasfosterau/effect-auth-resend`](packages/resend)       | Resend `EmailSender` over plain `fetch`                                                                     |
-| [`@thomasfosterau/effect-auth-twilio`](packages/twilio)       | Twilio `SmsSender` over plain `fetch`                                                                       |
-| [`@thomasfosterau/effect-auth-saml`](packages/saml)           | SAML 2.0 `SamlVerifier` over `@node-saml/node-saml`                                                         |
+| Package                                                                         | Purpose                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@thomasfosterau/effect-auth`](packages/effect-auth)                           | The core library; `effect` is its only required peer. Its opt-in subpaths include `/http` (the HTTP API), `/client` (the typed browser client), `/sql` (SQL storage) and `/saml` (Node-only SAML 2.0). Start with its [README](packages/effect-auth/README.md). |
+| [`@thomasfosterau/effect-auth-svelte`](packages/svelte)                         | Svelte bindings and form components over the core's `/client`                                                                                                                                                                                                   |
+| [`@thomasfosterau/effect-auth-sveltekit`](packages/sveltekit)                   | SvelteKit server adapter: the `handle` hook and the credential form actions                                                                                                                                                                                     |
+| [`@thomasfosterau/effect-auth-drizzle`](packages/drizzle)                       | Drizzle storage layers for PostgreSQL, SQLite and MySQL                                                                                                                                                                                                         |
+| [`@thomasfosterau/effect-auth-alchemy-cloudflare`](packages/alchemy-cloudflare) | Alchemy v2 `AuthSchema` resource and Cloudflare D1 storage layers                                                                                                                                                                                               |
+| [`@thomasfosterau/effect-auth-alchemy-postgres`](packages/alchemy-postgres)     | Alchemy v2 `AuthSchema` resource and Postgres storage layers (over a Hyperdrive binding or a URL)                                                                                                                                                               |
+| [`@thomasfosterau/effect-auth-argon2`](packages/argon2)                         | Argon2id `PasswordHasher` on WebAssembly (`hash-wasm`), Workers-safe                                                                                                                                                                                            |
+| [`@thomasfosterau/effect-auth-resend`](packages/resend)                         | Resend `EmailSender` over plain `fetch`                                                                                                                                                                                                                         |
+| [`@thomasfosterau/effect-auth-twilio`](packages/twilio)                         | Twilio `SmsSender` over plain `fetch`                                                                                                                                                                                                                           |
+
+A subpath of the core brings no dependency of its own beyond an optional peer (`/saml`'s `@node-saml/node-saml`, `/http`'s `@thomasfosterau/effect-jsonapi`); a separate package exists only where it brings a dependency the core lacks ([ADR-0022](docs/adr/0022-package-boundaries.md)).
 
 ## Install
 
@@ -26,7 +26,7 @@ Batteries-included authentication and authorization for [Effect](https://effect.
 pnpm add @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`^4.1.0`). Add a storage adapter, a vendor adapter or the client as you need them; each package's README lists its own peers.
+`effect` is a peer dependency (`^4.1.0`). Import a subpath (`/client`, `/sql`, `/saml`, …) or add a storage or vendor adapter package as you need them; each package's README lists its own peers.
 
 ## Example
 
@@ -37,7 +37,7 @@ import { Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // In-memory stores. Lookups return `null` on a miss; the services turn that
-// into typed errors. Swap these for an adapter (effect-auth-sql, -drizzle).
+// into typed errors. Swap these for an adapter (`/sql`, effect-auth-drizzle).
 const users = new Map<string, Auth.User>();
 const sessions = new Map<string, Auth.Session>();
 const passwordHashes = new Map<string, string>();
@@ -114,7 +114,7 @@ const program = Effect.gen(function* () {
 console.log(await Effect.runPromise(program.pipe(Effect.provide(AuthLive))));
 ```
 
-From here: mount the HTTP API with `Http.make({ services })` from the `@thomasfosterau/effect-auth/http` subpath, swap the in-memory stores for [`effect-auth-sql`](packages/sql) or [`effect-auth-drizzle`](packages/drizzle), and talk to it from the browser with [`effect-auth-client`](packages/client). The [core README](packages/effect-auth/README.md) covers every feature.
+From here: mount the HTTP API with `Http.make({ services })` from the `@thomasfosterau/effect-auth/http` subpath, swap the in-memory stores for [`@thomasfosterau/effect-auth/sql`](packages/effect-auth/README.md#sql-storage-sql) or [`effect-auth-drizzle`](packages/drizzle), and talk to it from the browser with [`@thomasfosterau/effect-auth/client`](packages/effect-auth/README.md#browser-client-client). The [core README](packages/effect-auth/README.md) covers every feature.
 
 ## Documentation
 

@@ -62,7 +62,7 @@ export interface RegisterAttemptOptions {
 
 /**
  * Persistence for lockout counters, keyed by the (prefixed, normalized) email.
- * Implement over your database (see `@thomasfosterau/effect-auth-sql` for an
+ * Implement over your database (see `@thomasfosterau/effect-auth/sql` for an
  * atomic SQL implementation), or use {@link memoryAccountLockoutStore} for
  * single-instance deployments. Entries can safely expire after
  * `lockoutDurationMs`.

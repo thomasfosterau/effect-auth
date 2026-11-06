@@ -1,6 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import type { AuthClient } from "@thomasfosterau/effect-auth-client";
+import type { AuthClient } from "@thomasfosterau/effect-auth/client";
 import { authClientKey } from "../context.ts";
 import EmailOtpForm from "./EmailOtpForm.svelte";
 import MagicLinkForm from "./MagicLinkForm.svelte";

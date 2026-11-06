@@ -22,7 +22,7 @@
  * the `AuthnRequest` id, one-time-use enforcement, issuer checks, provisioning
  * — but not the XML: signature verification, canonicalisation and DEFLATE live
  * behind the {@link SamlVerifier} contract in {@link module:saml}, implemented
- * by `@thomasfosterau/effect-auth-saml`. Both {@link SamlVerifier} and
+ * by `@thomasfosterau/effect-auth/saml`. Both {@link SamlVerifier} and
  * {@link SamlReplayStore} are resolved *optionally*, so an app with no SAML
  * connections never installs an XML stack.
  *
@@ -442,7 +442,7 @@ export const make = (
       if (Option.isNone(verifier)) {
         return yield* new SsoError({
           message:
-            "SAML support is not installed: provide the SamlVerifier layer from @thomasfosterau/effect-auth-saml",
+            "SAML support is not installed: provide the SamlVerifier layer from @thomasfosterau/effect-auth/saml",
         });
       }
       const replay = yield* Effect.serviceOption(SamlReplayStore);

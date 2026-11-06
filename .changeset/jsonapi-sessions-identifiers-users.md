@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": minor
-"@thomasfosterau/effect-auth-client": minor
 ---
 
 **Breaking (HTTP):** the included HTTP API starts speaking JSON:API (#205). The session, identifier and own-profile endpoints are now JSON:API resources, answering `application/vnd.api+json` documents and JSON:API error documents:
@@ -22,4 +21,4 @@
 - `@thomasfosterau/effect-jsonapi` is an optional peer of effect-auth, needed only by the `./http` subpath. New in `./http`: `Http.Resources` (the resource declarations), `Http.JsonApiErrors` (the error documents), `Http.groupLayers` (every group plus the JSON:API middleware, for serving `AuthApi` from your own `HttpApiBuilder`; compose it in place of `authGroupLayer` + `scimGroupLayer`) and `Http.RemoteSession.fromSessionDocument`.
 - `RemoteSession` reads `GET /sessions/current?include=user`, so an app and its auth service must be on the same release.
 
-effect-auth-client keeps its method signatures and maps the documents onto the same view types. `revokeSession(id)` now takes the id `listSessions()` reports, and an error's `message` is read from a JSON:API error document's `detail`.
+effect-auth/client keeps its method signatures and maps the documents onto the same view types. `revokeSession(id)` now takes the id `listSessions()` reports, and an error's `message` is read from a JSON:API error document's `detail`.
