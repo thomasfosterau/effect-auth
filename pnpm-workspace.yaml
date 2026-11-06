@@ -107,6 +107,8 @@ catalog:
   solid-js: ^1.9.18
   svelte: ^5.57.3
   svelte-check: ^4.7.8
+  # Only for `@effect/docgen`, which requires `tsx` as a peer and spawns its
+  # binary to run the JSDoc examples (`vp run docs`). Scripts run with `vpx`.
   tsx: ^4.23.15
   # TypeScript 6/7 side by side. TS7 is the native Go compiler and ships no JS
   # compiler API until 7.1, so everything that `require("typescript")` stays on

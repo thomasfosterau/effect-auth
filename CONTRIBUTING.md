@@ -48,19 +48,19 @@ For Effect APIs, read what the pinned `effect` ships: `node_modules/effect/AGENT
 
 The full gate list is in [AGENTS.md → Verification](AGENTS.md#verification). While iterating, run the piece you need:
 
-| What                                   | Command                                                            |
-| -------------------------------------- | ------------------------------------------------------------------ |
-| Format and lint everything             | `vp check` (type-aware; build first; `--fix` applies fixes)        |
-| Lint one file                          | `vp lint <file>`                                                   |
-| Format files                           | `vp fmt <files> --write`                                           |
-| One package's unit tests               | `vp run --filter <pkg> test:unit`                                  |
-| One package's type check               | `vp run --filter <pkg> check`                                      |
-| One test file (from the package's dir) | `vp test run <file>`                                               |
-| The alchemy runtime suite              | `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy` |
-| Coverage map for fallow                | `vp run test:coverage` (writes `coverage/coverage-final.json`)     |
-| Dead code, unused exports, boundaries  | `fallow dead-code`                                                 |
-| The changed-files gate                 | `fallow audit --base origin/trunk` (after `vp run test:coverage`)  |
-| API docs and their runnable examples   | `vp run build && vp run docs`                                      |
+| What                                   | Command                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------- |
+| Format and lint everything             | `vp check` (type-aware; build first; `--fix` applies fixes)               |
+| Lint one file                          | `vp lint <file>`                                                          |
+| Format files                           | `vp fmt <files> --write`                                                  |
+| One package's unit tests               | `vp run --filter <pkg> test:unit`                                         |
+| One package's type check               | `vp run --filter <pkg> check`                                             |
+| One test file (from the package's dir) | `vp test run <file>`                                                      |
+| The alchemy runtime suite              | `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`        |
+| Coverage map for fallow                | `vp run test:coverage` (writes `coverage/coverage-final.json`)            |
+| Dead code, unused exports, boundaries  | `vp exec fallow dead-code`                                                |
+| The changed-files gate                 | `vp exec fallow audit --base origin/trunk` (after `vp run test:coverage`) |
+| API docs and their runnable examples   | `vp run build && vp run docs`                                             |
 
 `<pkg>` is the package name, for example `@thomasfosterau/effect-auth-sql`. `vp check` (format and lint) and `vp run check` (the type gate) are different commands.
 
