@@ -16,7 +16,7 @@ Either command installs against the lockfile and runs the root `prepare` script,
 
 You don't need to build anything first: each package's `build`, `check` and `test:unit` tasks build the workspace packages they depend on.
 
-Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions.
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions. The `Dev Container` workflow (`.github/workflows/devcontainer.yml`) builds it in CI whenever its inputs change; to try a change locally, `pnpm dlx @devcontainers/cli@0.89.0 up --workspace-folder .` (needs Docker).
 
 For Effect APIs, read what the pinned `effect` ships: `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`, and the declarations in `node_modules/effect/dist/*.d.ts`.
 
