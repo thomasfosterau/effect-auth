@@ -13,8 +13,9 @@
  * `SqlClient` a {@link PostgresDatabase} carries (`database(url)` from this
  * package, or {@link postgresDatabase} over any Postgres `SqlClient` layer).
  * The Cloudflare D1 counterpart is
- * `@thomasfosterau/effect-auth-alchemy-cloudflare`'s `AuthSchema`, a resource
- * of its own type, so one stack can mount both providers.
+ * `@thomasfosterau/effect-auth-alchemy-cloudflare`'s `AuthSchema`, an Alchemy
+ * Action of its own type over the D1 provider's `QueryDatabase`, so one stack
+ * can declare both.
  *
  * ### Where the database lives
  *

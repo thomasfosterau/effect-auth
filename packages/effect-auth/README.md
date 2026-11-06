@@ -1110,7 +1110,7 @@ export const listPosts = (scope: Auth.ReadScope.ReadScope, viewerId: string) =>
 ### Dialects
 
 - **SQLite:** supported. The test suite runs every store over `better-sqlite3`.
-- **Cloudflare D1:** supported. D1 is SQLite; [`@thomasfosterau/effect-auth-alchemy-cloudflare`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-alchemy-cloudflare) wires it, and its suite runs these stores over a SQLite-backed D1 shim. D1 has no transactions, so there the multi-step writes are not atomic (see that package's README).
+- **Cloudflare D1:** supported. D1 is SQLite; [`@thomasfosterau/effect-auth-alchemy-cloudflare`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-alchemy-cloudflare) wires it, and its suite runs these stores over a SQLite-backed D1 shim. D1 has no interactive transactions, so there a transaction's writes are sent as `batch()`es: the writes between two reads commit together, but not across a read (see that package's README).
 - **PostgreSQL:** supported. The same suite runs over PostgreSQL through PGlite (`@effect/sql-pglite`).
 - **MySQL:** not supported ([#260](https://github.com/thomasfosterau/effect-auth/issues/260)). MySQL has no `ON CONFLICT` clause, so the upserts and counters fail. For MySQL, use [`@thomasfosterau/effect-auth-drizzle`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-drizzle) with its MySQL tables (`Drizzle.MySql`). That package covers only `SessionStore`, `UserStore` and `IdentifierStore`, and its MySQL suite runs against `drizzle-orm/mysql-proxy`, not a MySQL server.
 

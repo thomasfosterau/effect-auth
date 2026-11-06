@@ -1,14 +1,16 @@
 import { defineConfig } from "vite-plus";
 import { packageTasks } from "../../vite.tasks.ts";
 
-// `AuthSchema.test.ts` is the one suite that loads the alchemy runtime (the
-// engine, its providers and their transitive `@distilled.cloud/*` clients), so
+// `AuthSchema.test.ts` is the one suite that loads the alchemy engine (the
+// engine, the `Cloudflare.D1.Database` resource and its transitive
+// `@distilled.cloud/*` clients), so
 // it runs as its own `test:alchemy` task in CI's separate `alchemy` job
 // ("Alchemy runtime"); the rest of the package is ordinary:
 //
 // - `build` and `check` (tsc over sources and tests) run as for any package;
 // - `test:unit` runs every test except `AuthSchema.test.ts` (`Storage.test.ts`
-//   only needs `@thomasfosterau/effect-auth/sql`, which is alchemy-free);
+//   needs `@thomasfosterau/effect-auth/sql`, the provider's `QueryDatabase`
+//   module and alchemy's `RuntimeContext`, none of which loads the engine);
 // - `test:alchemy` runs `AuthSchema.test.ts`. It is not skipped.
 //
 // alchemy 2.0.0-beta.80 is the first release that imports only `effect/*`
