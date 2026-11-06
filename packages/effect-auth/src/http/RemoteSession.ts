@@ -80,7 +80,7 @@ import * as S from "./HttpApiSchema.ts";
  * A Cloudflare service binding (`env.AUTH`), a `Http.make` web handler mounted
  * in-process, or a test double all satisfy this.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface Fetcher {
@@ -174,7 +174,7 @@ const asFetch =
  * assert.equal(result.included?.[0]?.id, "u-1")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const layerFetcher = (fetcher: FetcherLike): Layer.Layer<HttpClient.HttpClient> => {
@@ -194,7 +194,7 @@ export const layerFetcher = (fetcher: FetcherLike): Layer.Layer<HttpClient.HttpC
 /**
  * Which inbound headers ride along to the auth service.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface HeaderPolicy {
@@ -217,7 +217,7 @@ export interface HeaderPolicy {
  * at the top of this module. The relay re-adds them from the *body it is
  * actually sending*, never from the inbound request.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const defaultForwardedHeaders: ReadonlyArray<string> = [
@@ -240,7 +240,7 @@ export const defaultForwardedHeaders: ReadonlyArray<string> = [
 /**
  * Build the outgoing header set for a call to the auth service.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const forwardedHeaders = (inbound: Request | Headers, policy?: HeaderPolicy): Headers => {
@@ -267,7 +267,7 @@ export const forwardedHeaders = (inbound: Request | Headers, policy?: HeaderPoli
  * error, which is why `SessionResolution.resolveFailOpen` degrades on the whole
  * cause rather than only on typed failures.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category errors
  */
 export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
@@ -288,7 +288,7 @@ export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
  * is enabled this is how it keeps refreshing; drop it and the cache stops
  * refreshing after its first window.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RemoteSessionResult {
@@ -308,7 +308,7 @@ const decodeDocument = Schema.decodeUnknownEffect(SessionDocument);
  * As with {@link fromSessionWithUserView}, the user's derived `email` fields
  * are not `Types.User` fields and are dropped.
  *
- * @since 0.2.0
+ * @since 0.1.0
  * @category conversions
  */
 export const fromSessionDocument = (
@@ -353,7 +353,7 @@ const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
  * dropped here rather than folded into `attributes`, so a round trip cannot
  * silently invent an attribute the store never held.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category conversions
  */
 export const fromSessionWithUserView = (
@@ -392,7 +392,7 @@ export const fromSessionWithUserView = (
 /**
  * Configuration for {@link make}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RemoteSessionOptions {
@@ -415,7 +415,7 @@ export interface RemoteSessionOptions {
 /**
  * A client for the session seam of a remote auth service.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RemoteSessionClient {
@@ -496,7 +496,7 @@ export interface RemoteSessionClient {
  * assert.equal(result.session.value.user.id, "u-1")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
@@ -592,7 +592,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
  *
  * Exported so an app relaying through its own code path gets the same rule.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const relayResponse = (
@@ -625,7 +625,7 @@ export const relayResponse = (
  * What a full edge resolution produced: the session, the cookies to replay,
  * and the one {@link SessionResolution.AuthOutcome} describing what happened.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface EdgeSession extends RemoteSessionResult {
@@ -662,7 +662,7 @@ const toEdge =
  * Skips the call entirely for a cookieless request, reports the outcome, and
  * carries the `Set-Cookie` lines to replay.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category resolution
  */
 export const resolveAtEdge = (
@@ -759,7 +759,7 @@ export const resolveAtEdge = (
  * assert.deepEqual(edge.setCookie, [])
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category resolution
  */
 export const resolveAtEdgeFailOpen = (
@@ -787,7 +787,7 @@ export const resolveAtEdgeFailOpen = (
 /**
  * Replay relayed `Set-Cookie` lines onto an outgoing response.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const withSetCookie = (response: Response, setCookie: ReadonlyArray<string>): Response => {

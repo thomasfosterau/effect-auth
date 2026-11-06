@@ -63,7 +63,7 @@ import * as Policy from "./Policy.ts";
 /**
  * The three visibility states of owned material.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type Visibility = "public" | "followers" | "private";
@@ -71,7 +71,7 @@ export type Visibility = "public" | "followers" | "private";
 /**
  * The facts a read of one owned row is decided from.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface OwnedRow {
@@ -91,7 +91,7 @@ export interface OwnedRow {
  * never capped. The core never looks inside it; a renderer handed a query it
  * does not recognise must treat it as `Nobody`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type FollowingSet =
@@ -101,7 +101,7 @@ export type FollowingSet =
 /**
  * The fail-closed follow set: matches nobody.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const nobody: FollowingSet = { _tag: "Nobody" };
@@ -109,7 +109,7 @@ export const nobody: FollowingSet = { _tag: "Nobody" };
 /**
  * A follow set expressed as an adapter's query value.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const subquery = (query: unknown): FollowingSet => ({ _tag: "Subquery", query });
@@ -124,7 +124,7 @@ export const subquery = (query: unknown): FollowingSet => ({ _tag: "Subquery", q
  *   their own rows (drafts included), OR non-draft `followers` rows whose
  *   owner is in `following`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type OwnedReadScope =
@@ -143,7 +143,7 @@ export type OwnedReadScope =
  * that as public is a fail-open. `draft` is optional, since a leaf without the
  * draft axis never emits it; when present it must be exactly `false`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category cacheability
  */
 export const serveableAxes: ReadonlyArray<ServeableAxis> = [
@@ -164,7 +164,7 @@ export const serveableAxes: ReadonlyArray<ServeableAxis> = [
  * that can answer one can answer the other, and a runtime that provides
  * neither fails closed on both.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category services
  */
 export class IsFollower extends Context.Service<
@@ -180,7 +180,7 @@ export class IsFollower extends Context.Service<
  * absence should be explicit — a queue consumer, a test — so a job never
  * accidentally reads as a follower.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const isFollowerNever: Layer.Layer<IsFollower> = Layer.succeed(IsFollower, {
@@ -196,7 +196,7 @@ export const isFollowerNever: Layer.Layer<IsFollower> = Layer.succeed(IsFollower
  * The owned-material read access for one guard kit and one `viewPrivate` axis.
  * Build it with {@link make}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface OwnedAccess<Id> {
@@ -220,7 +220,7 @@ export interface OwnedAccess<Id> {
 /**
  * Options for {@link make}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface OwnedAccessOptions<Id, User extends Guard.ViewerShape, Rung extends string> {
@@ -244,7 +244,7 @@ const readActionScope = Policy.eq(readAction);
 /**
  * Build the owned-material read access.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(

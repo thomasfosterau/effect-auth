@@ -64,7 +64,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
  * The columns an owned-material list is filtered on. Any column or SQL
  * expression works — a table's columns, a view's, an alias.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface OwnedColumns {
@@ -86,7 +86,7 @@ const isSqlWrapper = (value: unknown): value is SQLWrapper =>
  * `undefined` means no filter (the `all` scope), which is what drizzle's
  * `.where(undefined)` reads it as.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category rendering
  */
 export const ownedListFilter =
@@ -128,7 +128,7 @@ export const ownedListFilter =
  * relation: the row check, and the viewer's follow set as a drizzle query
  * nested into {@link ownedListFilter}'s `owner IN (…)`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const isFollowerLayer = (options: {

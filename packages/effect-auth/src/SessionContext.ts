@@ -92,7 +92,7 @@ import type * as Types from "./Types.ts";
  * required-auth `AuthMiddleware`. Absent for anonymous executions — read
  * {@link MaybeCurrentSession} when the caller may be signed out.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category context
  */
 export class CurrentSession extends Context.Service<CurrentSession, Types.Session>()(
@@ -108,7 +108,7 @@ export class CurrentSession extends Context.Service<CurrentSession, Types.Sessio
  * for anonymous executions — read {@link MaybeCurrentSession} (or
  * {@link currentUserOption}) when the caller may be signed out.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category context
  */
 export class CurrentUser extends Context.Service<CurrentUser, Types.User>()(
@@ -129,7 +129,7 @@ export class CurrentUser extends Context.Service<CurrentUser, Types.User>()(
  * an effect written against this service runs unchanged under required auth,
  * optional auth, and a non-HTTP edge.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category context
  */
 export class MaybeCurrentSession extends Context.Service<
@@ -148,7 +148,7 @@ export class MaybeCurrentSession extends Context.Service<
  * principal exactly as the middleware does, rather than restating the entity
  * type string.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const principalOf = (user: Types.User): Entity.EntityRef => Entity.ref("User", user.id);
@@ -166,7 +166,7 @@ export const principalOf = (user: Types.User): Entity.EntityRef => Entity.ref("U
  * changes *who* the request is, never *what* it may do, and the policy kernel
  * reads `CurrentCredential` to enforce exactly that.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface CredentialOptions {
@@ -188,7 +188,7 @@ export interface CredentialOptions {
  * whole point of this module. It defaults to `"interactive"` — see
  * {@link CredentialOptions}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const authenticatedLayer = (
@@ -213,7 +213,7 @@ export const authenticatedLayer = (
  * there is no user and no principal, and inventing one would let gated code
  * type-check against a context that cannot satisfy it.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const anonymousLayer: Layer.Layer<MaybeCurrentSession> = Layer.succeed(
@@ -270,7 +270,7 @@ export const anonymousLayer: Layer.Layer<MaybeCurrentSession> = Layer.succeed(
  * )
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const layer = (
@@ -291,7 +291,7 @@ export const layer = (
  * compile against this layer — reach for {@link userSessionLayer} or
  * {@link authenticatedLayer} when that code has to run.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const userLayer = (
@@ -308,7 +308,7 @@ export const userLayer = (
  * {@link authenticatedLayer} from the session and user as separate values, for
  * edges that carry them apart (`event.locals.session` + `event.locals.user`).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const userSessionLayer = (
@@ -327,7 +327,7 @@ export const userSessionLayer = (
  * Normalize the several shapes an app edge hands back — a resolved session, an
  * `Option`, `null`, `undefined` — into one `Option`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category conversions
  */
 export const toOption = (
@@ -345,7 +345,7 @@ export const toOption = (
  * Succeeds for anonymous executions with `Option.none()`, so a predicate can
  * branch without an error channel.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const currentUserOption: Effect.Effect<
@@ -357,7 +357,7 @@ export const currentUserOption: Effect.Effect<
 /**
  * The current session as an `Option` — the read-path accessor.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const currentSessionOption: Effect.Effect<
@@ -369,7 +369,7 @@ export const currentSessionOption: Effect.Effect<
 /**
  * Whether a session resolved for the current execution.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const isAuthenticated: Effect.Effect<boolean, never, MaybeCurrentSession> =
@@ -383,7 +383,7 @@ export const isAuthenticated: Effect.Effect<boolean, never, MaybeCurrentSession>
  * accessor, not the underlying service. Prefer {@link currentUserOption} on a
  * read path that must serve anonymous callers.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const requireCurrentUser: Effect.Effect<
@@ -400,7 +400,7 @@ export const requireCurrentUser: Effect.Effect<
  * The current session, failing with `NotAuthenticatedError` when the execution
  * is anonymous.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const requireCurrentSession: Effect.Effect<
@@ -460,7 +460,7 @@ export const requireCurrentSession: Effect.Effect<
  * await Effect.runPromise(program)
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const viewerLayer = <Id, User>(
@@ -485,7 +485,7 @@ export const viewerLayer = <Id, User>(
  * {@link withRole} is the projection for a deployment that keeps the rung in
  * the user's `attributes`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category layers
  */
 export const viewerFromSession = <Id, User>(
@@ -499,7 +499,7 @@ export const viewerFromSession = <Id, User>(
  * shape `Guard.make` needs, for a deployment that stores the rung as a user
  * attribute.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type UserWithRole = Types.User & { readonly role: string };
@@ -512,7 +512,7 @@ export type UserWithRole = Types.User & { readonly role: string };
  * admits them — but holds no rung: the role is the empty string, which is on
  * no ladder, so every rung gate refuses them (fail closed).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category conversions
  */
 export const withRole =

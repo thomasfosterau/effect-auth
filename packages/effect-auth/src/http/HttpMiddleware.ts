@@ -170,7 +170,7 @@ import { decodeSessionCacheCookie, sessionCacheGateAttributes } from "../Session
  * - `MaybeCurrentSession` — `Option<SessionWithUser>`, provided by **both**
  *   middlewares, and the service read-path code should depend on.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category context
  */
 export { CurrentSession, CurrentUser, MaybeCurrentSession } from "../SessionContext.ts";
@@ -186,7 +186,7 @@ export { CurrentSession, CurrentUser, MaybeCurrentSession } from "../SessionCont
  * Construct your own with `HttpApiSecurity.apiKey({ key: yourName, in: "cookie" })`
  * when your cookie name differs.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category security
  */
 export const sessionCookieSecurity: HttpApiSecurity.ApiKey = HttpApiSecurity.apiKey({
@@ -197,7 +197,7 @@ export const sessionCookieSecurity: HttpApiSecurity.ApiKey = HttpApiSecurity.api
 /**
  * `HttpApiSecurity` describing the `Authorization: Bearer` scheme.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category security
  */
 export const bearerTokenSecurity: HttpApiSecurity.Http = HttpApiSecurity.bearer;
@@ -251,7 +251,7 @@ const _authSecurity = {
  * @effect-expect-leaking ParsedSearchParams
  * @effect-expect-leaking RouteContext
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category middleware
  */
 export class AuthMiddleware extends HttpApiMiddleware.Service<
@@ -301,7 +301,7 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
  * @effect-expect-leaking ParsedSearchParams
  * @effect-expect-leaking RouteContext
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category middleware
  */
 export class OptionalAuthMiddleware extends HttpApiMiddleware.Service<
@@ -500,7 +500,7 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  * }
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
@@ -664,7 +664,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * }
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMiddleware> => {

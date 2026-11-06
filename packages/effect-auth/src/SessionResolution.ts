@@ -47,7 +47,7 @@ import type * as Types from "./Types.ts";
  * The four outcomes of a resolution attempt. Re-exported from `Observability`,
  * where it sits beside its counter; this is the name to import.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthOutcome = Observability.AuthOutcome;
@@ -56,7 +56,7 @@ export type AuthOutcome = Observability.AuthOutcome;
  * How a caller got in. Re-exported from `Authorizer`, where `CurrentCredential`
  * carries it.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type { CredentialClass };
@@ -73,7 +73,7 @@ export type { CredentialClass };
  * Build one with {@link fromHeaders}, {@link fromCookies} or
  * {@link fromRequest} rather than by hand.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface CredentialSource {
@@ -116,7 +116,7 @@ const headerGetter = (
  * Cookies are read by parsing the `Cookie` header, so this covers a raw
  * Cloudflare `Request` with nothing else to hand.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const fromHeaders = (
@@ -140,7 +140,7 @@ export const fromHeaders = (
  * Pass `headers` too when the request may carry a bearer token or API key, so
  * the machine-credential spellings are visible to the predicates as well.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const fromCookies = (
@@ -157,7 +157,7 @@ export const fromCookies = (
 /**
  * A {@link CredentialSource} over a Web `Request`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const fromRequest = (request: { readonly headers: Headers }): CredentialSource =>
@@ -172,7 +172,7 @@ export const fromRequest = (request: { readonly headers: Headers }): CredentialS
  * middleware, see `SessionCookies`) plus the header spellings a machine
  * caller uses.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface CredentialConfig extends SessionCookies.SessionCookieNaming {
@@ -190,7 +190,7 @@ const DEFAULT_API_KEY_HEADERS: ReadonlyArray<string> = ["x-api-key"];
 /**
  * What kind of credential a request carries.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type CredentialKind =
@@ -206,7 +206,7 @@ export type CredentialKind =
 /**
  * What {@link detectCredential} found.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface CredentialPresence {
@@ -248,7 +248,7 @@ const bearerToken = (source: CredentialSource): string | undefined => {
 /**
  * Read the API key off a request, using the same header list the gate uses.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const extractApiKey = (
@@ -268,7 +268,7 @@ export const extractApiKey = (
  * Read the session token off a request — the `Authorization: Bearer/Token`
  * header first, then the session cookie, exactly as the middleware does.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const extractSessionToken = (
@@ -310,7 +310,7 @@ export const extractSessionToken = (
  * assert.equal(anonymous.present, false)
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const detectCredential = (
@@ -353,7 +353,7 @@ export const detectCredential = (
  * the policy kernel reads it to enforce rules like "an API key may act as this
  * user, but may not mint another API key".
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const credentialClassOf = (presence: CredentialPresence): CredentialClass =>
@@ -368,7 +368,7 @@ export const credentialClassOf = (presence: CredentialPresence): CredentialClass
  * {@link resolve} so the skip is reported as `skipped` rather than folded into
  * `anonymous`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category accessors
  */
 export const hasSessionCredential = (
@@ -383,7 +383,7 @@ export const hasSessionCredential = (
 /**
  * A resolution attempt's result: the session, and what happened getting it.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface SessionResolutionResult {
@@ -427,7 +427,7 @@ const report = (outcome: AuthOutcome): Effect.Effect<void> =>
  * lower-privilege outcome for your app — see {@link resolveFailOpen} for the
  * precondition that makes the other direction safe.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category resolution
  */
 export const resolve = <E, R>(
@@ -530,7 +530,7 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  * assert.equal(session.value.user.id, "u-1")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category resolution
  */
 export const resolveFailOpen = <E, R>(
@@ -555,7 +555,7 @@ export const resolveFailOpen = <E, R>(
  * Options for {@link resolveWith} — {@link ResolveOptions} generalised over
  * what the resolution returns.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ResolveWithOptions<A, E, R> {
@@ -590,7 +590,7 @@ export interface ResolveWithResult<A> {
  * mean either dropping them or calling the transport twice. This keeps the
  * outcome derivation in one place while letting the payload through.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category resolution
  */
 export const resolveWith = <A, E, R>(
@@ -611,7 +611,7 @@ export const resolveWith = <A, E, R>(
  * {@link resolveFailOpen}, generalised over a transport that carries more than
  * the session. On a degrade the payload is `options.empty`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category resolution
  */
 export const resolveWithFailOpen = <A, E, R>(

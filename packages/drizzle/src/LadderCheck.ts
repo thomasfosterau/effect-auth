@@ -31,7 +31,7 @@ import type * as Auth from "@thomasfosterau/effect-auth";
  * parameters: the migration carries the literal `IN` list whichever tool
  * renders it.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category schema
  */
 export const ladderCheck = <Rung extends string>(

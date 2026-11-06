@@ -25,7 +25,7 @@ import { ReadScope } from "@thomasfosterau/effect-auth";
 /**
  * Where each scope attribute and named set lives in the relation being read.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface ReadScopeBinding {
@@ -41,7 +41,7 @@ export interface ReadScopeBinding {
  * `AllowAll` renders `1 = 1` and `Deny` renders `1 = 0`, so the result can
  * always be spliced into `WHERE ${fragment}`.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category read scope
  */
 export const readScopeWhere = (

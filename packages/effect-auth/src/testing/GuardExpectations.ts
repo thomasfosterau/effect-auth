@@ -27,7 +27,7 @@ import { runAsViewer, type ViewerFixture } from "./RunAs.ts";
 /**
  * One case whose outcome was not the expected one.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface GuardMismatch {
@@ -42,7 +42,7 @@ export interface GuardMismatch {
 /**
  * An operation's guard did not behave as expected.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category errors
  */
 export class GuardExpectationError extends Data.TaggedError("GuardExpectationError")<{
@@ -54,7 +54,7 @@ export class GuardExpectationError extends Data.TaggedError("GuardExpectationErr
  * Whether the operation is a write (refusals are 401 / 403) or a read
  * (refusals are 404).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type Access = "write" | "read";
@@ -62,7 +62,7 @@ export type Access = "write" | "read";
 /**
  * Which errors count as each refusal.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RefusalOptions {
@@ -135,7 +135,7 @@ const check = <Id, User extends ViewerFixture, A, E, R>(
  * Assert that `operation` refuses an anonymous viewer: `Unauthorized` for a
  * write, the app's not-found for a read.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category assertions
  */
 export const expectRefusesAnonymous = <Id, User extends ViewerFixture, A, E, R>(
@@ -155,7 +155,7 @@ export const expectRefusesAnonymous = <Id, User extends ViewerFixture, A, E, R>(
  * What {@link expectRefusesBelow} and {@link expectGuarded} need to know about
  * the gate.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface RungOptions<User, Rung extends string> extends RefusalOptions {
@@ -178,7 +178,7 @@ const below = <Rung extends string>(
  * When `min` is the lowest rung there is no rung below it; only the
  * admission is checked.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category assertions
  */
 export const expectRefusesBelow = <Id, User extends ViewerFixture, Rung extends string, A, E, R>(
@@ -214,7 +214,7 @@ const rungCases = <User, Rung extends string>(
  * Assert that `operation` admits `owner`. Give the owner a rung below the
  * gate's minimum, so the admission is the ownership's and not the rung's.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category assertions
  */
 export const expectAllowsOwner = <Id, User extends ViewerFixture, A, E, R>(
@@ -230,7 +230,7 @@ export const expectAllowsOwner = <Id, User extends ViewerFixture, A, E, R>(
 /**
  * Options for {@link expectGuarded}.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface GuardedOptions<User, Rung extends string> extends RungOptions<User, Rung> {
@@ -288,7 +288,7 @@ export interface GuardedOptions<User, Rung extends string> extends RungOptions<U
  * assert.equal(result._tag, "Failure")
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category assertions
  */
 export const expectGuarded = <Id, User extends ViewerFixture, Rung extends string, A, E, R>(

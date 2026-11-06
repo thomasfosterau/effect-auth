@@ -226,7 +226,7 @@ import * as S from "./HttpApiSchema.ts";
  * `AuthorizeInput`, not to run business logic that can fail. A route whose
  * resource cannot be determined should fail before reaching authorization.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type DynamicAuthorizeInput<R = never> = (
@@ -238,7 +238,7 @@ export type DynamicAuthorizeInput<R = never> = (
  * routes whose resource never varies, or a {@link DynamicAuthorizeInput} for
  * the common per-request case.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthorizationMiddlewareInput<R = never> = AuthorizeInput | DynamicAuthorizeInput<R>;
@@ -267,7 +267,7 @@ const resolveAuthorizeInput = <R>(
  * that reads a path param require `RouteContext` from its layer, which no layer
  * can provide.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthorizationRequires<R = never> =
@@ -281,7 +281,7 @@ export type AuthorizationRequires<R = never> =
  * `Authorizer | CurrentPrincipal | R`, provides nothing, and fails with
  * `Forbidden` (403).
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthorizationMiddlewareConfig<R = never> = {
@@ -309,7 +309,7 @@ export type AuthorizationMiddlewareConfig<R = never> = {
  * the bare name: it is `@effect-auth/AuthorizationMiddleware/<name>#<n>`, where
  * `<n>` counts factory calls, so the type-level key and the runtime key differ.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export type AuthorizationMiddlewareInstance<
@@ -338,7 +338,7 @@ export type AuthorizationMiddlewareInstance<
  * built: providing another guard's `.layer` fails to type-check. The runtime
  * tag is unique per factory call regardless of name.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 export interface AuthorizationMiddlewareClass<
@@ -439,7 +439,7 @@ type GuardName<Id extends string, All extends string = Id> = Id extends string
  * @effect-expect-leaking ParsedSearchParams
  * @effect-expect-leaking RouteContext
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const makeAuthorizationMiddleware = <const Id extends string, R = never>(

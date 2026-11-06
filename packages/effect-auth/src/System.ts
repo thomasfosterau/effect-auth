@@ -74,7 +74,7 @@ import * as Policy from "./Policy.ts";
  * The reserved entity type of system principals. Application principal types
  * (`Guard.make({ principalType })`) may not use it.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constants
  */
 export const entityType = Entity.systemType;
@@ -90,7 +90,7 @@ class SystemPrincipalNameError extends Data.TaggedError("SystemPrincipalNameErro
  * Throws on an empty name: a system principal with no name cannot be granted,
  * audited or told apart from another, so it is a construction error.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const ref = (name: string): Entity.EntityRef => {
@@ -106,7 +106,7 @@ export const ref = (name: string): Entity.EntityRef => {
  * Whether an entity reference names a system principal (its type is `System`).
  * Reads the type only: it does not say whether any policy grants it anything.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category predicates
  */
 export const isSystem = (principal: Entity.EntityRef): boolean => principal.type === entityType;
@@ -116,7 +116,7 @@ export const isSystem = (principal: Entity.EntityRef): boolean => principal.type
  * {@link Authorizer.CurrentPrincipal} as `System::"<name>"`, so
  * `Authorizer.authorize`/`check` decide for that job.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category combinators
  */
 export const provide = (name: string) => Authorizer.CurrentPrincipal.provide(ref(name));
@@ -125,7 +125,7 @@ export const provide = (name: string) => Authorizer.CurrentPrincipal.provide(ref
  * A layer providing {@link Authorizer.CurrentPrincipal} as `System::"<name>"`,
  * for a job runtime that holds one principal for its whole lifetime.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const layer = (name: string): Layer.Layer<Authorizer.CurrentPrincipal> =>
@@ -137,7 +137,7 @@ export const layer = (name: string): Layer.Layer<Authorizer.CurrentPrincipal> =>
  * a policy that names `System::"<name>"` fails validation with an undeclared
  * entity type.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constants
  */
 export const declaration: AuthorizationModel.EntityTypeDecl = {};
@@ -173,7 +173,7 @@ export interface GrantOptions {
  * })
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constructors
  */
 export const grant = (name: string, options: GrantOptions): Policy.DeclarativePolicy =>

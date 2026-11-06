@@ -27,14 +27,14 @@ export class UserServiceStore extends Context.Service<
 /**
  * `UserService` configuration.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category models
  */
 /**
  * The default {@link UserServiceConfig.serverOnlyAttributes}: `role`, the rung
  * the guards read.
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category constants
  */
 export const DEFAULT_SERVER_ONLY_ATTRIBUTES: ReadonlyArray<string> = ["role"];

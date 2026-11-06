@@ -47,7 +47,7 @@ const PROBE_ORIGIN = "https://redirect.invalid";
  * strictEqual(safeRedirect(null, "/home"), "/home");
  * ```
  *
- * @since 1.0.0
+ * @since 0.1.0
  * @category redirects
  */
 export const safeRedirect = (target: string | null | undefined, fallback: string): string => {
