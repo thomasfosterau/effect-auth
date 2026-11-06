@@ -2,10 +2,7 @@
 "@thomasfosterau/effect-auth": minor
 "@thomasfosterau/effect-auth-client": minor
 "@thomasfosterau/effect-auth-sveltekit": minor
-"@thomasfosterau/effect-auth-react": minor
 "@thomasfosterau/effect-auth-svelte": minor
-"@thomasfosterau/effect-auth-solid": minor
-"@thomasfosterau/effect-auth-vue": minor
 ---
 
 **Breaking (HTTP):** sign-in, sign-up and the flows that prove an address are JSON:API resources (#205). They take `application/vnd.api+json` documents and answer JSON:API documents and error documents.
@@ -26,5 +23,5 @@
 - The default IP rate-limit rules follow the paths: `POST /sessions` (every sign-in method, now including magic-link verification), `POST /users`, `POST /otp-challenges`, `POST /password-resets` and the second-factor verifications.
 - No secret travels in a URL: the reset, verification and second-factor challenge tokens are sent in the request body, so access logs, `Referer` headers and rate-limit keys never carry them.
 - A rate-limit rule whose `path` is a regex now counts every path it matches in one bucket per client address (it was one bucket per path), so a caller cannot reset its count by varying the path.
-- effect-auth-client: the sign-in, sign-up and verification methods keep their arguments and resolve with the new `AuthResult`, whose `user` is present only when a session was issued. `continueChallenge` takes an `AuthResult`. The framework bindings' form `AuthSuccess` type follows it.
+- effect-auth-client: the sign-in, sign-up and verification methods keep their arguments and resolve with the new `AuthResult`, whose `user` is present only when a session was issued. `continueChallenge` takes an `AuthResult`. The Svelte binding's form `AuthSuccess` type follows it.
 - effect-auth-sveltekit: `credentialAction` sends its body as `application/vnd.api+json` by default (`contentType` overrides it), so an action for `POST /sessions` posts a `sessions` document.

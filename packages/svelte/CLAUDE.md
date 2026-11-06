@@ -10,7 +10,6 @@ Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may imp
 
 - **Thin over the client**: the stores adapt `client.session` and `client.listSessions`; no fetching or caching of their own.
 - **The stores implement Svelte's readable-store contract directly** (`subscribe(run)` calls `run` immediately and returns an unsubscribe), so `$store` works without importing `svelte/store`. `listSessionsStore` drops an out-of-order result.
-- **Parity with the other bindings** (DESIGN.md D8): the same capability set as `-react`, `-solid` and `-vue`. A feature added here is added to all four.
 - **Forms never navigate**: they report through `onSuccess` / `onError`; `EmailOtpForm` reports only the session-yielding step and marks its `<form>` `data-step="request" | "verify"`.
 - **No CSS ships.** Semantic markup with stable `ea-*` classes (including `ea-restart`); `class` appends, `classes` replaces defaults. Class names and default labels are public API; server messages render verbatim.
 - `getAuthClient()` throws a pointed error when nothing above called `setAuthClient`; a form's `client` prop overrides context.

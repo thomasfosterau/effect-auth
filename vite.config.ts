@@ -6,7 +6,6 @@ import { defineConfig } from "vite-plus";
 // and check scripts, and tool configs. They run under Node and Vitest only.
 const nonLibraryFiles = [
   "**/*.test.ts",
-  "**/*.test.tsx",
   "**/testing/**",
   "**/scripts/**",
   "**/*.config.ts",
@@ -189,7 +188,7 @@ export default defineConfig({
       {
         // Type tests assert rejections with an expect-error directive, and
         // the barrel tests assert that a member is absent from a namespace.
-        files: ["**/*.test.ts", "**/*.test.tsx"],
+        files: ["**/*.test.ts"],
         rules: { "effect/avoid-ts-ignore": "off", "import/namespace": "off" },
       },
       {
@@ -225,17 +224,17 @@ export default defineConfig({
         },
       },
       {
-        // Code that imports nothing from `effect`: the framework bindings peer
-        // only their framework (AGENTS.md), the browser client's runtime is
+        // Code that imports nothing from `effect`: the Svelte binding peers
+        // only its framework (AGENTS.md), the browser client's runtime is
         // plain `fetch` with no Effect in the bundle (`Client.ts`), and
         // `./ladder` imports nothing at all because browser bundles load it
         // (`ModuleGraph.test.ts`). The
         // rules that steer to an `effect` module (`Array`, `Predicate`,
         // `Match`, `HashSet`, `Schema`, `Clock`) have no satisfiable fix
-        // there, and the bindings throw plain `Error`s to framework code that
+        // there, and the binding throws plain `Error`s to framework code that
         // has no typed error channel.
         files: [
-          "packages/{react,svelte,solid,vue}/src/**",
+          "packages/svelte/src/**",
           "packages/client/src/Client.ts",
           "packages/effect-auth/src/Ladder.ts",
         ],
@@ -257,12 +256,6 @@ export default defineConfig({
         },
       },
       {
-        // The React binding is built on hooks, and the Vue binding on Vue's
-        // `use*` composables, which the rule cannot tell apart from hooks.
-        files: ["packages/{react,vue}/src/**"],
-        rules: { "effect/avoid-react-hooks": "off" },
-      },
-      {
         // Direct `node:crypto` use is corralled in these three modules.
         files: [
           "packages/effect-auth/src/password/Password.ts",
@@ -280,7 +273,7 @@ export default defineConfig({
         // guard (`Admin`), the cache-safety predicate over wire attributes
         // (`Cacheability.publiclyServeable`), the OAuth userinfo readers
         // (`str`, `nested`), SCIM patch values (`Scim`), the conformance
-        // suite's record comparison (`StoreConformance`), the bindings'
+        // suite's record comparison (`StoreConformance`), the Svelte binding's
         // `onError(cause)` and the client plugin's `request` body.
         files: [
           "packages/effect-auth/src/PolicyStore.ts",
@@ -290,7 +283,6 @@ export default defineConfig({
           "packages/effect-auth/src/oauth/OAuth.ts",
           "packages/effect-auth/src/Scim.ts",
           "packages/effect-auth/src/testing/StoreConformance.ts",
-          "packages/{react,solid}/src/forms/internal.tsx",
           "packages/svelte/src/forms/internal.ts",
           "packages/svelte/src/forms/submission.svelte.ts",
           "packages/client/src/Client.ts",
@@ -320,11 +312,11 @@ export default defineConfig({
     // false `missing-effect-context` errors.
     //
     // `typeCheck` stays off. Type checking is owned by each package's `check`
-    // task (Effect-patched tsc / vue-tsc / svelte-check against both
+    // task (Effect-patched tsc / svelte-check against both
     // tsconfig.json and tsconfig.test.json). tsgolint reads only each file's
     // nearest tsconfig.json, which here leaves out the colocated tests and the
     // per-package vite.config.ts: measured on a built tree it reported 70+
-    // false errors (Solid tests checked as React JSX, `toSorted` outside the
+    // false errors (`toSorted` outside the
     // test `lib`, the task-config types).
     options: { typeAware: true, typeCheck: false },
   },
@@ -353,15 +345,12 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-argon2#build",
           "@thomasfosterau/effect-auth-client#build",
           "@thomasfosterau/effect-auth-drizzle#build",
-          "@thomasfosterau/effect-auth-react#build",
           "@thomasfosterau/effect-auth-resend#build",
           "@thomasfosterau/effect-auth-saml#build",
-          "@thomasfosterau/effect-auth-solid#build",
           "@thomasfosterau/effect-auth-sql#build",
           "@thomasfosterau/effect-auth-svelte#build",
           "@thomasfosterau/effect-auth-sveltekit#build",
           "@thomasfosterau/effect-auth-twilio#build",
-          "@thomasfosterau/effect-auth-vue#build",
         ],
         cache: false,
       },
@@ -375,8 +364,8 @@ export default defineConfig({
       provider: "istanbul",
       reporter: ["text-summary", "json-summary", "json"],
       reportsDirectory: "./coverage",
-      include: ["packages/*/src/**/*.{ts,tsx,svelte,vue}"],
-      exclude: ["**/*.d.ts", "**/*.test.{ts,tsx}", "**/testing/**"],
+      include: ["packages/*/src/**/*.{ts,svelte}"],
+      exclude: ["**/*.d.ts", "**/*.test.ts", "**/testing/**"],
     },
   },
 });

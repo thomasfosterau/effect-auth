@@ -1,6 +1,6 @@
 # effect-auth
 
-Batteries-included authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers (sessions, passwords, passkeys, multi-factor, OAuth, SSO, organizations, API keys, JWT and one policy-based authorization kernel), plus an optional HTTP API, a typed browser client, framework bindings, and storage and vendor adapters, each opt-in. How it relates to effect-jsonapi and legation is stated once in [the three-library boundary](docs/BOUNDARY.md).
+Batteries-included authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers (sessions, passwords, passkeys, multi-factor, OAuth, SSO, organizations, API keys, JWT and one policy-based authorization kernel), plus an optional HTTP API, a typed browser client, a Svelte binding, and storage and vendor adapters, each opt-in. How it relates to effect-jsonapi and legation is stated once in [the three-library boundary](docs/BOUNDARY.md).
 
 **Disclaimer:** This is an experimental project, mostly written using Claude Code, and is not production-ready. If you want something usable, BetterAuth is probably the best option.
 
@@ -10,10 +10,7 @@ Batteries-included authentication and authorization for [Effect](https://effect.
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | [`@thomasfosterau/effect-auth`](packages/effect-auth)         | The core library; `effect` is its only dependency. Start with its [README](packages/effect-auth/README.md). |
 | [`@thomasfosterau/effect-auth-client`](packages/client)       | Typed browser client over the HTTP contract, with an observable session store                               |
-| [`@thomasfosterau/effect-auth-react`](packages/react)         | React hooks and form components over the client                                                             |
 | [`@thomasfosterau/effect-auth-svelte`](packages/svelte)       | Svelte bindings and form components over the client                                                         |
-| [`@thomasfosterau/effect-auth-vue`](packages/vue)             | Vue composables and form components over the client                                                         |
-| [`@thomasfosterau/effect-auth-solid`](packages/solid)         | Solid primitives and form components over the client                                                        |
 | [`@thomasfosterau/effect-auth-sveltekit`](packages/sveltekit) | SvelteKit server adapter: the `handle` hook and the credential form actions                                 |
 | [`@thomasfosterau/effect-auth-sql`](packages/sql)             | Driver-agnostic SQL storage layers (`effect/sql`)                                                           |
 | [`@thomasfosterau/effect-auth-drizzle`](packages/drizzle)     | Drizzle storage layers for PostgreSQL, SQLite and MySQL                                                     |

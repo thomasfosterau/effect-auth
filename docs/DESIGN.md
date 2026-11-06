@@ -446,6 +446,8 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 
 **Risk.** None (additive).
 
+**Update.** The React, Vue and Solid binding packages were removed before their first publish; `@thomasfosterau/effect-auth-svelte` is the one framework binding, so the parity rule now has nothing to compare against until another binding is added.
+
 ## D9. Barrel & module boundaries
 
 > **Superseded** by the API restructure: `effect-auth` now also

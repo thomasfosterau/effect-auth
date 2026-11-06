@@ -94,9 +94,7 @@ packages/*/node_modules/
 examples/*/dist/
 examples/*/node_modules/
 examples/*/.output/
-examples/*/.nuxt/
 examples/*/.svelte-kit/
-examples/*/.react-router/
 
 # docgen output (`vp run docs`, packages/effect-auth)
 packages/effect-auth/docs/

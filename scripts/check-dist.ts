@@ -17,12 +17,12 @@
  * every later rc: the unit suite only ever runs the catalog version, so this
  * is the check that proves each lower bound.
  *
- * Every package under `packages/*` is packed, the framework bindings included,
+ * Every package under `packages/*` is packed, the Svelte binding included,
  * and each packed manifest must set `repository.url` and `repository.directory`
  * to `packages/<dir>`. npm resolves a README's relative links against that
  * directory, so a missing or wrong value breaks them on the npm page. Every
- * offender is reported together. The bindings are packed for this check only:
- * nothing imports them here.
+ * offender is reported together. The binding is packed for this check only:
+ * nothing imports it here.
  *
  * Run `vp run build` first (the packed tarballs contain `dist/`), then:
  *
@@ -78,7 +78,7 @@
  * request read, and asserts the SQL and parameters they generate. No connection
  * is opened.
  *
- * Not covered: the react / solid / svelte / vue bindings, which import Effect
+ * Not covered: the Svelte binding, which imports Effect
  * only through `effect-auth-client`.
  */
 import { execFileSync } from "node:child_process";
@@ -517,7 +517,7 @@ main().catch((error) => {
 
 const scratch = mkdtempSync(join(tmpdir(), "effect-auth-dist-"));
 try {
-  // Every package, the bindings too: their manifests are checked below even
+  // Every package, the binding too: their manifests are checked below even
   // though nothing imports them.
   const dirs = readdirSync(join(root, "packages"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

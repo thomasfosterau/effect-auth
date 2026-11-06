@@ -3,10 +3,8 @@
  * small, dependency-free vanilla client (`createAuthClient`) with typed methods
  * over the auth HTTP contract and an observable session store.
  *
- * Framework bindings live in their own packages —
- * `@thomasfosterau/effect-auth-react`, `@thomasfosterau/effect-auth-svelte`,
- * `@thomasfosterau/effect-auth-vue` and `@thomasfosterau/effect-auth-solid` —
- * each of which builds on this one.
+ * The Svelte binding lives in its own package,
+ * `@thomasfosterau/effect-auth-svelte`, which builds on this one.
  *
  * Wire types (`SessionWithUserView`, `SignUpPayload`, ...) come straight from
  * `@thomasfosterau/effect-auth`'s `Http` namespace; they erase at compile time,

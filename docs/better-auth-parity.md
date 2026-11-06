@@ -26,7 +26,7 @@ package that implements a core service contract.
 | Package                            | Role                                                                                | Allowed dependencies                                                |
 | ---------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `packages/effect-auth`             | The monolithic core: every service, store contract, plugin, and the HTTP projection | `effect` v4 only (+ possibly `@effect/platform-browser` — see §2.2) |
-| `packages/client`                  | Vanilla typed client + React/Svelte/Vue bindings                                    | core types; frameworks as optional peers                            |
+| `packages/client`                  | Vanilla typed client (the Svelte binding is `packages/svelte`)                      | core types                                                          |
 | `packages/sql`                     | Store layers over `effect/sql` (driver-agnostic)                                    | core; SQL drivers as peers                                          |
 | `packages/alchemy` _(reinstated)_  | Alchemy v2 infra resources + Cloudflare D1 storage layers                           | core; `alchemy` as optional peer                                    |
 | `packages/argon2` _(new, extract)_ | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
