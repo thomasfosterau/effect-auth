@@ -19,10 +19,17 @@
     "packages/*/src/**/*.test.ts",
     "packages/svelte/scripts/postbuild.mjs",
     "packages/svelte/svelte.config.js",
-    "scripts/check-dist.ts",
     "**/vite.config.ts",
     "packages/drizzle/vite.drizzle-1.config.ts",
     "vite.tasks.ts"
+  ],
+  "framework": [
+    {
+      "name": "repo-scripts",
+      "detection": { "type": "fileExists", "pattern": "scripts/check-dist.ts" },
+      "entryPoints": ["scripts/check-dist.ts"],
+      "entryPointRole": "support"
+    }
   ],
   "ignorePatterns": ["**/dist/**", "**/docs/**", "**/coverage/**", "**/.reference/**"],
   "ignoreDependencies": [
