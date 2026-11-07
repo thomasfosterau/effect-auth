@@ -791,11 +791,11 @@ export const make = (
         userName,
         ...(user.name !== undefined && { displayName: user.name }),
         ...(Predicate.isString(externalId) && { externalId }),
-        emails: emails.map((identifier) => ({
-          value: identifier.value,
-          ...(identifier.value === userName && { primary: true }),
-          type: "work",
-        })),
+        emails: emails.map((identifier) =>
+          identifier.value === userName
+            ? { value: identifier.value, primary: true, type: "work" }
+            : { value: identifier.value, type: "work" },
+        ),
         active: !isScimDeactivated(user),
         createdAt: user.createdAt.getTime(),
         updatedAt: user.updatedAt.getTime(),

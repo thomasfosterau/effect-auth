@@ -195,7 +195,7 @@ export interface AuthDatabase {
   select<TFields extends DrizzleSelectFields>(fields: TFields): DrizzleFieldsSelectBuilder<TFields>;
   insert<TTable extends Table>(table: TTable): DrizzleInsertBuilder<TTable>;
   update<TTable extends Table>(table: TTable): DrizzleUpdateBuilder<TTable>;
-  delete<TTable extends Table>(table: TTable): DrizzleWhereStep;
+  delete(table: Table): DrizzleWhereStep;
 }
 
 // ---------------------------------------------------------------------------

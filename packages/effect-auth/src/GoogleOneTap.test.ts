@@ -72,18 +72,21 @@ const signCredential = (claims: Schema.JsonObject): string => {
 /** Hash a nonce the same way GoogleOneTap.ts does (SHA-256 hex). */
 const hashNonce = hashToken;
 
-const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject => ({
-  iss: "https://accounts.google.com",
-  aud: CLIENT_ID,
-  sub: "google-user-1",
-  email: "alice@gmail.test",
-  email_verified: true,
-  name: "Alice",
-  picture: "https://img.test/alice.png",
-  exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
-  iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
-  ...overrides,
-});
+const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject =>
+  Object.assign(
+    {
+      iss: "https://accounts.google.com",
+      aud: CLIENT_ID,
+      sub: "google-user-1",
+      email: "alice@gmail.test",
+      email_verified: true,
+      name: "Alice",
+      picture: "https://img.test/alice.png",
+      exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
+      iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
+    },
+    overrides,
+  );
 
 /** Swap `globalThis.fetch` for a canned JWKS response while `thunk` runs. */
 const withJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {

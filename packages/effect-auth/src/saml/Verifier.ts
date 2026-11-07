@@ -417,14 +417,13 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
       return yield* fail("SAML response carried no assertion");
     }
 
-    const getAssertion = profile.getAssertion;
-    if (getAssertion === undefined) {
+    if (profile.getAssertion === undefined) {
       return yield* fail("SAML response carried no verified assertion");
     }
     // SAFETY: node-saml builds `getAssertion()` from xml2js's parse of the
     // verified assertion, so it is xml2js output: element names mapping to
     // text, child elements or lists of them, and attributes under `$`.
-    const assertion = firstChild(getAssertion() as XmlNode, "Assertion");
+    const assertion = firstChild(profile.getAssertion() as XmlNode, "Assertion");
     if (assertion === undefined) {
       return yield* fail("Verified SAML content contained no Assertion");
     }

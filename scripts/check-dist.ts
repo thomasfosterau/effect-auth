@@ -520,8 +520,8 @@ try {
   // though nothing imports them.
   const dirs = readdirSync(join(root, "packages"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+    .map((entry) => entry.name);
+  dirs.sort();
   const directoryErrors: Array<string> = [];
   const packed: Array<Packed> = [];
   for (const dir of dirs) {
@@ -580,7 +580,9 @@ try {
   }
   if (groups.size === 0) throw new Error(`no package's effect peer range admits ${requested}`);
 
-  for (const [effectVersion, group] of [...groups].sort(([a], [b]) => semver.compare(a, b))) {
+  const ordered = [...groups];
+  ordered.sort(([a], [b]) => semver.compare(a, b));
+  for (const [effectVersion, group] of ordered) {
     const names = group.map(({ manifest }) => manifest.name);
     console.log(`effect ${effectVersion}: ${names.join(", ")}`);
     const project = join(scratch, `project-${effectVersion}`);

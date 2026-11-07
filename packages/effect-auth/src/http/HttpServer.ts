@@ -772,6 +772,15 @@ const USER_CODE_RATE_LIMIT: RateLimitConfig = {
   blockDurationMs: 30 * 60 * 1000,
 };
 
+/** The JWT service's public keys as a JWK Set (`/jwks` and the OIDC provider's). */
+const jwksDocument = Effect.fn("HttpServer.jwksDocument")(function* () {
+  const jwt = yield* resolveJwt;
+  const jwks = yield* jwt.service
+    .getJwks()
+    .pipe(Effect.catchTags({ AuthError: (e) => internalServerError(e) }));
+  return { keys: [...jwks.keys] };
+});
+
 /**
  * Consume one token from `key`'s bucket, answering `429` when the bucket is
  * spent and `500` when the limiter's store fails.
@@ -3331,17 +3340,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { token: result.token, expiresAt: result.expiresAt };
         }),
       )
-      .handle("jwtJwks", () =>
-        Effect.gen(function* () {
-          const jwt = yield* resolveJwt;
-          const jwks = yield* jwt.service.getJwks().pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { keys: jwks.keys.map((k) => ({ ...k })) };
-        }),
-      )
+      .handle("jwtJwks", () => jwksDocument())
       // --- OIDC provider ------------------------------------------------------
       .handle("oidcRegisterClient", ({ payload, request }) =>
         Effect.gen(function* () {
@@ -3672,16 +3671,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         }),
       )
       .handle("oidcJwks", () =>
-        Effect.gen(function* () {
-          yield* resolveOidcProvider; // 404 when the OIDC provider is disabled
-          const jwt = yield* resolveJwt;
-          const jwks = yield* jwt.service.getJwks().pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { keys: jwks.keys.map((k) => ({ ...k })) };
-        }),
+        // 404 when the OIDC provider is disabled.
+        Effect.andThen(resolveOidcProvider, jwksDocument()),
       ),
   );
 };

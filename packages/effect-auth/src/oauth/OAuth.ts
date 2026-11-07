@@ -600,14 +600,15 @@ const verifyIdTokenClaims = (
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
 const claimsToUserInfo = (claims: Schema.JsonObject): OAuthUserInfo => {
   const { email, email_verified, name, picture } = claims;
-  return {
-    ...claims,
-    id: String(claims["sub"] ?? claims["id"] ?? ""),
-    ...(Predicate.isString(email) && { email }),
-    ...(Predicate.isBoolean(email_verified) && { email_verified }),
-    ...(Predicate.isString(name) && { name }),
-    ...(Predicate.isString(picture) && { picture }),
-  };
+  return Object.assign(
+    {},
+    claims,
+    { id: String(claims["sub"] ?? claims["id"] ?? "") },
+    Predicate.isString(email) ? { email } : {},
+    Predicate.isBoolean(email_verified) ? { email_verified } : {},
+    Predicate.isString(name) ? { name } : {},
+    Predicate.isString(picture) ? { picture } : {},
+  );
 };
 
 /**

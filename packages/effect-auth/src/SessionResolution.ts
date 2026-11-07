@@ -96,8 +96,10 @@ const parseCookieHeader = (raw: string | null | undefined): HashMap.HashMap<stri
 
 type HeaderRecord = Record<string, string | ReadonlyArray<string> | undefined>;
 
+// A Web `Headers` (native or polyfilled) has a `get` method; a plain header
+// record has no `get` key (it is not an HTTP header name).
 const isWebHeaders = (headers: Headers | HeaderRecord): headers is Headers =>
-  Predicate.isFunction(headers.get);
+  Predicate.hasProperty(headers, "get");
 
 const headerGetter = (
   headers: Headers | HeaderRecord,

@@ -97,6 +97,16 @@ type MessageParams = typeof MessageParams.Type;
 
 type Resolver = (params?: MessageParams) => string;
 
+/** A printable interpolation parameter, or `fallback` when it is missing or not printable. */
+const param = (
+  params: MessageParams | undefined,
+  key: string,
+  fallback: number,
+): string | number => {
+  const value = params?.[key];
+  return Predicate.isString(value) || Predicate.isNumber(value) ? value : fallback;
+};
+
 const catalog: Record<string, string | Resolver> = {
   [ErrorCode.AUTH_ERROR]: "An unexpected error occurred",
   [ErrorCode.HASHING_ERROR]: "Password processing failed",
@@ -111,9 +121,9 @@ const catalog: Record<string, string | Resolver> = {
   [ErrorCode.EMAIL_VERIFICATION_ERROR]: "Email verification failed",
 
   [ErrorCode.PASSWORD_TOO_SHORT]: (p) =>
-    `Password must be at least ${p?.["minLength"] ?? 8} characters`,
+    `Password must be at least ${param(p, "minLength", 8)} characters`,
   [ErrorCode.PASSWORD_TOO_LONG]: (p) =>
-    `Password must be at most ${p?.["maxLength"] ?? 128} characters`,
+    `Password must be at most ${param(p, "maxLength", 128)} characters`,
   [ErrorCode.PASSWORD_ALREADY_SET]: "User already has a password; use changePassword instead",
   [ErrorCode.PWNED_PASSWORD]: "This password has appeared in a data breach; please choose another",
 

@@ -583,12 +583,13 @@ export const make = (
         const keys = yield* store.list();
 
         return {
-          keys: keys.map((pair) => ({
-            ...pair.publicKeyJwk,
-            kid: pair.id,
-            alg: pair.algorithm,
-            use: "sig",
-          })),
+          keys: keys.map((pair) =>
+            Object.assign({}, pair.publicKeyJwk, {
+              kid: pair.id,
+              alg: pair.algorithm,
+              use: "sig",
+            }),
+          ),
         } satisfies Jwks;
       }),
     };

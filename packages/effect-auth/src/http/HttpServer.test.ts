@@ -1217,7 +1217,7 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
     { verification: true, notice: false },
   ];
   const cases = takenAt.flatMap((taken) =>
-    lifecycles.map((lifecycle) => ({ ...taken, ...lifecycle })),
+    lifecycles.map((lifecycle) => Object.assign({}, taken, lifecycle)),
   );
 
   it.each(cases)(
@@ -2561,7 +2561,11 @@ describe("passwordless verify where send hides the account", () => {
   const messageOf = (response: { readonly body: string }) =>
     Schema.decodeUnknownSync(ErrorDocumentBody)(parseJson(response.body)).errors[0]?.detail;
 
-  it.each(flows.flatMap((flow) => verifySequences.map((sequence) => ({ ...flow, sequence }))))(
+  it.each(
+    flows.flatMap((flow) =>
+      verifySequences.map((sequence) => Object.assign({}, flow, { sequence })),
+    ),
+  )(
     "answers $sequence alike for every address: $flow (disableSignUp: true)",
     async ({ sequence, ...flow }) => {
       const { fixture, handler } = await setUp(true);
