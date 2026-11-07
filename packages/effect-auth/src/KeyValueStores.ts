@@ -119,7 +119,11 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
       ),
     );
 
-  const write = <A>(key: string, value: A, label: string): Effect.Effect<void, Errors.AuthError> =>
+  const write = (
+    key: string,
+    value: object | string,
+    label: string,
+  ): Effect.Effect<void, Errors.AuthError> =>
     kv.set(key, encodeJsonText(value)).pipe(Effect.mapError(toAuthError(label)));
 
   const remove = (key: string, label: string): Effect.Effect<void, Errors.AuthError> =>
@@ -644,6 +648,8 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
   readonly prefix: string;
   readonly now: number;
   readonly label: string;
+  /** Read the record under `key` (from {@link jsonKv}'s `read`, typed to the store's record). */
+  readonly read: (key: string) => Effect.Effect<A | null, Errors.AuthError>;
   readonly onRemoved: (record: A, key: string) => Effect.Effect<void, Errors.AuthError>;
 }): Effect.Effect<number, Errors.AuthError> =>
   options.keys.list(options.prefix).pipe(
@@ -653,7 +659,7 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
         () => 0,
         (removed, key) =>
           Effect.gen(function* () {
-            const record = yield* options.kv.read<A>(key, options.label);
+            const record = yield* options.read(key);
             // The services refuse a record once `now > expiresAt`, so a record
             // with `expiresAt === now` is still live and stays.
             if (record == null || record.expiresAt >= options.now) return removed;
@@ -730,12 +736,13 @@ export const purgeExpiredKV: Effect.Effect<
       const kv = jsonKv(store);
       return Effect.all(
         {
-          magicLinks: purgeExpiredRecords<MagicLinkToken>({
+          magicLinks: purgeExpiredRecords({
             kv,
             keys,
             prefix: magicLinkTokenKey(""),
             now,
             label: "purgeExpired.magicLinks",
+            read: (key) => kv.read<MagicLinkToken>(key, "purgeExpired.magicLinks"),
             onRemoved: (token) =>
               kv.indexRemove(
                 magicLinkEmailKey(token.email),
@@ -743,12 +750,13 @@ export const purgeExpiredKV: Effect.Effect<
                 "purgeExpired.magicLinks",
               ),
           }),
-          emailOtps: purgeExpiredRecords<EmailOtpRecord>({
+          emailOtps: purgeExpiredRecords({
             kv,
             keys,
             prefix: "email-otp:",
             now,
             label: "purgeExpired.emailOtps",
+            read: (key) => kv.read<EmailOtpRecord>(key, "purgeExpired.emailOtps"),
             onRemoved: () => Effect.void,
           }),
         },

@@ -987,7 +987,11 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(TestHooks))),
     );
 
-  it.each(hidden.flatMap((config) => verifySequences.map((sequence) => ({ ...config, sequence }))))(
+  it.each(
+    hidden.flatMap((config) =>
+      verifySequences.map((sequence) => Object.assign({}, config, { sequence })),
+    ),
+  )(
     "answers $sequence alike for every email ($purpose, disableSignUp: $disableSignUp)",
     async ({ purpose, disableSignUp, sequence }) => {
       const config = { purpose, disableSignUp };

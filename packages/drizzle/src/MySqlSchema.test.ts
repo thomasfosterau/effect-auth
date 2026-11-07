@@ -66,7 +66,7 @@ const makeProxy = (): Proxy => {
     if (method === "all") {
       const rows = queued;
       queued = [];
-      return { rows: rows.map((row) => [...row]) };
+      return { rows: rows.map((row) => row.slice()) };
     }
     // What mysql2 hands back for an INSERT/UPDATE/DELETE.
     return { rows: [{ insertId: 0, affectedRows: 1 }] };

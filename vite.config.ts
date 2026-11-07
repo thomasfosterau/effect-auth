@@ -111,21 +111,10 @@ export default defineConfig({
       // an Effect that fails on a mismatch.
       "vitest/expect-expect": "warn", // 29
       "typescript/no-base-to-string": "warn", // 23
-      "oxc/no-map-spread": "warn", // 10
-      "typescript/no-unnecessary-type-parameters": "warn", // 7
-      "typescript/no-unnecessary-type-assertion": "warn", // 2
-      "promise/always-return": "warn", // 5
-      "unicorn/no-array-sort": "warn", // 3
-      "typescript/unbound-method": "warn", // 1
-      // alchemy's lifecycle props are typed required but arrive `undefined`
-      // on a first deploy (the two `AuthSchema.ts`): the defaults are
-      // load-bearing.
-      "typescript/no-useless-default-assignment": "warn", // 6
-      "typescript/no-misused-spread": "warn", // 2
-      "typescript/restrict-template-expressions": "warn", // 2
-      "promise/no-promise-in-callback": "warn", // 1
+      // The one site is `BroadcastChannel#postMessage` (client/Client.ts's
+      // cross-tab sync), which takes no `targetOrigin`; the rule cannot tell
+      // it from `window.postMessage` (its docs say so), so it stays a warning.
       "unicorn/require-post-message-target-origin": "warn", // 1
-      "unicorn/prefer-add-event-listener": "warn", // 1
 
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.

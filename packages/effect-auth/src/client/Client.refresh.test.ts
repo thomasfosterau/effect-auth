@@ -17,15 +17,18 @@ const PW = "password-123";
 // synchronously within the same test process (no actual OS IPC needed).
 // ---------------------------------------------------------------------------
 
-class FakeBroadcastChannel {
+class FakeBroadcastChannel extends EventTarget {
   static readonly _channels = MutableHashMap.empty<
     string,
     MutableHashSet.MutableHashSet<FakeBroadcastChannel>
   >();
 
-  onmessage: ((event: MessageEvent) => void) | null = null;
+  // Effect's hash sets compare plain objects structurally; a per-instance
+  // symbol keeps two channels on the same name distinct peers.
+  readonly identity = Symbol("FakeBroadcastChannel");
 
   constructor(private readonly name: string) {
+    super();
     const ch = Option.getOrElse(MutableHashMap.get(FakeBroadcastChannel._channels, name), () =>
       MutableHashSet.empty<FakeBroadcastChannel>(),
     );
@@ -36,7 +39,7 @@ class FakeBroadcastChannel {
   postMessage(data: { readonly data: Http.SessionWithUserView | null }): void {
     const peers = MutableHashMap.get(FakeBroadcastChannel._channels, this.name);
     Arr.forEach(Option.match(peers, { onNone: () => [], onSome: Arr.fromIterable }), (peer) => {
-      if (peer !== this) peer.onmessage?.(new MessageEvent("message", { data }));
+      if (peer !== this) peer.dispatchEvent(new MessageEvent("message", { data }));
     });
   }
 
@@ -202,7 +205,7 @@ describe("cross-tab sync (BroadcastChannel)", () => {
       ...(Option.getOrUndefined(MutableHashMap.get(FakeBroadcastChannel._channels, "no-echo")) ??
         []),
     ][0];
-    ch?.onmessage?.(new MessageEvent("message", { data: { data: null } }));
+    ch?.dispatchEvent(new MessageEvent("message", { data: { data: null } }));
 
     // setState(false) was called — no extra fetch triggered.
     expect(fetchCount).toBe(before);

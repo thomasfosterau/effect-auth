@@ -101,19 +101,21 @@ export const listSessionsStore = (client: AuthClient): ListSessionsStore => {
     }
   };
 
-  const refetch = () => {
-    const seq = ++refetchSeq;
+  const load = async (seq: number): Promise<void> => {
     set({ ...state, isPending: true });
-    client.listSessions().then(
-      (sessions) => {
-        if (seq !== refetchSeq) return;
-        set({ data: sessions, isPending: false, error: null });
-      },
-      (cause: AuthClientError) => {
-        if (seq !== refetchSeq) return;
-        set({ data: null, isPending: false, error: cause });
-      },
+    const next = await client.listSessions().then(
+      (sessions): ListSessionsState => ({ data: sessions, isPending: false, error: null }),
+      (cause: AuthClientError): ListSessionsState => ({
+        data: null,
+        isPending: false,
+        error: cause,
+      }),
     );
+    if (seq === refetchSeq) set(next);
+  };
+
+  const refetch = () => {
+    void load(++refetchSeq);
   };
 
   return {

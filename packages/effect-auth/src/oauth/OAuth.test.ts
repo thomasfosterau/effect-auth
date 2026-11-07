@@ -124,7 +124,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 /** Parses JSON text as `JSON.parse` does. */
 const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const json = <A>(value: A): Response =>
+const json = (value: object): Response =>
   new Response(encodeJson(value), { headers: { "content-type": "application/json" } });
 
 const CLIENT = {
@@ -310,7 +310,7 @@ describe("OAuth token exchange", () => {
 // --- Provider-specific profile mapping --------------------------------------
 
 describe("OAuth profile mapping", () => {
-  const getProfile = <A>(provider: OAuthProvider, body: A, method = "GET") =>
+  const getProfile = (provider: OAuthProvider, body: object, method = "GET") =>
     withFetch(
       () => json(body),
       async (calls) => {
@@ -550,7 +550,7 @@ const makeSigningKey = async (
   return { privateKey: keyPair.privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
 };
 
-const b64u = <A>(obj: A): string => Buffer.from(encodeJson(obj), "utf8").toString("base64url");
+const b64u = (obj: object): string => Buffer.from(encodeJson(obj), "utf8").toString("base64url");
 
 const signIdToken = async (
   alg: "RS256" | "ES256" | "EdDSA",

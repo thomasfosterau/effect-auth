@@ -222,7 +222,7 @@ export interface ViewerOptions<User> extends RunAsOptions {
   readonly toUser?: ((viewer: User, now: Date) => Types.User) | undefined;
 }
 
-const defaultToUser = <User extends ViewerFixture>(viewer: User, now: Date): Types.User => {
+const defaultToUser = (viewer: ViewerFixture, now: Date): Types.User => {
   const { id, ...attributes } = viewer;
   return { id, createdAt: now, updatedAt: now, attributes };
 };

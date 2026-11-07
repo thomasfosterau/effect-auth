@@ -729,22 +729,21 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   const refetch = async (): Promise<void> => {
     const seq = ++refetchSeq;
     setState({ ...state, isPending: true });
-    await getSession()
-      .then((data) => {
-        if (seq !== refetchSeq) return;
-        setState({ data, isPending: false, error: null });
-      })
-      .catch((error) => {
-        if (seq !== refetchSeq) return;
-        setState({
-          data: state.data,
-          isPending: false,
-          error:
-            error instanceof AuthClientError
-              ? error
-              : new AuthClientError(0, error instanceof Error ? error.message : String(error)),
-        });
-      });
+    let next: SessionState;
+    try {
+      next = { data: await getSession(), isPending: false, error: null };
+    } catch (error) {
+      next = {
+        data: state.data,
+        isPending: false,
+        error:
+          error instanceof AuthClientError
+            ? error
+            : new AuthClientError(0, error instanceof Error ? error.message : String(error)),
+      };
+    }
+    if (seq !== refetchSeq) return;
+    setState(next);
   };
 
   const startRefresh = (): void => {
@@ -771,11 +770,12 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       if (globalThis.BroadcastChannel !== undefined) {
         const channelName = cfg.crossTab === true ? "effect-auth-session" : cfg.crossTab;
         broadcastChannel = new BroadcastChannel(channelName);
-        broadcastChannel.onmessage = (
-          event: MessageEvent<{ data: Http.SessionWithUserView | null }>,
-        ) => {
-          setState({ data: event.data.data, isPending: false, error: null }, false);
-        };
+        broadcastChannel.addEventListener(
+          "message",
+          (event: MessageEvent<{ data: Http.SessionWithUserView | null }>) => {
+            setState({ data: event.data.data, isPending: false, error: null }, false);
+          },
+        );
       }
     }
   };

@@ -92,7 +92,7 @@ const makeProxy = (): Proxy => {
     if (method === "all") {
       const rows = queued;
       queued = [];
-      return { rows: rows.map((row) => [...row]) };
+      return { rows: rows.map((row) => row.slice()) };
     }
     return { rows: [{ insertId: 0, affectedRows: 1 }] };
   }, mysqlProxyConfig);

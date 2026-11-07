@@ -195,6 +195,10 @@ export type AuthSchemaProviderOptions =
       readonly databases: Readonly<Record<string, AuthSchemaDatabase>>;
     };
 
+// alchemy types the lifecycle props as required, but they arrive `undefined`
+// on a first deploy (no `olds` yet), so widen before defaulting.
+const propsOrEmpty = (props: AuthSchemaProps | undefined): AuthSchemaProps => props ?? {};
+
 /**
  * The provider that drives the {@link AuthSchema} lifecycle, as a `Layer`.
  * Provide it to your stack alongside the other providers, with the Postgres
@@ -255,8 +259,8 @@ export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
     });
 
   return Provider.succeed(AuthSchema, {
-    read: ({ id, olds = {}, output }) =>
-      resolve(id, olds).pipe(
+    read: ({ id, olds, output }) =>
+      resolve(id, propsOrEmpty(olds)).pipe(
         Effect.flatMap(listAuthTables),
         Effect.map((tables) =>
           Arr.match(tables, {
@@ -275,9 +279,9 @@ export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
     // replacement trigger, so a diff can never destroy auth data.
     diff: () => Effect.succeed({ action: "update" as const }),
 
-    reconcile: ({ id, news = {} }) =>
+    reconcile: ({ id, news }) =>
       Effect.gen(function* () {
-        const database = yield* resolve(id, news);
+        const database = yield* resolve(id, propsOrEmpty(news));
         yield* migrate(database);
         const appliedAt = yield* Clock.currentTimeMillis;
         return yield* observe(database, appliedAt);
@@ -286,8 +290,12 @@ export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
     // `olds` here is the resource's *persisted* props, replayed by the engine
     // during a destroy — plain data only. The database comes from the closure,
     // so the drop works on a real `alchemy destroy` and not just in-process.
-    delete: ({ id, olds = {} }) =>
-      olds.dropOnDelete === true ? Effect.flatMap(resolve(id, olds), dropAuthTables) : Effect.void,
+    delete: ({ id, olds }) => {
+      const props = propsOrEmpty(olds);
+      return props.dropOnDelete === true
+        ? Effect.flatMap(resolve(id, props), dropAuthTables)
+        : Effect.void;
+    },
 
     // Non-listable: the schema lives inside a database the caller can
     // already reach. There is no account-wide API that enumerates
