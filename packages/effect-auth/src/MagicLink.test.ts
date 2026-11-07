@@ -8,6 +8,7 @@ import {
   Duration,
   Effect,
   Layer,
+  MutableHashMap,
   Option,
   Order,
   Predicate,
@@ -47,10 +48,10 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
   return item;
 };
 
-const users = new Map<string, User>();
-const identifierRecords = new Map<string, Identifier>();
-const magicLinkTokens = new Map<string, MagicLinkToken>();
-const sessions = new Map<string, Session>();
+const users = MutableHashMap.empty<string, User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const magicLinkTokens = MutableHashMap.empty<string, MagicLinkToken>();
+const sessions = MutableHashMap.empty<string, Session>();
 const sentLinks: Array<{ email: string; token: string }> = [];
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
@@ -58,42 +59,45 @@ const identifierStore = memoryIdentifierStore(identifierRecords);
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const addUser = (user: User) => {
-  users.set(user.id, user);
+  MutableHashMap.set(users, user.id, user);
 };
 
 /** Seed an email identifier the way the store would persist it. */
@@ -106,11 +110,11 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
 };
 
 const findEmailIdentifier = (email: string): Identifier | null =>
-  Array.from(identifierRecords.values()).find(
+  Array.from(MutableHashMap.values(identifierRecords)).find(
     (identifier) => identifier.type === "email" && identifier.value === email,
   ) ?? null;
 
@@ -119,7 +123,7 @@ const magicLinkUserStore = {
     Effect.sync(() => {
       createdWith.push(input.identifier);
       const user: User = {
-        id: `user-${users.size + 1}`,
+        id: `user-${MutableHashMap.size(users) + 1}`,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -140,36 +144,36 @@ const magicLinkStore = {
   create: (token: MagicLinkToken) =>
     Effect.sync(() => {
       storeOps.push("create");
-      magicLinkTokens.set(token.token, token);
+      MutableHashMap.set(magicLinkTokens, token.token, token);
       return token;
     }),
 
   get: (token: string) =>
     Effect.sync(() => {
       storeOps.push("get");
-      return magicLinkTokens.get(token) ?? null;
+      return Option.getOrNull(MutableHashMap.get(magicLinkTokens, token));
     }),
 
   getByEmail: (email: string) =>
     Effect.sync(() => {
       storeOps.push("getByEmail");
       return Option.getOrNull(
-        Arr.findFirst(magicLinkTokens.values(), (token) => token.email === email),
+        Arr.findFirst(MutableHashMap.values(magicLinkTokens), (token) => token.email === email),
       );
     }),
 
   delete: (token: string) =>
     Effect.sync(() => {
       storeOps.push("delete");
-      magicLinkTokens.delete(token);
+      MutableHashMap.remove(magicLinkTokens, token);
     }),
 
   deleteByEmail: (email: string) =>
     Effect.sync(() => {
       storeOps.push("deleteByEmail");
-      magicLinkTokens.forEach((magicLink, token) => {
+      MutableHashMap.forEach(magicLinkTokens, (magicLink, token) => {
         if (magicLink.email === email) {
-          magicLinkTokens.delete(token);
+          MutableHashMap.remove(magicLinkTokens, token);
         }
       });
     }),
@@ -183,8 +187,11 @@ const sessionConfig: SessionConfig = {
 };
 
 /** Password hashes, so a test can see a first proof clear one (#440). */
-const passwordHashes = new Map<string, string>();
-const emailPasswordStore = memoryEmailPasswordStore({ users: new Map(), passwordHashes });
+const passwordHashes = MutableHashMap.empty<string, string>();
+const emailPasswordStore = memoryEmailPasswordStore({
+  users: MutableHashMap.empty(),
+  passwordHashes,
+});
 
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
@@ -225,11 +232,11 @@ const recordingSend = (email: string, token: string) =>
 
 describe("MagicLinkService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    magicLinkTokens.clear();
-    sessions.clear();
-    passwordHashes.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(magicLinkTokens);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(passwordHashes);
     sentLinks.splice(0, sentLinks.length);
     storeOps.length = 0;
     createdWith.length = 0;
@@ -250,10 +257,12 @@ describe("MagicLinkService", () => {
 
     expect(sentLinks.length).toBe(1);
     expect(sentLinks[0]?.email).toBe("new@example.com");
-    expect(magicLinkTokens.size).toBe(1);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
 
     // The store is keyed by hash; the sent token is the raw value.
-    const stored = magicLinkTokens.get(hashToken(recorded(sentLinks).token));
+    const stored = Option.getOrUndefined(
+      MutableHashMap.get(magicLinkTokens, hashToken(recorded(sentLinks).token)),
+    );
     expect(stored).toBeDefined();
     expect(stored?.email).toBe("new@example.com");
     expect(stored?.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
@@ -292,9 +301,9 @@ describe("MagicLinkService", () => {
 
     expect(sentLinks.length).toBe(2);
     // Only the latest token remains usable. Compare by hash (store key).
-    expect(magicLinkTokens.size).toBe(1);
-    expect(magicLinkTokens.has(hashToken(recorded(sentLinks, 1).token))).toBe(true);
-    expect(magicLinkTokens.has(hashToken(recorded(sentLinks).token))).toBe(false);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
+    expect(MutableHashMap.has(magicLinkTokens, hashToken(recorded(sentLinks, 1).token))).toBe(true);
+    expect(MutableHashMap.has(magicLinkTokens, hashToken(recorded(sentLinks).token))).toBe(false);
   });
 
   it("should not send to unknown emails when sign-up is disabled, storing a marker token", async () => {
@@ -316,9 +325,9 @@ describe("MagicLinkService", () => {
     );
 
     expect(sentLinks.length).toBe(0);
-    expect([...magicLinkTokens.values()].map((token) => token.email)).toEqual([
-      "stranger@example.com",
-    ]);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(magicLinkTokens)).map((token) => token.email),
+    ).toEqual(["stranger@example.com"]);
   });
 
   // #417: without a cooldown, the unknown branch must do the store work the
@@ -379,7 +388,7 @@ describe("MagicLinkService", () => {
     );
 
     expect(sentLinks.length).toBe(1);
-    expect(magicLinkTokens.size).toBe(1);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
   });
 
   it("should verify a token, create a user with a verified email identifier and a session", async () => {
@@ -409,9 +418,9 @@ describe("MagicLinkService", () => {
     ]);
     expect(result.session.userId).toBe(result.user.id);
     expect(result.session.attributes).toEqual({ device: "test" });
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
     // One-time use: token consumed.
-    expect(magicLinkTokens.size).toBe(0);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(0);
   });
 
   it("should sign in an existing user without creating a new one", async () => {
@@ -438,7 +447,7 @@ describe("MagicLinkService", () => {
     );
 
     expect(result.user.id).toBe("user-known");
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
     expect(result.session.userId).toBe("user-known");
     // The verified link proves ownership: the previously unverified email
     // identifier is promoted to verified.
@@ -457,9 +466,9 @@ describe("MagicLinkService", () => {
       attributes: {},
     });
     addEmailIdentifier("user-squat", "victim@example.com", false);
-    passwordHashes.set("user-squat", "squatter-hash");
+    MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    sessions.set("squatter-session", {
+    MutableHashMap.set(sessions, "squatter-session", {
       id: "squatter-session",
       userId: "user-squat",
       expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
@@ -482,9 +491,11 @@ describe("MagicLinkService", () => {
     // The holder of the address is signed in; the squatter's password and
     // session are gone, so only the session just issued remains.
     expect(result.user.id).toBe("user-squat");
-    expect(passwordHashes.has("user-squat")).toBe(false);
-    expect(sessions.has("squatter-session")).toBe(false);
-    expect([...sessions.values()].map((session) => session.userId)).toEqual(["user-squat"]);
+    expect(MutableHashMap.has(passwordHashes, "user-squat")).toBe(false);
+    expect(MutableHashMap.has(sessions, "squatter-session")).toBe(false);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(sessions)).map((session) => session.userId),
+    ).toEqual(["user-squat"]);
     expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
   });
 
@@ -498,7 +509,7 @@ describe("MagicLinkService", () => {
       attributes: {},
     });
     addEmailIdentifier("user-owner", "victim@example.com", true);
-    passwordHashes.set("user-owner", "owner-hash");
+    MutableHashMap.set(passwordHashes, "user-owner", "owner-hash");
 
     await Effect.runPromise(
       Effect.provide(
@@ -511,14 +522,16 @@ describe("MagicLinkService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    expect(passwordHashes.get("user-owner")).toBe("owner-hash");
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, "user-owner"))).toBe(
+      "owner-hash",
+    );
   });
 
   it("should reject expired tokens and delete them", async () => {
     const testContext = await makeTestContext();
 
     // Seed with the hash as key (the service looks up by hash).
-    magicLinkTokens.set(hashToken("expired-token"), {
+    MutableHashMap.set(magicLinkTokens, hashToken("expired-token"), {
       token: hashToken("expired-token"),
       email: "late@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10 * 60 * 1000,
@@ -538,8 +551,8 @@ describe("MagicLinkService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MagicLinkError");
-    expect(magicLinkTokens.size).toBe(0);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("should reject replayed tokens (one-time use)", async () => {
@@ -562,7 +575,7 @@ describe("MagicLinkService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MagicLinkError");
     // Only the first verification created a session.
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("should fail for unknown tokens", async () => {
@@ -586,7 +599,7 @@ describe("MagicLinkService", () => {
   it("should not create users at verification when sign-up is disabled", async () => {
     const testContext = await makeTestContext();
 
-    magicLinkTokens.set(hashToken("orphan-token"), {
+    MutableHashMap.set(magicLinkTokens, hashToken("orphan-token"), {
       token: hashToken("orphan-token"),
       email: "orphan@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
@@ -609,9 +622,9 @@ describe("MagicLinkService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MagicLinkError");
-    expect(users.size).toBe(0);
-    expect(identifierRecords.size).toBe(0);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(users)).toBe(0);
+    expect(MutableHashMap.size(identifierRecords)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("should fail with ResendTooSoonError when a resend is within the cooldown window", async () => {
@@ -639,7 +652,7 @@ describe("MagicLinkService", () => {
     expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     // The original token is preserved — no replacement was issued.
     expect(sentLinks.length).toBe(1);
-    expect(magicLinkTokens.size).toBe(1);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
   });
 
   it("should allow a resend after the cooldown window has elapsed", async () => {
@@ -647,7 +660,7 @@ describe("MagicLinkService", () => {
 
     // Seed a token whose createdAt is older than the 60 s cooldown.
     const oldToken = hashToken("old-magic-token");
-    magicLinkTokens.set(oldToken, {
+    MutableHashMap.set(magicLinkTokens, oldToken, {
       token: oldToken,
       email: "user@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 70_000,
@@ -669,9 +682,9 @@ describe("MagicLinkService", () => {
 
     // A fresh link was issued after the cooldown elapsed.
     expect(sentLinks.length).toBe(1);
-    expect(magicLinkTokens.size).toBe(1);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
     // The old token was replaced.
-    expect(magicLinkTokens.has(oldToken)).toBe(false);
+    expect(MutableHashMap.has(magicLinkTokens, oldToken)).toBe(false);
   });
 
   it("should not apply the cooldown when resendCooldown is not configured", async () => {
@@ -690,7 +703,7 @@ describe("MagicLinkService", () => {
     );
 
     expect(sentLinks.length).toBe(2);
-    expect(magicLinkTokens.size).toBe(1);
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
   });
 
   // #415: with sign-up disabled, an unknown email must hit the cooldown exactly
@@ -747,10 +760,10 @@ describe("MagicLinkService", () => {
     expect(sentLinks.map((link) => link.email)).toEqual(["member@example.com"]);
     expect(
       Arr.sort(
-        Array.from(magicLinkTokens.values(), (token) => token.email),
+        Array.from(MutableHashMap.values(magicLinkTokens), (token) => token.email),
         Order.String,
       ),
     ).toEqual(["member@example.com", "missing@example.com"]);
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
   });
 });

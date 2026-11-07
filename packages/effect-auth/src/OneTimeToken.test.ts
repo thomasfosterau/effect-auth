@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, Predicate, Result } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Option, Predicate, Result } from "effect";
 import { SecureRandom } from "effect/crypto";
 import {
   make as makeOneTimeTokenService,
@@ -9,20 +9,21 @@ import {
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { hashToken } from "./TokenHash.ts";
 
-const oneTimeTokens = new Map<string, OneTimeTokenRecord>();
+const oneTimeTokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
 
 const oneTimeTokenStore = {
   create: (record: OneTimeTokenRecord) =>
     Effect.sync(() => {
-      oneTimeTokens.set(record.token, record);
+      MutableHashMap.set(oneTimeTokens, record.token, record);
       return record;
     }),
 
-  get: (token: string) => Effect.sync(() => oneTimeTokens.get(token) ?? null),
+  get: (token: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(oneTimeTokens, token))),
 
   delete: (token: string) =>
     Effect.sync(() => {
-      oneTimeTokens.delete(token);
+      MutableHashMap.remove(oneTimeTokens, token);
     }),
 };
 
@@ -34,7 +35,7 @@ const makeTestContext = () =>
 
 describe("OneTimeTokenService", () => {
   beforeEach(() => {
-    oneTimeTokens.clear();
+    MutableHashMap.clear(oneTimeTokens);
   });
 
   it("should generate and verify a token (happy path)", async () => {
@@ -61,7 +62,7 @@ describe("OneTimeTokenService", () => {
     );
 
     // Token is consumed — store should be empty.
-    expect(oneTimeTokens.size).toBe(0);
+    expect(MutableHashMap.size(oneTimeTokens)).toBe(0);
   });
 
   it("should generate without metadata", async () => {
@@ -95,7 +96,7 @@ describe("OneTimeTokenService", () => {
       ),
     );
 
-    const stored = Array.from(oneTimeTokens.values())[0];
+    const stored = Array.from(MutableHashMap.values(oneTimeTokens))[0];
     expect(stored?.token).toBe(hashToken(rawToken));
     expect(stored?.token).not.toBe(rawToken);
   });
@@ -130,7 +131,7 @@ describe("OneTimeTokenService", () => {
 
     // Seed a pre-expired record directly into the store.
     const expiredHash = hashToken("expired-raw-token");
-    oneTimeTokens.set(expiredHash, {
+    MutableHashMap.set(oneTimeTokens, expiredHash, {
       token: expiredHash,
       subject: "user-expired",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 20_000,
@@ -152,7 +153,7 @@ describe("OneTimeTokenService", () => {
     expect(result.failure._tag).toBe("OneTimeTokenError");
     expect(result.failure.message).toBe("Invalid or expired token");
     // Expired token is consumed (deleted) on lookup — store must be empty.
-    expect(oneTimeTokens.size).toBe(0);
+    expect(MutableHashMap.size(oneTimeTokens)).toBe(0);
   });
 
   it("should reject a completely unknown token (anti-enumeration)", async () => {
@@ -187,7 +188,7 @@ describe("OneTimeTokenService", () => {
           const rawToken = yield* service.generate("user-ttl");
           // Check that the stored record has a short TTL.
           const hash = hashToken(rawToken);
-          const stored = oneTimeTokens.get(hash);
+          const stored = Option.getOrUndefined(MutableHashMap.get(oneTimeTokens, hash));
           assert(stored !== undefined, "the token is stored");
           expect(stored.expiresAt - stored.createdAt).toBe(1_000);
         }),
@@ -205,7 +206,7 @@ describe("OneTimeTokenService", () => {
           const service = yield* makeOneTimeTokenService({ expiresIn: 60_000 });
           const rawToken = yield* service.generate("user-override", { expiresIn: 5_000 });
           const hash = hashToken(rawToken);
-          const stored = oneTimeTokens.get(hash);
+          const stored = Option.getOrUndefined(MutableHashMap.get(oneTimeTokens, hash));
           assert(stored !== undefined, "the token is stored");
           expect(stored.expiresAt - stored.createdAt).toBe(5_000);
         }),

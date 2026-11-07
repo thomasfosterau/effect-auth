@@ -36,97 +36,104 @@ import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 
-const users = new Map<string, User>();
-const identifiers = new Map<string, Identifier>();
-const passwordHashes = new Map<string, string>();
-const multiFactorRecords = new Map<string, MultiFactorRecord>();
-const pendingChallenges = new Map<string, PendingMultiFactor>();
+const users = MutableHashMap.empty<string, User>();
+const identifiers = MutableHashMap.empty<string, Identifier>();
+const passwordHashes = MutableHashMap.empty<string, string>();
+const multiFactorRecords = MutableHashMap.empty<string, MultiFactorRecord>();
+const pendingChallenges = MutableHashMap.empty<string, PendingMultiFactor>();
 const pendingAttempts = MutableHashMap.empty<string, number>();
-const sessions = new Map<string, Session>();
+const sessions = MutableHashMap.empty<string, Session>();
 
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const emailPasswordStore = {
   createUser: (input: CreateUserInput) =>
     Effect.sync(() => {
       const user: User = {
-        id: `user-${users.size + 1}`,
+        id: `user-${MutableHashMap.size(users) + 1}`,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: input.attributes ?? {},
       };
-      users.set(user.id, user);
+      MutableHashMap.set(users, user.id, user);
       return { user, created: true };
     }),
 
-  getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+  getPasswordHash: (userId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
 
-  clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
+  clearPasswordHash: (userId: string) =>
+    Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
-      passwordHashes.set(userId, hash);
+      MutableHashMap.set(passwordHashes, userId, hash);
     }),
 };
 
 const multiFactorStore = {
-  get: (userId: string) => Effect.sync(() => multiFactorRecords.get(userId) ?? null),
+  get: (userId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId))),
 
   upsert: (record: MultiFactorRecord) =>
     Effect.sync(() => {
-      multiFactorRecords.set(record.userId, record);
+      MutableHashMap.set(multiFactorRecords, record.userId, record);
       return record;
     }),
 
   delete: (userId: string) =>
     Effect.sync(() => {
-      multiFactorRecords.delete(userId);
+      MutableHashMap.remove(multiFactorRecords, userId);
     }),
 };
 
 const pendingMultiFactorStore = {
   create: (pending: PendingMultiFactor) =>
     Effect.sync(() => {
-      pendingChallenges.set(pending.token, pending);
+      MutableHashMap.set(pendingChallenges, pending.token, pending);
       return pending;
     }),
 
-  get: (token: string) => Effect.sync(() => pendingChallenges.get(token) ?? null),
+  get: (token: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingChallenges, token))),
 
   recordFailedAttempt: (token: string) =>
     Effect.sync(() => {
@@ -137,7 +144,7 @@ const pendingMultiFactorStore = {
 
   delete: (token: string) =>
     Effect.sync(() => {
-      pendingChallenges.delete(token);
+      MutableHashMap.remove(pendingChallenges, token);
       MutableHashMap.remove(pendingAttempts, token);
     }),
 };
@@ -194,7 +201,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
     updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   };
-  users.set(id, user);
+  MutableHashMap.set(users, id, user);
   const identifier = makeIdentifier({
     userId: id,
     type: "email",
@@ -203,24 +210,24 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
     verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifiers.set(identifier.id, identifier);
+  MutableHashMap.set(identifiers, identifier.id, identifier);
 
   const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
   const hashed = await Effect.runPromise(hasher.hash(password));
-  passwordHashes.set(id, hashed.hash);
+  MutableHashMap.set(passwordHashes, id, hashed.hash);
 
   return user;
 };
 
 describe("MultiFactorService", () => {
   beforeEach(() => {
-    users.clear();
-    identifiers.clear();
-    passwordHashes.clear();
-    multiFactorRecords.clear();
-    pendingChallenges.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifiers);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(multiFactorRecords);
+    MutableHashMap.clear(pendingChallenges);
     MutableHashMap.clear(pendingAttempts);
-    sessions.clear();
+    MutableHashMap.clear(sessions);
   });
 
   it("should enable, confirm with a TOTP code, and report multi-factor as enabled", async () => {
@@ -256,7 +263,7 @@ describe("MultiFactorService", () => {
     });
 
     // Backup codes are stored hashed, never in plaintext
-    const record = multiFactorRecords.get("user-2fa-1");
+    const record = Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-1"));
     expect(record?.verified).toBe(true);
     Arr.forEach(enableResult.backupCodes, (plaintext) => {
       expect(record?.backupCodes).not.toContain(plaintext);
@@ -284,7 +291,9 @@ describe("MultiFactorService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MultiFactorError");
-    expect(multiFactorRecords.get("user-2fa-2")?.verified).toBe(false);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-2"))?.verified,
+    ).toBe(false);
   });
 
   it("should fail to enable with a wrong password", async () => {
@@ -304,7 +313,7 @@ describe("MultiFactorService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("InvalidCredentialsError");
-    expect(multiFactorRecords.size).toBe(0);
+    expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
   });
 
   it("should fail to disable with a wrong password and remove the record on success", async () => {
@@ -340,7 +349,7 @@ describe("MultiFactorService", () => {
     expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
     expect(stillEnabled).toBe(true);
     expect(enabledAfterDisable).toBe(false);
-    expect(multiFactorRecords.size).toBe(0);
+    expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
   });
 
   it("should create a session on the challenge + verifyTotp happy path", async () => {
@@ -370,9 +379,9 @@ describe("MultiFactorService", () => {
     expect(result.userId).toBe("user-2fa-5");
     expect(result.session.userId).toBe("user-2fa-5");
     expect(result.session.attributes).toEqual({ device: "test" });
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
     // Pending token is consumed on success
-    expect(pendingChallenges.size).toBe(0);
+    expect(MutableHashMap.size(pendingChallenges)).toBe(0);
   });
 
   it("should reject an expired pending token", async () => {
@@ -401,9 +410,9 @@ describe("MultiFactorService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MultiFactorError");
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
     // Expired tokens are deleted eagerly
-    expect(pendingChallenges.size).toBe(0);
+    expect(MutableHashMap.size(pendingChallenges)).toBe(0);
   });
 
   it("should reject a replayed pending token", async () => {
@@ -435,7 +444,7 @@ describe("MultiFactorService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MultiFactorError");
     // Only the first verification created a session
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("should reject a replayed TOTP code on a fresh challenge", async () => {
@@ -469,7 +478,7 @@ describe("MultiFactorService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MultiFactorError");
     // Only the first challenge produced a session
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("caps wrong codes per challenge, and answers a capped challenge as a wrong code", async () => {
@@ -489,7 +498,7 @@ describe("MultiFactorService", () => {
           const wrongCode = () => Effect.flip(service.verifyTotp(challenge.token, "not-a-code"));
           const errors = [yield* wrongCode(), yield* wrongCode(), yield* wrongCode()];
           errors.push(yield* wrongCode());
-          const pendingAfter4 = pendingChallenges.has(challenge.token);
+          const pendingAfter4 = MutableHashMap.has(pendingChallenges, challenge.token);
           // The fifth wrong code (the default cap) deletes the challenge.
           errors.push(yield* wrongCode());
 
@@ -510,9 +519,9 @@ describe("MultiFactorService", () => {
       "MultiFactorError",
       "Invalid multi-factor code",
     ]);
-    expect(pendingChallenges.size).toBe(0);
+    expect(MutableHashMap.size(pendingChallenges)).toBe(0);
     expect(MutableHashMap.size(pendingAttempts)).toBe(0);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("counts TOTP and backup codes against one cap, configurable per service", async () => {
@@ -549,9 +558,11 @@ describe("MultiFactorService", () => {
 
     expect(underCap.userId).toBe("user-2fa-cap2");
     expect([capped._tag, capped.message]).toEqual(["MultiFactorError", "Invalid backup code"]);
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
     // The unused backup code survives the capped challenge.
-    expect(multiFactorRecords.get("user-2fa-cap2")?.backupCodes).toHaveLength(9);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-cap2"))?.backupCodes,
+    ).toHaveLength(9);
   });
 
   it("should accept a backup code only once", async () => {
@@ -590,8 +601,10 @@ describe("MultiFactorService", () => {
     assert(Result.isFailure(reuse));
     expect(reuse.failure._tag).toBe("MultiFactorError");
     expect(secondUse.userId).toBe("user-2fa-8");
-    expect(sessions.size).toBe(2);
-    expect(multiFactorRecords.get("user-2fa-8")?.backupCodes).toHaveLength(8);
+    expect(MutableHashMap.size(sessions)).toBe(2);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-8"))?.backupCodes,
+    ).toHaveLength(8);
   });
 
   it("should invalidate old backup codes on regeneration", async () => {
@@ -667,19 +680,19 @@ describe("MultiFactorService", () => {
     expect(unverified._tag).toBe("Failure");
     assert(Result.isFailure(unverified));
     expect(unverified.failure._tag).toBe("MultiFactorError");
-    expect(pendingChallenges.size).toBe(0);
+    expect(MutableHashMap.size(pendingChallenges)).toBe(0);
   });
 });
 
 describe("MultiFactorService with TOTP secret encryption", () => {
   beforeEach(() => {
-    users.clear();
-    identifiers.clear();
-    passwordHashes.clear();
-    multiFactorRecords.clear();
-    pendingChallenges.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifiers);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(multiFactorRecords);
+    MutableHashMap.clear(pendingChallenges);
     MutableHashMap.clear(pendingAttempts);
-    sessions.clear();
+    MutableHashMap.clear(sessions);
   });
 
   it("should enroll and verify TOTP with { secret } encryption", async () => {
@@ -718,10 +731,10 @@ describe("MultiFactorService with TOTP secret encryption", () => {
 
     expect(enabled).toBe(true);
     expect(verifyResult.userId).toBe("user-enc-1");
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
 
     // The stored secret must be ciphertext, not the plaintext base32 secret
-    const record = multiFactorRecords.get("user-enc-1");
+    const record = Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-enc-1"));
     expect(record?.secret).toBeDefined();
     expect(record?.secret).not.toBe(enableResult.secret);
     expect(record?.secret).not.toMatch(/^[A-Z2-7]+=*$/);
@@ -757,7 +770,7 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     expect(verifyResult.userId).toBe("user-enc-2");
 
     // Stored secret is ciphertext
-    const record = multiFactorRecords.get("user-enc-2");
+    const record = Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-enc-2"));
     expect(record?.secret).not.toBe(enableResult.secret);
   });
 
@@ -808,6 +821,6 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     );
 
     expect(result.userId).toBe("user-enc-4");
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 });

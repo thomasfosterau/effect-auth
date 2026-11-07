@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test"
 import type * as Http from "../http/index.ts";
 import { createAuthClient } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
+import { Array as Arr, MutableHashMap, MutableHashSet, Option } from "effect";
 
 /** Whether a request is the store's session read (`GET /sessions/current`). */
 const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
@@ -17,31 +18,36 @@ const PW = "password-123";
 // ---------------------------------------------------------------------------
 
 class FakeBroadcastChannel {
-  static readonly _channels = new Map<string, Set<FakeBroadcastChannel>>();
+  static readonly _channels = MutableHashMap.empty<
+    string,
+    MutableHashSet.MutableHashSet<FakeBroadcastChannel>
+  >();
 
   onmessage: ((event: MessageEvent) => void) | null = null;
 
   constructor(private readonly name: string) {
-    let ch = FakeBroadcastChannel._channels.get(name);
-    if (ch === undefined) {
-      ch = new Set();
-      FakeBroadcastChannel._channels.set(name, ch);
-    }
-    ch.add(this);
+    const ch = Option.getOrElse(MutableHashMap.get(FakeBroadcastChannel._channels, name), () =>
+      MutableHashSet.empty<FakeBroadcastChannel>(),
+    );
+    MutableHashMap.set(FakeBroadcastChannel._channels, name, ch);
+    MutableHashSet.add(ch, this);
   }
 
   postMessage(data: { readonly data: Http.SessionWithUserView | null }): void {
-    FakeBroadcastChannel._channels.get(this.name)?.forEach((peer) => {
+    const peers = MutableHashMap.get(FakeBroadcastChannel._channels, this.name);
+    Arr.forEach(Option.match(peers, { onNone: () => [], onSome: Arr.fromIterable }), (peer) => {
       if (peer !== this) peer.onmessage?.(new MessageEvent("message", { data }));
     });
   }
 
   close(): void {
-    FakeBroadcastChannel._channels.get(this.name)?.delete(this);
+    Option.map(MutableHashMap.get(FakeBroadcastChannel._channels, this.name), (peers) =>
+      MutableHashSet.remove(peers, this),
+    );
   }
 
   static reset(): void {
-    FakeBroadcastChannel._channels.clear();
+    MutableHashMap.clear(FakeBroadcastChannel._channels);
   }
 }
 
@@ -192,7 +198,10 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     const before = fetchCount;
 
     // Simulate a message arriving from a peer tab.
-    const ch = [...(FakeBroadcastChannel._channels.get("no-echo") ?? [])][0];
+    const ch = [
+      ...(Option.getOrUndefined(MutableHashMap.get(FakeBroadcastChannel._channels, "no-echo")) ??
+        []),
+    ][0];
     ch?.onmessage?.(new MessageEvent("message", { data: { data: null } }));
 
     // setState(false) was called — no extra fetch triggered.
@@ -221,9 +230,19 @@ describe("cross-tab sync (BroadcastChannel)", () => {
 
     // Unsubscribe A — its BroadcastChannel should be closed.
     unsubA();
-    expect(FakeBroadcastChannel._channels.get("stop-test")?.size).toBe(1); // only B
+    expect(
+      Option.map(
+        MutableHashMap.get(FakeBroadcastChannel._channels, "stop-test"),
+        MutableHashSet.size,
+      ),
+    ).toEqual(Option.some(1)); // only B
 
     unsubB();
-    expect(FakeBroadcastChannel._channels.get("stop-test")?.size).toBe(0);
+    expect(
+      Option.map(
+        MutableHashMap.get(FakeBroadcastChannel._channels, "stop-test"),
+        MutableHashSet.size,
+      ),
+    ).toEqual(Option.some(0));
   });
 });

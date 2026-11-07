@@ -43,7 +43,7 @@
  *
  * @module saml
  */
-import { Clock, Context, Data, Effect } from "effect";
+import { Clock, Context, Data, Effect, MutableHashMap, Option } from "effect";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */
@@ -248,7 +248,7 @@ export class SamlReplayStore extends Context.Service<
 >()("@effect-auth/SamlReplayStore") {}
 
 /**
- * In-memory {@link SamlReplayStore}, backed by a `Map`. Single-process only —
+ * In-memory {@link SamlReplayStore}, backed by a `MutableHashMap`. Single-process only —
  * good for tests and single-instance deployments; behind a load balancer use a
  * shared store so a replay can't simply land on another instance.
  *
@@ -256,23 +256,23 @@ export class SamlReplayStore extends Context.Service<
  * each `Effect.sync` body indivisible.
  */
 export const memorySamlReplayStore = (
-  records: Map<string, SamlReplayRecord> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, SamlReplayRecord> = MutableHashMap.empty(),
 ): typeof SamlReplayStore.Service => ({
   create: (record) =>
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sync(() => {
-        const existing = records.get(record.id);
+        const existing = Option.getOrUndefined(MutableHashMap.get(records, record.id));
         if (existing !== undefined && now <= existing.expiresAt) return null;
-        records.set(record.id, record);
+        MutableHashMap.set(records, record.id, record);
         return record;
       }),
     ),
   consume: (id) =>
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sync(() => {
-        const existing = records.get(id);
+        const existing = Option.getOrUndefined(MutableHashMap.get(records, id));
         if (existing === undefined) return null;
-        records.delete(id);
+        MutableHashMap.remove(records, id);
         return now > existing.expiresAt ? null : existing;
       }),
     ),

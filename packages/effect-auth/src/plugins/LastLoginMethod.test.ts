@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
 import { composePlugins, Hooks } from "../Hooks.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
@@ -16,10 +16,10 @@ import type * as Types from "../Types.ts";
 const hasher = Password.scryptHasher({ cost: 1024 });
 
 const makeFixture = () => {
-  const usersById = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
-  const passwordHashes = new Map<string, string>();
-  const sessions = new Map<string, Types.Session>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
+  const passwordHashes = MutableHashMap.empty<string, string>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
   let userSeq = 0;
 
   const emailPasswordStore: typeof EmailPasswordStore.Service = {
@@ -33,23 +33,27 @@ const makeFixture = () => {
           updatedAt: now,
           attributes: input.attributes ?? {},
         };
-        usersById.set(user.id, user);
+        MutableHashMap.set(usersById, user.id, user);
         return { user, created: true };
       }),
-    getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
-    clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
-    setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
+    getPasswordHash: (userId) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    clearPasswordHash: (userId: string) =>
+      Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
+    setPasswordHash: (userId, hash) =>
+      Effect.sync(() => void MutableHashMap.set(passwordHashes, userId, hash)),
   };
   const sessionStore: typeof SessionStore.Service = {
-    create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
-    update: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+    create: (s) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    get: (sessionId) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+    update: (s) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),
   };
   const userStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
   };
 
   const stores = Layer.mergeAll(
@@ -100,12 +104,14 @@ describe("LastLoginMethodPlugin", () => {
     expect(signedIn.method).toBe("email-password");
     // ...and the plugin persisted it onto both stored sessions.
     assert(signedUp.session !== undefined && signedIn.session !== undefined, "both issue sessions");
-    expect(sessions.get(hashToken(signedUp.session.id))?.attributes["method"]).toBe(
-      "email-password",
-    );
-    expect(sessions.get(hashToken(signedIn.session.id))?.attributes["method"]).toBe(
-      "email-password",
-    );
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(sessions, hashToken(signedUp.session.id)))
+        ?.attributes["method"],
+    ).toBe("email-password");
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(sessions, hashToken(signedIn.session.id)))
+        ?.attributes["method"],
+    ).toBe("email-password");
   });
 
   it("does nothing when no session was issued", async () => {
@@ -157,6 +163,6 @@ describe("LastLoginMethodPlugin", () => {
     );
 
     expect(captured).toEqual([]);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 });

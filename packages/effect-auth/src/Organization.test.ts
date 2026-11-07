@@ -1,5 +1,15 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, DateTime, Effect, Order, Result } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  MutableHashMap,
+  Option,
+  Order,
+  Result,
+} from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -26,14 +36,14 @@ import {
 } from "./Organization.ts";
 import * as OrganizationModule from "./Organization.ts";
 
-const organizations = new Map<string, Organization>();
-const members = new Map<string, Member>();
-const invitations = new Map<string, Invitation>();
-const teams = new Map<string, Team>();
+const organizations = MutableHashMap.empty<string, Organization>();
+const members = MutableHashMap.empty<string, Member>();
+const invitations = MutableHashMap.empty<string, Invitation>();
+const teams = MutableHashMap.empty<string, Team>();
 const teamMembers: TeamMember[] = [];
-const orgRoles = new Map<string, OrgRole>();
-const domainRecords = new Map<string, OrganizationDomain>();
-const identifierRecords = new Map<string, Identifier>();
+const orgRoles = MutableHashMap.empty<string, OrgRole>();
+const domainRecords = MutableHashMap.empty<string, OrganizationDomain>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
 
 /** Composite key for the custom-role table. */
 const orgRoleKey = (organizationId: string, role: string): string =>
@@ -48,7 +58,7 @@ const seedEmail = (userId: string, email: string): void => {
     value: email,
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
 };
 
 /** Drop every team-membership row matching `predicate` (in-place). */
@@ -60,142 +70,154 @@ const removeTeamMemberRows = (predicate: (teamMember: TeamMember) => boolean): v
 const organizationStore = {
   createOrganization: (organization: Organization) =>
     Effect.sync(() => {
-      organizations.set(organization.id, organization);
+      MutableHashMap.set(organizations, organization.id, organization);
       return organization;
     }),
 
   getOrganizationById: (organizationId: string) =>
-    Effect.sync(() => organizations.get(organizationId) ?? null),
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
 
   getOrganizationBySlug: (slug: string) =>
     Effect.sync(
       () =>
-        Array.from(organizations.values()).find((organization) => organization.slug === slug) ??
-        null,
+        Array.from(MutableHashMap.values(organizations)).find(
+          (organization) => organization.slug === slug,
+        ) ?? null,
     ),
 
   updateOrganization: (organization: Organization) =>
     Effect.sync(() => {
-      organizations.set(organization.id, organization);
+      MutableHashMap.set(organizations, organization.id, organization);
       return organization;
     }),
 
   deleteOrganization: (organizationId: string) =>
     Effect.sync(() => {
-      organizations.delete(organizationId);
-      members.forEach((member, id) => {
+      MutableHashMap.remove(organizations, organizationId);
+      MutableHashMap.forEach(members, (member, id) => {
         if (member.organizationId === organizationId) {
-          members.delete(id);
+          MutableHashMap.remove(members, id);
         }
       });
-      invitations.forEach((invitation, id) => {
+      MutableHashMap.forEach(invitations, (invitation, id) => {
         if (invitation.organizationId === organizationId) {
-          invitations.delete(id);
+          MutableHashMap.remove(invitations, id);
         }
       });
-      teams.forEach((team, id) => {
+      MutableHashMap.forEach(teams, (team, id) => {
         if (team.organizationId === organizationId) {
-          teams.delete(id);
+          MutableHashMap.remove(teams, id);
           removeTeamMemberRows((teamMember) => teamMember.teamId === id);
         }
       });
-      orgRoles.forEach((orgRole, key) => {
+      MutableHashMap.forEach(orgRoles, (orgRole, key) => {
         if (orgRole.organizationId === organizationId) {
-          orgRoles.delete(key);
+          MutableHashMap.remove(orgRoles, key);
         }
       });
     }),
 
   createMember: (member: Member) =>
     Effect.sync(() => {
-      members.set(member.id, member);
+      MutableHashMap.set(members, member.id, member);
       return member;
     }),
 
   getMember: (organizationId: string, userId: string) =>
     Effect.sync(
       () =>
-        Array.from(members.values()).find(
+        Array.from(MutableHashMap.values(members)).find(
           (member) => member.organizationId === organizationId && member.userId === userId,
         ) ?? null,
     ),
 
   updateMember: (member: Member) =>
     Effect.sync(() => {
-      members.set(member.id, member);
+      MutableHashMap.set(members, member.id, member);
       return member;
     }),
 
   deleteMember: (memberId: string) =>
     Effect.sync(() => {
-      members.delete(memberId);
+      MutableHashMap.remove(members, memberId);
     }),
 
   listMembersByOrganization: (organizationId: string) =>
     Effect.sync(() =>
-      Array.from(members.values()).filter((member) => member.organizationId === organizationId),
+      Array.from(MutableHashMap.values(members)).filter(
+        (member) => member.organizationId === organizationId,
+      ),
     ),
 
   listMembersByUser: (userId: string) =>
-    Effect.sync(() => Array.from(members.values()).filter((member) => member.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(members)).filter((member) => member.userId === userId),
+    ),
 
   countMembersByOrganization: (organizationId: string) =>
     Effect.sync(
       () =>
-        Array.from(members.values()).filter((member) => member.organizationId === organizationId)
-          .length,
+        Array.from(MutableHashMap.values(members)).filter(
+          (member) => member.organizationId === organizationId,
+        ).length,
     ),
 
   createInvitation: (invitation: Invitation) =>
     Effect.sync(() => {
-      invitations.set(invitation.id, invitation);
+      MutableHashMap.set(invitations, invitation.id, invitation);
       return invitation;
     }),
 
-  getInvitation: (invitationId: string) => Effect.sync(() => invitations.get(invitationId) ?? null),
+  getInvitation: (invitationId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(invitations, invitationId))),
 
   updateInvitation: (invitation: Invitation) =>
     Effect.sync(() => {
-      invitations.set(invitation.id, invitation);
+      MutableHashMap.set(invitations, invitation.id, invitation);
       return invitation;
     }),
 
   listInvitationsByOrganization: (organizationId: string) =>
     Effect.sync(() =>
-      Array.from(invitations.values()).filter(
+      Array.from(MutableHashMap.values(invitations)).filter(
         (invitation) => invitation.organizationId === organizationId,
       ),
     ),
 
   listInvitationsByEmail: (email: string) =>
     Effect.sync(() =>
-      Array.from(invitations.values()).filter((invitation) => invitation.email === email),
+      Array.from(MutableHashMap.values(invitations)).filter(
+        (invitation) => invitation.email === email,
+      ),
     ),
 
   createTeam: (team: Team) =>
     Effect.sync(() => {
-      teams.set(team.id, team);
+      MutableHashMap.set(teams, team.id, team);
       return team;
     }),
 
-  getTeam: (teamId: string) => Effect.sync(() => teams.get(teamId) ?? null),
+  getTeam: (teamId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(teams, teamId))),
 
   updateTeam: (team: Team) =>
     Effect.sync(() => {
-      if (!teams.has(team.id)) return null;
-      teams.set(team.id, team);
+      if (!MutableHashMap.has(teams, team.id)) return null;
+      MutableHashMap.set(teams, team.id, team);
       return team;
     }),
 
   deleteTeam: (teamId: string) =>
     Effect.sync(() => {
-      teams.delete(teamId);
+      MutableHashMap.remove(teams, teamId);
       removeTeamMemberRows((teamMember) => teamMember.teamId === teamId);
     }),
 
   listTeams: (organizationId: string) =>
     Effect.sync(() =>
-      Array.from(teams.values()).filter((team) => team.organizationId === organizationId),
+      Array.from(MutableHashMap.values(teams)).filter(
+        (team) => team.organizationId === organizationId,
+      ),
     ),
 
   addTeamMember: (teamId: string, userId: string) =>
@@ -223,7 +245,7 @@ const organizationStore = {
     Effect.sync(() =>
       teamMembers
         .filter((teamMember) => teamMember.userId === userId)
-        .map((teamMember) => teams.get(teamMember.teamId))
+        .map((teamMember) => Option.getOrUndefined(MutableHashMap.get(teams, teamMember.teamId)))
         .filter(
           (team): team is Team => team !== undefined && team.organizationId === organizationId,
         ),
@@ -231,21 +253,25 @@ const organizationStore = {
 
   upsertOrgRole: (orgRole: OrgRole) =>
     Effect.sync(() => {
-      orgRoles.set(orgRoleKey(orgRole.organizationId, orgRole.role), orgRole);
+      MutableHashMap.set(orgRoles, orgRoleKey(orgRole.organizationId, orgRole.role), orgRole);
       return orgRole;
     }),
 
   getOrgRole: (organizationId: string, role: string) =>
-    Effect.sync(() => orgRoles.get(orgRoleKey(organizationId, role)) ?? null),
+    Effect.sync(() =>
+      Option.getOrNull(MutableHashMap.get(orgRoles, orgRoleKey(organizationId, role))),
+    ),
 
   listOrgRoles: (organizationId: string) =>
     Effect.sync(() =>
-      Array.from(orgRoles.values()).filter((orgRole) => orgRole.organizationId === organizationId),
+      Array.from(MutableHashMap.values(orgRoles)).filter(
+        (orgRole) => orgRole.organizationId === organizationId,
+      ),
     ),
 
   deleteOrgRole: (organizationId: string, role: string) =>
     Effect.sync(() => {
-      orgRoles.delete(orgRoleKey(organizationId, role));
+      MutableHashMap.remove(orgRoles, orgRoleKey(organizationId, role));
     }),
 };
 
@@ -329,14 +355,14 @@ const runServiceWithVerifier = <A, E>(
 
 /** Empty every in-memory table between tests. */
 const resetStores = (): void => {
-  organizations.clear();
-  members.clear();
-  invitations.clear();
-  teams.clear();
+  MutableHashMap.clear(organizations);
+  MutableHashMap.clear(members);
+  MutableHashMap.clear(invitations);
+  MutableHashMap.clear(teams);
   teamMembers.length = 0;
-  orgRoles.clear();
-  domainRecords.clear();
-  identifierRecords.clear();
+  MutableHashMap.clear(orgRoles);
+  MutableHashMap.clear(domainRecords);
+  MutableHashMap.clear(identifierRecords);
 };
 
 describe("OrganizationService", () => {
@@ -381,7 +407,7 @@ describe("OrganizationService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("OrganizationError");
-    expect(organizations.size).toBe(1);
+    expect(MutableHashMap.size(organizations)).toBe(1);
   });
 
   it("enforces the per-user organization limit", async () => {
@@ -398,7 +424,7 @@ describe("OrganizationService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("OrganizationError");
-    expect(organizations.size).toBe(2);
+    expect(MutableHashMap.size(organizations)).toBe(2);
   });
 
   it("respects allowUserToCreateOrganization: false", async () => {
@@ -409,7 +435,7 @@ describe("OrganizationService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("OrganizationError");
-    expect(organizations.size).toBe(0);
+    expect(MutableHashMap.size(organizations)).toBe(0);
   });
 
   it("permission-checks organization update and delete", async () => {
@@ -448,7 +474,7 @@ describe("OrganizationService", () => {
     expect(result.ownerUpdate.slug).toBe("acme-renamed");
     expect(result.memberDelete._tag).toBe("Failure");
     expect(result.afterDelete._tag).toBe("Failure");
-    expect(organizations.size).toBe(0);
+    expect(MutableHashMap.size(organizations)).toBe(0);
   });
 
   it("rejects an organization update to a taken slug", async () => {
@@ -518,7 +544,9 @@ describe("OrganizationService", () => {
     expect(result.member.userId).toBe("invitee-user");
     expect(result.member.role).toBe("member");
     expect(result.afterAccept).toHaveLength(0);
-    expect(invitations.get(result.invitation.id)?.status).toBe("accepted");
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(invitations, result.invitation.id))?.status,
+    ).toBe("accepted");
     expect(result.full.members).toHaveLength(2);
   });
 
@@ -542,7 +570,7 @@ describe("OrganizationService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("OrganizationError");
-    expect(Array.from(invitations.values())[0].status).toBe("pending");
+    expect(Array.from(MutableHashMap.values(invitations))[0].status).toBe("pending");
   });
 
   it("rejects accepting an expired invitation", async () => {
@@ -950,7 +978,7 @@ describe("OrganizationService", () => {
     expect(result.strangerLists._tag).toBe("Failure");
     expect(result.strangerListsMembers._tag).toBe("Failure");
     expect(result.strangerListsForMember._tag).toBe("Failure");
-    expect(teams.size).toBe(0);
+    expect(MutableHashMap.size(teams)).toBe(0);
   });
 
   it("requires team members to already belong to the organization", async () => {
@@ -1344,7 +1372,9 @@ describe("OrganizationService", () => {
       }),
     );
 
-    expect([...orgRoles.values()].map((orgRole) => orgRole.role)).toEqual(["auditor"]);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(orgRoles)).map((orgRole) => orgRole.role),
+    ).toEqual(["auditor"]);
   });
 
   it("re-upserting a role keeps createdAt and refreshes updatedAt", async () => {
@@ -1624,7 +1654,7 @@ describe("OrganizationService - invitations", () => {
 
           // Age the row: a pending-but-expired invitation is exactly what a
           // resend is for.
-          invitations.set(invitation.id, {
+          MutableHashMap.set(invitations, invitation.id, {
             ...invitation,
             expiresAt: (yield* Clock.currentTimeMillis) - 1_000,
           });

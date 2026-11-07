@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Duration, Effect, Layer } from "effect";
+import { DateTime, Duration, Effect, Layer, MutableHashMap, Option } from "effect";
 import { Hooks, type HookError } from "../Hooks.ts";
 import {
   AccountLockoutPlugin,
@@ -25,7 +25,7 @@ const authResult = (email: string): AuthResult => ({
 });
 
 interface Harness {
-  readonly records: Map<string, AccountLockoutRecord>;
+  readonly records: MutableHashMap.MutableHashMap<string, AccountLockoutRecord>;
   readonly beforeSignIn: (email: string) => Promise<SignInInput>;
   readonly beforeSignInResult: (email: string) => Promise<SignInInput | HookError>;
   readonly afterSignIn: (email: string) => Promise<AuthResult>;
@@ -35,7 +35,7 @@ const makeHarness = (
   config?: AccountLockoutConfig,
   storeOverride?: typeof AccountLockoutStore.Service,
 ): Harness => {
-  const records = new Map<string, AccountLockoutRecord>();
+  const records = MutableHashMap.empty<string, AccountLockoutRecord>();
   const store = storeOverride ?? memoryAccountLockoutStore(records);
 
   const layer = AccountLockoutPlugin(config).pipe(
@@ -94,40 +94,49 @@ describe("AccountLockoutPlugin", () => {
 
     // Simulate the window elapsing by moving the lock into the past.
     const key = "lockout:user@example.com";
-    const rec = h.records.get(key);
+    const rec = Option.getOrUndefined(MutableHashMap.get(h.records, key));
     assert(rec !== undefined, "the lock is recorded");
 
-    h.records.set(key, { ...rec, lockedUntil: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1 });
+    MutableHashMap.set(h.records, key, {
+      ...rec,
+      lockedUntil: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1,
+    });
 
     // Now allowed again (counter reset to a fresh streak).
     const allowed = await h.beforeSignInResult("user@example.com");
     expect(allowed).not.toBeInstanceOf(AccountLockedError);
-    expect(h.records.get(key)?.failures).toBe(1);
+    expect(Option.getOrUndefined(MutableHashMap.get(h.records, key))?.failures).toBe(1);
   });
 
   it("resets the counter on a successful sign-in", async () => {
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
     await h.beforeSignIn("user@example.com");
     await h.beforeSignIn("user@example.com");
-    expect(h.records.get("lockout:user@example.com")?.failures).toBe(2);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(h.records, "lockout:user@example.com"))?.failures,
+    ).toBe(2);
 
     await h.afterSignIn("user@example.com");
-    expect(h.records.has("lockout:user@example.com")).toBe(false);
+    expect(MutableHashMap.has(h.records, "lockout:user@example.com")).toBe(false);
 
     // A fresh streak starts from zero, so the identifier is nowhere near locked.
     await h.beforeSignIn("user@example.com");
-    expect(h.records.get("lockout:user@example.com")?.failures).toBe(1);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(h.records, "lockout:user@example.com"))?.failures,
+    ).toBe(1);
   });
 
   it("keys by normalized email (case/whitespace-insensitive)", async () => {
     const h = makeHarness({ maxAttempts: 5, lockoutDurationMs: 60_000 });
     await h.beforeSignIn("User@Example.com");
     await h.beforeSignIn("  user@example.com ");
-    expect(h.records.get("lockout:user@example.com")?.failures).toBe(2);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(h.records, "lockout:user@example.com"))?.failures,
+    ).toBe(2);
   });
 
   it("concurrent attempts do not lose increments (atomic registerAttempt)", async () => {
-    const records = new Map<string, AccountLockoutRecord>();
+    const records = MutableHashMap.empty<string, AccountLockoutRecord>();
     const store = memoryAccountLockoutStore(records);
     const options = {
       maxAttempts: 100,
@@ -142,14 +151,14 @@ describe("AccountLockoutPlugin", () => {
       ),
     );
 
-    expect(records.get("lockout:burst")?.failures).toBe(25);
+    expect(Option.getOrUndefined(MutableHashMap.get(records, "lockout:burst"))?.failures).toBe(25);
   });
 
   it("registerAttempt does not increment or extend an active lock", async () => {
-    const records = new Map<string, AccountLockoutRecord>();
+    const records = MutableHashMap.empty<string, AccountLockoutRecord>();
     const store = memoryAccountLockoutStore(records);
     const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
-    records.set("lockout:k", { failures: 5, lockedUntil: now + 60_000 });
+    MutableHashMap.set(records, "lockout:k", { failures: 5, lockedUntil: now + 60_000 });
 
     const result = await Effect.runPromise(
       store.registerAttempt("lockout:k", { maxAttempts: 5, lockoutDurationMs: 60_000, now }),
@@ -159,7 +168,7 @@ describe("AccountLockoutPlugin", () => {
   });
 
   it("a delete failure after a successful sign-in is isolated (does not abort)", async () => {
-    const records = new Map<string, AccountLockoutRecord>();
+    const records = MutableHashMap.empty<string, AccountLockoutRecord>();
     const flaky: typeof AccountLockoutStore.Service = {
       ...memoryAccountLockoutStore(records),
       delete: () => Effect.fail(new AuthError({ message: "store down" })),

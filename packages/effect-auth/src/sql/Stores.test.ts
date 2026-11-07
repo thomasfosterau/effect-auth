@@ -8,6 +8,7 @@ import {
   Layer,
   Order,
   Predicate,
+  Record as Rec,
   Schema,
   Stream,
 } from "effect";
@@ -169,7 +170,7 @@ const sqlite: StoreEngine = {
         readonly name: string;
         readonly type: string;
       }>`PRAGMA table_info(${sql.literal(table)})`;
-      return Object.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
+      return Rec.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
     }),
 };
 
@@ -222,7 +223,7 @@ const postgres: StoreEngine = {
       const rows = yield* sql<{ readonly name: string; readonly type: string }>`
         SELECT column_name AS name, data_type AS type FROM information_schema.columns
         WHERE table_schema = current_schema() AND table_name = ${table}`;
-      return Object.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
+      return Rec.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
     }),
 };
 
@@ -976,7 +977,7 @@ const storeContract = (engine: StoreEngine): void => {
       await run(
         Effect.gen(function* () {
           yield* Effect.forEach(
-            Object.entries(timestampColumns),
+            Rec.toEntries(timestampColumns),
             ([table, columns]) =>
               engine.columnTypes(table).pipe(
                 Effect.map((typeByCol) => {

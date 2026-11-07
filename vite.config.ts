@@ -170,8 +170,6 @@ export default defineConfig({
       // attributes, metadata, JWT claims, drizzle column types); narrowing
       // them is an API change (60 / 0).
       "effect/no-unsafe-dictionary-type": "warn",
-      // Exported `Map` parameters and `ReadonlyMap` results (14 / 292).
-      "effect/avoid-native-object-helpers": "warn",
     },
     overrides: [
       {
@@ -207,6 +205,22 @@ export default defineConfig({
           "packages/effect-auth/src/testing/StoreConformance.test.ts",
         ],
         rules: { "vitest/valid-title": "off" },
+      },
+      {
+        // Native `Map`s that are part of a published type, not storage: the
+        // WebAuthn CBOR decoder returns a CBOR map as `CBORMap`, a public
+        // `ReadonlyMap` that callers tell from an array with `instanceof Map`,
+        // and `RbacConfig` takes `ReadonlyMap` as well as records, which its
+        // test passes. The session cookie cache's `gateAttributes` are a public
+        // `ReadonlySet`, held until the owner decides whether it becomes a
+        // `HashSet` (asked on #443). Changing any of them is an API change.
+        files: [
+          "packages/effect-auth/src/multifactor/WebAuthnCodec.ts",
+          "packages/effect-auth/src/Rbac.test.ts",
+          "packages/effect-auth/src/SessionCookieCache.ts",
+          "packages/effect-auth/src/SessionCookieCache.test.ts",
+        ],
+        rules: { "effect/avoid-native-object-helpers": "off" },
       },
       {
         // Plain Node tooling that runs no Effect (the dist smoke test and the

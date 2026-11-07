@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Logger, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Logger, MutableHashMap, Schema } from "effect";
 import {
   EmailSender,
   SmsSender,
@@ -28,7 +28,7 @@ const user = (attributes: Types.Attributes = {}): Types.User => ({
 const identifierStoreWith = (
   ...entries: Array<{ type: IdentifierType; value: string; verified?: boolean }>
 ) => {
-  const records = new Map<string, Identifier>();
+  const records = MutableHashMap.empty<string, Identifier>();
   Arr.forEach(entries, (entry) => {
     const identifier = makeIdentifier({
       userId: "u1",
@@ -37,7 +37,7 @@ const identifierStoreWith = (
       verified: entry.verified ?? true,
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    records.set(identifier.id, identifier);
+    MutableHashMap.set(records, identifier.id, identifier);
   });
   return memoryIdentifierStore(records);
 };

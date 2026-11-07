@@ -1,5 +1,16 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Clock, DateTime, Effect, Layer, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  MutableHashSet,
+  Option,
+  Predicate,
+  Schema,
+} from "effect";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
@@ -44,20 +55,20 @@ const HOUR = 60 * 60 * 1000;
 
 /** Build a handler wired with real org/admin/api-key/jwt services + in-memory stores. */
 const makeFixture = () => {
-  const usersById = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
-  const sessions = new Map<string, Types.Session>();
-  const orgs = new Map<string, Organization>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
+  const orgs = MutableHashMap.empty<string, Organization>();
   const members: Member[] = [];
-  const invitations = new Map<string, Invitation>();
-  const teams = new Map<string, Team>();
+  const invitations = MutableHashMap.empty<string, Invitation>();
+  const teams = MutableHashMap.empty<string, Team>();
   const teamMembers: TeamMember[] = [];
   const removeTeamMembers = (teamId: string): void => {
     const kept = teamMembers.filter((m) => m.teamId !== teamId);
     teamMembers.splice(0, teamMembers.length, ...kept);
   };
-  const orgRoles = new Map<string, OrgRole>();
-  const apiKeys = new Map<string, ApiKey>();
+  const orgRoles = MutableHashMap.empty<string, OrgRole>();
+  const apiKeys = MutableHashMap.empty<string, ApiKey>();
   const jwtKeys: JwtKeyPair[] = [];
 
   const seedUser = (id: string, email: string, attributes: Types.Attributes = {}) => {
@@ -68,7 +79,7 @@ const makeFixture = () => {
       updatedAt: now,
       attributes,
     };
-    usersById.set(id, user);
+    MutableHashMap.set(usersById, id, user);
     // The login handle lives in the identifier store (verified email).
     const identifier = makeIdentifier({
       userId: id,
@@ -78,7 +89,7 @@ const makeFixture = () => {
       verifiedAt: now,
       now,
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
     return user;
   };
 
@@ -88,7 +99,7 @@ const makeFixture = () => {
     );
     const tokenHash = hashToken(rawToken);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    sessions.set(tokenHash, {
+    MutableHashMap.set(sessions, tokenHash, {
       id: tokenHash,
       userId,
       expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: HOUR })),
@@ -100,57 +111,67 @@ const makeFixture = () => {
   };
 
   const userStore = {
-    get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
+    get: (userId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
   };
 
   const userServiceStore = {
     get: userStore.get,
     update: (user: Types.User) =>
       Effect.sync(() => {
-        usersById.set(user.id, user);
+        MutableHashMap.set(usersById, user.id, user);
         return user;
       }),
-    delete: (userId: string) => Effect.sync(() => void usersById.delete(userId)),
+    delete: (userId: string) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 
   const sessionStore: typeof SessionStore.Service = {
     create: (session: Types.Session) =>
       Effect.sync(() => {
-        sessions.set(session.id, session);
+        MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
-    get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+    get: (sessionId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
     update: (session: Types.Session) =>
       Effect.sync(() => {
-        sessions.set(session.id, session);
+        MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
-    delete: (sessionId: string) => Effect.sync(() => void sessions.delete(sessionId)),
+    delete: (sessionId: string) =>
+      Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        sessions.forEach((s, id) => {
-          if (s.userId === userId) sessions.delete(id);
+        MutableHashMap.forEach(sessions, (s, id) => {
+          if (s.userId === userId) MutableHashMap.remove(sessions, id);
         });
       }),
     listByUserId: (userId: string) =>
-      Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+      ),
   };
 
   const orgStore = {
-    createOrganization: (o: Organization) => Effect.sync(() => (orgs.set(o.id, o), o)),
-    getOrganizationById: (id: string) => Effect.succeed(orgs.get(id) ?? null),
+    createOrganization: (o: Organization) =>
+      Effect.sync(() => (MutableHashMap.set(orgs, o.id, o), o)),
+    getOrganizationById: (id: string) =>
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(orgs, id))),
     getOrganizationBySlug: (slug: string) =>
-      Effect.succeed([...orgs.values()].find((o) => o.slug === slug) ?? null),
-    updateOrganization: (o: Organization) => Effect.sync(() => (orgs.set(o.id, o), o)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(orgs)).find((o) => o.slug === slug) ?? null,
+      ),
+    updateOrganization: (o: Organization) =>
+      Effect.sync(() => (MutableHashMap.set(orgs, o.id, o), o)),
     deleteOrganization: (id: string) =>
       Effect.sync(() => {
-        orgs.delete(id);
-        orgRoles.forEach((orgRole, key) => {
-          if (orgRole.organizationId === id) orgRoles.delete(key);
+        MutableHashMap.remove(orgs, id);
+        MutableHashMap.forEach(orgRoles, (orgRole, key) => {
+          if (orgRole.organizationId === id) MutableHashMap.remove(orgRoles, key);
         });
-        teams.forEach((team, teamId) => {
+        MutableHashMap.forEach(teams, (team, teamId) => {
           if (team.organizationId !== id) return;
-          teams.delete(teamId);
+          MutableHashMap.remove(teams, teamId);
           removeTeamMembers(teamId);
         });
       }),
@@ -176,28 +197,42 @@ const makeFixture = () => {
       Effect.succeed(members.filter((m) => m.userId === userId)),
     countMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
-    createInvitation: (inv: Invitation) => Effect.sync(() => (invitations.set(inv.id, inv), inv)),
-    getInvitation: (id: string) => Effect.succeed(invitations.get(id) ?? null),
-    updateInvitation: (inv: Invitation) => Effect.sync(() => (invitations.set(inv.id, inv), inv)),
+    createInvitation: (inv: Invitation) =>
+      Effect.sync(() => (MutableHashMap.set(invitations, inv.id, inv), inv)),
+    getInvitation: (id: string) =>
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(invitations, id))),
+    updateInvitation: (inv: Invitation) =>
+      Effect.sync(() => (MutableHashMap.set(invitations, inv.id, inv), inv)),
     listInvitationsByOrganization: (organizationId: string) =>
-      Effect.succeed([...invitations.values()].filter((i) => i.organizationId === organizationId)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(invitations)).filter(
+          (i) => i.organizationId === organizationId,
+        ),
+      ),
     listInvitationsByEmail: (email: string) =>
-      Effect.succeed([...invitations.values()].filter((i) => i.email === email)),
-    createTeam: (t: Team) => Effect.sync(() => (teams.set(t.id, t), t)),
-    getTeam: (teamId: string) => Effect.succeed(teams.get(teamId) ?? null),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(invitations)).filter((i) => i.email === email),
+      ),
+    createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),
+    getTeam: (teamId: string) =>
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
     updateTeam: (t: Team) =>
       Effect.sync(() => {
-        if (!teams.has(t.id)) return null;
-        teams.set(t.id, t);
+        if (!MutableHashMap.has(teams, t.id)) return null;
+        MutableHashMap.set(teams, t.id, t);
         return t;
       }),
     deleteTeam: (teamId: string) =>
       Effect.sync(() => {
-        teams.delete(teamId);
+        MutableHashMap.remove(teams, teamId);
         removeTeamMembers(teamId);
       }),
     listTeams: (organizationId: string) =>
-      Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(teams)).filter(
+          (t) => t.organizationId === organizationId,
+        ),
+      ),
     addTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
         const teamMember: TeamMember = {
@@ -219,32 +254,36 @@ const makeFixture = () => {
       Effect.succeed(
         teamMembers
           .filter((m) => m.userId === userId)
-          .map((m) => teams.get(m.teamId))
+          .map((m) => Option.getOrUndefined(MutableHashMap.get(teams, m.teamId)))
           .filter((t): t is Team => t !== undefined && t.organizationId === organizationId),
       ),
     upsertOrgRole: (r: OrgRole) =>
-      Effect.sync(() => (orgRoles.set(`${r.organizationId} ${r.role}`, r), r)),
+      Effect.sync(() => (MutableHashMap.set(orgRoles, `${r.organizationId} ${r.role}`, r), r)),
     getOrgRole: (organizationId: string, role: string) =>
-      Effect.succeed(orgRoles.get(`${organizationId} ${role}`) ?? null),
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(orgRoles, `${organizationId} ${role}`))),
     listOrgRoles: (organizationId: string) =>
-      Effect.succeed([...orgRoles.values()].filter((r) => r.organizationId === organizationId)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(orgRoles)).filter(
+          (r) => r.organizationId === organizationId,
+        ),
+      ),
     deleteOrgRole: (organizationId: string, role: string) =>
-      Effect.sync(() => void orgRoles.delete(`${organizationId} ${role}`)),
+      Effect.sync(() => void MutableHashMap.remove(orgRoles, `${organizationId} ${role}`)),
   };
 
   const adminUserStore = {
     listUsers: (query: { limit?: number; offset?: number; searchEmail?: string }) =>
       Effect.sync(() => {
-        let all = [...usersById.values()];
+        let all = Arr.fromIterable(MutableHashMap.values(usersById));
         if (query.searchEmail !== undefined) {
           // Emails live in the identifier store now; search resolves through it.
           const needle = query.searchEmail.toLowerCase();
-          const matching = new Set(
-            [...identifierRecords.values()]
+          const matching = MutableHashSet.fromIterable(
+            Arr.fromIterable(MutableHashMap.values(identifierRecords))
               .filter((i) => i.type === "email" && i.value.toLowerCase().includes(needle))
               .map((i) => i.userId),
           );
-          all = all.filter((u) => matching.has(u.id));
+          all = all.filter((u) => MutableHashSet.has(matching, u.id));
         }
         const total = all.length;
         const offset = query.offset ?? 0;
@@ -263,7 +302,7 @@ const makeFixture = () => {
           updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
           attributes: input.attributes ?? {},
         };
-        usersById.set(id, user);
+        MutableHashMap.set(usersById, id, user);
         return { user, created: true };
       }),
 
@@ -271,14 +310,18 @@ const makeFixture = () => {
   };
 
   const apiKeyStore = {
-    create: (k: ApiKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
-    get: (id: string) => Effect.succeed(apiKeys.get(id) ?? null),
+    create: (k: ApiKey) => Effect.sync(() => (MutableHashMap.set(apiKeys, k.id, k), k)),
+    get: (id: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(apiKeys, id))),
     getByHash: (keyHash: string) =>
-      Effect.succeed([...apiKeys.values()].find((k) => k.keyHash === keyHash) ?? null),
-    update: (k: ApiKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
-    delete: (id: string) => Effect.sync(() => void apiKeys.delete(id)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(apiKeys)).find((k) => k.keyHash === keyHash) ?? null,
+      ),
+    update: (k: ApiKey) => Effect.sync(() => (MutableHashMap.set(apiKeys, k.id, k), k)),
+    delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(apiKeys, id)),
     listByUserId: (userId: string) =>
-      Effect.succeed([...apiKeys.values()].filter((k) => k.userId === userId)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((k) => k.userId === userId),
+      ),
   };
 
   const jwtKeyStore = {
@@ -289,26 +332,27 @@ const makeFixture = () => {
 
   // In-memory RateLimitStore: ApiKeyService resolves RateLimiter at construction
   // time even though these tests never exercise rate-limited paths.
-  const rateLimitEntries = new Map<string, RateLimitEntry>();
+  const rateLimitEntries = MutableHashMap.empty<string, RateLimitEntry>();
   const rateLimitStore = {
-    get: (key: string) => Effect.sync(() => rateLimitEntries.get(key) ?? null),
+    get: (key: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(rateLimitEntries, key))),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
-      Effect.sync(() => void rateLimitEntries.set(key, entry)),
+      Effect.sync(() => void MutableHashMap.set(rateLimitEntries, key, entry)),
     increment: (key: string, ttl: number) =>
       // Starts a new window when there is none or it has expired, as the
       // RateLimitStore contract requires (#455).
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
-          const entry = rateLimitEntries.get(key);
+          const entry = Option.getOrUndefined(MutableHashMap.get(rateLimitEntries, key));
           const next: RateLimitEntry =
             entry === undefined || now >= entry.resetAt
               ? { key, count: 1, resetAt: now + ttl * 1000 }
               : { ...entry, count: entry.count + 1 };
-          rateLimitEntries.set(key, next);
+          MutableHashMap.set(rateLimitEntries, key, next);
           return next.count;
         }),
       ),
-    delete: (key: string) => Effect.sync(() => void rateLimitEntries.delete(key)),
+    delete: (key: string) => Effect.sync(() => void MutableHashMap.remove(rateLimitEntries, key)),
   };
 
   // Stage 0: raw stores + Hooks + dummy layers for AuthServices members these
@@ -473,7 +517,11 @@ describe("HTTP organization endpoints", () => {
       jsonReq("/organization/set-active", { organizationId: org.id }, sid),
     );
     expect(active.status).toBe(200);
-    expect(fx.sessions.get(hashToken(sid))?.attributes["activeOrganizationId"]).toBe(org.id);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(fx.sessions, hashToken(sid)))?.attributes[
+        "activeOrganizationId"
+      ],
+    ).toBe(org.id);
 
     // Delete.
     const deleted = await fx.handler(req("DELETE", `/organization/${org.id}`, sid));

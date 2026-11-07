@@ -1,6 +1,15 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Array as Arr, DateTime, Effect, Layer, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Predicate,
+  Schema,
+} from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -90,16 +99,16 @@ const withJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {
 // ---------------------------------------------------------------------------
 
 const makeMemoryNonceStore = (): typeof GoogleOneTapNonceStore.Service => {
-  const store = new Map<string, { expiresAt: number }>();
+  const store = MutableHashMap.empty<string, { expiresAt: number }>();
   return {
     create: (nonce, expiresAt) =>
       Effect.sync(() => {
-        store.set(nonce, { expiresAt });
+        MutableHashMap.set(store, nonce, { expiresAt });
       }),
-    get: (nonce) => Effect.sync(() => store.get(nonce) ?? null),
+    get: (nonce) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(store, nonce))),
     delete: (nonce) =>
       Effect.sync(() => {
-        store.delete(nonce);
+        MutableHashMap.remove(store, nonce);
       }),
   };
 };
@@ -107,8 +116,8 @@ const makeMemoryNonceStore = (): typeof GoogleOneTapNonceStore.Service => {
 // --- Service-level tests --------------------------------------------------------
 
 const makeStores = () => {
-  const users = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
+  const users = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
   let userSeq = 0;
   /** The `identifier` each `createUser` call was given. */
@@ -116,7 +125,7 @@ const makeStores = () => {
 
   const userStore: typeof OAuthUserStore.Service = {
     getUser: (userId) => {
-      const u = users.get(userId);
+      const u = Option.getOrUndefined(MutableHashMap.get(users, userId));
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
     createUser: (input) =>
@@ -131,12 +140,12 @@ const makeStores = () => {
           updatedAt: now,
           attributes: {},
         };
-        users.set(user.id, user);
+        MutableHashMap.set(users, user.id, user);
         return { user, created: true };
       }),
   };
   const coreUserStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
   };
   const sessionsCleared: Array<string> = [];
   const sessionManager: typeof SessionService.Service = {
@@ -161,7 +170,7 @@ const makeStores = () => {
   };
 
   const nonceStore = makeMemoryNonceStore();
-  const passwordHashes = new Map<string, string>();
+  const passwordHashes = MutableHashMap.empty<string, string>();
 
   const layer = Layer.mergeAll(
     Layer.succeed(OAuthUserStore)(userStore),
@@ -169,7 +178,7 @@ const makeStores = () => {
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(EmailPasswordStore)(
-      memoryEmailPasswordStore({ users: new Map(), passwordHashes }),
+      memoryEmailPasswordStore({ users: MutableHashMap.empty(), passwordHashes }),
     ),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
     Hooks.Default,
@@ -228,7 +237,7 @@ describe("GoogleOneTapService", () => {
     expect(first.claims["sub"]).toBe("google-user-1");
     expect(second.isNewUser).toBe(false);
     expect(second.user.id).toBe(first.user.id);
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
   });
 
   it("accepts the bare `accounts.google.com` issuer", async () => {
@@ -314,7 +323,12 @@ describe("GoogleOneTapService", () => {
     // A squatter signed up with the address and a password they know; it was
     // never verified.
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    users.set("user-squat", { id: "user-squat", createdAt: now, updatedAt: now, attributes: {} });
+    MutableHashMap.set(users, "user-squat", {
+      id: "user-squat",
+      createdAt: now,
+      updatedAt: now,
+      attributes: {},
+    });
     await Effect.runPromise(
       identifiers.create(
         makeIdentifier({
@@ -325,7 +339,7 @@ describe("GoogleOneTapService", () => {
         }),
       ),
     );
-    passwordHashes.set("user-squat", "squatter-hash");
+    MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
 
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "squat-nonce";
@@ -341,7 +355,7 @@ describe("GoogleOneTapService", () => {
     );
 
     expect(result.user.id).toBe("user-squat");
-    expect(passwordHashes.has("user-squat")).toBe(false);
+    expect(MutableHashMap.has(passwordHashes, "user-squat")).toBe(false);
     expect(sessionsCleared).toEqual(["user-squat"]);
     const identifier = await Effect.runPromise(identifiers.getByValue("email", "alice@gmail.test"));
     expect(identifier?.verified).toBe(true);
@@ -421,15 +435,15 @@ describe("GoogleOneTapService", () => {
 // --- HTTP layer ------------------------------------------------------------------
 
 const makeHttpFixture = () => {
-  const usersById = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifierRecords);
-  const sessions = new Map<string, Types.Session>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
   let userSeq = 0;
 
   const oauthUserStore: typeof OAuthUserStore.Service = {
     getUser: (userId) => {
-      const u = usersById.get(userId);
+      const u = Option.getOrUndefined(MutableHashMap.get(usersById, userId));
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
     createUser: (input) =>
@@ -443,23 +457,25 @@ const makeHttpFixture = () => {
           updatedAt: now,
           attributes: {},
         };
-        usersById.set(user.id, user);
+        MutableHashMap.set(usersById, user.id, user);
         return { user, created: true };
       }),
   };
   const userStore = {
-    get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
+    get: (userId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
   };
   const userServiceStore = {
     get: userStore.get,
-    update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
+    update: (user: Types.User) =>
+      Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
     delete: () => Effect.void,
   };
   const sessionStore: typeof SessionStore.Service = {
-    create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
-    update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
+    create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),
   };

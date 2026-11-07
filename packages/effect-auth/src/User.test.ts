@@ -1,5 +1,5 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, DateTime, Effect, Result } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Option, Result } from "effect";
 import { UserServiceStore } from "./User.ts";
 import * as User from "./User.ts";
 import {
@@ -12,22 +12,22 @@ import {
 import { normalizeEmail } from "./utils.ts";
 import type { User as UserRecord } from "./Types.ts";
 
-const users = new Map<string, UserRecord>();
-const identifierRecords = new Map<string, Identifier>();
+const users = MutableHashMap.empty<string, UserRecord>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const identifiers = memoryIdentifierStore(identifierRecords);
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 
   update: (user: UserRecord) =>
     Effect.sync(() => {
-      users.set(user.id, user);
+      MutableHashMap.set(users, user.id, user);
       return user;
     }),
 
   delete: (userId: string) =>
     Effect.sync(() => {
-      users.delete(userId);
+      MutableHashMap.remove(users, userId);
     }),
 };
 
@@ -35,8 +35,8 @@ const makeTestContext = () => Context.make(UserServiceStore, userStore);
 
 describe("UserService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
 
     const seeded: UserRecord = {
       id: "user-1",
@@ -48,7 +48,7 @@ describe("UserService", () => {
       },
     };
 
-    users.set(seeded.id, seeded);
+    MutableHashMap.set(users, seeded.id, seeded);
     // The login handle lives in the identifier store now, not on the user.
     const emailIdentifier = makeIdentifier({
       userId: seeded.id,
@@ -56,7 +56,7 @@ describe("UserService", () => {
       value: "user@example.com",
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifierRecords.set(emailIdentifier.id, emailIdentifier);
+    MutableHashMap.set(identifierRecords, emailIdentifier.id, emailIdentifier);
   });
 
   it("should get user by id", async () => {
@@ -130,7 +130,9 @@ describe("UserService", () => {
     expect(error._tag).toBe("InvalidInputError");
     expect(error).toMatchObject({ field: "role" });
     // Nothing was written — not even the harmless half of the update.
-    expect(users.get("user-1")?.attributes).toEqual({ role: "member" });
+    expect(Option.getOrUndefined(MutableHashMap.get(users, "user-1"))?.attributes).toEqual({
+      role: "member",
+    });
   });
 
   it("refuses every configured server-only attribute, and can be opted out of", async () => {

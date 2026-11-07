@@ -37,7 +37,16 @@
  *
  * @module policy-store
  */
-import { Context, Effect, Match, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Match,
+  MutableHashMap,
+  Option,
+  Predicate,
+  Schema,
+} from "effect";
 import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
@@ -439,73 +448,74 @@ export const effectivePolicies = (
  * mirroring a SQL unique-index violation. `deleteTemplate` cascades to links,
  * per the contract.
  *
- * Pass your own `Map`s (each keyed by record id) to inspect or pre-seed state
+ * Pass your own `MutableHashMap`s (each keyed by record id) to inspect or pre-seed state
  * in tests.
  */
 export const memoryPolicyStore = (
   records: {
-    readonly policies?: Map<string, Policy.DeclarativePolicy>;
-    readonly templates?: Map<string, PolicyTemplate>;
-    readonly links?: Map<string, TemplateLink>;
+    readonly policies?: MutableHashMap.MutableHashMap<string, Policy.DeclarativePolicy>;
+    readonly templates?: MutableHashMap.MutableHashMap<string, PolicyTemplate>;
+    readonly links?: MutableHashMap.MutableHashMap<string, TemplateLink>;
   } = {},
 ): typeof PolicyStore.Service => {
-  const policies = records.policies ?? new Map<string, Policy.DeclarativePolicy>();
-  const templates = records.templates ?? new Map<string, PolicyTemplate>();
-  const links = records.links ?? new Map<string, TemplateLink>();
+  const policies = records.policies ?? MutableHashMap.empty<string, Policy.DeclarativePolicy>();
+  const templates = records.templates ?? MutableHashMap.empty<string, PolicyTemplate>();
+  const links = records.links ?? MutableHashMap.empty<string, TemplateLink>();
 
   const insert = <A extends { readonly id: string }>(
-    store: Map<string, A>,
+    store: MutableHashMap.MutableHashMap<string, A>,
     label: string,
     value: A,
   ): Effect.Effect<A, Errors.AuthError> =>
     Effect.suspend(() => {
-      if (store.has(value.id)) {
+      if (MutableHashMap.has(store, value.id)) {
         return Effect.fail(
           new Errors.AuthError({ message: `${label} "${value.id}" already exists` }),
         );
       }
-      store.set(value.id, value);
+      MutableHashMap.set(store, value.id, value);
       return Effect.succeed(value);
     });
 
   const replace = <A extends { readonly id: string }>(
-    store: Map<string, A>,
+    store: MutableHashMap.MutableHashMap<string, A>,
     value: A,
   ): Effect.Effect<A | null, Errors.AuthError> =>
     Effect.sync(() => {
-      if (!store.has(value.id)) return null;
-      store.set(value.id, value);
+      if (!MutableHashMap.has(store, value.id)) return null;
+      MutableHashMap.set(store, value.id, value);
       return value;
     });
 
   return {
-    getPolicy: (id) => Effect.sync(() => policies.get(id) ?? null),
-    listPolicies: () => Effect.sync(() => [...policies.values()]),
+    getPolicy: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(policies, id))),
+    listPolicies: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(policies))),
     createPolicy: (policy) => insert(policies, "Policy", policy),
     updatePolicy: (policy) => replace(policies, policy),
-    deletePolicy: (id) => Effect.sync(() => void policies.delete(id)),
+    deletePolicy: (id) => Effect.sync(() => void MutableHashMap.remove(policies, id)),
 
-    getTemplate: (id) => Effect.sync(() => templates.get(id) ?? null),
-    listTemplates: () => Effect.sync(() => [...templates.values()]),
+    getTemplate: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(templates, id))),
+    listTemplates: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(templates))),
     createTemplate: (value) => insert(templates, "Policy template", value),
     updateTemplate: (value) => replace(templates, value),
     deleteTemplate: (id) =>
       Effect.sync(() => {
-        templates.delete(id);
-        links.forEach((link, linkId) => {
-          if (link.templateId === id) links.delete(linkId);
-        });
+        MutableHashMap.remove(templates, id);
+        Arr.forEach(
+          Arr.filter(Arr.fromIterable(links), ([, link]) => link.templateId === id),
+          ([linkId]) => void MutableHashMap.remove(links, linkId),
+        );
       }),
 
     listLinks: (templateId) =>
       Effect.sync(() =>
-        [...links.values()].filter(
+        Arr.fromIterable(MutableHashMap.values(links)).filter(
           (link) => templateId === undefined || link.templateId === templateId,
         ),
       ),
-    getLink: (id) => Effect.sync(() => links.get(id) ?? null),
+    getLink: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(links, id))),
     createLink: (link) => insert(links, "Template link", link),
-    deleteLink: (id) => Effect.sync(() => void links.delete(id)),
+    deleteLink: (id) => Effect.sync(() => void MutableHashMap.remove(links, id)),
   } satisfies typeof PolicyStore.Service;
 };
 

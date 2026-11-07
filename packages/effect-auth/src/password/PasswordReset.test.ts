@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Context, DateTime, Effect, Layer, Result } from "effect";
+import { Context, DateTime, Effect, Layer, MutableHashMap, Option, Result } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -27,11 +27,11 @@ import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
-const users = new Map<string, User>();
-const identifierRecords = new Map<string, Identifier>();
-const passwordHashes = new Map<string, string>();
-const resetTokens = new Map<string, PasswordResetToken>();
-const sessions = new Map<string, Session>();
+const users = MutableHashMap.empty<string, User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const passwordHashes = MutableHashMap.empty<string, string>();
+const resetTokens = MutableHashMap.empty<string, PasswordResetToken>();
+const sessions = MutableHashMap.empty<string, Session>();
 const sentEmails: Array<{ email: string; token: string }> = [];
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
@@ -45,73 +45,77 @@ const seedEmailIdentifier = (userId: string, email: string, verified: boolean): 
     verified,
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
   return identifier;
 };
 
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const passwordResetUserStore = {
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
-      passwordHashes.set(userId, hash);
+      MutableHashMap.set(passwordHashes, userId, hash);
     }),
 };
 
 const passwordResetStore = {
   create: (reset: PasswordResetToken) =>
     Effect.sync(() => {
-      resetTokens.set(reset.token, reset);
+      MutableHashMap.set(resetTokens, reset.token, reset);
       return reset;
     }),
 
-  get: (token: string) => Effect.sync(() => resetTokens.get(token) ?? null),
+  get: (token: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(resetTokens, token))),
 
   delete: (token: string) =>
     Effect.sync(() => {
-      resetTokens.delete(token);
+      MutableHashMap.remove(resetTokens, token);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      resetTokens.forEach((reset, token) => {
+      MutableHashMap.forEach(resetTokens, (reset, token) => {
         if (reset.userId === userId) {
-          resetTokens.delete(token);
+          MutableHashMap.remove(resetTokens, token);
         }
       });
     }),
@@ -161,11 +165,11 @@ const makeTestContext = async () => {
 
 describe("PasswordResetService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    resetTokens.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(resetTokens);
+    MutableHashMap.clear(sessions);
     sentEmails.splice(0, sentEmails.length);
   });
 
@@ -178,7 +182,7 @@ describe("PasswordResetService", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "reset@example.com", false);
 
     await Effect.runPromise(
@@ -199,7 +203,7 @@ describe("PasswordResetService", () => {
 
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("reset@example.com");
-    expect(resetTokens.size).toBe(1);
+    expect(MutableHashMap.size(resetTokens)).toBe(1);
   });
 
   it("should not reveal whether an email exists", async () => {
@@ -219,7 +223,7 @@ describe("PasswordResetService", () => {
     );
 
     expect(sentEmails.length).toBe(0);
-    expect(resetTokens.size).toBe(0);
+    expect(MutableHashMap.size(resetTokens)).toBe(0);
   });
 
   it("should revoke sessions by default on password reset", async () => {
@@ -235,9 +239,9 @@ describe("PasswordResetService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "session-reset@example.com", false);
-    passwordHashes.set(user.id, oldHash.hash);
+    MutableHashMap.set(passwordHashes, user.id, oldHash.hash);
 
     // Seed with the hash as key (the service looks up by hash).
     const resetToken: PasswordResetToken = {
@@ -248,8 +252,8 @@ describe("PasswordResetService", () => {
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
     };
 
-    resetTokens.set(resetToken.token, resetToken);
-    sessions.set("session-1", {
+    MutableHashMap.set(resetTokens, resetToken.token, resetToken);
+    MutableHashMap.set(sessions, "session-1", {
       id: "session-1",
       userId: user.id,
       createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -273,13 +277,13 @@ describe("PasswordResetService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    const updatedHash = passwordHashes.get(user.id);
+    const updatedHash = Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id));
     expect(result.userId).toBe(user.id);
     expect(result.reset).toBe(true);
     expect(updatedHash).toBeDefined();
     expect(updatedHash).not.toBe(oldHash.hash);
-    expect(resetTokens.size).toBe(0);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(resetTokens)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("should not revoke sessions when revokeSessionsOnPasswordReset is false", async () => {
@@ -295,9 +299,9 @@ describe("PasswordResetService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "session-keep@example.com", false);
-    passwordHashes.set(user.id, oldHash.hash);
+    MutableHashMap.set(passwordHashes, user.id, oldHash.hash);
 
     const resetToken: PasswordResetToken = {
       token: hashToken("token-456"),
@@ -307,8 +311,8 @@ describe("PasswordResetService", () => {
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
     };
 
-    resetTokens.set(resetToken.token, resetToken);
-    sessions.set("session-2", {
+    MutableHashMap.set(resetTokens, resetToken.token, resetToken);
+    MutableHashMap.set(sessions, "session-2", {
       id: "session-2",
       userId: user.id,
       createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -331,13 +335,13 @@ describe("PasswordResetService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    const updatedHash = passwordHashes.get(user.id);
+    const updatedHash = Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id));
     expect(result.userId).toBe(user.id);
     expect(result.reset).toBe(true);
     expect(updatedHash).toBeDefined();
     expect(updatedHash).not.toBe(oldHash.hash);
-    expect(resetTokens.size).toBe(0);
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(resetTokens)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("should fail for invalid reset tokens", async () => {

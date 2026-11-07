@@ -10,7 +10,7 @@
  * covered with a recording `fetch` instead.
  */
 import * as Auth from "../index.ts";
-import { Array as Arr, DateTime, Effect, Order, Predicate, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, MutableHashSet, Order, Predicate, Schema } from "effect";
 import { assert, describe, expect, it } from "vite-plus/test";
 import {
   AuthClientError,
@@ -605,7 +605,7 @@ describe("organizations", () => {
       "failed",
     );
 
-    server.publishedDnsDomains.add("acme.test");
+    MutableHashSet.add(server.publishedDnsDomains, "acme.test");
     const verified = await owner.organization.verifyDomain(org.id, claim.id);
     expect(verified.verificationState).toBe("verified");
     expect(verified.verifiedAt).toBeTypeOf("number");

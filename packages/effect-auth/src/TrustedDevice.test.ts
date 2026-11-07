@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, DateTime, Effect, Redacted } from "effect";
+import { Array as Arr, Context, DateTime, Effect, MutableHashMap, Option, Redacted } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
@@ -17,27 +17,28 @@ import type { User } from "./Types.ts";
 // In-memory store
 // ---------------------------------------------------------------------------
 
-const deviceRecords = new Map<string, TrustedDeviceRecord>(); // key: tokenHash
+const deviceRecords = MutableHashMap.empty<string, TrustedDeviceRecord>(); // key: tokenHash
 
 const deviceStore = {
   upsert: (record: TrustedDeviceRecord) =>
     Effect.sync(() => {
-      deviceRecords.set(record.tokenHash, record);
+      MutableHashMap.set(deviceRecords, record.tokenHash, record);
       return record;
     }),
 
-  getByTokenHash: (tokenHash: string) => Effect.sync(() => deviceRecords.get(tokenHash) ?? null),
+  getByTokenHash: (tokenHash: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(deviceRecords, tokenHash))),
 
   delete: (tokenHash: string) =>
     Effect.sync(() => {
-      deviceRecords.delete(tokenHash);
+      MutableHashMap.remove(deviceRecords, tokenHash);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      deviceRecords.forEach((record, hash) => {
+      MutableHashMap.forEach(deviceRecords, (record, hash) => {
         if (record.userId === userId) {
-          deviceRecords.delete(hash);
+          MutableHashMap.remove(deviceRecords, hash);
         }
       });
     }),
@@ -58,7 +59,7 @@ const testUser: User = {
 };
 
 beforeEach(() => {
-  deviceRecords.clear();
+  MutableHashMap.clear(deviceRecords);
 });
 
 // ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ describe("TrustedDeviceService", () => {
     expect(cookieValue).toContain(".");
     expect(expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(verifiedId).toBe(testUser.id);
-    expect(deviceRecords.size).toBe(1);
+    expect(MutableHashMap.size(deviceRecords)).toBe(1);
   });
 
   it("stores only the hash, not the raw token", async () => {
@@ -95,10 +96,10 @@ describe("TrustedDeviceService", () => {
     const rawToken = cookieValue.split(".").slice(0, -1).join(".");
 
     // The raw token must never appear in the stored record
-    Arr.forEach(deviceRecords.values(), (record) => {
+    Arr.forEach(MutableHashMap.values(deviceRecords), (record) => {
       expect(record.tokenHash).not.toBe(rawToken);
     });
-    expect(deviceRecords.size).toBe(1);
+    expect(MutableHashMap.size(deviceRecords)).toBe(1);
   });
 
   it("returns null for a tampered HMAC", async () => {
@@ -135,7 +136,7 @@ describe("TrustedDeviceService", () => {
     const result = await Effect.runPromise(Effect.provide(program, Hooks.Default));
     expect(result).toBeNull();
     // Expired record must be eagerly deleted
-    expect(deviceRecords.size).toBe(0);
+    expect(MutableHashMap.size(deviceRecords)).toBe(0);
   });
 
   it("revoke removes a specific token", async () => {
@@ -148,7 +149,7 @@ describe("TrustedDeviceService", () => {
 
     const result = await Effect.runPromise(Effect.provide(program, Hooks.Default));
     expect(result).toBeNull();
-    expect(deviceRecords.size).toBe(0);
+    expect(MutableHashMap.size(deviceRecords)).toBe(0);
   });
 
   it("revokeAll removes every token for a user", async () => {

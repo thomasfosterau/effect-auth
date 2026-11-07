@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Option, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, MutableHashSet, Option, Schema } from "effect";
 import * as Admin from "../Admin.ts";
 import * as SessionContext from "../SessionContext.ts";
 import * as Types from "../Types.ts";
@@ -17,7 +17,11 @@ describe("fixtureUsers", () => {
     Arr.forEach([users.admin, users.member, users.otherMember], (user) => {
       expect(user.id).toMatch(uuidV4);
     });
-    expect(new Set([users.admin.id, users.member.id, users.otherMember.id]).size).toBe(3);
+    expect(
+      MutableHashSet.size(
+        MutableHashSet.fromIterable([users.admin.id, users.member.id, users.otherMember.id]),
+      ),
+    ).toBe(3);
 
     expect(Admin.isAdmin(users.admin)).toBe(true);
     expect(Admin.isAdmin(users.member)).toBe(false);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, MutableHashMap, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
@@ -109,7 +109,7 @@ describe("PolicyStore CRUD", () => {
   });
 
   it("deleting a template cascades to its links, leaving other templates' links alone", async () => {
-    const links = new Map<string, PolicyStore.TemplateLink>();
+    const links = MutableHashMap.empty<string, PolicyStore.TemplateLink>();
     const store = PolicyStore.memoryPolicyStore({ links });
     const other = PolicyStore.template({ id: "other", principal: PolicyStore.eqSlot });
     await run(store.createTemplate(shareTemplate));
@@ -129,18 +129,18 @@ describe("PolicyStore CRUD", () => {
 
     await run(store.deleteTemplate("share-doc"));
     expect(await run(store.getTemplate("share-doc"))).toBeNull();
-    expect([...links.keys()]).toEqual(["l3"]);
+    expect(Arr.fromIterable(MutableHashMap.keys(links))).toEqual(["l3"]);
     // No-op for an unknown template.
     await run(store.deleteTemplate("share-doc"));
   });
 
   it("accepts pre-seeded maps", async () => {
     const policy = Policy.permit({ id: "seeded" });
-    const policies = new Map([[policy.id, policy]]);
+    const policies = MutableHashMap.fromIterable([[policy.id, policy]]);
     const store = PolicyStore.memoryPolicyStore({ policies });
     expect(await run(store.getPolicy("seeded"))).toEqual(policy);
     await run(store.createPolicy(Policy.permit({ id: "added" })));
-    expect([...policies.keys()]).toEqual(["seeded", "added"]);
+    expect(Arr.fromIterable(MutableHashMap.keys(policies))).toEqual(["seeded", "added"]);
   });
 });
 
@@ -275,10 +275,10 @@ describe("effectivePolicies", () => {
   });
 
   it("fails (naming the link) when a link's template is missing", async () => {
-    const links = new Map<string, PolicyStore.TemplateLink>();
+    const links = MutableHashMap.empty<string, PolicyStore.TemplateLink>();
     const store = PolicyStore.memoryPolicyStore({ links });
     // A link that outlived its template (a store that skipped the cascade).
-    links.set("l1", link("l1", alice, doc1));
+    MutableHashMap.set(links, "l1", link("l1", alice, doc1));
 
     const failure = await run(Effect.flip(PolicyStore.effectivePolicies(store)));
     expect(failure._tag).toBe("AuthError");

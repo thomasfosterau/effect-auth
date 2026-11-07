@@ -1,5 +1,15 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, Data, Effect, Order, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Data,
+  Effect,
+  MutableHashMap,
+  Option,
+  Order,
+  Schema,
+} from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
@@ -21,57 +31,61 @@ import {
 
 // Mock implementations for testing
 const mockChallengeStore = {
-  challenges: new Map<string, WebAuthnChallenge>(),
+  challenges: MutableHashMap.empty<string, WebAuthnChallenge>(),
 
   create: (challenge: WebAuthnChallenge) =>
     Effect.sync(() => {
       const key = Buffer.from(challenge.challenge).toString("hex");
-      mockChallengeStore.challenges.set(key, challenge);
+      MutableHashMap.set(mockChallengeStore.challenges, key, challenge);
       return challenge;
     }),
 
   get: (challenge: Uint8Array) =>
     Effect.sync(() => {
       const key = Buffer.from(challenge).toString("hex");
-      return mockChallengeStore.challenges.get(key) ?? null;
+      return Option.getOrNull(MutableHashMap.get(mockChallengeStore.challenges, key));
     }),
 
   delete: (challenge: Uint8Array) =>
     Effect.sync(() => {
       const key = Buffer.from(challenge).toString("hex");
-      mockChallengeStore.challenges.delete(key);
+      MutableHashMap.remove(mockChallengeStore.challenges, key);
     }),
 };
 
 const mockCredentialStore = {
-  credentials: new Map<string, WebAuthnCredential>(),
+  credentials: MutableHashMap.empty<string, WebAuthnCredential>(),
 
   create: (credential: WebAuthnCredential) =>
     Effect.sync(() => {
-      mockCredentialStore.credentials.set(credential.id, credential);
+      MutableHashMap.set(mockCredentialStore.credentials, credential.id, credential);
       return credential;
     }),
 
   get: (credentialId: string) =>
-    Effect.sync(() => mockCredentialStore.credentials.get(credentialId) ?? null),
+    Effect.sync(() =>
+      Option.getOrNull(MutableHashMap.get(mockCredentialStore.credentials, credentialId)),
+    ),
 
   getByCredentialId: (credentialId: string) =>
-    Effect.sync(() => mockCredentialStore.credentials.get(credentialId) ?? null),
+    Effect.sync(() =>
+      Option.getOrNull(MutableHashMap.get(mockCredentialStore.credentials, credentialId)),
+    ),
 
   update: (credential: WebAuthnCredential) =>
     Effect.sync(() => {
-      mockCredentialStore.credentials.set(credential.id, credential);
+      MutableHashMap.set(mockCredentialStore.credentials, credential.id, credential);
       return credential;
     }),
 
   delete: (credentialId: string) =>
     Effect.sync(() => {
-      mockCredentialStore.credentials.delete(credentialId);
+      MutableHashMap.remove(mockCredentialStore.credentials, credentialId);
     }),
 
   listByUserId: (userId: string) =>
     Effect.sync(() => {
-      const credentials = Array.from(mockCredentialStore.credentials.values()).filter(
+      const credentials = Array.from(MutableHashMap.values(mockCredentialStore.credentials)).filter(
         (c) => c.userId === userId,
       );
       return credentials;
@@ -115,8 +129,8 @@ const dependencies = Context.merge(
 describe("WebAuthn Service", () => {
   beforeEach(() => {
     // Clear mocks before each test
-    mockChallengeStore.challenges.clear();
-    mockCredentialStore.credentials.clear();
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
   });
 
   it("should generate a registration challenge", async () => {
@@ -131,7 +145,7 @@ describe("WebAuthn Service", () => {
           expect(result.expiresAt).toBeGreaterThan(yield* Clock.currentTimeMillis);
 
           // Verify challenge was stored
-          expect(mockChallengeStore.challenges.size).toBe(1);
+          expect(MutableHashMap.size(mockChallengeStore.challenges)).toBe(1);
         }),
         dependencies,
       ),
@@ -147,7 +161,7 @@ describe("WebAuthn Service", () => {
           const result2 = yield* service.generateRegistrationChallenge(testUser);
 
           expect(result1.challenge).not.toEqual(result2.challenge);
-          expect(mockChallengeStore.challenges.size).toBe(2);
+          expect(MutableHashMap.size(mockChallengeStore.challenges)).toBe(2);
         }),
         dependencies,
       ),
@@ -166,7 +180,7 @@ describe("WebAuthn Service", () => {
           expect(result.expiresAt).toBeGreaterThan(yield* Clock.currentTimeMillis);
 
           // Verify challenge was stored with userId
-          const stored = Array.from(mockChallengeStore.challenges.values())[0];
+          const stored = Array.from(MutableHashMap.values(mockChallengeStore.challenges))[0];
           expect(stored.userId).toBe(testUser.id);
         }),
         dependencies,
@@ -185,7 +199,7 @@ describe("WebAuthn Service", () => {
           expect(result.challenge.length).toBe(32);
 
           // Verify challenge was stored WITHOUT userId
-          const stored = Array.from(mockChallengeStore.challenges.values())[0];
+          const stored = Array.from(MutableHashMap.values(mockChallengeStore.challenges))[0];
           expect(stored.userId).toBeUndefined();
         }),
         dependencies,
@@ -267,7 +281,7 @@ describe("WebAuthn Service", () => {
           const service = yield* WebAuthn.make(expiredConfig);
           const { challenge } = yield* service.generateRegistrationChallenge(testUser);
 
-          expect(mockChallengeStore.challenges.size).toBe(1);
+          expect(MutableHashMap.size(mockChallengeStore.challenges)).toBe(1);
 
           // Try to verify with expired challenge - should fail
           const mockResponse: RegistrationResponse = {
@@ -281,7 +295,7 @@ describe("WebAuthn Service", () => {
 
           expect(result).toBeInstanceOf(ChallengeExpiredError);
           // Challenge should be deleted after expiration check
-          expect(mockChallengeStore.challenges.size).toBe(0);
+          expect(MutableHashMap.size(mockChallengeStore.challenges)).toBe(0);
         }),
         dependencies,
       ),
@@ -797,8 +811,8 @@ describe.each<{ name: string; alg: Alg }>([
   { name: "EdDSA", alg: -8 },
 ])("WebAuthn $name round trip", ({ alg }) => {
   beforeEach(() => {
-    mockChallengeStore.challenges.clear();
-    mockCredentialStore.credentials.clear();
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
   });
 
   it("registers a credential and verifies an assertion", async () => {
@@ -907,7 +921,9 @@ describe.each<{ name: string; alg: Alg }>([
 
           // Usernameless authentication — no userId passed.
           const auth = yield* service.generateAuthenticationChallenge();
-          const storedChallenge = Array.from(mockChallengeStore.challenges.values())[0];
+          const storedChallenge = Array.from(
+            MutableHashMap.values(mockChallengeStore.challenges),
+          )[0];
           expect(storedChallenge?.userId).toBeUndefined();
 
           const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
@@ -978,8 +994,8 @@ describe.each<{ name: string; alg: Alg }>([
 
 describe("WebAuthn algorithm support", () => {
   beforeEach(() => {
-    mockChallengeStore.challenges.clear();
-    mockCredentialStore.credentials.clear();
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
   });
 
   it("rejects registration of a credential using an unsupported COSE algorithm", async () => {
@@ -1006,7 +1022,7 @@ describe("WebAuthn algorithm support", () => {
     );
     assert.instanceOf(err, WebAuthnVerificationError);
     expect(err.message).toContain("Unsupported algorithm: -35");
-    expect(mockCredentialStore.credentials.size).toBe(0);
+    expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
   });
 
   it("rejects a registration whose attestation object is not valid CBOR", async () => {

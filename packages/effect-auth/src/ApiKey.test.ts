@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Clock, Context, Effect, Option, Result } from "effect";
+import { Array as Arr, Clock, Context, Effect, MutableHashMap, Option, Result } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -17,46 +17,49 @@ import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
 
-const apiKeys = new Map<string, ApiKeyRecord>();
-const rateLimitEntries = new Map<string, RateLimitEntry>();
+const apiKeys = MutableHashMap.empty<string, ApiKeyRecord>();
+const rateLimitEntries = MutableHashMap.empty<string, RateLimitEntry>();
 
 const apiKeyStore = {
   create: (apiKey: ApiKeyRecord) =>
     Effect.sync(() => {
-      apiKeys.set(apiKey.id, apiKey);
+      MutableHashMap.set(apiKeys, apiKey.id, apiKey);
       return apiKey;
     }),
 
-  get: (id: string) => Effect.sync(() => apiKeys.get(id) ?? null),
+  get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(apiKeys, id))),
 
   getByHash: (keyHash: string) =>
     Effect.sync(() => {
       return Option.getOrNull(
-        Arr.findFirst(apiKeys.values(), (apiKey) => apiKey.keyHash === keyHash),
+        Arr.findFirst(MutableHashMap.values(apiKeys), (apiKey) => apiKey.keyHash === keyHash),
       );
     }),
 
   update: (apiKey: ApiKeyRecord) =>
     Effect.sync(() => {
-      apiKeys.set(apiKey.id, apiKey);
+      MutableHashMap.set(apiKeys, apiKey.id, apiKey);
       return apiKey;
     }),
 
   delete: (id: string) =>
     Effect.sync(() => {
-      apiKeys.delete(id);
+      MutableHashMap.remove(apiKeys, id);
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => [...apiKeys.values()].filter((apiKey) => apiKey.userId === userId)),
+    Effect.sync(() =>
+      Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((apiKey) => apiKey.userId === userId),
+    ),
 };
 
 const rateLimitStore = {
-  get: (key: string) => Effect.sync(() => rateLimitEntries.get(key) ?? null),
+  get: (key: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(rateLimitEntries, key))),
 
   set: (key: string, entry: RateLimitEntry, _ttl: number) =>
     Effect.sync(() => {
-      rateLimitEntries.set(key, entry);
+      MutableHashMap.set(rateLimitEntries, key, entry);
     }),
 
   increment: (key: string, ttl: number) =>
@@ -64,19 +67,19 @@ const rateLimitStore = {
     // RateLimitStore contract requires (#455).
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sync(() => {
-        const entry = rateLimitEntries.get(key);
+        const entry = Option.getOrUndefined(MutableHashMap.get(rateLimitEntries, key));
         const next: RateLimitEntry =
           entry === undefined || now >= entry.resetAt
             ? { key, count: 1, resetAt: now + ttl * 1000 }
             : { ...entry, count: entry.count + 1 };
-        rateLimitEntries.set(key, next);
+        MutableHashMap.set(rateLimitEntries, key, next);
         return next.count;
       }),
     ),
 
   delete: (key: string) =>
     Effect.sync(() => {
-      rateLimitEntries.delete(key);
+      MutableHashMap.remove(rateLimitEntries, key);
     }),
 };
 
@@ -121,8 +124,8 @@ const runService = async <A, E>(
 
 describe("ApiKeyService", () => {
   beforeEach(() => {
-    apiKeys.clear();
-    rateLimitEntries.clear();
+    MutableHashMap.clear(apiKeys);
+    MutableHashMap.clear(rateLimitEntries);
   });
 
   it("should create and verify an API key (happy path)", async () => {
@@ -502,7 +505,7 @@ describe("ApiKeyService", () => {
     );
 
     expect(result.every((outcome) => outcome.valid)).toBe(true);
-    expect(rateLimitEntries.size).toBe(0);
+    expect(MutableHashMap.size(rateLimitEntries)).toBe(0);
   });
 });
 
@@ -513,8 +516,8 @@ describe("ApiKeyService", () => {
 
 describe("ApiKeyService + Authorizer: credential class", () => {
   beforeEach(() => {
-    apiKeys.clear();
-    rateLimitEntries.clear();
+    MutableHashMap.clear(apiKeys);
+    MutableHashMap.clear(rateLimitEntries);
   });
 
   const mintKey = Entity.ref("Action", "ApiKey.create");

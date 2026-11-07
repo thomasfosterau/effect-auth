@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, Layer, Result } from "effect";
+import { Context, DateTime, Effect, Layer, MutableHashMap, Option, Result } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
@@ -10,44 +10,47 @@ import type { Session, User, SessionConfig } from "./Types.ts";
 
 // Mock implementations for testing
 const mockSessionStore = {
-  sessions: new Map<string, Session>(),
+  sessions: MutableHashMap.empty<string, Session>(),
 
   create: (session: Session) =>
     Effect.sync(() => {
-      mockSessionStore.sessions.set(session.id, session);
+      MutableHashMap.set(mockSessionStore.sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => mockSessionStore.sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(mockSessionStore.sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      mockSessionStore.sessions.set(session.id, session);
+      MutableHashMap.set(mockSessionStore.sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      mockSessionStore.sessions.delete(sessionId);
+      MutableHashMap.remove(mockSessionStore.sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      mockSessionStore.sessions.forEach((session, id) => {
+      MutableHashMap.forEach(mockSessionStore.sessions, (session, id) => {
         if (session.userId === userId) {
-          mockSessionStore.sessions.delete(id);
+          MutableHashMap.remove(mockSessionStore.sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
     Effect.sync(() =>
-      Array.from(mockSessionStore.sessions.values()).filter((session) => session.userId === userId),
+      Array.from(MutableHashMap.values(mockSessionStore.sessions)).filter(
+        (session) => session.userId === userId,
+      ),
     ),
 };
 
 const mockUserStore = {
-  users: new Map<string, User>([
+  users: MutableHashMap.fromIterable<string, User>([
     [
       "user1",
       {
@@ -70,7 +73,8 @@ const mockUserStore = {
     ],
   ]),
 
-  get: (userId: string) => Effect.sync(() => mockUserStore.users.get(userId) ?? null),
+  get: (userId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(mockUserStore.users, userId))),
 };
 
 const SessionStoreTest = Context.make(SessionStore, mockSessionStore);
@@ -103,7 +107,7 @@ describe("SessionService", () => {
 
   it("should validate a valid session", async () => {
     // Clear mock store
-    mockSessionStore.sessions.clear();
+    MutableHashMap.clear(mockSessionStore.sessions);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -122,7 +126,7 @@ describe("SessionService", () => {
   });
 
   it("should fail to validate expired session", async () => {
-    mockSessionStore.sessions.clear();
+    MutableHashMap.clear(mockSessionStore.sessions);
 
     const result = await Effect.runPromise(
       Effect.result(
@@ -150,7 +154,7 @@ describe("SessionService", () => {
   });
 
   it("should invalidate a session", async () => {
-    mockSessionStore.sessions.clear();
+    MutableHashMap.clear(mockSessionStore.sessions);
 
     const result = await Effect.runPromise(
       Effect.result(
@@ -174,7 +178,7 @@ describe("SessionService", () => {
   });
 
   it("create→validate round-trip: store keyed by hash, cookie carries raw token", async () => {
-    mockSessionStore.sessions.clear();
+    MutableHashMap.clear(mockSessionStore.sessions);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -183,7 +187,7 @@ describe("SessionService", () => {
           const session = yield* manager.createSession("user1");
 
           const rawToken = session.id;
-          const storedKeys = Array.from(mockSessionStore.sessions.keys());
+          const storedKeys = Array.from(MutableHashMap.keys(mockSessionStore.sessions));
 
           // The store must not contain the raw token — only its hash.
           const validated = yield* manager.validateSession(rawToken);
@@ -205,7 +209,7 @@ describe("SessionService", () => {
 
   describe("updateAge write-throttle", () => {
     beforeEach(() => {
-      mockSessionStore.sessions.clear();
+      MutableHashMap.clear(mockSessionStore.sessions);
     });
 
     it("writes to the store when no updateAge is configured (default: always write)", async () => {
@@ -277,32 +281,35 @@ describe("SessionService", () => {
 
     it("writes to the store once the updateAge window has elapsed", async () => {
       let updateCallCount = 0;
-      const sessions = new Map<string, Session>();
+      const sessions = MutableHashMap.empty<string, Session>();
       const timedStore = {
         create: (session: Session) =>
           Effect.sync(() => {
-            sessions.set(session.id, session);
+            MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
-        get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+        get: (sessionId: string) =>
+          Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
         update: (session: Session) =>
           Effect.sync(() => {
             updateCallCount++;
-            sessions.set(session.id, session);
+            MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
         delete: (sessionId: string) =>
           Effect.sync(() => {
-            sessions.delete(sessionId);
+            MutableHashMap.remove(sessions, sessionId);
           }),
         deleteByUserId: (userId: string) =>
           Effect.sync(() => {
-            sessions.forEach((session, id) => {
-              if (session.userId === userId) sessions.delete(id);
+            MutableHashMap.forEach(sessions, (session, id) => {
+              if (session.userId === userId) MutableHashMap.remove(sessions, id);
             });
           }),
         listByUserId: (userId: string) =>
-          Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),
+          Effect.sync(() =>
+            Array.from(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+          ),
       };
 
       const configWithShortUpdateAge: SessionConfig = {
@@ -333,10 +340,10 @@ describe("SessionService", () => {
 
       // Manually age the session's lastActivityAt beyond the updateAge threshold.
       const tokenHash = hashToken(rawToken);
-      const stored = sessions.get(tokenHash);
+      const stored = Option.getOrUndefined(MutableHashMap.get(sessions, tokenHash));
       assert(stored !== undefined, "the session is stored");
 
-      sessions.set(tokenHash, {
+      MutableHashMap.set(sessions, tokenHash, {
         ...stored,
         lastActivityAt: DateTime.toDateUtc(
           DateTime.makeUnsafe(stored.lastActivityAt.getTime() - 200),
@@ -360,31 +367,34 @@ describe("SessionService", () => {
     });
 
     it("still enforces expiry even when write is throttled", async () => {
-      const sessions = new Map<string, Session>();
+      const sessions = MutableHashMap.empty<string, Session>();
       const timedStore = {
         create: (session: Session) =>
           Effect.sync(() => {
-            sessions.set(session.id, session);
+            MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
-        get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+        get: (sessionId: string) =>
+          Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
         update: (session: Session) =>
           Effect.sync(() => {
-            sessions.set(session.id, session);
+            MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
         delete: (sessionId: string) =>
           Effect.sync(() => {
-            sessions.delete(sessionId);
+            MutableHashMap.remove(sessions, sessionId);
           }),
         deleteByUserId: (userId: string) =>
           Effect.sync(() => {
-            sessions.forEach((session, id) => {
-              if (session.userId === userId) sessions.delete(id);
+            MutableHashMap.forEach(sessions, (session, id) => {
+              if (session.userId === userId) MutableHashMap.remove(sessions, id);
             });
           }),
         listByUserId: (userId: string) =>
-          Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),
+          Effect.sync(() =>
+            Array.from(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+          ),
       };
 
       // updateAge is very long (1 year), so writes are always throttled.
@@ -421,7 +431,7 @@ describe("SessionService", () => {
   });
 
   it("should invalidate all user sessions", async () => {
-    mockSessionStore.sessions.clear();
+    MutableHashMap.clear(mockSessionStore.sessions);
 
     const results = await Effect.runPromise(
       Effect.provide(

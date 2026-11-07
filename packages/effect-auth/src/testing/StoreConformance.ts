@@ -62,6 +62,7 @@ import {
   Option,
   Order,
   Predicate,
+  Record as Rec,
   Schema,
 } from "effect";
 import * as ApiKey from "../ApiKey.ts";
@@ -136,10 +137,10 @@ class Mismatch extends Data.TaggedError("Mismatch")<{ readonly message: string }
 const canonical = (value: unknown): unknown => {
   if (value instanceof Date) return { $date: value.getTime() };
   if (Array.isArray(value)) return value.map(canonical);
-  if (Predicate.isObjectOrArray(value)) {
-    return Object.fromEntries(
+  if (Predicate.isObject(value)) {
+    return Rec.fromEntries(
       Arr.sort(
-        Object.entries(value).filter(([, field]) => field !== undefined),
+        Rec.toEntries(value).filter(([, field]) => field !== undefined),
         Order.mapInput(Order.String, ([key]: readonly [string, unknown]) => key),
       ).map(([key, field]) => [key, canonical(field)]),
     );

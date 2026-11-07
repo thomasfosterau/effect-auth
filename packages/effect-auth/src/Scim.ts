@@ -66,6 +66,7 @@ import {
   DateTime,
   Effect,
   Layer,
+  MutableHashMap,
   Option,
   Order,
   Predicate,
@@ -236,26 +237,34 @@ const byCreatedAt: Order.Order<{ readonly createdAt: number }> = Order.mapInput(
  * In-memory {@link ScimConnectionStore}, keyed by connection id. Single-process
  * only — good for tests and single-instance deployments.
  *
- * Pass your own `Map` to inspect or pre-seed state in tests.
+ * Pass your own `MutableHashMap` to inspect or pre-seed state in tests.
  */
 export const memoryScimConnectionStore = (
-  records: Map<string, ScimConnection> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, ScimConnection> = MutableHashMap.empty(),
 ): typeof ScimConnectionStore.Service => ({
-  create: (connection) => Effect.sync(() => (records.set(connection.id, connection), connection)),
-  getById: (id) => Effect.sync(() => records.get(id) ?? null),
+  create: (connection) =>
+    Effect.sync(() => (MutableHashMap.set(records, connection.id, connection), connection)),
+  getById: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, id))),
   getByTokenHash: (tokenHash) =>
     Effect.sync(
-      () => [...records.values()].find((record) => record.tokenHash === tokenHash) ?? null,
+      () =>
+        Arr.fromIterable(MutableHashMap.values(records)).find(
+          (record) => record.tokenHash === tokenHash,
+        ) ?? null,
     ),
   listByOrganization: (organizationId) =>
     Effect.sync(() =>
       Arr.sort(
-        Arr.filter([...records.values()], (record) => record.organizationId === organizationId),
+        Arr.filter(
+          Arr.fromIterable(MutableHashMap.values(records)),
+          (record) => record.organizationId === organizationId,
+        ),
         byCreatedAt,
       ),
     ),
-  update: (connection) => Effect.sync(() => (records.set(connection.id, connection), connection)),
-  delete: (id) => Effect.sync(() => void records.delete(id)),
+  update: (connection) =>
+    Effect.sync(() => (MutableHashMap.set(records, connection.id, connection), connection)),
+  delete: (id) => Effect.sync(() => void MutableHashMap.remove(records, id)),
 });
 
 /**

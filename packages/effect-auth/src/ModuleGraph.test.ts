@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr } from "effect";
+import { Array as Arr, MutableHashSet } from "effect";
 import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 
@@ -31,22 +31,22 @@ const exists = (file: string): Promise<boolean> =>
   );
 
 interface ModuleGraph {
-  readonly files: ReadonlySet<string>;
-  readonly externalSpecifiers: ReadonlySet<string>;
+  readonly files: MutableHashSet.MutableHashSet<string>;
+  readonly externalSpecifiers: MutableHashSet.MutableHashSet<string>;
 }
 
 const walkModuleGraph = async (entry: string): Promise<ModuleGraph> => {
-  const visited = new Set<string>();
-  const externalSpecifiers = new Set<string>();
+  const visited = MutableHashSet.empty<string>();
+  const externalSpecifiers = MutableHashSet.empty<string>();
   const visit = async (file: string): Promise<void> => {
-    if (visited.has(file)) return;
-    visited.add(file);
+    if (MutableHashSet.has(visited, file)) return;
+    MutableHashSet.add(visited, file);
 
     const source = await readFile(file, "utf8");
     await Arr.reduce(extractSpecifiers(source), Promise.resolve(), async (previous, specifier) => {
       await previous;
       if (!isRelativeSpecifier(specifier)) {
-        externalSpecifiers.add(specifier);
+        MutableHashSet.add(externalSpecifiers, specifier);
         return;
       }
       const resolved = path.resolve(path.dirname(file), specifier);
@@ -58,8 +58,11 @@ const walkModuleGraph = async (entry: string): Promise<ModuleGraph> => {
   return { files: visited, externalSpecifiers };
 };
 
-const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: string): boolean =>
-  [...externalSpecifiers].some(
+const reachesModule = (
+  externalSpecifiers: MutableHashSet.MutableHashSet<string>,
+  moduleName: string,
+): boolean =>
+  Arr.fromIterable(externalSpecifiers).some(
     (specifier) => specifier === moduleName || specifier.startsWith(`${moduleName}/`),
   );
 

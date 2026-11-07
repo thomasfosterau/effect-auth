@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, Duration, Effect, Layer, Result } from "effect";
+import { Clock, Duration, Effect, Layer, MutableHashMap, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { make, type RateLimitConfig, type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { RateLimitError } from "./Errors.ts";
@@ -11,18 +11,20 @@ import { RateLimitError } from "./Errors.ts";
  * single-statement SQL upsert or a Durable Object's input gate makes it.
  */
 const makeStore = (...entries: ReadonlyArray<RateLimitEntry>) => {
-  const stored = new Map<string, RateLimitEntry>(entries.map((entry) => [entry.key, entry]));
+  const stored = MutableHashMap.fromIterable<string, RateLimitEntry>(
+    entries.map((entry) => [entry.key, entry]),
+  );
   const layer = Layer.succeed(RateLimitStore)({
     get: (key) =>
       Effect.andThen(
         Effect.yieldNow,
-        Effect.sync(() => stored.get(key) ?? null),
+        Effect.sync(() => Option.getOrNull(MutableHashMap.get(stored, key))),
       ),
     set: (key, entry) =>
       Effect.andThen(
         Effect.yieldNow,
         Effect.sync(() => {
-          stored.set(key, entry);
+          MutableHashMap.set(stored, key, entry);
         }),
       ),
     increment: (key, ttlSeconds) =>
@@ -30,19 +32,19 @@ const makeStore = (...entries: ReadonlyArray<RateLimitEntry>) => {
         Effect.yieldNow,
         Effect.flatMap(Clock.currentTimeMillis, (now) =>
           Effect.sync(() => {
-            const entry = stored.get(key);
+            const entry = Option.getOrUndefined(MutableHashMap.get(stored, key));
             const next: RateLimitEntry =
               entry === undefined || now >= entry.resetAt
                 ? { key, count: 1, resetAt: now + ttlSeconds * 1000 }
                 : { ...entry, count: entry.count + 1 };
-            stored.set(key, next);
+            MutableHashMap.set(stored, key, next);
             return next.count;
           }),
         ),
       ),
     delete: (key) =>
       Effect.sync(() => {
-        stored.delete(key);
+        MutableHashMap.remove(stored, key);
       }),
   });
   return { stored, layer };
@@ -102,14 +104,16 @@ describe("RateLimiter.checkLimit", () => {
     const { layer, stored } = makeStore(entry);
     const error = await refusal(layer, "full", config);
     expect(error).toBeInstanceOf(RateLimitError);
-    expect(stored.get("full")).toEqual(entry);
+    expect(Option.getOrUndefined(MutableHashMap.get(stored, "full"))).toEqual(entry);
   });
 
   it("blocks a key at its limit when a block duration is configured", async () => {
     const { layer, stored } = makeStore({ key: "full", count: 2, resetAt: OPEN_UNTIL });
     const error = await refusal(layer, "full", { ...config, blockDurationMs: 60_000 });
     expect(error).toBeInstanceOf(RateLimitError);
-    expect(stored.get("full")?.blockedUntil).toBeGreaterThan(0);
+    expect(Option.getOrUndefined(MutableHashMap.get(stored, "full"))?.blockedUntil).toBeGreaterThan(
+      0,
+    );
   });
 });
 
@@ -142,7 +146,7 @@ describe("RateLimiter.consumeToken", () => {
       ),
     );
     expect(results.filter(Result.isSuccess)).toHaveLength(5);
-    expect(stored.get("burst")?.count).toBe(50);
+    expect(Option.getOrUndefined(MutableHashMap.get(stored, "burst"))?.count).toBe(50);
   });
 
   it("starts a new window once the old one has expired", async () => {
@@ -162,7 +166,9 @@ describe("RateLimiter.consumeToken", () => {
       Effect.flip(consume(layer, "full", { ...config, blockDurationMs: 60_000 })),
     );
     expect(error).toBeInstanceOf(RateLimitError);
-    expect(stored.get("full")?.blockedUntil).toBeGreaterThan(0);
+    expect(Option.getOrUndefined(MutableHashMap.get(stored, "full"))?.blockedUntil).toBeGreaterThan(
+      0,
+    );
   });
 
   it("reports retryAfter as the Duration until the window resets", async () => {

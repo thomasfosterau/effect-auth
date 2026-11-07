@@ -29,7 +29,7 @@ import type {
   PreparedQueryHKTBase,
 } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
-import { DateTime, Effect, Layer, Predicate, Schema } from "effect";
+import { DateTime, Effect, Layer, Predicate, Record as Rec, Schema, Struct } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { fromTables } from "./Columns.ts";
@@ -89,7 +89,7 @@ const projection = fromTables(tables);
 const wireRow = (
   names: Readonly<Record<string, string>>,
   values: Readonly<Record<string, Schema.Json>>,
-): ReadonlyArray<unknown> => Object.values(names).map((field) => values[field]);
+): ReadonlyArray<unknown> => Rec.values(names).map((field) => values[field]);
 
 const run = <A, E>(
   proxy: Proxy,
@@ -356,7 +356,7 @@ describe("MySQL / Schema", () => {
 
   it("honours custom table names in both the tables and the DDL", () => {
     const custom = defineTables({ sessions: "app_sessions" });
-    expect(Object.keys(getTableColumns(custom.sessions))).toEqual([
+    expect(Struct.keys(getTableColumns(custom.sessions))).toEqual([
       "id",
       "userId",
       "expiresAt",
@@ -372,7 +372,9 @@ describe("MySQL / Schema", () => {
 
   it("keeps the same column names as the other dialects", () => {
     const columnNames = (table: Tables[keyof Tables]) =>
-      Object.values(getTableColumns(table)).map((column) => column.name);
+      Rec.values<string, { readonly name: string }>(getTableColumns(table)).map(
+        (column) => column.name,
+      );
     expect(columnNames(tables.sessions)).toEqual([
       "id",
       "user_id",

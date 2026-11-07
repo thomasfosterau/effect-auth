@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Predicate } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option, Predicate } from "effect";
 import * as Auth from "./index.ts";
 
 /**
@@ -40,7 +40,7 @@ describe("static service layers", () => {
   });
 
   it("SessionService.layer builds a working session manager", async () => {
-    const sessions = new Map<string, Auth.Session>();
+    const sessions = MutableHashMap.empty<string, Auth.Session>();
     const user: Auth.User = {
       id: "user-1",
       createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -51,19 +51,22 @@ describe("static service layers", () => {
     const sessionStore: typeof Auth.SessionStore.Service = {
       create: (session) =>
         Effect.sync(() => {
-          sessions.set(session.id, session);
+          MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
-      get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
+      get: (sessionId) =>
+        Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
       update: (session) =>
         Effect.sync(() => {
-          sessions.set(session.id, session);
+          MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
-      delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+      delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
       deleteByUserId: () => Effect.void,
       listByUserId: (userId) =>
-        Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+        Effect.sync(() =>
+          Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+        ),
     };
 
     const userStore: typeof Auth.UserStore.Service = {

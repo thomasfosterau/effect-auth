@@ -13,7 +13,7 @@
  * (`tsconfig.json` excludes `src/testing/`).
  */
 
-import { DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Email from "@thomasfosterau/effect-auth/email";
@@ -90,8 +90,8 @@ export const makeAppWriter = (
   insertUser: (row: UserRowInsert) => Promise<void>,
   mode: WriterMode,
 ) => {
-  const users = new Map<string, Auth.User>();
-  const hashes = new Map<string, string>();
+  const users = MutableHashMap.empty<string, Auth.User>();
+  const hashes = MutableHashMap.empty<string, string>();
   /** The `identifier` each `createUser` call was given. */
   const createdWith: Array<Auth.NewUserIdentifier | undefined> = [];
 
@@ -113,7 +113,8 @@ export const makeAppWriter = (
       createdWith.push(input.identifier);
       if (mode === "findsOrCreates" && lookup !== undefined && input.identifier !== undefined) {
         const held = yield* lookup.getByValue(input.identifier.type, input.identifier.value);
-        const existing = held === null ? undefined : users.get(held.userId);
+        const existing =
+          held === null ? undefined : Option.getOrUndefined(MutableHashMap.get(users, held.userId));
         if (existing !== undefined) return { user: existing, created: false };
       }
       const id = globalThis.crypto.randomUUID();
@@ -123,7 +124,7 @@ export const makeAppWriter = (
         catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
       });
       const user: Auth.User = { id, createdAt: now, updatedAt: now, attributes: {} };
-      users.set(id, user);
+      MutableHashMap.set(users, id, user);
       return { user, created: true };
     });
 
@@ -131,13 +132,16 @@ export const makeAppWriter = (
 
   const emailPasswordStore: typeof Email.EmailPasswordStore.Service = {
     createUser,
-    getPasswordHash: (userId) => Effect.sync(() => hashes.get(userId) ?? null),
-    clearPasswordHash: (userId: string) => Effect.sync(() => void hashes.delete(userId)),
-    setPasswordHash: (userId, hash) => Effect.sync(() => void hashes.set(userId, hash)),
+    getPasswordHash: (userId) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(hashes, userId))),
+    clearPasswordHash: (userId: string) =>
+      Effect.sync(() => void MutableHashMap.remove(hashes, userId)),
+    setPasswordHash: (userId, hash) =>
+      Effect.sync(() => void MutableHashMap.set(hashes, userId, hash)),
   };
 
   const userStore: typeof Auth.UserStore.Service = {
-    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
   };
 
   /**

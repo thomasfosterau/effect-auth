@@ -1,6 +1,18 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { TestClock } from "effect/testing";
-import { Array as Arr, Context, DateTime, Effect, Layer, Order, Predicate, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Order,
+  Predicate,
+  Record as Rec,
+  Result,
+} from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -30,47 +42,51 @@ import { hashToken } from "./TokenHash.ts";
 import type { Attributes, Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 
-const users = new Map<string, User>();
-const sessions = new Map<string, Session>();
-const identifiers = new Map<string, Identifier>();
-const passwordHashes = new Map<string, string>();
+const users = MutableHashMap.empty<string, User>();
+const sessions = MutableHashMap.empty<string, Session>();
+const identifiers = MutableHashMap.empty<string, Identifier>();
+const passwordHashes = MutableHashMap.empty<string, string>();
 /** The `identifier` each `createUser` call was given. */
 const createdWith: Array<NewUserIdentifier | undefined> = [];
 
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
-const getUser = (userId: string) => Effect.sync(() => users.get(userId) ?? null);
+const getUser = (userId: string) =>
+  Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId)));
 
 // Session's UserStore (used by SessionService.validateSession)
 const sessionUserStore = {
@@ -82,13 +98,13 @@ const userServiceStore = {
 
   update: (user: User) =>
     Effect.sync(() => {
-      users.set(user.id, user);
+      MutableHashMap.set(users, user.id, user);
       return user;
     }),
 
   delete: (userId: string) =>
     Effect.sync(() => {
-      users.delete(userId);
+      MutableHashMap.remove(users, userId);
     }),
 };
 
@@ -96,7 +112,7 @@ const userServiceStore = {
  * would resolve the email-of-record from its identifier records. */
 const emailOf = (userId: string): string =>
   Arr.sort(
-    Array.from(identifiers.values()).filter(
+    Array.from(MutableHashMap.values(identifiers)).filter(
       (identifier) => identifier.userId === userId && identifier.type === "email",
     ),
     Order.mapInput(Order.Number, (identifier: Identifier) => identifier.createdAt.getTime()),
@@ -113,7 +129,7 @@ const adminUserStore = {
     Effect.sync(() => {
       const search = query.searchEmail?.toLowerCase();
       const matching = Arr.sort(
-        Array.from(users.values()).filter((user) =>
+        Array.from(MutableHashMap.values(users)).filter((user) =>
           search ? emailOf(user.id).toLowerCase().includes(search) : true,
         ),
         Order.mapInput(localeOrder, (user: User) => emailOf(user.id)),
@@ -131,7 +147,7 @@ const adminUserStore = {
   }) =>
     Effect.sync(() => {
       createdWith.push(input.identifier);
-      const id = `user-${users.size + 1}`;
+      const id = `user-${MutableHashMap.size(users) + 1}`;
       const user: User = {
         id,
         name: input.name,
@@ -140,13 +156,13 @@ const adminUserStore = {
         updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: input.attributes ?? {},
       };
-      users.set(id, user);
+      MutableHashMap.set(users, id, user);
       return { user, created: true };
     }),
 
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
-      passwordHashes.set(userId, hash);
+      MutableHashMap.set(passwordHashes, userId, hash);
     }),
 };
 
@@ -202,7 +218,7 @@ const seedUser = (id: string, email: string, attributes: Attributes = {}): User 
     updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes,
   };
-  users.set(id, user);
+  MutableHashMap.set(users, id, user);
   const identifier = makeIdentifier({
     userId: id,
     type: "email",
@@ -211,7 +227,7 @@ const seedUser = (id: string, email: string, attributes: Attributes = {}): User 
     verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifiers.set(identifier.id, identifier);
+  MutableHashMap.set(identifiers, identifier.id, identifier);
   return user;
 };
 
@@ -240,10 +256,10 @@ const runService = <A, E>(
 
 describe("AdminService", () => {
   beforeEach(() => {
-    users.clear();
-    sessions.clear();
-    identifiers.clear();
-    passwordHashes.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(identifiers);
+    MutableHashMap.clear(passwordHashes);
     createdWith.length = 0;
   });
 
@@ -281,7 +297,7 @@ describe("AdminService", () => {
       }),
     );
 
-    Arr.forEach(Object.values(result), (outcome) => {
+    Arr.forEach(Rec.values(result), (outcome) => {
       expect(outcome._tag).toBe("Failure");
       assert(Predicate.isTagged(outcome, "Failure"));
       expect(outcome.failure._tag).toBe("AdminError");
@@ -317,7 +333,7 @@ describe("AdminService", () => {
 
     expect(updated.attributes["role"]).toBe("admin");
     expect(updated.attributes["theme"]).toBe("dark");
-    const stored = users.get("user-1");
+    const stored = Option.getOrUndefined(MutableHashMap.get(users, "user-1"));
     assert(stored !== undefined, "user-1 is seeded");
     expect(isAdmin(stored)).toBe(true);
   });
@@ -332,7 +348,9 @@ describe("AdminService", () => {
       Effect.flip(service.setRole(admin, "user-1", "superadmin")),
     );
     expect(refused._tag).toBe("AdminError");
-    expect(users.get("user-1")?.attributes["role"]).toBe("user");
+    expect(Option.getOrUndefined(MutableHashMap.get(users, "user-1"))?.attributes["role"]).toBe(
+      "user",
+    );
 
     const promoted = await runService(testContext, { roles }, (service) =>
       service.setRole(admin, "user-1", "moderator"),
@@ -373,10 +391,10 @@ describe("AdminService", () => {
         const sessionManager = yield* SessionService;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-1");
-        const sessionsBefore = sessions.size;
+        const sessionsBefore = MutableHashMap.size(sessions);
 
         const banned = yield* service.banUser(admin, "user-1", { reason: "Spamming" });
-        const sessionsAfter = sessions.size;
+        const sessionsAfter = MutableHashMap.size(sessions);
 
         const banSelf = yield* Effect.result(service.banUser(admin, "admin-1"));
         const banAdmin = yield* Effect.result(service.banUser(admin, otherAdmin.id));
@@ -393,7 +411,7 @@ describe("AdminService", () => {
     expect(Effect.runSync(isBanned(result.banned))).toBe(true);
     expect(result.banSelf._tag).toBe("Failure");
     expect(result.banAdmin._tag).toBe("Failure");
-    const storedAdmin = users.get("admin-2");
+    const storedAdmin = Option.getOrUndefined(MutableHashMap.get(users, "admin-2"));
     assert(storedAdmin !== undefined, "admin-2 is seeded");
     expect(Effect.runSync(isBanned(storedAdmin))).toBe(false);
   });
@@ -523,9 +541,9 @@ describe("AdminService", () => {
     );
 
     expect(result.removeSelf._tag).toBe("Failure");
-    expect(users.has("admin-1")).toBe(true);
-    expect(users.has("user-1")).toBe(false);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.has(users, "admin-1")).toBe(true);
+    expect(MutableHashMap.has(users, "user-1")).toBe(false);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("revokes a user's sessions without touching others", async () => {
@@ -543,7 +561,7 @@ describe("AdminService", () => {
       }),
     );
 
-    const remaining = Array.from(sessions.values());
+    const remaining = Array.from(MutableHashMap.values(sessions));
     expect(remaining).toHaveLength(1);
     expect(remaining[0].userId).toBe("user-2");
   });
@@ -565,7 +583,7 @@ describe("AdminService", () => {
     const impersonationExpiresAt = session.attributes["impersonationExpiresAt"];
     assert(Predicate.isNumber(impersonationExpiresAt));
     expect(impersonationExpiresAt).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
-    expect(sessions.has(hashToken(session.id))).toBe(true);
+    expect(MutableHashMap.has(sessions, hashToken(session.id))).toBe(true);
 
     const missingTarget = await runService(testContext, {}, (service) =>
       Effect.result(service.impersonateUser(admin, "ghost")),
@@ -600,13 +618,13 @@ describe("AdminService", () => {
     );
 
     // Minimal user: the primary email identifier is claimed (unverified by default)
-    const minimalEmail = Array.from(identifiers.values()).find(
+    const minimalEmail = Array.from(MutableHashMap.values(identifiers)).find(
       (id) => id.type === "email" && id.value === "alice@example.com",
     );
     expect(minimalEmail?.userId).toBe(result.minimal.id);
     expect(minimalEmail?.verified).toBe(false);
     expect(result.minimal.attributes["role"]).toBeUndefined();
-    expect(passwordHashes.has(result.minimal.id)).toBe(false);
+    expect(MutableHashMap.has(passwordHashes, result.minimal.id)).toBe(false);
 
     // Full user: role merged into attributes
     expect(result.full.name).toBe("Bob");
@@ -614,10 +632,14 @@ describe("AdminService", () => {
     expect(result.full.attributes["theme"]).toBe("dark");
 
     // Password was hashed and stored
-    expect(passwordHashes.get(result.full.id)).toBe("test$s3cr3t");
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, result.full.id))).toBe(
+      "test$s3cr3t",
+    );
 
     // Identifier records created: the primary email plus the extra username
-    const idents = Array.from(identifiers.values()).filter((id) => id.userId === result.full.id);
+    const idents = Array.from(MutableHashMap.values(identifiers)).filter(
+      (id) => id.userId === result.full.id,
+    );
     expect(idents).toHaveLength(2);
     const emailIdent = idents.find((id) => id.type === "email");
     const usernameIdent = idents.find((id) => id.type === "username");
@@ -662,7 +684,7 @@ describe("AdminService", () => {
       }),
     );
 
-    const claimed = Array.from(identifiers.values()).find(
+    const claimed = Array.from(MutableHashMap.values(identifiers)).find(
       (identifier) => identifier.userId === result.created.id,
     );
     expect(claimed?.value).toBe("carol@example.com");
@@ -702,7 +724,7 @@ describe("AdminService", () => {
         }),
     );
 
-    const values = Array.from(identifiers.values())
+    const values = Array.from(MutableHashMap.values(identifiers))
       .filter((identifier) => identifier.userId === result.created.id)
       .map((identifier) => [identifier.type, identifier.value]);
     expect(values).toEqual([
@@ -717,7 +739,7 @@ describe("AdminService", () => {
   it("createUser: a failing phone normaliser writes nothing (#408)", async () => {
     const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
-    const usersBefore = users.size;
+    const usersBefore = MutableHashMap.size(users);
 
     const result = await runService(
       testContext,
@@ -732,9 +754,9 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    expect(users.size).toBe(usersBefore);
+    expect(MutableHashMap.size(users)).toBe(usersBefore);
     expect(
-      Array.from(identifiers.values()).some(
+      Array.from(MutableHashMap.values(identifiers)).some(
         (identifier) => identifier.value === "frank@example.com",
       ),
     ).toBe(false);
@@ -751,7 +773,10 @@ describe("AdminService", () => {
             input.identifier === undefined
               ? null
               : yield* identifierStore.getByValue(input.identifier.type, input.identifier.value);
-          const owner = held === null ? undefined : users.get(held.userId);
+          const owner =
+            held === null
+              ? undefined
+              : Option.getOrUndefined(MutableHashMap.get(users, held.userId));
           if (owner !== undefined) return { user: owner, created: false };
           return yield* adminUserStore.createUser(input);
         }),
@@ -764,7 +789,7 @@ describe("AdminService", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(owner.id, owner);
+    MutableHashMap.set(users, owner.id, owner);
     const ownerEmail = makeIdentifier({
       userId: owner.id,
       type: "email",
@@ -772,8 +797,8 @@ describe("AdminService", () => {
       verified: false,
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifiers.set(ownerEmail.id, ownerEmail);
-    passwordHashes.set(owner.id, "owner-hash");
+    MutableHashMap.set(identifiers, ownerEmail.id, ownerEmail);
+    MutableHashMap.set(passwordHashes, owner.id, "owner-hash");
 
     const result = await runService(testContext, {}, (service) =>
       Effect.result(
@@ -790,11 +815,13 @@ describe("AdminService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("AdminError");
     // No password, no extra identifier, and the owner's address is still unverified.
-    expect(passwordHashes.get(owner.id)).toBe("owner-hash");
-    expect(Array.from(identifiers.values()).filter((i) => i.userId === owner.id)).toEqual([
-      ownerEmail,
-    ]);
-    expect(Array.from(identifiers.values()).some((i) => i.value === "attacker")).toBe(false);
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, owner.id))).toBe("owner-hash");
+    expect(
+      Array.from(MutableHashMap.values(identifiers)).filter((i) => i.userId === owner.id),
+    ).toEqual([ownerEmail]);
+    expect(Array.from(MutableHashMap.values(identifiers)).some((i) => i.value === "attacker")).toBe(
+      false,
+    );
   });
 
   it("createUser: authorization failure for non-admin", async () => {
@@ -819,7 +846,9 @@ describe("AdminService", () => {
       service.setUserPassword(admin, "user-1", "newpassword"),
     );
 
-    expect(passwordHashes.get("user-1")).toBe("test$newpassword");
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, "user-1"))).toBe(
+      "test$newpassword",
+    );
   });
 
   it("setUserPassword: optionally revokes all user sessions after reset", async () => {
@@ -837,7 +866,7 @@ describe("AdminService", () => {
 
         // Without revoke: sessions survive
         yield* service.setUserPassword(admin, "user-1", "pass1");
-        const afterNoRevoke = sessions.size;
+        const afterNoRevoke = MutableHashMap.size(sessions);
 
         // With revoke: user-1's sessions are revoked, user-2's remain
         yield* service.setUserPassword(admin, "user-1", "pass2", { revokeOtherSessions: true });
@@ -845,8 +874,8 @@ describe("AdminService", () => {
       }),
     );
 
-    expect(sessions.size).toBe(1);
-    const remaining = Array.from(sessions.values());
+    expect(MutableHashMap.size(sessions)).toBe(1);
+    const remaining = Array.from(MutableHashMap.values(sessions));
     expect(remaining[0]?.userId).toBe("user-2");
   });
 
@@ -901,7 +930,7 @@ describe("AdminService", () => {
           lastActivityAt: yield* DateTime.nowAsDate,
           attributes: {},
         };
-        sessions.set("expired-hash", expiredSession);
+        MutableHashMap.set(sessions, "expired-hash", expiredSession);
 
         return yield* service.listUserSessions(admin, "user-1");
       }),

@@ -1,5 +1,15 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Clock, Context, DateTime, Effect, Layer, Result } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Result,
+} from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -272,30 +282,30 @@ describe("Hooks - transform short-circuit", () => {
 
 describe("RateLimitPlugin - dependency composition + short-circuit", () => {
   const makeRateLimitStoreLayer = () => {
-    const entries = new Map<string, RateLimitEntry>();
+    const entries = MutableHashMap.empty<string, RateLimitEntry>();
     return Layer.succeed(RateLimitStore, {
-      get: (key: string) => Effect.succeed(entries.get(key) ?? null),
+      get: (key: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(entries, key))),
       set: (key: string, entry: RateLimitEntry) =>
         Effect.sync(() => {
-          entries.set(key, entry);
+          MutableHashMap.set(entries, key, entry);
         }),
       increment: (key: string, ttl: number) =>
         // Starts a new window when there is none or it has expired, as the
         // RateLimitStore contract requires (#455).
         Effect.flatMap(Clock.currentTimeMillis, (now) =>
           Effect.sync(() => {
-            const existing = entries.get(key);
+            const existing = Option.getOrUndefined(MutableHashMap.get(entries, key));
             const next: RateLimitEntry =
               existing === undefined || now >= existing.resetAt
                 ? { key, count: 1, resetAt: now + ttl * 1000 }
                 : { ...existing, count: existing.count + 1 };
-            entries.set(key, next);
+            MutableHashMap.set(entries, key, next);
             return next.count;
           }),
         ),
       delete: (key: string) =>
         Effect.sync(() => {
-          entries.delete(key);
+          MutableHashMap.remove(entries, key);
         }),
     });
   };
@@ -335,47 +345,51 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
 
 describe("Hooks - integration with EmailPasswordService", () => {
   it("a beforeSignUp transform enriches the input the service consumes", async () => {
-    const users = new Map<string, User>();
-    const identifierRecords = new Map<string, Identifier>();
-    const passwordHashes = new Map<string, string>();
-    const sessions = new Map<string, Session>();
+    const users = MutableHashMap.empty<string, User>();
+    const identifierRecords = MutableHashMap.empty<string, Identifier>();
+    const passwordHashes = MutableHashMap.empty<string, string>();
+    const sessions = MutableHashMap.empty<string, Session>();
 
     const sessionStore = {
       create: (session: Session) =>
         Effect.sync(() => {
-          sessions.set(session.id, session);
+          MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
-      get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+      get: (sessionId: string) =>
+        Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
       update: (session: Session) =>
         Effect.sync(() => {
-          sessions.set(session.id, session);
+          MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
       delete: (sessionId: string) =>
         Effect.sync(() => {
-          sessions.delete(sessionId);
+          MutableHashMap.remove(sessions, sessionId);
         }),
       deleteByUserId: (userId: string) =>
         Effect.sync(() => {
-          sessions.forEach((session, id) => {
-            if (session.userId === userId) sessions.delete(id);
+          MutableHashMap.forEach(sessions, (session, id) => {
+            if (session.userId === userId) MutableHashMap.remove(sessions, id);
           });
         }),
       listByUserId: (userId: string) =>
         Effect.sync(() =>
-          Array.from(sessions.values()).filter((session) => session.userId === userId),
+          Array.from(MutableHashMap.values(sessions)).filter(
+            (session) => session.userId === userId,
+          ),
         ),
     };
 
     const userStore = {
-      get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+      get: (userId: string) =>
+        Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
     };
 
     const emailPasswordStore = {
       createUser: ({ name, attributes }: CreateUserInput) =>
         Effect.sync(() => {
-          const id = `user-${users.size + 1}`;
+          const id = `user-${MutableHashMap.size(users) + 1}`;
           const user: User = {
             id,
             ...(name !== undefined && { name }),
@@ -383,14 +397,16 @@ describe("Hooks - integration with EmailPasswordService", () => {
             updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
             attributes: attributes ?? {},
           };
-          users.set(id, user);
+          MutableHashMap.set(users, id, user);
           return { user, created: true };
         }),
-      getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
-      clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
+      getPasswordHash: (userId: string) =>
+        Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+      clearPasswordHash: (userId: string) =>
+        Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
       setPasswordHash: (userId: string, hash: string) =>
         Effect.sync(() => {
-          passwordHashes.set(userId, hash);
+          MutableHashMap.set(passwordHashes, userId, hash);
         }),
     };
 

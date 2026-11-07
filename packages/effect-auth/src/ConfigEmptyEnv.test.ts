@@ -3,12 +3,13 @@ import {
   Array as Arr,
   Cause,
   Config,
-  Schema,
   ConfigProvider,
   Effect,
   Exit,
+  MutableHashSet,
   Order,
   Redacted,
+  Schema,
 } from "effect";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import { jwtServiceConfig } from "./Jwt.ts";
@@ -169,16 +170,16 @@ describe("empty environment variables", () => {
     });
 
     it("guards the assumption: Config.schema runs the Record key filter for every key, empty leaves included", async () => {
-      const seen = new Set<string>();
+      const seen = MutableHashSet.empty<string>();
       const key = Schema.String.check(
         Schema.makeFilter((k: string) => {
-          seen.add(k);
+          MutableHashSet.add(seen, k);
           return true;
         }),
       );
       const probe = Config.schema(Schema.Record(key, Schema.UndefinedOr(Schema.String)), ["P"]);
       await Effect.runPromise(probe.parse(env({ P_A: "1", P_B: "", P_C_D: "2" })));
-      expect(Arr.sort([...seen], Order.String)).toEqual(["A", "B", "C"]);
+      expect(Arr.sort(Arr.fromIterable(seen), Order.String)).toEqual(["A", "B", "C"]);
     });
 
     it("preserveEmptyStrings: an empty value is a failure", async () => {

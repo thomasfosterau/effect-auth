@@ -1,5 +1,15 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Predicate, Redacted, Schema } from "effect";
+import {
+  Array as Arr,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Predicate,
+  Redacted,
+  Schema,
+} from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
@@ -49,20 +59,20 @@ import * as OAuth from "./OAuth.ts";
 
 /** In-memory OAuth state store for authorization-URL tests. */
 const StateStoreLive = () => {
-  const map = new Map<string, OAuthState>();
+  const map = MutableHashMap.empty<string, OAuthState>();
   return Layer.succeed(OAuthStateStore, {
     create: (s: OAuthState) =>
       Effect.sync(() => {
-        map.set(s.state, s);
+        MutableHashMap.set(map, s.state, s);
         return s;
       }),
     get: (state: string) => {
-      const v = map.get(state);
+      const v = Option.getOrUndefined(MutableHashMap.get(map, state));
       return v ? Effect.succeed(v) : Effect.fail(new AuthError({ message: "not found" }));
     },
     delete: (state: string) =>
       Effect.sync(() => {
-        map.delete(state);
+        MutableHashMap.remove(map, state);
       }),
   });
 };
@@ -855,33 +865,36 @@ describe("OAuthService encryptTokens", () => {
   );
 
   const makeAccountStore = () => {
-    const stored = new Map<string, OAuthAccount>();
+    const stored = MutableHashMap.empty<string, OAuthAccount>();
     const layer = Layer.succeed(OAuthAccountStore, {
       create: (a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(stored.get(`${p}:${id}`) ?? null),
-      getByUserId: (uid) => Effect.succeed([...stored.values()].filter((a) => a.userId === uid)),
+      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(stored, `${p}:${id}`))),
+      getByUserId: (uid) =>
+        Effect.succeed(
+          Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
+        ),
       update: (a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
       linkToUser: (uid, a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, { ...a, userId: uid });
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
         }),
       unlinkFromUser: (uid, p) =>
         Effect.sync(() => {
-          stored.forEach((v, k) => {
-            if (v.userId === uid && v.provider === p) stored.delete(k);
+          MutableHashMap.forEach(stored, (v, k) => {
+            if (v.userId === uid && v.provider === p) MutableHashMap.remove(stored, k);
           });
         }),
       delete: (p, id) =>
         Effect.sync(() => {
-          stored.delete(`${p}:${id}`);
+          MutableHashMap.remove(stored, `${p}:${id}`);
         }),
     });
     return { stored, layer };
@@ -912,7 +925,7 @@ describe("OAuthService encryptTokens", () => {
     // Pre-populate store with encrypted tokens (as the service would have stored them).
     const encAccess = await Effect.runPromise(cipher.encrypt(PLAIN_ACCESS));
     const encRefresh = await Effect.runPromise(cipher.encrypt(PLAIN_REFRESH));
-    stored.set("github:gh-1", {
+    MutableHashMap.set(stored, "github:gh-1", {
       id: "acc-1",
       userId: "user-1",
       provider: "github",
@@ -952,7 +965,7 @@ describe("OAuthService encryptTokens", () => {
     // Returned access token must be plaintext.
     expect(newAccessToken).toBe(NEW_ACCESS);
     // Stored access token must be encrypted (not the raw plaintext).
-    const updated = stored.get("github:gh-1");
+    const updated = Option.getOrUndefined(MutableHashMap.get(stored, "github:gh-1"));
     assert(updated !== undefined, "the account is stored");
     expect(updated.accessToken).not.toBe(NEW_ACCESS);
     // And it must decrypt to the new plaintext access token.
@@ -966,7 +979,7 @@ describe("OAuthService encryptTokens", () => {
     const PLAIN_REFRESH = "plain-refresh-token";
     const NEW_ACCESS = "new-access-token-after-refresh";
 
-    stored.set("github:gh-1", {
+    MutableHashMap.set(stored, "github:gh-1", {
       id: "acc-1",
       userId: "user-1",
       provider: "github",
@@ -994,7 +1007,9 @@ describe("OAuthService encryptTokens", () => {
 
     expect(newAccessToken).toBe(NEW_ACCESS);
     // Without encryption the stored token is the raw string.
-    expect(stored.get("github:gh-1")?.accessToken).toBe(NEW_ACCESS);
+    expect(Option.getOrUndefined(MutableHashMap.get(stored, "github:gh-1"))?.accessToken).toBe(
+      NEW_ACCESS,
+    );
   });
 
   it("accepts a custom TokenCipher via { cipher }", async () => {
@@ -1005,7 +1020,7 @@ describe("OAuthService encryptTokens", () => {
     const NEW_ACCESS = "new-access-from-custom-cipher";
 
     const encRefresh = await Effect.runPromise(customCipher.encrypt(PLAIN_REFRESH));
-    stored.set("github:gh-2", {
+    MutableHashMap.set(stored, "github:gh-2", {
       id: "acc-2",
       userId: "user-2",
       provider: "github",
@@ -1085,35 +1100,38 @@ describe("OAuthService unlinkAccount guard", () => {
   });
 
   const makeAccountLayer = (accounts: OAuthAccount[], hasPassword?: boolean) => {
-    const stored = new Map<string, OAuthAccount>(
+    const stored = MutableHashMap.fromIterable<string, OAuthAccount>(
       accounts.map((a) => [`${a.provider}:${a.providerId}`, a]),
     );
     return Layer.succeed(OAuthAccountStore, {
       create: (a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(stored.get(`${p}:${id}`) ?? null),
-      getByUserId: (uid) => Effect.succeed([...stored.values()].filter((a) => a.userId === uid)),
+      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(stored, `${p}:${id}`))),
+      getByUserId: (uid) =>
+        Effect.succeed(
+          Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
+        ),
       update: (a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
       linkToUser: (uid, a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, { ...a, userId: uid });
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
         }),
       unlinkFromUser: (uid, p) =>
         Effect.sync(() => {
-          stored.forEach((v, k) => {
-            if (v.userId === uid && v.provider === p) stored.delete(k);
+          MutableHashMap.forEach(stored, (v, k) => {
+            if (v.userId === uid && v.provider === p) MutableHashMap.remove(stored, k);
           });
         }),
       delete: (p, id) =>
         Effect.sync(() => {
-          stored.delete(`${p}:${id}`);
+          MutableHashMap.remove(stored, `${p}:${id}`);
         }),
       ...(hasPassword !== undefined && { hasPassword: () => Effect.succeed(hasPassword) }),
     });
@@ -1208,30 +1226,33 @@ describe("OAuthService linking controls", () => {
     });
 
   const makeAccountLayer = (existing?: OAuthAccount) => {
-    const stored = new Map<string, OAuthAccount>(
+    const stored = MutableHashMap.fromIterable<string, OAuthAccount>(
       existing ? [[`${existing.provider}:${existing.providerId}`, existing]] : [],
     );
     return Layer.succeed(OAuthAccountStore, {
       create: (a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(stored.get(`${p}:${id}`) ?? null),
-      getByUserId: (uid) => Effect.succeed([...stored.values()].filter((a) => a.userId === uid)),
+      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(stored, `${p}:${id}`))),
+      getByUserId: (uid) =>
+        Effect.succeed(
+          Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
+        ),
       update: (a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
       linkToUser: (uid, a) =>
         Effect.sync(() => {
-          stored.set(`${a.provider}:${a.providerId}`, { ...a, userId: uid });
+          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
         }),
       unlinkFromUser: () => Effect.void,
       delete: (p, id) =>
         Effect.sync(() => {
-          stored.delete(`${p}:${id}`);
+          MutableHashMap.remove(stored, `${p}:${id}`);
         }),
     });
   };
@@ -1270,7 +1291,7 @@ describe("OAuthService linking controls", () => {
   const makeIdentifiers = (
     ...seeds: ReadonlyArray<{ userId: string; email: string; verified?: boolean }>
   ) => {
-    const records = new Map<string, Identifier>();
+    const records = MutableHashMap.empty<string, Identifier>();
     Arr.forEach(seeds, (seed) => {
       const identifier = makeIdentifier({
         userId: seed.userId,
@@ -1279,7 +1300,7 @@ describe("OAuthService linking controls", () => {
         verified: seed.verified ?? true,
         now: DateTime.toDateUtc(DateTime.nowUnsafe()),
       });
-      records.set(identifier.id, identifier);
+      MutableHashMap.set(records, identifier.id, identifier);
     });
     const store = memoryIdentifierStore(records);
     return { records, store, layer: Layer.succeed(IdentifierStore)(store) };
@@ -1578,13 +1599,17 @@ describe("OAuthService linking controls", () => {
   it("refuses when the store's writer returns the existing owner, and links nothing to the owner (#380)", async () => {
     const owner = makeUser({ id: "owner-id" });
     const identifiers = makeIdentifiers();
-    const accounts = new Map<string, OAuthAccount>();
+    const accounts = MutableHashMap.empty<string, OAuthAccount>();
     const accountLayer = Layer.succeed(OAuthAccountStore, {
-      create: (a) => Effect.sync(() => (accounts.set(a.id, a), a)),
+      create: (a) => Effect.sync(() => (MutableHashMap.set(accounts, a.id, a), a)),
       get: () => Effect.succeed(null),
-      getByUserId: (uid) => Effect.succeed([...accounts.values()].filter((a) => a.userId === uid)),
-      update: (a) => Effect.sync(() => (accounts.set(a.id, a), a)),
-      linkToUser: (uid, a) => Effect.sync(() => void accounts.set(a.id, { ...a, userId: uid })),
+      getByUserId: (uid) =>
+        Effect.succeed(
+          Arr.fromIterable(MutableHashMap.values(accounts)).filter((a) => a.userId === uid),
+        ),
+      update: (a) => Effect.sync(() => (MutableHashMap.set(accounts, a.id, a), a)),
+      linkToUser: (uid, a) =>
+        Effect.sync(() => void MutableHashMap.set(accounts, a.id, { ...a, userId: uid })),
       unlinkFromUser: () => Effect.void,
       delete: () => Effect.void,
     });
@@ -1602,7 +1627,7 @@ describe("OAuthService linking controls", () => {
             verified: false,
             now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           });
-          identifiers.records.set(held.id, held);
+          MutableHashMap.set(identifiers.records, held.id, held);
           return { user: owner, created: false };
         }),
     });
@@ -1631,7 +1656,7 @@ describe("OAuthService linking controls", () => {
     assert.instanceOf(err, AuthError);
     expect(err.message).toMatch(/already associated/i);
     // No account linked to the owner, and the owner's address is still unverified.
-    expect(accounts.size).toBe(0);
+    expect(MutableHashMap.size(accounts)).toBe(0);
     const held = await Effect.runPromise(
       identifiers.store.getByValue("email", "owner@example.com"),
     );
@@ -1718,37 +1743,40 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
   );
 
   const makeStateStore = (...seed: ReadonlyArray<OAuthState>) => {
-    const states = new Map<string, OAuthState>(seed.map((s) => [s.state, s]));
+    const states = MutableHashMap.fromIterable<string, OAuthState>(seed.map((s) => [s.state, s]));
     const store: typeof OAuthStateStore.Service = {
       create: (s) =>
         Effect.sync(() => {
-          states.set(s.state, s);
+          MutableHashMap.set(states, s.state, s);
           return s;
         }),
-      get: (k) => Effect.succeed(states.get(k) ?? null),
+      get: (k) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, k))),
       delete: (k) =>
         Effect.sync(() => {
-          states.delete(k);
+          MutableHashMap.remove(states, k);
         }),
     };
     return { states, store };
   };
 
   const makeAccounts = (...seed: ReadonlyArray<OAuthAccount>) => {
-    const accounts = new Map<string, OAuthAccount>(
+    const accounts = MutableHashMap.fromIterable<string, OAuthAccount>(
       seed.map((a) => [`${a.provider}:${a.providerId}`, a]),
     );
     const store: typeof OAuthAccountStore.Service = {
       create: (a) =>
         Effect.sync(() => {
-          accounts.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(accounts.get(`${p}:${id}`) ?? null),
-      getByUserId: (uid) => Effect.succeed([...accounts.values()].filter((a) => a.userId === uid)),
+      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(accounts, `${p}:${id}`))),
+      getByUserId: (uid) =>
+        Effect.succeed(
+          Arr.fromIterable(MutableHashMap.values(accounts)).filter((a) => a.userId === uid),
+        ),
       update: (a) =>
         Effect.sync(() => {
-          accounts.set(`${a.provider}:${a.providerId}`, a);
+          MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
       linkToUser: () => Effect.void,
@@ -1820,7 +1848,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       const service = await makeService(store);
       const err = await Effect.runPromise(Effect.flip(service.handleCallback("st-1", "code")));
       expect(err._tag).toBe("OAuthStateExpiredError");
-      expect(states.has("st-1")).toBe(false);
+      expect(MutableHashMap.has(states, "st-1")).toBe(false);
     });
 
     it("fails with OAuthProviderError when the state names an unregistered provider", async () => {
@@ -1853,9 +1881,11 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       });
       expect(result.account.refreshToken).toBeUndefined();
       expect(result.account.expiresAt).toBeUndefined();
-      expect(accounts.accounts.get("github:gh-9")).toEqual(result.account);
+      expect(Option.getOrUndefined(MutableHashMap.get(accounts.accounts, "github:gh-9"))).toEqual(
+        result.account,
+      );
       // The state is single-use.
-      expect(states.has("st-1")).toBe(false);
+      expect(MutableHashMap.has(states, "st-1")).toBe(false);
     });
 
     it("links a new account to linkToUserId and reports the user", async () => {
@@ -1906,7 +1936,9 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
         refreshToken: "rt-2",
       });
       expect(result.account.updatedAt).toBeGreaterThan(1);
-      expect(accounts.accounts.get("github:gh-9")).toEqual(result.account);
+      expect(Option.getOrUndefined(MutableHashMap.get(accounts.accounts, "github:gh-9"))).toEqual(
+        result.account,
+      );
     });
   });
 
@@ -1924,7 +1956,9 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
         service.generateAuthorizationUrl("github", { scopes: ["read", "write"] }),
       );
       expect(new URL(result.url).searchParams.get("scope")).toBe("read write");
-      expect(states.get(result.state)?.returnTo).toBeUndefined();
+      expect(
+        Option.getOrUndefined(MutableHashMap.get(states, result.state))?.returnTo,
+      ).toBeUndefined();
     });
 
     it("records returnTo on the stored state", async () => {
@@ -1933,7 +1967,10 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       const result = await Effect.runPromise(
         service.generateAuthorizationUrl("github", { returnTo: "/after" }),
       );
-      expect(states.get(result.state)).toMatchObject({ provider: "github", returnTo: "/after" });
+      expect(Option.getOrUndefined(MutableHashMap.get(states, result.state))).toMatchObject({
+        provider: "github",
+        returnTo: "/after",
+      });
     });
 
     it("fails with AuthError when the state vanishes before returnTo is recorded", async () => {

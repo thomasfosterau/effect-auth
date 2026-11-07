@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Redacted } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";
@@ -38,7 +38,8 @@ register(Testing.sessionStoreConformance(), () =>
 );
 register(
   Testing.userStoreConformance({
-    seedUser: (user: Types.User) => Effect.sync(() => void table.users.set(user.id, user)),
+    seedUser: (user: Types.User) =>
+      Effect.sync(() => void MutableHashMap.set(table.users, user.id, user)),
   }),
   () => Layer.succeed(UserStore, Testing.memoryUserStore(table)),
 );

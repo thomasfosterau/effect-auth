@@ -43,7 +43,18 @@
  * @module organization
  */
 
-import { Array as Arr, Clock, Context, Data, Effect, Layer, Option, Order, Result } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Order,
+  Result,
+} from "effect";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
@@ -297,24 +308,31 @@ export class OrganizationDomainStore extends Context.Service<
  * In-memory {@link OrganizationDomainStore}, keyed by claim id. Single-process
  * only - good for tests and single-instance deployments.
  *
- * Pass your own `Map` to inspect or pre-seed state in tests.
+ * Pass your own `MutableHashMap` to inspect or pre-seed state in tests.
  */
 export const memoryOrganizationDomainStore = (
-  records: Map<string, OrganizationDomain> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, OrganizationDomain> = MutableHashMap.empty(),
 ): typeof OrganizationDomainStore.Service => ({
-  create: (domain) => Effect.sync(() => (records.set(domain.id, domain), domain)),
-  getById: (domainId) => Effect.sync(() => records.get(domainId) ?? null),
+  create: (domain) => Effect.sync(() => (MutableHashMap.set(records, domain.id, domain), domain)),
+  getById: (domainId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, domainId))),
   getByDomain: (domain) =>
-    Effect.sync(() => [...records.values()].find((record) => record.domain === domain) ?? null),
+    Effect.sync(
+      () =>
+        Arr.fromIterable(MutableHashMap.values(records)).find(
+          (record) => record.domain === domain,
+        ) ?? null,
+    ),
   listByOrganization: (organizationId) =>
     Effect.sync(() =>
       Arr.sort(
-        [...records.values()].filter((record) => record.organizationId === organizationId),
+        Arr.fromIterable(MutableHashMap.values(records)).filter(
+          (record) => record.organizationId === organizationId,
+        ),
         Order.mapInput(Order.Number, (record: OrganizationDomain) => record.createdAt),
       ),
     ),
-  update: (domain) => Effect.sync(() => (records.set(domain.id, domain), domain)),
-  delete: (domainId) => Effect.sync(() => void records.delete(domainId)),
+  update: (domain) => Effect.sync(() => (MutableHashMap.set(records, domain.id, domain), domain)),
+  delete: (domainId) => Effect.sync(() => void MutableHashMap.remove(records, domainId)),
 });
 
 /**
