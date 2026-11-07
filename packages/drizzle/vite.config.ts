@@ -5,6 +5,9 @@ export default defineConfig({
   run: packageTasks({
     build: "tsc",
     check: "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run",
+    // Once on the catalog's drizzle-orm 0.4x line, once on the 1.0 line the
+    // peer range also admits (`vite.drizzle-1.config.ts`, #544).
+    test: "vp test run && vp test run --config vite.drizzle-1.config.ts",
   }),
   test: {
     globals: true,

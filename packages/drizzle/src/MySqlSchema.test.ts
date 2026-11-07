@@ -34,6 +34,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { fromTables } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
+import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
 import { layer } from "./Layers.ts";
 import { defineTables, migrationStatements, tables, type Tables } from "./MySqlSchema.ts";
 import type * as Pg from "./PgSchema.ts";
@@ -61,7 +62,7 @@ const makeProxy = (): Proxy => {
   const statements: Array<Statement> = [];
   let queued: ReadonlyArray<ReadonlyArray<unknown>> = [];
   const db = drizzle(async (sql, params, method) => {
-    statements.push({ sql, params });
+    statements.push({ sql: normalizeSql(sql), params });
     if (method === "all") {
       const rows = queued;
       queued = [];
@@ -69,7 +70,7 @@ const makeProxy = (): Proxy => {
     }
     // What mysql2 hands back for an INSERT/UPDATE/DELETE.
     return { rows: [{ insertId: 0, affectedRows: 1 }] };
-  });
+  }, mysqlProxyConfig);
   return {
     db,
     statements,

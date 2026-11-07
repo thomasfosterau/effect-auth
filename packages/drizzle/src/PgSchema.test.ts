@@ -55,7 +55,7 @@ beforeAll(async () => {
     await previous;
     await client.exec(statement);
   });
-  db = drizzle(client);
+  db = drizzle({ client });
 });
 
 afterAll(async () => {

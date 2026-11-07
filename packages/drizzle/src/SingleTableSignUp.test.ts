@@ -77,14 +77,14 @@ const runWith =
   <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
     Effect.runPromise(
       build().pipe(
-        Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(drizzle(client))))),
+        Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(drizzle({ client }))))),
       ),
     );
 
 signUpContract("single-table PostgreSQL", false, {
   run: runWith(strictMapping),
   insertUser: async (row: UserRowInsert) => {
-    await drizzle(client)
+    await drizzle({ client })
       .insert(strictUsers)
       .values({
         ...row,
@@ -95,14 +95,14 @@ signUpContract("single-table PostgreSQL", false, {
       });
   },
   readUserRow: async (userId) => {
-    const rows = await drizzle(client)
+    const rows = await drizzle({ client })
       .select({ email: strictUsers.email, emailVerified: strictUsers.emailVerified })
       .from(strictUsers)
       .where(eq(strictUsers.userId, userId));
     return rows[0] ?? null;
   },
   countUserRows: async () => {
-    const [row] = await drizzle(client).select({ n: count() }).from(strictUsers);
+    const [row] = await drizzle({ client }).select({ n: count() }).from(strictUsers);
     return row?.n ?? 0;
   },
 });
@@ -110,19 +110,19 @@ signUpContract("single-table PostgreSQL", false, {
 signUpContract("single-table PostgreSQL", true, {
   run: runWith(mapping),
   insertUser: async (row: UserRowInsert) => {
-    await drizzle(client)
+    await drizzle({ client })
       .insert(appUsers)
       .values({ ...row, userId: row.id });
   },
   readUserRow: async (userId) => {
-    const rows = await drizzle(client)
+    const rows = await drizzle({ client })
       .select({ email: appUsers.email, emailVerified: appUsers.emailVerified })
       .from(appUsers)
       .where(eq(appUsers.userId, userId));
     return rows[0] ?? null;
   },
   countUserRows: async () => {
-    const [row] = await drizzle(client).select({ n: count() }).from(appUsers);
+    const [row] = await drizzle({ client }).select({ n: count() }).from(appUsers);
     return row?.n ?? 0;
   },
 });

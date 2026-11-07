@@ -76,7 +76,7 @@ const withDatabase = async <A>(
 ): Promise<A> => {
   await truncateTables(client);
   const log = makeQueryLog();
-  return await use(drizzle(client, { logger: log.logger }), log);
+  return await use(drizzle({ client, logger: log.logger }), log);
 };
 
 /**

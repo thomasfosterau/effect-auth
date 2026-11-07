@@ -41,7 +41,9 @@ beforeEach(async () => {
 const runWithDatabase = <A, E>(build: () => Effect.Effect<A, E, Auth.SessionStore>): Promise<A> =>
   Effect.runPromise(
     build().pipe(
-      Effect.provide(sessionStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle(client))))),
+      Effect.provide(
+        sessionStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle({ client })))),
+      ),
     ),
   );
 

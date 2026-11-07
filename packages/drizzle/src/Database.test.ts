@@ -169,9 +169,9 @@ describe("overlapping requests", () => {
     // Three databases: one per "request", plus the default the reference falls
     // back to. The default holds no rows at all, so a handle that leaked out of
     // its request would read `null` and fail the assertions loudly.
-    const fallbackDb = drizzle(primary);
-    const firstDb = drizzle(first);
-    const secondDb = drizzle(second);
+    const fallbackDb = drizzle({ client: primary });
+    const firstDb = drizzle({ client: first });
+    const secondDb = drizzle({ client: second });
 
     const RequestDatabase: Context.Reference<PgliteDatabase> = Context.Reference<PgliteDatabase>(
       "test/RequestDatabase",

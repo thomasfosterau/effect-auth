@@ -26,9 +26,19 @@ pipeline.
 pnpm add @thomasfosterau/effect-auth-drizzle @thomasfosterau/effect-auth drizzle-orm effect
 ```
 
-`drizzle-orm` (`>=0.44.0`) and `effect` (`^4.1.0`) are peer dependencies (`@types/pg` is an optional one), as is your driver of choice (`pg`,
+`drizzle-orm` (`>=0.44.0 || >=1.0.0-rc.5`) and `effect` (`^4.1.0`) are peer dependencies (`@types/pg` is an optional one), as is your driver of choice (`pg`,
 `postgres`, `@neondatabase/serverless`, `@electric-sql/pglite`,
 `better-sqlite3`, `@libsql/client`, `mysql2`, ...).
+
+Both drizzle-orm lines are supported, and the package's suite runs on each:
+the classic `0.44`/`0.45` line and the 1.0 line from `1.0.0-rc.5` (the
+release candidate that ships drizzle's Effect drivers). Hand a driver its
+client as `drizzle({ client })`, which both lines read the same way: 1.0
+reads any argument that is not a string as a config, so `drizzle(pool)`
+there ignores `pool` and opens a default connection of its own. On 1.0, `drizzle-orm/mysql-proxy` decodes nothing itself
+(drizzle moved decoding into each driver's codecs), so a proxy that returns
+mysql2's wire values must pass mysql2's codecs as `codecs` for the stores to
+read `Date`s and booleans.
 
 ## Usage
 
@@ -42,7 +52,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
 
-const db = drizzle(new Pool({ connectionString: process.env.DATABASE_URL }));
+const db = drizzle({ client: new Pool({ connectionString: process.env.DATABASE_URL }) });
 
 const stores = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
 ```

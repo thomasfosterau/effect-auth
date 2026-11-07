@@ -128,13 +128,13 @@ const runWith = <A, E>(
 ): Promise<A> =>
   Effect.runPromise(
     build().pipe(
-      Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(drizzle(client))))),
+      Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(drizzle({ client }))))),
     ),
   );
 
 /** Insert the users the contract expects, with no login handle. */
 const seedUsers = async (): Promise<void> => {
-  await drizzle(client)
+  await drizzle({ client })
     .insert(appUsers)
     .values([
       { userId: USER.ada, createdAt: USER_CREATED_AT, updatedAt: USER_CREATED_AT },
@@ -143,7 +143,7 @@ const seedUsers = async (): Promise<void> => {
 };
 
 const readUserRow = async (userId: string) => {
-  const rows = await drizzle(client)
+  const rows = await drizzle({ client })
     .select({ email: appUsers.email, emailVerified: appUsers.emailVerified })
     .from(appUsers)
     .where(eq(appUsers.userId, userId))
@@ -167,7 +167,7 @@ notNullContract("single-table PostgreSQL", {
   run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
     runWith(strictMapping, build),
   seedUsers: async () => {
-    await drizzle(client)
+    await drizzle({ client })
       .insert(strictUsers)
       .values([
         {
@@ -183,7 +183,7 @@ notNullContract("single-table PostgreSQL", {
       ]);
   },
   readUserRow: async (userId: string) => {
-    const rows = await drizzle(client)
+    const rows = await drizzle({ client })
       .select({ email: strictUsers.email, emailVerified: strictUsers.emailVerified })
       .from(strictUsers)
       .where(eq(strictUsers.userId, userId))
@@ -191,7 +191,7 @@ notNullContract("single-table PostgreSQL", {
     return rows[0] ?? null;
   },
   deleteUserRow: async (userId: string) => {
-    await drizzle(client).delete(strictUsers).where(eq(strictUsers.userId, userId));
+    await drizzle({ client }).delete(strictUsers).where(eq(strictUsers.userId, userId));
   },
 });
 
@@ -200,7 +200,7 @@ verifiedAtContract("single-table PostgreSQL", {
   run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
     runWith(verifiedMapping, build),
   seedUsers: async () => {
-    await drizzle(client)
+    await drizzle({ client })
       .insert(verifiedUsers)
       .values([
         { userId: USER.ada, createdAt: USER_CREATED_AT },
@@ -208,7 +208,7 @@ verifiedAtContract("single-table PostgreSQL", {
       ]);
   },
   readUserRow: async (userId: string) => {
-    const rows = await drizzle(client)
+    const rows = await drizzle({ client })
       .select({ email: verifiedUsers.email, emailVerified: verifiedUsers.emailVerified })
       .from(verifiedUsers)
       .where(eq(verifiedUsers.userId, userId))
@@ -216,7 +216,7 @@ verifiedAtContract("single-table PostgreSQL", {
     return rows[0] ?? null;
   },
   readVerifiedAt: async (userId: string) => {
-    const rows = await drizzle(client)
+    const rows = await drizzle({ client })
       .select({ verifiedAt: verifiedUsers.emailVerifiedAt })
       .from(verifiedUsers)
       .where(eq(verifiedUsers.userId, userId))
@@ -257,7 +257,7 @@ conformance(
   Testing.identifierStoreConformance({
     seedUser: (user) =>
       Effect.tryPromise(() =>
-        drizzle(client)
+        drizzle({ client })
           .insert(appUsers)
           .values({ userId: user.id, createdAt: user.createdAt, updatedAt: user.updatedAt }),
       ).pipe(Effect.orDie),

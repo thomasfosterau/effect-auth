@@ -36,7 +36,7 @@
  * import { Pool } from "pg";
  * import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
  *
- * const db = drizzle(new Pool({ connectionString: process.env["DATABASE_URL"] }));
+ * const db = drizzle({ client: new Pool({ connectionString: process.env["DATABASE_URL"] }) });
  *
  * // All three stores on top of the drizzle handle.
  * const stores = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));

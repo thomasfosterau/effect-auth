@@ -62,7 +62,7 @@ beforeEach(() => {
       created_at INTEGER NOT NULL
     );
   `);
-  db = drizzle(client);
+  db = drizzle({ client });
 });
 
 afterEach(() => {

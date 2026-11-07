@@ -38,7 +38,7 @@ beforeEach(async () => {
 const runWithDatabase = <A, E>(
   build: (db: PgliteDatabase) => Effect.Effect<A, E, Auth.UserStore>,
 ): Promise<A> => {
-  const db = drizzle(client);
+  const db = drizzle({ client });
   return Effect.runPromise(
     build(db).pipe(Effect.provide(userStoreLayer(tables).pipe(Layer.provide(databaseLayer(db))))),
   );
@@ -124,7 +124,7 @@ conformance(
   Testing.userStoreConformance({
     seedUser: (user) =>
       Effect.tryPromise(() =>
-        drizzle(client)
+        drizzle({ client })
           .insert(tables.users)
           .values({
             id: user.id,
