@@ -142,7 +142,6 @@ catalogs:
     # The optional peer of effect-auth's `./saml` subpath, at the same
     # CVE-fixed floor as the catalog pin above.
     "@node-saml/node-saml": ^5.1.0
-    drizzle-orm: ">=0.44.0"
     # `^4.0.0` by policy, raised here because the packages' own code needs an
     # Effect module that first shipped in a later minor: `effect/crypto`
     # (`SecureRandom`, `Digest`, which the core's services yield) is new in
@@ -150,6 +149,14 @@ catalogs:
     # building, type-checking and testing on `effect` 4.1.0 exactly.
     effect: ^4.1.0
     svelte: ^5.20.0
+  # effect-auth-drizzle's `drizzle-orm` peer, apart from `peers` because it
+  # names a prerelease. A semver range never admits a prerelease unless a
+  # comparator names one on the same version tuple, so `>=0.44.0` alone
+  # rejects the `1.0.0-rc.5` the applications run (#544). Both lines are
+  # tested: the suite runs on the catalog's 0.4x `drizzle-orm` and again on
+  # `drizzle-orm-effect` (the 1.0.0-rc.5 build), `vite.drizzle-1.config.ts`.
+  drizzle-peers:
+    drizzle-orm: ">=0.44.0 || >=1.0.0-rc.5"
   # The two Alchemy packages' peers (effect-auth-alchemy-cloudflare and
   # effect-auth-alchemy-postgres), kept apart from the programme floor in
   # `peers` (today the `effect` floors are equal): `alchemy` (beta.85) itself

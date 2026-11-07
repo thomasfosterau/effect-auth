@@ -60,7 +60,7 @@
   },
   "peerDependencies": {
     "@types/pg": "catalog:peers",
-    "drizzle-orm": "catalog:peers",
+    "drizzle-orm": "catalog:drizzle-peers",
     "effect": "catalog:peers"
   },
   "peerDependenciesMeta": {

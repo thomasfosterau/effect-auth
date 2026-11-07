@@ -173,7 +173,7 @@ beforeEach(async () => {
     client,
     [appIdentifiers, appSessions, appUsers].map((table) => getTableName(table)),
   );
-  await drizzle(client)
+  await drizzle({ client })
     .insert(appUsers)
     .values({
       key: userId,
@@ -190,7 +190,7 @@ beforeEach(async () => {
 const runWithDatabase = <A, E>(
   build: (db: PgliteDatabase) => Effect.Effect<A, E, StoreServices>,
 ): Promise<A> => {
-  const db = drizzle(client);
+  const db = drizzle({ client });
   return Effect.runPromise(
     build(db).pipe(Effect.provide(storesLayer(appSchema).pipe(Layer.provide(databaseLayer(db))))),
   );

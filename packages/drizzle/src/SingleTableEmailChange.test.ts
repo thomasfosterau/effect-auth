@@ -90,7 +90,7 @@ beforeEach(async () => {
 });
 
 const readRow = async (userId: string) => {
-  const rows = await drizzle(client)
+  const rows = await drizzle({ client })
     .select({ email: appUsers.email, emailVerified: appUsers.emailVerified })
     .from(appUsers)
     .where(eq(appUsers.userId, userId))
@@ -99,7 +99,7 @@ const readRow = async (userId: string) => {
 };
 
 const readStrictRow = async (userId: string) => {
-  const rows = await drizzle(client)
+  const rows = await drizzle({ client })
     .select({ email: strictUsers.email, emailVerified: strictUsers.emailVerified })
     .from(strictUsers)
     .where(eq(strictUsers.userId, userId))
@@ -108,7 +108,7 @@ const readStrictRow = async (userId: string) => {
 };
 
 const deleteStrictRow = async (userId: string) => {
-  await drizzle(client).delete(strictUsers).where(eq(strictUsers.userId, userId));
+  await drizzle({ client }).delete(strictUsers).where(eq(strictUsers.userId, userId));
 };
 
 const makeUser = (id: string): Auth.User => {
@@ -194,7 +194,7 @@ const makeHarness = (
           }),
         ).pipe(
           Layer.provide(
-            singleTableLayer(users).pipe(Layer.provide(databaseLayer(drizzle(client)))),
+            singleTableLayer(users).pipe(Layer.provide(databaseLayer(drizzle({ client })))),
           ),
         ),
       ),
@@ -218,7 +218,7 @@ const makeHarness = (
 describe("single-table IdentifierStore: email change", () => {
   describe("nullable email", () => {
     beforeEach(async () => {
-      await drizzle(client)
+      await drizzle({ client })
         .insert(appUsers)
         .values([
           { userId: USER.ada, email: OLD, emailVerified: true, createdAt: USER_CREATED_AT },
@@ -249,7 +249,7 @@ describe("single-table IdentifierStore: email change", () => {
           replace: (from, to) =>
             Effect.orDie(
               Effect.tryPromise(() =>
-                drizzle(client)
+                drizzle({ client })
                   .update(appUsers)
                   .set({ email: NEW, emailVerified: true })
                   .where(eq(appUsers.userId, USER.grace)),
@@ -280,7 +280,7 @@ describe("single-table IdentifierStore: email change", () => {
           replace: (from, to) =>
             Effect.orDie(
               Effect.tryPromise(() =>
-                drizzle(client)
+                drizzle({ client })
                   .update(appUsers)
                   .set({ email: NEW, emailVerified: false })
                   .where(eq(appUsers.userId, USER.ada)),
@@ -300,7 +300,7 @@ describe("single-table IdentifierStore: email change", () => {
     it("an address another user claims after the change is requested fails with AccountTokenError and the previous address stays", async () => {
       const h = makeHarness(mapping, async () => {});
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
-      await drizzle(client)
+      await drizzle({ client })
         .update(appUsers)
         .set({ email: NEW, emailVerified: true })
         .where(eq(appUsers.userId, USER.grace));
@@ -315,7 +315,7 @@ describe("single-table IdentifierStore: email change", () => {
 
   describe("NOT NULL email", () => {
     beforeEach(async () => {
-      await drizzle(client)
+      await drizzle({ client })
         .insert(strictUsers)
         .values([
           { userId: USER.ada, email: OLD, emailVerified: true, createdAt: USER_CREATED_AT },
@@ -341,7 +341,7 @@ describe("single-table IdentifierStore: email change", () => {
         replace: (from, to) =>
           Effect.orDie(
             Effect.tryPromise(() =>
-              drizzle(client)
+              drizzle({ client })
                 .update(strictUsers)
                 .set({ email: NEW })
                 .where(eq(strictUsers.userId, USER.grace)),
@@ -367,7 +367,7 @@ describe("single-table IdentifierStore: email change", () => {
         replace: (from, to) =>
           Effect.orDie(
             Effect.tryPromise(() =>
-              drizzle(client)
+              drizzle({ client })
                 .update(strictUsers)
                 .set({ email: NEW, emailVerified: false })
                 .where(eq(strictUsers.userId, USER.ada)),

@@ -21,6 +21,7 @@
     "packages/svelte/svelte.config.js",
     "scripts/check-dist.ts",
     "**/vite.config.ts",
+    "packages/drizzle/vite.drizzle-1.config.ts",
     "vite.tasks.ts"
   ],
   "ignorePatterns": ["**/dist/**", "**/docs/**", "**/coverage/**", "**/.reference/**"],

@@ -83,7 +83,7 @@ const withDatabase = async <A>(
     });
     const log = makeQueryLog();
     return await use(
-      drizzle(client, { logger: log.logger }),
+      drizzle({ client, logger: log.logger }),
       log,
       names === undefined ? tables : defineTables(names),
       client,
@@ -636,7 +636,7 @@ describe("SQLite / IdentifierStore contract", () => {
     Arr.forEach(migrationStatements(), (statement) => {
       client.exec(statement);
     });
-    db = drizzle(client);
+    db = drizzle({ client });
   });
 
   afterEach(() => {

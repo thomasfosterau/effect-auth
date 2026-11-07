@@ -26,7 +26,7 @@ let client: PGlite;
 beforeAll(async () => {
   client = await migratedPglite();
   await client.exec(readmeTablesSql);
-  setDb(drizzle(client));
+  setDb(drizzle({ client }));
 });
 
 afterAll(async () => {
@@ -71,7 +71,7 @@ describe("README: sign-up writer examples", () => {
 
     expect(result.created).toBe(true);
     expect(result.user.name).toBe("Ada");
-    const rows = await drizzle(client)
+    const rows = await drizzle({ client })
       .select()
       .from(notNullUsers)
       .where(eq(notNullUsers.userId, result.user.id));
@@ -84,7 +84,7 @@ describe("README: sign-up writer examples", () => {
     const error = await Effect.runPromise(Effect.flip(notNullWriter({ name: "Nobody" })));
 
     expect(error).toBeInstanceOf(Auth.AuthError);
-    const [row] = await drizzle(client).select({ n: count() }).from(notNullUsers);
+    const [row] = await drizzle({ client }).select({ n: count() }).from(notNullUsers);
     expect(row?.n).toBe(0);
   });
 
@@ -96,7 +96,7 @@ describe("README: sign-up writer examples", () => {
     expect([without.user.name, withAddress.user.name]).toEqual([undefined, "Ada"]);
     const read = async (id: string) =>
       (
-        await drizzle(client)
+        await drizzle({ client })
           .select({
             email: nullableUsers.email,
             emailVerified: nullableUsers.emailVerified,
@@ -135,7 +135,7 @@ describe("README: sign-up writer examples", () => {
         return yield* Auth.createUserWithIdentifier(identifiers, ada, (identifier) =>
           notNullWriter({ identifier }),
         );
-      }).pipe(Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(drizzle(client)))))),
+      }).pipe(Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(drizzle({ client })))))),
     );
 
     expect(created.identifier).toMatchObject({

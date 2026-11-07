@@ -17,6 +17,7 @@ import { DateTime, Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
+import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
 
 const appUsers = mysqlTable("app_users", {
@@ -87,14 +88,14 @@ const makeProxy = (): Proxy => {
   const statements: Array<Statement> = [];
   let queued: ReadonlyArray<ReadonlyArray<unknown>> = [];
   const db = drizzle(async (sql, params, method) => {
-    statements.push({ sql, params });
+    statements.push({ sql: normalizeSql(sql), params });
     if (method === "all") {
       const rows = queued;
       queued = [];
       return { rows: rows.map((row) => [...row]) };
     }
     return { rows: [{ insertId: 0, affectedRows: 1 }] };
-  });
+  }, mysqlProxyConfig);
   return {
     db,
     statements,

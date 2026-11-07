@@ -24,6 +24,7 @@ import { Array as Arr, Context, Effect, Match, Option, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
+import { normalizeSql } from "./testing/DrizzleLine.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 /** A stored visibility, checked to be one `OwnedAccess` names. */
@@ -96,7 +97,7 @@ beforeAll(async () => {
     create table gardens (id text primary key, owner_id text not null, visibility text not null);
     create table follows (follower_id text not null, owner_id text not null);
   `);
-  db = drizzle(client);
+  db = drizzle({ client });
   const postRows = OWNERS.flatMap((ownerId) =>
     VISIBILITIES.flatMap((visibility) =>
       [false, true].map((draft) => ({
@@ -265,7 +266,7 @@ describe("ownedListFilter's rendered SQL", () => {
     })(scope);
     if (where === undefined) return undefined;
     const { sql, params } = dialect.sqlToQuery(where);
-    return { sql, params };
+    return { sql: normalizeSql(sql), params };
   };
 
   it("is no filter at all for the all scope", () => {

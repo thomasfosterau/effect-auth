@@ -186,7 +186,7 @@ beforeEach(async () => {
 
 const withDatabase = async <A>(
   run: (client: PGlite, db: ReturnType<typeof drizzle>) => Promise<A>,
-): Promise<A> => run(client, drizzle(client));
+): Promise<A> => run(client, drizzle({ client }));
 
 describe("promoted attributes", () => {
   it("rejects a promoted column that does not read back as an attribute value", () => {

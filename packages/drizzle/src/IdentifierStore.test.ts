@@ -43,7 +43,7 @@ const runWithDatabase = <A, E>(
   Effect.runPromise(
     build().pipe(
       Effect.provide(
-        identifierStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle(client)))),
+        identifierStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle({ client })))),
       ),
     ),
   );
