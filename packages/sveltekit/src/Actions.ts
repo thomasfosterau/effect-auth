@@ -142,12 +142,14 @@ export interface Kit<Failure, Fields> {
 }
 
 /**
- * Options for {@link credentialAction}.
+ * Options for {@link submitCredential} and the helpers built on it, for a
+ * credential submitted as an `Input`: the submitted `FormData` for a form
+ * action, or whatever a remote function receives.
  *
- * @since 0.1.0
+ * @since 0.2.0
  * @category models
  */
-export interface CredentialActionOptions<Fields> {
+export interface CredentialRequestOptions<Input, Fields> {
   /**
    * Send the request to the auth handler: the service binding's `fetch`, or
    * the in-process handler.
@@ -156,19 +158,27 @@ export interface CredentialActionOptions<Fields> {
   /** The auth endpoint to POST to, as an absolute URL (for example `https://auth.internal/api/auth/sessions`). */
   readonly endpoint: string;
   /**
-   * The body to send, built from the submitted form: for the auth handler's
+   * The body to send, built from the submitted input: for the auth handler's
    * credential flows, a JSON:API document (`POST /sessions` takes a `sessions`
    * document whose `credential` attribute names the method).
    */
-  readonly body: (form: FormData) => Schema.Json;
+  readonly body: (input: Input) => Schema.Json;
   /**
    * The body's media type. Default `application/vnd.api+json`, what the auth
    * handler's credential flows accept; pass `application/json` for an endpoint
    * that takes plain JSON.
    */
   readonly contentType?: string | undefined;
-  /** The form fields to echo back on failure (never the password). */
-  readonly fields: (form: FormData) => Fields;
+  /** The input fields to echo back on failure (never the password). */
+  readonly fields: (input: Input) => Fields;
+  /**
+   * The post-sign-in target the client asked for, before validation. Default:
+   * the {@link CredentialRequestOptions.redirectParam} query parameter of
+   * `event.url`. A remote function's event is the remote call's, not the
+   * page's, so read the target from the input there (a hidden field, say).
+   * Whatever it returns goes through `safeRedirect`.
+   */
+  readonly target?: ((input: Input, event: ActionEvent) => string | null) | undefined;
   /** The query parameter that carries the post-sign-in target. Default `redirect`. */
   readonly redirectParam?: string | undefined;
   /** Where to go when the target is missing or unsafe. */
@@ -176,6 +186,52 @@ export interface CredentialActionOptions<Fields> {
   /** Override the message per failure kind. */
   readonly messages?: Partial<Record<CredentialFailureKind, string>> | undefined;
 }
+
+/**
+ * Options for {@link credentialAction}: {@link CredentialRequestOptions} over
+ * the submitted `FormData`.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type CredentialActionOptions<Fields> = CredentialRequestOptions<FormData, Fields>;
+
+/**
+ * The handler issued a session: its `Set-Cookie` headers are already relayed
+ * onto `event.cookies`, and `location` is the validated target to go to.
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export interface CredentialSignedIn {
+  readonly kind: "signed-in";
+  readonly location: string;
+}
+
+/**
+ * The handler refused the credential or failed: the form failure, and the
+ * status a form action reports it with (one per {@link CredentialFailureKind}).
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export interface CredentialRejected<Fields> {
+  readonly kind: "failed";
+  readonly status: number;
+  readonly failure: CredentialFailure<Fields>;
+}
+
+/**
+ * What {@link submitCredential} answers: a session (cookies relayed), a
+ * pending next step (no session yet), or a failure.
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export type CredentialResult<Fields> =
+  | CredentialSignedIn
+  | CredentialPending<Fields>
+  | CredentialRejected<Fields>;
 
 const defaultMessages: Record<CredentialFailureKind, string> = {
   invalid: "Invalid email or password.",
@@ -281,17 +337,92 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
 };
 
 /**
+ * Submit a credential to the auth handler on behalf of one request: the core
+ * the form-action and remote-function helpers share.
+ *
+ * It POSTs `options.body(input)` to `endpoint`, forwarding the browser's
+ * `Origin`, `User-Agent` and `X-Forwarded-For` (and `CF-Connecting-IP`) so the
+ * handler's CSRF check and rate limits see the real client. On a `202` (no
+ * session issued: a second factor is pending, or the address must be verified
+ * first) it answers {@link CredentialPending}; a `202` whose body is not the
+ * handler's pending document counts as `unavailable`. On any other 2xx it
+ * relays the `Set-Cookie` headers onto `event.cookies` and answers
+ * {@link CredentialSignedIn} with the `safeRedirect`-validated target.
+ * Otherwise it answers {@link CredentialRejected}. It never throws for the
+ * handler's answer: a failing `fetch` is `unavailable` too.
+ *
+ * @since 0.2.0
+ * @category actions
+ */
+export const submitCredential = async <Input, Fields>(
+  event: ActionEvent,
+  input: Input,
+  options: CredentialRequestOptions<Input, Fields>,
+): Promise<CredentialResult<Fields>> => {
+  const forwarded = new Headers({
+    "content-type": options.contentType ?? "application/vnd.api+json",
+  });
+  Arr.forEach(["origin", "user-agent", "x-forwarded-for", "cf-connecting-ip"], (name) => {
+    const value = event.request.headers.get(name);
+    if (value !== null) forwarded.set(name, value);
+  });
+  const response = await options
+    .fetch(
+      new Request(options.endpoint, {
+        method: "POST",
+        headers: forwarded,
+        body: encodeJson(options.body(input)),
+      }),
+    )
+    .then(
+      (value) => value,
+      () => null,
+    );
+
+  const pending =
+    response?.status === 202 ? decodePending(await response.text().catch(() => "")) : Option.none();
+  if (Option.isSome(pending)) {
+    const { data, meta } = pending.value;
+    return {
+      kind: "pending",
+      secondFactor:
+        data === undefined ? null : { token: data.id, expiresAt: data.attributes.expiresAt },
+      needsEmailVerification: meta.needsEmailVerification,
+      fields: options.fields(input),
+    };
+  }
+
+  if (response !== null && response.ok && response.status !== 202) {
+    relayCookies(event, response);
+    const target =
+      options.target === undefined
+        ? event.url.searchParams.get(options.redirectParam ?? "redirect")
+        : options.target(input, event);
+    return { kind: "signed-in", location: safeRedirect(target, options.fallback) };
+  }
+
+  const kind = response === null ? "unavailable" : kindOf(response.status);
+  return {
+    kind: "failed",
+    status: failureStatus[kind],
+    failure: {
+      kind,
+      message: options.messages?.[kind] ?? defaultMessages[kind],
+      retryAfterSeconds: kind === "rate-limited" ? retryAfterSeconds(response) : null,
+      fields: options.fields(input),
+    },
+  };
+};
+
+/**
  * Build a form action for a credential flow.
  *
- * The action POSTs the form to `endpoint` as a JSON:API document, forwarding the browser's
- * `Origin`, `User-Agent` and `X-Forwarded-For` so the handler's CSRF check and
- * rate limits see the real client. On a `202` (no session issued: a second
- * factor is pending, or the address must be verified first) it returns a
- * {@link CredentialPending} without redirecting; a `202` whose body is not
- * the handler's pending document counts as `unavailable`. On any other 2xx it
- * relays the `Set-Cookie` headers and redirects (303) to the validated
- * target. Otherwise it returns `fail(status, CredentialFailure)`, with a
- * status per {@link CredentialFailureKind}.
+ * The action submits the form through {@link submitCredential}. On a session
+ * it redirects (303) to the validated target, with the `Set-Cookie` headers
+ * relayed. On a `202` (no session issued: a second factor is pending, or the
+ * address must be verified first) it returns the {@link CredentialPending}
+ * without redirecting. Otherwise it returns `fail(status, CredentialFailure)`,
+ * with a status per {@link CredentialFailureKind}.
  *
  * @example
  * ```ts
@@ -350,54 +481,169 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
 export const credentialAction =
   <Failure, Fields>(kit: Kit<Failure, Fields>, options: CredentialActionOptions<Fields>) =>
   async (event: ActionEvent): Promise<Failure | CredentialPending<Fields>> => {
-    const form = await event.request.formData();
-    const forwarded = new Headers({
-      "content-type": options.contentType ?? "application/vnd.api+json",
-    });
-    Arr.forEach(["origin", "user-agent", "x-forwarded-for", "cf-connecting-ip"], (name) => {
-      const value = event.request.headers.get(name);
-      if (value !== null) forwarded.set(name, value);
-    });
-    const response = await options
-      .fetch(
-        new Request(options.endpoint, {
-          method: "POST",
-          headers: forwarded,
-          body: encodeJson(options.body(form)),
-        }),
-      )
-      .then(
-        (value) => value,
-        () => null,
-      );
-
-    const pending =
-      response?.status === 202
-        ? decodePending(await response.text().catch(() => ""))
-        : Option.none();
-    if (Option.isSome(pending)) {
-      const { data, meta } = pending.value;
-      return {
-        kind: "pending",
-        secondFactor:
-          data === undefined ? null : { token: data.id, expiresAt: data.attributes.expiresAt },
-        needsEmailVerification: meta.needsEmailVerification,
-        fields: options.fields(form),
-      };
-    }
-
-    if (response !== null && response.ok && response.status !== 202) {
-      relayCookies(event, response);
-      const target = event.url.searchParams.get(options.redirectParam ?? "redirect");
-      return kit.redirect(303, safeRedirect(target, options.fallback));
-    }
-
-    const kind = response === null ? "unavailable" : kindOf(response.status);
-    const failure: CredentialFailure<Fields> = {
-      kind,
-      message: options.messages?.[kind] ?? defaultMessages[kind],
-      retryAfterSeconds: kind === "rate-limited" ? retryAfterSeconds(response) : null,
-      fields: options.fields(form),
-    };
-    return kit.fail(failureStatus[kind], failure);
+    const result = await submitCredential(event, await event.request.formData(), options);
+    if (result.kind === "signed-in") return kit.redirect(303, result.location);
+    return result.kind === "pending" ? result : kit.fail(result.status, result.failure);
   };
+
+/**
+ * SvelteKit's `getRequestEvent` (from `$app/server`), passed in so this
+ * package doesn't import SvelteKit: what a remote function reads its request
+ * event from.
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export interface RemoteKit {
+  readonly getRequestEvent: () => ActionEvent;
+}
+
+/**
+ * {@link RemoteKit} plus SvelteKit's `redirect` (from `@sveltejs/kit`), for a
+ * remote `form()`, which may redirect.
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export interface RemoteFormKit extends RemoteKit {
+  readonly redirect: (status: 303, location: string) => never;
+}
+
+/**
+ * Build the handler of a SvelteKit remote `form()` for a credential flow.
+ *
+ * The same submission as {@link credentialAction}, through
+ * {@link submitCredential}, with a remote function's envelope: the event comes
+ * from `getRequestEvent()`, a session redirects (303) to the validated target,
+ * and everything else is the form's result (`form.result` on the page): the
+ * {@link CredentialPending} next step, or the {@link CredentialFailure}, whose
+ * `kind` tells wrong credentials (`invalid`) from throttling (`rate-limited`)
+ * and faults (`unavailable`). `Input` is whatever the remote form hands its
+ * handler (`FormData`, or the validated object of a schema'd form).
+ *
+ * The event of a remote call is not the page's, so pass
+ * {@link CredentialRequestOptions.target} to read the post-sign-in target from
+ * the input.
+ *
+ * @example
+ * ```ts
+ * import { deepStrictEqual, rejects } from "node:assert";
+ * import { credentialForm } from "@thomasfosterau/effect-auth-sveltekit";
+ *
+ * const relayed: Array<string> = [];
+ * const kit = {
+ *   // `getRequestEvent` from `$app/server` and `redirect` from `@sveltejs/kit`.
+ *   getRequestEvent: () => ({
+ *     request: new Request("https://app.example/_app/remote/sign-in", { method: "POST" }),
+ *     url: new URL("https://app.example/_app/remote/sign-in"),
+ *     cookies: { set: (name: string) => void relayed.push(name) },
+ *   }),
+ *   redirect: (status: 303, location: string): never => {
+ *     throw { status, location };
+ *   },
+ * };
+ *
+ * const handler = (response: Response) =>
+ *   credentialForm(kit, {
+ *     fetch: async () => response,
+ *     endpoint: "https://auth.internal/api/auth/sessions",
+ *     body: (form: FormData) => ({
+ *       data: {
+ *         type: "sessions",
+ *         attributes: {
+ *           credential: {
+ *             method: "password",
+ *             email: String(form.get("email") ?? ""),
+ *             password: String(form.get("password") ?? ""),
+ *           },
+ *         },
+ *       },
+ *     }),
+ *     fields: (form) => ({ email: String(form.get("email") ?? "") }),
+ *     target: (form) => String(form.get("redirect") ?? ""),
+ *     fallback: "/",
+ *   });
+ *
+ * const form = new FormData();
+ * form.set("email", "ada@example.com");
+ * form.set("password", "hunter2");
+ * form.set("redirect", "/dashboard");
+ *
+ * // In `sign-in.remote.ts`: `export const signIn = form(handler(...))`.
+ * const session = new Headers({ "set-cookie": "__Host-session=tok; Path=/; HttpOnly; Secure" });
+ * await rejects(handler(new Response("{}", { status: 201, headers: session }))(form), {
+ *   status: 303,
+ *   location: "/dashboard",
+ * });
+ * deepStrictEqual(relayed, ["__Host-session"]);
+ *
+ * deepStrictEqual(await handler(new Response(null, { status: 401 }))(form), {
+ *   kind: "invalid",
+ *   message: "Invalid email or password.",
+ *   retryAfterSeconds: null,
+ *   fields: { email: "ada@example.com" },
+ * });
+ * ```
+ *
+ * @since 0.2.0
+ * @category remote functions
+ */
+export const credentialForm =
+  <Input, Fields>(kit: RemoteFormKit, options: CredentialRequestOptions<Input, Fields>) =>
+  async (input: Input): Promise<CredentialPending<Fields> | CredentialFailure<Fields>> => {
+    const result = await submitCredential(kit.getRequestEvent(), input, options);
+    if (result.kind === "signed-in") return kit.redirect(303, result.location);
+    return result.kind === "pending" ? result : result.failure;
+  };
+
+/**
+ * Build the handler of a SvelteKit remote `command()` for a credential flow.
+ *
+ * A command cannot redirect, so it answers the whole {@link CredentialResult}:
+ * on `signed-in` the cookies are already set, and the caller navigates to
+ * `location` itself (`goto(result.location)`); `pending` and `failed` are as
+ * for {@link credentialForm}.
+ *
+ * @example
+ * ```ts
+ * import { deepStrictEqual } from "node:assert";
+ * import { credentialCommand } from "@thomasfosterau/effect-auth-sveltekit";
+ *
+ * const signIn = credentialCommand(
+ *   {
+ *     getRequestEvent: () => ({
+ *       request: new Request("https://app.example/_app/remote/sign-in", { method: "POST" }),
+ *       url: new URL("https://app.example/_app/remote/sign-in"),
+ *       cookies: { set: () => undefined },
+ *     }),
+ *   },
+ *   {
+ *     fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
+ *     endpoint: "https://auth.internal/api/auth/sessions",
+ *     body: (input: { readonly email: string; readonly password: string }) => ({
+ *       data: { type: "sessions", attributes: { credential: { method: "password", ...input } } },
+ *     }),
+ *     fields: (input) => ({ email: input.email }),
+ *     fallback: "/",
+ *   },
+ * );
+ *
+ * deepStrictEqual(await signIn({ email: "ada@example.com", password: "hunter2" }), {
+ *   kind: "failed",
+ *   status: 429,
+ *   failure: {
+ *     kind: "rate-limited",
+ *     message: "Too many attempts. Please wait and try again.",
+ *     retryAfterSeconds: 30,
+ *     fields: { email: "ada@example.com" },
+ *   },
+ * });
+ * ```
+ *
+ * @since 0.2.0
+ * @category remote functions
+ */
+export const credentialCommand =
+  <Input, Fields>(kit: RemoteKit, options: CredentialRequestOptions<Input, Fields>) =>
+  (input: Input): Promise<CredentialResult<Fields>> =>
+    submitCredential(kit.getRequestEvent(), input, options);
