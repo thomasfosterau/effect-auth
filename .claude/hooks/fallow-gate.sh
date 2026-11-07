@@ -95,7 +95,10 @@ else
 fi
 # --- End trusted checkouts and the vp runner ---
 
-VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null || true)"
+# Local deviation: keep only the first line. The npm launcher appends a
+# `verified: …` line to `--version` (#524; as effect-ext's gate does,
+# effect-schema-ext#57).
+VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null | head -n1 || true)"
 VERSION="${VERSION_RAW#fallow }"
 VERSION="${VERSION%% *}"
 
