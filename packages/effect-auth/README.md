@@ -723,13 +723,13 @@ The captcha token is read from the optional `captchaToken` field on the sign-up 
 No store deletes an email OTP or a magic link that nobody redeems: it stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address. The services refuse an expired record, so this is about space, not access, but a caller can grow the store by one record per address it tries. Purge on a schedule the host owns (a cron trigger on Workers, a timer or job on a long-lived server):
 
 - `@thomasfosterau/effect-auth/sql`'s `purgeExpired` (and `@thomasfosterau/effect-auth-alchemy-cloudflare`'s `purgeExpired(db)` on D1) deletes the expired rows in one statement per table.
-- `purgeExpiredKV` does the same for `MagicLinkStoreKV` and `EmailOtpStoreKV` (so `layerKV` and `Testing.memoryStores`). A `KeyValueStore` cannot list its keys, so the purge also requires `KeyValueStoreKeys`, whose `list(prefix)` you implement over your backend; `layerMemoryKeyValueStore` provides both over one in-memory map.
+- `purgeExpiredKV` does the same for `MagicLinkStoreKV` and `EmailOtpStoreKV` (so `layerKV` and `Testing.memoryStores`). It finds the records through the store's own `keys` (Effect 4.1), so any `KeyValueStore` serves, `KeyValueStore.layerMemory` included. A backend that lists by prefix more cheaply than it lists everything (a large or shared Workers KV namespace, Redis) can also provide `KeyValueStoreKeys`, whose `list(prefix)` the purge then uses instead; `layerMemoryKeyValueStore` provides both over one in-memory map.
 
 ```ts
 import { Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// Workers KV: follow `list` through every cursor. `KV` is the namespace binding.
+// Optional, for Workers KV: list one prefix, following every cursor. `KV` is the namespace binding.
 export const workersKvKeys = (KV: {
   list: (options: { prefix: string; cursor?: string }) => Promise<{
     keys: ReadonlyArray<{ name: string }>;

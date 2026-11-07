@@ -541,5 +541,63 @@ describe("KeyValueStores", () => {
       );
       expect(failure.message).toBe("list failed");
     });
+
+    it("reads the store's own keys when no KeyValueStoreKeys is provided (#521)", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const links = yield* MagicLinkStore;
+          const otps = yield* EmailOtpStore;
+          yield* links.create(link("old", "a@example.com", now - 1));
+          yield* links.create(link("new", "a@example.com", now + 60_000));
+          yield* otps.upsert(otp("a@example.com", "sign-in", now - 1));
+          const purged = yield* purgeExpiredKV;
+          return {
+            purged,
+            old: yield* links.get("old"),
+            fresh: yield* links.get("new"),
+            remaining: yield* (yield* KeyValueStore.KeyValueStore).keys,
+          };
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              Layer.provideMerge(
+                Layer.merge(MagicLinkStoreKV, EmailOtpStoreKV),
+                // Effect's own in-memory store: no listing seam beside it.
+                KeyValueStore.layerMemory,
+              ),
+              TestClock.layer(),
+            ),
+          ),
+        ),
+      );
+      expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 1 });
+      expect(result.old).toBeNull();
+      expect(result.fresh?.token).toBe("new");
+      expect(Arr.sort(result.remaining, Order.String)).toEqual([
+        "magic-link:email:a@example.com",
+        "magic-link:token:new",
+      ]);
+    });
+
+    it("surfaces a failing store keys read as an AuthError", async () => {
+      const failing = KeyValueStore.makeStringOnly({
+        get: () => Effect.undefined,
+        set: () => Effect.void,
+        remove: () => Effect.void,
+        clear: Effect.void,
+        size: Effect.succeed(0),
+        keys: Effect.fail(
+          new KeyValueStore.KeyValueStoreError({ message: "keys failed", method: "keys" }),
+        ),
+      });
+      const failure = await Effect.runPromise(
+        Effect.flip(purgeExpiredKV).pipe(
+          Effect.provideService(KeyValueStore.KeyValueStore, failing),
+        ),
+      );
+      expect(failure).toBeInstanceOf(Errors.AuthError);
+      expect(failure.message).toBe("KeyValueStore keys failed");
+    });
   });
 });
