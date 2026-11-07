@@ -27,12 +27,12 @@ What the repository does to keep a compromised dependency, action or credential 
 - **Actions are pinned to full commit SHAs** (with the version in a comment), in the workflows and in the shared setup action; Dependabot moves the pins.
 - **No default token permissions.** Both workflows declare `permissions: {}`; each job opts into exactly what it needs (`contents: read` for CI).
 - **Dependabot-safe CI.** CI needs no secret and no OIDC, so a Dependabot pull request runs it with a read-only token; the release job never runs for `dependabot[bot]`. Every job sets `timeout-minutes`, installs with `--frozen-lockfile`, and calls the local bins through `pnpm exec` rather than a `GITHUB_PATH` entry. Node is `node-version: "*"` with `check-latest: true`, never `latest` (which resolves to a Node pre-release). `uvx zizmor --offline .github` audits the workflows (config in [.github/zizmor.yml](.github/zizmor.yml)).
-- **No persisted credentials.** CI's checkouts use `persist-credentials: false`. The release job is the one exception: the Changesets action pushes the version branch and tags with the job-scoped `GITHUB_TOKEN`, so its checkout keeps it.
+- **No persisted credentials.** Every checkout uses `persist-credentials: false`, the Release workflow's included: its `version` and `publish` jobs push the version branch and the tags through the GitHub API with the job-scoped `GITHUB_TOKEN`, not through git.
 
 ### Publishing
 
 - **Trusted publishing, no token.** Packages are published from GitHub Actions through npm trusted publishing (OIDC, `id-token: write`); there is no `NPM_TOKEN` secret to steal ([PUBLISHING.md](PUBLISHING.md)).
-- **A protected environment.** The release job runs in the `release` GitHub environment, which requires approval, and only on `thomasfosterau/effect-auth` itself, never on a fork.
+- **A protected environment.** The release workflow's `publish` job runs in the `release` GitHub environment, which requires approval, and only on `thomasfosterau/effect-auth` itself, never on a fork. It is the only job that holds `id-token: write`: the `version` job, which refreshes the version PR, runs outside the environment and cannot publish (changesets/action's `select-mode`, `version` and `publish` sub-actions).
 - **No dependency code runs next to the publish credential.** The release job installs with `--ignore-scripts` and then runs only the repository's own `prepare` script. It sets `pnpm_config_verify_deps_before_run: "false"`, because pnpm 11 would otherwise re-install (with lifecycle scripts) before a `pnpm run` whenever a manifest looked newer than the install, undoing `--ignore-scripts` inside the job that holds `id-token: write`.
 - **Pinned npm major.** The job updates npm to `npm@11` (trusted publishing needs `>=11.5.1`), not `@latest`, so a new npm major can't arrive unreviewed.
 
