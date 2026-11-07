@@ -552,17 +552,20 @@ export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.Ke
 // ---------------------------------------------------------------------------
 
 /**
- * The key-listing seam {@link purgeExpiredKV} needs beside the
- * `KeyValueStore`, which has no way to enumerate its keys.
+ * An optional prefix listing for {@link purgeExpiredKV}, for a backend that
+ * lists by prefix more cheaply than it lists everything.
+ *
+ * Without it, the purge reads the `KeyValueStore`'s own `keys` (every key, new
+ * in Effect 4.1) and keeps those under each prefix it purges. That is enough
+ * for the in-memory, file-system, SQL and browser-storage stores. Provide this
+ * when the store's namespace is large or shared and the backend can list one
+ * prefix: Workers KV `list({ prefix })` followed through every `cursor`, Redis
+ * `SCAN … MATCH prefix*`.
  *
  * `list(prefix)` returns every key that starts with `prefix`, exactly as the
  * `KeyValueStore` sees it: when the store is a `KeyValueStore.prefix` view,
- * strip that prefix from the backend's keys. The host implements it over its
- * backend's own listing (Workers KV `list({ prefix })` followed through every
- * `cursor`, Redis `SCAN … MATCH prefix*`), or uses
- * {@link layerMemoryKeyValueStore} for an in-memory store. A key listed but
- * gone by the time it is read is skipped, so a listing need not be a
- * snapshot.
+ * strip that prefix from the backend's keys. A key listed but gone by the
+ * time it is read is skipped, so a listing need not be a snapshot.
  *
  * @example
  * ```ts
@@ -596,8 +599,9 @@ export class KeyValueStoreKeys extends Context.Service<
 /**
  * An in-memory `KeyValueStore` together with the {@link KeyValueStoreKeys}
  * listing over the same map, for tests, examples and single-process demos.
- * Each build of the layer starts empty. `KeyValueStore.layerMemory` keeps its
- * map private, so it cannot back {@link purgeExpiredKV}; use this instead.
+ * Each build of the layer starts empty. `KeyValueStore.layerMemory` serves
+ * {@link purgeExpiredKV} too (through its `keys`); this layer also provides
+ * the listing, for code that reads it.
  */
 export const layerMemoryKeyValueStore: Layer.Layer<
   KeyValueStore.KeyValueStore | KeyValueStoreKeys
@@ -638,6 +642,17 @@ export interface PurgeExpiredKVResult {
   readonly emailOtps: number;
 }
 
+/** The listing a store's own `keys` gives: every key, kept under `prefix`. */
+const storeKeys = (store: KeyValueStore.KeyValueStore): typeof KeyValueStoreKeys.Service => ({
+  list: (prefix) =>
+    store.keys.pipe(
+      Effect.map(Arr.filter((key) => key.startsWith(prefix))),
+      Effect.mapError(
+        (cause) => new Errors.AuthError({ message: "KeyValueStore keys failed", cause }),
+      ),
+    ),
+});
+
 const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: {
   readonly kv: ReturnType<typeof jsonKv>;
   readonly keys: typeof KeyValueStoreKeys.Service;
@@ -669,8 +684,9 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
  * Delete the magic-link tokens and email OTP records whose `expiresAt` has
  * passed from the `KeyValueStore`-backed stores (`MagicLinkStoreKV`,
  * `EmailOtpStoreKV`, and so `layerKV` and the testing package's
- * `memoryStores`); requires the `KeyValueStore` and a
- * {@link KeyValueStoreKeys} listing over it.
+ * `memoryStores`); requires the `KeyValueStore`. It finds the records through
+ * {@link KeyValueStoreKeys} when one is provided, and through the store's own
+ * `keys` otherwise.
  *
  * No store deletes these records on its own: a code or link nobody redeems
  * stays until a later send for the same address replaces it, and the sends
@@ -723,10 +739,11 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
 export const purgeExpiredKV: Effect.Effect<
   PurgeExpiredKVResult,
   Errors.AuthError,
-  KeyValueStore.KeyValueStore | KeyValueStoreKeys
+  KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.use((store) =>
-  KeyValueStoreKeys.use((keys) =>
-    Effect.flatMap(Clock.currentTimeMillis, (now) => {
+  Effect.flatMap(Effect.serviceOption(KeyValueStoreKeys), (listing) => {
+    const keys = Option.getOrElse(listing, () => storeKeys(store));
+    return Effect.flatMap(Clock.currentTimeMillis, (now) => {
       const kv = jsonKv(store);
       return Effect.all(
         {
@@ -754,8 +771,8 @@ export const purgeExpiredKV: Effect.Effect<
         },
         { concurrency: 1 },
       );
-    }),
-  ),
+    });
+  }),
 );
 
 // ---------------------------------------------------------------------------
