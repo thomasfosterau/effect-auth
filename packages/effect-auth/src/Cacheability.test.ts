@@ -9,9 +9,13 @@
  * viewer-independent, which is exactly what a cache with no viewer in its key
  * needs — and every representation it refuses is hidden from someone.
  */
-import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Context, Effect, Layer, Option } from "effect";
+import { assert, describe, expect, it } from "vite-plus/test";
+import { Array as Arr, Context, Effect, Layer, Option, Predicate } from "effect";
 import * as Cacheability from "./Cacheability.ts";
+import * as Condition from "./Condition.ts";
+import * as Entity from "./Entity.ts";
+import * as Policy from "./Policy.ts";
+import * as ReadScope from "./ReadScope.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
@@ -153,5 +157,106 @@ describe("OwnedAccess.serveableAxes", () => {
 
   it("refuse an owned representation whose projection dropped visibility", () => {
     expect(serveable({ draft: false })).toBe(false);
+  });
+});
+
+const resource = (name: string) => Condition.attr("resource", name);
+
+describe("Cacheability.publicReach (#191)", () => {
+  const reference = Policy.permit({ id: "species", resource: Policy.isType("Species") });
+  const journal = Policy.permit({
+    id: "journal:owner",
+    resource: Policy.isType("Journal"),
+    when: Condition.eq(Condition.principal, resource("owner")),
+  });
+  const speciesBinding: ReadScope.Binding = { resourceType: "Species", attributes: {} };
+  const ownedBinding: ReadScope.Binding = {
+    resourceType: "Owned",
+    attributes: { owner: { entity: guards.principalType }, visibility: "Text", draft: "Boolean" },
+    setFacts: { follows: { attribute: "owner", set: "following" } },
+  };
+  const bindings: ReadonlyArray<ReadScope.Binding> = [
+    speciesBinding,
+    ownedBinding,
+    { resourceType: "Journal", attributes: { owner: { entity: "User" } } },
+  ];
+  const policies = [reference, ...owned.policies, journal];
+
+  it("classifies each type by how much of it the anonymous principal may read", () => {
+    expect(Cacheability.publicReachByType(policies, bindings)).toEqual({
+      Species: "All",
+      Owned: "Some",
+      Journal: "None",
+    });
+  });
+
+  it("detects a type moving from public to owned: the drift a pinned map fails on", () => {
+    const narrowed = Arr.map(policies, (policy) =>
+      policy.id === "species"
+        ? Policy.permit({
+            id: "species",
+            resource: Policy.isType("Species"),
+            when: Condition.eq(Condition.principal, resource("owner")),
+          })
+        : policy,
+    );
+    expect(
+      Cacheability.publicReachByType(narrowed, [
+        { resourceType: "Species", attributes: { owner: { entity: "User" } } },
+      ]),
+    ).toEqual({ Species: "None" });
+  });
+
+  it("gives the filter for a partly public type, admitting only public published rows", () => {
+    const reach = Cacheability.publicReach(policies, ownedBinding);
+    assert(Predicate.isTagged(reach, "Some"));
+    const admits = (visibility: string | null, draft: boolean | null) =>
+      ReadScope.matches(reach.scope, { owner: "u-member", visibility, draft });
+    expect(admits("public", false)).toBe(true);
+    expect(admits("public", true)).toBe(false);
+    expect(admits("followers", false)).toBe(false);
+    expect(admits("private", false)).toBe(false);
+    expect(admits(null, false)).toBe(false);
+    expect(admits("public", null)).toBe(false);
+  });
+
+  it("is never public when a forbid denies everyone, whatever a permit grants", () => {
+    const forbidden = [
+      reference,
+      Policy.forbid({ id: "freeze", resource: Policy.isType("Species") }),
+    ];
+    expect(Cacheability.publicReach(forbidden, speciesBinding)._tag).toBe("None");
+  });
+
+  it("answers Undecided, not public, for a policy a scope can't express", () => {
+    const tagged = Policy.permit({
+      id: "tagged",
+      resource: Policy.isType("Species"),
+      when: Condition.contains(resource("tags"), Condition.lit("x")),
+    });
+    const reach = Cacheability.publicReach([tagged], speciesBinding);
+    expect(reach._tag).toBe("Undecided");
+  });
+
+  it("does not let a principal-attribute policy match the attribute-less anonymous principal", () => {
+    const members = Policy.permit({
+      id: "members",
+      resource: Policy.isType("Species"),
+      when: Condition.eq(Condition.attr("principal", "member"), Condition.lit(true)),
+    });
+    expect(Cacheability.publicReach([members], speciesBinding)._tag).toBe("None");
+  });
+
+  it("decides another action or principal when asked", () => {
+    const write = Policy.permit({
+      id: "write",
+      action: Policy.eq(Entity.ref("Action", "write")),
+      resource: Policy.isType("Species"),
+    });
+    expect(Cacheability.publicReach([write], speciesBinding)._tag).toBe("None");
+    expect(
+      Cacheability.publicReach([write], speciesBinding, { action: Entity.ref("Action", "write") })
+        ._tag,
+    ).toBe("All");
   });
 });
