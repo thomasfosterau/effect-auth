@@ -306,22 +306,10 @@ export const make = (
     const rateLimiter = yield* RateLimiter;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const randomToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(keyLength).pipe(
-        Effect.map(Base64Url.encode),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate API key secret", cause }),
-        ),
-      );
+    const randomToken = (): Effect.Effect<string> =>
+      crypto.randomBytes(keyLength).pipe(Effect.map(Base64Url.encode));
 
-    const randomId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto
-        .uuidV4()
-        .pipe(
-          Effect.mapError(
-            (cause) => new Errors.AuthError({ message: "Failed to generate API key id", cause }),
-          ),
-        );
+    const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
     /**
      * Load a key by id and enforce ownership.

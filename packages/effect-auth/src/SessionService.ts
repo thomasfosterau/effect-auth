@@ -26,13 +26,8 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const generateSessionId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(20).pipe(
-        Effect.map(Hex.encode),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate session id", cause }),
-        ),
-      );
+    const generateSessionId = (): Effect.Effect<string> =>
+      crypto.randomBytes(20).pipe(Effect.map(Hex.encode));
 
     return {
       createSession: Effect.fn("SessionService.createSession")(

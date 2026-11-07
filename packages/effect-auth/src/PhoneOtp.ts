@@ -308,10 +308,7 @@ export const make = (
      * base64url-encoded. It is hashed into the marker record and then
      * discarded.
      */
-    const generateMarkerSecret: Effect.Effect<string, Errors.AuthError> = randomBase64UrlToken(
-      crypto,
-      "Failed to generate OTP marker",
-    );
+    const generateMarkerSecret: Effect.Effect<string> = randomBase64UrlToken(crypto);
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined

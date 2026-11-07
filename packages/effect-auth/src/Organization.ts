@@ -1075,13 +1075,8 @@ export const make = (
     const domainVerifierOption = yield* Effect.serviceOption(DomainVerifier);
 
     /** Generate a random identifier for organizations, members, and invitations. */
-    const generateId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(16).pipe(
-        Effect.map(Hex.encode),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
-        ),
-      );
+    const generateId = (): Effect.Effect<string> =>
+      crypto.randomBytes(16).pipe(Effect.map(Hex.encode));
 
     /**
      * Whether one granted permission string satisfies a requested one.

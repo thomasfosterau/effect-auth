@@ -109,7 +109,7 @@ directories, each with its own `index.ts` barrel and matching
 - **Foundations** (root): `Types.ts` (schema'd `User`, `Session`,
   `SessionConfig`, …), `Errors.ts` (shared tagged errors), `Hooks.ts`
   (hooks/plugin system), `TokenHash.ts`, `Cipher.ts`, `Identifier.ts`,
-  `Messages.ts`, `PlatformCrypto.ts` (default `Crypto.Crypto` layer),
+  `Messages.ts`, `PlatformCrypto.ts` (default `SecureRandom` / `Digest` layer),
   `Observability.ts`.
 - **Session management** (root, flat — the spine nearly every feature module
   depends on, so it is not a cluster): `SessionService.ts`, `SessionStore.ts`,
@@ -334,7 +334,7 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Dependencies
 
-- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256). Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
+- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256). Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
 - **Optional peers of the core**, each reached from one subpath only: `@thomasfosterau/effect-jsonapi` (`./http`, and `./client/testing` through it) and `@node-saml/node-saml` (`./saml`, Node-only). `effect/sql`, behind `./sql`, ships in `effect`.
 - **Packages** hold the code that brings a dependency the core lacks (ADR-0022): `-drizzle` (`drizzle-orm`), `-alchemy-cloudflare` (`alchemy`, `@alchemy.run/cloudflare`), `-alchemy-postgres` (`alchemy`, `@effect/sql-pg`), `-argon2` (`hash-wasm`) and the Svelte binding (`svelte`). `-resend` and `-twilio` (plain `fetch`) stay packages because the owner decides vendor-adapter merges case by case, and `-sveltekit` is the server side of a framework. The browser client, the SQL stores and the SAML verifier, once packages of their own, are core subpaths.
 

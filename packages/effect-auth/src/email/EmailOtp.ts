@@ -289,8 +289,7 @@ export const generateOtp = (
  */
 const generateMarkerSecret = (
   crypto: typeof SecureRandom.SecureRandom.Service,
-): Effect.Effect<string, Errors.AuthError> =>
-  randomBase64UrlToken(crypto, "Failed to generate OTP marker");
+): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
 /**
  * Create an email OTP service

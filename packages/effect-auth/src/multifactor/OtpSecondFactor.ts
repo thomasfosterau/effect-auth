@@ -171,8 +171,7 @@ export const make = (
     const invalidOtp = () =>
       Effect.fail(new OtpSecondFactorError({ message: "Invalid or expired OTP" }));
 
-    const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto, "Failed to generate pending token");
+    const generatePendingToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       begin: Effect.fn("OtpSecondFactorService.begin")(function* (user: Types.User) {

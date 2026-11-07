@@ -213,8 +213,7 @@ const make = (
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const generateToken = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto);
+    const generateToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       requestEmailChange: Effect.fn("AccountManagementService.requestEmailChange")(function* (

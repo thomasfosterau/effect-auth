@@ -261,8 +261,7 @@ export const make = (
     const store = yield* TrustedDeviceStore;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto, "Failed to generate device token");
+    const generateRawToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       issue: Effect.fn("TrustedDeviceService.issue")(function* (userId: string) {

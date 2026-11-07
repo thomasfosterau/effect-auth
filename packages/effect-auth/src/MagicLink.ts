@@ -187,8 +187,7 @@ export class MagicLinkService extends Context.Service<
  */
 export const generateMagicLinkToken = (
   crypto: typeof SecureRandom.SecureRandom.Service,
-): Effect.Effect<string, Errors.AuthError> =>
-  randomBase64UrlToken(crypto, "Failed to generate magic link token");
+): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
 /**
  * Create a magic link service

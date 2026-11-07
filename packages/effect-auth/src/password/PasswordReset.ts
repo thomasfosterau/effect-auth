@@ -146,8 +146,7 @@ export const make = (
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
-    const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto, "Failed to generate reset token");
+    const generateResetToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       requestPasswordReset: Effect.fn("PasswordResetService.requestPasswordReset")(function* (
