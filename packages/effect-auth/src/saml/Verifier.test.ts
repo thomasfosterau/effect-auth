@@ -254,10 +254,15 @@ describe("SamlVerifier.verify — addressing and validity", () => {
     expect(err.message).toMatch(/Destination/i);
   });
 
+  // node-saml 5.2 enforces the SubjectConfirmationData window itself, before
+  // our check runs, and rejects with its own message (#532). What is pinned is
+  // the rejection; either message names it.
+  const EXPIRED = /expired|No valid subject confirmation/i;
+
   // (e)
   it("rejects an expired assertion", async () => {
     const err = await flip(validResponse({ notOnOrAfter: iso(-10 * 60_000) }));
-    expect(err.message).toMatch(/expired/i);
+    expect(err.message).toMatch(EXPIRED);
   });
 
   it("rejects an assertion that is not yet valid", async () => {
@@ -268,7 +273,7 @@ describe("SamlVerifier.verify — addressing and validity", () => {
   it("honours the clock-skew window at both edges", async () => {
     // Just outside the default 3-minute window, then inside a widened one.
     const justExpired = validResponse({ notOnOrAfter: iso(-4 * 60_000) });
-    expect((await flip(justExpired)).message).toMatch(/expired/i);
+    expect((await flip(justExpired)).message).toMatch(EXPIRED);
     const assertion = await run(verifier.verify(input(justExpired, { clockSkewMs: 10 * 60_000 })));
     expect(assertion.nameId).toBe("worker@acme.test");
   });
@@ -298,6 +303,18 @@ describe("SamlVerifier.verify — addressing and validity", () => {
       `InResponseTo="_someOtherRequest">`,
     );
     const err = await flip(tampered);
+    expect(err.message).toMatch(/InResponseTo disagrees/);
+  });
+
+  it("reads InResponseTo from the document, not node-saml's profile, so decoys count too", async () => {
+    // node-saml 5.2 reports the signed value as `profile.inResponseTo` (#532),
+    // so the comparison must read the raw XML: here a second, unsigned
+    // attribute elsewhere in the Response.
+    const decoy = validResponse().replace(
+      "<samlp:Status>",
+      `<samlp:Extensions><x:Echo xmlns:x="urn:example:decoy" InResponseTo="_someOtherRequest"/></samlp:Extensions><samlp:Status>`,
+    );
+    const err = await flip(decoy);
     expect(err.message).toMatch(/InResponseTo disagrees/);
   });
 });

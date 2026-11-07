@@ -334,6 +334,25 @@ const checkDestination = (xml: string, acsUrl: string): Effect.Effect<void, Saml
     : Effect.void;
 };
 
+/**
+ * Every non-empty `InResponseTo` in the decoded document, read from the raw
+ * XML rather than from node-saml's profile. The Response element's attribute
+ * is not covered by an assertion-only signature, and node-saml 5.2 stopped
+ * reporting it (`profile.inResponseTo` became the signed value, #532), so a
+ * rewritten attribute would otherwise go unnoticed. Conservative like the
+ * pre-flight scans: decoys anywhere in the document count.
+ */
+const documentInResponseTo = (xml: string): ReadonlyArray<string> =>
+  Arr.dedupe(
+    Arr.filter(
+      Arr.map(
+        Arr.fromIterable(xml.matchAll(/\bInResponseTo\s*=\s*("([^"]*)"|'([^']*)')/g)),
+        (match) => match[2] ?? match[3] ?? "",
+      ),
+      (value) => value !== "",
+    ),
+  );
+
 const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError> =>
   Effect.gen(function* () {
     if (Arr.isReadonlyArrayEmpty(input.idpCertificates)) {
@@ -424,17 +443,17 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     yield* checkDestination(xml, input.acsUrl);
 
     // Prefer the signed `InResponseTo` over the Response attribute, and reject
-    // a document where the two disagree.
-    const responseInResponseTo = Predicate.isString(profile["inResponseTo"])
-      ? profile["inResponseTo"]
-      : undefined;
-    if (
-      confirmation.inResponseTo !== undefined &&
-      responseInResponseTo !== undefined &&
-      confirmation.inResponseTo !== responseInResponseTo
-    ) {
+    // a document whose `InResponseTo` values disagree, with the signed one or
+    // among themselves. The values come from the raw XML, never from
+    // node-saml's profile, whose `inResponseTo` changed meaning in 5.2 (#532).
+    const documentValues = documentInResponseTo(xml);
+    const signedValues = confirmation.inResponseTo === undefined ? [] : [confirmation.inResponseTo];
+    if (Arr.dedupe([...signedValues, ...documentValues]).length > 1) {
       return yield* fail("SAML response InResponseTo disagrees with the signed assertion");
     }
+    const responseInResponseTo = Predicate.isString(profile["inResponseTo"])
+      ? profile["inResponseTo"]
+      : Arr.head(documentValues).pipe(Option.getOrUndefined);
     const inResponseTo = confirmation.inResponseTo ?? responseInResponseTo;
     if (input.expectedInResponseTo !== undefined && inResponseTo !== input.expectedInResponseTo) {
       return yield* fail("SAML response does not answer the expected AuthnRequest");

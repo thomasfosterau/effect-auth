@@ -60,7 +60,7 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 
 - **Never relax `@node-saml/node-saml` below `5.1.0`**: the fix for CVE-2025-54419 / CVE-2025-54369 (profile data read from bytes the signature did not cover). `xml-crypto` is a dev dependency for the fixtures only.
 - **Trust only pinned certificates** (`idpCertificates`), never a `KeyInfo` in the document; profile data is read only from signature-covered XML.
-- **Every check is a rejection, never a warning**: issuer, audience, `Conditions` window with `defaultClockSkewMs`, `Recipient` and `Destination` equal to the ACS URL, `SubjectConfirmationData` `NotOnOrAfter`, signed `InResponseTo` agreeing with the attribute, at most one `Assertion`, no duplicated `ID`.
+- **Every check is a rejection, never a warning**: issuer, audience, `Conditions` window with `defaultClockSkewMs`, `Recipient` and `Destination` equal to the ACS URL, `SubjectConfirmationData` `NotOnOrAfter`, signed `InResponseTo` agreeing with every `InResponseTo` in the raw XML (never node-saml's `profile.inResponseTo`, which 5.2 fills from the signed value, #532), at most one `Assertion`, no duplicated `ID`.
 - **Algorithms are allow-listed** (`defaultSignatureAlgorithms`: SHA-256 and SHA-512); HMAC signature methods are refused outright.
 - **Encrypted assertions are refused** with an actionable message; there is no half-built decryption path.
 - **Pre-flight scans are conservative**: they run over the whole decoded document before node-saml and reject if anything anywhere fails, decoys included. Don't narrow them to "the signed part".
