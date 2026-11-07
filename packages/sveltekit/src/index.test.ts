@@ -5,6 +5,8 @@ import {
   type ActionEvent,
   type CookieOptions,
   credentialAction,
+  credentialCommand,
+  credentialForm,
   handle,
   type LocalsAuth,
   parseSetCookie,
@@ -330,6 +332,164 @@ describe("credentialAction", () => {
     ).toMatchObject({
       status: 503,
       data: { kind: "unavailable" },
+    });
+  });
+});
+
+/** A remote call's event: its URL is the remote endpoint's, not the page's. */
+const remote = () => {
+  const cookies: Array<[string, string, CookieOptions]> = [];
+  const remoteEvent: ActionEvent = {
+    request: new Request("https://app.example/_app/remote/abc/signIn", {
+      method: "POST",
+      headers: { origin: "https://app.example" },
+    }),
+    url: new URL("https://app.example/_app/remote/abc/signIn?redirect=/elsewhere"),
+    cookies: { set: (name, value, options) => void cookies.push([name, value, options]) },
+  };
+  return { cookies, getRequestEvent: () => remoteEvent };
+};
+
+const sessionResponse = () => {
+  const headers = new Headers();
+  headers.append("set-cookie", "__Host-conduit_session=tok; Path=/; HttpOnly; Secure");
+  return new Response("{}", { status: 201, headers });
+};
+
+describe("remote functions", () => {
+  type Credential = { readonly email: string; readonly password: string; readonly next: string };
+  const input: Credential = { email: "ada@example.com", password: "hunter2", next: "/dashboard" };
+
+  const options = (answer: () => Promise<Response>, seen?: Array<Request>) => ({
+    fetch: async (request: Request) => {
+      seen?.push(request);
+      return answer();
+    },
+    endpoint: "https://auth.internal/api/auth/sessions",
+    body: (credential: Credential) => ({
+      data: {
+        type: "sessions",
+        attributes: {
+          credential: {
+            method: "password",
+            email: credential.email,
+            password: credential.password,
+          },
+        },
+      },
+    }),
+    fields: (credential: Credential) => ({ email: credential.email }),
+    target: (credential: Credential) => credential.next,
+    fallback: "/home",
+  });
+
+  it("form: sets the session cookie and redirects to the validated target from the input", async () => {
+    const { cookies, getRequestEvent } = remote();
+    const seen: Array<Request> = [];
+    await expect(
+      credentialForm(
+        { getRequestEvent, redirect: kit.redirect },
+        options(async () => sessionResponse(), seen),
+      )(input),
+    ).rejects.toMatchObject({ status: 303, location: "/dashboard" });
+    expect(cookies.map(([name, , cookie]) => [name, cookie.httpOnly, cookie.secure])).toEqual([
+      ["__Host-conduit_session", true, true],
+    ]);
+    expect(seen[0]?.headers.get("origin")).toBe("https://app.example");
+  });
+
+  it("form: refuses an off-site target from the input", async () => {
+    const { getRequestEvent } = remote();
+    await expect(
+      credentialForm(
+        { getRequestEvent, redirect: kit.redirect },
+        options(async () => sessionResponse()),
+      )({ ...input, next: "https://evil.example" }),
+    ).rejects.toMatchObject({ status: 303, location: "/home" });
+  });
+
+  it("form: returns 401 and 429 as distinguishable failures, setting no cookie", async () => {
+    const { cookies, getRequestEvent } = remote();
+    const signIn = (answer: () => Promise<Response>) =>
+      credentialForm({ getRequestEvent, redirect: kit.redirect }, options(answer))(input);
+    expect(await signIn(async () => new Response(null, { status: 401 }))).toEqual({
+      kind: "invalid",
+      message: "Invalid email or password.",
+      retryAfterSeconds: null,
+      fields: { email: "ada@example.com" },
+    });
+    expect(
+      await signIn(
+        async () => new Response(null, { status: 429, headers: { "retry-after": "7" } }),
+      ),
+    ).toEqual({
+      kind: "rate-limited",
+      message: "Too many attempts. Please wait and try again.",
+      retryAfterSeconds: 7,
+      fields: { email: "ada@example.com" },
+    });
+    expect(cookies).toEqual([]);
+  });
+
+  it("form: returns the pending step on a 202, without redirecting", async () => {
+    const { getRequestEvent } = remote();
+    const result = await credentialForm(
+      { getRequestEvent, redirect: kit.redirect },
+      options(
+        async () =>
+          new Response(encodeJson({ meta: { needsEmailVerification: true } }), { status: 202 }),
+      ),
+    )(input);
+    expect(result).toEqual({
+      kind: "pending",
+      secondFactor: null,
+      needsEmailVerification: true,
+      fields: { email: "ada@example.com" },
+    });
+  });
+
+  it("command: sets the cookie and answers the target instead of redirecting", async () => {
+    const { cookies, getRequestEvent } = remote();
+    expect(
+      await credentialCommand(
+        { getRequestEvent },
+        options(async () => sessionResponse()),
+      )(input),
+    ).toEqual({ kind: "signed-in", location: "/dashboard" });
+    expect(cookies.map(([name]) => name)).toEqual(["__Host-conduit_session"]);
+  });
+
+  it("command: answers 401, 429 and faults as distinct failures with their statuses", async () => {
+    const { getRequestEvent } = remote();
+    const signIn = (answer: () => Promise<Response>) =>
+      credentialCommand({ getRequestEvent }, options(answer))(input);
+    expect(await signIn(async () => new Response(null, { status: 401 }))).toMatchObject({
+      kind: "failed",
+      status: 400,
+      failure: { kind: "invalid" },
+    });
+    expect(
+      await signIn(
+        async () => new Response(null, { status: 429, headers: { "retry-after": "3" } }),
+      ),
+    ).toMatchObject({
+      kind: "failed",
+      status: 429,
+      failure: { kind: "rate-limited", retryAfterSeconds: 3 },
+    });
+    expect(await signIn(() => Promise.reject(new TypeError("fetch failed")))).toMatchObject({
+      kind: "failed",
+      status: 503,
+      failure: { kind: "unavailable" },
+    });
+  });
+
+  it("defaults the target to the event URL's redirect parameter", async () => {
+    const { getRequestEvent } = remote();
+    const { target: _target, ...withoutTarget } = options(async () => sessionResponse());
+    expect(await credentialCommand({ getRequestEvent }, withoutTarget)(input)).toEqual({
+      kind: "signed-in",
+      location: "/elsewhere",
     });
   });
 });

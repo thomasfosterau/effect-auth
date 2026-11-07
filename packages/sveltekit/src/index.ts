@@ -9,6 +9,9 @@
  * - {@link credentialAction}: the form action for a credential flow. It
  *   relays `Set-Cookie`, redirects only to a `safeRedirect`-validated target,
  *   and reports `401`, `429` and service faults as distinct failures.
+ * - {@link credentialForm} and {@link credentialCommand}: the same credential
+ *   flows as SvelteKit remote functions, over the shared
+ *   {@link submitCredential}.
  *
  * Both are typed against the parts of SvelteKit's `RequestEvent` they use, so
  * the package has no dependency on `@sveltejs/kit`.
