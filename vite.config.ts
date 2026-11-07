@@ -20,7 +20,10 @@ export default defineConfig({
   staged: {
     "*": ["vp check --fix --no-lint", "vp check --no-fmt --no-error-on-unmatched-pattern"],
   },
-  fmt: {},
+  // Changesets writes each package's CHANGELOG.md in the version PR, in its own
+  // layout (blank lines that carry list indentation); formatting it here would
+  // fail CI on every version PR's merge commit. It is generated, never edited.
+  fmt: { ignorePatterns: ["**/CHANGELOG.md"] },
   lint: {
     // `@effect/tsgo`'s preset needs the Effect-patched oxlint and
     // oxlint-tsgolint (the root `prepare` script runs `effect-tsgo patch
