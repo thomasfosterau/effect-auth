@@ -20,7 +20,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { eq } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -127,23 +127,23 @@ const makeHarness = (
   deleteRow: (userId: string) => Promise<void>,
   wrap?: (store: typeof Auth.IdentifierStore.Service) => typeof Auth.IdentifierStore.Service,
 ) => {
-  const userMap = new Map<string, Auth.User>([
+  const userMap = MutableHashMap.fromIterable<string, Auth.User>([
     [USER.ada, makeUser(USER.ada)],
     [USER.grace, makeUser(USER.grace)],
   ]);
-  const tokens = new Map<string, Auth.AccountToken>();
+  const tokens = MutableHashMap.empty<string, Auth.AccountToken>();
 
   const userStore: typeof Auth.UserServiceStore.Service = {
-    get: (userId) => Effect.sync(() => userMap.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(userMap, userId))),
     update: (user) =>
       Effect.sync(() => {
-        userMap.set(user.id, user);
+        MutableHashMap.set(userMap, user.id, user);
         return user;
       }),
     delete: (userId) =>
       Effect.orDie(
         Effect.tryPromise(async () => {
-          userMap.delete(userId);
+          MutableHashMap.remove(userMap, userId);
           await deleteRow(userId);
         }),
       ),
@@ -152,15 +152,15 @@ const makeHarness = (
   const tokenStore: typeof Auth.AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => {
-        tokens.set(token.token, token);
+        MutableHashMap.set(tokens, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => tokens.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void tokens.delete(token)),
+    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+    delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        tokens.forEach((rec, t) => {
-          if (rec.userId === userId) tokens.delete(t);
+        MutableHashMap.forEach(tokens, (rec, t) => {
+          if (rec.userId === userId) MutableHashMap.remove(tokens, t);
         });
       }),
   };
@@ -235,7 +235,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(user.id).toBe(USER.ada);
       expect(await readRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
       expect(await readRow(USER.grace)).toEqual({ email: null, emailVerified: false });
-      expect(h.tokens.has(token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     });
 
     it("an address another user claims between the confirm-time check and the write fails with AccountTokenError; the previous address and the token stay", async () => {
@@ -265,7 +265,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(err.message).toBe("Email already in use");
       expect(await readRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
       expect(await readRow(USER.grace)).toEqual({ email: NEW, emailVerified: true });
-      expect(h.tokens.has(token)).toBe(true);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     });
 
     it("a row a concurrent write already moved to the new address, unverified, ends verified, and the token is consumed", async () => {
@@ -294,7 +294,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       expect(user.id).toBe(USER.ada);
       expect(await readRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
-      expect(h.tokens.has(token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     });
 
     it("an address another user claims after the change is requested fails with AccountTokenError and the previous address stays", async () => {
@@ -332,7 +332,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(user.id).toBe(USER.ada);
       expect(await readStrictRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
       expect(await readStrictRow(USER.grace)).toEqual({ email: GRACE, emailVerified: false });
-      expect(h.tokens.has(token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     });
 
     it("an address another user claims between the confirm-time check and the write fails with AccountTokenError; the previous address and the token stay", async () => {
@@ -355,7 +355,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(err).toBeInstanceOf(Auth.AccountTokenError);
       expect(err.message).toBe("Email already in use");
       expect(await readStrictRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
-      expect(h.tokens.has(token)).toBe(true);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     });
 
     it("a row a concurrent write already moved to the new address, unverified, ends verified, and the token is consumed", async () => {
@@ -380,7 +380,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       expect(user.id).toBe(USER.ada);
       expect(await readStrictRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
-      expect(h.tokens.has(token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     });
 
     it("account deletion completes: the user row and its address go, the token is consumed, and the other user is untouched", async () => {
@@ -392,7 +392,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(deleted).toEqual({ userId: USER.ada });
       expect(await readStrictRow(USER.ada)).toBeNull();
       expect(await readStrictRow(USER.grace)).toEqual({ email: GRACE, emailVerified: false });
-      expect(h.tokens.has(token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     });
   });
 });

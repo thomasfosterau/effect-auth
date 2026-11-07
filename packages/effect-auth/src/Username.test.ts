@@ -1,5 +1,14 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Option, Order } from "effect";
+import {
+  Array as Arr,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Order,
+  Struct,
+} from "effect";
 import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
   type AuthResult,
@@ -30,10 +39,10 @@ const sessionConfig: Types.SessionConfig = {
 
 // Shared in-memory state, reset per test. Login handles (emails, usernames)
 // live in the identifier store now, not on the user record.
-const usersById = new Map<string, Types.User>();
-const identifierRecords = new Map<string, Identifier>();
-const passwordHashes = new Map<string, string>();
-const sessions = new Map<string, Types.Session>();
+const usersById = MutableHashMap.empty<string, Types.User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const passwordHashes = MutableHashMap.empty<string, string>();
+const sessions = MutableHashMap.empty<string, Types.Session>();
 let seq = 0;
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
@@ -41,7 +50,7 @@ const identifierStore = memoryIdentifierStore(identifierRecords);
 const findIdentifier = (type: IdentifierType, value: string): Identifier | null => {
   return Option.getOrNull(
     Arr.findFirst(
-      identifierRecords.values(),
+      MutableHashMap.values(identifierRecords),
       (record) => record.type === type && record.value === value,
     ),
   );
@@ -58,39 +67,44 @@ const emailPasswordStore: typeof EmailPasswordStore.Service = {
         updatedAt: now,
         attributes: input.attributes ?? {},
       };
-      usersById.set(user.id, user);
+      MutableHashMap.set(usersById, user.id, user);
       return { user, created: true };
     }),
-  getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
-  clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
-  setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
+  getPasswordHash: (userId) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+  clearPasswordHash: (userId: string) =>
+    Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
+  setPasswordHash: (userId, hash) =>
+    Effect.sync(() => void MutableHashMap.set(passwordHashes, userId, hash)),
 };
 
 const sessionStore: typeof SessionStore.Service = {
   create: (session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
   update: (session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+  delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      sessions.forEach((s, id) => {
-        if (s.userId === userId) sessions.delete(id);
+      MutableHashMap.forEach(sessions, (s, id) => {
+        if (s.userId === userId) MutableHashMap.remove(sessions, id);
       });
     }),
   listByUserId: (userId) =>
-    Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+    Effect.sync(() =>
+      Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+    ),
 };
 
 const userStore: typeof UserStore.Service = {
-  get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
 };
 
 const hasherLayer = Layer.succeed(PasswordHasher)(hasher);
@@ -155,10 +169,10 @@ const run = <A, E>(
 
 describe("UsernameService", () => {
   beforeEach(() => {
-    usersById.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(usersById);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
     seq = 0;
   });
 
@@ -246,7 +260,7 @@ describe("UsernameService", () => {
     // Once the email identifier is marked verified the same credentials succeed.
     const emailIdentifier = findIdentifier("email", "hector@example.com");
     assert(emailIdentifier !== null, "sign-up stored the email identifier");
-    identifierRecords.set(emailIdentifier.id, {
+    MutableHashMap.set(identifierRecords, emailIdentifier.id, {
       ...emailIdentifier,
       verified: true,
       verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -329,10 +343,10 @@ describe("UsernameService", () => {
 
 describe("UsernameService under anti-enumeration (#414)", () => {
   beforeEach(() => {
-    usersById.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(usersById);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
     seq = 0;
   });
 
@@ -346,7 +360,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
       verified: false,
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
   };
 
   /** A user who already holds `email`, created outside any sign-up. */
@@ -358,7 +372,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
       updatedAt: now,
       attributes: {},
     };
-    usersById.set(owner.id, owner);
+    MutableHashMap.set(usersById, owner.id, owner);
     claimEmail(owner.id, email);
     return owner;
   };
@@ -491,8 +505,8 @@ describe("UsernameService under anti-enumeration (#414)", () => {
 
       // The same answer: same fields, no session, the submitted address.
       const shape = (result: AuthResult) => ({
-        keys: Arr.sort(Object.keys(result), Order.String),
-        userKeys: Arr.sort(Object.keys(result.user), Order.String),
+        keys: Arr.sort(Struct.keys(result), Order.String),
+        userKeys: Arr.sort(Struct.keys(result.user), Order.String),
         session: result.session,
         method: result.method,
       });
@@ -506,7 +520,9 @@ describe("UsernameService under anti-enumeration (#414)", () => {
       expect(findIdentifier("username", "fresh_one")?.userId).toBe(fresh.user.id);
       expect(findIdentifier("username", "squat_me")).toBeNull();
       expect(
-        [...identifierRecords.values()].filter((identifier) => identifier.userId === owner.id),
+        Arr.fromIterable(MutableHashMap.values(identifierRecords)).filter(
+          (identifier) => identifier.userId === owner.id,
+        ),
       ).toEqual([expect.objectContaining({ type: "email", value: VICTIM })]);
 
       // The username stays free for a real sign-up.
@@ -555,7 +571,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
           Effect.tap(() =>
             Effect.sync(() => {
               const held = findIdentifier("email", VICTIM);
-              if (held !== null) identifierRecords.delete(held.id);
+              if (held !== null) MutableHashMap.remove(identifierRecords, held.id);
             }),
           ),
         ),
@@ -622,7 +638,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
               verified: true,
               now: DateTime.toDateUtc(DateTime.nowUnsafe()),
             });
-            identifierRecords.set(identifier.id, identifier);
+            MutableHashMap.set(identifierRecords, identifier.id, identifier);
           }
         }).pipe(Effect.andThen(hasher.hash(password))),
     };
@@ -636,7 +652,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
     );
     const contested = findIdentifier("username", "contested");
     assert(contested !== null, "the racing sign-up claimed the username");
-    identifierRecords.delete(contested.id);
+    MutableHashMap.remove(identifierRecords, contested.id);
 
     const taken = await runAntiEnumeration(
       (svc) =>

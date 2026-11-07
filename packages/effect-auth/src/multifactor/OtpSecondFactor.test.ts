@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, Result } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Option, Result } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -21,59 +21,62 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
 // In-memory stores
 // ---------------------------------------------------------------------------
 
-const otpRecords = new Map<string, OtpSecondFactorRecord>(); // key: pendingToken
-const sessions = new Map<string, Session>();
-const users = new Map<string, User>();
+const otpRecords = MutableHashMap.empty<string, OtpSecondFactorRecord>(); // key: pendingToken
+const sessions = MutableHashMap.empty<string, Session>();
+const users = MutableHashMap.empty<string, User>();
 
 const otpStore = {
   create: (record: OtpSecondFactorRecord) =>
     Effect.sync(() => {
-      otpRecords.set(record.pendingToken, record);
+      MutableHashMap.set(otpRecords, record.pendingToken, record);
       return record;
     }),
 
-  get: (pendingToken: string) => Effect.sync(() => otpRecords.get(pendingToken) ?? null),
+  get: (pendingToken: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(otpRecords, pendingToken))),
 
   update: (record: OtpSecondFactorRecord) =>
     Effect.sync(() => {
-      otpRecords.set(record.pendingToken, record);
+      MutableHashMap.set(otpRecords, record.pendingToken, record);
       return record;
     }),
 
   delete: (pendingToken: string) =>
     Effect.sync(() => {
-      otpRecords.delete(pendingToken);
+      MutableHashMap.remove(otpRecords, pendingToken);
     }),
 };
 
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
+  get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
   delete: (id: string) =>
     Effect.sync(() => {
-      sessions.delete(id);
+      MutableHashMap.remove(sessions, id);
     }),
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((s, id) => {
-        if (s.userId === userId) sessions.delete(id);
+      MutableHashMap.forEach(sessions, (s, id) => {
+        if (s.userId === userId) MutableHashMap.remove(sessions, id);
       });
     }),
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const sessionConfig: SessionConfig = {
@@ -115,9 +118,9 @@ const testUser: User = {
 };
 
 beforeEach(() => {
-  otpRecords.clear();
-  sessions.clear();
-  users.set(testUser.id, testUser);
+  MutableHashMap.clear(otpRecords);
+  MutableHashMap.clear(sessions);
+  MutableHashMap.set(users, testUser.id, testUser);
 });
 
 // ---------------------------------------------------------------------------
@@ -150,7 +153,7 @@ describe("OtpSecondFactorService", () => {
     expect(recorded(sentOtps).user.id).toBe(testUser.id);
     expect(recorded(sentOtps).otp).toMatch(/^\d{6}$/);
     // Only the hash is stored
-    const stored = otpRecords.get(challenge.token);
+    const stored = Option.getOrUndefined(MutableHashMap.get(otpRecords, challenge.token));
     assert(stored !== undefined, "the challenge stored an OTP record");
     expect(stored.otpHash).not.toBe(recorded(sentOtps).otp);
     expect(stored.attempts).toBe(0);
@@ -179,7 +182,7 @@ describe("OtpSecondFactorService", () => {
     expect(result.userId).toBe(testUser.id);
     expect(result.session.userId).toBe(testUser.id);
     // Pending record consumed
-    expect(otpRecords.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
   it("challenge is single-use: second verify after success fails", async () => {
@@ -232,7 +235,7 @@ describe("OtpSecondFactorService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("OtpSecondFactorError");
     // Attempt counter incremented, record still present
-    const stored = Array.from(otpRecords.values())[0];
+    const stored = Array.from(MutableHashMap.values(otpRecords))[0];
     expect(stored?.attempts).toBe(1);
   });
 
@@ -269,7 +272,7 @@ describe("OtpSecondFactorService", () => {
     assert(Result.isFailure(r3));
     expect(r3.failure._tag).toBe("OtpSecondFactorError");
     expect(r3.failure.message).toContain("attempts");
-    expect(otpRecords.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
   it("verify fails when the challenge has expired", async () => {
@@ -299,7 +302,7 @@ describe("OtpSecondFactorService", () => {
     expect(result.failure._tag).toBe("OtpSecondFactorError");
     expect(result.failure.message).toContain("expired");
     // Expired pending record must be eagerly deleted
-    expect(otpRecords.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
   it("respects a custom OTP length", async () => {
@@ -358,6 +361,6 @@ describe("OtpSecondFactorService", () => {
     expect(result.userId).toBe(testUser.id);
     expect(result.session.userId).toBe(testUser.id);
     expect(result.session.attributes).toMatchObject({ device: "mobile" });
-    expect(otpRecords.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 });

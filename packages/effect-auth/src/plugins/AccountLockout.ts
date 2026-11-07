@@ -39,7 +39,7 @@
  *
  * @module plugins/account-lockout
  */
-import { Clock, Context, Duration, Effect } from "effect";
+import { Clock, Context, Duration, Effect, MutableHashMap, Option } from "effect";
 import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
 import { makePlugin } from "../Hooks.ts";
@@ -123,19 +123,19 @@ const transition = (
  * multi-instance deployments need a shared store with an atomic
  * `registerAttempt` (e.g. the SQL implementation).
  *
- * Pass your own `Map` to inspect or pre-seed state in tests.
+ * Pass your own `MutableHashMap` to inspect or pre-seed state in tests.
  */
 export const memoryAccountLockoutStore = (
-  records: Map<string, AccountLockoutRecord> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, AccountLockoutRecord> = MutableHashMap.empty(),
 ): typeof AccountLockoutStore.Service => ({
-  get: (key) => Effect.sync(() => records.get(key) ?? null),
+  get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, key))),
   registerAttempt: (key, options) =>
     Effect.sync(() => {
-      const next = transition(records.get(key) ?? null, options);
-      records.set(key, next);
+      const next = transition(Option.getOrNull(MutableHashMap.get(records, key)), options);
+      MutableHashMap.set(records, key, next);
       return next;
     }),
-  delete: (key) => Effect.sync(() => void records.delete(key)),
+  delete: (key) => Effect.sync(() => void MutableHashMap.remove(records, key)),
 });
 
 /** Configuration for {@link AccountLockoutPlugin}. */

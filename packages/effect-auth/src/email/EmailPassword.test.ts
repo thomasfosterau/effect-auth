@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Array as Arr, Context, DateTime, Effect, Layer, Order, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Order,
+  Result,
+  Struct,
+} from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -20,10 +31,10 @@ import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts"
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 
-const users = new Map<string, User>();
-const identifierRecords = new Map<string, Identifier>();
-const passwordHashes = new Map<string, string>();
-const sessions = new Map<string, Session>();
+const users = MutableHashMap.empty<string, User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const passwordHashes = MutableHashMap.empty<string, string>();
+const sessions = MutableHashMap.empty<string, Session>();
 /** The `identifier` each `createUser` call was given. */
 const createdWith: Array<CreateUserInput["identifier"]> = [];
 
@@ -38,52 +49,55 @@ const seedEmailIdentifier = (userId: string, email: string, verified: boolean): 
     verified,
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
   return identifier;
 };
 
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const emailPasswordStore = {
   createUser: ({ name, image, attributes, identifier }: CreateUserInput) =>
     Effect.sync(() => {
       createdWith.push(identifier);
-      const id = `user-${users.size + 1}`;
+      const id = `user-${MutableHashMap.size(users) + 1}`;
       const user: User = {
         id,
         ...(name !== undefined && { name }),
@@ -92,16 +106,18 @@ const emailPasswordStore = {
         updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: attributes ?? {},
       };
-      users.set(id, user);
+      MutableHashMap.set(users, id, user);
       return { user, created: true };
     }),
 
-  getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+  getPasswordHash: (userId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
 
-  clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
+  clearPasswordHash: (userId: string) =>
+    Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
-      passwordHashes.set(userId, hash);
+      MutableHashMap.set(passwordHashes, userId, hash);
     }),
 };
 
@@ -149,10 +165,10 @@ const makeTestContext = async (
 
 describe("EmailPasswordService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
     createdWith.length = 0;
   });
 
@@ -182,7 +198,7 @@ describe("EmailPasswordService", () => {
     expect(result.session?.userId).toBe(result.user.id);
 
     // The claimed email identifier belongs to the new user and starts unverified.
-    const stored = Array.from(identifierRecords.values()).find(
+    const stored = Array.from(MutableHashMap.values(identifierRecords)).find(
       (identifier) => identifier.type === "email" && identifier.value === "test@example.com",
     );
     expect(stored?.userId).toBe(result.user.id);
@@ -205,9 +221,9 @@ describe("EmailPasswordService", () => {
       ...emailPasswordStore,
       createUser: () =>
         Effect.sync(() => {
-          users.set(owner.id, owner);
+          MutableHashMap.set(users, owner.id, owner);
           seedEmailIdentifier(owner.id, "owner@example.com", false);
-          passwordHashes.set(owner.id, "owner-hash");
+          MutableHashMap.set(passwordHashes, owner.id, "owner-hash");
           return { user: owner, created: false };
         }),
     };
@@ -226,10 +242,13 @@ describe("EmailPasswordService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailInUseError");
     // No password, session or second identifier landed on the owner.
-    expect(passwordHashes.get(owner.id)).toBe("owner-hash");
-    expect(sessions.size).toBe(0);
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, owner.id))).toBe("owner-hash");
+    expect(MutableHashMap.size(sessions)).toBe(0);
     expect(
-      Array.from(identifierRecords.values()).map(({ userId, verified }) => ({ userId, verified })),
+      Array.from(MutableHashMap.values(identifierRecords)).map(({ userId, verified }) => ({
+        userId,
+        verified,
+      })),
     ).toEqual([{ userId: owner.id, verified: false }]);
   });
 
@@ -246,9 +265,9 @@ describe("EmailPasswordService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "existing@example.com", true);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -282,9 +301,9 @@ describe("EmailPasswordService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "invalid@example.com", true);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -319,9 +338,9 @@ describe("EmailPasswordService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "unverified@example.com", false);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -348,10 +367,10 @@ describe("EmailPasswordService", () => {
 
 describe("EmailPasswordService constant-work sign-in", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
   });
 
   it("calls passwordHasher.verify even when the email does not exist", async () => {
@@ -430,7 +449,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "nohash@example.com", true);
     // Intentionally no password hash stored for this user.
 
@@ -483,10 +502,10 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
 describe("EmailPasswordService second-factor gate", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
   });
 
   it("returns a second-factor challenge instead of a session when the gate requires it", async () => {
@@ -502,9 +521,9 @@ describe("EmailPasswordService second-factor gate", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "gated@example.com", true);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const gate = {
       required: (candidate: User) => Effect.succeed(candidate.id === user.id),
@@ -531,7 +550,7 @@ describe("EmailPasswordService second-factor gate", () => {
       expiresAt: expect.any(Number),
     });
     // No session may be created until the second factor is redeemed.
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("creates a session normally when the gate does not require a second factor", async () => {
@@ -547,9 +566,9 @@ describe("EmailPasswordService second-factor gate", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "ungated@example.com", true);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const gate = {
       required: () => Effect.succeed(false),
@@ -580,10 +599,10 @@ describe("EmailPasswordService second-factor gate", () => {
 
 describe("EmailPasswordService — migration and security hardening", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
   });
 
   // Both counts are low on purpose: the test is about the rehash-on-sign-in
@@ -631,9 +650,9 @@ describe("EmailPasswordService — migration and security hardening", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "migration@example.com", true);
-    passwordHashes.set(user.id, oldHash);
+    MutableHashMap.set(passwordHashes, user.id, oldHash);
 
     // Use the current PBKDF2 hasher — it detects the outdated hash via needsRehash.
     const result = await Effect.runPromise(
@@ -653,7 +672,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
     expect(result.session).toBeDefined();
 
     // The stored hash must have been silently upgraded to the current params.
-    const updatedHash = passwordHashes.get(user.id);
+    const updatedHash = Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id));
     assert(updatedHash !== undefined, "the user has a password hash");
     expect(updatedHash).not.toBe(oldHash);
     expect(updatedHash.startsWith(`pbkdf2-sha256$${CURRENT_PBKDF2_ITERATIONS}$`)).toBe(true);
@@ -673,9 +692,9 @@ describe("EmailPasswordService — migration and security hardening", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "switch@example.com", true);
-    passwordHashes.set(user.id, oldHash);
+    MutableHashMap.set(passwordHashes, user.id, oldHash);
 
     const scryptHasher = Password.scryptHasher({ cost: 1024 });
     const verifier = Password.multiAlgorithmVerifier([
@@ -707,7 +726,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
     expect(result.session).toBeDefined();
 
     // Hash must have been rehashed to scrypt by the active hasher.
-    const updatedHash = passwordHashes.get(user.id);
+    const updatedHash = Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id));
     assert(updatedHash !== undefined, "the user has a password hash");
     expect(updatedHash.startsWith("scrypt$")).toBe(true);
   });
@@ -721,10 +740,10 @@ describe("EmailPasswordService — migration and security hardening", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "malformed@example.com", true);
     // Malformed hash: non-numeric iteration count — would previously cause a RangeError defect.
-    passwordHashes.set(user.id, "pbkdf2-sha256$notanumber$aabbcc$ddeeff");
+    MutableHashMap.set(passwordHashes, user.id, "pbkdf2-sha256$notanumber$aabbcc$ddeeff");
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -754,9 +773,9 @@ describe("EmailPasswordService — migration and security hardening", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "longpw@example.com", true);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -782,47 +801,51 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
 describe("EmailPasswordService - dangling session protection", () => {
   // Shared in-memory stores for these tests.
-  const localUsers = new Map<string, User>();
-  const localIdentifierRecords = new Map<string, Identifier>();
-  const localPasswordHashes = new Map<string, string>();
-  const localSessions = new Map<string, Session>();
+  const localUsers = MutableHashMap.empty<string, User>();
+  const localIdentifierRecords = MutableHashMap.empty<string, Identifier>();
+  const localPasswordHashes = MutableHashMap.empty<string, string>();
+  const localSessions = MutableHashMap.empty<string, Session>();
 
   const localIdentifierStore = memoryIdentifierStore(localIdentifierRecords);
 
   const localSessionStore = {
     create: (session: Session) =>
       Effect.sync(() => {
-        localSessions.set(session.id, session);
+        MutableHashMap.set(localSessions, session.id, session);
         return session;
       }),
-    get: (sessionId: string) => Effect.sync(() => localSessions.get(sessionId) ?? null),
+    get: (sessionId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(localSessions, sessionId))),
     update: (session: Session) =>
       Effect.sync(() => {
-        localSessions.set(session.id, session);
+        MutableHashMap.set(localSessions, session.id, session);
         return session;
       }),
     delete: (sessionId: string) =>
       Effect.sync(() => {
-        localSessions.delete(sessionId);
+        MutableHashMap.remove(localSessions, sessionId);
       }),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        localSessions.forEach((session, id) => {
-          if (session.userId === userId) localSessions.delete(id);
+        MutableHashMap.forEach(localSessions, (session, id) => {
+          if (session.userId === userId) MutableHashMap.remove(localSessions, id);
         });
       }),
     listByUserId: (userId: string) =>
-      Effect.sync(() => Array.from(localSessions.values()).filter((s) => s.userId === userId)),
+      Effect.sync(() =>
+        Array.from(MutableHashMap.values(localSessions)).filter((s) => s.userId === userId),
+      ),
   };
 
   const localUserStore = {
-    get: (userId: string) => Effect.sync(() => localUsers.get(userId) ?? null),
+    get: (userId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(localUsers, userId))),
   };
 
   const localEmailPasswordStore = {
     createUser: ({ name, attributes }: CreateUserInput) =>
       Effect.sync(() => {
-        const id = `user-${localUsers.size + 1}`;
+        const id = `user-${MutableHashMap.size(localUsers) + 1}`;
         const user: User = {
           id,
           ...(name !== undefined && { name }),
@@ -830,15 +853,16 @@ describe("EmailPasswordService - dangling session protection", () => {
           updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
           attributes: attributes ?? {},
         };
-        localUsers.set(id, user);
+        MutableHashMap.set(localUsers, id, user);
         return { user, created: true };
       }),
-    getPasswordHash: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
+    getPasswordHash: (userId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(localPasswordHashes, userId))),
     clearPasswordHash: (userId: string) =>
-      Effect.sync(() => void localPasswordHashes.delete(userId)),
+      Effect.sync(() => void MutableHashMap.remove(localPasswordHashes, userId)),
     setPasswordHash: (userId: string, hash: string) =>
       Effect.sync(() => {
-        localPasswordHashes.set(userId, hash);
+        MutableHashMap.set(localPasswordHashes, userId, hash);
       }),
   };
 
@@ -876,10 +900,10 @@ describe("EmailPasswordService - dangling session protection", () => {
   };
 
   beforeEach(() => {
-    localUsers.clear();
-    localIdentifierRecords.clear();
-    localPasswordHashes.clear();
-    localSessions.clear();
+    MutableHashMap.clear(localUsers);
+    MutableHashMap.clear(localIdentifierRecords);
+    MutableHashMap.clear(localPasswordHashes);
+    MutableHashMap.clear(localSessions);
   });
 
   it("signIn succeeds and returns the session even when afterSignIn hook fails (no dangling session)", async () => {
@@ -894,7 +918,7 @@ describe("EmailPasswordService - dangling session protection", () => {
     );
     expect(signUpResult.session).toBeDefined();
 
-    localSessions.clear(); // clear sign-up session so we can inspect sign-in session cleanly
+    MutableHashMap.clear(localSessions); // clear sign-up session so we can inspect sign-in session cleanly
 
     // A failing afterSignIn hook.
     const failingAfterSignIn = makePlugin({
@@ -916,9 +940,9 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signInResult.identifier).toEqual({ type: "email", value: "alice@example.com" });
 
     // The session is live in the store — no dangling session.
-    expect(signInResult.session && localSessions.has(hashToken(signInResult.session.id))).toBe(
-      true,
-    );
+    expect(
+      signInResult.session && MutableHashMap.has(localSessions, hashToken(signInResult.session.id)),
+    ).toBe(true);
   });
 
   it("signUp succeeds and returns the session even when afterSignUp hook fails (no dangling session)", async () => {
@@ -943,18 +967,18 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signUpResult.identifier).toEqual({ type: "email", value: "bob@example.com" });
 
     // The session is live in the store — no dangling session.
-    expect(signUpResult.session && localSessions.has(hashToken(signUpResult.session.id))).toBe(
-      true,
-    );
+    expect(
+      signUpResult.session && MutableHashMap.has(localSessions, hashToken(signUpResult.session.id)),
+    ).toBe(true);
   });
 });
 
 describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
   });
 
   it("default mode: duplicate email still returns EmailInUseError (unchanged)", async () => {
@@ -1007,8 +1031,8 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     expect(duplicate.session).toBeUndefined();
 
     // Same body shape: same set of top-level fields on both branches.
-    expect(Arr.sort(Object.keys(duplicate), Order.String)).toEqual(
-      Arr.sort(Object.keys(fresh), Order.String),
+    expect(Arr.sort(Struct.keys(duplicate), Order.String)).toEqual(
+      Arr.sort(Struct.keys(fresh), Order.String),
     );
     expect(fresh.method).toBe("email-password");
     expect(duplicate.method).toBe("email-password");
@@ -1021,7 +1045,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
 
     // The real, pre-existing account is untouched (no second identifier or
     // password write landed against it).
-    const identifiersForEmail = Array.from(identifierRecords.values()).filter(
+    const identifiersForEmail = Array.from(MutableHashMap.values(identifierRecords)).filter(
       (identifier) => identifier.type === "email" && identifier.value === "shape@example.com",
     );
     expect(identifiersForEmail).toHaveLength(1);
@@ -1094,7 +1118,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
       ...emailPasswordStore,
       newUserId: () =>
         Effect.sync(() => {
-          const id = `user-${users.size + 1 + minted.length}`;
+          const id = `user-${MutableHashMap.size(users) + 1 + minted.length}`;
           minted.push(id);
           return id;
         }),
@@ -1120,13 +1144,13 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     // it names no user.
     expect(minted).toEqual([minting.duplicate.user.id]);
     expect(minting.duplicate.user.id).toMatch(/^user-\d+$/);
-    expect(users.has(minting.duplicate.user.id)).toBe(false);
+    expect(MutableHashMap.has(users, minting.duplicate.user.id)).toBe(false);
     // One timestamp for both, as a store's `createUser` sets them.
     expect(minting.duplicate.user.updatedAt).toBe(minting.duplicate.user.createdAt);
 
     // Without the seam the stand-in's id is a random UUID.
-    users.clear();
-    identifierRecords.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
     const fallback = await Effect.runPromise(signUpTwice(emailPasswordStore));
     expect(fallback.duplicate.user.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -1143,9 +1167,9 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     attributes: {},
   };
   const seedOwner = (email: string) => {
-    users.set(owner.id, owner);
+    MutableHashMap.set(users, owner.id, owner);
     seedEmailIdentifier(owner.id, email, false);
-    passwordHashes.set(owner.id, "owner-hash");
+    MutableHashMap.set(passwordHashes, owner.id, "owner-hash");
   };
   const takenAtInsert: ReadonlyArray<{
     readonly name: string;
@@ -1212,11 +1236,11 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
 
       // Same shape as the pre-check duplicate, with no session.
       expect(result.session).toBeUndefined();
-      expect(Arr.sort(Object.keys(result), Order.String)).toEqual(
-        Arr.sort(Object.keys(precheck), Order.String),
+      expect(Arr.sort(Struct.keys(result), Order.String)).toEqual(
+        Arr.sort(Struct.keys(precheck), Order.String),
       );
-      expect(Arr.sort(Object.keys(result.user), Order.String)).toEqual(
-        Arr.sort(Object.keys(precheck.user), Order.String),
+      expect(Arr.sort(Struct.keys(result.user), Order.String)).toEqual(
+        Arr.sort(Struct.keys(precheck.user), Order.String),
       );
       expect(result.identifier).toEqual({ type: "email", value: "victim@example.com" });
       expect(result.method).toBe(precheck.method);
@@ -1225,10 +1249,12 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
       expect(precheckHashes).toBe(1);
       expect(hashCalls).toBe(2);
       // Nothing landed on the owner.
-      expect(passwordHashes.get(owner.id)).toBe("owner-hash");
-      expect(sessions.size).toBe(0);
+      expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, owner.id))).toBe(
+        "owner-hash",
+      );
+      expect(MutableHashMap.size(sessions)).toBe(0);
       expect(
-        Array.from(identifierRecords.values())
+        Array.from(MutableHashMap.values(identifierRecords))
           .filter((identifier) => identifier.value === "victim@example.com")
           .map(({ userId, verified }) => ({ userId, verified })),
       ).toEqual([{ userId: owner.id, verified: false }]);

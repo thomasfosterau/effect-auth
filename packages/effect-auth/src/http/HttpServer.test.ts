@@ -10,9 +10,9 @@ import {
 } from "vite-plus/test";
 import {
   Array as Arr,
+  Clock,
   Data,
   DateTime,
-  Clock,
   Deferred,
   Effect,
   Fiber,
@@ -20,6 +20,7 @@ import {
   Layer,
   Logger,
   MutableHashMap,
+  MutableHashSet,
   Option,
   Order,
   Path,
@@ -209,12 +210,12 @@ const makeFixture = (
           }),
         };
   // --- shared in-memory state -----------------------------------------------
-  const usersById = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
-  const passwordHashes = new Map<string, string>();
-  const sessions = new Map<string, Types.Session>();
-  const verifications = new Map<string, EmailVerification>();
-  const resets = new Map<string, PasswordResetToken>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
+  const passwordHashes = MutableHashMap.empty<string, string>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
+  const verifications = MutableHashMap.empty<string, EmailVerification>();
+  const resets = MutableHashMap.empty<string, PasswordResetToken>();
   let userSeq = 0;
   let sessionStoreReads = 0;
 
@@ -243,38 +244,43 @@ const makeFixture = (
       updatedAt: now,
       attributes: input.attributes ?? {},
     };
-    usersById.set(user.id, user);
+    MutableHashMap.set(usersById, user.id, user);
     return user;
   };
 
-  const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
+  const getUserById = (userId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId)));
 
   // --- core stores -----------------------------------------------------------
   const sessionStore: typeof SessionStore.Service = {
     create: (session) =>
       Effect.sync(() => {
-        sessions.set(session.id, session);
+        MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
     get: (sessionId) =>
       Effect.sync(() => {
         sessionStoreReads++;
-        return sessions.get(sessionId) ?? null;
+        return Option.getOrNull(MutableHashMap.get(sessions, sessionId));
       }),
     update: (session) =>
       Effect.sync(() => {
-        sessions.set(session.id, session);
+        MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
-    delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+    delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        sessions.forEach((session, id) => {
-          if (session.userId === userId) sessions.delete(id);
+        MutableHashMap.forEach(sessions, (session, id) => {
+          if (session.userId === userId) MutableHashMap.remove(sessions, id);
         });
       }),
     listByUserId: (userId) =>
-      Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(sessions)).filter(
+          (session) => session.userId === userId,
+        ),
+      ),
   };
 
   const userStore: typeof UserStore.Service = {
@@ -283,9 +289,12 @@ const makeFixture = (
 
   const baseEmailPasswordStore: typeof EmailPasswordStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
-    getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
-    clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
-    setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
+    getPasswordHash: (userId) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    clearPasswordHash: (userId: string) =>
+      Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
+    setPasswordHash: (userId, hash) =>
+      Effect.sync(() => void MutableHashMap.set(passwordHashes, userId, hash)),
   };
   const emailPasswordStore =
     options.emailPasswordStore?.(baseEmailPasswordStore, {
@@ -298,7 +307,7 @@ const makeFixture = (
           verified: false,
           now: DateTime.toDateUtc(DateTime.nowUnsafe()),
         });
-        identifierRecords.set(identifier.id, identifier);
+        MutableHashMap.set(identifierRecords, identifier.id, identifier);
       },
       nextUserId: () => `user-${++userSeq}`,
     }) ?? baseEmailPasswordStore;
@@ -307,24 +316,24 @@ const makeFixture = (
     get: getUserById,
     update: (user) =>
       Effect.sync(() => {
-        usersById.set(user.id, user);
+        MutableHashMap.set(usersById, user.id, user);
         return user;
       }),
-    delete: (userId) => Effect.sync(() => void usersById.delete(userId)),
+    delete: (userId) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 
   const emailVerificationStore: typeof EmailVerificationStore.Service = {
     create: (verification) =>
       Effect.sync(() => {
-        verifications.set(verification.token, verification);
+        MutableHashMap.set(verifications, verification.token, verification);
         return verification;
       }),
-    get: (token) => Effect.sync(() => verifications.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void verifications.delete(token)),
+    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+    delete: (token) => Effect.sync(() => void MutableHashMap.remove(verifications, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        verifications.forEach((v, token) => {
-          if (v.userId === userId) verifications.delete(token);
+        MutableHashMap.forEach(verifications, (v, token) => {
+          if (v.userId === userId) MutableHashMap.remove(verifications, token);
         });
       }),
   };
@@ -332,21 +341,22 @@ const makeFixture = (
   const passwordResetStore: typeof PasswordResetStore.Service = {
     create: (reset) =>
       Effect.sync(() => {
-        resets.set(reset.token, reset);
+        MutableHashMap.set(resets, reset.token, reset);
         return reset;
       }),
-    get: (token) => Effect.sync(() => resets.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void resets.delete(token)),
+    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(resets, token))),
+    delete: (token) => Effect.sync(() => void MutableHashMap.remove(resets, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        resets.forEach((reset, token) => {
-          if (reset.userId === userId) resets.delete(token);
+        MutableHashMap.forEach(resets, (reset, token) => {
+          if (reset.userId === userId) MutableHashMap.remove(resets, token);
         });
       }),
   };
 
   const passwordResetUserStore: typeof PasswordResetUserStore.Service = {
-    setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
+    setPasswordHash: (userId, hash) =>
+      Effect.sync(() => void MutableHashMap.set(passwordHashes, userId, hash)),
   };
 
   const storeLayer = Layer.mergeAll(
@@ -399,23 +409,25 @@ const makeFixture = (
   const services: Layer.Layer<AuthServices> = baseServices;
 
   // --- optional feature stores -----------------------------------------------
-  const magicLinks = new Map<string, MagicLinkToken>();
+  const magicLinks = MutableHashMap.empty<string, MagicLinkToken>();
   const magicLinkStore: typeof MagicLinkStore.Service = {
     create: (token) =>
       Effect.sync(() => {
-        magicLinks.set(token.token, token);
+        MutableHashMap.set(magicLinks, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => magicLinks.get(token) ?? null),
+    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(magicLinks, token))),
     getByEmail: (email) =>
       Effect.sync(() => {
-        return Option.getOrNull(Arr.findFirst(magicLinks.values(), (link) => link.email === email));
+        return Option.getOrNull(
+          Arr.findFirst(MutableHashMap.values(magicLinks), (link) => link.email === email),
+        );
       }),
-    delete: (token) => Effect.sync(() => void magicLinks.delete(token)),
+    delete: (token) => Effect.sync(() => void MutableHashMap.remove(magicLinks, token)),
     deleteByEmail: (email) =>
       Effect.sync(() => {
-        magicLinks.forEach((link, key) => {
-          if (link.email === email) magicLinks.delete(key);
+        MutableHashMap.forEach(magicLinks, (link, key) => {
+          if (link.email === email) MutableHashMap.remove(magicLinks, key);
         });
       }),
   };
@@ -423,22 +435,24 @@ const makeFixture = (
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
-  const emailOtps = new Map<string, EmailOtpRecord>();
+  const emailOtps = MutableHashMap.empty<string, EmailOtpRecord>();
   const otpKey = (email: string, purpose: EmailOtpPurpose) => `${purpose}:${email}`;
   const emailOtpStore: typeof EmailOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
-        emailOtps.set(otpKey(record.email, record.purpose), record);
+        MutableHashMap.set(emailOtps, otpKey(record.email, record.purpose), record);
         return record;
       }),
-    get: (email, purpose) => Effect.sync(() => emailOtps.get(otpKey(email, purpose)) ?? null),
-    delete: (email, purpose) => Effect.sync(() => void emailOtps.delete(otpKey(email, purpose))),
+    get: (email, purpose) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(emailOtps, otpKey(email, purpose)))),
+    delete: (email, purpose) =>
+      Effect.sync(() => void MutableHashMap.remove(emailOtps, otpKey(email, purpose))),
     incrementAttempts: (email, purpose) =>
       Effect.sync(() => {
-        const record = emailOtps.get(otpKey(email, purpose));
+        const record = Option.getOrUndefined(MutableHashMap.get(emailOtps, otpKey(email, purpose)));
         if (record === undefined) return 0;
         const updated = { ...record, attempts: record.attempts + 1 };
-        emailOtps.set(otpKey(email, purpose), updated);
+        MutableHashMap.set(emailOtps, otpKey(email, purpose), updated);
         return updated.attempts;
       }),
   };
@@ -446,25 +460,27 @@ const makeFixture = (
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
-  const multiFactorRecords = new Map<string, MultiFactorRecord>();
+  const multiFactorRecords = MutableHashMap.empty<string, MultiFactorRecord>();
   const multiFactorStore: typeof MultiFactorStore.Service = {
-    get: (userId) => Effect.sync(() => multiFactorRecords.get(userId) ?? null),
+    get: (userId) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId))),
     upsert: (record) =>
       Effect.sync(() => {
-        multiFactorRecords.set(record.userId, record);
+        MutableHashMap.set(multiFactorRecords, record.userId, record);
         return record;
       }),
-    delete: (userId) => Effect.sync(() => void multiFactorRecords.delete(userId)),
+    delete: (userId) => Effect.sync(() => void MutableHashMap.remove(multiFactorRecords, userId)),
   };
-  const pendingMultiFactors = new Map<string, PendingMultiFactor>();
+  const pendingMultiFactors = MutableHashMap.empty<string, PendingMultiFactor>();
   const pendingMultiFactorAttempts = MutableHashMap.empty<string, number>();
   const pendingMultiFactorStore: typeof PendingMultiFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => {
-        pendingMultiFactors.set(pending.token, pending);
+        MutableHashMap.set(pendingMultiFactors, pending.token, pending);
         return pending;
       }),
-    get: (token) => Effect.sync(() => pendingMultiFactors.get(token) ?? null),
+    get: (token) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingMultiFactors, token))),
     recordFailedAttempt: (token) =>
       Effect.sync(() => {
         const attempts =
@@ -474,45 +490,50 @@ const makeFixture = (
       }),
     delete: (token) =>
       Effect.sync(() => {
-        pendingMultiFactors.delete(token);
+        MutableHashMap.remove(pendingMultiFactors, token);
         MutableHashMap.remove(pendingMultiFactorAttempts, token);
       }),
   };
 
-  const accountTokens = new Map<string, AccountToken>();
+  const accountTokens = MutableHashMap.empty<string, AccountToken>();
   const accountStore: typeof AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => {
-        accountTokens.set(token.token, token);
+        MutableHashMap.set(accountTokens, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => accountTokens.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void accountTokens.delete(token)),
+    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(accountTokens, token))),
+    delete: (token) => Effect.sync(() => void MutableHashMap.remove(accountTokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        accountTokens.forEach((rec, t) => {
-          if (rec.userId === userId) accountTokens.delete(t);
+        MutableHashMap.forEach(accountTokens, (rec, t) => {
+          if (rec.userId === userId) MutableHashMap.remove(accountTokens, t);
         });
       }),
   };
 
-  const phoneRecords = new Map<string, PhoneOtpRecord>();
+  const phoneRecords = MutableHashMap.empty<string, PhoneOtpRecord>();
   const phoneKey = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
   const phoneOtpStore: typeof PhoneOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
-        phoneRecords.set(phoneKey(record.phoneNumber, record.purpose), record);
+        MutableHashMap.set(phoneRecords, phoneKey(record.phoneNumber, record.purpose), record);
         return record;
       }),
-    get: (phone, purpose) => Effect.sync(() => phoneRecords.get(phoneKey(phone, purpose)) ?? null),
+    get: (phone, purpose) =>
+      Effect.sync(() =>
+        Option.getOrNull(MutableHashMap.get(phoneRecords, phoneKey(phone, purpose))),
+      ),
     delete: (phone, purpose) =>
-      Effect.sync(() => void phoneRecords.delete(phoneKey(phone, purpose))),
+      Effect.sync(() => void MutableHashMap.remove(phoneRecords, phoneKey(phone, purpose))),
     incrementAttempts: (phone, purpose) =>
       Effect.sync(() => {
-        const record = phoneRecords.get(phoneKey(phone, purpose));
+        const record = Option.getOrUndefined(
+          MutableHashMap.get(phoneRecords, phoneKey(phone, purpose)),
+        );
         if (!record) return 0;
         const updated = { ...record, attempts: record.attempts + 1 };
-        phoneRecords.set(phoneKey(phone, purpose), updated);
+        MutableHashMap.set(phoneRecords, phoneKey(phone, purpose), updated);
         return updated.attempts;
       }),
   };
@@ -522,27 +543,34 @@ const makeFixture = (
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
-  const deviceRecords = new Map<string, DeviceAuthorizationRecord>();
+  const deviceRecords = MutableHashMap.empty<string, DeviceAuthorizationRecord>();
   const deviceStore: typeof DeviceAuthorizationStore.Service = {
     create: (record) =>
       Effect.sync(() => {
-        deviceRecords.set(record.deviceCode, record);
+        MutableHashMap.set(deviceRecords, record.deviceCode, record);
         return record;
       }),
-    getByDeviceCode: (deviceCode) => Effect.sync(() => deviceRecords.get(deviceCode) ?? null),
+    getByDeviceCode: (deviceCode) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(deviceRecords, deviceCode))),
     getByUserCode: (userCode) =>
-      Effect.sync(() => [...deviceRecords.values()].find((r) => r.userCode === userCode) ?? null),
+      Effect.sync(
+        () =>
+          Arr.fromIterable(MutableHashMap.values(deviceRecords)).find(
+            (r) => r.userCode === userCode,
+          ) ?? null,
+      ),
     update: (record) =>
       Effect.sync(() => {
-        deviceRecords.set(record.deviceCode, record);
+        MutableHashMap.set(deviceRecords, record.deviceCode, record);
         return record;
       }),
-    delete: (deviceCode) => Effect.sync(() => void deviceRecords.delete(deviceCode)),
+    delete: (deviceCode) =>
+      Effect.sync(() => void MutableHashMap.remove(deviceRecords, deviceCode)),
     claimApproval: (deviceCode) =>
       Effect.sync(() => {
-        const record = deviceRecords.get(deviceCode);
+        const record = Option.getOrUndefined(MutableHashMap.get(deviceRecords, deviceCode));
         if (record === undefined || record.status !== "approved") return null;
-        deviceRecords.delete(deviceCode);
+        MutableHashMap.remove(deviceRecords, deviceCode);
         return record;
       }),
   };
@@ -557,11 +585,11 @@ const makeFixture = (
       verified: true,
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
   };
 
   const seedUnverifiedEmailUser = (user: Types.User, email: string): void => {
-    usersById.set(user.id, user);
+    MutableHashMap.set(usersById, user.id, user);
     const identifier = makeIdentifier({
       userId: user.id,
       type: "email",
@@ -569,7 +597,7 @@ const makeFixture = (
       verified: false,
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
   };
 
   const registerPhone = (userId: string, phoneNumber: string): void => {
@@ -580,12 +608,12 @@ const makeFixture = (
       verified: true,
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
   };
 
   const anonymousUserStore: typeof AnonymousUserStore.Service = {
     createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
-    deleteUser: (userId) => Effect.sync(() => void usersById.delete(userId)),
+    deleteUser: (userId) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 
   // Every optional-feature store, merged with the base services layer:
@@ -667,8 +695,8 @@ const makeFixture = (
     registerPhone,
     seedUnverifiedEmailUser,
     sessionStoreReads: () => sessionStoreReads,
-    verificationRecords: () => [...verifications.values()],
-    userExists: (userId) => usersById.has(userId),
+    verificationRecords: () => Arr.fromIterable(MutableHashMap.values(verifications)),
+    userExists: (userId) => MutableHashMap.has(usersById, userId),
   };
 };
 
@@ -678,26 +706,26 @@ const memoryRateLimiterLayer = (): Layer.Layer<RateLimiter> =>
 
 /** An in-memory `RateLimitStore`. */
 const memoryRateLimitStoreLayer = (): Layer.Layer<RateLimitStore> => {
-  const entries = new Map<string, RateLimitEntry>();
+  const entries = MutableHashMap.empty<string, RateLimitEntry>();
   const store = {
-    get: (key: string) => Effect.sync(() => entries.get(key) ?? null),
+    get: (key: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(entries, key))),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
-      Effect.sync(() => void entries.set(key, entry)),
+      Effect.sync(() => void MutableHashMap.set(entries, key, entry)),
     increment: (key: string, ttl: number) =>
       // Starts a new window when there is none or it has expired, as the
       // RateLimitStore contract requires (#455).
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
-          const entry = entries.get(key);
+          const entry = Option.getOrUndefined(MutableHashMap.get(entries, key));
           const next: RateLimitEntry =
             entry === undefined || now >= entry.resetAt
               ? { key, count: 1, resetAt: now + ttl * 1000 }
               : { ...entry, count: entry.count + 1 };
-          entries.set(key, next);
+          MutableHashMap.set(entries, key, next);
           return next.count;
         }),
       ),
-    delete: (key: string) => Effect.sync(() => void entries.delete(key)),
+    delete: (key: string) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
   };
   return Layer.succeed(RateLimitStore, store);
 };
@@ -3158,36 +3186,36 @@ describe("client IP at the HTTP boundary", () => {
       readonly allowMissingClientIp?: boolean | undefined;
       readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
     } = {},
-  ): { readonly handler: Handler; readonly keys: ReadonlySet<string> } => {
-    const entries = new Map<string, RateLimitEntry>();
-    const keys = new Set<string>();
+  ): { readonly handler: Handler; readonly keys: MutableHashSet.MutableHashSet<string> } => {
+    const entries = MutableHashMap.empty<string, RateLimitEntry>();
+    const keys = MutableHashSet.empty<string>();
     const store = {
       get: (key: string) =>
         Effect.sync(() => {
-          keys.add(key);
-          return entries.get(key) ?? null;
+          MutableHashSet.add(keys, key);
+          return Option.getOrNull(MutableHashMap.get(entries, key));
         }),
       set: (key: string, entry: RateLimitEntry, _ttl: number) =>
         Effect.sync(() => {
-          keys.add(key);
-          entries.set(key, entry);
+          MutableHashSet.add(keys, key);
+          MutableHashMap.set(entries, key, entry);
         }),
       increment: (key: string, ttl: number) =>
         // Starts a new window when there is none or it has expired, as the
         // RateLimitStore contract requires (#455).
         Effect.flatMap(Clock.currentTimeMillis, (now) =>
           Effect.sync(() => {
-            keys.add(key);
-            const entry = entries.get(key);
+            MutableHashSet.add(keys, key);
+            const entry = Option.getOrUndefined(MutableHashMap.get(entries, key));
             const next: RateLimitEntry =
               entry === undefined || now >= entry.resetAt
                 ? { key, count: 1, resetAt: now + ttl * 1000 }
                 : { ...entry, count: entry.count + 1 };
-            entries.set(key, next);
+            MutableHashMap.set(entries, key, next);
             return next.count;
           }),
         ),
-      delete: (key: string) => Effect.sync(() => void entries.delete(key)),
+      delete: (key: string) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
     };
     const limiter = RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
     const services = Layer.merge(makeFixture().services, limiter);
@@ -3244,7 +3272,7 @@ describe("client IP at the HTTP boundary", () => {
     expect(signIn.status).not.toBe(429);
     const signUp = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }, from));
     expect(signUp.status).toBe(429);
-    expect([...keys].filter((key) => key.includes("203.0.113.30"))).toHaveLength(1);
+    expect(Arr.fromIterable(keys).filter((key) => key.includes("203.0.113.30"))).toHaveLength(1);
   });
 
   it("sends Retry-After in whole seconds, rounded up, with a matching body field", async () => {
@@ -3287,7 +3315,7 @@ describe("client IP at the HTTP boundary", () => {
         message: expect.stringContaining("Client address unavailable"),
       });
     });
-    expect([...keys]).toEqual([]);
+    expect(Arr.fromIterable(keys)).toEqual([]);
 
     // An endpoint with no rule is not limited, so it needs no address.
     const session = await handler(getRequest(CURRENT_SESSION));
@@ -3305,11 +3333,11 @@ describe("client IP at the HTTP boundary", () => {
       authRequest("password", { email: "nobody@example.com", password: PW }),
     );
     expect(bare.status).toBe(429);
-    expect([...keys]).toEqual([]);
+    expect(Arr.fromIterable(keys)).toEqual([]);
 
     // A valid address is still keyed on its own: the refusals used no bucket.
     expect((await attempt(handler, "203.0.113.1", "6.6.6.6")).status).not.toBe(429);
-    expect(keys.size).toBeGreaterThan(0);
+    expect(MutableHashSet.size(keys)).toBeGreaterThan(0);
     Arr.forEach(keys, (key) => {
       expect(key.endsWith("203.0.113.1")).toBe(true);
     });

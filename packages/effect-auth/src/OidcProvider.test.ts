@@ -6,7 +6,11 @@ import {
   Effect,
   FileSystem,
   Layer,
+  MutableHashMap,
+  MutableHashSet,
+  Option,
   Path,
+  Record as Rec,
   Redacted,
   Schema,
 } from "effect";
@@ -69,35 +73,40 @@ const ISSUER = "http://idp.test/api/auth";
 // -----------------------------------------------------------------------------
 
 const makeOidcStores = () => {
-  const clients = new Map<string, OidcClient>();
-  const codes = new Map<string, OidcAuthorizationCode>();
-  const tokens = new Map<string, OidcToken>();
-  const consents = new Map<string, OidcConsent>();
+  const clients = MutableHashMap.empty<string, OidcClient>();
+  const codes = MutableHashMap.empty<string, OidcAuthorizationCode>();
+  const tokens = MutableHashMap.empty<string, OidcToken>();
+  const consents = MutableHashMap.empty<string, OidcConsent>();
   const jwtKeys: JwtKeyPair[] = [];
 
   const clientStore: typeof OidcClientStore.Service = {
-    create: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
-    getByClientId: (id) => Effect.succeed(clients.get(id) ?? null),
-    update: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
-    delete: (id) => Effect.sync(() => void clients.delete(id)),
-    list: () => Effect.succeed([...clients.values()]),
+    create: (c) => Effect.sync(() => (MutableHashMap.set(clients, c.clientId, c), c)),
+    getByClientId: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(clients, id))),
+    update: (c) => Effect.sync(() => (MutableHashMap.set(clients, c.clientId, c), c)),
+    delete: (id) => Effect.sync(() => void MutableHashMap.remove(clients, id)),
+    list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(clients))),
   };
   const codeStore: typeof OidcCodeStore.Service = {
-    create: (c) => Effect.sync(() => (codes.set(c.codeHash, c), c)),
-    get: (hash) => Effect.succeed(codes.get(hash) ?? null),
-    delete: (hash) => Effect.sync(() => void codes.delete(hash)),
+    create: (c) => Effect.sync(() => (MutableHashMap.set(codes, c.codeHash, c), c)),
+    get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
+    delete: (hash) => Effect.sync(() => void MutableHashMap.remove(codes, hash)),
   };
   const tokenStore: typeof OidcTokenStore.Service = {
-    create: (t) => Effect.sync(() => (tokens.set(t.tokenHash, t), t)),
-    get: (hash) => Effect.succeed(tokens.get(hash) ?? null),
-    delete: (hash) => Effect.sync(() => void tokens.delete(hash)),
+    create: (t) => Effect.sync(() => (MutableHashMap.set(tokens, t.tokenHash, t), t)),
+    get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
+    delete: (hash) => Effect.sync(() => void MutableHashMap.remove(tokens, hash)),
     listByFamily: (familyId) =>
-      Effect.succeed([...tokens.values()].filter((t) => t.familyId === familyId)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(tokens)).filter((t) => t.familyId === familyId),
+      ),
   };
   const consentStore: typeof OidcConsentStore.Service = {
-    get: (userId, clientId) => Effect.succeed(consents.get(`${userId}:${clientId}`) ?? null),
-    upsert: (c) => Effect.sync(() => (consents.set(`${c.userId}:${c.clientId}`, c), c)),
-    delete: (userId, clientId) => Effect.sync(() => void consents.delete(`${userId}:${clientId}`)),
+    get: (userId, clientId) =>
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(consents, `${userId}:${clientId}`))),
+    upsert: (c) =>
+      Effect.sync(() => (MutableHashMap.set(consents, `${c.userId}:${c.clientId}`, c), c)),
+    delete: (userId, clientId) =>
+      Effect.sync(() => void MutableHashMap.remove(consents, `${userId}:${clientId}`)),
   };
   const jwtKeyStore: typeof JwtKeyStore.Service = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
@@ -476,7 +485,9 @@ describe("OidcProviderService", () => {
       expect(updated.disabled).toBe(true);
       expect(updated.metadata).toEqual({ team: "core" });
       expect(updated.clientSecretHash).toBe(before.clientSecretHash);
-      expect(stores.clients.get(before.clientId)).toEqual(updated);
+      expect(Option.getOrUndefined(MutableHashMap.get(stores.clients, before.clientId))).toEqual(
+        updated,
+      );
     });
 
     it("leaves the client unchanged, bar updatedAt, when no field is supplied", async () => {
@@ -817,7 +828,7 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(promote.error).toBe("invalid_client_metadata");
 
     await Effect.runPromise(service.deleteDynamicClient(clientId, rat));
-    expect(stores.clients.has(clientId)).toBe(false);
+    expect(MutableHashMap.has(stores.clients, clientId)).toBe(false);
   });
 
   it("holds a dynamic client to the scopes and grants it registered for", async () => {
@@ -917,17 +928,17 @@ const makeHttpFixture = (
     readonly connectAsynchronously?: boolean;
   } = {},
 ) => {
-  const usersById = new Map<string, Types.User>();
-  const identifiers = new Map<string, Identifier>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifiers = MutableHashMap.empty<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifiers);
-  const sessions = new Map<string, Types.Session>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
   const oidc = makeOidcStores();
   let userSeq = 0;
 
   const seedUser = (email: string, attributes: Types.User["attributes"] = {}): string => {
     const id = `u${++userSeq}`;
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    usersById.set(id, {
+    MutableHashMap.set(usersById, id, {
       id,
       name: `User ${id}`,
       createdAt: now,
@@ -942,7 +953,7 @@ const makeHttpFixture = (
       verifiedAt: now,
       now,
     });
-    identifiers.set(identifier.id, identifier);
+    MutableHashMap.set(identifiers, identifier.id, identifier);
     return id;
   };
   const makeSession = (userId: string): string => {
@@ -951,7 +962,7 @@ const makeHttpFixture = (
     );
     const tokenHash = hashToken(rawToken);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    sessions.set(tokenHash, {
+    MutableHashMap.set(sessions, tokenHash, {
       id: tokenHash,
       userId,
       expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
@@ -963,26 +974,29 @@ const makeHttpFixture = (
   };
 
   const userStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
   };
   const userServiceStore = {
     get: userStore.get,
-    update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
+    update: (user: Types.User) =>
+      Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
     delete: () => Effect.void,
   };
   const sessionStore: typeof SessionStore.Service = {
-    create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
-    update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
+    create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        sessions.forEach((s, id) => {
-          if (s.userId === userId) sessions.delete(id);
+        MutableHashMap.forEach(sessions, (s, id) => {
+          if (s.userId === userId) MutableHashMap.remove(sessions, id);
         });
       }),
     listByUserId: (userId: string) =>
-      Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+      ),
   };
 
   const coreStoreLayer = Layer.mergeAll(
@@ -1051,35 +1065,35 @@ const makeHttpFixture = (
   const oidcLayer = Layer.mergeAll(oidcDeps, oidcServiceLayer);
 
   // Every key the per-IP limiter touches, so a test can see its bucket (if any).
-  const rateLimitKeys = new Set<string>();
-  const rateLimitEntries = new Map<string, RateLimitEntry>();
+  const rateLimitKeys = MutableHashSet.empty<string>();
+  const rateLimitEntries = MutableHashMap.empty<string, RateLimitEntry>();
   const rateLimitStore = {
     get: (key: string) =>
       Effect.sync(() => {
-        rateLimitKeys.add(key);
-        return rateLimitEntries.get(key) ?? null;
+        MutableHashSet.add(rateLimitKeys, key);
+        return Option.getOrNull(MutableHashMap.get(rateLimitEntries, key));
       }),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
       Effect.sync(() => {
-        rateLimitKeys.add(key);
-        rateLimitEntries.set(key, entry);
+        MutableHashSet.add(rateLimitKeys, key);
+        MutableHashMap.set(rateLimitEntries, key, entry);
       }),
     increment: (key: string, ttl: number) =>
       // Starts a new window when there is none or it has expired, as the
       // RateLimitStore contract requires (#455).
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
-          rateLimitKeys.add(key);
-          const entry = rateLimitEntries.get(key);
+          MutableHashSet.add(rateLimitKeys, key);
+          const entry = Option.getOrUndefined(MutableHashMap.get(rateLimitEntries, key));
           const next: RateLimitEntry =
             entry === undefined || now >= entry.resetAt
               ? { key, count: 1, resetAt: now + ttl * 1000 }
               : { ...entry, count: entry.count + 1 };
-          rateLimitEntries.set(key, next);
+          MutableHashMap.set(rateLimitEntries, key, next);
           return next.count;
         }),
       ),
-    delete: (key: string) => Effect.sync(() => void rateLimitEntries.delete(key)),
+    delete: (key: string) => Effect.sync(() => void MutableHashMap.remove(rateLimitEntries, key)),
   };
   const limiterLayer = RateLimiter.layer().pipe(
     Layer.provide(Layer.succeed(RateLimitStore, rateLimitStore)),
@@ -1201,7 +1215,7 @@ const get = (
   options: { sessionId?: string; bearer?: string } = {},
 ): Request => {
   const url = new URL(`http://idp.test${path}`);
-  Arr.forEach(Object.entries(query), ([k, v]) => {
+  Arr.forEach(Rec.toEntries(query), ([k, v]) => {
     url.searchParams.set(k, v);
   });
   return new Request(url, {
@@ -1778,9 +1792,9 @@ describe("HTTP OIDC provider endpoints", () => {
 
     // Expire the token by mutating absoluteExpiresAt to the past.
     const hash = hashOidcSecret(rt);
-    const stored = fx.oidcTokenStore.get(hash);
+    const stored = Option.getOrUndefined(MutableHashMap.get(fx.oidcTokenStore, hash));
     assert(stored !== undefined, "the refresh token is stored");
-    fx.oidcTokenStore.set(hash, {
+    MutableHashMap.set(fx.oidcTokenStore, hash, {
       ...stored,
       absoluteExpiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000,
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000,
@@ -2388,7 +2402,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     const res = await fx.handler(register({ "cf-connecting-ip": "203.0.113.9" }));
 
     expect(res.status).toBe(201);
-    expect(fx.rateLimitKeys.has("oidc-register:203.0.113.9")).toBe(true);
+    expect(MutableHashSet.has(fx.rateLimitKeys, "oidc-register:203.0.113.9")).toBe(true);
     expect([...fx.rateLimitKeys].some((key) => key.includes("unknown"))).toBe(false);
   });
 

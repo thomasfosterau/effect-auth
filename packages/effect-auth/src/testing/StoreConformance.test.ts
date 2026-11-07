@@ -4,7 +4,15 @@
  * the same suites over SQLite and PostgreSQL (`packages/effect-auth/src/sql/Stores.test.ts`).
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Result } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  MutableHashMap,
+  MutableHashSet,
+  Option,
+  Result,
+} from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as ApiKey from "../ApiKey.ts";
 import * as Errors from "../Errors.ts";
@@ -16,42 +24,54 @@ import { UserStore } from "../UserStore.ts";
 import * as Testing from "./index.ts";
 
 const sessionStore = (): typeof SessionStore.Service => {
-  const sessions = new Map<string, Types.Session>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
   return {
-    create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-    get: (id) => Effect.sync(() => sessions.get(id) ?? null),
-    update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-    delete: (id) => Effect.sync(() => void sessions.delete(id)),
+    create: (session) =>
+      Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    update: (session) =>
+      Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    delete: (id) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        sessions.forEach((session, id) => {
-          if (session.userId === userId) sessions.delete(id);
+        MutableHashMap.forEach(sessions, (session, id) => {
+          if (session.userId === userId) MutableHashMap.remove(sessions, id);
         });
       }),
     listByUserId: (userId) =>
-      Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(sessions)).filter(
+          (session) => session.userId === userId,
+        ),
+      ),
   };
 };
 
 const apiKeyStore = (): typeof ApiKey.ApiKeyStore.Service => {
-  const keys = new Map<string, ApiKey.ApiKey>();
+  const keys = MutableHashMap.empty<string, ApiKey.ApiKey>();
   return {
-    create: (key) => Effect.sync(() => (keys.set(key.id, key), key)),
-    get: (id) => Effect.sync(() => keys.get(id) ?? null),
+    create: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
+    get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(keys, id))),
     getByHash: (hash) =>
-      Effect.sync(() => [...keys.values()].find((key) => key.keyHash === hash) ?? null),
-    update: (key) => Effect.sync(() => (keys.set(key.id, key), key)),
-    delete: (id) => Effect.sync(() => void keys.delete(id)),
+      Effect.sync(
+        () =>
+          Arr.fromIterable(MutableHashMap.values(keys)).find((key) => key.keyHash === hash) ?? null,
+      ),
+    update: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
+    delete: (id) => Effect.sync(() => void MutableHashMap.remove(keys, id)),
     listByUserId: (userId) =>
-      Effect.sync(() => [...keys.values()].filter((key) => key.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(keys)).filter((key) => key.userId === userId),
+      ),
   };
 };
 
-const users = new Map<string, Types.User>();
+const users = MutableHashMap.empty<string, Types.User>();
 const userStore: typeof UserStore.Service = {
-  get: (id) => Effect.sync(() => users.get(id) ?? null),
+  get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
 };
-const seedUser = (user: Types.User) => Effect.sync(() => void users.set(user.id, user));
+const seedUser = (user: Types.User) =>
+  Effect.sync(() => void MutableHashMap.set(users, user.id, user));
 
 const register = <E, R>(
   suite: Testing.ConformanceSuite<E, R>,
@@ -135,12 +155,12 @@ describe("a broken store fails its suite", () => {
   it("a SessionStore whose deleteByUserId deletes everyone's sessions fails", async () => {
     const failed = await failures(Testing.sessionStoreConformance(), () => {
       const inner = sessionStore();
-      const ids = new Set<string>();
+      const ids = MutableHashSet.empty<string>();
       return Layer.succeed(SessionStore, {
         ...inner,
-        create: (session) => (ids.add(session.id), inner.create(session)),
+        create: (session) => (MutableHashSet.add(ids, session.id), inner.create(session)),
         deleteByUserId: () =>
-          Effect.forEach([...ids], (id) => inner.delete(id), {
+          Effect.forEach(Arr.fromIterable(ids), (id) => inner.delete(id), {
             concurrency: 1,
             discard: true,
           }),

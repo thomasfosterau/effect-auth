@@ -7,7 +7,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { Array as Arr, DateTime, Effect, Layer, Schema } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, Record as Rec, Schema } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -47,7 +47,7 @@ let db: PgliteDatabase;
 beforeAll(async () => {
   client = await migratedPglite();
   await client.exec(
-    `DROP TABLE ${Object.values(defaultTables)
+    `DROP TABLE ${Rec.values(defaultTables)
       .map((table) => getTableName(table))
       .join(", ")}`,
   );
@@ -65,7 +65,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await truncate(
     client,
-    Object.values(customTables).map((table) => getTableName(table)),
+    Rec.values(customTables).map((table) => getTableName(table)),
   );
 });
 

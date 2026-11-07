@@ -10,6 +10,7 @@ import {
   Path,
   Predicate,
   Schema,
+  Struct,
   Types,
 } from "effect";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -309,7 +310,7 @@ describe("makeAuthorizationMiddleware – attaching to an endpoint", () => {
 
     expect(fixed.middlewares.has(RequireDocRead)).toBe(true);
     expect(perRequest.middlewares.has(RequireDocReadByParam)).toBe(true);
-    expect(Object.keys(group.endpoints)).toEqual(["getDoc"]);
+    expect(Struct.keys(group.endpoints)).toEqual(["getDoc"]);
   });
 });
 

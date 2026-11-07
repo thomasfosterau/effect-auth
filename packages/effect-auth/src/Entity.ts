@@ -18,7 +18,15 @@
  *
  * @module entity
  */
-import { Array as Arr, MutableHashSet, Option, Predicate, Record as Rec, Schema } from "effect";
+import {
+  Array as Arr,
+  HashMap,
+  MutableHashSet,
+  Option,
+  Predicate,
+  Record as Rec,
+  Schema,
+} from "effect";
 
 // ---------------------------------------------------------------------------
 // Entity references
@@ -190,12 +198,12 @@ export const entity = (
  * that is what "slicing" means.
  */
 export interface EntitySlice {
-  readonly entities: ReadonlyMap<string, Entity>;
+  readonly entities: HashMap.HashMap<string, Entity>;
 }
 
 /** Build an {@link EntitySlice} from a list of entities (later wins on duplicate refs). */
 export const slice = (entities: ReadonlyArray<Entity> = []): EntitySlice => ({
-  entities: new Map(entities.map((e) => [refKey(e.ref), e])),
+  entities: HashMap.fromIterable(Arr.map(entities, (e) => [refKey(e.ref), e] as const)),
 });
 
 /** An empty slice (every entity unknown: no attributes, no parents). */
@@ -203,7 +211,7 @@ export const emptySlice: EntitySlice = slice();
 
 /** Look up an entity in the slice, or `null` when it is not present. */
 export const getEntity = (s: EntitySlice, r: EntityRef): Entity | null =>
-  s.entities.get(refKey(r)) ?? null;
+  Option.getOrNull(HashMap.get(s.entities, refKey(r)));
 
 /** Read an entity's attribute from the slice (`null` when absent). */
 export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): AttributeValue | null => {
@@ -229,7 +237,7 @@ export const entityIn = (s: EntitySlice, child: EntityRef, ancestor: EntityRef):
       const key = refKey(current);
       if (MutableHashSet.has(visited, key)) return [false, queue];
       MutableHashSet.add(visited, key);
-      const found = s.entities.get(key);
+      const found = Option.getOrUndefined(HashMap.get(s.entities, key));
       if (found === undefined) return [false, queue];
       if (found.parents.some((parent) => refEquals(parent, ancestor))) return [true, []];
       queue.push(...found.parents);

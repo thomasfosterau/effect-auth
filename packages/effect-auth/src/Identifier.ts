@@ -12,7 +12,7 @@
  * every flow that resolves "who owns this email/username/phone" goes through
  * the {@link IdentifierStore}.
  */
-import { Array as Arr, Context, Data, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Context, Data, Effect, MutableHashMap, Option, Order, Schema } from "effect";
 import * as Errors from "./Errors.ts";
 import * as Types from "./Types.ts";
 
@@ -410,16 +410,16 @@ export const replaceIdentifier = (
  * (synchronous, single-threaded): `create` fails with `AuthError` when the
  * pair is already claimed, mirroring a SQL unique-index violation.
  *
- * Pass your own `Map` (keyed by identifier `id`) to inspect or pre-seed
+ * Pass your own `MutableHashMap` (keyed by identifier `id`) to inspect or pre-seed
  * state in tests.
  */
 export const memoryIdentifierStore = (
-  records: Map<string, Identifier> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, Identifier> = MutableHashMap.empty(),
 ): typeof IdentifierStore.Service => {
   const byValue = (type: IdentifierType, value: string): Identifier | null =>
     Option.getOrNull(
       Arr.findFirst(
-        records.values(),
+        MutableHashMap.values(records),
         (identifier) => identifier.type === type && identifier.value === value,
       ),
     );
@@ -428,7 +428,7 @@ export const memoryIdentifierStore = (
     listByUser: (userId) =>
       Effect.sync(() =>
         Arr.sort(
-          Arr.filter(records.values(), (identifier) => identifier.userId === userId),
+          Arr.filter(MutableHashMap.values(records), (identifier) => identifier.userId === userId),
           byCreatedAt,
         ),
       ),
@@ -441,7 +441,7 @@ export const memoryIdentifierStore = (
             }),
           );
         }
-        records.set(identifier.id, identifier);
+        MutableHashMap.set(records, identifier.id, identifier);
         return Effect.succeed(identifier);
       }),
     // Synchronous, so the claim and the release are one indivisible step.
@@ -449,7 +449,7 @@ export const memoryIdentifierStore = (
       Effect.suspend(() => {
         const invalid = replaceInputError(from, to);
         if (invalid !== null) return Effect.fail(invalid);
-        const held = records.get(from.id);
+        const held = Option.getOrUndefined(MutableHashMap.get(records, from.id));
         if (
           held === undefined ||
           held.userId !== from.userId ||
@@ -465,23 +465,23 @@ export const memoryIdentifierStore = (
             }),
           );
         }
-        records.delete(from.id);
-        records.set(to.id, to);
+        MutableHashMap.remove(records, from.id);
+        MutableHashMap.set(records, to.id, to);
         return Effect.succeed(to);
       }),
     setVerified: (id, verifiedAt) =>
       Effect.sync(() => {
-        const existing = records.get(id);
+        const existing = Option.getOrUndefined(MutableHashMap.get(records, id));
         if (existing === undefined) return null;
         const updated: Identifier = { ...existing, verified: true, verifiedAt };
-        records.set(id, updated);
+        MutableHashMap.set(records, id, updated);
         return updated;
       }),
-    delete: (id) => Effect.sync(() => void records.delete(id)),
+    delete: (id) => Effect.sync(() => void MutableHashMap.remove(records, id)),
     deleteByUser: (userId) =>
       Effect.sync(() => {
-        Arr.forEach(Arr.fromIterable(records.entries()), ([id, identifier]) => {
-          if (identifier.userId === userId) records.delete(id);
+        Arr.forEach(Arr.fromIterable(records), ([id, identifier]) => {
+          if (identifier.userId === userId) MutableHashMap.remove(records, id);
         });
       }),
   };

@@ -1,5 +1,13 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, ConfigProvider, Effect, Layer, Redacted } from "effect";
+import {
+  Array as Arr,
+  ConfigProvider,
+  Effect,
+  Layer,
+  Record as Rec,
+  Redacted,
+  Struct,
+} from "effect";
 import { JwtKeyStore, JwtService, jwtServiceConfig } from "./Jwt.ts";
 import { TrustedDeviceService, TrustedDeviceStore, trustedDeviceConfig } from "./TrustedDevice.ts";
 import { multiFactorConfig } from "./multifactor/MultiFactor.ts";
@@ -41,12 +49,12 @@ const withEnv = (env: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromEnv({ env }));
 
 describe("Effect floor compatibility", () => {
-  Arr.forEach(Object.entries(entryPoints), ([name, load]) => {
+  Arr.forEach(Rec.toEntries(entryPoints), ([name, load]) => {
     it(
       `imports the ${name} entry point`,
       async () => {
         const mod = await load();
-        expect(Object.keys(mod).length).toBeGreaterThan(0);
+        expect(Struct.keys(mod).length).toBeGreaterThan(0);
       },
       IMPORT_TIMEOUT,
     );

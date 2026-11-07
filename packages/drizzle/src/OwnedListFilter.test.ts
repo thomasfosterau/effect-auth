@@ -20,7 +20,16 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { Array as Arr, Context, Effect, Match, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Match,
+  MutableHashSet,
+  Option,
+  Order,
+  Schema,
+} from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
@@ -166,7 +175,7 @@ describe("ownedListFilter agrees with canView, row for row", () => {
     Arr.forEach(VIEWERS, (viewer) => {
       it(`posts (with drafts): ${describeViewer(viewer)}, follower seam ${seam}`, async () => {
         const all = await db.select().from(posts);
-        const expected = new Set<string>();
+        const expected = MutableHashSet.empty<string>();
         await Arr.reduce(all, Promise.resolve(), async (previous, row) => {
           await previous;
           const visible = await Effect.runPromise(
@@ -180,7 +189,7 @@ describe("ownedListFilter agrees with canView, row for row", () => {
               seam,
             ),
           );
-          if (visible) expected.add(row.id);
+          if (visible) MutableHashSet.add(expected, row.id);
         });
         const scope = await Effect.runPromise(withSeam(owned.readScope, viewer, seam));
         const listed = await db
@@ -193,12 +202,17 @@ describe("ownedListFilter agrees with canView, row for row", () => {
               draft: posts.draft,
             })(scope),
           );
-        expect(new Set(listed.map((row) => row.id))).toEqual(expected);
+        expect(
+          Arr.sort(
+            listed.map((row) => row.id),
+            Order.String,
+          ),
+        ).toEqual(Arr.sort(expected, Order.String));
       });
 
       it(`gardens (no draft axis): ${describeViewer(viewer)}, follower seam ${seam}`, async () => {
         const all = await db.select().from(gardens);
-        const expected = new Set<string>();
+        const expected = MutableHashSet.empty<string>();
         await Arr.reduce(all, Promise.resolve(), async (previous, row) => {
           await previous;
           const visible = await Effect.runPromise(
@@ -211,7 +225,7 @@ describe("ownedListFilter agrees with canView, row for row", () => {
               seam,
             ),
           );
-          if (visible) expected.add(row.id);
+          if (visible) MutableHashSet.add(expected, row.id);
         });
         const scope = await Effect.runPromise(withSeam(owned.readScope, viewer, seam));
         const listed = await db
@@ -220,7 +234,12 @@ describe("ownedListFilter agrees with canView, row for row", () => {
           .where(
             ownedListFilter({ owner: gardens.ownerId, visibility: gardens.visibility })(scope),
           );
-        expect(new Set(listed.map((row) => row.id))).toEqual(expected);
+        expect(
+          Arr.sort(
+            listed.map((row) => row.id),
+            Order.String,
+          ),
+        ).toEqual(Arr.sort(expected, Order.String));
       });
     });
   });
@@ -238,21 +257,23 @@ describe("ownedListFilter agrees with canView, row for row", () => {
             draft: posts.draft,
           })(scope),
         );
-      return new Set(rows.map((row) => row.id));
+      return MutableHashSet.fromIterable(rows.map((row) => row.id));
     };
     // Anonymous: the three published public rows.
-    expect(await listFor(null)).toEqual(
-      new Set(["alice:public:published", "bob:public:published", "carol:public:published"]),
-    );
+    expect(Arr.sort(await listFor(null), Order.String)).toEqual([
+      "alice:public:published",
+      "bob:public:published",
+      "carol:public:published",
+    ]);
     // bob follows alice: public rows, his own six, and alice's published followers row.
     const bob = await listFor({ id: "bob", role: "user" });
-    expect(bob.has("alice:followers:published")).toBe(true);
-    expect(bob.has("alice:followers:draft")).toBe(false);
-    expect(bob.has("alice:private:published")).toBe(false);
-    expect(bob.has("carol:followers:published")).toBe(false);
+    expect(MutableHashSet.has(bob, "alice:followers:published")).toBe(true);
+    expect(MutableHashSet.has(bob, "alice:followers:draft")).toBe(false);
+    expect(MutableHashSet.has(bob, "alice:private:published")).toBe(false);
+    expect(MutableHashSet.has(bob, "carol:followers:published")).toBe(false);
     expect([...bob].filter((id) => id.startsWith("bob:"))).toHaveLength(6);
     // A moderator sees the whole corpus.
-    expect(await listFor({ id: "mod", role: "moderator" })).toHaveLength(18);
+    expect(MutableHashSet.size(await listFor({ id: "mod", role: "moderator" }))).toBe(18);
   });
 });
 

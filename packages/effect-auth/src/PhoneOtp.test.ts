@@ -6,6 +6,8 @@ import {
   Duration,
   Effect,
   Layer,
+  MutableHashMap,
+  Option,
   Predicate,
   Result,
 } from "effect";
@@ -53,10 +55,10 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
 };
 
 // --- in-memory state ---------------------------------------------------------
-const users = new Map<string, Types.User>();
-const identifierRecords = new Map<string, Identifier>();
-const records = new Map<string, PhoneOtpRecord>();
-const sessions = new Map<string, Types.Session>();
+const users = MutableHashMap.empty<string, Types.User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const records = MutableHashMap.empty<string, PhoneOtpRecord>();
+const sessions = MutableHashMap.empty<string, Types.Session>();
 let seq = 0;
 
 const identifiers = memoryIdentifierStore(identifierRecords);
@@ -72,26 +74,26 @@ const phoneOtpStore: typeof PhoneOtpStore.Service = {
   upsert: (record) =>
     Effect.sync(() => {
       storeOps.push("upsert");
-      records.set(key(record.phoneNumber, record.purpose), record);
+      MutableHashMap.set(records, key(record.phoneNumber, record.purpose), record);
       return record;
     }),
   get: (phone, purpose) =>
     Effect.sync(() => {
       storeOps.push("get");
-      return records.get(key(phone, purpose)) ?? null;
+      return Option.getOrNull(MutableHashMap.get(records, key(phone, purpose)));
     }),
   delete: (phone, purpose) =>
     Effect.sync(() => {
       storeOps.push("delete");
-      records.delete(key(phone, purpose));
+      MutableHashMap.remove(records, key(phone, purpose));
     }),
   incrementAttempts: (phone, purpose) =>
     Effect.sync(() => {
       storeOps.push("incrementAttempts");
-      const record = records.get(key(phone, purpose));
+      const record = Option.getOrUndefined(MutableHashMap.get(records, key(phone, purpose)));
       if (!record) return 0;
       const updated = { ...record, attempts: record.attempts + 1 };
-      records.set(key(phone, purpose), updated);
+      MutableHashMap.set(records, key(phone, purpose), updated);
       return updated.attempts;
     }),
 };
@@ -111,7 +113,7 @@ const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
         updatedAt: now,
         attributes: {},
       };
-      users.set(user.id, user);
+      MutableHashMap.set(users, user.id, user);
       return { user, created: true };
     }),
 };
@@ -126,7 +128,7 @@ const seedPhoneUser = (phoneNumber: string, verified: boolean): Types.User => {
     updatedAt: now,
     attributes: {},
   };
-  users.set(user.id, user);
+  MutableHashMap.set(users, user.id, user);
   const identifier = makeIdentifier({
     userId: user.id,
     type: "phone",
@@ -135,35 +137,37 @@ const seedPhoneUser = (phoneNumber: string, verified: boolean): Types.User => {
     ...(verified ? { verifiedAt: now } : {}),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
   return user;
 };
 
 const sessionStore: typeof SessionStore.Service = {
   create: (session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
   update: (session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+  delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      sessions.forEach((s, id) => {
-        if (s.userId === userId) sessions.delete(id);
+      MutableHashMap.forEach(sessions, (s, id) => {
+        if (s.userId === userId) MutableHashMap.remove(sessions, id);
       });
     }),
   listByUserId: (userId) =>
-    Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+    Effect.sync(() =>
+      Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+    ),
 };
 
 const userStore: typeof UserStore.Service = {
-  get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const sessionConfig: Types.SessionConfig = {
@@ -202,10 +206,10 @@ const phoneNumberOf = (userId: string) => Effect.runPromise(getPhoneNumber(ident
 
 describe("PhoneOtpService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    records.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(records);
+    MutableHashMap.clear(sessions);
     sentOtps.length = 0;
     storeOps.length = 0;
     seq = 0;
@@ -227,7 +231,7 @@ describe("PhoneOtpService", () => {
     expect(sentOtps).toHaveLength(1);
     const otp = recorded(sentOtps).otp;
     expect(otp).toMatch(/^\d{6}$/);
-    const record = records.get("+15551230000:sign-in");
+    const record = Option.getOrUndefined(MutableHashMap.get(records, "+15551230000:sign-in"));
     expect(record?.otpHash).toBe(hashToken(otp));
     expect(record?.attempts).toBe(0);
   });
@@ -259,7 +263,7 @@ describe("PhoneOtpService", () => {
     const testContext = await makeTestContext();
     // Seed an existing phone user.
     seedPhoneUser("+15551232222", true);
-    const before = users.size;
+    const before = MutableHashMap.size(users);
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -269,7 +273,7 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
-    expect(users.size).toBe(before);
+    expect(MutableHashMap.size(users)).toBe(before);
     expect(await phoneNumberOf(result.user.id)).toBe("+15551232222");
   });
 
@@ -289,7 +293,7 @@ describe("PhoneOtpService", () => {
 
   it("rejects expired OTPs and deletes the record", async () => {
     const testContext = await makeTestContext();
-    records.set("+15551234444:sign-in", {
+    MutableHashMap.set(records, "+15551234444:sign-in", {
       phoneNumber: "+15551234444",
       otpHash: hashToken("123456"),
       purpose: "sign-in",
@@ -304,7 +308,7 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(result._tag).toBe("Failure");
-    expect(records.has("+15551234444:sign-in")).toBe(false);
+    expect(MutableHashMap.has(records, "+15551234444:sign-in")).toBe(false);
   });
 
   it("enforces the attempt limit then invalidates the code", async () => {
@@ -336,8 +340,10 @@ describe("PhoneOtpService", () => {
     );
     expect(sentOtps).toHaveLength(0);
     // An undelivered marker record stands in for the code (#417).
-    expect(records.get("+15551236666:sign-in")?.attempts).toBe(0);
-    expect(users.size).toBe(0);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(records, "+15551236666:sign-in"))?.attempts,
+    ).toBe(0);
+    expect(MutableHashMap.size(users)).toBe(0);
   });
 
   it("verifies an existing user's phone number", async () => {
@@ -393,14 +399,14 @@ describe("PhoneOtpService", () => {
     expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     // The original OTP is preserved — no replacement was issued.
     expect(sentOtps).toHaveLength(1);
-    expect(records.has("+15559990001:sign-in")).toBe(true);
+    expect(MutableHashMap.has(records, "+15559990001:sign-in")).toBe(true);
   });
 
   it("allows a resend after the cooldown window has elapsed", async () => {
     const testContext = await makeTestContext();
 
     // Seed a record whose createdAt is older than the 60 s cooldown.
-    records.set("+15559990002:sign-in", {
+    MutableHashMap.set(records, "+15559990002:sign-in", {
       phoneNumber: "+15559990002",
       otpHash: hashToken("000000"),
       purpose: "sign-in",
@@ -421,9 +427,11 @@ describe("PhoneOtpService", () => {
 
     // A fresh OTP was issued after the cooldown elapsed.
     expect(sentOtps).toHaveLength(1);
-    expect(records.has("+15559990002:sign-in")).toBe(true);
+    expect(MutableHashMap.has(records, "+15559990002:sign-in")).toBe(true);
     // The new record has a fresh hash, not the seeded one.
-    expect(records.get("+15559990002:sign-in")?.otpHash).toBe(hashToken(recorded(sentOtps).otp));
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(records, "+15559990002:sign-in"))?.otpHash,
+    ).toBe(hashToken(recorded(sentOtps).otp));
   });
 
   it("does not apply the cooldown when resendCooldown is not configured", async () => {
@@ -436,7 +444,7 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(sentOtps).toHaveLength(2);
-    expect(records.has("+15559990003:sign-in")).toBe(true);
+    expect(MutableHashMap.has(records, "+15559990003:sign-in")).toBe(true);
   });
 
   // #415: with sign-up disabled, an unknown number must hit the cooldown exactly
@@ -483,8 +491,8 @@ describe("PhoneOtpService", () => {
     // Only the account holder is sent a code; the unknown number holds an
     // undelivered record as its cooldown marker.
     expect(sentOtps.map((sent) => sent.phoneNumber)).toEqual(["+15559990010"]);
-    expect(records.has("+15559990011:sign-in")).toBe(true);
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.has(records, "+15559990011:sign-in")).toBe(true);
+    expect(MutableHashMap.size(users)).toBe(1);
   });
 
   // #415: an unknown number's cooldown marker must never be redeemable. With
@@ -506,7 +514,9 @@ describe("PhoneOtpService", () => {
         }).pipe(Effect.provideService(SecureRandom.SecureRandom, zeroCrypto));
         yield* service.send("+15559990020", "sign-in");
         yield* service.send("+15559990021", "sign-in");
-        const marker = records.get(key("+15559990021", "sign-in"));
+        const marker = Option.getOrUndefined(
+          MutableHashMap.get(records, key("+15559990021", "sign-in")),
+        );
         const error = yield* Effect.flip(service.signIn("+15559990021", guess));
         return { marker, error };
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
@@ -517,7 +527,7 @@ describe("PhoneOtpService", () => {
     expect(marker).toBeDefined();
     expect(marker?.otpHash).not.toBe(hashToken(guess));
     expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
     expect(createdWith).toEqual([]);
   });
 });
@@ -533,10 +543,10 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
   const invalid = { _tag: "Failure", error: "PhoneOtpError", message: "Invalid or expired OTP" };
 
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    records.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(records);
+    MutableHashMap.clear(sessions);
     sentOtps.length = 0;
     storeOps.length = 0;
     seq = 0;
@@ -550,7 +560,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
   });
 
   const recordOf = (phoneNumber: string) => (): RecordState | null => {
-    const record = records.get(key(phoneNumber, "sign-in"));
+    const record = Option.getOrUndefined(MutableHashMap.get(records, key(phoneNumber, "sign-in")));
     return record === undefined
       ? null
       : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
@@ -678,10 +688,10 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
           sendOtp: recordingSend,
         });
         yield* service.send(member, "sign-in");
-        const stored = records.get(key(member, "sign-in"));
+        const stored = Option.getOrUndefined(MutableHashMap.get(records, key(member, "sign-in")));
         assert(stored !== undefined, "send stored the OTP record");
 
-        records.set(key(member, "sign-in"), { ...stored, attempts: maxAttempts });
+        MutableHashMap.set(records, key(member, "sign-in"), { ...stored, attempts: maxAttempts });
         return {
           answer: observable(yield* Effect.result(service.signIn(member, recorded(sentOtps).otp))),
           record: recordOf(member)(),
@@ -697,7 +707,9 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
     const created = seedPhoneUser("+15559990200", false);
     const phone = "+15559990200";
     const recordState = (): RecordState | null => {
-      const record = records.get(key(phone, "phone-verification"));
+      const record = Option.getOrUndefined(
+        MutableHashMap.get(records, key(phone, "phone-verification")),
+      );
       return record === undefined
         ? null
         : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };

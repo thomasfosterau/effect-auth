@@ -1,4 +1,4 @@
-import { Array as Arr, Order } from "effect";
+import { Array as Arr, Order, Struct } from "effect";
 import { describe, it, expect, expectTypeOf } from "vite-plus/test";
 import * as Auth from "../index.ts";
 import * as PluginsCluster from "./index.ts";
@@ -17,7 +17,7 @@ describe("plugins barrel", () => {
   });
 
   it("exports exactly the named plugin constructors and the lockout store", () => {
-    expect(Arr.sort(Object.keys(PluginsCluster), Order.String)).toEqual([
+    expect(Arr.sort(Struct.keys(PluginsCluster), Order.String)).toEqual([
       "AccountLockoutPlugin",
       "AccountLockoutStore",
       "AuditPlugin",
@@ -28,8 +28,8 @@ describe("plugins barrel", () => {
       "RateLimitPlugin",
       "memoryAccountLockoutStore",
     ]);
-    expect(Arr.sort(Object.keys(Auth.Plugins), Order.String)).toEqual(
-      Arr.sort(Object.keys(PluginsCluster), Order.String),
+    expect(Arr.sort(Struct.keys(Auth.Plugins), Order.String)).toEqual(
+      Arr.sort(Struct.keys(PluginsCluster), Order.String),
     );
   });
 

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order, DateTime } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashSet, Order } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
@@ -86,7 +86,7 @@ describe("requestRefs", () => {
 
     // Deduplicated: doc1 appears both as request.resource and the eq scope ref.
     const keys = refs.map(Entity.refKey);
-    expect(new Set(keys).size).toBe(keys.length);
+    expect(MutableHashSet.size(MutableHashSet.fromIterable(keys))).toBe(keys.length);
     expect(refs).toHaveLength(5);
   });
 

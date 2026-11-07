@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { DateTime, Effect, Layer, Result } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option, Result } from "effect";
 import {
   DeviceAuthorizationService,
   DeviceAuthorizationStore,
@@ -15,32 +15,37 @@ import { SessionService } from "./SessionService.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
 
-const records = new Map<string, DeviceAuthorizationRecord>();
-const sessions = new Map<string, Types.Session>();
-const users = new Map<string, Types.User>();
+const records = MutableHashMap.empty<string, DeviceAuthorizationRecord>();
+const sessions = MutableHashMap.empty<string, Types.Session>();
+const users = MutableHashMap.empty<string, Types.User>();
 
 const store: typeof DeviceAuthorizationStore.Service = {
   create: (record) =>
     Effect.sync(() => {
       // record.deviceCode and record.userCode are already hashed by the service.
-      records.set(record.deviceCode, record);
+      MutableHashMap.set(records, record.deviceCode, record);
       return record;
     }),
-  getByDeviceCode: (deviceCode) => Effect.sync(() => records.get(deviceCode) ?? null),
+  getByDeviceCode: (deviceCode) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, deviceCode))),
   getByUserCode: (userCode) =>
-    Effect.sync(() => [...records.values()].find((r) => r.userCode === userCode) ?? null),
+    Effect.sync(
+      () =>
+        Arr.fromIterable(MutableHashMap.values(records)).find((r) => r.userCode === userCode) ??
+        null,
+    ),
   update: (record) =>
     Effect.sync(() => {
-      records.set(record.deviceCode, record);
+      MutableHashMap.set(records, record.deviceCode, record);
       return record;
     }),
-  delete: (deviceCode) => Effect.sync(() => void records.delete(deviceCode)),
+  delete: (deviceCode) => Effect.sync(() => void MutableHashMap.remove(records, deviceCode)),
   claimApproval: (deviceCode) =>
     Effect.sync(() => {
-      const record = records.get(deviceCode);
+      const record = Option.getOrUndefined(MutableHashMap.get(records, deviceCode));
       if (record === undefined || record.status !== "approved") return null;
       // Read and delete in one synchronous step — atomic on a single JS thread.
-      records.delete(deviceCode);
+      MutableHashMap.remove(records, deviceCode);
       return record;
     }),
 };
@@ -48,28 +53,30 @@ const store: typeof DeviceAuthorizationStore.Service = {
 const sessionStore: typeof SessionStore.Service = {
   create: (session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
   update: (session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+  delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      sessions.forEach((s, id) => {
-        if (s.userId === userId) sessions.delete(id);
+      MutableHashMap.forEach(sessions, (s, id) => {
+        if (s.userId === userId) MutableHashMap.remove(sessions, id);
       });
     }),
   listByUserId: (userId) =>
-    Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+    Effect.sync(() =>
+      Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+    ),
 };
 
 const userStore: typeof UserStore.Service = {
-  get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const sessionConfig: Types.SessionConfig = {
@@ -106,11 +113,11 @@ const run = <A, E>(
 
 describe("DeviceAuthorizationService", () => {
   beforeEach(() => {
-    records.clear();
-    sessions.clear();
-    users.clear();
+    MutableHashMap.clear(records);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(users);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    users.set("user-1", {
+    MutableHashMap.set(users, "user-1", {
       id: "user-1",
       createdAt: now,
       updatedAt: now,
@@ -125,7 +132,7 @@ describe("DeviceAuthorizationService", () => {
     expect(result.verificationUri).toBe("https://example.com/device");
     expect(result.interval).toBe(5);
     // The store is keyed by hash; the returned deviceCode is the raw value.
-    const record = records.get(hashToken(result.deviceCode));
+    const record = Option.getOrUndefined(MutableHashMap.get(records, hashToken(result.deviceCode)));
     expect(record?.status).toBe("pending");
   });
 
@@ -175,9 +182,9 @@ describe("DeviceAuthorizationService", () => {
   it("returns expired_token once the request has expired", async () => {
     const begun = await run((svc) => svc.begin());
     const deviceHash = hashToken(begun.deviceCode);
-    const record = records.get(deviceHash);
+    const record = Option.getOrUndefined(MutableHashMap.get(records, deviceHash));
     assert(record !== undefined, "begin stored the request");
-    records.set(deviceHash, {
+    MutableHashMap.set(records, deviceHash, {
       ...record,
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1,
     });
@@ -222,7 +229,7 @@ describe("DeviceAuthorizationService", () => {
     expect(successes).toHaveLength(1);
     expect(expired).toHaveLength(1);
     // Exactly one session was created — no duplicate mint.
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("slow_down does not reset the polling window and escalates the interval", async () => {
@@ -230,16 +237,16 @@ describe("DeviceAuthorizationService", () => {
     const hash = hashToken(begun.deviceCode);
 
     // Seed lastPolledAt to 1 second ago — within the 5 s interval.
-    const record = records.get(hash);
+    const record = Option.getOrUndefined(MutableHashMap.get(records, hash));
     assert(record !== undefined, "begin stored the request");
     const lastPolled = DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000;
-    records.set(hash, { ...record, lastPolledAt: lastPolled });
+    MutableHashMap.set(records, hash, { ...record, lastPolledAt: lastPolled });
 
     const err = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
     assert.instanceOf(err, DevicePollError);
     expect(err.error).toBe("slow_down");
 
-    const updated = records.get(hash);
+    const updated = Option.getOrUndefined(MutableHashMap.get(records, hash));
     assert(updated !== undefined, "the request is still stored");
 
     // lastPolledAt must NOT advance — the rejected poll must not reset the window.

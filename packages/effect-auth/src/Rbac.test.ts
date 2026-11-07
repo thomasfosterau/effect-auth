@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Order, Predicate } from "effect";
+import { Array as Arr, Effect, Order, Predicate, Record as Rec } from "effect";
 import * as Rbac from "./Rbac.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
@@ -176,12 +176,12 @@ describe("RBAC as policy-kernel sugar", () => {
     it("declares every non-wildcard resource type and action", () => {
       const declared = Rbac.model(config);
 
-      expect(Arr.sort(Object.keys(declared.entities), Order.String)).toEqual([
+      expect(Arr.sort(Rec.keys(declared.entities), Order.String)).toEqual([
         "Role",
         "User",
         "posts",
       ]);
-      expect(Arr.sort(Object.keys(declared.actions), Order.String)).toEqual(["read", "update"]);
+      expect(Arr.sort(Rec.keys(declared.actions), Order.String)).toEqual(["read", "update"]);
       expect(declared.actions["read"]).toEqual({
         appliesTo: { principal: ["User"], resource: ["posts"] },
       });

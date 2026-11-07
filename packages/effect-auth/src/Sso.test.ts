@@ -1,6 +1,16 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { DateTime, Effect, Layer, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Predicate,
+  Schema,
+  Struct,
+} from "effect";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -71,7 +81,7 @@ const withFetch = <A>(
   const original = globalThis.fetch;
   globalThis.fetch = (input) => {
     const url = Predicate.isString(input) ? input : input.toString();
-    const key = Object.keys(routes).find((k) => url.startsWith(k));
+    const key = Struct.keys(routes).find((k) => url.startsWith(k));
     const body = key ? routes[key] : { error: "no route" };
     return Promise.resolve(
       new Response(encodeJson(body), { headers: { "content-type": "application/json" } }),
@@ -85,30 +95,32 @@ const withFetch = <A>(
 const makeStores = (
   overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
 ) => {
-  const providers = new Map<string, SsoProvider>();
-  const users = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
+  const providers = MutableHashMap.empty<string, SsoProvider>();
+  const users = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
-  const states = new Map<string, OAuthState>();
+  const states = MutableHashMap.empty<string, OAuthState>();
   const members: Member[] = [];
-  const organizations = new Map<string, Organization>();
-  const domainRecords = new Map<string, OrganizationDomain>();
+  const organizations = MutableHashMap.empty<string, Organization>();
+  const domainRecords = MutableHashMap.empty<string, OrganizationDomain>();
   const domainStore = overrides.domainStore ?? memoryOrganizationDomainStore(domainRecords);
   let userSeq = 0;
   /** The `identifier` each `createUser` call was given. */
   const createdWith: Array<OAuthCreateUserInput["identifier"]> = [];
 
   const ssoStore: typeof SsoProviderStore.Service = {
-    create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
-    getById: (id) => Effect.succeed(providers.get(id) ?? null),
+    create: (p) => Effect.sync(() => (MutableHashMap.set(providers, p.id, p), p)),
+    getById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(providers, id))),
     getByDomain: (domain) =>
-      Effect.succeed([...providers.values()].find((p) => p.domain === domain) ?? null),
-    list: () => Effect.succeed([...providers.values()]),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ?? null,
+      ),
+    list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
   };
 
   const userStore = {
     getUser: (userId: string) => {
-      const u = users.get(userId);
+      const u = Option.getOrUndefined(MutableHashMap.get(users, userId));
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
     createUser: (input: OAuthCreateUserInput) =>
@@ -123,22 +135,22 @@ const makeStores = (
           updatedAt: now,
           attributes: {},
         };
-        users.set(user.id, user);
+        MutableHashMap.set(users, user.id, user);
         return { user, created: true };
       }),
   };
 
   const coreUserStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
   };
 
   const stateStore = {
-    create: (s: OAuthState) => Effect.sync(() => (states.set(s.state, s), s)),
-    get: (state: string) => Effect.succeed(states.get(state) ?? null),
-    delete: (state: string) => Effect.sync(() => void states.delete(state)),
+    create: (s: OAuthState) => Effect.sync(() => (MutableHashMap.set(states, s.state, s), s)),
+    get: (state: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, state))),
+    delete: (state: string) => Effect.sync(() => void MutableHashMap.remove(states, state)),
   };
 
-  const passwordHashes = new Map<string, string>();
+  const passwordHashes = MutableHashMap.empty<string, string>();
   const sessionsCleared: Array<string> = [];
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
@@ -169,7 +181,7 @@ const makeStores = (
       ),
     // Read for the organization's `defaultRole`, and by JIT provisioning:
     getOrganizationById: (organizationId: string) =>
-      Effect.succeed(organizations.get(organizationId) ?? null),
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
     countMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     // Unused by SSO:
@@ -209,7 +221,7 @@ const makeStores = (
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(EmailPasswordStore)(
-      memoryEmailPasswordStore({ users: new Map(), passwordHashes }),
+      memoryEmailPasswordStore({ users: MutableHashMap.empty(), passwordHashes }),
     ),
     Layer.succeed(OrganizationStore)(orgStore),
     Layer.succeed(OrganizationDomainStore)(domainStore),
@@ -242,7 +254,7 @@ const makeStores = (
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       ...overrides,
     };
-    organizations.set(organization.id, organization);
+    MutableHashMap.set(organizations, organization.id, organization);
     return organization;
   };
 
@@ -253,7 +265,7 @@ const makeStores = (
     verificationState: OrganizationDomain["verificationState"] = "verified",
   ): OrganizationDomain => {
     const record: OrganizationDomain = {
-      id: `dom-${domainRecords.size + 1}`,
+      id: `dom-${MutableHashMap.size(domainRecords) + 1}`,
       organizationId,
       domain,
       verificationState,
@@ -263,7 +275,7 @@ const makeStores = (
         verifiedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       }),
     };
-    domainRecords.set(record.id, record);
+    MutableHashMap.set(domainRecords, record.id, record);
     return record;
   };
 
@@ -357,13 +369,13 @@ describe("SsoService", () => {
     expect(members).toEqual([
       { ...members[0], organizationId: "org-1", userId: first.user.id, role: "member" },
     ]);
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
 
     // Second login: reuses the same user, no duplicate membership.
     const second = await withFetch(idpRoutes, () => Effect.runPromise(signInFlow()));
     expect(second.isNewUser).toBe(false);
     expect(second.user.id).toBe(first.user.id);
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
     expect(members.length).toBe(1);
   });
 
@@ -406,7 +418,7 @@ describe("SsoService", () => {
     // A squatter signed up with the address and a password they know; it was
     // never verified.
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    fx.users.set("user-squat", {
+    MutableHashMap.set(fx.users, "user-squat", {
       id: "user-squat",
       createdAt: now,
       updatedAt: now,
@@ -422,13 +434,13 @@ describe("SsoService", () => {
         }),
       ),
     );
-    fx.passwordHashes.set("user-squat", "squatter-hash");
+    MutableHashMap.set(fx.passwordHashes, "user-squat", "squatter-hash");
 
     const result = await fx.signIn();
 
     expect(result.isNewUser).toBe(false);
     expect(result.user.id).toBe("user-squat");
-    expect(fx.passwordHashes.has("user-squat")).toBe(false);
+    expect(MutableHashMap.has(fx.passwordHashes, "user-squat")).toBe(false);
     expect(fx.sessionsCleared).toEqual(["user-squat"]);
     const identifier = await Effect.runPromise(
       fx.identifiers.getByValue("email", "worker@acme.test"),
@@ -517,7 +529,7 @@ describe("SsoService", () => {
     expect(discovered.authorizationEndpoint).toBe("https://idp.acme.test/auth");
     expect(discovered.tokenEndpoint).toBe("https://idp.acme.test/tok");
     expect(discovered.userInfoEndpoint).toBe("https://idp.acme.test/ui");
-    expect(providers.size).toBe(1);
+    expect(MutableHashMap.size(providers)).toBe(1);
   });
 
   it("fails sign-in for an unknown domain", async () => {
@@ -639,7 +651,7 @@ const stubSamlVerifier = (requests: SamlAuthnRequestInput[]): typeof SamlVerifie
 
 const makeSamlFixture = () => {
   const base = makeStores();
-  const replayRecords = new Map<string, SamlReplayRecord>();
+  const replayRecords = MutableHashMap.empty<string, SamlReplayRecord>();
   const replay = memorySamlReplayStore(replayRecords);
   const requests: SamlAuthnRequestInput[] = [];
 
@@ -721,7 +733,7 @@ describe("SsoService — SAML", () => {
     const second = await Effect.runPromise(signIn("_a2"));
     expect(second.isNewUser).toBe(false);
     expect(second.user.id).toBe(first.user.id);
-    expect(fx.users.size).toBe(1);
+    expect(MutableHashMap.size(fx.users)).toBe(1);
     expect(fx.members.length).toBe(1);
   });
 
@@ -901,7 +913,7 @@ describe("SsoService — SAML", () => {
     expect(errors.noCerts.message).toMatch(/idpCertificates must not be empty/);
     assert.instanceOf(errors.badUrl, SsoError);
     expect(errors.badUrl.message).toMatch(/acsUrl must be an absolute URL/);
-    expect(fx.providers.size).toBe(0);
+    expect(MutableHashMap.size(fx.providers)).toBe(0);
   });
 
   it("renders SP metadata for a connection", async () => {
@@ -973,12 +985,12 @@ describe("memorySamlReplayStore", () => {
 
 /** A web handler wired with the SSO endpoints over in-memory stores. */
 const makeHttpFixture = () => {
-  const usersById = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifierRecords);
-  const sessions = new Map<string, Types.Session>();
-  const providers = new Map<string, SsoProvider>();
-  const states = new Map<string, OAuthState>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
+  const providers = MutableHashMap.empty<string, SsoProvider>();
+  const states = MutableHashMap.empty<string, OAuthState>();
   const members: Member[] = [];
   let userSeq = 0;
 
@@ -991,7 +1003,7 @@ const makeHttpFixture = () => {
       updatedAt: now,
       attributes,
     };
-    usersById.set(id, user);
+    MutableHashMap.set(usersById, id, user);
     const identifier = makeIdentifier({
       userId: id,
       type: "email",
@@ -1000,7 +1012,7 @@ const makeHttpFixture = () => {
       verifiedAt: now,
       now,
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
     return id;
   };
   const makeSession = (userId: string): string => {
@@ -1009,7 +1021,7 @@ const makeHttpFixture = () => {
     );
     const tokenHash = hashToken(rawToken);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    sessions.set(tokenHash, {
+    MutableHashMap.set(sessions, tokenHash, {
       id: tokenHash,
       userId,
       expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
@@ -1021,30 +1033,34 @@ const makeHttpFixture = () => {
   };
 
   const userStore = {
-    get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
+    get: (userId: string) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
   };
   const userServiceStore = {
     get: userStore.get,
-    update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
+    update: (user: Types.User) =>
+      Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
     delete: () => Effect.void,
   };
   const sessionStore: typeof SessionStore.Service = {
-    create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
-    update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
+    create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        sessions.forEach((s, id) => {
-          if (s.userId === userId) sessions.delete(id);
+        MutableHashMap.forEach(sessions, (s, id) => {
+          if (s.userId === userId) MutableHashMap.remove(sessions, id);
         });
       }),
     listByUserId: (userId: string) =>
-      Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+      ),
   };
   const oauthUserStore = {
     getUser: (userId: string) => {
-      const u = usersById.get(userId);
+      const u = Option.getOrUndefined(MutableHashMap.get(usersById, userId));
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
     createUser: (input: { name?: string; image?: string }) =>
@@ -1059,21 +1075,23 @@ const makeHttpFixture = () => {
           updatedAt: now,
           attributes: {},
         };
-        usersById.set(id, user);
+        MutableHashMap.set(usersById, id, user);
         return { user, created: true };
       }),
   };
   const ssoStore: typeof SsoProviderStore.Service = {
-    create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
-    getById: (id) => Effect.succeed(providers.get(id) ?? null),
+    create: (p) => Effect.sync(() => (MutableHashMap.set(providers, p.id, p), p)),
+    getById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(providers, id))),
     getByDomain: (domain) =>
-      Effect.succeed([...providers.values()].find((p) => p.domain === domain) ?? null),
-    list: () => Effect.succeed([...providers.values()]),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ?? null,
+      ),
+    list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
   };
   const stateStore = {
-    create: (s: OAuthState) => Effect.sync(() => (states.set(s.state, s), s)),
-    get: (state: string) => Effect.succeed(states.get(state) ?? null),
-    delete: (state: string) => Effect.sync(() => void states.delete(state)),
+    create: (s: OAuthState) => Effect.sync(() => (MutableHashMap.set(states, s.state, s), s)),
+    get: (state: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, state))),
+    delete: (state: string) => Effect.sync(() => void MutableHashMap.remove(states, state)),
   };
   // SSO only ever calls getMember/createMember plus the organization read that
   // resolves the default role.
@@ -1257,7 +1275,7 @@ describe("HTTP SSO endpoints — SAML", () => {
     // registrar's user id.
     expect(provider).not.toHaveProperty("clientSecret");
     expect(provider).not.toHaveProperty("userId");
-    expect(fx.providers.size).toBe(1);
+    expect(MutableHashMap.size(fx.providers)).toBe(1);
   });
 
   it("still registers an OIDC connection when the body carries no protocol", async () => {

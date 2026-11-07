@@ -1,5 +1,15 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Order, Schema } from "effect";
+import {
+  Array as Arr,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Order,
+  Schema,
+  Struct,
+} from "effect";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
@@ -51,8 +61,8 @@ const ORG_B = "org-b";
  * exercises an unmapped path fails instead of quietly succeeding.
  */
 const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } = {}) => {
-  const usersById = new Map<string, Types.User>();
-  const identifierRecords = new Map<string, Identifier>();
+  const usersById = MutableHashMap.empty<string, Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const memory = memoryIdentifierStore(identifierRecords);
   // `oneEmailPerUser` refuses a user's second address as a single-table store
   // (effect-auth-drizzle's `SingleTableIdentifierStore`) does.
@@ -72,12 +82,12 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
           ),
       }
     : memory;
-  const connectionRecords = new Map<string, ScimConnection>();
-  const organizations = new Map<string, Organization>();
+  const connectionRecords = MutableHashMap.empty<string, ScimConnection>();
+  const organizations = MutableHashMap.empty<string, Organization>();
   const members: Member[] = [];
-  const teams = new Map<string, Team>();
+  const teams = MutableHashMap.empty<string, Team>();
   const teamMembers: TeamMember[] = [];
-  const sessions = new Map<string, Types.Session>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
   let userSeq = 0;
   let teamSeq = 0;
   /** The `identifier` each `create` call was given. */
@@ -96,21 +106,21 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
           updatedAt: now,
           attributes: input.attributes ?? {},
         };
-        usersById.set(user.id, user);
+        MutableHashMap.set(usersById, user.id, user);
         return { user, created: true };
       }),
-    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
-    update: (user) => Effect.sync(() => (usersById.set(user.id, user), user)),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    update: (user) => Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
   };
 
   const coreUserStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
   };
 
   const userServiceStore: typeof UserServiceStore.Service = {
     get: coreUserStore.get,
     update: userStore.update,
-    delete: (userId) => Effect.sync(() => void usersById.delete(userId)),
+    delete: (userId) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 
   /** A session manager just real enough to observe revocation. */
@@ -119,7 +129,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       Effect.sync(() => {
         const now = DateTime.toDateUtc(DateTime.nowUnsafe());
         const session: Types.Session = {
-          id: `s-${userId}-${sessions.size}`,
+          id: `s-${userId}-${MutableHashMap.size(sessions)}`,
           userId,
           expiresAt: DateTime.toDateUtc(
             DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
@@ -128,19 +138,22 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
           lastActivityAt: now,
           attributes: {},
         };
-        sessions.set(session.id, session);
+        MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
     validateSession: () => Effect.die("unused"),
-    invalidateSession: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+    invalidateSession: (sessionId) =>
+      Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     invalidateUserSessions: (userId) =>
       Effect.sync(() => {
-        sessions.forEach((session, id) => {
-          if (session.userId === userId) sessions.delete(id);
+        MutableHashMap.forEach(sessions, (session, id) => {
+          if (session.userId === userId) MutableHashMap.remove(sessions, id);
         });
       }),
     listSessions: (userId) =>
-      Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(sessions)).filter((s) => s.userId === userId),
+      ),
     revokeSessionById: () => Effect.succeed(false),
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
@@ -156,22 +169,27 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       ),
     listMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId)),
-    createTeam: (t: Team) => Effect.sync(() => (teams.set(t.id, t), t)),
-    getTeam: (teamId: string) => Effect.succeed(teams.get(teamId) ?? null),
+    createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),
+    getTeam: (teamId: string) =>
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
     updateTeam: (t: Team) =>
       Effect.sync(() => {
-        if (!teams.has(t.id)) return null;
-        teams.set(t.id, t);
+        if (!MutableHashMap.has(teams, t.id)) return null;
+        MutableHashMap.set(teams, t.id, t);
         return t;
       }),
     deleteTeam: (teamId: string) =>
       Effect.sync(() => {
-        teams.delete(teamId);
+        MutableHashMap.remove(teams, teamId);
         const kept = teamMembers.filter((m) => m.teamId !== teamId);
         teamMembers.splice(0, teamMembers.length, ...kept);
       }),
     listTeams: (organizationId: string) =>
-      Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(teams)).filter(
+          (t) => t.organizationId === organizationId,
+        ),
+      ),
     addTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
         const teamMember: TeamMember = {
@@ -192,7 +210,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     // Read when provisioning a member, to pick up the organization's own
     // `defaultRole`; tests that care seed `organizations`.
     getOrganizationById: (organizationId: string) =>
-      Effect.succeed(organizations.get(organizationId) ?? null),
+      Effect.succeed(Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
     // Never reached by SCIM.
     createOrganization: unused,
     getOrganizationBySlug: unused,
@@ -223,7 +241,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       updatedAt: now,
       attributes: {},
     };
-    usersById.set(user.id, user);
+    MutableHashMap.set(usersById, user.id, user);
     const identifier = makeIdentifier({
       userId: user.id,
       type: "email",
@@ -232,7 +250,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       verifiedAt: now,
       now,
     });
-    identifierRecords.set(identifier.id, identifier);
+    MutableHashMap.set(identifierRecords, identifier.id, identifier);
     members.push({
       id: `m${members.length + 1}`,
       organizationId,
@@ -252,7 +270,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       createdAt: now,
       updatedAt: now,
     };
-    teams.set(team.id, team);
+    MutableHashMap.set(teams, team.id, team);
     return team;
   };
 
@@ -278,7 +296,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       ...(defaultRole !== undefined && { defaultRole }),
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     };
-    organizations.set(organization.id, organization);
+    MutableHashMap.set(organizations, organization.id, organization);
     return organization;
   };
 
@@ -321,7 +339,7 @@ describe("ScimService — connections", () => {
     const fx = await makeFixture();
 
     // The raw token is never persisted — only its digest.
-    const stored = [...fx.connectionRecords.values()];
+    const stored = Arr.fromIterable(MutableHashMap.values(fx.connectionRecords));
     expect(stored.some((c) => c.tokenHash === fx.a.token)).toBe(false);
     expect(fx.a.token.length).toBeGreaterThan(20);
 
@@ -330,7 +348,10 @@ describe("ScimService — connections", () => {
     expect(resolved.organizationId).toBe(ORG_A);
 
     // Using a connection stamps it, so an operator can spot a dead integration.
-    expect(fx.connectionRecords.get(fx.a.connection.id)?.lastUsedAt).toBeTypeOf("number");
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(fx.connectionRecords, fx.a.connection.id))
+        ?.lastUsedAt,
+    ).toBeTypeOf("number");
 
     await fx.run(fx.service.revokeConnection(fx.a.connection.id));
     const err = await fx.run(Effect.flip(fx.service.authenticate(fx.a.token)));
@@ -426,7 +447,7 @@ describe("ScimService — users", () => {
     expect(err.status).toBe(409);
     expect(err.scimType).toBe("uniqueness");
     // The pre-flight check runs before the user row, so no orphan is left.
-    expect(fx.usersById.size).toBe(1);
+    expect(MutableHashMap.size(fx.usersById)).toBe(1);
   });
 
   it("rejects an empty userName", async () => {
@@ -465,7 +486,7 @@ describe("ScimService — users", () => {
     const deleteErr = await fx.run(Effect.flip(fx.service.deactivateUser(fx.b.connection, ada.id)));
     assert.instanceOf(deleteErr, ScimError);
     expect(deleteErr.status).toBe(404);
-    const stored = fx.usersById.get(ada.id);
+    const stored = Option.getOrUndefined(MutableHashMap.get(fx.usersById, ada.id));
     assert(stored !== undefined, "ada is still stored");
     expect(Scim.isScimDeactivated(stored)).toBe(false);
   });
@@ -546,7 +567,7 @@ describe("ScimService — users", () => {
     const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
     await fx.run(fx.sessionManager.createSession(ada.id));
     await fx.run(fx.sessionManager.createSession(ada.id));
-    expect(fx.sessions.size).toBe(2);
+    expect(MutableHashMap.size(fx.sessions)).toBe(2);
 
     const patched = await fx.run(
       fx.service.patchUser(fx.a.connection, ada.id, [
@@ -554,8 +575,12 @@ describe("ScimService — users", () => {
       ]),
     );
     expect(patched.active).toBe(false);
-    expect(fx.usersById.get(ada.id)?.attributes[SCIM_DEACTIVATED_ATTRIBUTE]).toBe(true);
-    expect(fx.sessions.size).toBe(0);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(fx.usersById, ada.id))?.attributes[
+        SCIM_DEACTIVATED_ATTRIBUTE
+      ],
+    ).toBe(true);
+    expect(MutableHashMap.size(fx.sessions)).toBe(0);
 
     // The account survives: reactivation is one write, not a re-provision.
     const reactivated = await fx.run(
@@ -564,7 +589,11 @@ describe("ScimService — users", () => {
       ]),
     );
     expect(reactivated.active).toBe(true);
-    expect(fx.usersById.get(ada.id)?.attributes[SCIM_DEACTIVATED_ATTRIBUTE]).toBeUndefined();
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(fx.usersById, ada.id))?.attributes[
+        SCIM_DEACTIVATED_ATTRIBUTE
+      ],
+    ).toBeUndefined();
   });
 
   it("accepts Entra ID's path-less patch and its stringly-typed booleans", async () => {
@@ -753,10 +782,10 @@ describe("ScimService — users", () => {
     await fx.run(fx.service.deactivateUser(fx.a.connection, ada.id));
 
     // The user, its identifiers and its membership all survive.
-    expect(fx.usersById.has(ada.id)).toBe(true);
+    expect(MutableHashMap.has(fx.usersById, ada.id)).toBe(true);
     expect(await fx.run(fx.identifiers.getByValue("email", "ada@acme.test"))).not.toBeNull();
     expect(fx.members).toHaveLength(1);
-    expect(fx.sessions.size).toBe(0);
+    expect(MutableHashMap.size(fx.sessions)).toBe(0);
 
     const resource = await fx.run(fx.service.getUser(fx.a.connection, ada.id));
     expect(resource.active).toBe(false);
@@ -778,7 +807,11 @@ describe("ScimService — users", () => {
       ]),
     );
     expect(patched.externalId).toBe("okta-7");
-    expect(fx.usersById.get(userId)?.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE]).toBe("okta-7");
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(fx.usersById, userId))?.attributes[
+        SCIM_EXTERNAL_ID_ATTRIBUTE
+      ],
+    ).toBe("okta-7");
   });
 });
 
@@ -804,7 +837,9 @@ describe("ScimService — groups", () => {
         Order.String,
       ),
     ).toEqual(Arr.sort([ada.id, grace.id], Order.String));
-    expect(fx.teams.get(group.id)?.organizationId).toBe(ORG_A);
+    expect(Option.getOrUndefined(MutableHashMap.get(fx.teams, group.id))?.organizationId).toBe(
+      ORG_A,
+    );
     expect(fx.teamMembers).toHaveLength(2);
   });
 
@@ -837,7 +872,7 @@ describe("ScimService — groups", () => {
     const deleteErr = await fx.run(Effect.flip(fx.service.deleteGroup(fx.b.connection, group.id)));
     assert.instanceOf(deleteErr, ScimError);
     expect(deleteErr.status).toBe(404);
-    expect(fx.teams.has(group.id)).toBe(true);
+    expect(MutableHashMap.has(fx.teams, group.id)).toBe(true);
 
     expect((await fx.run(fx.service.listGroups(fx.b.connection))).totalResults).toBe(0);
   });
@@ -932,10 +967,10 @@ describe("ScimService — groups", () => {
     expect(badFilter.scimType).toBe("invalidFilter");
 
     await fx.run(fx.service.deleteGroup(fx.a.connection, engineering.id));
-    expect(fx.teams.has(engineering.id)).toBe(false);
+    expect(MutableHashMap.has(fx.teams, engineering.id)).toBe(false);
     // Deleting a team is not deprovisioning: the user keeps their membership.
     expect(fx.members.some((m) => m.userId === ada.id)).toBe(true);
-    expect(fx.usersById.has(ada.id)).toBe(true);
+    expect(MutableHashMap.has(fx.usersById, ada.id)).toBe(true);
   });
 
   it("adopts a team created outside SCIM", async () => {
@@ -1161,7 +1196,7 @@ describe("HTTP SCIM endpoints", () => {
     expect(conflict.scimType).toBe("uniqueness");
     // The body is RFC 7644 §3.12 verbatim — no repo-specific members.
     expect(
-      Arr.sort(Object.keys(Schema.decodeUnknownSync(JsonFields)(conflictJson)), Order.String),
+      Arr.sort(Struct.keys(Schema.decodeUnknownSync(JsonFields)(conflictJson)), Order.String),
     ).toEqual(["detail", "schemas", "scimType", "status"]);
 
     // 4. The filter now finds them.

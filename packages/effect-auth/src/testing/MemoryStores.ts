@@ -6,7 +6,7 @@
  * without a database.
  *
  * Each `memoryXStore` returns a plain implementation of one contract over
- * `Map`s that live as long as the value. The three user-writing contracts
+ * `MutableHashMap`s that live as long as the value. The three user-writing contracts
  * (`UserStore`, `EmailPasswordStore`, `OAuthUserStore`) and
  * `OAuthAccountStore.hasPassword` share one {@link MemoryUserTable}, so a user
  * created through one is read through the others. {@link layer} provides every
@@ -21,7 +21,7 @@
  *
  * @module testing
  */
-import { DateTime, Effect, Layer } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
 import type { KeyValueStore } from "effect/persistence";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
@@ -54,6 +54,16 @@ import { TrustedDeviceStore, type TrustedDeviceRecord } from "../TrustedDevice.t
 import type * as Types from "../Types.ts";
 import { type CreateUserResult, UserStore } from "../UserStore.ts";
 
+/** Removes every entry whose value matches `predicate`. */
+const removeWhere = <V>(
+  map: MutableHashMap.MutableHashMap<string, V>,
+  predicate: (value: V) => boolean,
+): void =>
+  Arr.forEach(
+    Arr.filter(Arr.fromIterable(map), ([, value]) => predicate(value)),
+    ([key]) => void MutableHashMap.remove(map, key),
+  );
+
 // ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
@@ -66,8 +76,8 @@ import { type CreateUserResult, UserStore } from "../UserStore.ts";
  * @category models
  */
 export interface MemoryUserTable {
-  readonly users: Map<string, Types.User>;
-  readonly passwordHashes: Map<string, string>;
+  readonly users: MutableHashMap.MutableHashMap<string, Types.User>;
+  readonly passwordHashes: MutableHashMap.MutableHashMap<string, string>;
 }
 
 /**
@@ -77,8 +87,8 @@ export interface MemoryUserTable {
  * @category constructors
  */
 export const memoryUserTable = (): MemoryUserTable => ({
-  users: new Map(),
-  passwordHashes: new Map(),
+  users: MutableHashMap.empty(),
+  passwordHashes: MutableHashMap.empty(),
 });
 
 const insertUser = (
@@ -94,7 +104,7 @@ const insertUser = (
     updatedAt: now,
     attributes: "attributes" in input && input.attributes !== undefined ? input.attributes : {},
   };
-  table.users.set(user.id, user);
+  MutableHashMap.set(table.users, user.id, user);
   return { user, created: true };
 };
 
@@ -107,7 +117,7 @@ const insertUser = (
 export const memoryUserStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof UserStore.Service => ({
-  get: (userId) => Effect.sync(() => table.users.get(userId) ?? null),
+  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.users, userId))),
 });
 
 /**
@@ -122,9 +132,12 @@ export const memoryEmailPasswordStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof EmailPasswordStore.Service => ({
   createUser: (input) => Effect.map(DateTime.nowAsDate, (now) => insertUser(table, input, now)),
-  getPasswordHash: (userId) => Effect.sync(() => table.passwordHashes.get(userId) ?? null),
-  setPasswordHash: (userId, hash) => Effect.sync(() => void table.passwordHashes.set(userId, hash)),
-  clearPasswordHash: (userId) => Effect.sync(() => void table.passwordHashes.delete(userId)),
+  getPasswordHash: (userId) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.passwordHashes, userId))),
+  setPasswordHash: (userId, hash) =>
+    Effect.sync(() => void MutableHashMap.set(table.passwordHashes, userId, hash)),
+  clearPasswordHash: (userId) =>
+    Effect.sync(() => void MutableHashMap.remove(table.passwordHashes, userId)),
 });
 
 /**
@@ -138,7 +151,7 @@ export const memoryOAuthUserStore = (
 ): typeof OAuthUserStore.Service => ({
   getUser: (userId) =>
     Effect.suspend(() => {
-      const user = table.users.get(userId);
+      const user = Option.getOrUndefined(MutableHashMap.get(table.users, userId));
       return user === undefined
         ? Effect.fail(new Errors.UserNotFoundError({ message: "User not found", userId }))
         : Effect.succeed(user);
@@ -146,7 +159,7 @@ export const memoryOAuthUserStore = (
   createUser: (input) => Effect.map(DateTime.nowAsDate, (now) => insertUser(table, input, now)),
   updateUser: (userId, update) =>
     Effect.flatMap(DateTime.nowAsDate, (now) => {
-      const user = table.users.get(userId);
+      const user = Option.getOrUndefined(MutableHashMap.get(table.users, userId));
       if (user === undefined) {
         return Effect.fail(new Errors.AuthError({ message: "User not found" }));
       }
@@ -156,7 +169,7 @@ export const memoryOAuthUserStore = (
         ...(update.image === undefined ? {} : { image: update.image }),
         updatedAt: now,
       };
-      table.users.set(userId, updated);
+      MutableHashMap.set(table.users, userId, updated);
       return Effect.succeed(updated);
     }),
 });
@@ -166,75 +179,83 @@ export const memoryOAuthUserStore = (
 // ---------------------------------------------------------------------------
 
 /**
- * `SessionStore` over a `Map` keyed by the session's token hash.
+ * `SessionStore` over a `MutableHashMap` keyed by the session's token hash.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memorySessionStore = (
-  sessions: Map<string, Types.Session> = new Map(),
+  sessions: MutableHashMap.MutableHashMap<string, Types.Session> = MutableHashMap.empty(),
 ): typeof SessionStore.Service => ({
-  create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
-  update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-  delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
+  create: (session) =>
+    Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  update: (session) =>
+    Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+  delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
-        if (session.userId === userId) sessions.delete(id);
-      });
+      removeWhere(sessions, (session) => session.userId === userId);
     }),
   listByUserId: (userId) =>
-    Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Arr.fromIterable(MutableHashMap.values(sessions)).filter(
+        (session) => session.userId === userId,
+      ),
+    ),
 });
 
 /**
- * `MultiFactorStore` over a `Map` keyed by user id.
+ * `MultiFactorStore` over a `MutableHashMap` keyed by user id.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryMultiFactorStore = (
-  records: Map<string, MultiFactorRecord> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, MultiFactorRecord> = MutableHashMap.empty(),
 ): typeof MultiFactorStore.Service => ({
-  get: (userId) => Effect.sync(() => records.get(userId) ?? null),
-  upsert: (record) => Effect.sync(() => (records.set(record.userId, record), record)),
-  delete: (userId) => Effect.sync(() => void records.delete(userId)),
+  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, userId))),
+  upsert: (record) =>
+    Effect.sync(() => (MutableHashMap.set(records, record.userId, record), record)),
+  delete: (userId) => Effect.sync(() => void MutableHashMap.remove(records, userId)),
 });
 
 /**
- * `TrustedDeviceStore` over a `Map` keyed by the device token's hash.
+ * `TrustedDeviceStore` over a `MutableHashMap` keyed by the device token's hash.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryTrustedDeviceStore = (
-  records: Map<string, TrustedDeviceRecord> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, TrustedDeviceRecord> = MutableHashMap.empty(),
 ): typeof TrustedDeviceStore.Service => ({
-  upsert: (record) => Effect.sync(() => (records.set(record.tokenHash, record), record)),
-  getByTokenHash: (tokenHash) => Effect.sync(() => records.get(tokenHash) ?? null),
-  delete: (tokenHash) => Effect.sync(() => void records.delete(tokenHash)),
+  upsert: (record) =>
+    Effect.sync(() => (MutableHashMap.set(records, record.tokenHash, record), record)),
+  getByTokenHash: (tokenHash) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, tokenHash))),
+  delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(records, tokenHash)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      records.forEach((record, hash) => {
-        if (record.userId === userId) records.delete(hash);
-      });
+      removeWhere(records, (record) => record.userId === userId);
     }),
 });
 
 /**
- * `OtpSecondFactorStore` over a `Map` keyed by the pending token.
+ * `OtpSecondFactorStore` over a `MutableHashMap` keyed by the pending token.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryOtpSecondFactorStore = (
-  records: Map<string, OtpSecondFactorRecord> = new Map(),
+  records: MutableHashMap.MutableHashMap<string, OtpSecondFactorRecord> = MutableHashMap.empty(),
 ): typeof OtpSecondFactorStore.Service => ({
-  create: (record) => Effect.sync(() => (records.set(record.pendingToken, record), record)),
-  get: (pendingToken) => Effect.sync(() => records.get(pendingToken) ?? null),
-  update: (record) => Effect.sync(() => (records.set(record.pendingToken, record), record)),
-  delete: (pendingToken) => Effect.sync(() => void records.delete(pendingToken)),
+  create: (record) =>
+    Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
+  get: (pendingToken) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, pendingToken))),
+  update: (record) =>
+    Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
+  delete: (pendingToken) => Effect.sync(() => void MutableHashMap.remove(records, pendingToken)),
 });
 
 /**
@@ -257,7 +278,7 @@ export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeySt
 const accountKey = (provider: string, providerId: string) => `${provider}\u0000${providerId}`;
 
 /**
- * `OAuthAccountStore` over a `Map` keyed by `(provider, providerId)`.
+ * `OAuthAccountStore` over a `MutableHashMap` keyed by `(provider, providerId)`.
  * `hasPassword` reads the {@link MemoryUserTable}'s password hashes, so the
  * last-credential unlink guard is on.
  *
@@ -266,27 +287,34 @@ const accountKey = (provider: string, providerId: string) => `${provider}\u0000$
  */
 export const memoryOAuthAccountStore = (
   table: MemoryUserTable = memoryUserTable(),
-  accounts: Map<string, OAuthAccount> = new Map(),
+  accounts: MutableHashMap.MutableHashMap<string, OAuthAccount> = MutableHashMap.empty(),
 ): typeof OAuthAccountStore.Service => {
   const put = (account: OAuthAccount) =>
-    void accounts.set(accountKey(account.provider, account.providerId), account);
+    void MutableHashMap.set(accounts, accountKey(account.provider, account.providerId), account);
   return {
     create: (account) => Effect.sync(() => (put(account), account)),
     get: (provider, providerId) =>
-      Effect.sync(() => accounts.get(accountKey(provider, providerId)) ?? null),
+      Effect.sync(() =>
+        Option.getOrNull(MutableHashMap.get(accounts, accountKey(provider, providerId))),
+      ),
     getByUserId: (userId) =>
-      Effect.sync(() => [...accounts.values()].filter((account) => account.userId === userId)),
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(accounts)).filter(
+          (account) => account.userId === userId,
+        ),
+      ),
     update: (account) => Effect.sync(() => (put(account), account)),
     linkToUser: (userId, account) => Effect.sync(() => put({ ...account, userId })),
     unlinkFromUser: (userId, provider) =>
       Effect.sync(() => {
-        accounts.forEach((account, key) => {
-          if (account.userId === userId && account.provider === provider) accounts.delete(key);
-        });
+        removeWhere(
+          accounts,
+          (account) => account.userId === userId && account.provider === provider,
+        );
       }),
     delete: (provider, providerId) =>
-      Effect.sync(() => void accounts.delete(accountKey(provider, providerId))),
-    hasPassword: (userId) => Effect.sync(() => table.passwordHashes.has(userId)),
+      Effect.sync(() => void MutableHashMap.remove(accounts, accountKey(provider, providerId))),
+    hasPassword: (userId) => Effect.sync(() => MutableHashMap.has(table.passwordHashes, userId)),
   };
 };
 
@@ -295,67 +323,81 @@ export const memoryOAuthAccountStore = (
 // ---------------------------------------------------------------------------
 
 /**
- * `OidcClientStore` over a `Map` keyed by client id.
+ * `OidcClientStore` over a `MutableHashMap` keyed by client id.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcClientStore = (
-  clients: Map<string, OidcClient> = new Map(),
+  clients: MutableHashMap.MutableHashMap<string, OidcClient> = MutableHashMap.empty(),
 ): typeof OidcClientStore.Service => ({
-  create: (client) => Effect.sync(() => (clients.set(client.clientId, client), client)),
-  getByClientId: (clientId) => Effect.sync(() => clients.get(clientId) ?? null),
-  update: (client) => Effect.sync(() => (clients.set(client.clientId, client), client)),
-  delete: (clientId) => Effect.sync(() => void clients.delete(clientId)),
-  list: () => Effect.sync(() => [...clients.values()]),
+  create: (client) =>
+    Effect.sync(() => (MutableHashMap.set(clients, client.clientId, client), client)),
+  getByClientId: (clientId) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(clients, clientId))),
+  update: (client) =>
+    Effect.sync(() => (MutableHashMap.set(clients, client.clientId, client), client)),
+  delete: (clientId) => Effect.sync(() => void MutableHashMap.remove(clients, clientId)),
+  list: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(clients))),
 });
 
 /**
- * `OidcCodeStore` over a `Map` keyed by the code's hash.
+ * `OidcCodeStore` over a `MutableHashMap` keyed by the code's hash.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcCodeStore = (
-  codes: Map<string, OidcAuthorizationCode> = new Map(),
+  codes: MutableHashMap.MutableHashMap<string, OidcAuthorizationCode> = MutableHashMap.empty(),
 ): typeof OidcCodeStore.Service => ({
-  create: (code) => Effect.sync(() => (codes.set(code.codeHash, code), code)),
-  get: (codeHash) => Effect.sync(() => codes.get(codeHash) ?? null),
-  delete: (codeHash) => Effect.sync(() => void codes.delete(codeHash)),
+  create: (code) => Effect.sync(() => (MutableHashMap.set(codes, code.codeHash, code), code)),
+  get: (codeHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(codes, codeHash))),
+  delete: (codeHash) => Effect.sync(() => void MutableHashMap.remove(codes, codeHash)),
 });
 
 /**
- * `OidcTokenStore` over a `Map` keyed by the token's hash, with
+ * `OidcTokenStore` over a `MutableHashMap` keyed by the token's hash, with
  * `listByFamily` (refresh-token reuse detection on).
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcTokenStore = (
-  tokens: Map<string, OidcToken> = new Map(),
+  tokens: MutableHashMap.MutableHashMap<string, OidcToken> = MutableHashMap.empty(),
 ): typeof OidcTokenStore.Service => ({
-  create: (token) => Effect.sync(() => (tokens.set(token.tokenHash, token), token)),
-  get: (tokenHash) => Effect.sync(() => tokens.get(tokenHash) ?? null),
-  delete: (tokenHash) => Effect.sync(() => void tokens.delete(tokenHash)),
+  create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.tokenHash, token), token)),
+  get: (tokenHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, tokenHash))),
+  delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(tokens, tokenHash)),
   listByFamily: (familyId) =>
-    Effect.sync(() => [...tokens.values()].filter((token) => token.familyId === familyId)),
+    Effect.sync(() =>
+      Arr.fromIterable(MutableHashMap.values(tokens)).filter(
+        (token) => token.familyId === familyId,
+      ),
+    ),
 });
 
 /**
- * `OidcConsentStore` over a `Map` keyed by `(userId, clientId)`.
+ * `OidcConsentStore` over a `MutableHashMap` keyed by `(userId, clientId)`.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const memoryOidcConsentStore = (
-  consents: Map<string, OidcConsent> = new Map(),
+  consents: MutableHashMap.MutableHashMap<string, OidcConsent> = MutableHashMap.empty(),
 ): typeof OidcConsentStore.Service => {
   const key = (userId: string, clientId: string) => `${userId}\u0000${clientId}`;
   return {
-    get: (userId, clientId) => Effect.sync(() => consents.get(key(userId, clientId)) ?? null),
+    get: (userId, clientId) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(consents, key(userId, clientId)))),
     upsert: (consent) =>
-      Effect.sync(() => (consents.set(key(consent.userId, consent.clientId), consent), consent)),
-    delete: (userId, clientId) => Effect.sync(() => void consents.delete(key(userId, clientId))),
+      Effect.sync(
+        () => (
+          MutableHashMap.set(consents, key(consent.userId, consent.clientId), consent),
+          consent
+        ),
+      ),
+    delete: (userId, clientId) =>
+      Effect.sync(() => void MutableHashMap.remove(consents, key(userId, clientId))),
   };
 };
 

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Order } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option, Order } from "effect";
 import {
   AccountManagementService,
   AccountManagementStore,
@@ -25,9 +25,9 @@ interface Harness {
     | IdentifierStore
     | SessionService
   >;
-  readonly users: Map<string, Types.User>;
-  readonly identifiers: Map<string, Identifier>;
-  readonly tokens: Map<string, AccountToken>;
+  readonly users: MutableHashMap.MutableHashMap<string, Types.User>;
+  readonly identifiers: MutableHashMap.MutableHashMap<string, Identifier>;
+  readonly tokens: MutableHashMap.MutableHashMap<string, AccountToken>;
   readonly revoked: string[];
   readonly changeEmails: Array<{ newEmail: string; token: string }>;
   readonly deleteSends: Array<{ email: string | null; token: string }>;
@@ -51,13 +51,13 @@ const makeUser = (id: string): Types.User => {
  */
 type WrapIdentifiers = (
   store: typeof IdentifierStore.Service,
-  records: Map<string, Identifier>,
+  records: MutableHashMap.MutableHashMap<string, Identifier>,
 ) => typeof IdentifierStore.Service;
 
 const makeHarness = (wrap?: WrapIdentifiers): Harness => {
-  const users = new Map<string, Types.User>();
-  const identifiers = new Map<string, Identifier>();
-  const tokens = new Map<string, AccountToken>();
+  const users = MutableHashMap.empty<string, Types.User>();
+  const identifiers = MutableHashMap.empty<string, Identifier>();
+  const tokens = MutableHashMap.empty<string, AccountToken>();
   const revoked: string[] = [];
   const changeEmails: Array<{ newEmail: string; token: string }> = [];
   const deleteSends: Array<{ email: string | null; token: string }> = [];
@@ -65,7 +65,7 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
   const notifiedOld: Array<{ oldEmail: string | null; newEmail: string }> = [];
 
   const addUser = (user: Types.User, email: string) => {
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     const identifier = makeIdentifier({
       userId: user.id,
       type: "email",
@@ -74,33 +74,33 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
       verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    identifiers.set(identifier.id, identifier);
+    MutableHashMap.set(identifiers, identifier.id, identifier);
   };
   addUser(makeUser("user-1"), "alice@example.com");
   addUser(makeUser("user-2"), "bob@example.com");
 
   const userStore: typeof UserServiceStore.Service = {
-    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
     update: (user) =>
       Effect.sync(() => {
-        users.set(user.id, user);
+        MutableHashMap.set(users, user.id, user);
         return user;
       }),
-    delete: (userId) => Effect.sync(() => void users.delete(userId)),
+    delete: (userId) => Effect.sync(() => void MutableHashMap.remove(users, userId)),
   };
 
   const tokenStore: typeof AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => {
-        tokens.set(token.token, token);
+        MutableHashMap.set(tokens, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => tokens.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void tokens.delete(token)),
+    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+    delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        tokens.forEach((rec, t) => {
-          if (rec.userId === userId) tokens.delete(t);
+        MutableHashMap.forEach(tokens, (rec, t) => {
+          if (rec.userId === userId) MutableHashMap.remove(tokens, t);
         });
       }),
   };
@@ -182,14 +182,16 @@ describe("AccountManagement — change email", () => {
     const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
     expect(user.id).toBe("user-1");
     // The old email identifier is gone; the new one belongs to the user and is verified.
-    const userEmails = [...h.identifiers.values()].filter(
+    const userEmails = Arr.fromIterable(MutableHashMap.values(h.identifiers)).filter(
       (identifier) => identifier.userId === "user-1" && identifier.type === "email",
     );
     expect(userEmails).toHaveLength(1);
     expect(userEmails[0]?.value).toBe("alice-new@example.com");
     expect(userEmails[0]?.verified).toBe(true);
     expect(
-      [...h.identifiers.values()].some((identifier) => identifier.value === "alice@example.com"),
+      Arr.fromIterable(MutableHashMap.values(h.identifiers)).some(
+        (identifier) => identifier.value === "alice@example.com",
+      ),
     ).toBe(false);
     // Sessions revoked on email change (default).
     expect(h.revoked).toContain("user-1");
@@ -206,7 +208,7 @@ describe("AccountManagement — change email", () => {
     );
     expect(err).toBeInstanceOf(EmailInUseError);
     expect(h.changeEmails).toHaveLength(0);
-    expect(h.tokens.size).toBe(0);
+    expect(MutableHashMap.size(h.tokens)).toBe(0);
   });
 
   it("consumes the token on first confirm (single use)", async () => {
@@ -221,10 +223,13 @@ describe("AccountManagement — change email", () => {
     const h = makeHarness();
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice3@example.com"));
     // Force expiry.
-    const rec = h.tokens.get(token);
+    const rec = Option.getOrUndefined(MutableHashMap.get(h.tokens, token));
     assert(rec !== undefined, "the change-email token is stored");
 
-    h.tokens.set(token, { ...rec, expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1 });
+    MutableHashMap.set(h.tokens, token, {
+      ...rec,
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1,
+    });
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AccountTokenError);
   });
@@ -233,7 +238,7 @@ describe("AccountManagement — change email", () => {
 describe("AccountManagement — change email: failed claims keep the previous address", () => {
   const NEW_EMAIL = "alice-new@example.com";
   const userEmails = (h: Harness, userId: string) =>
-    [...h.identifiers.values()]
+    Arr.fromIterable(MutableHashMap.values(h.identifiers))
       .filter((identifier) => identifier.userId === userId && identifier.type === "email")
       .map((identifier) => ({ value: identifier.value, verified: identifier.verified }));
 
@@ -244,7 +249,8 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       ...store,
       replace: (from, to) =>
         Effect.suspend(() => {
-          records.set(
+          MutableHashMap.set(
+            records,
             "rival",
             makeIdentifier({
               userId: "user-2",
@@ -264,8 +270,11 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toBe("Email already in use");
     expect(userEmails(h, "user-1")).toEqual([{ value: "alice@example.com", verified: true }]);
-    expect([...h.identifiers.values()].find((i) => i.value === NEW_EMAIL)?.userId).toBe("user-2");
-    expect(h.tokens.has(token)).toBe(true);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(h.identifiers)).find((i) => i.value === NEW_EMAIL)
+        ?.userId,
+    ).toBe("user-2");
+    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
@@ -321,7 +330,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       { value: "alice@example.com", verified: true },
       { value: NEW_EMAIL, verified: true },
     ]);
-    expect(h.tokens.has(token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
 
     // The retry sees the new address as this user's own and releases the old one.
     await run(h, (svc) => svc.confirmEmailChange(token));
@@ -333,7 +342,10 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     const h = makeHarness((store, records) => ({
       ...store,
       delete: (id) => {
-        if (failRelease && records.get(id)?.value === "alice@work.example.com") {
+        if (
+          failRelease &&
+          Option.getOrUndefined(MutableHashMap.get(records, id))?.value === "alice@work.example.com"
+        ) {
           failRelease = false;
           return Effect.fail(new AuthError({ message: "store unavailable" }));
         }
@@ -346,7 +358,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       value: "alice@work.example.com",
       now: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
     });
-    h.identifiers.set(second.id, second);
+    MutableHashMap.set(h.identifiers, second.id, second);
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
@@ -377,7 +389,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toContain("changed during the confirmation");
     expect(userEmails(h, "user-1")).toEqual([]);
-    expect(h.tokens.has(token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
@@ -424,7 +436,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
         expect(user.id).toBe("user-1");
         expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-        expect(h.tokens.has(token)).toBe(false);
+        expect(MutableHashMap.has(h.tokens, token)).toBe(false);
         expect(h.revoked).toEqual(["user-1"]);
         expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
       });
@@ -436,7 +448,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         await run(h, (svc) => svc.confirmEmailChange(token));
 
         expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-        expect(h.tokens.has(token)).toBe(false);
+        expect(MutableHashMap.has(h.tokens, token)).toBe(false);
       });
     },
   );
@@ -465,7 +477,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     await run(h, (svc) => svc.confirmEmailChange(token));
 
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(h.tokens.has(token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
   });
 
   it("a user who already holds the new address, unverified, ends with it verified and the previous address released", async () => {
@@ -477,12 +489,12 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       value: NEW_EMAIL,
       now: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
     });
-    h.identifiers.set(held.id, held);
+    MutableHashMap.set(h.identifiers, held.id, held);
 
     await run(h, (svc) => svc.confirmEmailChange(token));
 
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(h.tokens.has(token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
   });
 
   it("a failed verification of a converged address fails and keeps the token; a retry completes the change verified", async () => {
@@ -502,12 +514,12 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
     expect(err).toBeInstanceOf(AuthError);
-    expect(h.tokens.has(token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     expect(h.revoked).toEqual([]);
 
     await run(h, (svc) => svc.confirmEmailChange(token));
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(h.tokens.has(token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
   });
 
   it("an address deleted before its verification fails with AccountTokenError and keeps the token", async () => {
@@ -524,15 +536,15 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
     expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toBe("The account's email changed during the confirmation; try again");
-    expect(h.tokens.has(token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
 
   it("a user with no email claims the new address", async () => {
     const h = makeHarness();
-    h.identifiers.forEach((identifier, id) => {
-      if (identifier.userId === "user-1") h.identifiers.delete(id);
+    MutableHashMap.forEach(h.identifiers, (identifier, id) => {
+      if (identifier.userId === "user-1") MutableHashMap.remove(h.identifiers, id);
     });
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
 
@@ -555,12 +567,12 @@ describe("AccountManagement — change email: failed claims keep the previous ad
             value: identifier.value,
             now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           });
-          records.set(concurrent.id, concurrent);
+          MutableHashMap.set(records, concurrent.id, concurrent);
           return store.create(identifier);
         }),
     }));
-    h.identifiers.forEach((identifier, id) => {
-      if (identifier.userId === "user-1") h.identifiers.delete(id);
+    MutableHashMap.forEach(h.identifiers, (identifier, id) => {
+      if (identifier.userId === "user-1") MutableHashMap.remove(h.identifiers, id);
     });
     return h;
   };
@@ -573,7 +585,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
     expect(user.id).toBe("user-1");
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(h.tokens.has(token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     expect(h.revoked).toEqual(["user-1"]);
     expect(h.notifiedOld).toEqual([{ oldEmail: null, newEmail: NEW_EMAIL }]);
   });
@@ -587,8 +599,11 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toBe("Email already in use");
     expect(userEmails(h, "user-1")).toEqual([]);
-    expect([...h.identifiers.values()].find((i) => i.value === NEW_EMAIL)?.userId).toBe("user-2");
-    expect(h.tokens.has(token)).toBe(true);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(h.identifiers)).find((i) => i.value === NEW_EMAIL)
+        ?.userId,
+    ).toBe("user-2");
+    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
@@ -604,11 +619,13 @@ describe("AccountManagement — delete user", () => {
     expect(userId).toBe("user-2");
     expect(h.beforeDeleteCalls).toEqual(["user-2"]);
     expect(h.revoked).toContain("user-2");
-    expect(h.users.has("user-2")).toBe(false);
+    expect(MutableHashMap.has(h.users, "user-2")).toBe(false);
     // The user's identifiers are removed too.
-    expect([...h.identifiers.values()].some((identifier) => identifier.userId === "user-2")).toBe(
-      false,
-    );
+    expect(
+      Arr.fromIterable(MutableHashMap.values(h.identifiers)).some(
+        (identifier) => identifier.userId === "user-2",
+      ),
+    ).toBe(false);
   });
 
   it("rejects a change-email token at the deletion confirm endpoint (wrong purpose)", async () => {
@@ -617,6 +634,6 @@ describe("AccountManagement — delete user", () => {
     const err = await run(h, (svc) => Effect.flip(svc.confirmAccountDeletion(token)));
     expect(err).toBeInstanceOf(AccountTokenError);
     // The user still exists.
-    expect(h.users.has("user-1")).toBe(true);
+    expect(MutableHashMap.has(h.users, "user-1")).toBe(true);
   });
 });

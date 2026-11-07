@@ -21,6 +21,7 @@ import {
   Layer,
   Logger,
   Option,
+  Record as Rec,
   Schema,
 } from "effect";
 import * as Authorizer from "./Authorizer.ts";
@@ -224,7 +225,7 @@ describe("guards and the policy kernel", () => {
   });
 
   it("each gate and its predicate agree on every viewer and every axis", () => {
-    Arr.forEach(Object.values(Axes), (axis) => {
+    Arr.forEach(Rec.values(Axes), (axis) => {
       Arr.forEach(viewers, (viewer) => {
         const gateAdmits = Exit.isSuccess(runGate(guards.requireRoleAtLeast(axis), viewer));
         expect(run(guards.hasRoleAtLeast(axis), viewer)).toBe(gateAdmits);
@@ -265,7 +266,7 @@ describe("guards and the policy kernel", () => {
     const doc = Entity.entity(Entity.ref("Owned", "doc-1"), {
       attributes: { owner: Entity.entityValue(Entity.ref("User", member.id)) },
     });
-    Arr.forEach(Object.values(Axes), (axis) => {
+    Arr.forEach(Rec.values(Axes), (axis) => {
       Arr.forEach(viewers, (viewer) => {
         if (viewer === null) return;
         expect(decideWithAuthorizer(viewer, guards.policies.roleAtLeast(axis), doc)).toBe(

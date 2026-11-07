@@ -1,5 +1,15 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, DateTime, Effect, Layer, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Result,
+  Struct,
+} from "effect";
 import { SecureRandom } from "effect/crypto";
 import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
@@ -38,11 +48,11 @@ import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
-const users = new Map<string, User>();
-const identifierRecords = new Map<string, Identifier>();
-const passwordHashes = new Map<string, string>();
-const sessions = new Map<string, Session>();
-const verifications = new Map<string, EmailVerification>();
+const users = MutableHashMap.empty<string, User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const passwordHashes = MutableHashMap.empty<string, string>();
+const sessions = MutableHashMap.empty<string, Session>();
+const verifications = MutableHashMap.empty<string, EmailVerification>();
 const sentEmails: Array<{ email: string; token: string }> = [];
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
@@ -57,55 +67,58 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
 };
 
 const findEmailIdentifier = (email: string): Identifier | null =>
-  Array.from(identifierRecords.values()).find(
+  Array.from(MutableHashMap.values(identifierRecords)).find(
     (identifier) => identifier.type === "email" && identifier.value === email,
   ) ?? null;
 
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const emailPasswordStore = {
   createUser: ({ name, attributes }: CreateUserInput) =>
     Effect.sync(() => {
-      const id = `user-${users.size + 1}`;
+      const id = `user-${MutableHashMap.size(users) + 1}`;
       const user: User = {
         id,
         ...(name !== undefined && { name }),
@@ -113,55 +126,58 @@ const emailPasswordStore = {
         updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         attributes: attributes ?? {},
       };
-      users.set(id, user);
+      MutableHashMap.set(users, id, user);
       return { user, created: true };
     }),
 
-  getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+  getPasswordHash: (userId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
 
-  clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
+  clearPasswordHash: (userId: string) =>
+    Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
-      passwordHashes.set(userId, hash);
+      MutableHashMap.set(passwordHashes, userId, hash);
     }),
 };
 
 const emailVerificationStore = {
   create: (verification: EmailVerification) =>
     Effect.sync(() => {
-      verifications.set(verification.token, verification);
+      MutableHashMap.set(verifications, verification.token, verification);
       return verification;
     }),
 
-  get: (token: string) => Effect.sync(() => verifications.get(token) ?? null),
+  get: (token: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
 
   delete: (token: string) =>
     Effect.sync(() => {
-      verifications.delete(token);
+      MutableHashMap.remove(verifications, token);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      verifications.forEach((verification, token) => {
+      MutableHashMap.forEach(verifications, (verification, token) => {
         if (verification.userId === userId) {
-          verifications.delete(token);
+          MutableHashMap.remove(verifications, token);
         }
       });
     }),
 };
 
 const userServiceStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 
   update: (user: User) =>
     Effect.sync(() => {
-      users.set(user.id, user);
+      MutableHashMap.set(users, user.id, user);
       return user;
     }),
 
   delete: (userId: string) =>
     Effect.sync(() => {
-      users.delete(userId);
+      MutableHashMap.remove(users, userId);
     }),
 };
 
@@ -270,11 +286,11 @@ const makeTestContext = async (
 
 describe("AuthLifecycleService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
-    verifications.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(verifications);
     sentEmails.splice(0, sentEmails.length);
   });
 
@@ -321,7 +337,7 @@ describe("AuthLifecycleService", () => {
       updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2021-01-01T00:00:00Z")),
       attributes: { plan: "enterprise", secret: "holder-only" },
     };
-    users.set(pending.id, pending);
+    MutableHashMap.set(users, pending.id, pending);
     addEmailIdentifier(pending.id, "pending@example.com", false);
 
     const result = await Effect.runPromise(
@@ -355,9 +371,11 @@ describe("AuthLifecycleService", () => {
     expect(result.session).toBeUndefined();
     // The holder's record is untouched, and the verification is re-issued to
     // the holder, not to the stand-in.
-    expect(users.get(pending.id)).toEqual(pending);
+    expect(Option.getOrUndefined(MutableHashMap.get(users, pending.id))).toEqual(pending);
     expect(sentEmails.map((sent) => sent.email)).toEqual(["pending@example.com"]);
-    expect([...verifications.values()].map((v) => v.userId)).toEqual([pending.id]);
+    expect(Arr.fromIterable(MutableHashMap.values(verifications)).map((v) => v.userId)).toEqual([
+      pending.id,
+    ]);
   });
 
   it("a sign-up for an address held verified fails with EmailInUseError", async () => {
@@ -369,7 +387,7 @@ describe("AuthLifecycleService", () => {
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(holder.id, holder);
+    MutableHashMap.set(users, holder.id, holder);
     addEmailIdentifier(holder.id, "held@example.com", true);
 
     const error = await Effect.runPromise(
@@ -404,9 +422,9 @@ describe("AuthLifecycleService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     addEmailIdentifier(user.id, "signin@example.com", false);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -442,7 +460,7 @@ describe("AuthLifecycleService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     addEmailIdentifier(user.id, "verify@example.com", false);
 
     const token = await Effect.runPromise(
@@ -488,9 +506,9 @@ describe("AuthLifecycleService", () => {
       attributes: {},
     };
 
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     addEmailIdentifier(user.id, "verified@example.com", true);
-    passwordHashes.set(user.id, hashResult.hash);
+    MutableHashMap.set(passwordHashes, user.id, hashResult.hash);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -520,11 +538,11 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
   const PASSWORD = "strong-password-123";
 
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
-    verifications.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(verifications);
     sentEmails.splice(0, sentEmails.length);
   });
 
@@ -536,7 +554,7 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(holder.id, holder);
+    MutableHashMap.set(users, holder.id, holder);
     addEmailIdentifier(holder.id, HELD, verified);
     return holder;
   };
@@ -596,8 +614,8 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
       // The held address is answered by a stand-in no row backs, in the shape
       // a fresh sign-up gets.
       expect(held.user.id).not.toBe(holder.id);
-      expect(users.has(held.user.id)).toBe(false);
-      expect(Object.keys(held)).toEqual(Object.keys(fresh));
+      expect(MutableHashMap.has(users, held.user.id)).toBe(false);
+      expect(Struct.keys(held)).toEqual(Struct.keys(fresh));
       expect(held.identifier).toEqual({ type: "email", value: HELD });
       expect(held.needsEmailVerification).toBe(true);
       expect(fresh.needsEmailVerification).toBe(true);
@@ -605,11 +623,11 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
       expect(fresh.session).toBeUndefined();
 
       // One verification record, for the fresh user; none for the stand-in.
-      const records = [...verifications.values()];
+      const records = Arr.fromIterable(MutableHashMap.values(verifications));
       expect(records.map((record) => [record.userId, record.email])).toEqual([
         [fresh.user.id, FRESH],
       ]);
-      expect(records.every((record) => users.has(record.userId))).toBe(true);
+      expect(records.every((record) => MutableHashMap.has(users, record.userId))).toBe(true);
       // The verification hooks never see the stand-in's id.
       expect(hookCalls).toEqual([
         ["before", fresh.user.id],
@@ -643,7 +661,9 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
 
     expect(held.needsEmailVerification).toBe(true);
     expect(sentEmails.map((sent) => sent.email)).toEqual([FRESH]);
-    expect([...verifications.values()].map((record) => record.email)).toEqual([FRESH]);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(verifications)).map((record) => record.email),
+    ).toEqual([FRESH]);
   });
 
   it("with verification off, neither sign-up sends anything", async () => {
@@ -660,7 +680,7 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
 
     expect(notices).toEqual([]);
     expect(sentEmails).toEqual([]);
-    expect(verifications.size).toBe(0);
+    expect(MutableHashMap.size(verifications)).toBe(0);
   });
 
   it("a failed send fails neither answer; both failures reach afterDeliveryFailure (#196)", async () => {
@@ -711,18 +731,20 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
   const VICTIM_PASSWORD = "victim-password-123";
 
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
-    verifications.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(verifications);
     sentEmails.splice(0, sentEmails.length);
   });
 
   it("a squatter's password and sessions do not survive the victim's verification", async () => {
     const context = await makeTestContext({ requireEmailVerification: true });
     const sessionsOf = (userId: string) =>
-      [...sessions.values()].filter((session) => session.userId === userId).length;
+      Arr.fromIterable(MutableHashMap.values(sessions)).filter(
+        (session) => session.userId === userId,
+      ).length;
 
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
@@ -787,9 +809,9 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     addEmailIdentifier(user.id, VICTIM, false);
-    passwordHashes.set(user.id, "squatter-hash");
+    MutableHashMap.set(passwordHashes, user.id, "squatter-hash");
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -803,8 +825,8 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
     );
 
     expect(result.session).toBeUndefined();
-    expect(passwordHashes.has(user.id)).toBe(false);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.has(passwordHashes, user.id)).toBe(false);
+    expect(MutableHashMap.size(sessions)).toBe(0);
     expect(findEmailIdentifier(VICTIM)?.verified).toBe(true);
   });
 
@@ -816,9 +838,9 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       attributes: {},
     };
-    users.set(user.id, user);
+    MutableHashMap.set(users, user.id, user);
     addEmailIdentifier(user.id, VICTIM, true);
-    passwordHashes.set(user.id, "owner-hash");
+    MutableHashMap.set(passwordHashes, user.id, "owner-hash");
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -832,9 +854,9 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
       }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
     );
 
-    expect(passwordHashes.get(user.id)).toBe("owner-hash");
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id))).toBe("owner-hash");
     // The session held before and the one the verification issued.
-    expect(sessions.size).toBe(2);
+    expect(MutableHashMap.size(sessions)).toBe(2);
     expect(result.session).toBeDefined();
   });
 });
@@ -843,11 +865,11 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
   const PASSWORD = "strong-password-123";
 
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    passwordHashes.clear();
-    sessions.clear();
-    verifications.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(verifications);
     sentEmails.splice(0, sentEmails.length);
   });
 
@@ -865,7 +887,7 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
   ).pipe(Layer.provide(Hooks.Default));
 
   const seed = (id: string, email: string, verified: boolean) => {
-    users.set(id, {
+    MutableHashMap.set(users, id, {
       id,
       createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
       updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -892,7 +914,9 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
     assert(Result.isSuccess(result));
     expect(result.success.identifier).toEqual({ type: "email", value: "alice@example.com" });
     expect(sentEmails.map((sent) => sent.email)).toEqual(["alice@example.com"]);
-    expect([...verifications.values()].map((v) => v.userId)).toEqual(["user-rewritten"]);
+    expect(Arr.fromIterable(MutableHashMap.values(verifications)).map((v) => v.userId)).toEqual([
+      "user-rewritten",
+    ]);
   });
 
   it("fails with EmailInUseError when the rewritten address is held verified, whoever holds the raw one", async () => {
@@ -904,6 +928,6 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailInUseError");
     expect(sentEmails).toEqual([]);
-    expect(verifications.size).toBe(0);
+    expect(MutableHashMap.size(verifications)).toBe(0);
   });
 });

@@ -12,7 +12,16 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Clock, DateTime, Effect, Layer, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Option,
+  Schema,
+} from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -55,8 +64,8 @@ const makeWorld = (type: IdentifierType, value: string) => {
     updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
     attributes: {},
   };
-  const users = new Map<string, Types.User>([[owner.id, owner]]);
-  const identifierRecords = new Map<string, Identifier>();
+  const users = MutableHashMap.fromIterable<string, Types.User>([[owner.id, owner]]);
+  const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
   const sessionsFor: string[] = [];
   /** Memberships a flow writes after its create (SCIM), recorded per world. */
@@ -78,7 +87,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
         verified: false,
         now: DateTime.toDateUtc(DateTime.nowUnsafe()),
       });
-      identifierRecords.set(held.id, held);
+      MutableHashMap.set(identifierRecords, held.id, held);
       return { user: owner, created: false };
     });
 
@@ -108,7 +117,9 @@ const makeWorld = (type: IdentifierType, value: string) => {
 
   const base = Layer.mergeAll(
     Layer.succeed(IdentifierStore)(identifiers),
-    Layer.succeed(UserStore)({ get: (userId) => Effect.sync(() => users.get(userId) ?? null) }),
+    Layer.succeed(UserStore)({
+      get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+    }),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Hooks.Default,
@@ -132,21 +143,23 @@ type World = ReturnType<typeof makeWorld>;
 const memoryOtpStore = <R extends { readonly purpose: string; readonly attempts: number }>(
   keyOf: (record: R) => string,
 ) => {
-  const records = new Map<string, R>();
+  const records = MutableHashMap.empty<string, R>();
   const key = (address: string, purpose: string) => `${address}:${purpose}`;
   return {
     upsert: (record: R) =>
-      Effect.sync(() => (records.set(key(keyOf(record), record.purpose), record), record)),
+      Effect.sync(
+        () => (MutableHashMap.set(records, key(keyOf(record), record.purpose), record), record),
+      ),
     get: (address: string, purpose: string) =>
-      Effect.sync(() => records.get(key(address, purpose)) ?? null),
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, key(address, purpose)))),
     delete: (address: string, purpose: string) =>
-      Effect.sync(() => void records.delete(key(address, purpose))),
+      Effect.sync(() => void MutableHashMap.remove(records, key(address, purpose))),
     incrementAttempts: (address: string, purpose: string) =>
       Effect.sync(() => {
-        const record = records.get(key(address, purpose));
+        const record = Option.getOrUndefined(MutableHashMap.get(records, key(address, purpose)));
         if (record === undefined) return 0;
         const attempts = record.attempts + 1;
-        records.set(key(address, purpose), { ...record, attempts });
+        MutableHashMap.set(records, key(address, purpose), { ...record, attempts });
         return attempts;
       }),
   };
@@ -253,14 +266,15 @@ const cases: ReadonlyArray<Case> = [
     value: EMAIL,
     run: (world) => {
       const sent: string[] = [];
-      const tokens = new Map<string, MagicLink.MagicLinkToken>();
+      const tokens = MutableHashMap.empty<string, MagicLink.MagicLinkToken>();
       const layer = Layer.mergeAll(
         world.base,
         Layer.succeed(MagicLink.MagicLinkStore)({
-          create: (token) => Effect.sync(() => (tokens.set(token.token, token), token)),
-          get: (token) => Effect.sync(() => tokens.get(token) ?? null),
+          create: (token) =>
+            Effect.sync(() => (MutableHashMap.set(tokens, token.token, token), token)),
+          get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
           getByEmail: () => Effect.succeed(null),
-          delete: (token) => Effect.sync(() => void tokens.delete(token)),
+          delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
           deleteByEmail: () => Effect.void,
         }),
         Layer.succeed(MagicLink.MagicLinkUserStore)({ createUser: world.createUser }),
@@ -332,17 +346,18 @@ const cases: ReadonlyArray<Case> = [
     type: "email",
     value: EMAIL,
     run: (world) => {
-      const nonces = new Map<string, number>();
+      const nonces = MutableHashMap.empty<string, number>();
       const layer = Layer.mergeAll(
         world.base,
         Layer.succeed(GoogleOneTap.GoogleOneTapNonceStore)({
-          create: (nonce, expiresAt) => Effect.sync(() => void nonces.set(nonce, expiresAt)),
+          create: (nonce, expiresAt) =>
+            Effect.sync(() => void MutableHashMap.set(nonces, nonce, expiresAt)),
           get: (nonce) =>
             Effect.sync(() => {
-              const expiresAt = nonces.get(nonce);
+              const expiresAt = Option.getOrUndefined(MutableHashMap.get(nonces, nonce));
               return expiresAt === undefined ? null : { expiresAt };
             }),
-          delete: (nonce) => Effect.sync(() => void nonces.delete(nonce)),
+          delete: (nonce) => Effect.sync(() => void MutableHashMap.remove(nonces, nonce)),
         }),
         Layer.succeed(OAuthUserStore)(oauthUserStore(world)),
       );
@@ -366,22 +381,27 @@ const cases: ReadonlyArray<Case> = [
     type: "email",
     value: EMAIL,
     run: (world) => {
-      const providers = new Map<string, Sso.SsoProvider>();
-      const states = new Map<string, OAuthState>();
+      const providers = MutableHashMap.empty<string, Sso.SsoProvider>();
+      const states = MutableHashMap.empty<string, OAuthState>();
       const requests: SamlAuthnRequestInput[] = [];
       const layer = Layer.mergeAll(
         world.base,
         Layer.succeed(Sso.SsoProviderStore)({
-          create: (provider) => Effect.sync(() => (providers.set(provider.id, provider), provider)),
-          getById: (id) => Effect.succeed(providers.get(id) ?? null),
+          create: (provider) =>
+            Effect.sync(() => (MutableHashMap.set(providers, provider.id, provider), provider)),
+          getById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(providers, id))),
           getByDomain: (domain) =>
-            Effect.succeed([...providers.values()].find((p) => p.domain === domain) ?? null),
-          list: () => Effect.succeed([...providers.values()]),
+            Effect.succeed(
+              Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ??
+                null,
+            ),
+          list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
         }),
         Layer.succeed(OAuthStateStore)({
-          create: (state) => Effect.sync(() => (states.set(state.state, state), state)),
-          get: (state) => Effect.succeed(states.get(state) ?? null),
-          delete: (state) => Effect.sync(() => void states.delete(state)),
+          create: (state) =>
+            Effect.sync(() => (MutableHashMap.set(states, state.state, state), state)),
+          get: (state) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, state))),
+          delete: (state) => Effect.sync(() => void MutableHashMap.remove(states, state)),
         }),
         Layer.succeed(OAuthUserStore)(oauthUserStore(world)),
         Layer.succeed(SamlVerifier)(stubSamlVerifier(requests)),
@@ -493,7 +513,9 @@ describe("a store whose createUser reports created: false", () => {
       // The owner's identifier is as the writer left it: not re-claimed, not
       // verified. No session, and nothing else written.
       expect(
-        [...world.identifierRecords.values()].map(({ userId, verified }) => ({ userId, verified })),
+        Arr.fromIterable(MutableHashMap.values(world.identifierRecords)).map(
+          ({ userId, verified }) => ({ userId, verified }),
+        ),
       ).toEqual([{ userId: world.owner.id, verified: false }]);
       expect(world.sessionsFor).toEqual([]);
       expect(extraWrites?.(world) ?? []).toEqual([]);

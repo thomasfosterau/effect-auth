@@ -8,6 +8,8 @@ import {
   Duration,
   Effect,
   Layer,
+  MutableHashMap,
+  Option,
   Predicate,
   Result,
   Tracer,
@@ -55,10 +57,10 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
   return item;
 };
 
-const users = new Map<string, User>();
-const identifierRecords = new Map<string, Identifier>();
-const otpRecords = new Map<string, EmailOtpRecord>();
-const sessions = new Map<string, Session>();
+const users = MutableHashMap.empty<string, User>();
+const identifierRecords = MutableHashMap.empty<string, Identifier>();
+const otpRecords = MutableHashMap.empty<string, EmailOtpRecord>();
+const sessions = MutableHashMap.empty<string, Session>();
 const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
 /** The name of each `EmailOtpStore` call, in order. */
 const storeOps: string[] = [];
@@ -70,42 +72,45 @@ const recordKey = (email: string, purpose: EmailOtpPurpose) => `${email}:${purpo
 const sessionStore = {
   create: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
-  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+  get: (sessionId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
 
   update: (session: Session) =>
     Effect.sync(() => {
-      sessions.set(session.id, session);
+      MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
-      sessions.delete(sessionId);
+      MutableHashMap.remove(sessions, sessionId);
     }),
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      sessions.forEach((session, id) => {
+      MutableHashMap.forEach(sessions, (session, id) => {
         if (session.userId === userId) {
-          sessions.delete(id);
+          MutableHashMap.remove(sessions, id);
         }
       });
     }),
 
   listByUserId: (userId: string) =>
-    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+    Effect.sync(() =>
+      Array.from(MutableHashMap.values(sessions)).filter((session) => session.userId === userId),
+    ),
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
 };
 
 const addUser = (user: User) => {
-  users.set(user.id, user);
+  MutableHashMap.set(users, user.id, user);
 };
 
 /** Seed an email identifier the way the store would persist it. */
@@ -118,11 +123,11 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
-  identifierRecords.set(identifier.id, identifier);
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
 };
 
 const findEmailIdentifier = (email: string): Identifier | null =>
-  Array.from(identifierRecords.values()).find(
+  Array.from(MutableHashMap.values(identifierRecords)).find(
     (identifier) => identifier.type === "email" && identifier.value === email,
   ) ?? null;
 
@@ -131,7 +136,7 @@ const emailOtpUserStore = {
     Effect.sync(() => {
       createdWith.push(input.identifier);
       const user: User = {
-        id: `user-${users.size + 1}`,
+        id: `user-${MutableHashMap.size(users) + 1}`,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
         updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
@@ -149,33 +154,35 @@ const emailOtpStore = {
   upsert: (record: EmailOtpRecord) =>
     Effect.sync(() => {
       storeOps.push("upsert");
-      otpRecords.set(recordKey(record.email, record.purpose), record);
+      MutableHashMap.set(otpRecords, recordKey(record.email, record.purpose), record);
       return record;
     }),
 
   get: (email: string, purpose: EmailOtpPurpose) =>
     Effect.sync(() => {
       storeOps.push("get");
-      return otpRecords.get(recordKey(email, purpose)) ?? null;
+      return Option.getOrNull(MutableHashMap.get(otpRecords, recordKey(email, purpose)));
     }),
 
   delete: (email: string, purpose: EmailOtpPurpose) =>
     Effect.sync(() => {
       storeOps.push("delete");
-      otpRecords.delete(recordKey(email, purpose));
+      MutableHashMap.remove(otpRecords, recordKey(email, purpose));
     }),
 
   incrementAttempts: (email: string, purpose: EmailOtpPurpose) =>
     Effect.gen(function* () {
       storeOps.push("incrementAttempts");
-      const record = otpRecords.get(recordKey(email, purpose));
+      const record = Option.getOrUndefined(
+        MutableHashMap.get(otpRecords, recordKey(email, purpose)),
+      );
       if (!record) {
         return yield* new Errors.AuthError({
           message: "OTP record not found",
         });
       }
       const updated = { ...record, attempts: record.attempts + 1 };
-      otpRecords.set(recordKey(email, purpose), updated);
+      MutableHashMap.set(otpRecords, recordKey(email, purpose), updated);
       return updated.attempts;
     }),
 };
@@ -188,8 +195,11 @@ const sessionConfig: SessionConfig = {
 };
 
 /** Password hashes, so a test can see a first proof clear one (#440). */
-const passwordHashes = new Map<string, string>();
-const emailPasswordStore = memoryEmailPasswordStore({ users: new Map(), passwordHashes });
+const passwordHashes = MutableHashMap.empty<string, string>();
+const emailPasswordStore = memoryEmailPasswordStore({
+  users: MutableHashMap.empty(),
+  passwordHashes,
+});
 
 const makeTestContext = async () => {
   // SessionService's `make` now resolves SessionStore | UserStore | Hooks at
@@ -232,11 +242,11 @@ const recordingSend = (email: string, otp: string, purpose: EmailOtpPurpose) =>
 
 describe("EmailOtpService", () => {
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    otpRecords.clear();
-    sessions.clear();
-    passwordHashes.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(otpRecords);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(passwordHashes);
     sentOtps.splice(0, sentOtps.length);
     storeOps.length = 0;
     createdWith.length = 0;
@@ -261,7 +271,7 @@ describe("EmailOtpService", () => {
     expect(sent.purpose).toBe("sign-in");
     expect(sent.otp).toMatch(/^\d{6}$/);
 
-    const record = otpRecords.get("new@example.com:sign-in");
+    const record = Option.getOrUndefined(MutableHashMap.get(otpRecords, "new@example.com:sign-in"));
     expect(record).toBeDefined();
     expect(record?.otpHash).toBe(hashToken(sent.otp));
     expect(record?.otpHash).not.toBe(sent.otp);
@@ -288,10 +298,10 @@ describe("EmailOtpService", () => {
     expect(sentOtps.length).toBe(2);
     expect(sentOtps[0]?.otp).toMatch(/^\d{8}$/);
     // One active OTP per email + purpose: only the latest hash remains.
-    expect(otpRecords.size).toBe(1);
-    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(
-      hashToken(recorded(sentOtps, 1).otp),
-    );
+    expect(MutableHashMap.size(otpRecords)).toBe(1);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(otpRecords, "repeat@example.com:sign-in"))?.otpHash,
+    ).toBe(hashToken(recorded(sentOtps, 1).otp));
   });
 
   it("should sign in a new user with a valid OTP, creating a verified email identifier and session", async () => {
@@ -321,9 +331,9 @@ describe("EmailOtpService", () => {
     ]);
     expect(result.session.userId).toBe(result.user.id);
     expect(result.session.attributes).toEqual({ device: "test" });
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
     // One-time use: record consumed.
-    expect(otpRecords.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
   it("should sign in an existing user without creating a new one", async () => {
@@ -349,7 +359,7 @@ describe("EmailOtpService", () => {
     );
 
     expect(result.user.id).toBe("user-known");
-    expect(users.size).toBe(1);
+    expect(MutableHashMap.size(users)).toBe(1);
     expect(result.session.userId).toBe("user-known");
   });
 
@@ -365,9 +375,9 @@ describe("EmailOtpService", () => {
       attributes: {},
     });
     addEmailIdentifier("user-squat", "victim@example.com", false);
-    passwordHashes.set("user-squat", "squatter-hash");
+    MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    sessions.set("squatter-session", {
+    MutableHashMap.set(sessions, "squatter-session", {
       id: "squatter-session",
       userId: "user-squat",
       expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
@@ -390,9 +400,11 @@ describe("EmailOtpService", () => {
     // The holder of the address is signed in; the squatter's password and
     // session are gone, so only the session just issued remains.
     expect(result.user.id).toBe("user-squat");
-    expect(passwordHashes.has("user-squat")).toBe(false);
-    expect(sessions.has("squatter-session")).toBe(false);
-    expect([...sessions.values()].map((session) => session.userId)).toEqual(["user-squat"]);
+    expect(MutableHashMap.has(passwordHashes, "user-squat")).toBe(false);
+    expect(MutableHashMap.has(sessions, "squatter-session")).toBe(false);
+    expect(
+      Arr.fromIterable(MutableHashMap.values(sessions)).map((session) => session.userId),
+    ).toEqual(["user-squat"]);
     expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
   });
 
@@ -406,7 +418,7 @@ describe("EmailOtpService", () => {
       attributes: {},
     });
     addEmailIdentifier("user-owner", "victim@example.com", true);
-    passwordHashes.set("user-owner", "owner-hash");
+    MutableHashMap.set(passwordHashes, "user-owner", "owner-hash");
 
     await Effect.runPromise(
       Effect.provide(
@@ -419,7 +431,9 @@ describe("EmailOtpService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    expect(passwordHashes.get("user-owner")).toBe("owner-hash");
+    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, "user-owner"))).toBe(
+      "owner-hash",
+    );
   });
 
   it("should reject a replayed OTP (one-time use)", async () => {
@@ -441,13 +455,13 @@ describe("EmailOtpService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailOtpError");
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("should reject expired OTPs and delete the record", async () => {
     const testContext = await makeTestContext();
 
-    otpRecords.set("late@example.com:sign-in", {
+    MutableHashMap.set(otpRecords, "late@example.com:sign-in", {
       email: "late@example.com",
       otpHash: hashToken("123456"),
       purpose: "sign-in",
@@ -469,8 +483,8 @@ describe("EmailOtpService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailOtpError");
-    expect(otpRecords.size).toBe(0);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("should increment attempts on a wrong OTP and delete the record when the limit is hit", async () => {
@@ -505,9 +519,9 @@ describe("EmailOtpService", () => {
     expect(real._tag).toBe("Failure");
     assert(Result.isFailure(real));
     expect(real.failure._tag).toBe("EmailOtpError");
-    expect(otpRecords.size).toBe(0);
-    expect(sessions.size).toBe(0);
-    expect(users.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+    expect(MutableHashMap.size(users)).toBe(0);
   });
 
   it("should allow the correct OTP after fewer than maxAttempts failures", async () => {
@@ -526,7 +540,7 @@ describe("EmailOtpService", () => {
     );
 
     expect(findEmailIdentifier("fumble@example.com")?.userId).toBe(result.user.id);
-    expect(sessions.size).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
   it("should not send sign-in OTPs to unknown emails when sign-up is disabled, storing a marker", async () => {
@@ -548,13 +562,16 @@ describe("EmailOtpService", () => {
     );
 
     expect(sentOtps.length).toBe(0);
-    expect(otpRecords.get("stranger@example.com:sign-in")?.attempts).toBe(0);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(otpRecords, "stranger@example.com:sign-in"))
+        ?.attempts,
+    ).toBe(0);
   });
 
   it("should not create users at sign-in when sign-up is disabled", async () => {
     const testContext = await makeTestContext();
 
-    otpRecords.set("orphan@example.com:sign-in", {
+    MutableHashMap.set(otpRecords, "orphan@example.com:sign-in", {
       email: "orphan@example.com",
       otpHash: hashToken("123456"),
       purpose: "sign-in",
@@ -579,9 +596,9 @@ describe("EmailOtpService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailOtpError");
-    expect(users.size).toBe(0);
-    expect(identifierRecords.size).toBe(0);
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(users)).toBe(0);
+    expect(MutableHashMap.size(identifierRecords)).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("should only send forget-password OTPs to existing users, succeeding either way", async () => {
@@ -611,8 +628,8 @@ describe("EmailOtpService", () => {
     expect(sentOtps.length).toBe(1);
     expect(sentOtps[0]?.email).toBe("member@example.com");
     expect(sentOtps[0]?.purpose).toBe("forget-password");
-    expect(otpRecords.size).toBe(2);
-    expect(otpRecords.has("missing@example.com:forget-password")).toBe(true);
+    expect(MutableHashMap.size(otpRecords)).toBe(2);
+    expect(MutableHashMap.has(otpRecords, "missing@example.com:forget-password")).toBe(true);
   });
 
   it("should verify email-verification OTPs via check without creating a session", async () => {
@@ -634,9 +651,9 @@ describe("EmailOtpService", () => {
     );
 
     expect(result).toEqual({ email: "verify@example.com", verified: true });
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
     // One-time use: record consumed.
-    expect(otpRecords.size).toBe(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
   it("should scope OTPs to their purpose", async () => {
@@ -657,7 +674,7 @@ describe("EmailOtpService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailOtpError");
-    expect(sessions.size).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("should fail with ResendTooSoonError when a resend is within the cooldown window", async () => {
@@ -685,14 +702,14 @@ describe("EmailOtpService", () => {
     expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     // The original OTP is preserved — no replacement was issued.
     expect(sentOtps.length).toBe(1);
-    expect(otpRecords.size).toBe(1);
+    expect(MutableHashMap.size(otpRecords)).toBe(1);
   });
 
   it("should allow a resend after the cooldown window has elapsed", async () => {
     const testContext = await makeTestContext();
 
     // Seed an OTP record whose createdAt is older than the 60 s cooldown.
-    otpRecords.set("user@example.com:sign-in", {
+    MutableHashMap.set(otpRecords, "user@example.com:sign-in", {
       email: "user@example.com",
       otpHash: hashToken("123456"),
       purpose: "sign-in",
@@ -716,11 +733,11 @@ describe("EmailOtpService", () => {
 
     // A fresh OTP was issued after the cooldown elapsed.
     expect(sentOtps.length).toBe(1);
-    expect(otpRecords.size).toBe(1);
+    expect(MutableHashMap.size(otpRecords)).toBe(1);
     // The new record has a fresh hash, not the seeded one.
-    expect(otpRecords.get("user@example.com:sign-in")?.otpHash).toBe(
-      hashToken(recorded(sentOtps).otp),
-    );
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(otpRecords, "user@example.com:sign-in"))?.otpHash,
+    ).toBe(hashToken(recorded(sentOtps).otp));
   });
 
   it("should scope the cooldown to each purpose independently", async () => {
@@ -742,7 +759,7 @@ describe("EmailOtpService", () => {
     );
 
     expect(sentOtps.length).toBe(2);
-    expect(otpRecords.size).toBe(2);
+    expect(MutableHashMap.size(otpRecords)).toBe(2);
   });
 
   it("should not apply the cooldown when resendCooldown is not configured", async () => {
@@ -760,7 +777,7 @@ describe("EmailOtpService", () => {
     );
 
     expect(sentOtps.length).toBe(2);
-    expect(otpRecords.size).toBe(1);
+    expect(MutableHashMap.size(otpRecords)).toBe(1);
   });
 
   // #415: where `send` hides whether the email has an account, an unknown email
@@ -825,7 +842,7 @@ describe("EmailOtpService", () => {
       // Only the account holder is sent a code; the unknown email holds an
       // undelivered record as its cooldown marker.
       expect(sentOtps.map((sent) => sent.email)).toEqual(["member@example.com"]);
-      expect(otpRecords.has(`missing@example.com:${purpose}`)).toBe(true);
+      expect(MutableHashMap.has(otpRecords, `missing@example.com:${purpose}`)).toBe(true);
     },
   );
 
@@ -860,7 +877,9 @@ describe("EmailOtpService", () => {
             }).pipe(Effect.provideService(SecureRandom.SecureRandom, zeroCrypto));
             yield* service.send("member@example.com", purpose);
             yield* service.send("missing@example.com", purpose);
-            const marker = otpRecords.get(recordKey("missing@example.com", purpose));
+            const marker = Option.getOrUndefined(
+              MutableHashMap.get(otpRecords, recordKey("missing@example.com", purpose)),
+            );
             const error = yield* Effect.flip(
               purpose === "sign-in"
                 ? Effect.asVoid(service.signIn("missing@example.com", guess))
@@ -877,7 +896,7 @@ describe("EmailOtpService", () => {
       expect(marker).toBeDefined();
       expect(marker?.otpHash).not.toBe(hashToken(guess));
       expect(error).toMatchObject({ _tag: "EmailOtpError", message: "Invalid or expired OTP" });
-      expect(users.size).toBe(1);
+      expect(MutableHashMap.size(users)).toBe(1);
       expect(createdWith).toEqual([]);
     },
   );
@@ -897,10 +916,10 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
   const invalid = { _tag: "Failure", error: "EmailOtpError", message: "Invalid or expired OTP" };
 
   beforeEach(() => {
-    users.clear();
-    identifierRecords.clear();
-    otpRecords.clear();
-    sessions.clear();
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(otpRecords);
+    MutableHashMap.clear(sessions);
     sentOtps.splice(0, sentOtps.length);
     storeOps.length = 0;
     createdWith.length = 0;
@@ -919,7 +938,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
   });
 
   const recordOf = (email: string, purpose: EmailOtpPurpose) => (): RecordState | null => {
-    const record = otpRecords.get(recordKey(email, purpose));
+    const record = Option.getOrUndefined(MutableHashMap.get(otpRecords, recordKey(email, purpose)));
     return record === undefined
       ? null
       : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
@@ -1072,10 +1091,12 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
             sendVerificationOtp: recordingSend,
           });
           yield* service.send("member@example.com", purpose);
-          const stored = otpRecords.get(recordKey("member@example.com", purpose));
+          const stored = Option.getOrUndefined(
+            MutableHashMap.get(otpRecords, recordKey("member@example.com", purpose)),
+          );
           assert(stored !== undefined, "send stored the OTP record");
 
-          otpRecords.set(recordKey("member@example.com", purpose), {
+          MutableHashMap.set(otpRecords, recordKey("member@example.com", purpose), {
             ...stored,
             attempts: maxAttempts,
           });

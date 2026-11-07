@@ -1,5 +1,5 @@
 import { describe, it, expect, onTestFinished } from "vite-plus/test";
-import { Array as Arr, Layer, Order, Schema } from "effect";
+import { Array as Arr, Layer, Order, Schema, Struct } from "effect";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
@@ -141,7 +141,7 @@ describe("getOpenApiSpec", () => {
 
   it("contains every endpoint path", () => {
     const spec = getOpenApiSpec();
-    const paths = Object.keys(spec.paths);
+    const paths = Struct.keys(spec.paths);
     Arr.forEach(EXPECTED_PATHS, (p) => {
       expect(paths).toContain(p);
     });
@@ -155,7 +155,7 @@ describe("getOpenApiSpec", () => {
     // Sign-up and sign-in answer `201` with a session or `202` without one,
     // and JSON:API's negotiation errors (406 / 415) besides their own.
     const signUp = spec.paths["/users"]?.post?.responses ?? {};
-    expect(Arr.sort(Object.keys(signUp), Order.String)).toEqual([
+    expect(Arr.sort(Struct.keys(signUp), Order.String)).toEqual([
       "201",
       "202",
       "400",
@@ -168,7 +168,7 @@ describe("getOpenApiSpec", () => {
     ]);
 
     const signIn = spec.paths["/sessions"]?.post?.responses ?? {};
-    expect(Arr.sort(Object.keys(signIn), Order.String)).toEqual([
+    expect(Arr.sort(Struct.keys(signIn), Order.String)).toEqual([
       "201",
       "202",
       "400",
@@ -184,7 +184,7 @@ describe("getOpenApiSpec", () => {
     // A JSON:API resource endpoint documents its own errors and the
     // protocol's (400 for a malformed query, 406 / 415 for negotiation).
     const session = spec.paths["/sessions/{id}"]?.get?.responses ?? {};
-    expect(Arr.sort(Object.keys(session), Order.String)).toEqual([
+    expect(Arr.sort(Struct.keys(session), Order.String)).toEqual([
       "200",
       "400",
       "401",
@@ -215,7 +215,7 @@ describe("HttpServer.make docs routes", () => {
     expect(jsonRes.headers.get("content-type")).toContain("application/json");
     const doc = Schema.decodeUnknownSync(OpenApiDocument)(await jsonRes.json());
     expect(doc.openapi).toBe("3.1.0");
-    expect(Object.keys(doc.paths)).toContain("/sessions");
+    expect(Struct.keys(doc.paths)).toContain("/sessions");
 
     const refRes = await handler(new Request("http://test/api/auth/reference"));
     expect(refRes.status).toBe(200);

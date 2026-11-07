@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer } from "effect";
+import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
 import { ClientIP } from "../ClientIP.ts";
 import { Hooks } from "../Hooks.ts";
 import type { SignInInput } from "../email/EmailPassword.ts";
@@ -13,30 +13,30 @@ import { IPRateLimitPlugin } from "./IPRateLimit.ts";
 
 /** In-memory rate-limit store backed by a simple Map (pass one to inspect it). */
 const makeMemStore = (
-  store: Map<string, RateLimitEntry> = new Map(),
+  store: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
 ): typeof RateLimitStore.Service => {
   return {
-    get: (key) => Effect.succeed(store.get(key) ?? null),
+    get: (key) => Effect.succeed(Option.getOrNull(MutableHashMap.get(store, key))),
     set: (key, entry) =>
       Effect.sync(() => {
-        store.set(key, entry);
+        MutableHashMap.set(store, key, entry);
       }),
     increment: (key, ttlSec) =>
       Effect.sync(() => {
         const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
-        const existing = store.get(key);
+        const existing = Option.getOrUndefined(MutableHashMap.get(store, key));
         if (!existing || now >= existing.resetAt) {
           const entry: RateLimitEntry = { key, count: 1, resetAt: now + ttlSec * 1000 };
-          store.set(key, entry);
+          MutableHashMap.set(store, key, entry);
           return 1;
         }
         const updated = { ...existing, count: existing.count + 1 };
-        store.set(key, updated);
+        MutableHashMap.set(store, key, updated);
         return updated.count;
       }),
     delete: (key) =>
       Effect.sync(() => {
-        store.delete(key);
+        MutableHashMap.remove(store, key);
       }),
   };
 };
@@ -47,7 +47,7 @@ const makeMemStore = (
  */
 const makeHooksLayer = (
   cfg?: Parameters<typeof IPRateLimitPlugin>[0],
-  entries?: Map<string, RateLimitEntry>,
+  entries?: MutableHashMap.MutableHashMap<string, RateLimitEntry>,
 ) => {
   const storeImpl = makeMemStore(entries);
   const storeLayer = Layer.succeed(RateLimitStore, storeImpl);
@@ -109,7 +109,7 @@ describe("IPRateLimitPlugin", () => {
     ));
 
   it("refuses every request whose ClientIP carries no address, and counts none of them", () => {
-    const entries = new Map<string, RateLimitEntry>();
+    const entries = MutableHashMap.empty<string, RateLimitEntry>();
     return Effect.runPromise(
       Effect.gen(function* () {
         // Ten address-less sign-ins: each is refused, none is let through unlimited
@@ -126,10 +126,10 @@ describe("IPRateLimitPlugin", () => {
         expect(err).toBeInstanceOf(RateLimitError);
         expect(err).toMatchObject({ key: "ip:signin" });
         // None of the refusals touched the store.
-        expect([...entries.keys()]).toEqual([]);
+        expect(Arr.fromIterable(MutableHashMap.keys(entries))).toEqual([]);
         // A visitor with an address is still keyed on their own budget.
         expect(yield* callSignIn("198.51.100.4")).toBe("ok");
-        expect([...entries.keys()]).toEqual(["ip:signin:198.51.100.4"]);
+        expect(Arr.fromIterable(MutableHashMap.keys(entries))).toEqual(["ip:signin:198.51.100.4"]);
       }).pipe(Effect.provide(makeHooksLayer(undefined, entries))),
     );
   });

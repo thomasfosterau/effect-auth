@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import {
   AnonymousService,
   AnonymousUserStore,
@@ -25,14 +25,14 @@ const makeSession = (userId: string): Types.Session => {
 
 interface Harness {
   readonly layer: Layer.Layer<AnonymousService | AnonymousUserStore | SessionService | Hooks>;
-  readonly users: Map<string, Types.User>;
+  readonly users: MutableHashMap.MutableHashMap<string, Types.User>;
   readonly created: string[];
   readonly linkCalls: Array<{ anon: string; real: string }>;
   readonly invalidatedUserSessions: string[];
 }
 
 const makeHarness = (config?: AnonymousConfig): Harness => {
-  const users = new Map<string, Types.User>();
+  const users = MutableHashMap.empty<string, Types.User>();
   const created: string[] = [];
   const linkCalls: Array<{ anon: string; real: string }> = [];
   const invalidatedUserSessions: string[] = [];
@@ -52,11 +52,11 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
           updatedAt: now,
           attributes: { isAnonymous: true, email: `${id}@anonymous.local` },
         };
-        users.set(id, user);
+        MutableHashMap.set(users, id, user);
         created.push(id);
         return user;
       }),
-    deleteUser: (userId) => Effect.sync(() => void users.delete(userId)),
+    deleteUser: (userId) => Effect.sync(() => void MutableHashMap.remove(users, userId)),
   };
 
   const sessionManager: typeof SessionService.Service = {
@@ -125,7 +125,7 @@ describe("Anonymous", () => {
     expect(isAnonymousUser(user)).toBe(true);
     expect(user.attributes["email"]).toMatch(/@anonymous\.local$/);
     expect(session.userId).toBe(user.id);
-    expect(h.users.has(user.id)).toBe(true);
+    expect(MutableHashMap.has(h.users, user.id)).toBe(true);
   });
 
   it("passes session attributes through to the session manager", async () => {
@@ -146,7 +146,7 @@ describe("Anonymous", () => {
     };
     await run(h, (svc) => svc.linkAccount(anon, realUser));
     expect(h.linkCalls).toEqual([{ anon: anon.id, real: "real-1" }]);
-    expect(h.users.has(anon.id)).toBe(false);
+    expect(MutableHashMap.has(h.users, anon.id)).toBe(false);
   });
 
   it("isAnonymousUser detects the convention flag", () => {
