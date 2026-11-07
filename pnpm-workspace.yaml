@@ -63,7 +63,7 @@ catalog:
   "@enfect/oxlint": ^0.10.0
   # `@thomasfosterau/effect-auth/saml`'s XML-DSig and canonicalisation. 5.1.0
   # fixed CVE-2025-54419 / CVE-2025-54369; never relax the floor below it.
-  "@node-saml/node-saml": ^5.1.0
+  "@node-saml/node-saml": ^5.2.0
   "@sveltejs/package": ^3.0.2
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/svelte": ^5.4.2
@@ -141,7 +141,7 @@ catalogs:
     "@types/pg": ^8.15.0
     # The optional peer of effect-auth's `./saml` subpath, at the same
     # CVE-fixed floor as the catalog pin above.
-    "@node-saml/node-saml": ^5.1.0
+    "@node-saml/node-saml": ^5.2.0
     # `^4.0.0` by policy, raised here because the packages' own code needs an
     # Effect module that first shipped in a later minor: `effect/crypto`
     # (`SecureRandom`, `Digest`, which the core's services yield) is new in
