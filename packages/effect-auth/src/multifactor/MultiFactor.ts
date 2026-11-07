@@ -399,22 +399,18 @@ export const make = (
     /**
      * Generate a cryptographically secure pending-challenge token
      */
-    const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto, "Failed to generate pending token");
+    const generatePendingToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     /**
      * Generate a single plaintext backup code: 10 crypto-random hex characters
      * formatted as `xxxxx-xxxxx`.
      */
-    const generateBackupCode = (): Effect.Effect<string, Errors.AuthError> =>
+    const generateBackupCode = (): Effect.Effect<string> =>
       crypto.randomBytes(5).pipe(
         Effect.map((bytes) => {
           const raw = Hex.encode(bytes);
           return `${raw.slice(0, 5)}-${raw.slice(5)}`;
         }),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate backup code", cause }),
-        ),
       );
 
     /**

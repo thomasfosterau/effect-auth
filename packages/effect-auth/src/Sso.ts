@@ -417,12 +417,7 @@ export const make = (
     const store = yield* SsoProviderStore;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const randomId = (): Effect.Effect<string, AuthError> =>
-      crypto
-        .uuidV4()
-        .pipe(
-          Effect.mapError((cause) => new AuthError({ message: "Failed to generate id", cause })),
-        );
+    const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
     /**
      * SAML message ids are XML `NCName`s, which may not start with a digit —

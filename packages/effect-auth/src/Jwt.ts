@@ -285,13 +285,7 @@ export const generateKeyPair = (
   crypto: typeof SecureRandom.SecureRandom.Service,
 ): Effect.Effect<JwtKeyPair, JwtError> =>
   Effect.gen(function* () {
-    const id = yield* crypto
-      .uuidV4()
-      .pipe(
-        Effect.mapError(
-          (cause) => new JwtError({ message: `Failed to generate ${algorithm} key id`, cause }),
-        ),
-      );
+    const id = yield* crypto.uuidV4();
     const { publicKeyJwk, privateKeyPem } = yield* Effect.try({
       try: () => Cipher.generateJwsKeyPair(algorithm),
       catch: (error) =>

@@ -90,14 +90,7 @@ export const generateSecret = (
         message: "Invalid secret length: must be a positive integer of at least 16 bytes",
       });
     }
-    const bytes = yield* crypto
-      .randomBytes(length)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new Errors.HashingError({ message: "Failed to generate random secret", cause }),
-        ),
-      );
+    const bytes = yield* crypto.randomBytes(length);
     return bytes;
   });
 

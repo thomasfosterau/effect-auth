@@ -865,15 +865,10 @@ export const make = (
     const crypto = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
 
-    const randomToken = (): Effect.Effect<string, AuthError> => randomBase64UrlToken(crypto);
+    const randomToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
-    const randomClientId = (): Effect.Effect<string, AuthError> =>
-      crypto.randomBytes(16).pipe(
-        Effect.map(Hex.encode),
-        Effect.mapError(
-          (cause) => new AuthError({ message: "Failed to generate client id", cause }),
-        ),
-      );
+    const randomClientId = (): Effect.Effect<string> =>
+      crypto.randomBytes(16).pipe(Effect.map(Hex.encode));
 
     /** SHA-256 digest of the PKCE code verifier, base64url-encoded. */
     const hashCodeVerifier = (verifier: string): Effect.Effect<string> =>

@@ -148,8 +148,7 @@ export const make = (
     const store = yield* OneTimeTokenStore;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto);
+    const generateRawToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       generate: Effect.fn("OneTimeTokenService.generate")(

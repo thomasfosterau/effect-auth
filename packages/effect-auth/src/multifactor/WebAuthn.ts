@@ -260,14 +260,7 @@ export const make = (
 
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
 
-    const generateChallenge = (): Effect.Effect<Uint8Array, Errors.AuthError> =>
-      crypto
-        .randomBytes(32)
-        .pipe(
-          Effect.mapError(
-            (cause) => new Errors.AuthError({ message: "Failed to generate challenge", cause }),
-          ),
-        );
+    const generateChallenge = (): Effect.Effect<Uint8Array> => crypto.randomBytes(32);
 
     return {
       generateRegistrationChallenge: Effect.fn("WebAuthnService.generateRegistrationChallenge")(

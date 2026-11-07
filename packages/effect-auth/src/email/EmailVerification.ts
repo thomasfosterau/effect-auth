@@ -144,8 +144,7 @@ export class EmailVerificationService extends Context.Service<
  */
 export const generateVerificationToken = (
   crypto: typeof SecureRandom.SecureRandom.Service,
-): Effect.Effect<string, AuthError> =>
-  randomBase64UrlToken(crypto, "Failed to generate verification token");
+): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
 /**
  * Create an email verification service

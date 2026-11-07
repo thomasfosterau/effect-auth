@@ -412,14 +412,7 @@ export const make = (
     const hasher = yield* PasswordHasher;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const randomId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto
-        .uuidV4()
-        .pipe(
-          Effect.mapError(
-            (cause) => new Errors.AuthError({ message: "Failed to generate identifier id", cause }),
-          ),
-        );
+    const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
     return {
       listUsers: Effect.fn("AdminService.listUsers")(function* (

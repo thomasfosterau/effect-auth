@@ -739,16 +739,9 @@ export const make = (
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const randomId = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto
-        .uuidV4()
-        .pipe(
-          Effect.mapError(
-            (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
-          ),
-        );
+    const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
-    const randomToken = (): Effect.Effect<string, Errors.AuthError> => randomBase64UrlToken(crypto);
+    const randomToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     /**
      * The organization role a SCIM-provisioned member receives: the SCIM

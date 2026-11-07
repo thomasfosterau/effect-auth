@@ -344,10 +344,7 @@ export class OAuthUserStore extends Context.Service<
 export const generateState = (): Effect.Effect<string, never, SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
     const crypto = yield* SecureRandom.SecureRandom;
-    return yield* crypto.randomBytes(32).pipe(
-      Effect.orDie,
-      Effect.map((bytes) => Base64Url.encode(bytes)),
-    );
+    return yield* crypto.randomBytes(32).pipe(Effect.map((bytes) => Base64Url.encode(bytes)));
   });
 
 /**
@@ -378,10 +375,7 @@ export const generatePKCE = (): Effect.Effect<
 export const generateNonce = (): Effect.Effect<string, never, SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
     const crypto = yield* SecureRandom.SecureRandom;
-    return yield* crypto.randomBytes(16).pipe(
-      Effect.orDie,
-      Effect.map((bytes) => Base64Url.encode(bytes)),
-    );
+    return yield* crypto.randomBytes(16).pipe(Effect.map((bytes) => Base64Url.encode(bytes)));
   });
 
 /** Decodes a JWT segment's JSON object; throws on invalid JSON or a non-object. */
@@ -1053,13 +1047,8 @@ export const make = (
     const crypto = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
 
-    const randomAccountId = (): Effect.Effect<string, AuthError> =>
-      crypto.randomBytes(16).pipe(
-        Effect.map((bytes) => Hex.encode(bytes)),
-        Effect.mapError(
-          (cause) => new AuthError({ message: "Failed to generate account id", cause }),
-        ),
-      );
+    const randomAccountId = (): Effect.Effect<string> =>
+      crypto.randomBytes(16).pipe(Effect.map((bytes) => Hex.encode(bytes)));
 
     const encryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> => {
       if (cipher === null) return Effect.succeed(account);

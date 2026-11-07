@@ -223,8 +223,7 @@ const make = (
     const sessionManager = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
 
-    const generateDeviceCode = (): Effect.Effect<string, Errors.AuthError> =>
-      randomBase64UrlToken(crypto, "Failed to generate device code");
+    const generateDeviceCode = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       begin: Effect.fn("DeviceAuthorizationService.begin")(function* (options?: {
