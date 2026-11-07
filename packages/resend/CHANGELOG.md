@@ -1,5 +1,19 @@
 # @thomasfosterau/effect-auth-resend
 
+## 0.1.1
+
+### Patch Changes
+
+- 3c140a6: Ship `CHANGELOG.md` in the published tarball, so the release notes can be read from `node_modules` (#545).
+- Updated dependencies [55637b0]
+- Updated dependencies [3c140a6]
+- Updated dependencies [1cacf66]
+- Updated dependencies [e52a95d]
+- Updated dependencies [7f12561]
+- Updated dependencies [47534bb]
+- Updated dependencies [4c48eb4]
+  - @thomasfosterau/effect-auth@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
