@@ -21,7 +21,8 @@
     "directory": "packages/twilio"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "sideEffects": false,

@@ -24,7 +24,8 @@
     "directory": "packages/argon2"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "sideEffects": false,

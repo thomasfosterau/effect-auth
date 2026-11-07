@@ -27,7 +27,8 @@
     "directory": "packages/alchemy-postgres"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "sideEffects": false,
