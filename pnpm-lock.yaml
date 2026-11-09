@@ -82,8 +82,8 @@ catalogs:
       specifier: 3.39.0
       version: 3.39.0
     hash-wasm:
-      specifier: ^4.12.0
-      version: 4.12.0
+      specifier: ^4.13.0
+      version: 4.13.0
     jsdom:
       specifier: ^30.1.3
       version: 30.1.3
@@ -246,7 +246,7 @@ importers:
         version: link:../effect-auth
       hash-wasm:
         specifier: 'catalog:'
-        version: 4.12.0
+        version: 4.13.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -713,9 +713,6 @@ packages:
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
-
-  '@cloudflare/workers-types@5.20261104.1':
-    resolution: {integrity: sha512-XSPcK88JXnW/oC82wuXvaP7vgyk2myydugbgOd/RcLKwqkwW0cP09Ozp9ItACa4IAZ7uKtMIfxZpUTXajYVd1Q==}
 
   '@cloudflare/workers-types@5.20261106.1':
     resolution: {integrity: sha512-uQtZyYehF0hwImaFi0/z/BWeTC/DMKpEo+nCySs5WZwoMhnIqLnN3sVjS7GCBc222EWf+F6khsHPWIvPEaP6JA==}
@@ -2953,8 +2950,8 @@ packages:
     resolution: {integrity: sha512-lh9HLdb53sC7XIZOYzTXM4lFuXElv3EVkSDhsd7DoJBj7hm+Ni7D3qYbb+Rr8DuM8nRanBvkVO9d7askreXGnQ==}
     deprecated: Removed event-stream from gulp-header
 
-  hash-wasm@4.12.0:
-    resolution: {integrity: sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==}
+  hash-wasm@4.13.0:
+    resolution: {integrity: sha512-GrWl7wsV46fKIXQZB5ebskLZLAmKL6d9RS0fspCxDeQyjoNu1AfTJTMLPOJyfzaQm0ldFiwFN21/w+sE/kgEFQ==}
 
   html-encoding-sniffer@7.0.0:
     resolution: {integrity: sha512-UikN5yr7xsCDAq87Or5or0PAlD3HJJOKVzM05az588WnpDJ4Ux7a2A53Qi6gofGg2/EtvF/H4hCi/TXfCW4Y6w==}
@@ -4242,10 +4239,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261026.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20261104.1': {}
-
-  '@cloudflare/workers-types@5.20261106.1':
-    optional: true
+  '@cloudflare/workers-types@5.20261106.1': {}
 
   '@csstools/color-helpers@6.1.2': {}
 
@@ -4358,7 +4352,7 @@ snapshots:
 
   '@effect/sql-d1@4.1.2(effect@4.1.2)':
     dependencies:
-      '@cloudflare/workers-types': 5.20261104.1
+      '@cloudflare/workers-types': 5.20261106.1
       effect: 4.1.2
 
   '@effect/sql-pg@4.1.2(effect@4.1.2)':
@@ -5778,7 +5772,7 @@ snapshots:
       lodash.template: 4.18.1
       through2: 2.0.5
 
-  hash-wasm@4.12.0: {}
+  hash-wasm@4.13.0: {}
 
   html-encoding-sniffer@7.0.0:
     dependencies:
