@@ -1,5 +1,23 @@
 # @thomasfosterau/effect-auth-drizzle
 
+## 0.1.1
+
+### Patch Changes
+
+- 3c140a6: Ship `CHANGELOG.md` in the published tarball, so the release notes can be read from `node_modules` (#545).
+- d39f978: Admit drizzle-orm's 1.0 line in the `drizzle-orm` peer range: `>=0.44.0 || >=1.0.0-rc.5` (was `>=0.44.0`, which rejects every 1.0 release candidate, since a range never matches a prerelease it does not name). The package's suite now runs on both lines, 0.45 and 1.0.0-rc.5 (#544).
+  
+  The README and API examples now hand drivers their client as `drizzle({ client })`: drizzle-orm 1.0 reads a bare client argument as a config and opens a default connection in its place.
+- e52a95d: Pay down oxlint adoption allowances (#503): `AuthDatabase.delete` drops its unused type parameter, and the core's message catalog, header detection and client session refresh are rewritten without behaviour changes for valid inputs.
+- Updated dependencies [55637b0]
+- Updated dependencies [3c140a6]
+- Updated dependencies [1cacf66]
+- Updated dependencies [e52a95d]
+- Updated dependencies [7f12561]
+- Updated dependencies [47534bb]
+- Updated dependencies [4c48eb4]
+  - @thomasfosterau/effect-auth@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

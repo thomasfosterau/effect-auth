@@ -1,5 +1,26 @@
 # @thomasfosterau/effect-auth
 
+## 0.2.0
+
+### Minor Changes
+
+- 55637b0: `Cacheability.publicReach` and `publicReachByType` add a drift guard for viewer-less caches (#191). They compile each resource type's read scope for the anonymous principal and classify the type. `All` means every row is public, so a cache may admit the type wholesale. `Some` means only the rows a filter admits are public: check each representation with `publiclyServeable`. `None` means no row is public. `Undecided` means the policies read rows in a way a scope can't express, and it never counts as public. Pin the result in a test: a policy change that moves a type from public to owned then fails the build, where a hand-kept list of public types would go stale without anyone noticing.
+- 1cacf66: Drop the error paths for drawing randomness, which cannot fail: Effect 4.1's `SecureRandom` has a `never` error channel (#520). `generateVerificationToken` and `generateMagicLinkToken` now return `Effect<string>` (was `Effect<string, AuthError>`); a `catchTag("AuthError", …)` on either can go. `generateState` and `generateNonce` drop a no-op `Effect.orDie`. The services' own signatures are unchanged; they no longer produce an `AuthError` they could never raise.
+- 7f12561: The in-memory stores and `EntitySlice` use Effect collections instead of native `Map`s and `Set`s (#443).
+  
+  Migration (these are test and single-process helpers):
+  
+  - Every `memory*Store` that took a pre-seeded `Map` now takes a `MutableHashMap` from `effect`: `memorySessionStore`, `memoryMultiFactorStore`, `memoryTrustedDeviceStore`, `memoryOtpSecondFactorStore`, `memoryOAuthAccountStore`, the four `memoryOidc*Store`s, `memoryIdentifierStore`, `memoryAccountLockoutStore`, `memoryOrganizationDomainStore`, `memorySamlReplayStore`, `memoryScimConnectionStore` and `memoryPolicyStore` (its `policies`, `templates` and `links`). `MemoryUserTable`'s `users` and `passwordHashes` are `MutableHashMap`s too. Build one with `MutableHashMap.empty()` or `MutableHashMap.fromIterable(entries)` and read it with `MutableHashMap.get` (an `Option`), `MutableHashMap.values` and `MutableHashMap.size`.
+  - `EntitySlice.entities` is a `HashMap<string, Entity>`. Build slices with `Entity.slice` and read them with `Entity.getEntity`, as before; code that read `entities` directly uses `HashMap.get`.
+  - `./client/testing`'s `makeServerFixture` returns `sessions`, `usersById`, `identifierRecords` and `domainRecords` as `MutableHashMap`s and `publishedDnsDomains` as a `MutableHashSet` (`MutableHashSet.add(fixture.publishedDnsDomains, domain)`).
+- 47534bb: `purgeExpiredKV` no longer requires `KeyValueStoreKeys` (#521). Without one, it finds the records through the `KeyValueStore`'s own `keys`, new in Effect 4.1, so it runs over any store, `KeyValueStore.layerMemory` included. `KeyValueStoreKeys` stays as an optional prefix listing for backends that list one prefix more cheaply than they list every key, such as a large or shared Workers KV namespace, or Redis. When it is provided, the purge uses it.
+
+### Patch Changes
+
+- 3c140a6: Ship `CHANGELOG.md` in the published tarball, so the release notes can be read from `node_modules` (#545).
+- e52a95d: Pay down oxlint adoption allowances (#503): `AuthDatabase.delete` drops its unused type parameter, and the core's message catalog, header detection and client session refresh are rewritten without behaviour changes for valid inputs.
+- 4c48eb4: `./saml`: the tamper check on `InResponseTo` reads the values from the raw XML rather than from node-saml's `profile.inResponseTo` (#532). node-saml 5.2 fills that field from the signed confirmation data, so on 5.2 the check compared the signed value with itself and never fired. A rewritten Response attribute is rejected again on both 5.1 and 5.2. So is any second `InResponseTo` anywhere in the document that disagrees with the signed one.
+
 ## 0.1.0
 
 ### Minor Changes

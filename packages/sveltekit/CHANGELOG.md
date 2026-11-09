@@ -1,5 +1,23 @@
 # @thomasfosterau/effect-auth-sveltekit
 
+## 0.2.0
+
+### Minor Changes
+
+- 23a9904: Credential helpers for SvelteKit remote functions (#487). `credentialForm` builds a remote `form()` handler: it sets the session cookie and redirects to the `safeRedirect`-validated target, or returns the pending step or a failure whose `kind` tells `invalid` (`400`/`401`) from `rate-limited` (`429`) and `unavailable`. `credentialCommand` builds a remote `command()` handler that answers the whole result, with the target as `location`, since a command cannot redirect. Both take `getRequestEvent` (and `redirect`) from the app, so the package still has no `@sveltejs/kit` dependency. `credentialAction` now wraps the same `submitCredential`, which is exported. `CredentialRequestOptions<Input, Fields>` generalizes `CredentialActionOptions` (now its `FormData` case), with a new `target` option for reading the post-sign-in target from the input.
+
+### Patch Changes
+
+- 3c140a6: Ship `CHANGELOG.md` in the published tarball, so the release notes can be read from `node_modules` (#545).
+- Updated dependencies [55637b0]
+- Updated dependencies [3c140a6]
+- Updated dependencies [1cacf66]
+- Updated dependencies [e52a95d]
+- Updated dependencies [7f12561]
+- Updated dependencies [47534bb]
+- Updated dependencies [4c48eb4]
+  - @thomasfosterau/effect-auth@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
