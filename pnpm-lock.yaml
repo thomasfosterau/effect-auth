@@ -46,8 +46,8 @@ catalogs:
       specifier: ^5.4.2
       version: 5.4.2
     '@thomasfosterau/effect-jsonapi':
-      specifier: ^0.20.0
-      version: 0.20.0
+      specifier: ^0.21.0
+      version: 0.21.0
     '@types/better-sqlite3':
       specifier: ^9.6.0
       version: 9.6.0
@@ -314,7 +314,7 @@ importers:
         version: 5.1.0
       '@thomasfosterau/effect-jsonapi':
         specifier: 'catalog:'
-        version: 0.20.0(effect@4.1.2)
+        version: 0.21.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(effect@4.1.2)
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0
@@ -713,9 +713,6 @@ packages:
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
-
-  '@cloudflare/workers-types@5.20261104.1':
-    resolution: {integrity: sha512-XSPcK88JXnW/oC82wuXvaP7vgyk2myydugbgOd/RcLKwqkwW0cP09Ozp9ItACa4IAZ7uKtMIfxZpUTXajYVd1Q==}
 
   '@cloudflare/workers-types@5.20261106.1':
     resolution: {integrity: sha512-uQtZyYehF0hwImaFi0/z/BWeTC/DMKpEo+nCySs5WZwoMhnIqLnN3sVjS7GCBc222EWf+F6khsHPWIvPEaP6JA==}
@@ -1856,8 +1853,28 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
-  '@thomasfosterau/effect-jsonapi@0.20.0':
-    resolution: {integrity: sha512-vn/MBiwWhqeEWS/RxhgjgREg7ErpmGCCP8u1/ESz+bKAWX0Yes9CvruULkq2d6buIihpVSDL+SDDSzVJOY/vIw==}
+  '@thomasfosterau/effect-ext@0.1.0':
+    resolution: {integrity: sha512-gCewDQmefBF48NeR/3iVdPSxilNbPel6P/AYU5j1iykcBCmXNv3ZwAkkLOls2c5j7iscquXLlTov2IGsAvhgzw==}
+    engines: {node: '>=22.18'}
+    hasBin: true
+    peerDependencies:
+      '@effect/platform-browser': ^4.0.0
+      '@effect/platform-node': ^4.0.0
+      '@thomasfosterau/effect-jsonapi': '>=0.16.1'
+      '@thomasfosterau/effect-parse': ^0.4.1
+      effect: 4.1.2
+    peerDependenciesMeta:
+      '@effect/platform-browser':
+        optional: true
+      '@effect/platform-node':
+        optional: true
+      '@thomasfosterau/effect-jsonapi':
+        optional: true
+      '@thomasfosterau/effect-parse':
+        optional: true
+
+  '@thomasfosterau/effect-jsonapi@0.21.0':
+    resolution: {integrity: sha512-EoQJH+1r2tVOF+IRK9haOYMkvC8UpYqfOoxi+BHXkH7I4qbmQAjRuLTCdGh7cDsJJlLM4BdbG5UUz4I/uuytAw==}
     engines: {node: '>=22', pnpm: '>=11'}
     peerDependencies:
       effect: 4.1.2
@@ -4242,10 +4259,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261026.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20261104.1': {}
-
-  '@cloudflare/workers-types@5.20261106.1':
-    optional: true
+  '@cloudflare/workers-types@5.20261106.1': {}
 
   '@csstools/color-helpers@6.1.2': {}
 
@@ -4358,7 +4372,7 @@ snapshots:
 
   '@effect/sql-d1@4.1.2(effect@4.1.2)':
     dependencies:
-      '@cloudflare/workers-types': 5.20261104.1
+      '@cloudflare/workers-types': 5.20261106.1
       effect: 4.1.2
 
   '@effect/sql-pg@4.1.2(effect@4.1.2)':
@@ -5033,9 +5047,21 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.2
 
-  '@thomasfosterau/effect-jsonapi@0.20.0(effect@4.1.2)':
+  '@thomasfosterau/effect-ext@0.1.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(effect@4.1.2))(effect@4.1.2)':
     dependencies:
       effect: 4.1.2
+    optionalDependencies:
+      '@effect/platform-node': 4.1.2(effect@4.1.2)(redis@6.3.0)
+      '@thomasfosterau/effect-jsonapi': 0.21.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(effect@4.1.2)
+
+  '@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(effect@4.1.2)':
+    dependencies:
+      '@thomasfosterau/effect-ext': 0.1.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.2)(redis@6.3.0))(effect@4.1.2))(effect@4.1.2)
+      effect: 4.1.2
+    transitivePeerDependencies:
+      - '@effect/platform-browser'
+      - '@effect/platform-node'
+      - '@thomasfosterau/effect-parse'
 
   '@ts-morph/common@0.29.0':
     dependencies:
