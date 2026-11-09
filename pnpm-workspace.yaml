@@ -99,7 +99,7 @@ catalog:
   # (.claude/hooks/fallow-gate.sh) and `fallow audit` (AGENTS.md, Verification).
   # Config in .fallowrc.json.
   fallow: 3.39.0
-  hash-wasm: ^4.12.0
+  hash-wasm: ^4.13.0
   jsdom: ^30.1.3
   # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
   # its peer range and checks a requested version against that range, with the

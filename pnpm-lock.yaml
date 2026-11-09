@@ -82,8 +82,8 @@ catalogs:
       specifier: 3.39.0
       version: 3.39.0
     hash-wasm:
-      specifier: ^4.12.0
-      version: 4.12.0
+      specifier: ^4.13.0
+      version: 4.13.0
     jsdom:
       specifier: ^30.1.3
       version: 30.1.3
@@ -246,7 +246,7 @@ importers:
         version: link:../effect-auth
       hash-wasm:
         specifier: 'catalog:'
-        version: 4.12.0
+        version: 4.13.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2970,8 +2970,8 @@ packages:
     resolution: {integrity: sha512-lh9HLdb53sC7XIZOYzTXM4lFuXElv3EVkSDhsd7DoJBj7hm+Ni7D3qYbb+Rr8DuM8nRanBvkVO9d7askreXGnQ==}
     deprecated: Removed event-stream from gulp-header
 
-  hash-wasm@4.12.0:
-    resolution: {integrity: sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==}
+  hash-wasm@4.13.0:
+    resolution: {integrity: sha512-GrWl7wsV46fKIXQZB5ebskLZLAmKL6d9RS0fspCxDeQyjoNu1AfTJTMLPOJyfzaQm0ldFiwFN21/w+sE/kgEFQ==}
 
   html-encoding-sniffer@7.0.0:
     resolution: {integrity: sha512-UikN5yr7xsCDAq87Or5or0PAlD3HJJOKVzM05az588WnpDJ4Ux7a2A53Qi6gofGg2/EtvF/H4hCi/TXfCW4Y6w==}
@@ -5804,7 +5804,7 @@ snapshots:
       lodash.template: 4.18.1
       through2: 2.0.5
 
-  hash-wasm@4.12.0: {}
+  hash-wasm@4.13.0: {}
 
   html-encoding-sniffer@7.0.0:
     dependencies:
