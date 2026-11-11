@@ -998,7 +998,7 @@ const authRequest = (
   headers: Record<string, string> = {},
 ): Request => {
   const { rememberMe, token, ...rest } = fields;
-  const id = Predicate.isString(token) ? token : "";
+  const id = P.isString(token) ? token : "";
   const signIn = (credential: { readonly [key: string]: Schema.Json }) =>
     writeRequest(
       "POST",
