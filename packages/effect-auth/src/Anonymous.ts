@@ -65,7 +65,7 @@ export class AnonymousService extends Context.Service<
   {
     /** Create an anonymous user and an authenticated session for them. */
     readonly signInAnonymous: (
-      sessionAttributes?: Record<string, unknown>,
+      sessionAttributes?: Types.Attributes,
     ) => Effect.Effect<AnonymousResult, Errors.AuthError | HookError>;
 
     /**

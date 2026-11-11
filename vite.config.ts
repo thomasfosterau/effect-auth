@@ -148,17 +148,6 @@ export default defineConfig({
       // including the narrowings the DOM, Fetch and framework types
       // structurally require. Stays visible as a warning.
       "effect/casting-awareness": "warn",
-
-      // ---- Effect preset: ported-code allowances --------------------------
-      // Code that predates the preset. Each rule sits at `warn` so its sites
-      // stay reported; a new site is a defect, not headroom. Once a rule's
-      // count reaches zero its line is deleted, so it is back at the preset's
-      // `error`. Counts (sources / tests) and the remaining sites:
-      // #443.
-      // Published types say `Record<string, unknown>` (session and user
-      // attributes, metadata, JWT claims, drizzle column types); narrowing
-      // them is an API change (60 / 0).
-      "effect/no-unsafe-dictionary-type": "warn",
     },
     overrides: [
       {

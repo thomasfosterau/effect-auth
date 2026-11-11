@@ -19,7 +19,7 @@
  * | boolean           | `boolean`               | `integer` 0/1              | `tinyint` 0/1     |
  *
  * All four round-trip to the *same* TypeScript values — `string`, `Date`,
- * `Record<string, unknown>`, `boolean` — which is why one store implementation
+ * `Auth.JsonObject`, `boolean` — which is why one store implementation
  * serves all three. Column names are identical across dialects.
  *
  * ### Tables this package did not define

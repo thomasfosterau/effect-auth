@@ -13,7 +13,7 @@
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * // The app's own French catalog. Codes it lacks fall back to the English default.
- * const frCatalog: Record<string, (params?: Record<string, unknown>) => string> = {
+ * const frCatalog: Record<string, (params?: Auth.JsonObject) => string> = {
  *   [Auth.ErrorCode.INVALID_CREDENTIALS]: () => "E-mail ou mot de passe invalide",
  * }
  *
@@ -53,8 +53,9 @@
  * @module messages
  */
 
-import { Context, Effect, Layer, Option, Predicate, Schema } from "effect";
+import { Context, Effect, Layer, Option, Predicate } from "effect";
 import { ErrorCode } from "./Errors.ts";
+import type * as Types from "./Types.ts";
 
 // ---------------------------------------------------------------------------
 // Service interface
@@ -78,7 +79,7 @@ export class Messages extends Context.Service<
      *                 `undefined`; the default catalog ignores it.
      * @param params - Interpolation parameters specific to the error.
      */
-    readonly resolve: (code: string, locale?: string, params?: Record<string, unknown>) => string;
+    readonly resolve: (code: string, locale?: string, params?: Types.JsonObject) => string;
   }
 >()("@effect-auth/Messages") {
   /** Default English catalog – no setup required. */
@@ -92,8 +93,7 @@ export class Messages extends Context.Service<
 // ---------------------------------------------------------------------------
 
 /** Interpolation parameters, as `Messages.resolve` receives them. */
-const MessageParams = Schema.Record(Schema.String, Schema.Unknown);
-type MessageParams = typeof MessageParams.Type;
+type MessageParams = Types.JsonObject;
 
 type Resolver = (params?: MessageParams) => string;
 
@@ -175,7 +175,7 @@ function defaultResolve(code: string, _locale?: string, params?: MessageParams):
 export const resolveMessage = (
   code: string,
   fallback: string,
-  params?: Record<string, unknown>,
+  params?: Types.JsonObject,
 ): Effect.Effect<string, never, never> =>
   Effect.serviceOption(Messages).pipe(
     Effect.map((opt) =>

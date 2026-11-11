@@ -104,7 +104,7 @@ export interface GoogleOneTapSignInResult {
   readonly session: Types.Session;
   readonly isNewUser: boolean;
   /** The verified id_token claims (sub, email, name, picture, ...). */
-  readonly claims: Record<string, unknown>;
+  readonly claims: Types.JsonObject;
 }
 
 /**

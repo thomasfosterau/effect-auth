@@ -10,8 +10,9 @@
  */
 
 import * as crypto from "node:crypto";
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { AuthError } from "./Errors.ts";
+import * as Types from "./Types.ts";
 
 /**
  * Pluggable encryption/decryption interface for secrets stored at rest.
@@ -207,20 +208,24 @@ export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null =>
 /** Signing/verification algorithms supported for compact JWS tokens. */
 export type JwsAlgorithm = "ES256" | "EdDSA" | "RS256";
 
+const decodeJwk = Schema.decodeUnknownSync(Types.JsonObject);
+
 /**
  * Generate a fresh ES256 (P-256) or EdDSA (Ed25519) signing key pair. The
  * public key is exported as a JWK; the private key as a PKCS#8 PEM string.
  */
 export const generateJwsKeyPair = (
   algorithm: "ES256" | "EdDSA",
-): { readonly publicKeyJwk: Record<string, unknown>; readonly privateKeyPem: string } => {
+): { readonly publicKeyJwk: Types.JsonObject; readonly privateKeyPem: string } => {
   const { publicKey, privateKey } =
     algorithm === "ES256"
       ? crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
       : crypto.generateKeyPairSync("ed25519");
 
   return {
-    publicKeyJwk: { ...publicKey.export({ format: "jwk" }) },
+    // A JWK is JSON by construction; the decode turns node's open-ended
+    // `JsonWebKey` into the JSON object type without a cast.
+    publicKeyJwk: decodeJwk(publicKey.export({ format: "jwk" })),
     privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
@@ -250,7 +255,7 @@ export const verifyJws = (
   algorithm: JwsAlgorithm,
   data: Uint8Array,
   signature: Uint8Array,
-  jwk: Record<string, unknown>,
+  jwk: Types.JsonObject,
 ): boolean => {
   // SAFETY: `jwk` is a JSON Web Key object (from a JWKS or a stored key pair);
   // `createPublicKey` validates its members and throws on a malformed key.

@@ -20,7 +20,7 @@
  *
  * @module testing
  */
-import { type Context, DateTime, Effect, Layer, type Option, Schema } from "effect";
+import { type Context, DateTime, Effect, Layer, type Option, Record as Rec, Schema } from "effect";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "../Authorizer.ts";
 import * as SessionContext from "../SessionContext.ts";
 import type * as Types from "../Types.ts";
@@ -215,15 +215,21 @@ export interface ViewerFixture {
 export interface ViewerOptions<User> extends RunAsOptions {
   /**
    * Project the app's viewer into this library's `User`. By default the user
-   * keeps the viewer's `id`, was created `now`, and carries every other field
-   * of the viewer as an attribute, so `SessionContext.withRole()` reads the
+   * keeps the viewer's `id`, was created `now`, and carries every other
+   * JSON-valued field of the viewer as an attribute (a `Date` or function
+   * field is left out), so `SessionContext.withRole()` reads the
    * same `role` the app's viewer holds.
    */
   readonly toUser?: ((viewer: User, now: Date) => Types.User) | undefined;
 }
 
+const isJson = Schema.is(Schema.Json);
+
 const defaultToUser = (viewer: ViewerFixture, now: Date): Types.User => {
-  const { id, ...attributes } = viewer;
+  const { id, ...fields } = viewer;
+  // Attributes are JSON: a field that is not (a `Date`, a function, …) stays
+  // on the viewer and is left out of the user.
+  const attributes = Rec.filter<string, unknown, Types.Json>(fields, isJson);
   return { id, createdAt: now, updatedAt: now, attributes };
 };
 

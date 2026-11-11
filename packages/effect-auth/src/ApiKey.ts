@@ -23,6 +23,7 @@ import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
 import { hashToken } from "./TokenHash.ts";
+import type * as Types from "./Types.ts";
 
 /**
  * API key error
@@ -58,7 +59,7 @@ export interface ApiKey {
   readonly lastUsedAt?: number;
   /** resource → allowed actions; undefined = no permission restrictions */
   readonly permissions?: Record<string, readonly string[]>;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: Types.JsonObject;
   /** Remaining uses; decremented on each successful verify. undefined = unlimited */
   readonly remaining?: number;
   /**
@@ -122,7 +123,7 @@ export interface ApiKeyCreateOptions {
   /** Lifetime in milliseconds from now; overrides `defaultExpiresIn` */
   readonly expiresIn?: number;
   readonly permissions?: Record<string, readonly string[]>;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
   /** Number of allowed uses; undefined = unlimited */
   readonly remaining?: number;
   /** Number of uses to restore per `refillInterval` */
@@ -165,7 +166,7 @@ export interface ApiKeyUpdate {
   readonly enabled?: boolean;
   readonly expiresAt?: number;
   readonly permissions?: Record<string, readonly string[]>;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
   readonly remaining?: number;
   readonly refillAmount?: number;
   readonly refillInterval?: number;

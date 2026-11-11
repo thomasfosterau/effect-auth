@@ -119,7 +119,7 @@ export interface MagicLinkConfig {
  * Options for verifying a magic link token
  */
 export interface MagicLinkVerifyOptions {
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
 }
 
 /**

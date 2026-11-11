@@ -89,7 +89,7 @@ export interface OidcClient {
   /** Skip the consent screen for this client (first-party apps). */
   readonly skipConsent: boolean;
   readonly disabled: boolean;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: Types.JsonObject;
   /** User id of the admin who registered the client. */
   readonly userId?: string;
   /** Epoch milliseconds. */
@@ -233,7 +233,7 @@ export interface RegisterOidcClientInput {
   readonly type?: "web" | "native";
   /** Default `false`. */
   readonly skipConsent?: boolean;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
 }
 
 /** Result of registering a client: the plaintext secret is shown exactly once. */
@@ -249,7 +249,7 @@ export interface UpdateOidcClientInput {
   readonly redirectUris?: readonly string[];
   readonly skipConsent?: boolean;
   readonly disabled?: boolean;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
 }
 
 // -----------------------------------------------------------------------------
@@ -627,17 +627,17 @@ export class OidcProviderService extends Context.Service<
      */
     readonly userinfo: (
       accessToken: string,
-    ) => Effect.Effect<Record<string, unknown>, OidcProviderError | AuthError>;
+    ) => Effect.Effect<Types.JsonObject, OidcProviderError | AuthError>;
 
     /** The OpenID Provider Metadata document (OIDC Discovery). */
-    readonly getMetadata: () => Record<string, unknown>;
+    readonly getMetadata: () => Types.JsonObject;
 
     /**
      * The OAuth 2.0 Authorization Server Metadata document (RFC 8414), served
      * at `/.well-known/oauth-authorization-server`. This is what MCP clients
      * fetch to discover the registration, authorization, and token endpoints.
      */
-    readonly getAuthorizationServerMetadata: () => Record<string, unknown>;
+    readonly getAuthorizationServerMetadata: () => Types.JsonObject;
 
     /**
      * The login page URL for an unauthenticated authorization request, with the

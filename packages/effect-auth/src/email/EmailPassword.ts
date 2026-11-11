@@ -23,7 +23,7 @@ import * as Obs from "../Observability.ts";
 export interface CreateUserInput {
   readonly name?: string;
   readonly image?: string;
-  readonly attributes?: Record<string, unknown>;
+  readonly attributes?: Types.Attributes;
   /**
    * The login handle the user is created with: a store that keeps it on the
    * user row writes it there on insert, and any other store ignores it (see
@@ -149,8 +149,8 @@ export interface SignUpInput {
   readonly email: string;
   readonly password: string;
   readonly name?: string;
-  readonly attributes?: Record<string, unknown>;
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly attributes?: Types.Attributes;
+  readonly sessionAttributes?: Types.Attributes;
   /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignUp` hook. */
   readonly captchaToken?: string;
 }
@@ -159,7 +159,7 @@ export interface SignUpInput {
 export interface SignInInput {
   readonly email: string;
   readonly password: string;
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
   /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignIn` hook. */
   readonly captchaToken?: string;
   /**

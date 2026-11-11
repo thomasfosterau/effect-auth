@@ -99,7 +99,7 @@ export interface AdminCreateUserInput {
   readonly password?: string;
   /** Written to `attributes.role`. */
   readonly role?: string;
-  readonly attributes?: Record<string, unknown>;
+  readonly attributes?: Types.Attributes;
   /**
    * Additional identifier records created via `IdentifierStore` (email,
    * username, or phone), beyond the primary email. Each value is normalised
@@ -133,7 +133,7 @@ export class AdminUserStore extends Context.Service<
     readonly createUser: (input: {
       readonly name?: string;
       readonly image?: string;
-      readonly attributes?: Record<string, unknown>;
+      readonly attributes?: Types.Attributes;
       /**
        * The login handle the user is created with: a store that keeps it on
        * the user row writes it there on insert, and any other store ignores it

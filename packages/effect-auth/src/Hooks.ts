@@ -76,7 +76,7 @@ export interface SessionRef {
 /** Named arguments for the `beforeCreateSession` hook. */
 export interface CreateSessionArgs {
   readonly userId: string;
-  readonly attributes?: Record<string, unknown>;
+  readonly attributes?: Types.Attributes;
 }
 
 /** Named arguments for the `beforeResetPassword` hook. */

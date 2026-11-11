@@ -31,7 +31,7 @@
  *
  * - **Attribute bags** must read back as an object. A drizzle `jsonb()` column
  *   with no `$type` reads back as `unknown`, which no mapping will accept; write
- *   `jsonb().$type<Record<string, unknown>>()`.
+ *   `jsonb().$type<Auth.JsonObject>()`.
  * - **Extra required columns** — a `role text NOT NULL` the stores know nothing
  *   about — must have a database-level default, since the stores insert only the
  *   columns they were given.
@@ -61,7 +61,7 @@
  *   userId: uuid("id").primaryKey(),
  *   displayName: text("display_name"),
  *   avatarUrl: text("avatar_url"),
- *   meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+ *   meta: jsonb("meta").$type<Auth.JsonObject>().notNull().default({}),
  *   role: text("role").notNull().default("user"),
  *   created: timestamp("created_at", { withTimezone: true }).notNull(),
  *   updated: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -148,7 +148,7 @@ export interface SessionColumnNames<TTable extends Table> {
   readonly expiresAt: ColumnKey<TTable, Date>;
   readonly createdAt: ColumnKey<TTable, Date>;
   readonly lastActivityAt: ColumnKey<TTable, Date>;
-  readonly attributes: ColumnKey<TTable, Record<string, unknown> | null>;
+  readonly attributes: ColumnKey<TTable, Auth.JsonObject | null>;
 }
 
 /** Which of `TTable`'s columns hold each field of a user. */
@@ -160,7 +160,7 @@ export interface UserColumnNames<TTable extends Table> {
    * The `jsonb` attribute bag. Optional: a table that keeps every attribute it
    * has as a promoted column (see the module docs) needs none.
    */
-  readonly attributes?: ColumnKey<TTable, Record<string, unknown> | null>;
+  readonly attributes?: ColumnKey<TTable, Auth.JsonObject | null>;
   readonly createdAt: ColumnKey<TTable, Date>;
   readonly updatedAt: ColumnKey<TTable, Date>;
 }
@@ -188,7 +188,7 @@ export type SessionColumns = {
   readonly expiresAt: StoreColumn<Date>;
   readonly createdAt: StoreColumn<Date>;
   readonly lastActivityAt: StoreColumn<Date>;
-  readonly attributes: NullableColumn<Record<string, unknown>>;
+  readonly attributes: NullableColumn<Auth.JsonObject>;
 };
 
 /** The user columns, resolved to drizzle column objects. */
@@ -196,7 +196,7 @@ export type UserColumns = {
   readonly id: StoreColumn<string>;
   readonly name: NullableColumn<string>;
   readonly image: NullableColumn<string>;
-  readonly attributes?: NullableColumn<Record<string, unknown>>;
+  readonly attributes?: NullableColumn<Auth.JsonObject>;
   readonly createdAt: StoreColumn<Date>;
   readonly updatedAt: StoreColumn<Date>;
 };

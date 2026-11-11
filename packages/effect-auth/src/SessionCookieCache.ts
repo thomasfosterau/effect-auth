@@ -48,7 +48,7 @@ import { Base64Url } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
 import { timingSafeEqualBytes } from "./TokenHash.ts";
-import type * as Types from "./Types.ts";
+import * as Types from "./Types.ts";
 
 /** Cookie-cache configuration (part of `CookieConfig`). */
 export interface SessionCacheConfig {
@@ -136,7 +136,7 @@ const SerializedSession = Schema.Struct({
   expiresAt: Schema.Number,
   createdAt: Schema.Number,
   lastActivityAt: Schema.Number,
-  attributes: Schema.Record(Schema.String, Schema.Unknown),
+  attributes: Types.Attributes,
 });
 
 const SerializedUser = Schema.Struct({
@@ -145,7 +145,7 @@ const SerializedUser = Schema.Struct({
   image: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
-  attributes: Schema.Record(Schema.String, Schema.Unknown),
+  attributes: Types.Attributes,
 });
 
 const SerializedPayload = Schema.Struct({

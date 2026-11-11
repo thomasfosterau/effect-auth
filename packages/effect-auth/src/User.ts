@@ -133,7 +133,9 @@ export const make = (
         attributes: Types.Attributes,
       ) {
         const refused = Option.getOrUndefined(
-          Arr.findFirst(Rec.keys(attributes), (key) => HashSet.has(serverOnly, key)),
+          Arr.findFirst(Rec.keys<string, Types.Json>(attributes), (key) =>
+            HashSet.has(serverOnly, key),
+          ),
         );
         if (refused !== undefined) {
           return yield* new Errors.InvalidInputError({

@@ -61,6 +61,7 @@ import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
 /**
@@ -81,7 +82,7 @@ export interface Organization {
   readonly slug: string;
   readonly logo?: string;
   /** Arbitrary app-specific metadata */
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: Types.JsonObject;
   /**
    * Role given to members added without an explicit one (direct
    * {@link OrganizationService.addMember}, JIT provisioning, SCIM). Absent
@@ -572,7 +573,7 @@ export interface CreateOrganizationInput {
   readonly name: string;
   readonly slug: string;
   readonly logo?: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
 }
 
 /**
@@ -582,7 +583,7 @@ export interface UpdateOrganizationInput {
   readonly name?: string;
   readonly slug?: string;
   readonly logo?: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
   /**
    * Turn JIT provisioning on or off. Gated on `organization:update` like the
    * rest of this input - the same tier that adds the verified domains JIT
