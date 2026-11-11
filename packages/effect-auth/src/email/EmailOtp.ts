@@ -151,7 +151,7 @@ export interface EmailOtpConfig {
  * Options for email OTP sign-in
  */
 export interface EmailOtpSignInOptions {
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
 }
 
 /**

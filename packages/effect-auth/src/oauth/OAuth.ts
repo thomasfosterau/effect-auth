@@ -94,7 +94,7 @@ export interface OAuthProviderConfig {
    * (maps nested shapes such as Facebook's `picture.data.url` or Twitter's
    * `data` envelope). Applied to both userinfo and id_token profiles.
    */
-  readonly mapProfile?: (raw: Record<string, unknown>) => OAuthUserInfo;
+  readonly mapProfile?: (raw: Types.JsonObject) => OAuthUserInfo;
 }
 
 /**
@@ -152,7 +152,7 @@ export interface OAuthUserInfo {
   readonly given_name?: string;
   readonly family_name?: string;
   readonly locale?: string;
-  readonly [key: string]: unknown;
+  readonly [key: string]: Types.Json;
 }
 
 /**
@@ -387,7 +387,7 @@ const decodeBase64UrlText = Schema.decodeSync(Schema.StringFromBase64Url);
 /** Decodes base64url text to its bytes; throws on invalid input. */
 const decodeBase64UrlBytes = Schema.decodeSync(Schema.Uint8ArrayFromBase64Url);
 
-const decodeJwtSegment = (segment: string): Schema.JsonObject =>
+const decodeJwtSegment = (segment: string): Types.JsonObject =>
   decodeJwtSegmentJson(decodeBase64UrlText(segment));
 
 /** Serializes a JSON value, as `JSON.stringify` does. */
@@ -428,7 +428,7 @@ const readJson = (response: Response): Effect.Effect<Schema.Json> =>
   readBody(response).pipe(Effect.flatMap(decodeJson), Effect.orDie);
 
 /** Whether a JSON value is an object (not an array or `null`). */
-const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => Predicate.isObject(json);
+const isJsonObject = (json: Schema.Json): json is Types.JsonObject => Predicate.isObject(json);
 
 /**
  * Verify and decode an OIDC `id_token` (compact JWS) against a provider's
@@ -445,8 +445,7 @@ export const verifyIdToken = (
     readonly nonce?: string;
     readonly now?: number;
   },
-): Effect.Effect<Record<string, unknown>, OAuthProviderError> =>
-  verifyIdTokenClaims(idToken, params);
+): Effect.Effect<Types.JsonObject, OAuthProviderError> => verifyIdTokenClaims(idToken, params);
 
 type IdTokenParams = Parameters<typeof verifyIdToken>[1];
 
@@ -467,8 +466,8 @@ const splitIdToken = (idToken: string): readonly [string, string, string] | unde
  */
 const fetchIdTokenJwk = (
   params: IdTokenParams,
-  header: Schema.JsonObject,
-): Effect.Effect<Schema.JsonObject, OAuthProviderError> =>
+  header: Types.JsonObject,
+): Effect.Effect<Types.JsonObject, OAuthProviderError> =>
   Effect.gen(function* () {
     const response = yield* Effect.tryPromise({
       try: () => fetch(params.jwksEndpoint, { headers: { Accept: "application/json" } }),
@@ -510,7 +509,7 @@ const fetchIdTokenJwk = (
 
 /** The first id_token claim check (`iss`, `aud`, `exp`, `nonce`) the payload fails, if any. */
 const idTokenClaimFailure = (
-  payload: Schema.JsonObject,
+  payload: Types.JsonObject,
   params: IdTokenParams,
   now: number,
 ): string | undefined => {
@@ -537,7 +536,7 @@ const idTokenClaimFailure = (
 const verifyIdTokenClaims = (
   idToken: string,
   params: IdTokenParams,
-): Effect.Effect<Schema.JsonObject, OAuthProviderError> =>
+): Effect.Effect<Types.JsonObject, OAuthProviderError> =>
   Effect.gen(function* () {
     const fail = (message: string) =>
       new OAuthProviderError({ message, provider: params.provider });
@@ -549,7 +548,7 @@ const verifyIdTokenClaims = (
     const [headerSeg, payloadSeg, signatureSeg] = segments;
 
     const { header, payload } = yield* Effect.try({
-      try: (): { header: Schema.JsonObject; payload: Schema.JsonObject } => ({
+      try: (): { header: Types.JsonObject; payload: Types.JsonObject } => ({
         header: decodeJwtSegment(headerSeg),
         payload: decodeJwtSegment(payloadSeg),
       }),
@@ -598,7 +597,7 @@ const verifyIdTokenClaims = (
   });
 
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
-const claimsToUserInfo = (claims: Schema.JsonObject): OAuthUserInfo => {
+const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
   const { email, email_verified, name, picture } = claims;
   return Object.assign(
     {},
@@ -1735,7 +1734,7 @@ export const nested = (v: unknown, ...path: string[]): unknown =>
  * profile(raw, { id: raw["id"], email: str(raw["email"]), name: str(raw["name"]) })
  */
 export const profile = (
-  base: Record<string, unknown>,
+  base: Types.JsonObject,
   fields: {
     readonly id: unknown;
     readonly email?: string | undefined;
@@ -1883,7 +1882,7 @@ export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
       mapProfile: (raw) => {
         // SAFETY: Twitter's users/me answers `{ data: user }`, the user an object;
         // a missing envelope falls back to the (object) payload itself.
-        const data = (raw["data"] ?? raw) as Record<string, unknown>;
+        const data = (raw["data"] ?? raw) as Types.JsonObject;
         return profile(data, {
           id: data["id"],
           name: str(data["name"]),
@@ -2035,7 +2034,7 @@ export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
       mapProfile: (raw) => {
         // SAFETY: Notion's users/me carries the user object at bot.owner.user;
         // without it, the (object) payload itself is the user.
-        const user = (nested(raw, "bot", "owner", "user") ?? raw) as Record<string, unknown>;
+        const user = (nested(raw, "bot", "owner", "user") ?? raw) as Types.JsonObject;
         return profile(raw, {
           id: user["id"] ?? raw["id"],
           email: str(nested(user, "person", "email")),
@@ -2100,7 +2099,7 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
       mapProfile: (raw) => {
         // SAFETY: TikTok's user/info carries the user object at data.user;
         // without it, the (object) payload itself is the user.
-        const user = (nested(raw, "data", "user") ?? raw) as Record<string, unknown>;
+        const user = (nested(raw, "data", "user") ?? raw) as Types.JsonObject;
         return profile(user, {
           id: user["open_id"] ?? user["id"],
           name: str(user["display_name"]),
@@ -2139,7 +2138,7 @@ export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
         const data = raw["data"];
         // SAFETY: Kick's users endpoint answers `{ data: [user] }`, each user an
         // object; without the array, the (object) payload itself is the user.
-        const user = (Array.isArray(data) ? data[0] : raw) as Record<string, unknown>;
+        const user = (Array.isArray(data) ? data[0] : raw) as Types.JsonObject;
         return profile(user, {
           id: user["user_id"] ?? user["id"],
           email: str(user["email"]),

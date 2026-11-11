@@ -11,7 +11,7 @@
  *
  * - Timestamps are `timestamp({ mode: "date", withTimezone: true })`, so the
  *   domain sees real `Date` values and PostgreSQL stores `timestamptz`.
- * - Attribute bags are `jsonb().$type<Record<string, unknown>>()`, `NOT NULL`
+ * - Attribute bags are `jsonb().$type<Auth.JsonObject>()`, `NOT NULL`
  *   with a `'{}'` default — the driver round-trips them as plain objects, no
  *   `JSON.parse` in the store layer.
  * - Identifiers are unique on `(type, value)`; that index is the real claim
@@ -44,7 +44,7 @@ const sessionColumns = () => ({
   expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   lastActivityAt: timestamp("last_activity_at", { mode: "date", withTimezone: true }).notNull(),
-  attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
+  attributes: jsonb("attributes").$type<Auth.JsonObject>().notNull().default({}),
 });
 
 const userColumns = () => ({
@@ -52,7 +52,7 @@ const userColumns = () => ({
   name: text("name"),
   image: text("image"),
   passwordHash: text("password_hash"),
-  attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
+  attributes: jsonb("attributes").$type<Auth.JsonObject>().notNull().default({}),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull(),
 });

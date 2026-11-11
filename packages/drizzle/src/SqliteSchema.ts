@@ -11,7 +11,7 @@
  *   disk, real `Date` values in the domain, so no precision is lost relative to
  *   PostgreSQL's `timestamptz`. (Time zone is not stored — a `Date` is an
  *   instant, and the store never reads a wall-clock field.)
- * - Attribute bags are `text({ mode: "json" }).$type<Record<string, unknown>>()`,
+ * - Attribute bags are `text({ mode: "json" }).$type<Auth.JsonObject>()`,
  *   `NOT NULL` with a `'{}'` default: drizzle serializes on write and parses on
  *   read, so the store layer still sees plain objects.
  * - Booleans are `integer({ mode: "boolean" })` — `0`/`1` on disk, `boolean` in
@@ -32,6 +32,10 @@ import type { TableNames } from "./Schema.ts";
 // Columns
 // ---------------------------------------------------------------------------
 
+/** The JSON attribute bag, `{}` when unset. */
+const attributesColumn = () =>
+  text("attributes", { mode: "json" }).$type<Auth.JsonObject>().notNull().default({});
+
 const sessionColumns = () => ({
   /** SHA-256 hex digest of the bearer token — never the raw token itself. */
   id: text("id").primaryKey(),
@@ -39,10 +43,7 @@ const sessionColumns = () => ({
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   lastActivityAt: integer("last_activity_at", { mode: "timestamp_ms" }).notNull(),
-  attributes: text("attributes", { mode: "json" })
-    .$type<Record<string, unknown>>()
-    .notNull()
-    .default({}),
+  attributes: attributesColumn(),
 });
 
 const userColumns = () => ({
@@ -50,10 +51,7 @@ const userColumns = () => ({
   name: text("name"),
   image: text("image"),
   passwordHash: text("password_hash"),
-  attributes: text("attributes", { mode: "json" })
-    .$type<Record<string, unknown>>()
-    .notNull()
-    .default({}),
+  attributes: attributesColumn(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });

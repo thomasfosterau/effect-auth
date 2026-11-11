@@ -121,7 +121,7 @@ export interface AuthLifecycleResult {
  */
 export interface VerifyEmailInput {
   readonly token: string;
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
 }
 
 /**

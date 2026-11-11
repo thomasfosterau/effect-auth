@@ -12,7 +12,7 @@
  *   (matching `Date`), and unlike `TIMESTAMP` not capped at 2038. MySQL stores
  *   no zone; a `Date` is an instant, and the store never reads a wall-clock
  *   field.
- * - Attribute bags are `json().$type<Record<string, unknown>>()`, `NOT NULL`
+ * - Attribute bags are `json().$type<Auth.JsonObject>()`, `NOT NULL`
  *   and — unlike the other two dialects — *without* a default, because MySQL
  *   does not accept a literal `DEFAULT` on a `JSON` column. Every insert this
  *   package performs writes the bag explicitly, so nothing depends on it.
@@ -56,7 +56,7 @@ const sessionColumns = () => ({
   expiresAt: datetime("expires_at", { mode: "date", fsp: 3 }).notNull(),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
   lastActivityAt: datetime("last_activity_at", { mode: "date", fsp: 3 }).notNull(),
-  attributes: json("attributes").$type<Record<string, unknown>>().notNull(),
+  attributes: json("attributes").$type<Auth.JsonObject>().notNull(),
 });
 
 const userColumns = () => ({
@@ -64,7 +64,7 @@ const userColumns = () => ({
   name: varchar("name", { length: KEY_LENGTH }),
   image: varchar("image", { length: 2048 }),
   passwordHash: varchar("password_hash", { length: 512 }),
-  attributes: json("attributes").$type<Record<string, unknown>>().notNull(),
+  attributes: json("attributes").$type<Auth.JsonObject>().notNull(),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
   updatedAt: datetime("updated_at", { mode: "date", fsp: 3 }).notNull(),
 });

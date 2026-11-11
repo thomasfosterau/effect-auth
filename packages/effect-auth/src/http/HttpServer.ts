@@ -680,6 +680,15 @@ const bearerToken = (request: HttpServerRequest.HttpServerRequest): string | und
 };
 
 /**
+ * The RFC 7591 registration endpoint the provider advertises (always a string
+ * in its RFC 8414 metadata), for the `registration_client_uri` it echoes.
+ */
+const registrationEndpointOf = (service: typeof OidcProviderService.Service): string => {
+  const endpoint = service.getAuthorizationServerMetadata()["registration_endpoint"];
+  return Predicate.isString(endpoint) ? endpoint : "";
+};
+
+/**
  * Guard the RFC 7592 management endpoints: 404 when management is switched
  * off, 401 when the caller presents no registration access token at all (the
  * token itself is verified by the service, in constant time).
@@ -755,6 +764,19 @@ const asCaller = <A, R>(
 ): Effect.Effect<A, S.Unauthorized | S.InternalServerError, R> =>
   Effect.catchTags(self, {
     UserNotFoundError: () => Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Answer an RFC 7591 / 7592 registration call: a registration refusal is the
+ * RFC's error response (see `registrationError`), a store failure a generic
+ * `500`.
+ */
+const asRegistration = <A, R>(
+  self: Effect.Effect<A, OidcRegistrationError | AuthError, R>,
+): Effect.Effect<A, S.OAuthError | S.Unauthorized | S.Forbidden | S.InternalServerError, R> =>
+  Effect.catchTags(self, {
+    OidcRegistrationError: registrationError,
     AuthError: (e) => internalServerError(e),
   });
 
@@ -3592,15 +3614,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .registerDynamicClient(registrationMetadata(payload), {
               ...(initialAccessToken !== undefined && { initialAccessToken }),
             })
-            .pipe(
-              Effect.catchTags({
-                OidcRegistrationError: registrationError,
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          const registrationEndpoint = String(
-            oidc.service.getAuthorizationServerMetadata()["registration_endpoint"],
-          );
+            .pipe(asRegistration);
+          const registrationEndpoint = registrationEndpointOf(oidc.service);
           return {
             ...encodeOidcRegistration(result.client, registrationEndpoint),
             ...(result.clientSecret !== undefined && {
@@ -3616,16 +3631,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
           const token = yield* requireRegistrationAccessToken(oidc.service, request);
-          const client = yield* oidc.service.readDynamicClient(params.clientId, token).pipe(
-            Effect.catchTags({
-              OidcRegistrationError: registrationError,
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return encodeOidcRegistration(
-            client,
-            String(oidc.service.getAuthorizationServerMetadata()["registration_endpoint"]),
-          );
+          const client = yield* oidc.service
+            .readDynamicClient(params.clientId, token)
+            .pipe(asRegistration);
+          return encodeOidcRegistration(client, registrationEndpointOf(oidc.service));
         }),
       )
       .handle("oidcUpdateRegistration", ({ params, payload, request }) =>
@@ -3634,28 +3643,15 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const token = yield* requireRegistrationAccessToken(oidc.service, request);
           const client = yield* oidc.service
             .updateDynamicClient(params.clientId, token, registrationMetadata(payload))
-            .pipe(
-              Effect.catchTags({
-                OidcRegistrationError: registrationError,
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeOidcRegistration(
-            client,
-            String(oidc.service.getAuthorizationServerMetadata()["registration_endpoint"]),
-          );
+            .pipe(asRegistration);
+          return encodeOidcRegistration(client, registrationEndpointOf(oidc.service));
         }),
       )
       .handle("oidcDeleteRegistration", ({ params, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
           const token = yield* requireRegistrationAccessToken(oidc.service, request);
-          yield* oidc.service.deleteDynamicClient(params.clientId, token).pipe(
-            Effect.catchTags({
-              OidcRegistrationError: registrationError,
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
+          yield* oidc.service.deleteDynamicClient(params.clientId, token).pipe(asRegistration);
         }),
       )
       .handle("oidcDiscovery", () =>

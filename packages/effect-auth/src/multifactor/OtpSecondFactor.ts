@@ -104,7 +104,7 @@ export interface OtpSecondFactorConfig {
 
 /** Options for {@link OtpSecondFactorService.verify}: attributes for the session it issues. */
 export interface OtpSecondFactorVerifyOptions {
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
 }
 
 /** The user id and session issued when the OTP second factor succeeds. */

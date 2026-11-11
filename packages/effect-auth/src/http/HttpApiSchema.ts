@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { HttpApiSchema } from "effect/http-api";
 import { Forbidden, Unauthorized } from "../Guard.ts";
 import * as Identifier from "../Identifier.ts";
-import type * as Types from "../Types.ts";
+import * as Types from "../Types.ts";
 
 /**
  * HTTP wire schemas for the auth protocol.
@@ -15,7 +15,7 @@ import type * as Types from "../Types.ts";
  */
 
 /** Arbitrary JSON attributes bag. */
-export const Attributes = Schema.Record(Schema.String, Schema.Unknown);
+export const Attributes = Types.Attributes;
 export type Attributes = typeof Attributes.Type;
 
 /** Public view of a login-handle identifier (timestamps as epoch millis). */
@@ -951,7 +951,7 @@ export const OidcRegistrationView = Schema.Struct({
 export type OidcRegistrationView = typeof OidcRegistrationView.Type;
 
 /** UserInfo response / OpenID Provider Metadata: open-ended claim records. */
-export const ClaimsView = Schema.Record(Schema.String, Schema.Unknown);
+export const ClaimsView = Types.JsonObject;
 export type ClaimsView = typeof ClaimsView.Type;
 
 // -----------------------------------------------------------------------------
@@ -967,7 +967,7 @@ export type JwtTokenView = typeof JwtTokenView.Type;
 
 /** A JWKS document (opaque key objects). */
 export const JwksView = Schema.Struct({
-  keys: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+  keys: Schema.Array(Types.JsonObject),
 });
 export type JwksView = typeof JwksView.Type;
 

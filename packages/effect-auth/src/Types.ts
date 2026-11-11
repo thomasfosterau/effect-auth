@@ -9,12 +9,34 @@
 import { Schema } from "effect";
 
 /**
+ * Any JSON value: `null`, a number, a boolean, a string, a readonly array of
+ * JSON values or a {@link JsonObject}. The value type of every attribute,
+ * metadata and claims bag the library stores or sends, since each one is
+ * persisted and transmitted as JSON. Effect's `Schema.Json`, so the same
+ * name validates one.
+ */
+export const Json: Schema.Codec<Json> = Schema.Json;
+export type Json = null | number | boolean | string | ReadonlyArray<Json> | JsonObject;
+
+/**
+ * A readonly string-keyed record of {@link Json} values: an attribute,
+ * metadata or claims bag. Effect's `Schema.JsonObject`. `Date`s, `undefined`
+ * values, class instances and functions are not JSON; convert them first
+ * (an ISO string or epoch milliseconds for a `Date`, an omitted key for
+ * `undefined`).
+ */
+export const JsonObject: Schema.Codec<JsonObject> = Schema.JsonObject;
+// A type literal rather than `Schema.JsonObject` itself: that interface shares
+// its name with a value, which type-aware lint reads as a class instance.
+export type JsonObject = { readonly [key: string]: Json };
+
+/**
  * Arbitrary attribute bag for custom fields on users and sessions.
  * Core fields (email, name, ...) are first-class; anything app-specific
- * lives here.
+ * lives here, as JSON ({@link JsonObject}).
  */
-export const Attributes = Schema.Record(Schema.String, Schema.Unknown);
-export type Attributes = typeof Attributes.Type;
+export const Attributes = JsonObject;
+export type Attributes = JsonObject;
 
 /**
  * Represents a user in the authentication system.

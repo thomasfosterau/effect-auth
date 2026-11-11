@@ -123,7 +123,7 @@ Two consequences worth knowing:
 | **MySQL**      | `Drizzle.MySql`  | `datetime(3)`        | `json`             | `tinyint` 0/1 |
 
 Column names are identical across the three, and every one of them round-trips
-to the same TypeScript values: `string`, `Date`, `Record<string, unknown>`,
+to the same TypeScript values: `string`, `Date`, `Auth.JsonObject`,
 `boolean`. MySQL uses `varchar(255)` where the others use `text`, because InnoDB
 cannot index a `TEXT` column without a prefix length and the `(type, value)`
 unique index has to be indexable.
@@ -360,12 +360,13 @@ CREATE TABLE IF NOT EXISTS effect_auth_identifiers (
 import { Layer } from "effect";
 import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+import type * as Auth from "@thomasfosterau/effect-auth";
 
 const appUsers = pgTable("users", {
   userId: uuid("id").primaryKey(),
   displayName: text("display_name"),
   avatarUrl: text("avatar_url"),
-  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  meta: jsonb("meta").$type<Auth.JsonObject>().notNull().default({}),
   role: text("role").notNull().default("user"),
   created: timestamp("created_at", { withTimezone: true }).notNull(),
   updated: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -415,7 +416,7 @@ export const stores = (db: Parameters<typeof Drizzle.databaseLayer>[0]) =>
   Drizzle.layer(schema).pipe(Layer.provide(Drizzle.databaseLayer(db)));
 ```
 
-The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Record<string, unknown>>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`. A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
+The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Auth.JsonObject>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`. A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
 
 ## Authorization helpers
 

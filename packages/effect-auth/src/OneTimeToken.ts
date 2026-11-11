@@ -34,7 +34,7 @@ import type * as Types from "./Types.ts";
 export interface OneTimeTokenRecord {
   readonly token: string;
   readonly subject: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
   readonly createdAt: number;
   readonly expiresAt: number;
 }
@@ -78,13 +78,13 @@ export interface OneTimeTokenGenerateOptions {
   /** Per-token TTL override in milliseconds. Falls back to `OneTimeTokenConfig.expiresIn`. */
   readonly expiresIn?: number;
   /** Arbitrary metadata stored alongside the token (e.g. purpose, redirect URL, scopes). */
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
 }
 
 /** The subject and metadata a verified one-time token was issued for. */
 export interface OneTimeTokenVerifyResult {
   readonly subject: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: Types.JsonObject;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,12 +287,12 @@ export const make = (
  */
 export const redeemOneTimeTokenForSession = (
   rawToken: string,
-  options?: { readonly sessionAttributes?: Record<string, unknown> },
+  options?: { readonly sessionAttributes?: Types.Attributes },
 ): Effect.Effect<
   {
     readonly subject: string;
     readonly session: Types.Session;
-    readonly metadata?: Record<string, unknown>;
+    readonly metadata?: Types.JsonObject;
   },
   Errors.OneTimeTokenError | Errors.AuthError | HookError,
   OneTimeTokenService | OneTimeTokenStore | SessionService | Hooks

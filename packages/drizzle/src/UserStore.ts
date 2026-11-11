@@ -69,7 +69,7 @@ const makeToUser =
   (users: UserSchema) =>
   (row: UserRow): Auth.User => {
     // A users table with no mapped attribute bag reads back `undefined` here.
-    // SAFETY: `UserColumns.attributes` is a `NullableColumn<Record<string, unknown>>`;
+    // SAFETY: `UserColumns.attributes` is a `NullableColumn<Auth.JsonObject>`;
     // only its being an optional field blurs the projected type.
     const bag = (row.attributes ?? {}) as Auth.Attributes;
     // SAFETY: `selection` projects each promoted column under its `promotedKey`, and
@@ -81,8 +81,10 @@ const makeToUser =
     );
     const attributes = Rec.filter(
       { ...bag, ...promoted },
-      (value, attribute) =>
-        !(Rec.has(users.promoted, attribute) && (value === null || value === undefined)),
+      // A bag read from JSON holds no `undefined`, so only a promoted column
+      // that read back absent or `NULL` is dropped.
+      (value, attribute): value is Auth.Json =>
+        value !== undefined && !(Rec.has(users.promoted, attribute) && value === null),
     );
     return {
       id: row.id,

@@ -174,7 +174,7 @@ export interface PhoneOtpConfig {
 
 /** Options for {@link PhoneOtpService.signIn}. */
 export interface PhoneOtpSignInOptions {
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
 }
 
 /** The user and session issued by a phone OTP sign-in. */

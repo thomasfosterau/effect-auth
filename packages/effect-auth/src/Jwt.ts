@@ -48,7 +48,7 @@ import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import type * as Types from "./Types.ts";
+import * as Types from "./Types.ts";
 import * as Obs from "./Observability.ts";
 
 /**
@@ -80,7 +80,7 @@ export interface JwtKeyPair {
   readonly id: string;
   readonly algorithm: JwtAlgorithm;
   /** Public key in JWK form (no private material) */
-  readonly publicKeyJwk: Record<string, unknown>;
+  readonly publicKeyJwk: Types.JsonObject;
   /** PKCS#8 PEM private key — encrypt at rest in production */
   readonly privateKeyPem: string;
   readonly createdAt: number;
@@ -115,7 +115,7 @@ export interface JwtConfig {
   /** Derive the `sub` claim from the user (default: `user.id`) */
   readonly getSubject?: (user: Types.User) => string;
   /** Extra claims merged into every token's payload */
-  readonly definePayload?: (user: Types.User) => Record<string, unknown>;
+  readonly definePayload?: (user: Types.User) => Types.JsonObject;
   /**
    * Clock-skew tolerance in milliseconds applied to `exp` and `nbf` checks.
    * A token expired by less than `clockSkewLeeway` ms is still accepted;
@@ -153,7 +153,7 @@ export interface JwtSignResult {
  * The JWKS document (RFC 7517) to serve at `/.well-known/jwks.json`.
  */
 export interface Jwks {
-  readonly keys: readonly Record<string, unknown>[];
+  readonly keys: readonly Types.JsonObject[];
 }
 
 /**
@@ -170,7 +170,7 @@ export class JwtService extends Context.Service<
      */
     readonly sign: (
       user: Types.User,
-      extraClaims?: Record<string, unknown>,
+      extraClaims?: Types.JsonObject,
     ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError>;
 
     /**
@@ -181,7 +181,7 @@ export class JwtService extends Context.Service<
      */
     readonly verify: (
       token: string,
-    ) => Effect.Effect<Record<string, unknown>, JwtError | Errors.AuthError>;
+    ) => Effect.Effect<Types.JsonObject, JwtError | Errors.AuthError>;
 
     /**
      * The JWKS document containing every stored public key (with `kid`,
@@ -249,7 +249,7 @@ export const jwtServiceConfig = Config.all({
 const base64UrlEncode = (data: Uint8Array | string): string => Base64Url.encode(data);
 
 /** A decoded JSON object (a JOSE header, a claims set, or a JWK). */
-const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
+const JsonObject = Types.JsonObject;
 type JsonObject = typeof JsonObject.Type;
 
 /** A JSON object to and from its JSON text. */
@@ -632,7 +632,7 @@ export class RemoteJwksVerifier extends Context.Service<
      * token header is absent in the cached JWKS, the cache is refreshed once to
      * handle key rotation before failing.
      */
-    readonly verify: (token: string) => Effect.Effect<Record<string, unknown>, JwtError>;
+    readonly verify: (token: string) => Effect.Effect<Types.JsonObject, JwtError>;
   }
 >()("@effect-auth/RemoteJwksVerifier") {
   static readonly layer = (config: RemoteJwksConfig) =>
@@ -734,7 +734,7 @@ export const remoteJwksVerifier = (
           const alg = jws.header["alg"];
           if (alg !== "ES256" && alg !== "EdDSA") {
             return yield* new JwtError({
-              message: `Unsupported or missing algorithm: ${String(alg)}`,
+              message: `Unsupported or missing algorithm: ${Predicate.isString(alg) ? alg : "none"}`,
             });
           }
 
