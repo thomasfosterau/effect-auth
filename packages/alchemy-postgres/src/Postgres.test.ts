@@ -18,7 +18,7 @@ const databaseUrl = Option.getOrUndefined(
   Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
 );
 
-const url = (): Redacted.Redacted<string> => {
+const url = (): Redacted.Redacted => {
   assert(databaseUrl !== undefined, "DATABASE_URL names the Postgres server");
   return databaseUrl;
 };

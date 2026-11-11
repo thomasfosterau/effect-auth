@@ -225,6 +225,21 @@ const make = (
 
     const generateDeviceCode = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
+    /** Record the user's decision on the live request a user code names. */
+    const decide = (
+      userCode: string,
+      decision:
+        | { readonly status: "approved"; readonly userId: string }
+        | { readonly status: "denied" },
+    ) =>
+      Effect.gen(function* () {
+        const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
+        if (record === null || (yield* Clock.currentTimeMillis) > record.expiresAt) {
+          return yield* new DeviceCodeError({ message: "Invalid or expired code" });
+        }
+        return yield* store.update({ ...record, ...decision });
+      });
+
     return {
       begin: Effect.fn("DeviceAuthorizationService.begin")(function* (options?: {
         readonly clientId?: string;
@@ -321,24 +336,13 @@ const make = (
         return { user, session };
       }),
 
-      approve: Effect.fn("DeviceAuthorizationService.approve")(function* (
-        userCode: string,
-        userId: string,
-      ) {
-        const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
-        if (record === null || (yield* Clock.currentTimeMillis) > record.expiresAt) {
-          return yield* new DeviceCodeError({ message: "Invalid or expired code" });
-        }
-        yield* store.update({ ...record, status: "approved", userId });
-      }),
+      approve: Effect.fn("DeviceAuthorizationService.approve")((userCode: string, userId: string) =>
+        decide(userCode, { status: "approved", userId }),
+      ),
 
-      deny: Effect.fn("DeviceAuthorizationService.deny")(function* (userCode: string) {
-        const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
-        if (record === null || (yield* Clock.currentTimeMillis) > record.expiresAt) {
-          return yield* new DeviceCodeError({ message: "Invalid or expired code" });
-        }
-        yield* store.update({ ...record, status: "denied" });
-      }),
+      deny: Effect.fn("DeviceAuthorizationService.deny")((userCode: string) =>
+        decide(userCode, { status: "denied" }),
+      ),
 
       allowMissingRateLimiter: config.allowMissingRateLimiter === true,
     };

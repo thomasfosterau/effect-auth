@@ -111,6 +111,7 @@ const validatePasswordLength = (
         message: `Password must be at most ${maxPasswordLength} characters`,
       });
     }
+    return yield* Effect.void;
   });
 
 /**

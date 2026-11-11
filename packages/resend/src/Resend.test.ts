@@ -23,7 +23,8 @@ const stubFetch = (
 ): { readonly fetch: typeof fetch; readonly calls: CapturedRequest[] } => {
   const calls: CapturedRequest[] = [];
   const fetchStub: typeof fetch = async (input, init) => {
-    const request = { url: String(input), init: init ?? {} };
+    const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
+    const request = { url, init: init ?? {} };
     calls.push(request);
     return Predicate.isFunction(response) ? response(request) : response;
   };

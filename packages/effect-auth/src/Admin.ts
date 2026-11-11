@@ -518,7 +518,7 @@ export const make = (
         }
 
         yield* sessionManager.invalidateUserSessions(userId);
-        yield* userStore.delete(userId);
+        return yield* userStore.delete(userId);
       }),
 
       revokeUserSessions: Effect.fn("AdminService.revokeUserSessions")(function* (
@@ -653,6 +653,7 @@ export const make = (
         if (options.revokeOtherSessions) {
           yield* sessionManager.invalidateUserSessions(userId);
         }
+        return yield* Effect.void;
       }),
 
       listUserSessions: Effect.fn("AdminService.listUserSessions")(function* (

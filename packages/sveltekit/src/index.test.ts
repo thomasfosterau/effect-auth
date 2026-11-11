@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Predicate, Schema } from "effect";
 import type { SessionWithUser } from "@thomasfosterau/effect-auth";
 import {
   type ActionEvent,
@@ -145,6 +145,12 @@ class Redirect extends Error {
     super(`redirect ${status} ${location}`);
   }
 }
+/** A text field of a submitted form; a missing field or a file reads as empty. */
+const formText = (form: FormData, name: string): string => {
+  const value = form.get(name);
+  return Predicate.isString(value) ? value : "";
+};
+
 /** A JSON body for a stubbed handler response. */
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
@@ -189,13 +195,13 @@ const signInWith = (answer: () => Promise<Response>, seen?: Array<Request>) =>
         attributes: {
           credential: {
             method: "password",
-            email: String(form.get("email") ?? ""),
-            password: String(form.get("password") ?? ""),
+            email: formText(form, "email"),
+            password: formText(form, "password"),
           },
         },
       },
     }),
-    fields: (form) => ({ email: String(form.get("email") ?? "") }),
+    fields: (form) => ({ email: formText(form, "email") }),
     fallback: "/home",
   });
 

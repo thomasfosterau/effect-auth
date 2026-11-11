@@ -42,6 +42,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
+import { deliverCode } from "./CodeDelivery.ts";
 import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -376,7 +377,7 @@ export const make = (
         }
 
         // Consume the OTP (one-time use).
-        yield* store.delete(phoneNumber, purpose);
+        return yield* store.delete(phoneNumber, purpose);
       });
 
     return {
@@ -386,7 +387,7 @@ export const make = (
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
         if (!phoneNumber) {
-          return;
+          return yield* Effect.void;
         }
 
         // Anti-enumeration: sign-in with sign-up disabled and no user
@@ -432,21 +433,17 @@ export const make = (
 
         yield* store.upsert(record);
 
-        if (!deliver) {
-          return;
-        }
-
-        // With sign-up disabled, only a known number gets a code, so an inline
-        // send would answer it later, and fail it when the vendor does: the
-        // send goes off the response path (#196).
-        if (hidesAccount(purpose)) {
-          return yield* detached(`phone-otp:${purpose}`, config.sendOtp(phoneNumber, otp, purpose));
-        }
-        yield* Effect.catch(config.sendOtp(phoneNumber, otp, purpose), (error) =>
-          Effect.fail(
+        // With sign-up disabled, only a known number gets a code, so its send
+        // goes off the response path (#196).
+        return yield* deliverCode(detached, {
+          purpose: `phone-otp:${purpose}`,
+          code: otp,
+          send: (code) => config.sendOtp(phoneNumber, code, purpose),
+          onFailure: (error) =>
             new PhoneOtpError({ message: `Failed to send OTP to ${phoneNumber}`, cause: error }),
-          ),
-        );
+          deliver,
+          hidesAccount: hidesAccount(purpose),
+        });
       }),
 
       signIn: Effect.fn("PhoneOtpService.signIn")(function* (

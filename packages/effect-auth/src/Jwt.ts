@@ -137,7 +137,7 @@ export interface JwtConfig {
    * is always applied — there is no opt-out per key.
    */
   readonly encryptPrivateKey?:
-    | { readonly secret: Redacted.Redacted<string> }
+    | { readonly secret: Redacted.Redacted }
     | { readonly cipher: TokenCipher };
 }
 
@@ -678,7 +678,7 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
  */
 export const remoteJwksVerifier = (
   config: RemoteJwksConfig,
-): Effect.Effect<typeof RemoteJwksVerifier.Service, never> =>
+): Effect.Effect<typeof RemoteJwksVerifier.Service> =>
   Effect.gen(function* () {
     const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
     const leewayMs = config.clockSkewLeeway ?? 0;

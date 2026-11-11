@@ -151,7 +151,7 @@ export interface MultiFactorConfig {
    * hashed and are unaffected by this option.
    */
   readonly encryptSecret?:
-    | { readonly secret: Redacted.Redacted<string> }
+    | { readonly secret: Redacted.Redacted }
     | { readonly cipher: TokenCipher };
 }
 
@@ -432,6 +432,7 @@ export const make = (
             message: "Invalid password",
           });
         }
+        return yield* Effect.void;
       });
 
     /**
@@ -551,7 +552,7 @@ export const make = (
           });
         }
 
-        yield* store.upsert({ ...record, verified: true, lastUsedCounter: matchedCounter });
+        return yield* store.upsert({ ...record, verified: true, lastUsedCounter: matchedCounter });
       }),
 
       disable: Effect.fn("MultiFactorService.disable")(function* (

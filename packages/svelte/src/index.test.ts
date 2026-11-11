@@ -58,7 +58,7 @@ const makeClient = () => {
   return createAuthClient({
     baseUrl: "http://svelte.test",
     fetch: (input, init) => {
-      const { pathname } = new URL(String(input));
+      const { pathname } = new URL(new Request(input).url);
       switch (`${init?.method ?? "GET"} ${pathname}`) {
         case "POST /users":
           signedIn = true;

@@ -930,8 +930,10 @@ export const make = (
           );
         }
         const existing = yield* orgs.listTeamMembers(teamId);
-        if (existing.some((entry) => entry.userId === userId)) return;
-        yield* orgs.addTeamMember(teamId, userId);
+        if (!existing.some((entry) => entry.userId === userId)) {
+          yield* orgs.addTeamMember(teamId, userId);
+        }
+        return yield* Effect.void;
       });
 
     /**
@@ -1002,10 +1004,10 @@ export const make = (
       Effect.gen(function* () {
         const existing = yield* identifiers.getByValue("email", email);
         if (existing !== null) {
-          if (existing.userId === user.id) return;
+          if (existing.userId === user.id) return yield* Effect.void;
           return yield* conflict(`The email "${email}" is already in use`);
         }
-        yield* claimEmail(user.id, email);
+        return yield* Effect.asVoid(claimEmail(user.id, email));
       });
 
     /** Apply an `emails` PATCH entry: unclaim on `remove`, else claim each address. */

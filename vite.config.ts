@@ -104,13 +104,9 @@ export default defineConfig({
       "unicorn/consistent-function-scoping": "warn", // 148
       "typescript/no-unsafe-type-assertion": "warn", // 124
       "eslint/no-shadow": "warn", // 120
-      "typescript/no-unnecessary-type-arguments": "warn", // 59
-      "typescript/consistent-return": "warn", // 45
-      "vitest/require-mock-type-parameters": "warn", // 32
       // Type tests (expect-error directives) and tests that assert by running
       // an Effect that fails on a mismatch.
       "vitest/expect-expect": "warn", // 29
-      "typescript/no-base-to-string": "warn", // 23
       // The one site is `BroadcastChannel#postMessage` (client/Client.ts's
       // cross-tab sync), which takes no `targetOrigin`; the rule cannot tell
       // it from `window.postMessage` (its docs say so), so it stays a warning.

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
-import { argon2id } from "hash-wasm";
+import { argon2id, type IArgon2Options } from "hash-wasm";
 import { Effect } from "effect";
 import { Password } from "@thomasfosterau/effect-auth";
 import * as Argon2 from "./index.ts";
@@ -13,7 +13,9 @@ vi.mock("hash-wasm", async (importOriginal) => {
   const actual = await importOriginal<typeof import("hash-wasm")>();
   return {
     ...actual,
-    argon2id: vi.fn(async () => "$argon2id$v=19$m=1,t=1,p=1$c2FsdA$aGFzaA"),
+    argon2id: vi.fn<(options: IArgon2Options) => Promise<string>>(
+      async () => "$argon2id$v=19$m=1,t=1,p=1$c2FsdA$aGFzaA",
+    ),
   };
 });
 

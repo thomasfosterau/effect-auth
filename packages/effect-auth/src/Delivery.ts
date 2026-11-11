@@ -232,6 +232,7 @@ export const emailCallbacks = (
         return yield* new Errors.AuthError({ message: "User has no email for second-factor OTP" });
       }
       yield* sender.send({ to: email, purpose: "second-factor-otp", params: { otp } });
+      return undefined;
     }),
 });
 
@@ -261,5 +262,6 @@ export const smsCallbacks = (
         });
       }
       yield* sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
+      return undefined;
     }),
 });

@@ -19,6 +19,7 @@ import {
   UserStore,
 } from "../UserStore.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
+import { deliverCode } from "../CodeDelivery.ts";
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
@@ -389,7 +390,7 @@ export const make = (
         }
 
         // Consume the OTP (one-time use)
-        yield* store.delete(email, purpose);
+        return yield* store.delete(email, purpose);
       });
 
     return {
@@ -399,7 +400,7 @@ export const make = (
       ) {
         const email = normalizeEmail(rawEmail);
         if (!email) {
-          return;
+          return yield* Effect.void;
         }
 
         // Do not reveal whether the user exists to reduce email enumeration
@@ -449,28 +450,18 @@ export const make = (
         // One active OTP per email + purpose: replaces any outstanding one.
         yield* store.upsert(record);
 
-        if (!deliver) {
-          return;
-        }
-
         // Where only a known address gets a code (sign-in with sign-up
-        // disabled, forget-password), an inline send would answer it later,
-        // and fail it when the vendor does: the send goes off the response
-        // path. Elsewhere a failed send is the caller's to see (#196).
-        if (hidesAccount(purpose)) {
-          return yield* detached(
-            `email-otp:${purpose}`,
-            config.sendVerificationOtp(email, otp, purpose),
-          );
-        }
-        yield* Effect.catch(config.sendVerificationOtp(email, otp, purpose), (error) =>
-          Effect.fail(
-            new EmailOtpError({
-              message: `Failed to send OTP to ${email}`,
-              cause: error,
-            }),
-          ),
-        );
+        // disabled, forget-password), the send goes off the response path.
+        // Elsewhere a failed send is the caller's to see (#196).
+        return yield* deliverCode(detached, {
+          deliver,
+          hidesAccount: hidesAccount(purpose),
+          purpose: `email-otp:${purpose}`,
+          code: otp,
+          send: (code) => config.sendVerificationOtp(email, code, purpose),
+          onFailure: (error) =>
+            new EmailOtpError({ message: `Failed to send OTP to ${email}`, cause: error }),
+        });
       }),
 
       signIn: Effect.fn("EmailOtpService.signIn")(function* (

@@ -100,7 +100,7 @@ export type DenyBehavior = "redact" | "fail";
  */
 export interface ProtectedFieldOptions<E = unknown> {
   /** The policy set this field's decision is made against. */
-  readonly policies: Policy.Policy<E, never> | ReadonlyArray<Policy.Policy<E, never>>;
+  readonly policies: Policy.Policy<E> | ReadonlyArray<Policy.Policy<E>>;
   /**
    * The capability this field represents, e.g. `"user:read-email"`. A string is
    * lifted to `Action::"<string>"`.
@@ -134,8 +134,8 @@ const toActionRef = (action: string | Entity.EntityRef): Entity.EntityRef =>
   Predicate.isString(action) ? Entity.ref("Action", action) : action;
 
 const toPolicies = <E>(
-  policies: Policy.Policy<E, never> | ReadonlyArray<Policy.Policy<E, never>>,
-): ReadonlyArray<Policy.Policy<E, never>> => Arr.ensure(policies);
+  policies: Policy.Policy<E> | ReadonlyArray<Policy.Policy<E>>,
+): ReadonlyArray<Policy.Policy<E>> => Arr.ensure(policies);
 
 /**
  * Build the {@link Policy.PolicyRequest} a protected field asks. The principal
@@ -165,9 +165,9 @@ const requestFor = <E>(
  * field a job reads or writes is audited like any other check it makes.
  */
 const decide = <E>(
-  policies: ReadonlyArray<Policy.Policy<E, never>>,
+  policies: ReadonlyArray<Policy.Policy<E>>,
   request: Policy.PolicyRequest,
-): Effect.Effect<boolean, never, never> =>
+): Effect.Effect<boolean> =>
   Effect.gen(function* () {
     const resolver = yield* Effect.serviceOption(EntityResolver);
     const slice = yield* Option.isNone(resolver)

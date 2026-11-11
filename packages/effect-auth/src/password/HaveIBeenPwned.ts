@@ -79,6 +79,7 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
               message: "This password has appeared in a data breach; please choose another",
             });
           }
+          return yield* Effect.void;
         });
 
       return {

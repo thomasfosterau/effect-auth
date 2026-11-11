@@ -80,7 +80,7 @@ const withFetch = <A>(
 ): Promise<A> => {
   const original = globalThis.fetch;
   globalThis.fetch = (input) => {
-    const url = Predicate.isString(input) ? input : input.toString();
+    const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
     const key = Struct.keys(routes).find((k) => url.startsWith(k));
     const body = key ? routes[key] : { error: "no route" };
     return Promise.resolve(

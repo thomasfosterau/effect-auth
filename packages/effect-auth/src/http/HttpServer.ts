@@ -84,6 +84,7 @@ import {
   OidcProviderService,
   type OidcClient,
   type OidcClientMetadata,
+  type OidcProviderError,
   type OidcRegistrationError,
 } from "../OidcProvider.ts";
 import { SsoService, type SsoProvider } from "../Sso.ts";
@@ -748,11 +749,25 @@ const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
  */
 const internalServerError = (
   e: Cause.YieldableError,
-): Effect.Effect<never, S.InternalServerError, never> =>
+): Effect.Effect<never, S.InternalServerError> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
     Effect.flatMap(() =>
       Effect.fail(new S.InternalServerError({ message: "Internal server error" })),
     ),
+  );
+
+/**
+ * An OIDC provider call's failures as the client sees them: a refusal is a
+ * `400` carrying its message, an infrastructure failure a generic `500`.
+ */
+const oidcProviderFailures = <A, R>(
+  effect: Effect.Effect<A, OidcProviderError | AuthError, R>,
+): Effect.Effect<A, S.BadRequest | S.InternalServerError, R> =>
+  effect.pipe(
+    Effect.catchTags({
+      OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+      AuthError: (e) => internalServerError(e),
+    }),
   );
 
 /**
@@ -811,7 +826,7 @@ const consumeRateLimitToken = (
   rateLimiter: typeof RateLimiter.Service,
   key: string,
   limit: RateLimitConfig,
-): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
+): Effect.Effect<void, S.TooManyRequests | S.InternalServerError> =>
   rateLimiter.consumeToken(key, limit).pipe(
     Effect.catchTags({
       RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
@@ -822,16 +837,16 @@ const consumeRateLimitToken = (
 const applyUserCodeRateLimit = (
   userCode: string,
   device: typeof DeviceAuthorizationService.Service,
-): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
+): Effect.Effect<void, S.TooManyRequests | S.InternalServerError> =>
   Effect.gen(function* () {
     const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
     if (Option.isNone(rateLimiterOpt)) {
       // The app opted out of the limit explicitly; nothing else skips it.
-      if (device.allowMissingRateLimiter === true) return;
+      if (device.allowMissingRateLimiter === true) return yield* Effect.void;
       return yield* refuseWithoutRateLimiter("the device user-code limit");
     }
     const key = `device-user-code:${normalizeUserCode(userCode)}`;
-    yield* consumeRateLimitToken(rateLimiterOpt.value, key, USER_CODE_RATE_LIMIT);
+    return yield* consumeRateLimitToken(rateLimiterOpt.value, key, USER_CODE_RATE_LIMIT);
   });
 
 /**
@@ -867,7 +882,7 @@ const refuseWithoutRateLimiter = (limit: string): Effect.Effect<never, S.TooMany
  */
 const applyRegistrationRateLimit = (
   limit: RateLimitConfig,
-): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
+): Effect.Effect<void, S.TooManyRequests | S.InternalServerError> =>
   Effect.gen(function* () {
     const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
     if (Option.isNone(rateLimiterOpt)) {
@@ -876,7 +891,7 @@ const applyRegistrationRateLimit = (
     const clientIp = yield* Effect.serviceOption(ClientIP);
     const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
     if (ip === undefined) return yield* new S.TooManyRequests({ message: NO_CLIENT_ADDRESS });
-    yield* consumeRateLimitToken(rateLimiterOpt.value, `oidc-register:${ip}`, limit);
+    return yield* consumeRateLimitToken(rateLimiterOpt.value, `oidc-register:${ip}`, limit);
   });
 
 /**
@@ -958,8 +973,8 @@ const servicesConfigError = (
 const requireServicesConfig = (options: AuthWebHandlerOptions) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
-      const error = servicesConfigError(yield* Effect.context<never>(), options);
-      if (error === undefined) return;
+      const error = servicesConfigError(yield* Effect.context(), options);
+      if (error === undefined) return yield* Effect.void;
       yield* Effect.logError(error.message);
       return yield* error;
     }),
@@ -1318,6 +1333,7 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
             .pipe(Effect.catch(internalServerError));
           // A foreign or unknown id gets the same answer (anti-enumeration).
           if (!revoked) return yield* new S.NotFound({ message: "Session not found" });
+          return yield* Effect.void;
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("deleteOthers", ({ request }) =>
@@ -1379,7 +1395,7 @@ export const identifiersGroupLayer = (config?: CookieConfig, multiSession?: Mult
               message: "Cannot delete the only identifier on an account",
             });
           }
-          yield* identifiers.delete(target.id).pipe(Effect.catch(internalServerError));
+          return yield* identifiers.delete(target.id).pipe(Effect.catch(internalServerError));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -1922,7 +1938,7 @@ export const emailVerificationsGroupLayer = (
               }),
             );
           // `201` with the session when verification signs the user in.
-          if (result.session === undefined) return;
+          if (result.session === undefined) return yield* Effect.void;
           yield* issueSession(result.session, cfg, "email-password", undefined);
           return yield* signedIn({ ...result, session: result.session, method: "email-password" });
         }).pipe(JsonApiErrors.mapHttpErrors),
@@ -3382,12 +3398,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               },
               resolved.user.id,
             )
-            .pipe(
-              Effect.catchTags({
-                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
+            .pipe(oidcProviderFailures);
           return {
             client: encodeOidcClient(result.client),
             ...(result.clientSecret !== undefined && { clientSecret: result.clientSecret }),
@@ -3426,12 +3437,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               ...(payload.disabled !== undefined && { disabled: payload.disabled }),
               ...(payload.metadata !== undefined && { metadata: payload.metadata }),
             })
-            .pipe(
-              Effect.catchTags({
-                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
+            .pipe(oidcProviderFailures);
           return encodeOidcClient(updated);
         }),
       )
@@ -3442,12 +3448,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
           const oidc = yield* resolveOidcProvider;
-          yield* oidc.service.deleteClient(params.clientId).pipe(
-            Effect.catchTags({
-              OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
+          return yield* oidc.service.deleteClient(params.clientId).pipe(oidcProviderFailures);
         }),
       )
       .handle("oidcAuthorize", ({ query, request }) =>
@@ -3501,12 +3502,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               ...(query.nonce !== undefined && { nonce: query.nonce }),
               ...(query.prompt !== undefined && { prompt: query.prompt }),
             })
-            .pipe(
-              Effect.catchTags({
-                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
+            .pipe(oidcProviderFailures);
           return HttpServerResponse.redirect(result.redirectTo, { status: 302 });
         }),
       )
@@ -3516,12 +3512,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const resolved = yield* requireSession(request, cfg);
           const result = yield* oidc.service
             .consent(resolved.user.id, payload.consentCode, payload.accept)
-            .pipe(
-              Effect.catchTags({
-                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
+            .pipe(oidcProviderFailures);
           return { redirectTo: result.redirectTo };
         }),
       )
@@ -3709,7 +3700,7 @@ const scimConflict = (detail: string): S.ScimConflict =>
  */
 const scimInternalError = (
   e: ScimError | Errors.AuthError,
-): Effect.Effect<never, S.ScimInternalError, never> =>
+): Effect.Effect<never, S.ScimInternalError> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
     Effect.flatMap(() =>
       Effect.fail(
@@ -4869,7 +4860,7 @@ const serve = (
 
         // Provide the resolved ClientIP to all downstream effects (hooks, handlers)
         return yield* effect.pipe(Effect.provideService(ClientIP, { ip }));
-      }) as Effect.Effect<HttpServerResponse.HttpServerResponse, never, never>,
+      }) as Effect.Effect<HttpServerResponse.HttpServerResponse>,
   });
 
   const trustedOrigins = options.trustedOrigins ?? [];

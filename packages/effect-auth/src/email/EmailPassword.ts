@@ -366,6 +366,7 @@ const validatePasswordLength = (
         params: { maxLength: config.maxPasswordLength },
       });
     }
+    return yield* Effect.void;
   });
 
 export const make = (
@@ -652,6 +653,7 @@ export const make = (
             yield* sessionManager.invalidateUserSessions(input.userId);
           }
         }
+        return yield* Effect.void;
       }),
 
       setPassword: Effect.fn("EmailPasswordService.setPassword")(function* (
@@ -671,7 +673,7 @@ export const make = (
         }
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);
-        yield* store.setPasswordHash(userId, hashedPassword.hash);
+        return yield* store.setPasswordHash(userId, hashedPassword.hash);
       }),
 
       clearPassword: Effect.fn("EmailPasswordService.clearPassword")(function* (userId: string) {

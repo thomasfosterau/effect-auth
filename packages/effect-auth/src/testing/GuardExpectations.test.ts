@@ -30,7 +30,7 @@ const readPost = Effect.flatMap(guards.isOwnerOrRole(author.id, Axes.moderate), 
 const unguarded = Effect.succeed("done");
 
 const mismatchesOf = (
-  expectation: Effect.Effect<void, Testing.GuardExpectationError, never>,
+  expectation: Effect.Effect<void, Testing.GuardExpectationError>,
 ): ReadonlyArray<Testing.GuardMismatch> => {
   const result = Effect.runSync(Effect.result(expectation));
   return Result.isFailure(result) ? result.failure.mismatches : [];

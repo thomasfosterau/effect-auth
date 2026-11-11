@@ -1236,6 +1236,7 @@ export const make = (
             message: "Organization has reached its membership limit",
           });
         }
+        return yield* Effect.void;
       });
 
     /**
@@ -1647,9 +1648,11 @@ export const make = (
         yield* store.deleteMember(target.id);
         // Cascade: leaving the organization also leaves all of its teams.
         const teams = yield* store.listTeamsForMember(organizationId, memberUserId);
-        yield* Effect.forEach(teams, (team) => store.removeTeamMember(team.id, memberUserId), {
-          concurrency: 1,
-        });
+        return yield* Effect.forEach(
+          teams,
+          (team) => store.removeTeamMember(team.id, memberUserId),
+          { concurrency: 1, discard: true },
+        );
       }),
 
       updateMemberRole: Effect.fn("OrganizationService.updateMemberRole")(function* (

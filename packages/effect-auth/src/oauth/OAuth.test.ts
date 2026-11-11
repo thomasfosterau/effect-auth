@@ -103,7 +103,7 @@ const withFetch = async <A>(
   const calls: Captured[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (input, init) => {
-    const url = Predicate.isString(input) ? input : input.toString();
+    const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
     const body = init?.body;
     calls.push({
       url,
