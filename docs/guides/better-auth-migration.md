@@ -152,7 +152,9 @@ Better Auth leaves it to the app to schedule a send outside the response (the `w
 
 ## 5. Client migration
 
-`better-auth/client` → `@thomasfosterau/effect-auth/client`. Both export `createAuthClient`; both send credentialed `fetch` requests at a base URL and keep an observable session store. The differences that matter:
+`better-auth/client` → `@thomasfosterau/effect-auth/client`. Both export `createAuthClient` and send credentialed `fetch` requests at a base URL. The differences that matter:
+
+- **The session is an Atom graph, not a store on the client.** `makeSessionAtoms(client)` from `@thomasfosterau/effect-auth/client/atoms` exposes the session and its derived states as `effect/reactivity` Atoms, read through your app's `AtomRegistry`; commands stay plain client calls, and each session-changing call refetches the observed session before it resolves.
 
 - **No client plugins to mirror.** Better Auth requires the client plugin list to match the server's. The effect-auth client exposes every endpoint a browser would call up front — `signUp`, `signIn`, `signOut`, `getSession`, `identifiers`, `magicLink`, `emailOtp`, `phoneOtp`, `multiFactor`, `organization`, `apiKeys`, `admin`, `sso`, `oidc`, `device`, `googleOneTap`, `multiSession`, `changeEmail`, `deleteUser` — and endpoints whose server layer is absent simply reject with `404`. `extend()` is there for your own additions.
 - **The framework binding is a separate package**, not a subpath import: `@thomasfosterau/effect-auth-svelte`, built on the vanilla client with out-of-the-box form components (`SignInForm`, `SignUpForm`, password reset, magic link, email OTP).

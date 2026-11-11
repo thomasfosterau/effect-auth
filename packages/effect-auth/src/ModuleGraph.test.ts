@@ -112,18 +112,41 @@ describe("the saml subpath", () => {
   });
 });
 
+/** The specifiers `file` imports at runtime: comments stripped, `import type` skipped. */
+const valueImportsOf = async (file: string): Promise<string[]> => {
+  const code = (await readFile(file, "utf8"))
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  return [...code.matchAll(/^import\s+(?!type\b)[^;]*?from\s+["']([^"']+)["']/gm)].map(
+    (match) => match[1],
+  );
+};
+
 describe("the client subpath", () => {
   // The browser bundle holds only the client: its `http/` imports are type-only
-  // and erase, so its runtime graph is the client module alone.
+  // and erase, so its runtime graph is the client module alone, with no Effect
+  // runtime in it.
   it("imports the HTTP tier for types only", async () => {
-    const client = path.resolve(import.meta.dirname, "client", "Client.ts");
-    const code = (await readFile(client, "utf8"))
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/.*$/gm, "");
-    const valueImports = [
-      ...code.matchAll(/^import\s+(?!type\b)[^;]*?from\s+["']([^"']+)["']/gm),
-    ].map((match) => match[1]);
-    expect(valueImports).toEqual([]);
+    expect(await valueImportsOf(path.resolve(import.meta.dirname, "client", "Client.ts"))).toEqual(
+      [],
+    );
+  });
+
+  // `./client/atoms` is its own entry, so `./client` never loads `effect`.
+  it("re-exports nothing but the client", async () => {
+    const index = await readFile(path.resolve(import.meta.dirname, "client", "index.ts"), "utf8");
+    expect(extractSpecifiers(index.replace(/\/\*[\s\S]*?\*\//g, ""))).toEqual(["./Client.ts"]);
+  });
+});
+
+describe("the client/atoms subpath", () => {
+  // The session Atoms are where the Effect runtime enters a browser bundle, and
+  // only there: `effect` and the client, with the HTTP tier still types only.
+  it("imports effect and the client, and the HTTP tier for types only", async () => {
+    const imports = await valueImportsOf(
+      path.resolve(import.meta.dirname, "client", "SessionAtoms.ts"),
+    );
+    expect(imports.toSorted()).toEqual(["./Client.ts", "effect", "effect/reactivity"]);
   });
 });
 

@@ -216,8 +216,8 @@ export default defineConfig({
         },
       },
       {
-        // Code that imports nothing from `effect`: the Svelte binding peers
-        // only its framework (AGENTS.md), the browser client's runtime is
+        // Code that imports nothing from `effect` at runtime: the Svelte
+        // binding (`effect` types only, AGENTS.md), the browser client's runtime is
         // plain `fetch` with no Effect in the bundle (`client/Client.ts`), and
         // `./ladder` imports nothing at all because browser bundles load it
         // (`ModuleGraph.test.ts`). The

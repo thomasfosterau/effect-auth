@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vite-plus/test";
-import { createAuthClient, type AuthClient } from "@thomasfosterau/effect-auth/client";
-import { listSessionsStore, sessionStore, type ListSessionsState } from "./index.ts";
+import { describe, it, expect, vi } from "vite-plus/test";
+import { Atom, AtomRegistry } from "effect/reactivity";
+import { createAuthClient } from "@thomasfosterau/effect-auth/client";
+import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
+import { atomStore, listSessionsStore, sessionStore, type ListSessionsState } from "./index.ts";
 
 const EMAIL = "alice@svelte.test";
 const PW = "password-123";
-
-type SessionList = Awaited<ReturnType<AuthClient["listSessions"]>>;
 
 const json = (body: object): Response =>
   new Response(JSON.stringify(body), {
@@ -13,26 +13,16 @@ const json = (body: object): Response =>
     headers: { "content-type": "application/json" },
   });
 
-/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
-type StubOf<T> = T extends (...args: infer A) => infer R
-  ? (...args: A) => R
-  : { readonly [K in keyof T]?: StubOf<T[K]> };
-
-/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
-type ClientStub = StubOf<AuthClient>;
-const stub = (methods: ClientStub): AuthClient =>
-  // SAFETY: the code under test touches only the members a test supplies; reaching
-  // for a missing one throws, so a stub cannot let a test pass by omission.
-  methods as AuthClient;
+const notFound = () => new Response(null, { status: 404 });
 
 /**
  * A client backed by a stand-in server covering only the endpoints these
  * stores touch (`/users`, `/sessions/current`, `/sessions`). The
- * bindings care about nothing but the session store moving, so the in-process
+ * bindings care about nothing but the session Atoms moving, so the in-process
  * auth server the client package tests against would only add a dependency
  * here.
  */
-const makeClient = () => {
+const makeClient = (onList: () => void = () => {}) => {
   const now = Date.now();
   const user = { id: "user-1", email: EMAIL, createdAt: now, updatedAt: now, attributes: {} };
   const session = {
@@ -55,138 +45,131 @@ const makeClient = () => {
     relationships: { user: { data: { type: "users", id: userId } } },
   });
 
+  const signedInSession = () => json({ data: sessionResource(), included: [userResource()] });
+  const routes: Record<string, () => Response> = {
+    "POST /users": () => {
+      signedIn = true;
+      return json({
+        data: sessionResource(),
+        included: [userResource()],
+        meta: { needsEmailVerification: false },
+      });
+    },
+    "DELETE /sessions/current": () => {
+      signedIn = false;
+      return new Response(null, { status: 204 });
+    },
+    "GET /sessions/current": () =>
+      signedIn ? signedInSession() : new Response(null, { status: 401 }),
+    // The session Atoms list only while signed in.
+    "GET /sessions": () => {
+      onList();
+      return json({ data: [sessionResource()] });
+    },
+  };
+
   return createAuthClient({
     baseUrl: "http://svelte.test",
     fetch: (input, init) => {
       const { pathname } = new URL(new Request(input).url);
-      switch (`${init?.method ?? "GET"} ${pathname}`) {
-        case "POST /users":
-          signedIn = true;
-          return Promise.resolve(
-            json({
-              data: sessionResource(),
-              included: [userResource()],
-              meta: { needsEmailVerification: false },
-            }),
-          );
-        case "DELETE /sessions/current":
-          signedIn = false;
-          return Promise.resolve(new Response(null, { status: 204 }));
-        case "GET /sessions/current":
-          return Promise.resolve(
-            signedIn
-              ? json({ data: sessionResource(), included: [userResource()] })
-              : new Response(null, { status: 401 }),
-          );
-        case "GET /sessions":
-          return Promise.resolve(json({ data: signedIn ? [sessionResource()] : [] }));
-        default:
-          return Promise.resolve(new Response(null, { status: 404 }));
-      }
+      const route = routes[`${init?.method ?? "GET"} ${pathname}`] ?? notFound;
+      return Promise.resolve(route());
     },
   });
 };
 
 const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+describe("atomStore", () => {
+  it("emits at once, follows changes and unmounts on unsubscribe", async () => {
+    const registry = AtomRegistry.make();
+    let mounted = 0;
+    const count = Atom.make((get) => {
+      mounted++;
+      get.addFinalizer(() => {
+        mounted--;
+      });
+      return 1;
+    });
+    const writable = Atom.make(0);
+    const doubled = Atom.make((get) => get(writable) * 2 + get(count));
+
+    const seen: number[] = [];
+    const unsubscribe = atomStore(registry, doubled).subscribe((value) => seen.push(value));
+    expect(seen).toEqual([1]);
+    expect(mounted).toBe(1);
+
+    registry.set(writable, 2);
+    expect(seen).toEqual([1, 5]);
+
+    unsubscribe();
+    await nextTick();
+    expect(mounted).toBe(0);
+    registry.set(writable, 3);
+    expect(seen).toEqual([1, 5]);
+    registry.dispose();
+  });
+});
+
 describe("svelte sessionStore", () => {
   it("pushes session state to subscribers (readable-store contract)", async () => {
     const client = makeClient();
-    const store = sessionStore(client);
+    const registry = AtomRegistry.make();
+    const store = sessionStore(registry, makeSessionAtoms(client));
 
     const seen: Array<string | null | undefined> = [];
+    const pending: boolean[] = [];
     const unsubscribe = store.subscribe((state) => {
       seen.push(state.data === null ? null : state.data.user.email);
+      pending.push(state.isPending);
     });
 
-    // Immediate synchronous emission with the current value.
-    expect(seen.length).toBeGreaterThan(0);
+    // Immediate synchronous emission with the current value: pending, no session.
+    expect(seen).toEqual([null]);
+    expect(pending).toEqual([true]);
 
     await client.signUp({ email: EMAIL, password: PW });
-    expect(seen[seen.length - 1]).toBe(EMAIL);
+    expect(seen.at(-1)).toBe(EMAIL);
 
     await client.signOut();
-    expect(seen[seen.length - 1]).toBeNull();
+    expect(seen.at(-1)).toBeNull();
+    expect(pending.at(-1)).toBe(false);
 
     unsubscribe();
+    registry.dispose();
   });
 });
 
 describe("svelte listSessionsStore", () => {
-  it("fetches sessions on first subscribe and supports refetch", async () => {
-    const client = makeClient();
+  it("lists the sessions, follows the session and supports refetch", async () => {
+    let lists = 0;
+    const client = makeClient(() => lists++);
+    const registry = AtomRegistry.make();
+    const atoms = makeSessionAtoms(client);
     await client.signUp({ email: EMAIL, password: PW });
 
-    const store = listSessionsStore(client);
+    const store = listSessionsStore(registry, atoms);
     const seen: ListSessionsState[] = [];
     const unsubscribe = store.subscribe((state) => {
       seen.push(state);
     });
 
     expect(seen[0]?.isPending).toBe(true);
-    await nextTick();
-
-    const settled = seen[seen.length - 1];
-    expect(settled?.isPending).toBe(false);
-    expect(settled?.error).toBeNull();
-    expect(settled?.data?.length).toBe(1);
+    await vi.waitFor(() => expect(seen.at(-1)?.isPending).toBe(false));
+    expect(seen.at(-1)).toEqual({ data: [expect.anything()], isPending: false, error: null });
+    expect(lists).toBe(1);
 
     store.refetch();
-    await nextTick();
-    expect(seen[seen.length - 1]?.data?.length).toBe(1);
+    await vi.waitFor(() => expect(lists).toBe(2));
+    await vi.waitFor(() => expect(seen.at(-1)?.isPending).toBe(false));
+    expect(seen.at(-1)?.data?.length).toBe(1);
+
+    // Signing out reaches the list through the Atom graph: empty, no request.
+    await client.signOut();
+    await vi.waitFor(() => expect(seen.at(-1)?.data).toEqual([]));
+    expect(lists).toBe(2);
 
     unsubscribe();
-  });
-
-  it("discards stale listSessions responses — last refetch wins", async () => {
-    let resolveFirst!: (sessions: SessionList) => void;
-    let callCount = 0;
-
-    const fakeClient = stub({
-      listSessions: (): Promise<SessionList> => {
-        callCount++;
-        if (callCount === 2) {
-          // First explicit refetch: slow.
-          return new Promise((resolve) => {
-            resolveFirst = resolve;
-          });
-        }
-        // Initial fetch and second explicit refetch: resolve immediately with [] sessions.
-        return Promise.resolve([]);
-      },
-    });
-
-    const store = listSessionsStore(fakeClient);
-    const seen: ListSessionsState[] = [];
-    const unsubscribe = store.subscribe((s) => seen.push(s));
-    await nextTick(); // let the initial fetch settle
-
-    const initialLen = seen[seen.length - 1]?.data?.length ?? -1;
-    expect(initialLen).toBe(0);
-
-    // First refetch (slow/stale), then second refetch immediately.
-    store.refetch();
-    store.refetch();
-    await nextTick(); // second refetch settles
-
-    // Second refetch resolved with [].
-    expect(seen[seen.length - 1]?.data?.length).toBe(0);
-    expect(seen[seen.length - 1]?.isPending).toBe(false);
-
-    // Release the stale first refetch with different data.
-    const staleSession: SessionList[number] = {
-      id: "stale",
-      userId: "user-1",
-      expiresAt: 0,
-      createdAt: 0,
-      lastActivityAt: 0,
-      attributes: {},
-    };
-    resolveFirst([staleSession]);
-    await nextTick();
-
-    // Stale response discarded — data still reflects the second refetch.
-    expect(seen[seen.length - 1]?.data?.length).toBe(0);
-    unsubscribe();
+    registry.dispose();
   });
 });

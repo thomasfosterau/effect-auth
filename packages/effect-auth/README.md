@@ -777,7 +777,8 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | `@thomasfosterau/effect-auth/oauth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
 | `@thomasfosterau/effect-auth/plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
 | `@thomasfosterau/effect-auth/http`           | — (subpath only)   | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
-| `@thomasfosterau/effect-auth/client`         | — (subpath only)   | The browser client over the HTTP contract and its observable session store ([below](#browser-client-client))                                                                          |
+| `@thomasfosterau/effect-auth/client`         | — (subpath only)   | The browser client over the HTTP contract ([below](#browser-client-client))                                                                                                           |
+| `@thomasfosterau/effect-auth/client/atoms`   | — (subpath only)   | The client session as `effect/reactivity` Atoms ([below](#the-session-atoms-clientatoms))                                                                                             |
 | `@thomasfosterau/effect-auth/client/testing` | — (subpath only)   | An in-process server fixture and cookie-jar `fetch` for client tests                                                                                                                  |
 | `@thomasfosterau/effect-auth/sql`            | — (subpath only)   | Every store contract it covers over `effect/sql`'s `SqlClient`, plus the DDL ([below](#sql-storage-sql))                                                                              |
 | `@thomasfosterau/effect-auth/saml`           | — (subpath only)   | The `SamlVerifier` over `@node-saml/node-saml`; Node-only ([below](#saml-saml))                                                                                                       |
@@ -836,29 +837,41 @@ The externally specified endpoints (OAuth 2.0 and OIDC, RFC 8628 device flow, RF
 
 ## Browser client (`/client`)
 
-The browser half of [effect-auth](https://github.com/thomasfosterau/effect-auth): a small client over the effect-auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. Only the wire _types_ come from the `/http` subpath, and those erase at compile time, so nothing server-side reaches the browser bundle.
+The browser half of [effect-auth](https://github.com/thomasfosterau/effect-auth), in two subpaths:
 
-`effect` is needed for the types only; the client's runtime code imports nothing from it, and the root barrel does not re-export the subpath.
+- `/client`: a small client over the effect-auth HTTP contract (plain `fetch`, no Effect runtime in the bundle). It holds no session state; it tells its observers when a call changed the session.
+- `/client/atoms`: the session as [`effect/reactivity`](https://effect.website/) Atoms over that client, read through your application's `AtomRegistry`, so auth shares one Atom graph and one runtime with the rest of the page.
+
+Only the wire _types_ come from the `/http` subpath, and those erase at compile time, so nothing server-side reaches the browser bundle. `/client` needs `effect` for its types only; `/client/atoms` imports `effect` at runtime, and only it does. The root barrel re-exports neither.
 
 ### Usage
 
 ```ts
 import { AuthClientError, createAuthClient } from "@thomasfosterau/effect-auth/client";
+import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
+import { AtomRegistry } from "effect/reactivity";
 
 const client = createAuthClient({ baseUrl: "/api/auth" });
 
-// Typed methods named after the contract's endpoints.
+// The session, as Atoms over the client, read through the page's one registry.
+const registry = AtomRegistry.make();
+const auth = makeSessionAtoms(client, { refresh: { onFocus: true } });
+const unsubscribe = registry.subscribe(
+  auth.state,
+  ({ data, isPending, error }) => {
+    console.log(isPending ? "loading" : (data?.user.id ?? "signed out"), error?.message);
+  },
+  { immediate: true },
+);
+
+// Commands are plain calls named after the contract's endpoints. A
+// session-changing call resolves once the observed session has refetched.
 const result = await client.signIn({ email: "ada@example.com", password: "correct horse" });
 if (result.secondFactor) {
   // Password accepted; a second factor is required before a session is issued.
   await client.multiFactor.continueChallenge(result).verifyTotp("123456");
 }
-
-// The observable session store the framework bindings subscribe to.
-const unsubscribe = client.session.subscribe(() => {
-  const { data, isPending, error } = client.session.get();
-  console.log(isPending ? "loading" : (data?.user.id ?? "signed out"), error?.message);
-});
+console.log(registry.get(auth.isSignedIn)); // true
 
 try {
   await client.signIn({ email: "ada@example.com", password: "wrong" });
@@ -877,26 +890,34 @@ Every request is sent with `credentials: "include"`, so the session cookie flows
 
 `createAuthClient(options: AuthClientOptions): AuthClient`
 
-| Option    | Type                     | Purpose                                                                  |
-| --------- | ------------------------ | ------------------------------------------------------------------------ |
-| `baseUrl` | `string`                 | Where the auth handler is mounted: `"/api/auth"` or an absolute URL.     |
-| `fetch`   | `typeof fetch`           | Custom `fetch`: SSR, tests, or an in-process handler.                    |
-| `headers` | `Record<string, string>` | Extra headers on every request.                                          |
-| `refresh` | `RefreshOptions`         | Opt-in background refresh: `intervalMs`, `onFocus`, `crossTab`. All off. |
+| Option    | Type                     | Purpose                                                              |
+| --------- | ------------------------ | -------------------------------------------------------------------- |
+| `baseUrl` | `string`                 | Where the auth handler is mounted: `"/api/auth"` or an absolute URL. |
+| `fetch`   | `typeof fetch`           | Custom `fetch`: SSR, tests, or an in-process handler.                |
+| `headers` | `Record<string, string>` | Extra headers on every request.                                      |
 
-`refresh.intervalMs` polls `GET /sessions/current` while something is subscribed; `onFocus` refetches on window focus and when the tab becomes visible; `crossTab` mirrors session changes across tabs over a `BroadcastChannel` (`true` for the default channel name `"effect-auth-session"`, or a name of your own). Each degrades to a no-op outside a browser.
+`client.onSessionChange(listener)` registers an observer of session-changing calls (every sign-in and sign-up, sign-out, second-factor redemption, email verification, the email-change and account-deletion confirmations, `updateUser`, `multiSession.setActive`, `organization.setActive`, impersonation, the SSO callback and the device token poll) and returns its removal; the call resolves only once every observer's promise has settled, and an observer's rejection never fails it. `client.invalidateSession()` notifies the observers by hand, for a change the client did not make. The session Atoms are such an observer; you rarely register one yourself.
 
-### The session store
+### The session Atoms (`/client/atoms`)
 
-`client.session` is a `SessionStore`:
+`makeSessionAtoms(client, options?: SessionAtomsOptions): SessionAtoms`. Make them once per client and read them through your registry:
 
-| Member                | Behaviour                                                                   |
-| --------------------- | --------------------------------------------------------------------------- |
-| `get()`               | The current `SessionState`: `{ data, isPending, error }`. Stable reference. |
-| `subscribe(listener)` | Returns an unsubscribe function. The first subscriber triggers the fetch.   |
-| `refetch()`           | Re-reads `GET /sessions/current` and notifies subscribers.                  |
+| Atom            | Value                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------- |
+| `result`        | `AsyncResult<SessionWithUserView \| null, AuthClientError>`, the session read itself  |
+| `state`         | `SessionState`: `{ data, isPending, error }`                                          |
+| `data`          | The `SessionWithUserView`, or `null` when signed out                                  |
+| `isSignedIn`    | `boolean`                                                                             |
+| `isPending`     | `boolean`: the read is in flight                                                      |
+| `error`         | The last unexpected `AuthClientError`, or `null`                                      |
+| `sessions`      | `AsyncResult<readonly SessionView[], AuthClientError>`, the signed-in user's sessions |
+| `sessionsState` | `SessionListState`: `{ data, isPending, error }` over `sessions`                      |
 
-`data` is the `SessionWithUserView` or `null` when signed out. The store starts at `isPending: true`, so a UI never flashes "signed out" before the first fetch. A `401` resolves to `data: null`, not an error; any other failure keeps the last `data` and sets `error`. Session-changing calls (every sign-in and sign-up, sign-out, second-factor redemption, email verification, the email-change and account-deletion confirmations, `updateUser`, `multiSession.setActive`, `organization.setActive`, impersonation, the SSO callback and the device token poll) refetch the store only while something is subscribed.
+The read is lazy: nothing is fetched until a registry reads or mounts an Atom, and it starts pending, so a UI never flashes "signed out" before the first fetch. A `401` is `data: null`, not an error; any other failure keeps the last `data` and sets `error`; a refetch superseded by a later one is interrupted, so its answer never lands. While a session Atom is mounted, every session-changing call refetches it before it resolves; with nothing mounted, the round trip is skipped, and the next subscriber starts from the last read. `registry.refresh(auth.isSignedIn)` (or any session Atom) refetches; `registry.refresh(auth.sessions)` re-reads the list.
+
+A session change propagates through the graph: an Atom of your own that reads `auth.data` or `auth.isSignedIn` recomputes on sign-in and sign-out with no invalidation list, and `sessions` refetches when the session's id changes (signed out, it is empty without a request).
+
+`options.refresh` (`RefreshOptions`) turns on background refresh while the session is observed, all off by default: `intervalMs` polls `GET /sessions/current`; `onFocus` refetches on window focus and when the tab becomes visible; `crossTab` mirrors session changes across tabs over a `BroadcastChannel` (`true` for the default channel name `"effect-auth-session"`, or a name of your own). Each starts with the first subscriber, stops with the last, and degrades to a no-op outside a browser.
 
 ### Methods
 
@@ -918,7 +939,7 @@ Each method resolves to the contract's own view type (`Http.*`). Groups:
 
 ### Plugins
 
-`definePlugin(install)` builds a plugin whose `install(context)` returns extra methods; `client.extend(plugin)` returns the client with them added. The context (`AuthClientPluginContext`) exposes `request(method, path, body?)`, `mutating(run)` (run a session-changing call, then refetch when observed) and the `session` store.
+`definePlugin(install)` builds a plugin whose `install(context)` returns extra methods; `client.extend(plugin)` returns the client with them added. The context (`AuthClientPluginContext`) exposes `request(method, path, body?)` and `mutating(run)` (run a session-changing call, then notify the session observers).
 
 ```ts
 import { createAuthClient, definePlugin } from "@thomasfosterau/effect-auth/client";
@@ -957,10 +978,10 @@ console.log(server.sessions.size); // 1
 
 ### API
 
-- `createAuthClient(options)`, `AuthClient`, `AuthClientOptions`, `RefreshOptions`
-- `SessionStore`, `SessionState`
+- `createAuthClient(options)`, `AuthClient`, `AuthClientOptions`, `SessionChangeListener`
 - `AuthClientError` (`status`), `SecondFactorChallengeError` (`reason`), `SecondFactorContinuation`
 - `definePlugin`, `AuthClientPlugin`, `AuthClientPluginContext`
+- `./client/atoms`: `makeSessionAtoms`, `SessionAtoms`, `SessionAtomsOptions`, `RefreshOptions`, `SessionState`, `SessionListState`, `SessionResult`, `SessionListResult`
 - `./client/testing`: `makeServerFixture`, `ServerFixtureOptions`, `makeCookieJarFetch`
 
 ### Framework bindings

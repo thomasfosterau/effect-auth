@@ -34,6 +34,7 @@ const entryPoints = {
   "./plugins": () => import("./plugins/index.ts"),
   "./multifactor": () => import("./multifactor/index.ts"),
   "./client": () => import("./client/index.ts"),
+  "./client/atoms": () => import("./client/SessionAtoms.ts"),
   "./client/testing": () => import("./client/testing/fixture.ts"),
   "./sql": () => import("./sql/index.ts"),
   "./saml": () => import("./saml/index.ts"),

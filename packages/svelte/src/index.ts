@@ -1,15 +1,22 @@
 /**
- * Svelte bindings for `@thomasfosterau/effect-auth/client`.
+ * Svelte bindings for the effect-auth client.
  *
- * `sessionStore` implements Svelte's readable-store contract directly (no
- * `svelte` import needed), so it works with the `$store` syntax:
+ * The session is an `effect/reactivity` Atom graph
+ * (`makeSessionAtoms` from `@thomasfosterau/effect-auth/client/atoms`), read
+ * through the application's own `AtomRegistry`. This package adapts Atoms to
+ * Svelte's readable-store contract, so they work with the `$store` syntax
+ * without importing `svelte/store`:
  *
  * ```svelte
  * <script>
- *   const session = sessionStore(client);
+ *   const session = sessionStore(registry, auth);
  * </script>
  * {#if $session.data}Signed in as {$session.data.user.email}{/if}
  * ```
+ *
+ * {@link atomStore} is the whole Svelte↔Atom binding, over any Atom: the
+ * session stores are it applied to the session Atoms. It is small enough to
+ * live here until a shared Svelte Atom binding takes it over.
  *
  * The bundled form components are the other half of the package: real,
  * unstyled `.svelte` components for sign-in, sign-up, password reset, magic
@@ -18,7 +25,12 @@
  *
  * @module effect-auth-svelte
  */
-import type { AuthClient, AuthClientError, SessionState } from "@thomasfosterau/effect-auth/client";
+import type {
+  SessionAtoms,
+  SessionListState,
+  SessionState,
+} from "@thomasfosterau/effect-auth/client/atoms";
+import type { Atom, AtomRegistry } from "effect/reactivity";
 
 export { authClientKey, getAuthClient, setAuthClient } from "./context.ts";
 
@@ -52,84 +64,51 @@ export type {
   SignUpLabels,
 } from "./forms/props.ts";
 
-/** The sessions `client.listSessions()` resolves to. */
-type SessionList = Awaited<ReturnType<AuthClient["listSessions"]>>;
-
 /** Svelte's readable-store contract. */
 export interface Readable<T> {
   readonly subscribe: (run: (value: T) => void) => () => void;
 }
 
 /**
- * A readable store over the client's session. Subscribing triggers the
- * initial session fetch; auth mutations on the client refresh it.
+ * An Atom as a Svelte readable store over `registry`. Subscribing mounts the
+ * Atom and calls `run` at once with its value, then on every change;
+ * unsubscribing unmounts it. No state is held here: the registry is the store.
  */
-export const sessionStore = (client: AuthClient): Readable<SessionState> => ({
-  subscribe: (run) => {
-    run(client.session.get());
-    return client.session.subscribe(() => run(client.session.get()));
-  },
+export const atomStore = <A>(
+  registry: AtomRegistry.AtomRegistry,
+  atom: Atom.Atom<A>,
+): Readable<A> => ({
+  subscribe: (run) => registry.subscribe(atom, run, { immediate: true }),
 });
 
-/** The state emitted by {@link listSessionsStore}. */
-export interface ListSessionsState {
-  readonly data: SessionList | null;
-  readonly isPending: boolean;
-  readonly error: AuthClientError | null;
-}
+/**
+ * The session as a readable store: `atoms.state` through {@link atomStore}.
+ * The first subscription starts the session read; session-changing calls on
+ * the client refetch it while it is subscribed.
+ */
+export const sessionStore = (
+  registry: AtomRegistry.AtomRegistry,
+  atoms: SessionAtoms,
+): Readable<SessionState> => atomStore(registry, atoms.state);
+
+/** The state {@link listSessionsStore} emits. */
+export type ListSessionsState = SessionListState;
 
 /** A readable store over the user's active sessions, with a refetch handle. */
 export interface ListSessionsStore extends Readable<ListSessionsState> {
-  /** Re-run the query (e.g. after revoking a session). */
+  /** Re-read the list (after revoking a session, say). */
   readonly refetch: () => void;
 }
 
 /**
- * Fetch the authenticated user's active sessions as a readable store. The
- * first subscription triggers the fetch; call `refetch()` to refresh.
+ * The signed-in user's sessions as a readable store: `atoms.sessionsState`
+ * through {@link atomStore}. The first subscription starts the read, a session
+ * change refetches it through the Atom graph, and `refetch()` refreshes it.
  */
-export const listSessionsStore = (client: AuthClient): ListSessionsStore => {
-  let state: ListSessionsState = { data: null, isPending: true, error: null };
-  const subscribers = new Set<(value: ListSessionsState) => void>();
-  let fetched = false;
-  let refetchSeq = 0;
-
-  const set = (next: ListSessionsState) => {
-    state = next;
-    for (const run of subscribers) {
-      run(state);
-    }
-  };
-
-  const load = async (seq: number): Promise<void> => {
-    set({ ...state, isPending: true });
-    const next = await client.listSessions().then(
-      (sessions): ListSessionsState => ({ data: sessions, isPending: false, error: null }),
-      (cause: AuthClientError): ListSessionsState => ({
-        data: null,
-        isPending: false,
-        error: cause,
-      }),
-    );
-    if (seq === refetchSeq) set(next);
-  };
-
-  const refetch = () => {
-    void load(++refetchSeq);
-  };
-
-  return {
-    refetch,
-    subscribe: (run) => {
-      subscribers.add(run);
-      run(state);
-      if (!fetched) {
-        fetched = true;
-        refetch();
-      }
-      return () => {
-        subscribers.delete(run);
-      };
-    },
-  };
-};
+export const listSessionsStore = (
+  registry: AtomRegistry.AtomRegistry,
+  atoms: SessionAtoms,
+): ListSessionsStore => ({
+  ...atomStore(registry, atoms.sessionsState),
+  refetch: () => registry.refresh(atoms.sessions),
+});

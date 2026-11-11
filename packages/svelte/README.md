@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-svelte
 
-Svelte bindings for [`@thomasfosterau/effect-auth/client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth#browser-client-client), the browser client subpath of the core: readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
+Svelte bindings for [`@thomasfosterau/effect-auth/client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth#browser-client-client), the browser client subpath of the core: readable stores over its session Atoms ([`/client/atoms`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth#the-session-atoms-clientatoms), `effect/reactivity`), plus unstyled form components for the usual authentication screens.
 
 ## Install
 
@@ -8,18 +8,28 @@ Svelte bindings for [`@thomasfosterau/effect-auth/client`](https://github.com/th
 pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth effect
 ```
 
-`svelte` (>= 5.20) is a peer dependency. The components are authored with runes, and the package is built with `svelte-package`, so it resolves through the `svelte` export condition like any other Svelte component library.
+`svelte` (>= 5.20) and `effect` (>= 4.1, for the Atom types) are peer dependencies. The components are authored with runes, and the package is built with `svelte-package`, so it resolves through the `svelte` export condition like any other Svelte component library.
 
 ## Usage
 
+```ts
+// src/lib/auth.ts — one client, one set of session Atoms, and the page's one registry.
+import { createAuthClient } from "@thomasfosterau/effect-auth/client";
+import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
+import { AtomRegistry } from "effect/reactivity";
+
+export const client = createAuthClient({ baseUrl: "/api/auth" });
+export const auth = makeSessionAtoms(client, { refresh: { onFocus: true } });
+export const registry = AtomRegistry.make();
+```
+
 ```svelte
 <script lang="ts">
-  import { createAuthClient } from "@thomasfosterau/effect-auth/client";
   import { sessionStore, listSessionsStore } from "@thomasfosterau/effect-auth-svelte";
+  import { auth, registry } from "$lib/auth";
 
-  const client = createAuthClient({ baseUrl: "/api/auth" });
-  const session = sessionStore(client);
-  const sessions = listSessionsStore(client);
+  const session = sessionStore(registry, auth);
+  const sessions = listSessionsStore(registry, auth);
 </script>
 
 {#if $session.isPending}
@@ -30,9 +40,20 @@ pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth effect
 {/if}
 ```
 
-The stores implement Svelte's readable-store contract directly, so the `$store` syntax works without importing anything from `svelte/store`.
+The stores implement Svelte's readable-store contract directly, so the `$store` syntax works without importing anything from `svelte/store`. They hold no state: `atomStore(registry, atom)` turns any Atom into a readable store (mounted while subscribed), and `sessionStore` / `listSessionsStore` are it over `auth.state` and `auth.sessionsState`. Pass the registry the rest of your page uses, and auth and your other Atoms share one graph:
 
-Subscribing to `sessionStore` triggers the initial `GET /sessions/current` read; every auth mutation on the client refreshes it.
+```ts
+import { Atom } from "effect/reactivity";
+import { atomStore } from "@thomasfosterau/effect-auth-svelte";
+
+// Recomputes on sign-in and sign-out, with no invalidation of its own.
+const greeting = atomStore(
+  registry,
+  Atom.make((get) => `Hello, ${get(auth.data)?.user.email ?? "guest"}`),
+);
+```
+
+Subscribing to `sessionStore` starts the initial `GET /sessions/current` read; every session-changing call on the client refetches it while it is subscribed, and resolves once it has. The session list refetches when the session changes, and on `sessions.refetch()`.
 
 See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) for the rest of the client API.
 
@@ -171,7 +192,7 @@ Every visible string is overridable through `labels`, including the button's pen
 
 ## API
 
-- `sessionStore(client): Readable<SessionState>` and `listSessionsStore(client): ListSessionsStore` (`ListSessionsState` plus `refetch`); `Readable` is the readable-store contract they implement.
+- `atomStore(registry, atom): Readable<A>`, `sessionStore(registry, atoms): Readable<SessionState>` and `listSessionsStore(registry, atoms): ListSessionsStore` (`ListSessionsState` plus `refetch`); `Readable` is the readable-store contract they implement, `atoms` the `SessionAtoms` from `makeSessionAtoms`.
 - `setAuthClient(client)`, `getAuthClient()`, `authClientKey` (the context key).
 - Forms: `SignInForm`, `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, `EmailOtpForm`, with their `*FormProps` and `*Labels` types.
 - Shared form types: `AuthFormBaseProps`, `AuthFormClasses`, `AuthSuccess`, `StatusResponse`, `EmailOtpPurpose`, `FormFailure`.

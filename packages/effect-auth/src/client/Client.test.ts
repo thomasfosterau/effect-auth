@@ -3,14 +3,6 @@ import { Predicate, Schema } from "effect";
 import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
-/** The URL a stub `fetch` was asked for, whichever form `input` takes. */
-const requestUrl = (input: RequestInfo | URL): string =>
-  Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
-
-/** Whether a request is the store's session read (`GET /sessions/current`). */
-const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
-  requestUrl(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
-
 const EMAIL = "alice@client.test";
 const PW = "password-123";
 
@@ -74,32 +66,63 @@ describe("createAuthClient", () => {
     expect(signedInUser(ok).email).toBe(EMAIL);
   });
 
-  it("keeps the session store in sync across auth mutations", async () => {
+  it("notifies session observers after a session-changing call, and awaits them", async () => {
     const { client } = makeClient();
+    const order: string[] = [];
+    let release!: () => void;
+    const remove = client.onSessionChange(
+      () =>
+        new Promise<void>((resolve) => {
+          order.push("observer");
+          release = () => {
+            order.push("settled");
+            resolve();
+          };
+        }),
+    );
 
-    const states: Array<{ email: string | undefined; isPending: boolean }> = [];
-    const unsubscribe = client.session.subscribe(() => {
-      const s = client.session.get();
-      states.push({ email: s.data?.user.email, isPending: s.isPending });
+    const signedUp = client.signUp({ email: EMAIL, password: PW }).then((result) => {
+      order.push("resolved");
+      return result;
     });
+    // The call waits for its observer to settle before it resolves.
+    await vi.waitFor(() => expect(order).toEqual(["observer"]));
+    release();
+    expect(signedInUser(await signedUp).email).toBe(EMAIL);
+    expect(order).toEqual(["observer", "settled", "resolved"]);
 
-    // Initial fetch (triggered by the subscription) resolves to signed out.
-    await client.session.refetch();
-    expect(client.session.get().data).toBeNull();
-    expect(client.session.get().isPending).toBe(false);
-
-    await client.signUp({ email: EMAIL, password: PW });
-    expect(client.session.get().data?.user.email).toBe(EMAIL);
-
+    // A removed observer hears nothing more; a read-only call notifies no one.
+    remove();
     await client.signOut();
-    expect(client.session.get().data).toBeNull();
+    await client.getSession();
+    expect(order).toEqual(["observer", "settled", "resolved"]);
+  });
 
-    unsubscribe();
-    const count = states.length;
-    await client.signIn({ email: EMAIL, password: PW });
-    // No subscribers → the session refetch is skipped to save the round-trip.
-    expect(states.length).toBe(count);
-    expect(client.session.get().data).toBeNull(); // state unchanged, no refetch
+  it("never fails a call because an observer rejected", async () => {
+    const { client } = makeClient();
+    let calls = 0;
+    client.onSessionChange(() => {
+      calls++;
+      return Promise.reject(new AuthClientError(0, "observer failed"));
+    });
+    expect(signedInUser(await client.signUp({ email: EMAIL, password: PW })).email).toBe(EMAIL);
+    await client.invalidateSession();
+    expect(calls).toBe(2);
+  });
+
+  it("counts one listener registered twice as two observers", async () => {
+    const { client } = makeClient();
+    let calls = 0;
+    const listener = () => {
+      calls++;
+    };
+    const removeFirst = client.onSessionChange(listener);
+    client.onSessionChange(listener);
+    await client.invalidateSession();
+    expect(calls).toBe(2);
+    removeFirst();
+    await client.invalidateSession();
+    expect(calls).toBe(3);
   });
 
   it("manages the user and their sessions across two devices", async () => {
@@ -134,199 +157,6 @@ describe("createAuthClient", () => {
     const err = await rejectionOf(client.magicLink.send({ email: EMAIL }), AuthClientError);
     assert.instanceOf(err, AuthClientError);
     expect(err.status).toBe(404);
-  });
-});
-
-describe("session store correctness", () => {
-  it("initializes isPending:true to avoid a signed-out flash on first paint", () => {
-    const { client } = makeClient();
-    const initial = client.session.get();
-    expect(initial.isPending).toBe(true);
-    expect(initial.data).toBeNull();
-    expect(initial.error).toBeNull();
-  });
-
-  it("preserves session data when a refetch fails with a transient (non-401) error", async () => {
-    const server = makeServerFixture();
-    let injectError = false;
-    const base = makeCookieJarFetch(server.handler);
-
-    const client = createAuthClient({
-      baseUrl: "http://client.test",
-      fetch: (input, init?) => {
-        if (injectError && requestUrl(input).includes("/sessions/current")) {
-          return Promise.resolve(
-            new Response(toJson({ message: "Service Unavailable" }), {
-              status: 503,
-              headers: { "content-type": "application/json" },
-            }),
-          );
-        }
-        return base(input, init);
-      },
-    });
-
-    // Subscribe so mutations trigger session refetches that populate the store.
-    const unsubscribe = client.session.subscribe(() => {});
-    await client.signUp({ email: EMAIL, password: PW });
-    expect(client.session.get().data?.user.email).toBe(EMAIL);
-
-    injectError = true;
-    await client.session.refetch();
-
-    const after = client.session.get();
-    expect(after.data?.user.email).toBe(EMAIL);
-    assert.instanceOf(after.error, AuthClientError);
-    expect(after.error.status).toBe(503);
-    expect(after.isPending).toBe(false);
-
-    unsubscribe();
-  });
-
-  it("discards stale refetch responses — last dispatch wins", async () => {
-    let firstResolve!: () => void;
-    let callCount = 0;
-
-    const client = createAuthClient({
-      baseUrl: "http://client.test",
-      fetch: (input) => {
-        if (requestUrl(input).includes("/sessions/current")) {
-          callCount++;
-          if (callCount === 1) {
-            // First (stale) call: held until manually released with a 500.
-            return new Promise<Response>((resolve) => {
-              firstResolve = () =>
-                resolve(
-                  new Response(toJson({ message: "Internal Server Error" }), {
-                    status: 500,
-                    headers: { "content-type": "application/json" },
-                  }),
-                );
-            });
-          }
-          // Second (newer) call: resolves immediately as signed-out.
-          return Promise.resolve(new Response(null, { status: 401 }));
-        }
-        return Promise.resolve(new Response(null, { status: 404 }));
-      },
-    });
-
-    const first = client.session.refetch();
-    const second = client.session.refetch();
-    await second; // newer refetch settled: signed out, no error
-
-    expect(client.session.get().data).toBeNull();
-    expect(client.session.get().error).toBeNull();
-    expect(client.session.get().isPending).toBe(false);
-
-    // Release the stale first request (500 error).
-    firstResolve();
-    await first;
-
-    // Stale response discarded — state must not change.
-    expect(client.session.get().data).toBeNull();
-    expect(client.session.get().error).toBeNull();
-    expect(client.session.get().isPending).toBe(false);
-  });
-
-  it("skips the session refetch after a mutation when there are no subscribers", async () => {
-    let sessionFetchCount = 0;
-    const server = makeServerFixture();
-    const base = makeCookieJarFetch(server.handler);
-
-    const client = createAuthClient({
-      baseUrl: "http://client.test",
-      fetch: (input, init?) => {
-        if (isSessionRead(input, init)) sessionFetchCount++;
-        return base(input, init);
-      },
-    });
-
-    // No subscribers: signUp should not trigger a session refetch.
-    await client.signUp({ email: EMAIL, password: PW });
-    expect(sessionFetchCount).toBe(0);
-    // Store state is unchanged (no refetch ran).
-    expect(client.session.get().data).toBeNull();
-    expect(client.session.get().isPending).toBe(true);
-
-    // Once subscribed, the lazy fetch runs.
-    const unsubscribe = client.session.subscribe(() => {});
-    await client.session.refetch();
-    expect(sessionFetchCount).toBe(2); // lazy + explicit
-    expect(client.session.get().data?.user.email).toBe(EMAIL);
-
-    // With a subscriber, signOut triggers the refetch.
-    await client.signOut();
-    expect(sessionFetchCount).toBe(3);
-    expect(client.session.get().data).toBeNull();
-
-    unsubscribe();
-  });
-});
-
-describe("background refresh", () => {
-  it("polls on the configured interval and stops when unsubscribed", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    let sessionFetchCount = 0;
-
-    const client = createAuthClient({
-      baseUrl: "http://refresh.test",
-      fetch: (input, init?) => {
-        if (isSessionRead(input, init)) sessionFetchCount++;
-        return Promise.resolve(new Response(null, { status: 401 }));
-      },
-      refresh: { intervalMs: 500 },
-    });
-
-    const unsubscribe = client.session.subscribe(() => {});
-    // Settle the lazy initial fetch.
-    await client.session.refetch();
-    const baseline = sessionFetchCount;
-
-    // 500ms → 1 interval tick.
-    await vi.advanceTimersByTimeAsync(500);
-    expect(sessionFetchCount).toBe(baseline + 1);
-
-    // Another 500ms → 2 ticks total.
-    await vi.advanceTimersByTimeAsync(500);
-    expect(sessionFetchCount).toBe(baseline + 2);
-
-    // Unsubscribing must cancel the interval.
-    unsubscribe();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(sessionFetchCount).toBe(baseline + 2);
-
-    vi.useRealTimers();
-  });
-
-  it("restarts polling when a new subscriber joins after all left", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    let sessionFetchCount = 0;
-
-    const client = createAuthClient({
-      baseUrl: "http://refresh.test",
-      fetch: (input, init?) => {
-        if (isSessionRead(input, init)) sessionFetchCount++;
-        return Promise.resolve(new Response(null, { status: 401 }));
-      },
-      refresh: { intervalMs: 500 },
-    });
-
-    const unsub1 = client.session.subscribe(() => {});
-    await client.session.refetch();
-    unsub1(); // last subscriber leaves → interval cancelled
-
-    const before = sessionFetchCount;
-    await vi.advanceTimersByTimeAsync(1500);
-    expect(sessionFetchCount).toBe(before); // no polling
-
-    // A new subscriber restarts polling.
-    const unsub2 = client.session.subscribe(() => {});
-    await vi.advanceTimersByTimeAsync(500);
-    expect(sessionFetchCount).toBeGreaterThan(before);
-    unsub2();
-
-    vi.useRealTimers();
   });
 });
 
@@ -413,7 +243,7 @@ describe("plugin extension", () => {
     expect(Predicate.isFunction(extended.signOut)).toBe(true);
   });
 
-  it("plugin receives mutating context that refreshes the session store", async () => {
+  it("plugin receives mutating context that notifies the session observers", async () => {
     const server = makeServerFixture();
     const client = createAuthClient({
       baseUrl: "http://client.test",
@@ -425,12 +255,14 @@ describe("plugin extension", () => {
     }));
 
     const ext = client.extend(signOutPlugin);
-    const unsubscribe = ext.session.subscribe(() => {});
     await ext.signUp({ email: EMAIL, password: PW });
-    expect(ext.session.get().data?.user.email).toBe(EMAIL);
+    let notified = 0;
+    ext.onSessionChange(() => {
+      notified++;
+    });
 
     await ext.logOut();
-    expect(ext.session.get().data).toBeNull();
-    unsubscribe();
+    expect(notified).toBe(1);
+    expect(await ext.getSession()).toBeNull();
   });
 });
