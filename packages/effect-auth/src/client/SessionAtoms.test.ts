@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, vi } from "vite-plus/test";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { AuthClientError, createAuthClient } from "./Client.ts";
 import { makeSessionAtoms } from "./SessionAtoms.ts";

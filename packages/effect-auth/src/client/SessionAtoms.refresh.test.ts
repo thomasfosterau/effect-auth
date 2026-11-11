@@ -5,7 +5,9 @@ import { AtomRegistry } from "effect/reactivity";
 import { createAuthClient } from "./Client.ts";
 import { makeSessionAtoms } from "./SessionAtoms.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
-import { Array as Arr, MutableHashMap, MutableHashSet, Option } from "effect";
+import { MutableHashMap, MutableHashSet } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 
 /** Whether a request is the session read (`GET /sessions/current`). */
 const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>

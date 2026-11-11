@@ -56,7 +56,9 @@
  *
  * @module client/atoms
  */
-import { Effect, Option, Predicate } from "effect";
+import { Effect } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import type * as Http from "../http/index.ts";
 import { type AuthClient, AuthClientError } from "./Client.ts";
@@ -168,7 +170,7 @@ const toClientError = (cause: unknown): AuthClientError =>
     ? cause
     : new AuthClientError(
         0,
-        Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
+        P.hasProperty(cause, "message") && P.isString(cause.message)
           ? cause.message
           : String(cause),
       );
