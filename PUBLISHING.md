@@ -4,13 +4,13 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 ## The release flow
 
-1. **Add a changeset with your change.** Run `pnpm changeset` (or write `.changeset/<slug>.md` by hand), naming every package the change touches with its bump (`patch` / `minor` / `major`) and a user-facing summary, and commit it alongside the change. [AGENTS.md → Branches and pull requests](AGENTS.md#branches-and-pull-requests) says which changes need one.
+1. **Add a changeset with your change.** Run `pnpm changeset` (or write `.changeset/<slug>.md` by hand), naming every package the change touches with its bump (`patch` / `minor` / `major`) and a user-facing summary, and commit it alongside the change. [CONTRIBUTING.md → Branches and pull requests](CONTRIBUTING.md#branches-and-pull-requests) says which changes need one.
 2. **Merge to `trunk`.** The release workflow runs and, while changesets are pending, opens or updates a **"Version Packages"** PR that applies the version bumps and rolls the changesets into each package's `CHANGELOG.md`.
 3. **Merge the "Version Packages" PR.** With no changesets left, the workflow — after the `release` environment's manual approval — publishes every package whose version is not yet on npm via `pnpm publish` and trusted publishing, then tags the commit and creates the GitHub releases.
 
 The publish step uses `pnpm publish`, not `npm publish`: pnpm 11 supports npm OIDC trusted publishing (it mints the short-lived token itself; provenance is left to npm, which attaches it only when allowed, and is never forced because an explicit request fails from a private repository), and it is what rewrites the `catalog:`, `catalog:peers` and `workspace:*` specifiers in each `package.json` into the ranges consumers actually see; npm would publish the literal protocols. `changeset tag` then emits the `New tag:` lines the Changesets action uses to push the tags and create the GitHub releases.
 
-Who may release, and how: [AGENTS.md → Branches and pull requests](AGENTS.md#branches-and-pull-requests).
+Who may release, and how: [CONTRIBUTING.md → Branches and pull requests](CONTRIBUTING.md#branches-and-pull-requests).
 
 ## Maintainer setup (one-time)
 

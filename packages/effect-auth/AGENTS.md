@@ -1,0 +1,104 @@
+# @thomasfosterau/effect-auth
+
+The headless core: sessions, users and identifiers, every sign-in method, multi-factor, OAuth, organizations, admin, API keys, JWT, SSO, SCIM, the OIDC provider and the authorization kernel, as Effect services and layers, plus four opt-in subpaths the root never loads: the HTTP tier (`./http`), the browser client (`./client`, with its `./client/testing` fixture), SQL storage over `effect/sql` (`./sql`) and the Node-only SAML verifier (`./saml`). Client, SQL and SAML were their own packages until ADR-0022 merged them in.
+
+## Boundary
+
+Archetype **Core** (`.fallowrc.json` zone `core`, which may import only `ladder`). Peer: `effect` (`catalog:peers`); optional peers `@thomasfosterau/effect-jsonapi` (only `./http`, and `./client/testing` through it) and `@node-saml/node-saml` (only `./saml`, at `^5.1.0`); no `dependencies` at all. Never a dependency on legation in any field ([docs/BOUNDARY.md](../../docs/BOUNDARY.md)); effect-jsonapi is allowed. Every other package in the workspace builds on this one, so a breaking export change here reaches all eight. A module that needs only `effect` (or a dependency the core already has) belongs here as a subpath, not in a new package ([ADR-0022](../../docs/adr/0022-package-boundaries.md)).
+
+Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `UserStore`, `Identifier`, `TrustedDevice`, `SessionContext`, `SessionResolution`, `SessionCookies`), the authorization kernel (`Entity`, `Condition`, `Policy`, `AuthorizationModel`, `PolicyStore`, `Authorizer`, `Rbac`, `Permission`, `System`, `Guard`, `OwnedAccess`, `Cacheability`, `Protected`, `OrganizationEntities`, `Ladder`, `LadderSchema`) and the unclustered features (`Organization`, `Admin`, `ApiKey`, `Jwt`, `OidcProvider`, `Sso`, `Saml`, `Scim`, `Delivery`, `KeyValueStores`, `RateLimit`, …). Lowercase cluster directories each have an `index.ts` barrel, a subpath export and a root namespace:
+
+| Subpath            | Directory                   | Root namespace                    |
+| ------------------ | --------------------------- | --------------------------------- |
+| `.`                | `src/index.ts`              | `Auth`                            |
+| `./email`          | `email/`                    | `Auth.Email`                      |
+| `./password`       | `password/`                 | `Auth.Password`                   |
+| `./multifactor`    | `multifactor/`              | `Auth.MultiFactor`                |
+| `./oauth`          | `oauth/`                    | `Auth.OAuth`                      |
+| `./plugins`        | `plugins/`                  | `Auth.Plugins`                    |
+| `./http`           | `http/`                     | — (subpath only, #205)            |
+| `./client`         | `client/index.ts`           | — (subpath only)                  |
+| `./client/testing` | `client/testing/fixture.ts` | — (subpath only)                  |
+| `./sql`            | `sql/index.ts`              | — (subpath only)                  |
+| `./saml`           | `saml/index.ts`             | — (subpath only; Node-only)       |
+| `./ladder`         | `Ladder.ts`                 | `Auth.Ladder`                     |
+| `./testing`        | `testing/index.ts`          | — (not re-exported from the root) |
+
+`src/sql/testing/` is internal test support (the PGlite template the `./sql` suites open their databases from; excluded from the build). `src/testing/` holds the `./testing` subpath (`runAs`, `runAsViewer`), which the root barrel never re-exports and which must not load the HTTP tier (`ModuleGraph.test.ts`); its other modules are internal test support. A new cluster module is exported from its `index.ts`; a new subpath needs a `package.json` `exports` entry and a `.fallowrc.json` `entry`.
+
+## Invariants
+
+- **`./ladder` imports nothing**, not even `effect`: browser bundles load it. `ModuleGraph.test.ts` pins it; `.fallowrc.json` gives `Ladder.ts` its own zone with no outbound rule.
+- **The root barrel must not pull the HTTP tier** (`http/`, `effect/http-api`, effect-jsonapi) into a consumer's graph: the tier is published only on the `./http` subpath (#205), and `ModuleGraph.test.ts` fails on any root-reachable import of either. It reaches none of `client/`, `sql/` and `saml/` either; those may reach the HTTP tier (`./client` does, for its wire types) and the rest of the core, through relative imports.
+- **`@node-saml/node-saml` is reached only from `./saml`**: `ModuleGraph.test.ts` asserts the root never reaches it (nor `xml-crypto`). `./saml` is Node-only, so the README and its module docs say so; the rest of the core stays Workers- and browser-safe.
+
+### `./client`
+
+- **`client/Client.ts` has no runtime imports.** It imports the HTTP tier with `import type` only (`ModuleGraph.test.ts` pins it), so nothing server-side and no Effect runtime reaches a browser bundle. Only `./client/testing` imports the core at runtime. The package `tsconfig.json` adds the `DOM` lib for it (`window`, `document`, `BroadcastChannel`).
+- **One method per contract endpoint, named after it**, typed with the contract's own payload and view types, so a contract change is a compile error here. Optional server modules answer `404`; a method existing does not mean the server mounted the feature.
+- **Every request sends `credentials: "include"`**; a non-2xx rejects with `AuthClientError` carrying `status` and the server's JSON `message` (else the status text). JSON is detected by the media-type essence (`application/json` or `+json`), not a substring.
+- **The session store is lazy and refetch-skipping**: the first `subscribe` triggers the `GET /sessions/current?include=user` read; the state starts `isPending: true`; a `401` is `data: null`, not an error; a transient failure keeps the last `data` and sets `error`; session-changing calls refetch only while something is subscribed; an out-of-order refetch result is dropped.
+- **Background refresh is opt-in and degrades to a no-op** outside a browser (`intervalMs`, `onFocus`, `crossTab` via `BroadcastChannel`); it starts with the first subscriber and stops with the last.
+- **The second-factor continuation refuses an expired challenge locally**, without a request; the server enforces expiry regardless.
+- **`./client/testing` runs the real `Http.make` handler** over in-memory stores with features off by default (so unconfigured endpoints answer `404`), and `makeCookieJarFetch` emulates the browser's cookie jar. It is published.
+
+### `./sql`
+
+- **Supported dialects are SQLite (D1 included) and PostgreSQL.** Every statement must run on both. MySQL is not supported (#260): it has no `ON CONFLICT`. Don't add per-dialect branches; point MySQL users at effect-auth-drizzle. No driver is a dependency or a peer: the consumer provides a `SqlClient` layer (`@effect/sql-pg`, `@effect/sql-sqlite-*`, the D1 client in effect-auth-alchemy-cloudflare); PGlite and `better-sqlite3` are dev dependencies for the suites only. The two Alchemy packages build on this subpath, so a change to a table or a statement here is a change to every D1 and Alchemy Postgres deployment too.
+- **`schemaStatements` is append-only, idempotent DDL**: one statement per entry, `CREATE TABLE IF NOT EXISTS` / `CREATE [UNIQUE] INDEX IF NOT EXISTS`, `auth_`-prefixed tables, so `migrate` is safe on every deploy and on every cold start. `authTableNames` is derived from these statements, and the Alchemy `AuthSchema` resources list and drop the tables through it.
+- **Codecs**: instants are epoch milliseconds in `BIGINT` (an `INTEGER` overflows Postgres int4), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values base64 `TEXT`.
+- **Token columns hold the digest the service computed** (`auth_sessions.id`, magic-link, verification and reset tokens, `auth_api_keys.key_hash`). The store never hashes and never sees a raw bearer token.
+- **Atomicity is per statement**: upserts and counters are a single `ON CONFLICT … DO UPDATE` or `UPDATE … RETURNING`, never read-modify-write. Multi-step writes (challenge, OAuth state, `emailOtp.upsert`, `identifier.replace`) run in `sql.withTransaction`; on D1 it becomes `batch()`es, atomic between reads but not across one (see effect-auth-alchemy-cloudflare), so a multi-step write must stay safe when interrupted between its statements: `identifier.replace` claims the new value before it releases the old one.
+- **Store contract**: a miss is `null`; any driver failure becomes `AuthError` with the cause kept; methods carry `R = never` (the `SqlClient` is read when the store is built).
+- **Unique indexes are the claim mechanism** (`auth_identifiers (type, value)`, `auth_oauth_accounts (provider, provider_id)`, `auth_api_keys (key_hash)`): a violation surfaces as `AuthError` and the services turn it into the domain error.
+- **Expired magic-link and email-OTP rows are deleted only by `purgeExpired`**, which the host schedules (#420). No store sweeps on write and no table carries a TTL.
+- **Authorization is not in `layer`**: `RbacEntityResolverLayer` (roles as `Role::` parents of `User::`) and `readRbacPolicies` (compiled by `Auth.Rbac.policies`) are wired into an `Authorizer` by the application. There is no second evaluation path.
+- **`layer` covers a fixed store set**; stores added to the core later (one-time tokens, trusted devices, phone OTP, organizations, the OIDC provider, SSO, device authorization) are not implemented here yet. Adding one means a table in `sql/Schema.ts`, `make*Store` + `*StoreLayer` in `sql/Stores.ts`, an entry in `layer`, and a run of the shared suite on both engines.
+- The PostgreSQL suites open their databases from one migrated PGlite template per run (`vite.config.ts`'s `globalSetup`, `src/sql/testing/`); Vitest's file-system module cache is off for this package because of it (#502).
+
+### `./saml`
+
+- **Never relax `@node-saml/node-saml` below `5.1.0`**: the fix for CVE-2025-54419 / CVE-2025-54369 (profile data read from bytes the signature did not cover). `xml-crypto` is a dev dependency for the fixtures only.
+- **Trust only pinned certificates** (`idpCertificates`), never a `KeyInfo` in the document; profile data is read only from signature-covered XML.
+- **Every check is a rejection, never a warning**: issuer, audience, `Conditions` window with `defaultClockSkewMs`, `Recipient` and `Destination` equal to the ACS URL, `SubjectConfirmationData` `NotOnOrAfter`, signed `InResponseTo` agreeing with every `InResponseTo` in the raw XML (never node-saml's `profile.inResponseTo`, which 5.2 fills from the signed value, #532), at most one `Assertion`, no duplicated `ID`.
+- **Algorithms are allow-listed** (`defaultSignatureAlgorithms`: SHA-256 and SHA-512); HMAC signature methods are refused outright.
+- **Encrypted assertions are refused** with an actionable message; there is no half-built decryption path.
+- **Pre-flight scans are conservative**: they run over the whole decoded document before node-saml and reject if anything anywhere fails, decoys included. Don't narrow them to "the signed part".
+- **The request-only placeholder certificate** (`REQUEST_ONLY_IDP_CERT`) is used only to build an `AuthnRequest`; `verify` always builds its own instance from the pinned certificates.
+- **Replay is the `SsoService`'s job** (`SamlReplayStore`, spent once per `AuthnRequest` and per `Assertion`); `./saml` is stateless.
+- Every failure is a `SamlError`. `saml/Verifier.test.ts` reproduces each attack shape against hand-built signed fixtures; a new check gets a fixture.
+
+### Root
+
+- **Services are `Context.Service` classes with a static `layer`**; stores, hooks and `SecureRandom` / `Digest` are resolved once in the module-scoped `make`, so service methods carry `R = never`. Implementations are typed `typeof X.Service`; there are no `*Shape` interfaces.
+- **Stores are dumb persistence**: a lookup returns `X | null` on a miss and fails only with `AuthError` (infrastructure). Services turn a miss into a typed domain error.
+- **Errors**: domain errors are `Data.TaggedError` with a stable `code` (`Errors.ts` when two modules raise them, else module-local); HTTP-boundary errors are the `Schema.TaggedError` classes in `http/HttpApiSchema.ts` with fixed statuses (`RateLimitError` → 429, `AuthError` → 500). Nothing subclasses `AuthError`.
+- **Bearer secrets are stored as SHA-256 digests** (`hashToken` and its wrappers, ADR-0004): session ids, magic-link, email-verification, password-reset and one-time tokens, device codes, API keys, OIDC codes and tokens, email / phone OTPs, backup codes. The raw value goes to the user once; the digest is the store key.
+- **Secrets compare in constant time** with `constantTimeHashEqual` / `timingSafeEqualBytes` (`TokenHash.ts`).
+- **A send that would reveal whether an account exists never sits on the response path**: those flows hand it to `DeliveryScheduler` (`makeDetachedSend`), and its failure goes to the `afterDeliveryFailure` hook and the delivery metric, never to the caller. Every other send is awaited (#196).
+- **Randomness comes from the `SecureRandom.SecureRandom` service** (`effect/crypto`; default `PlatformCrypto.layer`, Web Crypto, which also provides `Digest.Digest`); never `Math.random`. Its error channel is `never`, so a draw is never mapped to an `AuthError` (#520). Direct `node:crypto` stays in `password/Password.ts` (scrypt), `TokenHash.ts` and `Cipher.ts`.
+- **Session ids are 160 bits** (`crypto.randomBytes(20)` in `SessionService.ts`), with active and idle expiry.
+- **Sign-in does constant work**: password verification runs against a cached decoy hash when the account does not exist.
+- **One authorization model** (ADR-0018): every decision goes through `Policy.decide`; `Rbac`, `Protected`, `OwnedAccess` read scopes and `Ladder` axes compile to or project the kernel. Default deny, forbid overrides permit. `Ladder.hasAtLeast` is for UX gates, never the gate.
+- **System principals are denied by default** (ADR-0019): only a permit whose principal scope names the `System` type can allow one; role permits never match one.
+- **404 until configured**: an optional HTTP feature resolves its service with `Effect.serviceOption` and answers `404` when the layer is absent.
+- **`Http.make` fails at startup, not per request**, when a configured limit has no `RateLimiter` (`RateLimiterConfigError`) or an IP limit has no client address source (`ClientAddressConfigError`); with `strict: true` it also refuses a `services` build that cannot finish synchronously (`ServicesBuildPendingError`).
+- **Optional encryption secrets fail closed when set but empty** (`OptionalSecretConfig.ts`): `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET`, `TWO_FACTOR_ENCRYPT_SECRET`.
+- **JSDoc `@example`s are type-checked and run** by `vp run docs`: in-memory stores, inline config, no network, no `declare` stubs; failure is a throw or a failed `assert`.
+- No change may weaken timing safety, token entropy, cookie flags, the trusted-origin CSRF check or replay protection (DESIGN.md ground rules).
+
+## Terms
+
+- **Credential / Verification / Auth state** — the three entity categories (ADR-0006): a persistent registered means of authenticating (Account, Passkey, ApiKey, MultiFactorEnrollment, TrustedDevice), a single-use artifact proving possession (tokens, OTPs, BackupCode, OAuthState, WebAuthnChallenge, Invitation), and the record of having authenticated (Session, JWT).
+- **Account** — a User's link to one Provider; the `credential` provider holds the password hash.
+- **Identifier** — a login handle (`email`, `username`, `phone`) in the `IdentifierStore`, unique per `(type, value)`; not a User field (DESIGN.md D12).
+- **Hooks / plugin** — `before*` / `after*` hook points; a plugin is a layer composed with `composePlugins` (first-party ones keep the `*Plugin` suffix).
+- **Seam** — a service the core declares and an adapter or the host implements: `PasswordHasher`, `EmailSender`, `SmsSender`, `DeliveryScheduler`, `SamlVerifier`, `SecondFactorGate`, `EntityResolver`, `IsFollower`.
+- **Principal / entity** — the kernel's typed references (`Type::"id"`); a **system principal** is `System::"<name>"`.
+- **Ladder / rung / axis** — an ordered role list, one role per user, and a named "this rung or above" capability.
+- **Fail-open / fail-closed resolution** — `SessionResolution.resolveFailOpen` turns a session-service fault into an anonymous request reported as `degraded`; `resolve` fails. Neither is the default.
+- **Session store (client)** — `client.session`: `get`, `subscribe`, `refetch` over `{ data, isPending, error }`; the contract the Svelte binding adapts. Not the server-side `SessionStore` service.
+- **Mutating call** — a client request that changes the session, followed by a refetch when observed (`AuthClientPluginContext.mutating`). A client **plugin** is `definePlugin(install)`, adding typed methods via `client.extend`.
+- **Store layer** — `./sql`'s `<Name>StoreLayer`: `Layer<Auth.<Name>Store, never, SqlClient>` over `make<Name>Store`.
+- **RBAC tables** — `auth_user_roles` (user → role) and `auth_role_permissions` (role → `resource`/`action`); data for the kernel, not a store service.
+- **IdP / SP** — the identity provider that signs a SAML assertion, and this application as the service provider (`spEntityId`, `acsUrl`). The **ACS URL** is the endpoint the `Response` is posted to; **RelayState** is the opaque `state` issued with the `AuthnRequest` and echoed back.

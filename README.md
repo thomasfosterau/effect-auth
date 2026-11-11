@@ -124,7 +124,7 @@ From here: mount the HTTP API with `Http.make({ services })` from the `@thomasfo
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md); agents read [AGENTS.md](AGENTS.md) and each package's `CLAUDE.md`. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md); agents read [AGENTS.md](AGENTS.md) and each package's `AGENTS.md` (Claude Code loads them through [.claude/CLAUDE.md](.claude/CLAUDE.md)). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
