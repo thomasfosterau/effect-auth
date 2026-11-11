@@ -80,7 +80,7 @@ export const defaultRender = (message: EmailMessage): RenderedEmail => {
 /** Configuration for {@link resendEmailSender}. */
 export interface ResendEmailSenderConfig {
   /** Resend API key. Wrap with `Redacted.make(...)` or read via `Config.Redacted(...)`. */
-  readonly apiKey: Redacted.Redacted<string>;
+  readonly apiKey: Redacted.Redacted;
   /** The `from` address (and optional display name, e.g. `"App <noreply@example.com>"`). */
   readonly from: string;
   /**
@@ -175,6 +175,7 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
           cause: { status: response.status, body },
         });
       }
+      return yield* Effect.void;
     }).pipe(
       Effect.withSpan("effect-auth-resend.send", {
         attributes: { purpose: message.purpose },
@@ -207,11 +208,11 @@ export interface ResendLayerConfig extends Omit<ResendEmailSenderConfig, "apiKey
    * Where the API key comes from. Defaults to the `RESEND_API_KEY` variable,
    * which must be set and non-empty.
    */
-  readonly apiKey?: Config.Config<Redacted.Redacted<string>> | undefined;
+  readonly apiKey?: Config.Config<Redacted.Redacted> | undefined;
 }
 
 /** `RESEND_API_KEY`, required and non-empty. */
-const defaultApiKey: Config.Config<Redacted.Redacted<string>> = Config.schema(
+const defaultApiKey: Config.Config<Redacted.Redacted> = Config.schema(
   Schema.Redacted(Schema.NonEmptyString),
   "RESEND_API_KEY",
 );

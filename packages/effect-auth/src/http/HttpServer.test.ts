@@ -998,6 +998,7 @@ const authRequest = (
   headers: Record<string, string> = {},
 ): Request => {
   const { rememberMe, token, ...rest } = fields;
+  const id = Predicate.isString(token) ? token : "";
   const signIn = (credential: { readonly [key: string]: Schema.Json }) =>
     writeRequest(
       "POST",
@@ -1021,13 +1022,12 @@ const authRequest = (
           type: "second-factor-verifications",
           attributes: { method, ...rest },
           relationships: {
-            challenge: { data: { type: "second-factor-challenges", id: String(token) } },
+            challenge: { data: { type: "second-factor-challenges", id } },
           },
         },
       },
       headers,
     );
-  const id = String(token);
   const requests: Record<AuthFlow, () => Request> = {
     password: () => signIn({ method: "password", ...rest }),
     username: () => signIn({ method: "username", ...rest }),

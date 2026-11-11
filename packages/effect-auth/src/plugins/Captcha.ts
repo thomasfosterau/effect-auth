@@ -33,7 +33,7 @@ const VERIFY_URLS: Record<CaptchaProvider, string> = {
 /** Configuration for {@link CaptchaPlugin}. */
 export interface CaptchaConfig {
   readonly provider: CaptchaProvider;
-  readonly secretKey: Redacted.Redacted<string>;
+  readonly secretKey: Redacted.Redacted;
   /** Endpoints to guard. Default `["signUp", "signIn"]`. */
   readonly endpoints?: readonly CaptchaEndpoint[];
 }
@@ -73,6 +73,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
           if (!success) {
             return yield* new CaptchaError({ message: "Captcha verification failed" });
           }
+          return yield* Effect.void;
         });
 
       const impls: PluginImpls = {

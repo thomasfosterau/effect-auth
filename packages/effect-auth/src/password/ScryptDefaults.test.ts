@@ -16,15 +16,15 @@ vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:crypto")>();
   return {
     ...actual,
-    scrypt: vi.fn(
+    scrypt: vi.fn<
       (
-        _password: crypto.BinaryLike,
-        _salt: crypto.BinaryLike,
+        password: crypto.BinaryLike,
+        salt: crypto.BinaryLike,
         keylen: number,
-        _options: crypto.ScryptOptions,
+        options: crypto.ScryptOptions,
         callback: (error: Error | null, derivedKey: Buffer) => void,
-      ) => callback(null, Buffer.alloc(keylen)),
-    ),
+      ) => void
+    >((_password, _salt, keylen, _options, callback) => callback(null, Buffer.alloc(keylen))),
   };
 });
 

@@ -43,7 +43,7 @@ const makeHarness = (
     Layer.provide(Layer.succeed(AccountLockoutStore)(store)),
   );
 
-  const drive = <A, E>(f: (hooks: typeof Hooks.Service) => Effect.Effect<A, E, never>) =>
+  const drive = <A, E>(f: (hooks: typeof Hooks.Service) => Effect.Effect<A, E>) =>
     Effect.runPromise(
       Effect.gen(function* () {
         const hooks = yield* Hooks;

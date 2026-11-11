@@ -136,13 +136,13 @@ const make = (
         }
 
         // Idempotent: already successfully linked.
-        if (MutableHashSet.has(done, anonymousUser.id)) return;
+        if (MutableHashSet.has(done, anonymousUser.id)) return yield* Effect.void;
 
         // Single-flight: another fiber is already migrating this user.
-        if (MutableHashSet.has(inFlight, anonymousUser.id)) return;
+        if (MutableHashSet.has(inFlight, anonymousUser.id)) return yield* Effect.void;
 
         MutableHashSet.add(inFlight, anonymousUser.id);
-        yield* Effect.gen(function* () {
+        return yield* Effect.gen(function* () {
           if (config.linkAccount !== undefined) {
             yield* config.linkAccount({ anonymousUser, newUser });
           }

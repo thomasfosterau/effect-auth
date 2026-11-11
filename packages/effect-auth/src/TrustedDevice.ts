@@ -148,7 +148,7 @@ export interface TrustedDeviceConfig {
    * HMAC-SHA256 signing secret. Keep server-side and rotate periodically.
    * Rotating the secret automatically invalidates all outstanding device tokens.
    */
-  readonly secret: Redacted.Redacted<string>;
+  readonly secret: Redacted.Redacted;
 }
 
 /** The cookie value and expiry of a newly trusted device. */
@@ -231,7 +231,7 @@ export const trustedDeviceConfig: Config.Config<TrustedDeviceConfig> = Config.al
 /** Separator between rawToken and HMAC in the cookie value. */
 const COOKIE_SEPARATOR = ".";
 
-const computeHmac = (secret: Redacted.Redacted<string>, rawToken: string): string =>
+const computeHmac = (secret: Redacted.Redacted, rawToken: string): string =>
   Hex.encode(Cipher.hmac("sha256", Redacted.value(secret), rawToken));
 
 /** Constant-time comparison of two hex strings of equal expected length. */

@@ -3,9 +3,13 @@ import { Predicate, Schema } from "effect";
 import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
+/** The URL a stub `fetch` was asked for, whichever form `input` takes. */
+const requestUrl = (input: RequestInfo | URL): string =>
+  Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
+
 /** Whether a request is the store's session read (`GET /sessions/current`). */
 const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
-  String(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
+  requestUrl(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
 
 const EMAIL = "alice@client.test";
 const PW = "password-123";
@@ -150,7 +154,7 @@ describe("session store correctness", () => {
     const client = createAuthClient({
       baseUrl: "http://client.test",
       fetch: (input, init?) => {
-        if (injectError && String(input).includes("/sessions/current")) {
+        if (injectError && requestUrl(input).includes("/sessions/current")) {
           return Promise.resolve(
             new Response(toJson({ message: "Service Unavailable" }), {
               status: 503,
@@ -186,7 +190,7 @@ describe("session store correctness", () => {
     const client = createAuthClient({
       baseUrl: "http://client.test",
       fetch: (input) => {
-        if (String(input).includes("/sessions/current")) {
+        if (requestUrl(input).includes("/sessions/current")) {
           callCount++;
           if (callCount === 1) {
             // First (stale) call: held until manually released with a 500.

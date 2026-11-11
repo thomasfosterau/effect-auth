@@ -619,7 +619,7 @@ export const make = (
             message: "Not authorized to delete this credential",
           });
         }
-        yield* credentialStore.delete(credentialId);
+        return yield* credentialStore.delete(credentialId);
       }),
 
       renameCredential: Effect.fn("WebAuthnService.renameCredential")(function* (

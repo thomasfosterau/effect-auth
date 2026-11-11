@@ -12,15 +12,17 @@ vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:crypto")>();
   return {
     ...actual,
-    pbkdf2: vi.fn(
+    pbkdf2: vi.fn<
       (
-        _password: crypto.BinaryLike,
-        _salt: crypto.BinaryLike,
-        _iterations: number,
+        password: crypto.BinaryLike,
+        salt: crypto.BinaryLike,
+        iterations: number,
         keylen: number,
-        _digest: string,
+        digest: string,
         callback: (error: Error | null, derivedKey: Buffer) => void,
-      ) => callback(null, Buffer.alloc(keylen)),
+      ) => void
+    >((_password, _salt, _iterations, keylen, _digest, callback) =>
+      callback(null, Buffer.alloc(keylen)),
     ),
   };
 });

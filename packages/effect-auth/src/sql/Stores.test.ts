@@ -52,7 +52,7 @@ const makeConnection = (db: Database.Database): SqlConnection.Connection => {
   ): Effect.Effect<ReadonlyArray<any>, SqlError.SqlError> =>
     Effect.try({
       try: () => {
-        const statement = db.prepare<Array<unknown>>(sqlText);
+        const statement = db.prepare(sqlText);
         if (statement.reader) {
           return statement.all(...params);
         }

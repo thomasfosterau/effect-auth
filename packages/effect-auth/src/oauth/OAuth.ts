@@ -13,6 +13,7 @@ import {
   Data,
   DateTime,
   Effect,
+  Formatter,
   Layer,
   Predicate,
   Record as Rec,
@@ -58,7 +59,7 @@ import {
  */
 export interface OAuthProviderConfig {
   readonly clientId: string;
-  readonly clientSecret: Redacted.Redacted<string>;
+  readonly clientSecret: Redacted.Redacted;
   readonly redirectUri: string;
   readonly authorizationEndpoint: string;
   readonly tokenEndpoint: string;
@@ -562,7 +563,7 @@ const verifyIdTokenClaims = (
 
     const alg = header["alg"];
     if (alg !== "RS256" && alg !== "ES256" && alg !== "EdDSA") {
-      return yield* fail(`Unsupported id_token algorithm: ${String(alg)}`);
+      return yield* fail(`Unsupported id_token algorithm: ${Formatter.format(alg)}`);
     }
 
     const jwk = yield* fetchIdTokenJwk(params, header);
@@ -596,13 +597,20 @@ const verifyIdTokenClaims = (
     return payload;
   });
 
+/**
+ * A provider's account id as a string: a string as is, a number (GitHub's,
+ * Facebook's) in decimal, and anything else, a missing id included, as `""`.
+ */
+const idString = (id: unknown): string =>
+  Predicate.isString(id) ? id : Predicate.isNumber(id) || Predicate.isBigInt(id) ? `${id}` : "";
+
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
 const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
   const { email, email_verified, name, picture } = claims;
   return Object.assign(
     {},
     claims,
-    { id: String(claims["sub"] ?? claims["id"] ?? "") },
+    { id: idString(claims["sub"] ?? claims["id"]) },
     Predicate.isString(email) ? { email } : {},
     Predicate.isBoolean(email_verified) ? { email_verified } : {},
     Predicate.isString(name) ? { name } : {},
@@ -981,7 +989,7 @@ export interface OAuthServiceOptions {
    * Rotation requires re-encrypting every stored token with the new key.
    */
   readonly encryptTokens?:
-    | { readonly secret: Redacted.Redacted<string> }
+    | { readonly secret: Redacted.Redacted }
     | { readonly cipher: TokenCipher };
 
   /**
@@ -1516,7 +1524,7 @@ export const make = (
           }
         }
 
-        yield* accountStore.delete(provider, account.providerId);
+        return yield* accountStore.delete(provider, account.providerId);
       }),
 
       refreshAccessToken: Effect.fn("OAuthService.refreshAccessToken")(
@@ -1631,7 +1639,7 @@ export const make = (
 
 export const GoogleProvider = (config: {
   clientId: string;
-  clientSecret: Redacted.Redacted<string>;
+  clientSecret: Redacted.Redacted;
   redirectUri: string;
 }): OAuthProvider =>
   provider(
@@ -1649,7 +1657,7 @@ export const GoogleProvider = (config: {
 /** GitHub OAuth 2.0 provider preset. */
 export const GitHubProvider = (config: {
   clientId: string;
-  clientSecret: Redacted.Redacted<string>;
+  clientSecret: Redacted.Redacted;
   redirectUri: string;
 }): OAuthProvider =>
   provider(
@@ -1667,7 +1675,7 @@ export const GitHubProvider = (config: {
 /** Discord OAuth 2.0 provider preset. */
 export const DiscordProvider = (config: {
   clientId: string;
-  clientSecret: Redacted.Redacted<string>;
+  clientSecret: Redacted.Redacted;
   redirectUri: string;
 }): OAuthProvider =>
   provider(
@@ -1685,7 +1693,7 @@ export const DiscordProvider = (config: {
 /** Microsoft (Entra ID) provider preset; `tenant` selects the directory. */
 export const MicrosoftProvider = (config: {
   clientId: string;
-  clientSecret: Redacted.Redacted<string>;
+  clientSecret: Redacted.Redacted;
   redirectUri: string;
   tenant?: string;
 }): OAuthProvider =>
@@ -1704,7 +1712,7 @@ export const MicrosoftProvider = (config: {
 /** The `{ clientId, clientSecret, redirectUri }` triple every provider needs. */
 export interface OAuthClientConfig {
   readonly clientId: string;
-  readonly clientSecret: Redacted.Redacted<string>;
+  readonly clientSecret: Redacted.Redacted;
   readonly redirectUri: string;
 }
 
@@ -1744,7 +1752,7 @@ export const profile = (
   },
 ): OAuthUserInfo => ({
   ...base,
-  id: String(fields.id ?? ""),
+  id: idString(fields.id),
   ...(fields.email !== undefined && { email: fields.email }),
   ...(fields.name !== undefined && { name: fields.name }),
   ...(fields.picture !== undefined && { picture: fields.picture }),
@@ -1809,7 +1817,7 @@ export const appleClientSecret = (params: {
   readonly clientId: string;
   readonly keyId: string;
   /** PKCS#8 PEM of the private key downloaded from Apple. */
-  readonly privateKey: Redacted.Redacted<string>;
+  readonly privateKey: Redacted.Redacted;
   /** Lifetime in seconds (default 6 months, Apple's maximum). */
   readonly expiresIn?: number;
   readonly now?: number;

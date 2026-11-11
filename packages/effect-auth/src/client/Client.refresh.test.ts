@@ -3,11 +3,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test"
 import type * as Http from "../http/index.ts";
 import { createAuthClient } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
-import { Array as Arr, MutableHashMap, MutableHashSet, Option } from "effect";
+import { Array as Arr, MutableHashMap, MutableHashSet, Option, Predicate } from "effect";
+
+/** The URL a stub `fetch` was asked for, whichever form `input` takes. */
+const requestUrl = (input: RequestInfo | URL): string =>
+  Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
 
 /** Whether a request is the store's session read (`GET /sessions/current`). */
 const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
-  String(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
+  requestUrl(input).includes("/sessions/current") && (init?.method ?? "GET") === "GET";
 
 const EMAIL = "alice@refresh.test";
 const PW = "password-123";

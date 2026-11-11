@@ -222,7 +222,7 @@ export const make = (
       send: Effect.fn("MagicLinkService.send")(function* (rawEmail: string) {
         const email = normalizeEmail(rawEmail);
         if (!email) {
-          return;
+          return yield* Effect.void;
         }
 
         // Do not reveal whether the user exists to reduce email enumeration
@@ -269,7 +269,7 @@ export const make = (
         // same store work. Nobody receives the raw token, so it can never be
         // verified.
         if (!deliver) {
-          return;
+          return yield* Effect.void;
         }
 
         // With sign-up disabled, only a known address gets the link, so an
@@ -280,7 +280,7 @@ export const make = (
         if (disableSignUp) {
           return yield* detached("magic-link", config.sendMagicLink(email, rawToken));
         }
-        yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
+        return yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
           Effect.fail(
             new Errors.MagicLinkError({
               message: `Failed to send magic link to ${email}`,

@@ -124,7 +124,7 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
             });
           }
           const key = `ip:${operation}:${ip}`;
-          yield* rateLimiter
+          return yield* rateLimiter
             .consumeToken(key, limitConfig)
             .pipe(Effect.provideService(RateLimitStore, store));
         });

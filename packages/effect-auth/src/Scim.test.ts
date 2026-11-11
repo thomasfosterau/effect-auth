@@ -326,7 +326,7 @@ const makeFixture = async (
 ) => {
   const stores = makeStores(storeOptions);
   const service = await Effect.runPromise(Scim.make(config).pipe(Effect.provide(stores.layer)));
-  const run = <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => Effect.runPromise(effect);
+  const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
   const a = await run(service.createConnection(ORG_A));
   const b = await run(service.createConnection(ORG_B));
   return { ...stores, service, run, a, b };

@@ -182,7 +182,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           // with (#455). The store starts a new window when there is none or
           // the current one has expired.
           const count = yield* store.increment(key, Math.ceil(config.windowMs / 1000));
-          if (count <= config.maxRequests) return;
+          if (count <= config.maxRequests) return yield* Effect.void;
 
           const current = yield* store.get(key);
           const resetAt = current?.resetAt ?? now + config.windowMs;

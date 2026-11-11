@@ -330,7 +330,7 @@ const make = (
           return yield* new UsernameError({ message: "Username is already taken" });
         }
         if (existing !== null) {
-          return; // Already this user's username.
+          return yield* Effect.void; // Already this user's username.
         }
 
         // Replace any previous username identifier, then claim the new one.
@@ -341,7 +341,7 @@ const make = (
           { concurrency: 1, discard: true },
         );
         const now = yield* DateTime.nowAsDate;
-        yield* claimIdentifier(
+        return yield* claimIdentifier(
           identifiers,
           makeIdentifier({ userId, type: "username", value: username, verified: true, now }),
         ).pipe(
@@ -350,6 +350,7 @@ const make = (
               Effect.fail(new UsernameError({ message: "Username is already taken" })),
             IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
           }),
+          Effect.asVoid,
         );
       }),
     };

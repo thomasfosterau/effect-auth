@@ -52,7 +52,7 @@ const makeSession = (id: string): Auth.Session => ({
 const TRANSACTION_CONNECTION = "effect/sql/SqlClient/TransactionConnection/";
 
 /** Whether the calling fiber's context carries an open SQL transaction. */
-const inTransaction: Effect.Effect<boolean> = Effect.map(Effect.context<never>(), (context) =>
+const inTransaction: Effect.Effect<boolean> = Effect.map(Effect.context(), (context) =>
   [...context.mapUnsafe.keys()].some((key) => key.startsWith(TRANSACTION_CONNECTION)),
 );
 

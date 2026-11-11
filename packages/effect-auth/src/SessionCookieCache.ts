@@ -56,7 +56,7 @@ export interface SessionCacheConfig {
   /** Cache lifetime in ms. Default 5 minutes. */
   readonly maxAge?: number;
   /** HMAC secret. Use `Redacted.make(...)` / `Config.Redacted`. */
-  readonly secret: Redacted.Redacted<string>;
+  readonly secret: Redacted.Redacted;
   /**
    * The cache epoch. Every cookie carries it, and one issued under another
    * epoch is rejected (the request falls through to the store), so changing it
@@ -80,7 +80,7 @@ export interface SessionCacheConfig {
 export interface ResolvedSessionCache {
   readonly maxAge: number;
   /** Kept redacted; unwrapped only inside `sign`. */
-  readonly secret: Redacted.Redacted<string>;
+  readonly secret: Redacted.Redacted;
   /** {@link SessionCacheConfig.version}, `""` when unset. */
   readonly version: string;
   /** The AES-256-GCM key when {@link SessionCacheConfig.encrypt} is on. */
@@ -123,7 +123,7 @@ const PAYLOAD_VERSION = 1;
 
 const b64url = (data: Uint8Array): string => Base64Url.encode(data);
 
-const sign = (data: string, secret: Redacted.Redacted<string>): string =>
+const sign = (data: string, secret: Redacted.Redacted): string =>
   b64url(Cipher.hmac("sha256", Redacted.value(secret), data));
 
 const timingSafeEqualStr = (a: string, b: string): boolean =>

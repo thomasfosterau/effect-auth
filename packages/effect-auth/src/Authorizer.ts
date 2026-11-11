@@ -250,7 +250,7 @@ export const auditSystemDecision = (
  */
 export interface AuthorizerConfig<E = unknown> {
   /** The static policy set every decision is made against. */
-  readonly policies: ReadonlyArray<Policy.Policy<E, never>>;
+  readonly policies: ReadonlyArray<Policy.Policy<E>>;
   /**
    * Optional declared model. When present: declarative policies are
    * validated at layer construction (a layer build failure beats a policy
@@ -315,7 +315,7 @@ export class Authorizer extends Context.Service<
 
 const make = <E = unknown>(
   config: AuthorizerConfig<E>,
-): Effect.Effect<typeof Authorizer.Service, Errors.AuthError, never> =>
+): Effect.Effect<typeof Authorizer.Service, Errors.AuthError> =>
   Effect.gen(function* () {
     const resolver = yield* Effect.serviceOption(EntityResolver);
     const store = yield* Effect.serviceOption(PolicyStore.PolicyStore);
@@ -339,10 +339,7 @@ const make = <E = unknown>(
 
     // Stored policies (template links included) are fetched per decision so
     // edits apply immediately; static policies are appended after them.
-    const allPolicies = (): Effect.Effect<
-      ReadonlyArray<Policy.Policy<E, never>>,
-      Errors.AuthError
-    > =>
+    const allPolicies = (): Effect.Effect<ReadonlyArray<Policy.Policy<E>>, Errors.AuthError> =>
       useStore && Option.isSome(store)
         ? Effect.map(PolicyStore.effectivePolicies(store.value), (stored) => [
             ...stored,
@@ -351,7 +348,7 @@ const make = <E = unknown>(
         : Effect.succeed(config.policies);
 
     const sliceFor = (
-      policies: ReadonlyArray<Policy.Policy<E, never>>,
+      policies: ReadonlyArray<Policy.Policy<E>>,
       request: Policy.PolicyRequest,
     ): Effect.Effect<Entity.EntitySlice, Errors.AuthError> =>
       Option.isSome(resolver)

@@ -176,7 +176,7 @@ export const resolveMessage = (
   code: string,
   fallback: string,
   params?: Types.JsonObject,
-): Effect.Effect<string, never, never> =>
+): Effect.Effect<string> =>
   Effect.serviceOption(Messages).pipe(
     Effect.map((opt) =>
       Option.isSome(opt) ? opt.value.resolve(code, undefined, params) : fallback,

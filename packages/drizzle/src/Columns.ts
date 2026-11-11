@@ -401,7 +401,7 @@ export const resolveSchema = (input: SchemaInput): AuthSchema =>
  */
 export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
   schema: TableSchema<TColumns>,
-  values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K], "query"> }>,
+  values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K]> }>,
 ): Table["$inferInsert"] =>
   Rec.mapKeys(
     values,

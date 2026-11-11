@@ -58,7 +58,7 @@ export interface Hyperdrive {
 }
 
 /** Where to connect: a Hyperdrive binding, or a Postgres URL. */
-export type Source = Hyperdrive | Redacted.Redacted<string>;
+export type Source = Hyperdrive | Redacted.Redacted;
 
 /** `@effect/sql-pg` pool settings. The connection itself comes from the {@link Source}. */
 export type ClientOptions = Omit<PgClient.PgPoolConfig, "url">;
@@ -112,7 +112,5 @@ export const purgeExpired = (
  * The provider holds the target as it holds a D1 binding, so a destroy, which
  * runs from persisted state, can still reach the database.
  */
-export const database = (
-  url: Redacted.Redacted<string>,
-  options?: ClientOptions,
-): PostgresDatabase => postgresDatabase(clientLayer(url, options));
+export const database = (url: Redacted.Redacted, options?: ClientOptions): PostgresDatabase =>
+  postgresDatabase(clientLayer(url, options));

@@ -352,7 +352,7 @@ export interface OidcDynamicRegistrationConfig {
    * Require `Authorization: Bearer <initial access token>` on `POST /register`.
    * Either a shared secret (compared in constant time) or a verifier hook.
    */
-  readonly initialAccessToken?: Redacted.Redacted<string> | OidcInitialAccessTokenVerifier;
+  readonly initialAccessToken?: Redacted.Redacted | OidcInitialAccessTokenVerifier;
   /**
    * Scope granted when the request omits `scope`. Defaults to the provider's
    * `allowedScopes`.
@@ -471,7 +471,7 @@ export interface OidcTokenResult {
 export interface TrustedOidcClient {
   readonly clientId: string;
   /** Plaintext secret (hashed at service creation); omit for public clients. */
-  readonly clientSecret?: Redacted.Redacted<string>;
+  readonly clientSecret?: Redacted.Redacted;
   readonly name: string;
   readonly redirectUris: readonly string[];
   readonly type?: "web" | "native";
@@ -1065,7 +1065,7 @@ export const make = (
     const verifyInitialAccessToken = (token: string | undefined) =>
       Effect.gen(function* () {
         const required = dcr?.initialAccessToken;
-        if (required === undefined) return;
+        if (required === undefined) return yield* Effect.void;
         const invalid = new OidcRegistrationError({
           error: "invalid_token",
           description: "A valid initial access token is required to register a client",
@@ -1075,6 +1075,7 @@ export const make = (
           ? yield* required(token)
           : secretEquals(token, Redacted.value(required));
         if (!ok) return yield* invalid;
+        return yield* Effect.void;
       });
 
     /**
@@ -1397,7 +1398,7 @@ export const make = (
         if (existing === null) {
           return yield* new OidcProviderError({ message: "Client not found" });
         }
-        yield* clientStore.delete(clientId);
+        return yield* clientStore.delete(clientId);
       }),
 
       authorize: Effect.fn("OidcProviderService.authorize")(

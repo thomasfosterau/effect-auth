@@ -186,7 +186,7 @@ const makeEngine = (cloudflare: ReturnType<typeof makeCloudflare>) => {
             Plan.make(compiled).pipe(Effect.flatMap(apply), Effect.provide(compiled.services)),
           ),
           Effect.flatMap(Schema.decodeUnknownEffect(DeployOutput)),
-        ) as Effect.Effect<typeof DeployOutput.Type, unknown, never>,
+        ) as Effect.Effect<typeof DeployOutput.Type, unknown>,
       ),
     /** `alchemy destroy`: apply an empty plan, so every resource and action is removed. */
     destroy: (): Promise<void> =>

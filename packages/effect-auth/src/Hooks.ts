@@ -141,7 +141,7 @@ export interface DeliveryFailure {
  * error channel short-circuits the operation (this is how a "deny" - e.g. a
  * rate-limit rejection - is expressed).
  */
-export type Transform<V> = (value: V) => Effect.Effect<V, HookError, never>;
+export type Transform<V> = (value: V) => Effect.Effect<V, HookError>;
 
 /**
  * A **tap** hook: observes a value (side-effect only).
@@ -151,10 +151,10 @@ export type Transform<V> = (value: V) => Effect.Effect<V, HookError, never>;
  * Author tap implementations with {@link Hooks.tap}, which lets you write a
  * `void`-returning Effect and adapts it to thread the value automatically.
  */
-export type Tap<V> = (value: V) => Effect.Effect<V, HookError, never>;
+export type Tap<V> = (value: V) => Effect.Effect<V, HookError>;
 
 /** Identity hook - passes the value through unchanged (the no-op default). */
-const identity = <V>(value: V): Effect.Effect<V, HookError, never> => Effect.succeed(value);
+const identity = <V>(value: V): Effect.Effect<V, HookError> => Effect.succeed(value);
 
 /** Build the no-op default implementation: identity for every hook point. */
 const makeNoopHooks = (): typeof Hooks.Service => ({
@@ -253,8 +253,8 @@ export class Hooks extends Context.Service<
    * The example is on the {@link Hooks} class.
    */
   static readonly tap =
-    <V>(fn: (value: V) => Effect.Effect<void, HookError, never>): Tap<V> =>
-    (value: V): Effect.Effect<V, HookError, never> =>
+    <V>(fn: (value: V) => Effect.Effect<void, HookError>): Tap<V> =>
+    (value: V): Effect.Effect<V, HookError> =>
       fn(value).pipe(Effect.as(value));
 
   /**

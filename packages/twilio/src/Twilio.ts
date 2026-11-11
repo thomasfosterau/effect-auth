@@ -10,7 +10,7 @@
  *
  * @module twilio/twilio
  */
-import { Data, Effect, Layer, Match, Option, Redacted, Schema } from "effect";
+import { Data, Effect, Formatter, Layer, Match, Option, Predicate, Redacted, Schema } from "effect";
 import { AuthError, SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ export interface TwilioSmsSenderConfig {
   /** Twilio Account SID (starts with `AC`). */
   readonly accountSid: string;
   /** Twilio Auth Token. Wrap with `Redacted.make(...)` or read via `Config.Redacted(...)`. */
-  readonly authToken: Redacted.Redacted<string>;
+  readonly authToken: Redacted.Redacted;
   /** The sending phone number (E.164) or Messaging Service SID. */
   readonly from: string;
   /**
@@ -70,17 +70,21 @@ class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
 }> {}
 
 /**
- * Twilio's `{ code, message }` error body. The fields are left untyped so any
- * JSON object is accepted and its `code`/`message` are rendered as they are.
+ * Twilio's `{ code, message }` error body. The fields are any JSON value, so
+ * any JSON object is accepted and its `code`/`message` are rendered as they are.
  */
 const TwilioErrorBodyJson = Schema.fromJsonString(
   Schema.Struct({
-    code: Schema.optionalKey(Schema.Unknown),
-    message: Schema.optionalKey(Schema.Unknown),
+    code: Schema.optionalKey(Schema.Json),
+    message: Schema.optionalKey(Schema.Json),
   }),
 );
 
 const decodeTwilioErrorBody = Schema.decodeUnknownOption(TwilioErrorBodyJson);
+
+/** A field of the error body as text: a string as is, anything else formatted. */
+const renderField = (value: Schema.Json): string =>
+  Predicate.isString(value) ? value : Formatter.format(value);
 
 /** Parse Twilio's `{ code, message }` error body, when present, into readable text. */
 const describeTwilioError = (status: number, bodyText: string): string =>
@@ -93,9 +97,9 @@ const describeTwilioError = (status: number, bodyText: string): string =>
     {
       onNone: () => `status ${status}: ${bodyText}`,
       onSome: (parsed) => {
-        const code = parsed.code !== undefined ? `code ${String(parsed.code)}` : `status ${status}`;
-        const message = parsed.message ?? "no message";
-        return `${code}: ${String(message)}`;
+        const code =
+          parsed.code !== undefined ? `code ${renderField(parsed.code)}` : `status ${status}`;
+        return `${code}: ${renderField(parsed.message ?? "no message")}`;
       },
     },
   );
@@ -156,6 +160,7 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
           cause: { status: response.status, body: bodyText },
         });
       }
+      return yield* Effect.void;
     }).pipe(
       Effect.withSpan("effect-auth-twilio.send", {
         attributes: { purpose: message.purpose },
