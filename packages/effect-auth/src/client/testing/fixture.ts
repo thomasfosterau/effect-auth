@@ -425,16 +425,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
           (t) => t.organizationId === organizationId,
         ),
       ),
-    addTeamMember: (teamId, userId) =>
-      Effect.sync(() => {
-        const teamMember: Auth.TeamMember = {
-          teamId,
-          userId,
-          createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-        };
-        teamMembers.push(teamMember);
-        return teamMember;
-      }),
+    addTeamMember: (teamMember) => Effect.sync(() => (teamMembers.push(teamMember), teamMember)),
+    getTeamMemberById: (teamMemberId) =>
+      Effect.succeed(teamMembers.find((m) => m.id === teamMemberId) ?? null),
     removeTeamMember: (teamId, userId) =>
       Effect.sync(() => {
         const index = teamMembers.findIndex((m) => m.teamId === teamId && m.userId === userId);
@@ -454,6 +447,10 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       ),
     getOrgRole: (organizationId, role) =>
       Effect.succeed(Option.getOrNull(MutableHashMap.get(orgRoles, `${organizationId} ${role}`))),
+    getOrgRoleById: (orgRoleId) =>
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(orgRoles)).find((r) => r.id === orgRoleId) ?? null,
+      ),
     listOrgRoles: (organizationId) =>
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(orgRoles)).filter(

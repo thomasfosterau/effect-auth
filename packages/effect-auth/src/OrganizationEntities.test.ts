@@ -75,10 +75,12 @@ const store = {
   deleteTeam: () => Effect.die("unused"),
   listTeams: () => Effect.die("unused"),
   addTeamMember: () => Effect.die("unused"),
+  getTeamMemberById: () => Effect.die("unused"),
   removeTeamMember: () => Effect.die("unused"),
   listTeamMembers: () => Effect.die("unused"),
   upsertOrgRole: () => Effect.die("unused"),
   getOrgRole: () => Effect.die("unused"),
+  getOrgRoleById: () => Effect.die("unused"),
   listOrgRoles: () => Effect.die("unused"),
   deleteOrgRole: () => Effect.die("unused"),
 } satisfies typeof OrganizationStore.Service;

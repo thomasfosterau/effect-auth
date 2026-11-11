@@ -362,3 +362,139 @@ export const Invitation = Resource.make("invitations", {
  * @category resources
  */
 export type Invitation = typeof Invitation.Type;
+
+/**
+ * An email domain an organization claims (`organization-domains`):
+ * `Organization.OrganizationDomain`, its `organizationId` as the
+ * `organization` relationship. A claim is created through
+ * `POST /organizations/:id/domains` (`domain`, and optionally the
+ * `verificationStrategy`, `dns` by default) and proved through
+ * `POST /organization-domains/:id/verifications`; nothing else about it is
+ * writable. `verificationToken` is the value a `dns` claim publishes as a TXT
+ * record.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const OrganizationDomain = Resource.make("organization-domains", {
+  id: Schema.String,
+  attributes: {
+    domain: Resource.attribute(Schema.String, { update: false }),
+    verificationState: Resource.readOnlyAttribute(
+      Schema.Literals(["pending", "verified", "failed"]),
+    ),
+    verificationStrategy: Resource.attribute(Schema.Literals(["dns", "manual"]), {
+      create: "optional",
+      update: false,
+    }),
+    verificationToken: Resource.attribute(Schema.String, {
+      resource: "optional",
+      create: false,
+      update: false,
+    }),
+    createdAt: epochMillis,
+    verifiedAt: Resource.attribute(Schema.Finite, {
+      resource: "optional",
+      create: false,
+      update: false,
+    }),
+  },
+  relationships: {
+    organization: Relationship.one(() => Organization),
+  },
+});
+
+/**
+ * The decoded `organization-domains` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type OrganizationDomain = typeof OrganizationDomain.Type;
+
+/**
+ * A role one organization defines at runtime (`organization-roles`):
+ * `Organization.OrgRole`, its `organizationId` as the `organization`
+ * relationship. The id is the stored `OrgRole.id`. The `role` name is set
+ * once, by `POST /organizations/:id/roles`; `permissions` are replaced through
+ * `PATCH /organization-roles/:id`.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const OrganizationRole = Resource.make("organization-roles", {
+  id: Schema.String,
+  attributes: {
+    role: Resource.attribute(Schema.String, { update: false }),
+    permissions: Schema.Array(Schema.String),
+    createdAt: epochMillis,
+    updatedAt: epochMillis,
+  },
+  relationships: {
+    organization: Relationship.one(() => Organization),
+  },
+});
+
+/**
+ * The decoded `organization-roles` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type OrganizationRole = typeof OrganizationRole.Type;
+
+/**
+ * A team (`teams`): `Organization.Team`, its `organizationId` as the
+ * `organization` relationship. Only `name` is writable.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const Team = Resource.make("teams", {
+  id: Schema.String,
+  attributes: {
+    name: Schema.String,
+    createdAt: epochMillis,
+    updatedAt: epochMillis,
+  },
+  relationships: {
+    organization: Relationship.one(() => Organization),
+  },
+});
+
+/**
+ * The decoded `teams` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type Team = typeof Team.Type;
+
+/**
+ * A team membership (`team-members`): `Organization.TeamMember`, its `teamId`
+ * and `userId` as the `team` and `user` relationships. The id is the stored
+ * `TeamMember.id`. A team membership carries no role, so nothing about it is
+ * writable: it is created (`POST /teams/:id/members`) and deleted
+ * (`DELETE /team-members/:id`).
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const TeamMember = Resource.make("team-members", {
+  id: Schema.String,
+  attributes: {
+    createdAt: epochMillis,
+  },
+  relationships: {
+    team: Relationship.one(() => Team),
+    user: Relationship.one(() => User),
+  },
+});
+
+/**
+ * The decoded `team-members` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type TeamMember = typeof TeamMember.Type;

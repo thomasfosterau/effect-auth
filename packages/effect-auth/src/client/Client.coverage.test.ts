@@ -422,7 +422,10 @@ describe("organizations", () => {
     const mate = await teammate.signUp({ email: "mate@client.test", password: PW });
 
     const org = await owner.organization.create({ name: "Globex", slug: "globex" });
-    await owner.organization.addMember(org.id, { userId: signedInUser(mate).id, role: "member" });
+    const membership = await owner.organization.addMember(org.id, {
+      userId: signedInUser(mate).id,
+      role: "member",
+    });
 
     const team = await owner.organization.createTeam(org.id, { name: "Engineering" });
     expect(team.organizationId).toBe(org.id);
@@ -432,29 +435,41 @@ describe("organizations", () => {
       userId: signedInUser(mate).id,
     });
     expect(teamMember).toMatchObject({ teamId: team.id, userId: signedInUser(mate).id });
-    expect((await owner.organization.listTeamMembers(team.id)).map((m) => m.userId)).toEqual([
-      signedInUser(mate).id,
+    expect((await owner.organization.listTeamMembers(team.id)).map((m) => m.id)).toEqual([
+      teamMember.id,
     ]);
-    expect(
-      (await owner.organization.listTeamsForMember(org.id, signedInUser(mate).id)).map((t) => t.id),
-    ).toEqual([team.id]);
+    expect((await owner.organization.listTeamsForMember(membership.id)).map((t) => t.id)).toEqual([
+      team.id,
+    ]);
 
     expect((await owner.organization.updateTeam(team.id, { name: "Platform" })).name).toBe(
       "Platform",
     );
 
     // Dynamic access control: give `member` the team:create permission.
-    const role = await owner.organization.upsertRole(org.id, "member", {
+    const role = await owner.organization.createRole(org.id, {
+      role: "member",
+      permissions: [],
+    });
+    expect(role).toMatchObject({ organizationId: org.id, role: "member", permissions: [] });
+    // A second definition of the same role is refused: it is changed in place.
+    const duplicate = await rejectionOf(
+      owner.organization.createRole(org.id, { role: "member", permissions: ["*:*"] }),
+      AuthClientError,
+    );
+    assert.instanceOf(duplicate, AuthClientError);
+    expect(duplicate.status).toBe(409);
+    const granted = await owner.organization.updateRole(role.id, {
       permissions: ["team:create"],
     });
-    expect(role).toMatchObject({ role: "member", permissions: ["team:create"] });
+    expect(granted).toMatchObject({ id: role.id, permissions: ["team:create"] });
     expect((await teammate.organization.listRoles(org.id)).map((r) => r.role)).toEqual(["member"]);
 
     const memberTeam = await teammate.organization.createTeam(org.id, { name: "Design" });
     expect(memberTeam.name).toBe("Design");
 
     // Dropping the definition removes the granted permission again.
-    await owner.organization.deleteRole(org.id, "member");
+    await owner.organization.deleteRole(role.id);
     const denied = await rejectionOf(
       teammate.organization.createTeam(org.id, { name: "Growth" }),
       AuthClientError,
@@ -462,7 +477,7 @@ describe("organizations", () => {
     assert.instanceOf(denied, AuthClientError);
     expect(denied.status).toBe(403);
 
-    await owner.organization.removeTeamMember(team.id, signedInUser(mate).id);
+    await owner.organization.removeTeamMember(teamMember.id);
     expect(await owner.organization.listTeamMembers(team.id)).toEqual([]);
     await owner.organization.deleteTeam(team.id);
     expect((await owner.organization.listTeams(org.id)).map((t) => t.name)).toEqual(["Design"]);
@@ -533,7 +548,10 @@ describe("organizations", () => {
     expect(org.defaultRole).toBe("member");
     expect(org.jitProvisioning).toBe(false);
 
-    await owner.organization.upsertRole(org.id, "contributor", { permissions: ["team:create"] });
+    await owner.organization.createRole(org.id, {
+      role: "contributor",
+      permissions: ["team:create"],
+    });
     const updated = await owner.organization.setDefaultRole(org.id, { role: "contributor" });
     expect(updated.defaultRole).toBe("contributor");
 
@@ -595,12 +613,10 @@ describe("organizations", () => {
     ]);
 
     // The TXT record is not published yet.
-    expect((await owner.organization.verifyDomain(org.id, claim.id)).verificationState).toBe(
-      "failed",
-    );
+    expect((await owner.organization.verifyDomain(claim.id)).verificationState).toBe("failed");
 
     MutableHashSet.add(server.publishedDnsDomains, "acme.test");
-    const verified = await owner.organization.verifyDomain(org.id, claim.id);
+    const verified = await owner.organization.verifyDomain(claim.id);
     expect(verified.verificationState).toBe("verified");
     expect(verified.verifiedAt).toBeTypeOf("number");
 
@@ -616,7 +632,7 @@ describe("organizations", () => {
     expect(conflict.status).toBe(403);
 
     // Releasing the claim frees the domain again.
-    await owner.organization.removeDomain(org.id, claim.id);
+    await owner.organization.removeDomain(claim.id);
     expect(await owner.organization.listDomains(org.id)).toEqual([]);
     expect((await rival.organization.addDomain(other.id, { domain: "acme.test" })).domain).toBe(
       "acme.test",

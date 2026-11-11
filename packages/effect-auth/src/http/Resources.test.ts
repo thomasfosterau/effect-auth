@@ -2,7 +2,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { Array as Arr, Order, Record as Rec } from "effect";
 import { Resource } from "@thomasfosterau/effect-jsonapi";
 import { Identifier } from "../Identifier.ts";
-import type { Invitation, Member, Organization } from "../Organization.ts";
+import type {
+  Invitation,
+  Member,
+  OrgRole,
+  Organization,
+  OrganizationDomain,
+  Team,
+  TeamMember,
+} from "../Organization.ts";
 import { Session, User } from "../Types.ts";
 import * as Resources from "./Resources.ts";
 
@@ -66,6 +74,41 @@ const invitationKeys = {
   createdAt: true,
 } satisfies Record<keyof Invitation, true>;
 
+const domainKeys = {
+  id: true,
+  organizationId: true,
+  domain: true,
+  verificationState: true,
+  verificationStrategy: true,
+  verificationToken: true,
+  createdAt: true,
+  verifiedAt: true,
+} satisfies Record<keyof OrganizationDomain, true>;
+
+const orgRoleKeys = {
+  id: true,
+  organizationId: true,
+  role: true,
+  permissions: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Record<keyof OrgRole, true>;
+
+const teamKeys = {
+  id: true,
+  organizationId: true,
+  name: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Record<keyof Team, true>;
+
+const teamMemberKeys = {
+  id: true,
+  teamId: true,
+  userId: true,
+  createdAt: true,
+} satisfies Record<keyof TeamMember, true>;
+
 // One declaration per entity (#205): each resource is the wire projection of
 // a store-facing schema, so a field added to one and not the other fails here.
 describe("the JSON:API resources", () => {
@@ -119,6 +162,48 @@ describe("the JSON:API resources", () => {
         foreignKeys: { organization: "organizationId", inviter: "inviterId" },
       }),
     ).toStrictEqual(sorted(Rec.keys(invitationKeys)));
+  });
+
+  it("organization-domains carry exactly OrganizationDomain, its organization as a relationship", () => {
+    expect(
+      storeFacingKeys(Resources.OrganizationDomain, {
+        foreignKeys: { organization: "organizationId" },
+      }),
+    ).toStrictEqual(sorted(Rec.keys(domainKeys)));
+  });
+
+  it("organization-roles carry exactly OrgRole, its organization as a relationship", () => {
+    expect(
+      storeFacingKeys(Resources.OrganizationRole, {
+        foreignKeys: { organization: "organizationId" },
+      }),
+    ).toStrictEqual(sorted(Rec.keys(orgRoleKeys)));
+  });
+
+  it("teams carry exactly Team, its organization as a relationship", () => {
+    expect(
+      storeFacingKeys(Resources.Team, { foreignKeys: { organization: "organizationId" } }),
+    ).toStrictEqual(sorted(Rec.keys(teamKeys)));
+  });
+
+  it("team-members carry exactly TeamMember, its keys as relationships", () => {
+    expect(
+      storeFacingKeys(Resources.TeamMember, {
+        foreignKeys: { team: "teamId", user: "userId" },
+      }),
+    ).toStrictEqual(sorted(Rec.keys(teamMemberKeys)));
+  });
+
+  it("accepts writes only to a team's name and a role's permissions", () => {
+    expect(sorted(Rec.keys(Resources.Team.updateInput.fields))).toStrictEqual(
+      sorted(["id", "name"]),
+    );
+    expect(sorted(Rec.keys(Resources.OrganizationRole.updateInput.fields))).toStrictEqual(
+      sorted(["id", "permissions"]),
+    );
+    expect(sorted(Rec.keys(Resources.OrganizationDomain.createInput.fields))).toStrictEqual(
+      sorted(["domain", "verificationStrategy"]),
+    );
   });
 
   it("accepts no write to a membership's previousRole or an invitation's invitee", () => {

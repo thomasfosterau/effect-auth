@@ -654,7 +654,8 @@ export const backupCodeSetsGroup = Group.make(
 );
 
 // -----------------------------------------------------------------------------
-// Device sessions, organizations, members and invitations (#205, slice 4a)
+// Device sessions and organizations: members, invitations, domains, roles and
+// teams (#205, slice 4)
 // -----------------------------------------------------------------------------
 
 /**
@@ -730,6 +731,94 @@ const organizationErrorWires = [
   E.InternalServerError.wire,
 ];
 
+/** The organization errors and a `409` (`POST /organizations/:id/roles` of a defined role). */
+const organizationConflictErrorWires = [...organizationErrorWires, E.Conflict.wire];
+
+/**
+ * `GET <path>`, the `:id` in it naming the parent: a JSON:API collection of
+ * `resource`, answering the organization errors.
+ */
+const childCollection = <
+  const Name extends string,
+  const Path extends `/${string}/:id/${string}`,
+  Resource extends Schema.Top,
+>(
+  name: Name,
+  path: Path,
+  resource: Resource,
+) =>
+  HttpApiEndpoint.get(name, path, {
+    params: { id: Schema.String },
+    success: MediaType.asJsonApi(Document.CollectionDocument(resource), 200),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors);
+
+/**
+ * `POST <path>`, the `:id` in it naming the parent: create one `resource` from
+ * the `payload` document; `201` with it.
+ */
+const childCreate = <
+  const Name extends string,
+  const Path extends `/${string}/:id/${string}`,
+  Payload extends Schema.Top,
+  Resource extends Schema.Top,
+>(
+  name: Name,
+  path: Path,
+  payload: Payload,
+  resource: Resource,
+  errors: ReadonlyArray<(typeof organizationConflictErrorWires)[number]>,
+) =>
+  HttpApiEndpoint.post(name, path, {
+    params: { id: Schema.String },
+    payload: jsonApiPayload(payload),
+    success: MediaType.asJsonApi(Document.DataDocument(resource), 201),
+    error: errors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors);
+
+/**
+ * `POST <path>` with no body, the `:id` in it naming the resource it acts on
+ * (a re-delivery, a verification): the resource afterwards, with `status`.
+ */
+const itemAction = <
+  const Name extends string,
+  const Path extends `/${string}/:id/${string}`,
+  Resource extends Schema.Top,
+>(
+  name: Name,
+  path: Path,
+  resource: Resource,
+  status: number,
+) =>
+  HttpApiEndpoint.post(name, path, {
+    params: { id: Schema.String },
+    success: MediaType.asJsonApi(Document.DataDocument(resource), status),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors);
+
+/**
+ * A write document of `type` whose `user` relationship names the user to add,
+ * with `attributes` optional.
+ */
+const userLinkDocument = <const T extends string, A extends Schema.Top>(type: T, attributes: A) =>
+  Schema.Struct({
+    data: Schema.Struct({
+      type: Schema.Literal(type),
+      attributes: Schema.optionalKey(attributes),
+      relationships: Schema.Struct({
+        user: Schema.Struct({
+          data: Schema.Struct({ type: Schema.Literal("users"), id: Schema.String }),
+        }),
+      }),
+    }),
+  });
+
 /** The body of `PATCH /organizations/active`: the organization, or `null` to clear it. */
 export const ActiveOrganizationDocument = linkageDocument("organizations");
 export type ActiveOrganizationDocument = typeof ActiveOrganizationDocument.Type;
@@ -739,22 +828,37 @@ export type ActiveOrganizationDocument = typeof ActiveOrganizationDocument.Type;
  * `user` relationship, and optionally the `role` (omitted, the organization's
  * `defaultRole`).
  */
-export const MemberCreateDocument = Schema.Struct({
-  data: Schema.Struct({
-    type: Schema.Literal("organization-members"),
-    attributes: Schema.optionalKey(Schema.Struct({ role: Schema.optional(Schema.String) })),
-    relationships: Schema.Struct({
-      user: Schema.Struct({
-        data: Schema.Struct({ type: Schema.Literal("users"), id: Schema.String }),
-      }),
-    }),
-  }),
-});
+export const MemberCreateDocument = userLinkDocument(
+  "organization-members",
+  Schema.Struct({ role: Schema.optional(Schema.String) }),
+);
 export type MemberCreateDocument = typeof MemberCreateDocument.Type;
 
 /** The body of `POST /organizations/:id/invitations`: the invitee's email and role. */
 export const InvitationCreateDocument = writeDocument("invitations", S.InviteMemberPayload);
 export type InvitationCreateDocument = typeof InvitationCreateDocument.Type;
+
+/**
+ * The body of `POST /organizations/:id/domains`: the domain to claim, and
+ * optionally how it is proved (`dns`, the default, or `manual`).
+ */
+export const DomainCreateDocument = writeDocument(
+  "organization-domains",
+  S.AddOrganizationDomainPayload,
+);
+export type DomainCreateDocument = typeof DomainCreateDocument.Type;
+
+/** The body of `POST /organizations/:id/roles`: the role's name and its permissions. */
+export const RoleCreateDocument = writeDocument("organization-roles", S.CreateOrgRolePayload);
+export type RoleCreateDocument = typeof RoleCreateDocument.Type;
+
+/** The body of `POST /organizations/:id/teams`: the team's name. */
+export const TeamCreateDocument = writeDocument("teams", S.CreateTeamPayload);
+export type TeamCreateDocument = typeof TeamCreateDocument.Type;
+
+/** The body of `POST /teams/:id/members`: the user to add, as the `user` relationship. */
+export const TeamMemberCreateDocument = userLinkDocument("team-members", Schema.Struct({}));
+export type TeamMemberCreateDocument = typeof TeamMemberCreateDocument.Type;
 
 /** One `organization-members` resource. */
 export const MemberDocument = Document.DataDocument(R.OrganizationMember);
@@ -788,9 +892,17 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  *   memberships, and add one directly (`member:create`).
  * - `GET /organizations/:id/invitations` · `POST /organizations/:id/invitations`:
  *   its invitations, and invite someone by email (`invitation:create`).
+ * - `GET /organizations/:id/domains` · `POST /organizations/:id/domains`: its
+ *   email-domain claims (any member), and claim one (`domain:manage`).
+ * - `GET /organizations/:id/roles` · `POST /organizations/:id/roles`: its
+ *   custom role definitions (any member), and define one (`role:manage`); a
+ *   role it already defines answers `409`.
+ * - `GET /organizations/:id/teams` · `POST /organizations/:id/teams`: its
+ *   teams (any member), and create one (`team:create`).
  *
  * `404` when organizations are not enabled; `403` when the actor's role lacks
- * the permission.
+ * the permission, or (for a domain request) when the server has no
+ * `OrganizationDomainStore`.
  */
 export const organizationsGroup = Group.make(
   R.Organization,
@@ -810,36 +922,46 @@ export const organizationsGroup = Group.make(
   }),
   Endpoint.update(R.Organization, { errors: organizationErrors }),
   Endpoint.delete(R.Organization, { errors: organizationErrors }),
-  HttpApiEndpoint.get("listMembers", "/organizations/:id/members", {
-    params: { id: Schema.String },
-    success: MediaType.asJsonApi(Document.CollectionDocument(R.OrganizationMember), 200),
-    error: organizationErrorWires,
-  })
-    .middleware(Middleware.ContentNegotiation)
-    .middleware(Middleware.SchemaErrors),
-  HttpApiEndpoint.post("addMember", "/organizations/:id/members", {
-    params: { id: Schema.String },
-    payload: jsonApiPayload(MemberCreateDocument),
-    success: MediaType.asJsonApi(MemberDocument, 201),
-    error: organizationErrorWires,
-  })
-    .middleware(Middleware.ContentNegotiation)
-    .middleware(Middleware.SchemaErrors),
-  HttpApiEndpoint.get("listInvitations", "/organizations/:id/invitations", {
-    params: { id: Schema.String },
-    success: MediaType.asJsonApi(Document.CollectionDocument(R.Invitation), 200),
-    error: organizationErrorWires,
-  })
-    .middleware(Middleware.ContentNegotiation)
-    .middleware(Middleware.SchemaErrors),
-  HttpApiEndpoint.post("invite", "/organizations/:id/invitations", {
-    params: { id: Schema.String },
-    payload: jsonApiPayload(InvitationCreateDocument),
-    success: MediaType.asJsonApi(InvitationDocument, 201),
-    error: organizationErrorWires,
-  })
-    .middleware(Middleware.ContentNegotiation)
-    .middleware(Middleware.SchemaErrors),
+  childCollection("listMembers", "/organizations/:id/members", R.OrganizationMember),
+  childCreate(
+    "addMember",
+    "/organizations/:id/members",
+    MemberCreateDocument,
+    R.OrganizationMember,
+    organizationErrorWires,
+  ),
+  childCollection("listInvitations", "/organizations/:id/invitations", R.Invitation),
+  childCreate(
+    "invite",
+    "/organizations/:id/invitations",
+    InvitationCreateDocument,
+    R.Invitation,
+    organizationErrorWires,
+  ),
+  childCollection("listDomains", "/organizations/:id/domains", R.OrganizationDomain),
+  childCreate(
+    "addDomain",
+    "/organizations/:id/domains",
+    DomainCreateDocument,
+    R.OrganizationDomain,
+    organizationErrorWires,
+  ),
+  childCollection("listRoles", "/organizations/:id/roles", R.OrganizationRole),
+  childCreate(
+    "createRole",
+    "/organizations/:id/roles",
+    RoleCreateDocument,
+    R.OrganizationRole,
+    organizationConflictErrorWires,
+  ),
+  childCollection("listTeams", "/organizations/:id/teams", R.Team),
+  childCreate(
+    "createTeam",
+    "/organizations/:id/teams",
+    TeamCreateDocument,
+    R.Team,
+    organizationErrorWires,
+  ),
 );
 
 /**
@@ -850,6 +972,8 @@ export const organizationsGroup = Group.make(
  *   role), with `member:update`. The last active owner can be neither
  *   demoted nor deactivated.
  * - `DELETE /organization-members/:id`: remove it, with `member:delete`; `204`.
+ * - `GET /organization-members/:id/teams`: the teams of its organization the
+ *   member belongs to (any member of that organization).
  *
  * An unknown id answers `404`, a refused change `403`.
  */
@@ -857,6 +981,7 @@ export const organizationMembersGroup = Group.make(
   R.OrganizationMember,
   Endpoint.update(R.OrganizationMember, { errors: organizationErrors }),
   Endpoint.delete(R.OrganizationMember, { errors: organizationErrors }),
+  childCollection("listTeams", "/organization-members/:id/teams", R.Team),
 );
 
 /**
@@ -875,15 +1000,79 @@ export const invitationsGroup = Group.make(
     success: InvitationTransitionDocument,
     errors: organizationErrors,
   }),
-  HttpApiEndpoint.post("deliver", "/invitations/:id/deliveries", {
-    params: { id: Schema.String },
-    success: MediaType.asJsonApi(InvitationDocument, 202),
-    error: organizationErrorWires,
-  })
-    .middleware(Middleware.ContentNegotiation)
-    .middleware(Middleware.SchemaErrors),
+  itemAction("deliver", "/invitations/:id/deliveries", R.Invitation, 202),
 );
 
+/**
+ * `organization-domains`: one email-domain claim, by id. Both need
+ * `domain:manage` in the claim's organization.
+ *
+ * - `DELETE /organization-domains/:id`: release the claim; `204`.
+ * - `POST /organization-domains/:id/verifications`: run the proof (the DNS TXT
+ *   record through the server's `DomainVerifier`, or the admin's attestation
+ *   for a `manual` claim); `200` with the claim, now `verified` or `failed`.
+ *
+ * An unknown id answers `404`; a refusal, or a server with no
+ * `OrganizationDomainStore`, `403`.
+ */
+export const organizationDomainsGroup = Group.make(
+  R.OrganizationDomain,
+  Endpoint.delete(R.OrganizationDomain, { errors: organizationErrors }),
+  itemAction("verify", "/organization-domains/:id/verifications", R.OrganizationDomain, 200),
+);
+
+/**
+ * `organization-roles`: one custom role definition, by its stored id. Both
+ * need `role:manage` (owner-only by default); the protected owner role can be
+ * neither defined nor removed.
+ *
+ * - `PATCH /organization-roles/:id`: replace its `permissions`.
+ * - `DELETE /organization-roles/:id`: remove it, so the static role of that
+ *   name (if any) applies again; `204`.
+ *
+ * An unknown id answers `404`, a refusal `403`.
+ */
+export const organizationRolesGroup = Group.make(
+  R.OrganizationRole,
+  Endpoint.update(R.OrganizationRole, { errors: organizationErrors }),
+  Endpoint.delete(R.OrganizationRole, { errors: organizationErrors }),
+);
+
+/**
+ * `teams`: one team, by id. The `team:*` permissions that gate them are
+ * organization-scoped, resolved through the team's organization.
+ *
+ * - `PATCH /teams/:id`: rename it (`team:update`).
+ * - `DELETE /teams/:id`: delete it and its memberships (`team:delete`); `204`.
+ * - `GET /teams/:id/members` · `POST /teams/:id/members`: its memberships (any
+ *   member of the organization), and add a member of the organization to it,
+ *   as the `user` relationship (`team:manage-members`).
+ *
+ * An unknown team answers `403`, as every refusal does.
+ */
+export const teamsGroup = Group.make(
+  R.Team,
+  Endpoint.update(R.Team, { errors: organizationErrors }),
+  Endpoint.delete(R.Team, { errors: organizationErrors }),
+  childCollection("listMembers", "/teams/:id/members", R.TeamMember),
+  childCreate(
+    "addMember",
+    "/teams/:id/members",
+    TeamMemberCreateDocument,
+    R.TeamMember,
+    organizationErrorWires,
+  ),
+);
+
+/**
+ * `team-members`: one team membership, by its stored id.
+ * `DELETE /team-members/:id` removes it (`team:manage-members`); `204`. An
+ * unknown id answers `404`, a refusal `403`.
+ */
+export const teamMembersGroup = Group.make(
+  R.TeamMember,
+  Endpoint.delete(R.TeamMember, { errors: organizationErrors }),
+);
 /** Email/password + session endpoints. */
 export const authGroup = HttpApiGroup.make("auth").add(
   // Device authorization grant (RFC 8628). 404 when unconfigured.
@@ -919,195 +1108,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     payload: S.DeviceUserCodePayload,
     success: S.StatusResponse,
     error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
-  }),
-  // --- Organization domains, roles and teams (session-authenticated; their
-  // --- JSON:API conversion is slice 4b of #205). 404 when the module is
-  // --- absent; 403 when the actor's role lacks the required permission.
-  // Email-domain claims. Writes need `domain:manage`; any member may list.
-  // 404 means the organization module itself is absent; a server with no
-  // `OrganizationDomainStore` wired answers 403 like any other refusal.
-  HttpApiEndpoint.get("orgListDomains", "/organization/:organizationId/domains", {
-    params: { organizationId: Schema.String },
-    success: S.OrganizationDomainListView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("orgAddDomain", "/organization/:organizationId/domains", {
-    params: { organizationId: Schema.String },
-    payload: S.AddOrganizationDomainPayload,
-    success: S.OrganizationDomainView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("orgRemoveDomain", "/organization/:organizationId/domains/:domainId", {
-    params: { organizationId: Schema.String, domainId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post(
-    "orgVerifyDomain",
-    "/organization/:organizationId/domains/:domainId/verify",
-    {
-      params: { organizationId: Schema.String, domainId: Schema.String },
-      success: S.OrganizationDomainView,
-      error: [
-        S.NotFoundError,
-        S.UnauthorizedError,
-        S.ForbiddenError,
-        S.BadRequestError,
-        S.InternalError,
-      ],
-    },
-  ),
-  // Dynamic access control: per-organization role definitions. Writes need the
-  // `role:manage` permission (owner-only by default); any member may list.
-  HttpApiEndpoint.put("orgUpsertRole", "/organization/:organizationId/roles/:role", {
-    params: { organizationId: Schema.String, role: Schema.String },
-    payload: S.UpsertOrgRolePayload,
-    success: S.OrgRoleView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("orgListRoles", "/organization/:organizationId/roles", {
-    params: { organizationId: Schema.String },
-    success: S.OrgRoleListView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("orgDeleteRole", "/organization/:organizationId/roles/:role", {
-    params: { organizationId: Schema.String, role: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  // Teams are organization sub-groups; the `team:*` permissions that gate them
-  // are organization-scoped, so team-scoped routes resolve the organization
-  // through the team id.
-  HttpApiEndpoint.post("orgCreateTeam", "/organization/:organizationId/teams", {
-    params: { organizationId: Schema.String },
-    payload: S.CreateTeamPayload,
-    success: S.TeamView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("orgListTeams", "/organization/:organizationId/teams", {
-    params: { organizationId: Schema.String },
-    success: S.TeamListView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get(
-    "orgListTeamsForMember",
-    "/organization/:organizationId/members/:userId/teams",
-    {
-      params: { organizationId: Schema.String, userId: Schema.String },
-      success: S.TeamListView,
-      error: [
-        S.NotFoundError,
-        S.UnauthorizedError,
-        S.ForbiddenError,
-        S.BadRequestError,
-        S.InternalError,
-      ],
-    },
-  ),
-  HttpApiEndpoint.patch("orgUpdateTeam", "/teams/:teamId", {
-    params: { teamId: Schema.String },
-    payload: S.UpdateTeamPayload,
-    success: S.TeamView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("orgDeleteTeam", "/teams/:teamId", {
-    params: { teamId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("orgAddTeamMember", "/teams/:teamId/members", {
-    params: { teamId: Schema.String },
-    payload: S.AddTeamMemberPayload,
-    success: S.TeamMemberView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("orgListTeamMembers", "/teams/:teamId/members", {
-    params: { teamId: Schema.String },
-    success: S.TeamMemberListView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("orgRemoveTeamMember", "/teams/:teamId/members/:userId", {
-    params: { teamId: Schema.String, userId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
   }),
   // --- Admin (session-authenticated; the actor must satisfy `isAdmin`).
   // --- Authorization failures answer 403.
@@ -1564,6 +1564,10 @@ export const AuthApi = HttpApi.make("AuthApi")
   .add(organizationsGroup)
   .add(organizationMembersGroup)
   .add(invitationsGroup)
+  .add(organizationDomainsGroup)
+  .add(organizationRolesGroup)
+  .add(teamsGroup)
+  .add(teamMembersGroup)
   .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({

@@ -147,10 +147,13 @@ await client.organization.acceptInvitation(invitationId); // as the invitee
 await client.organization.resendInvitation(invitationId); // same id, fresh expiry
 
 const team = await client.organization.createTeam(org.id, { name: "Engineering" });
-await client.organization.addTeamMember(team.id, { userId });
+const teamMember = await client.organization.addTeamMember(team.id, { userId });
+await client.organization.removeTeamMember(teamMember.id); // by the team membership's own id
 
-// Dynamic access control: redefine a role for this organization only.
-await client.organization.upsertRole(org.id, "member", { permissions: ["team:create"] });
+// Dynamic access control: redefine a role for this organization only. A role
+// the organization already defines answers 409; change it by its own id.
+const role = await client.organization.createRole(org.id, { role: "member", permissions: [] });
+await client.organization.updateRole(role.id, { permissions: ["team:create"] });
 
 // The role members added without one receive (owner-only).
 await client.organization.setDefaultRole(org.id, { role: "member" });
@@ -169,13 +172,13 @@ await client.organization.reactivateMember(member.id);
 // SSO sign-in for anyone with a verified address at that domain.
 const claim = await client.organization.addDomain(org.id, { domain: "acme.test" });
 claim.verificationToken; // publish as a TXT record, then:
-const verified = await client.organization.verifyDomain(org.id, claim.id);
+const verified = await client.organization.verifyDomain(claim.id); // by the claim's own id
 verified.verificationState; // "verified" | "failed" — retry a failed check
 
 await client.organization.setActive({ organizationId: org.id }); // recorded on the session
 ```
 
-Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `upsertRole`, `listRoles`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier` (claim the domain with `verificationStrategy: "manual"` instead).
+Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier` (claim the domain with `verificationStrategy: "manual"` instead).
 
 **API keys** — `apiKeys.{create,list,update,delete}`. The plaintext key comes back exactly once, from `create`.
 

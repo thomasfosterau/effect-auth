@@ -463,11 +463,13 @@ const cases: ReadonlyArray<Case> = [
         deleteTeam: unused("deleteTeam"),
         listTeams: unused("listTeams"),
         addTeamMember: unused("addTeamMember"),
+        getTeamMemberById: unused("getTeamMemberById"),
         removeTeamMember: unused("removeTeamMember"),
         listTeamMembers: unused("listTeamMembers"),
         listTeamsForMember: unused("listTeamsForMember"),
         upsertOrgRole: unused("upsertOrgRole"),
         getOrgRole: unused("getOrgRole"),
+        getOrgRoleById: unused("getOrgRoleById"),
         listOrgRoles: unused("listOrgRoles"),
         deleteOrgRole: unused("deleteOrgRole"),
       };

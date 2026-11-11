@@ -69,7 +69,14 @@ import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
 import { type PendingMultiFactor, PendingMultiFactorStore } from "../multifactor/MultiFactor.ts";
-import { type Member, type Organization, OrganizationStore } from "../Organization.ts";
+import {
+  type Member,
+  type OrgRole,
+  type Organization,
+  OrganizationStore,
+  type Team,
+  type TeamMember,
+} from "../Organization.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
@@ -1024,11 +1031,40 @@ const newMembership = <E, R>(newUser: () => Effect.Effect<string, E, R>) =>
     return { store, organization, member };
   });
 
+/** A fresh team in a fresh organization, both written to the store. */
+const newTeam = () =>
+  Effect.gen(function* () {
+    const store = yield* OrganizationStore;
+    const organization = yield* store.createOrganization(makeOrganization());
+    const now = at().getTime();
+    const team: Team = {
+      id: uuid(),
+      organizationId: organization.id,
+      name: "Conformance Team",
+      createdAt: now,
+      updatedAt: now,
+    };
+    yield* store.createTeam(team);
+    return { store, organization, team };
+  });
+
+const makeTeamMember = (teamId: string, userId: string): TeamMember => ({
+  id: uuid(),
+  teamId,
+  userId,
+  createdAt: at().getTime(),
+});
+
 /**
- * The membership half of the `OrganizationStore` contract: a membership reads
- * back by `(organizationId, userId)` and by its own id (`getMemberById`, which
- * the HTTP tier's `/organization-members/:id` relies on), an update is what
- * both lookups then answer, and a deleted or unknown membership is `null`.
+ * The parts of the `OrganizationStore` contract the HTTP tier addresses by
+ * id. A membership reads back by `(organizationId, userId)` and by its own id
+ * (`getMemberById`, behind `/organization-members/:id`), an update is what
+ * both lookups then answer, and a deleted or unknown membership is `null`. A
+ * team membership keeps the id it was added with (`getTeamMemberById`, behind
+ * `/team-members/:id`) until it is removed or its team deleted. A custom role
+ * definition reads back by its id (`getOrgRoleById`, behind
+ * `/organization-roles/:id`), a replacement under the same id is what both
+ * lookups answer, and a deleted definition is `null`.
  *
  * @since 0.3.0
  * @category suites
@@ -1105,6 +1141,97 @@ export const organizationStoreConformance = <E = never, R = never>(
           yield* expectEqual(
             "getMember after delete",
             yield* store.getMember(organization.id, member.userId),
+            null,
+          );
+        }),
+    },
+    {
+      name: "addTeamMember keeps the given id, and getTeamMemberById reads it back",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const { store, team } = yield* newTeam();
+          const teamMember = makeTeamMember(team.id, yield* newUser());
+          yield* expectEqual("addTeamMember", yield* store.addTeamMember(teamMember), teamMember);
+          yield* expectEqual(
+            "getTeamMemberById",
+            yield* store.getTeamMemberById(teamMember.id),
+            teamMember,
+          );
+          yield* expectEqual("listTeamMembers", yield* store.listTeamMembers(team.id), [
+            teamMember,
+          ]);
+          yield* expectEqual(
+            "getTeamMemberById of an unknown id",
+            yield* store.getTeamMemberById(uuid()),
+            null,
+          );
+        }),
+    },
+    {
+      name: "getTeamMemberById answers null once the membership is removed or its team deleted",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const { store, team } = yield* newTeam();
+          const removed = makeTeamMember(team.id, yield* newUser());
+          const cascaded = makeTeamMember(team.id, yield* newUser());
+          yield* store.addTeamMember(removed);
+          yield* store.addTeamMember(cascaded);
+          yield* store.removeTeamMember(team.id, removed.userId);
+          yield* expectEqual(
+            "getTeamMemberById after removeTeamMember",
+            yield* store.getTeamMemberById(removed.id),
+            null,
+          );
+          yield* expectEqual(
+            "getTeamMemberById of the other membership",
+            yield* store.getTeamMemberById(cascaded.id),
+            cascaded,
+          );
+          yield* store.deleteTeam(team.id);
+          yield* expectEqual(
+            "getTeamMemberById after deleteTeam",
+            yield* store.getTeamMemberById(cascaded.id),
+            null,
+          );
+        }),
+    },
+    {
+      name: "getOrgRoleById reads a role definition back, through a replacement, until it is deleted",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* OrganizationStore;
+          const organization = yield* store.createOrganization(makeOrganization());
+          const defined: OrgRole = {
+            id: uuid(),
+            organizationId: organization.id,
+            role: "auditor",
+            permissions: ["team:create"],
+            createdAt: at().getTime(),
+            updatedAt: at().getTime(),
+          };
+          yield* expectEqual("upsertOrgRole", yield* store.upsertOrgRole(defined), defined);
+          yield* expectEqual("getOrgRoleById", yield* store.getOrgRoleById(defined.id), defined);
+          const replaced: OrgRole = { ...defined, permissions: [], updatedAt: at(1).getTime() };
+          yield* store.upsertOrgRole(replaced);
+          yield* expectEqual(
+            "getOrgRoleById after a replacement",
+            yield* store.getOrgRoleById(defined.id),
+            replaced,
+          );
+          yield* expectEqual(
+            "getOrgRole after a replacement",
+            yield* store.getOrgRole(organization.id, "auditor"),
+            replaced,
+          );
+          yield* store.deleteOrgRole(organization.id, "auditor");
+          yield* expectEqual(
+            "getOrgRoleById after deleteOrgRole",
+            yield* store.getOrgRoleById(defined.id),
+            null,
+          );
+          yield* expectEqual(
+            "getOrgRoleById of an unknown id",
+            yield* store.getOrgRoleById(uuid()),
             null,
           );
         }),

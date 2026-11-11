@@ -600,8 +600,9 @@ export const TeamView = Schema.Struct({
 });
 export type TeamView = typeof TeamView.Type;
 
-/** Public view of a team membership. */
+/** Public view of a team membership; `id` addresses it (`DELETE /team-members/:id`). */
 export const TeamMemberView = Schema.Struct({
+  id: Schema.String,
   teamId: Schema.String,
   userId: Schema.String,
   createdAt: Schema.Number,
@@ -634,8 +635,9 @@ export const AddTeamMemberPayload = Schema.Struct({
 });
 export type AddTeamMemberPayload = typeof AddTeamMemberPayload.Type;
 
-/** Public view of a custom organization role. */
+/** Public view of a custom organization role; `id` addresses it (`/organization-roles/:id`). */
 export const OrgRoleView = Schema.Struct({
+  id: Schema.String,
   organizationId: Schema.String,
   role: Schema.String,
   permissions: Schema.Array(Schema.String),
@@ -648,11 +650,18 @@ export type OrgRoleView = typeof OrgRoleView.Type;
 export const OrgRoleListView = Schema.Array(OrgRoleView);
 export type OrgRoleListView = typeof OrgRoleListView.Type;
 
-/** Request body for defining a custom organization role. */
+/** The permissions of a custom organization role (`PATCH /organization-roles/:id`). */
 export const UpsertOrgRolePayload = Schema.Struct({
   permissions: Schema.Array(Schema.String),
 });
 export type UpsertOrgRolePayload = typeof UpsertOrgRolePayload.Type;
+
+/** A new custom organization role: its name and permissions (`POST /organizations/:id/roles`). */
+export const CreateOrgRolePayload = Schema.Struct({
+  role: Schema.String,
+  permissions: Schema.Array(Schema.String),
+});
+export type CreateOrgRolePayload = typeof CreateOrgRolePayload.Type;
 
 /**
  * Public view of an organization's domain claim. `verificationToken` is the
