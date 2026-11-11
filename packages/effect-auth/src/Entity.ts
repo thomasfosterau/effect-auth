@@ -18,15 +18,12 @@
  *
  * @module entity
  */
-import {
-  Array as Arr,
-  HashMap,
-  MutableHashSet,
-  Option,
-  Predicate,
-  Record as Rec,
-  Schema,
-} from "effect";
+import { HashMap, MutableHashSet } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 
 // ---------------------------------------------------------------------------
 // Entity references
@@ -116,18 +113,18 @@ export const AttributeValue: Schema.Codec<AttributeValue> = Schema.Union([
 
 /** Narrow an {@link AttributeValue} to an entity value. */
 export const isEntityValue = (value: AttributeValue): value is EntityValue =>
-  Predicate.isObject(value) &&
+  P.isObject(value) &&
   "__entity" in value &&
   // `typeof x === "object"`: an object, an array, or `null`.
-  (value.__entity === null || Predicate.isObjectOrArray(value.__entity));
+  (value.__entity === null || P.isObjectOrArray(value.__entity));
 
 /** The `typeof` of an attribute value: `"object"` for `null`, arrays and records. */
 const typeName = (value: AttributeValue): string =>
-  Predicate.isString(value)
+  P.isString(value)
     ? "string"
-    : Predicate.isNumber(value)
+    : P.isNumber(value)
       ? "number"
-      : Predicate.isBoolean(value)
+      : P.isBoolean(value)
         ? "boolean"
         : "object";
 
@@ -135,7 +132,7 @@ const typeName = (value: AttributeValue): string =>
 export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): boolean => {
   if (a === b) return true;
   if (typeName(a) !== typeName(b)) return false;
-  if (!Predicate.isObjectOrArray(a) || b === null) return false;
+  if (!P.isObjectOrArray(a) || b === null) return false;
   const arrayA = Array.isArray(a);
   const arrayB = Array.isArray(b);
   if (arrayA !== arrayB) return false;
@@ -150,8 +147,8 @@ export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): bool
   const recordA = a as { readonly [key: string]: AttributeValue };
   // SAFETY: as for `recordA`.
   const recordB = b as { readonly [key: string]: AttributeValue };
-  const entriesA = Rec.toEntries(recordA);
-  if (entriesA.length !== Rec.keys(recordB).length) return false;
+  const entriesA = R.toEntries(recordA);
+  if (entriesA.length !== R.keys(recordB).length) return false;
   return Arr.every(
     entriesA,
     // SAFETY: `key in recordB` holds, so the read is defined.

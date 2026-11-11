@@ -32,7 +32,8 @@
  * @example Viewer projection + write guard on one field
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Layer, Result, Schema } from "effect"
+ * import { Effect, Layer, Result } from "effect"
+ * import * as Schema from "effect/Schema"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * const UserView = Schema.Struct({
@@ -71,7 +72,11 @@
  *
  * @module protected
  */
-import { Array as Arr, Effect, Option, Predicate, Schema, SchemaGetter, SchemaIssue } from "effect";
+import { Effect, SchemaGetter, SchemaIssue } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import {
   auditSystemDecision,
   CurrentPrincipal,
@@ -131,7 +136,7 @@ export interface ProtectedFieldOptions<E = unknown> {
 // ---------------------------------------------------------------------------
 
 const toActionRef = (action: string | Entity.EntityRef): Entity.EntityRef =>
-  Predicate.isString(action) ? Entity.ref("Action", action) : action;
+  P.isString(action) ? Entity.ref("Action", action) : action;
 
 const toPolicies = <E>(
   policies: Policy.Policy<E> | ReadonlyArray<Policy.Policy<E>>,
@@ -265,7 +270,8 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
  * @example Redact rather than reject on the write side
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Layer, Schema } from "effect"
+ * import { Effect, Layer } from "effect"
+ * import * as Schema from "effect/Schema"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * const UserUpdate = Schema.Struct({

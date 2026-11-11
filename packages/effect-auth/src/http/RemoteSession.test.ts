@@ -1,5 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Exit, Option, Record as Rec, Schema } from "effect";
+import { Effect, Exit } from "effect";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/http";
 import * as RemoteSession from "./RemoteSession.ts";
 import * as SessionResolution from "../SessionResolution.ts";
@@ -61,7 +64,7 @@ const spy = (respond: (request: Request) => Response | Promise<Response>) => {
     calls.push({
       url: request.url,
       method: request.method,
-      headers: Rec.fromEntries(request.headers.entries()),
+      headers: R.fromEntries(request.headers.entries()),
       body: request.body === null ? "" : await request.clone().text(),
     });
     return respond(request);

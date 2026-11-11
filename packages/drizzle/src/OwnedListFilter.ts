@@ -65,7 +65,8 @@
  * @module owned-list-filter
  */
 import { and, eq, inArray, or, type SQL, type SQLWrapper } from "drizzle-orm";
-import { Effect, Layer, Match, Predicate } from "effect";
+import { Effect, Layer, Match } from "effect";
+import * as P from "effect/Predicate";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 /**
@@ -85,9 +86,7 @@ export interface OwnedColumns {
 }
 
 const isSqlWrapper = (value: unknown): value is SQLWrapper =>
-  Predicate.isObjectOrArray(value) &&
-  Predicate.hasProperty(value, "getSQL") &&
-  Predicate.isFunction(value.getSQL);
+  P.isObjectOrArray(value) && P.hasProperty(value, "getSQL") && P.isFunction(value.getSQL);
 
 /**
  * Render an owned-material read scope as a `WHERE` over `columns`.

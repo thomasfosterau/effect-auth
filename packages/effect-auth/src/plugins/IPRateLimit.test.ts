@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { ClientIP } from "../ClientIP.ts";
 import { Hooks } from "../Hooks.ts";
 import type { SignInInput } from "../email/EmailPassword.ts";

@@ -1,5 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, MutableHashMap, Option, Predicate, Result } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
 import {
   make as makeOneTimeTokenService,
@@ -50,7 +52,7 @@ describe("OneTimeTokenService", () => {
             metadata: { purpose: "invite" },
           });
 
-          expect(Predicate.isString(rawToken)).toBe(true);
+          expect(P.isString(rawToken)).toBe(true);
           expect(rawToken.length).toBeGreaterThan(0);
 
           const result = yield* service.verify(rawToken);

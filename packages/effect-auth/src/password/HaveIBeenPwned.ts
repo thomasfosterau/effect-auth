@@ -12,7 +12,9 @@
  *
  * @module plugins/hibp
  */
-import { Array as Arr, Effect, Option } from "effect";
+import { Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { Digest } from "effect/crypto";
 import { Hex } from "effect/encoding";
 import { HttpClient, HttpClientRequest } from "effect/http";

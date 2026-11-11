@@ -350,7 +350,8 @@ const unmetPeerRanges = (
 
 /** Runs inside the scratch project, against the packed `dist/` only. */
 const behaviour = `
-import { ConfigProvider, Effect, Layer, Redacted, Result, Schema } from "effect";
+import { ConfigProvider, Effect, Layer, Redacted, Result } from "effect";
+import * as Schema from "effect/Schema";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 const check = (name, ok) => {

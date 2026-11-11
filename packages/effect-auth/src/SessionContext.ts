@@ -74,7 +74,9 @@
  *
  * @module session-context
  */
-import { Context, Effect, Layer, Option, Predicate } from "effect";
+import { Context, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { CurrentCredential, CurrentPrincipal, type CredentialClass } from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Errors from "./Errors.ts";
@@ -432,7 +434,8 @@ export const requireCurrentSession: Effect.Effect<
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Option } from "effect"
+ * import { Context, Effect } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string }
@@ -519,5 +522,5 @@ export const withRole =
   (attribute = "role") =>
   (resolved: Types.SessionWithUser): Option.Option<UserWithRole> => {
     const role = resolved.user.attributes[attribute];
-    return Option.some({ ...resolved.user, role: Predicate.isString(role) ? role : "" });
+    return Option.some({ ...resolved.user, role: P.isString(role) ? role : "" });
   };

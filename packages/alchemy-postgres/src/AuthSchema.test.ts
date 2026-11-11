@@ -1,17 +1,8 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import {
-  Array as Arr,
-  Config,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Order,
-  Path,
-  PlatformError,
-  Redacted,
-  Schema,
-} from "effect";
+import { Config, Effect, FileSystem, Layer, Order, Path, PlatformError, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import { SqlClient } from "effect/sql";

@@ -1,16 +1,10 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import {
-  Array as Arr,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Schema,
-  Struct,
-} from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -80,7 +74,7 @@ const withFetch = <A>(
 ): Promise<A> => {
   const original = globalThis.fetch;
   globalThis.fetch = (input) => {
-    const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
+    const url = P.isString(input) ? input : input instanceof URL ? input.href : input.url;
     const key = Struct.keys(routes).find((k) => url.startsWith(k));
     const body = key ? routes[key] : { error: "no route" };
     return Promise.resolve(

@@ -21,7 +21,9 @@
  *
  * @module testing
  */
-import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";

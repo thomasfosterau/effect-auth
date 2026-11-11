@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, MutableHashMap, Option, Result } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
+import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";

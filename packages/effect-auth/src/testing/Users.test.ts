@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, MutableHashSet, Option, Schema } from "effect";
+import { DateTime, Effect, MutableHashSet } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Admin from "../Admin.ts";
 import * as SessionContext from "../SessionContext.ts";
 import * as Types from "../Types.ts";

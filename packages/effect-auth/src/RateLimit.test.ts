@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, Duration, Effect, Layer, MutableHashMap, Option, Result } from "effect";
+import { Clock, Duration, Effect, Layer, MutableHashMap, Result } from "effect";
+import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 import { make, type RateLimitConfig, type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { RateLimitError } from "./Errors.ts";

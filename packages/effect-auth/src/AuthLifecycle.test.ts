@@ -1,15 +1,7 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Context,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Result,
-  Struct,
-} from "effect";
+import { Context, DateTime, Effect, Layer, MutableHashMap, Result, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
 import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";

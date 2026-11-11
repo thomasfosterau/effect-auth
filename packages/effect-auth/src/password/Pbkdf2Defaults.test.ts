@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Array as Arr, Effect, Result } from "effect";
+import { Effect, Result } from "effect";
+import * as Arr from "effect/Array";
 import { PasswordHasher, pbkdf2Hasher } from "./Password.ts";
 
 // Pins PBKDF2's production default (600,000 iterations) and the `iterations`

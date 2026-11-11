@@ -42,7 +42,8 @@
  *
  * @module hooks
  */
-import { Array as Arr, Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import type * as Errors from "./Errors.ts";
 import type { AuthResult, SignInInput, SignUpInput } from "./email/EmailPassword.ts";
 import type { EntityRef } from "./Entity.ts";

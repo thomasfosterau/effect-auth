@@ -1,15 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  DateTime,
-  Effect,
-  MutableHashMap,
-  Option,
-  Redacted,
-  Result,
-} from "effect";
+import { Clock, Context, DateTime, Effect, MutableHashMap, Redacted, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";

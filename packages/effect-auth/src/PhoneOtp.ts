@@ -13,17 +13,8 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Data,
-  DateTime,
-  Duration,
-  Effect,
-  Layer,
-  Order,
-} from "effect";
+import { Clock, Context, Data, DateTime, Duration, Effect, Layer, Order } from "effect";
+import * as Arr from "effect/Array";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import {

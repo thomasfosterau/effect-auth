@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Cause, DateTime, Effect, Exit, Option, Schema } from "effect";
+import { Cause, DateTime, Effect, Exit } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpServerRequest } from "effect/http";
 import type * as Types from "./Types.ts";
 import * as SessionResolution from "./SessionResolution.ts";

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Array as Arr, Effect, Result } from "effect";
+import { Effect, Result } from "effect";
+import * as Arr from "effect/Array";
 import { PasswordHasher, scryptHasher } from "./Password.ts";
 
 // Pins scrypt's production defaults (N = 2^17, r = 8, p = 1) without running

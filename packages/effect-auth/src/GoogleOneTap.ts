@@ -26,7 +26,8 @@
  *
  * @module google-one-tap
  */
-import { Clock, Context, Data, DateTime, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
 import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
@@ -226,12 +227,12 @@ export const make = (
           nonce: hashNonce(nonce),
         }).pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));
 
-        if (!Predicate.isString(claims["iss"]) || !issuers.includes(claims["iss"])) {
+        if (!P.isString(claims["iss"]) || !issuers.includes(claims["iss"])) {
           return yield* new GoogleOneTapError({ message: "id_token issuer mismatch" });
         }
 
         const email = claims["email"];
-        if (!Predicate.isString(email) || claims["email_verified"] !== true) {
+        if (!P.isString(email) || claims["email_verified"] !== true) {
           return yield* new GoogleOneTapError({
             message: "Google did not attest a verified email address",
           });
@@ -256,8 +257,8 @@ export const make = (
             },
             (identifier) =>
               userStore.createUser({
-                ...(Predicate.isString(claims["name"]) && { name: claims["name"] }),
-                ...(Predicate.isString(claims["picture"]) && { image: claims["picture"] }),
+                ...(P.isString(claims["name"]) && { name: claims["name"] }),
+                ...(P.isString(claims["picture"]) && { image: claims["picture"] }),
                 identifier,
               }),
           ).pipe(

@@ -67,7 +67,8 @@
  *
  * @module plugins/ip-rate-limit
  */
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { ClientIP } from "../ClientIP.ts";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { Hooks, makePlugin } from "../Hooks.ts";

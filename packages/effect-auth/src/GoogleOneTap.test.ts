@@ -1,15 +1,10 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import {
-  Array as Arr,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Schema,
-} from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -570,7 +565,7 @@ describe("HTTP Google One Tap endpoint", () => {
     expect(res.status).toBe(201);
     const body = await jsonBody(res, NonceDocument);
     expect(body.data.type).toBe("google-one-tap-nonces");
-    expect(Predicate.isString(body.data.id)).toBe(true);
+    expect(P.isString(body.data.id)).toBe(true);
     expect(body.data.id.length).toBeGreaterThan(0);
   });
 

@@ -1,5 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Clock, DateTime, Effect, Layer, Order, Schema } from "effect";
+import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { SqlClient } from "effect/sql";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Auth from "@thomasfosterau/effect-auth";

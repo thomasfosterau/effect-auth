@@ -1,4 +1,5 @@
-import { Context, DateTime, Effect, Layer, Option } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";

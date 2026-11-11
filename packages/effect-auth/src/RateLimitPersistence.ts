@@ -53,7 +53,8 @@
  *
  * @module rate-limit-persistence
  */
-import { Duration, Effect, Layer, Predicate } from "effect";
+import { Duration, Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import { AuthError, RateLimitError } from "./Errors.ts";
 import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
@@ -61,7 +62,7 @@ import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
 /** Map the persistence limiter's error onto effect-auth's error channel. */
 const toError = (error: PersistenceRateLimiter.RateLimiterError): RateLimitError | AuthError => {
   const reason = error.reason;
-  if (Predicate.isTagged(reason, "RateLimitExceeded")) {
+  if (P.isTagged(reason, "RateLimitExceeded")) {
     return new RateLimitError({
       message: "Rate limit exceeded",
       key: reason.key,

@@ -28,17 +28,9 @@
  *
  * @module sso
  */
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Data,
-  DateTime,
-  Effect,
-  Layer,
-  Option,
-  Redacted,
-} from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";

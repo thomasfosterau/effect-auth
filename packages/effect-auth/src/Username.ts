@@ -10,7 +10,9 @@
  * anti-enumeration error and the same `SecondFactorGate` seam as
  * email/password sign-in.
  */
-import { Array as Arr, Context, Data, DateTime, Effect, Layer, Option } from "effect";
+import { Context, Data, DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Errors from "./Errors.ts";
 import {
   answeredByStandIn,

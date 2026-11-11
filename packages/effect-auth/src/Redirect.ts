@@ -14,7 +14,8 @@
  *
  * @module redirect
  */
-import { Array as Arr, Predicate } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 
 /** C0 controls and DEL: a browser strips some of them while parsing a URL, which can turn `/\t/evil` into `//evil`. */
 const isControlCharacter = (character: string): boolean => {
@@ -51,7 +52,7 @@ const PROBE_ORIGIN = "https://redirect.invalid";
  * @category redirects
  */
 export const safeRedirect = (target: string | null | undefined, fallback: string): string => {
-  if (!Predicate.isString(target) || !target.startsWith("/")) return fallback;
+  if (!P.isString(target) || !target.startsWith("/")) return fallback;
   if (target.startsWith("//") || target.includes("\\")) return fallback;
   if (Arr.some(Arr.fromIterable(target), isControlCharacter)) return fallback;
   return URL.canParse(target, PROBE_ORIGIN) && new URL(target, PROBE_ORIGIN).origin === PROBE_ORIGIN

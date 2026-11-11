@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option, Predicate } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Auth from "./index.ts";
 
 /**
@@ -35,7 +38,7 @@ describe("static service layers", () => {
       ["OidcProviderService", Auth.OidcProviderService],
     ];
     Arr.forEach(services, ([name, service]) => {
-      expect(Predicate.isFunction(service.layer), `${name}.layer`).toBe(true);
+      expect(P.isFunction(service.layer), `${name}.layer`).toBe(true);
     });
   });
 

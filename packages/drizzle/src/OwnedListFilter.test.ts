@@ -20,16 +20,10 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { PgDialect } from "drizzle-orm/pg-core";
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  Match,
-  MutableHashSet,
-  Option,
-  Order,
-  Schema,
-} from "effect";
+import { Context, Effect, Match, MutableHashSet, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";

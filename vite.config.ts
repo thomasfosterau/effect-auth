@@ -121,11 +121,13 @@ export default defineConfig({
       // is how a value is omitted under `exactOptionalPropertyTypes`.
       "effect/prefer-option-over-null": "off",
       "effect/no-conditional-empty-object-spread": "off",
-      // Imports are `import { Effect } from "effect"` throughout, and
-      // `prefer-namespace-imports` hard-codes abbreviations (`Arr`, `P`, …)
-      // with no options.
+      // Modules other than the helper ones come from the barrel
+      // (`import { Effect, Layer } from "effect"`).
       "effect/no-barrel-imports": "off",
-      "effect/prefer-namespace-imports": "off",
+      // Owner decision (2026-11-11): the helper modules are namespace imports
+      // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
+      // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
+      "effect/prefer-namespace-imports": "error",
       // Exported `make*` constructors are the composition style here.
       "effect/no-service-constructor-imports": "off",
       // Renaming these would change the published API or the wire format.

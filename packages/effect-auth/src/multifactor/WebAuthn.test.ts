@@ -1,15 +1,8 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Data,
-  Effect,
-  MutableHashMap,
-  Option,
-  Order,
-  Schema,
-} from "effect";
+import { Clock, Context, Data, Effect, MutableHashMap, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";

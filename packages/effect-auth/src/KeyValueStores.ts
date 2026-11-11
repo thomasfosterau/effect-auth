@@ -40,20 +40,11 @@
  * backend's intended use (best-effort rate limiting / attempt counting);
  * use a backend with atomic counters when strict enforcement is required.
  */
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Order,
-  Predicate,
-  Schema,
-  Result,
-} from "effect";
+import { Clock, Context, DateTime, Effect, Layer, MutableHashMap, Order, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { Base64 } from "effect/encoding";
 import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
@@ -82,9 +73,7 @@ const toAuthError =
   (cause: unknown): Errors.AuthError =>
     new Errors.AuthError({
       message: `KeyValueStore ${label} failed${
-        Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
-          ? `: ${cause.message}`
-          : ""
+        P.hasProperty(cause, "message") && P.isString(cause.message) ? `: ${cause.message}` : ""
       }`,
     });
 

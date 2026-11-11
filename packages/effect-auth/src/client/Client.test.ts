@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, vi } from "vite-plus/test";
-import { Predicate, Schema } from "effect";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
@@ -237,10 +238,10 @@ describe("plugin extension", () => {
     }));
 
     const extended = client.extend(sessionPlugin);
-    expect(Predicate.isFunction(extended.sessionCount)).toBe(true);
+    expect(P.isFunction(extended.sessionCount)).toBe(true);
     expect(await extended.sessionCount()).toBe(1);
     // Core methods are still present.
-    expect(Predicate.isFunction(extended.signOut)).toBe(true);
+    expect(P.isFunction(extended.signOut)).toBe(true);
   });
 
   it("plugin receives mutating context that notifies the session observers", async () => {

@@ -1,5 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option, Result } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import {
   DeviceAuthorizationService,
   DeviceAuthorizationStore,

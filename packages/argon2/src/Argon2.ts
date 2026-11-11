@@ -17,7 +17,10 @@
  *
  * @module argon2/argon2
  */
-import { Array as Arr, Effect, Layer, Option, Record as Rec } from "effect";
+import { Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import { argon2d, argon2i, argon2id } from "hash-wasm";
 import { HashingError, Password } from "@thomasfosterau/effect-auth";
 import {
@@ -122,7 +125,7 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
     if (Option.isSome(malformed)) {
       return invalidHash(`malformed parameter "${malformed.value.parameter}"`);
     }
-    const costs: Record<string, number> = Rec.fromEntries(
+    const costs: Record<string, number> = R.fromEntries(
       Arr.map(pairs, ({ name, value }): readonly [string, number] => [
         name,
         parsePositiveInt(value),

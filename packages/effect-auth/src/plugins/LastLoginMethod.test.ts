@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Option from "effect/Option";
 import { composePlugins, Hooks } from "../Hooks.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";

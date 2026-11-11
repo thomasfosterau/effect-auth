@@ -1,5 +1,8 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect, Option, Predicate, Schema } from "effect";
+import { DateTime, Effect } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import type { SessionWithUser } from "@thomasfosterau/effect-auth";
 import {
   type ActionEvent,
@@ -148,7 +151,7 @@ class Redirect extends Error {
 /** A text field of a submitted form; a missing field or a file reads as empty. */
 const formText = (form: FormData, name: string): string => {
   const value = form.get(name);
-  return Predicate.isString(value) ? value : "";
+  return P.isString(value) ? value : "";
 };
 
 /** A JSON body for a stubbed handler response. */

@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
+import * as Arr from "effect/Array";
 import { TestClock } from "effect/testing";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";

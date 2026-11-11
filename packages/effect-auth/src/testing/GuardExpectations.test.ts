@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Data, Effect, Option, Result } from "effect";
+import { Context, Data, Effect, Result } from "effect";
+import * as Option from "effect/Option";
 import * as Guard from "../Guard.ts";
 import * as Ladder from "../Ladder.ts";
 import * as Testing from "./index.ts";

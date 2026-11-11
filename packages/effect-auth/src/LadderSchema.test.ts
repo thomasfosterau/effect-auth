@@ -4,7 +4,8 @@
  * `@thomasfosterau/effect-auth-drizzle`, the DDL `CHECK`).
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import * as Ladder from "./Ladder.ts";
 import * as LadderSchema from "./LadderSchema.ts";
 

@@ -10,16 +10,9 @@
 import * as Auth from "../../index.ts";
 import * as Http from "../../http/index.ts";
 import { memorySessionStore } from "../../testing/MemoryStores.ts";
-import {
-  Array as Arr,
-  Clock,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  MutableHashSet,
-  Option,
-} from "effect";
+import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 
 const HOUR = 60 * 60 * 1000;
 

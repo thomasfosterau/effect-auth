@@ -40,7 +40,10 @@
  *
  * @module policy
  */
-import { Array as Arr, Data, Effect, Match, Predicate, Schema } from "effect";
+import { Data, Effect, Match } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type * as Ladder from "./Ladder.ts";
@@ -345,7 +348,7 @@ export const roleAtLeast = <Rung extends string>(
   },
 ): DeclarativePolicy => {
   const ladderCondition = roleAtLeastCondition(ladder, min, options);
-  const name = Predicate.isString(min) ? min : min.name;
+  const name = P.isString(min) ? min : min.name;
   return permit({
     id: options?.id ?? `ladder:${name}`,
     ...(options?.principal !== undefined ? { principal: options.principal } : {}),
@@ -475,7 +478,7 @@ export const decide = <E, R>(
   Effect.forEach(
     policies,
     (policy): Effect.Effect<PolicyOutcome, never, R> => {
-      if (Predicate.isTagged(policy, "DeclarativePolicy")) {
+      if (P.isTagged(policy, "DeclarativePolicy")) {
         return Effect.succeed(evaluateDeclarative(slice, req, policy));
       }
       // A custom permit cannot name a system principal in a way the kernel can

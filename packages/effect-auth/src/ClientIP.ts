@@ -8,16 +8,11 @@
  *
  * @module client-ip
  */
-import {
-  Array as Arr,
-  Context,
-  Data,
-  Effect,
-  Layer,
-  Option,
-  Predicate,
-  String as Str,
-} from "effect";
+import { Context, Data, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Str from "effect/String";
 import { HttpServerRequest } from "effect/http";
 
 // ---------------------------------------------------------------------------
@@ -440,7 +435,7 @@ export const resolveClientIP = (
     // taken; anything else falls back to the socket address.
     const name = config.trustedHeader.toLowerCase();
     const raw = Object.hasOwn(req.headers, name) ? req.headers[name] : undefined;
-    const fromHeader = Predicate.isString(raw) ? parseIpLiteral(raw) : undefined;
+    const fromHeader = P.isString(raw) ? parseIpLiteral(raw) : undefined;
     return fromHeader ?? remoteIp;
   }
 

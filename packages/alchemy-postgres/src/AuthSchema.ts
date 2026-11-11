@@ -43,7 +43,9 @@
  * {@link AuthSchemaProps.dropOnDelete}.
  */
 
-import { Array as Arr, Clock, Data, Effect, type Layer, Record as Rec } from "effect";
+import { Clock, Data, Effect, type Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { SqlClient, type SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth/sql";
 import * as Provider from "alchemy/Provider";
@@ -244,7 +246,7 @@ export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
       const name = props.database ?? DEFAULT_DATABASE;
       const database = databases[name];
       if (database !== undefined) return Effect.succeed(database);
-      const registered = Rec.keys(databases);
+      const registered = R.keys(databases);
       return Effect.fail(
         new UnknownDatabaseError({
           message:

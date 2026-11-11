@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import { KeyValueStore } from "effect/persistence";
 import {
   IdentifierStore,

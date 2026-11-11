@@ -51,7 +51,9 @@ import type {
   QueryDatabaseClient,
 } from "@alchemy.run/cloudflare/D1/QueryDatabase";
 import { RuntimeContext } from "alchemy/RuntimeContext";
-import { Array as Arr, Effect, Layer, Option, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient, type SqlConnection, SqlError, Statement } from "effect/sql";
 

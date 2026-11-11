@@ -12,16 +12,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import {
-  Array as Arr,
-  Clock,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Schema,
-} from "effect";
+import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";

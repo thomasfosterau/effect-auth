@@ -1,13 +1,7 @@
-import {
-  Array as Arr,
-  Context,
-  DateTime,
-  Effect,
-  HashSet,
-  Layer,
-  Option,
-  Record as Rec,
-} from "effect";
+import { Context, DateTime, Effect, HashSet, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
@@ -133,7 +127,7 @@ export const make = (
         attributes: Types.Attributes,
       ) {
         const refused = Option.getOrUndefined(
-          Arr.findFirst(Rec.keys<string, Types.Json>(attributes), (key) =>
+          Arr.findFirst(R.keys<string, Types.Json>(attributes), (key) =>
             HashSet.has(serverOnly, key),
           ),
         );

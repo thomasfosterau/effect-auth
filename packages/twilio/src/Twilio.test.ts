@@ -1,5 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Data, Effect, Predicate, Redacted, Schema } from "effect";
+import { Data, Effect, Redacted } from "effect";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 import { defaultRender, layer, twilioSmsSender } from "./index.ts";
 
@@ -24,7 +26,7 @@ const stubFetch = (
     const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
     const request = { url, init: init ?? {} };
     calls.push(request);
-    return Predicate.isFunction(response) ? response(request) : response;
+    return P.isFunction(response) ? response(request) : response;
   };
   return { fetch: fetchStub, calls };
 };
@@ -32,7 +34,7 @@ const stubFetch = (
 /** The form a captured request sent, which the sender encodes as a string. */
 const formOf = (request: CapturedRequest): URLSearchParams => {
   const body = request.init.body;
-  assert(Predicate.isString(body), "the form body is sent as a string");
+  assert(P.isString(body), "the form body is sent as a string");
   return new URLSearchParams(body);
 };
 

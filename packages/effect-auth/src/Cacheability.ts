@@ -54,7 +54,11 @@
  *
  * @module cacheability
  */
-import { Array as Arr, Effect, Option, Predicate, Record as Rec } from "effect";
+import { Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Entity from "./Entity.ts";
 import type * as Guard from "./Guard.ts";
 import type * as Ladder from "./Ladder.ts";
@@ -95,7 +99,7 @@ export type ServeableAxis =
 export const publiclyServeable =
   (axes: ReadonlyArray<ServeableAxis>) =>
   (attributes: unknown): boolean => {
-    if (!Predicate.isObject(attributes)) {
+    if (!P.isObject(attributes)) {
       return false;
     }
     const record = attributes;
@@ -219,12 +223,12 @@ export const publicReach = (
     action: options.action ?? Entity.ref("Action", "read"),
     slice: Entity.slice([principal]),
   });
-  if (Predicate.isTagged(compiled, "Inexact")) {
+  if (P.isTagged(compiled, "Inexact")) {
     return { _tag: "Undecided", reasons: compiled.reasons };
   }
   const { scope } = compiled;
-  if (Predicate.isTagged(scope, "AllowAll")) return { _tag: "All" };
-  if (Predicate.isTagged(scope, "Deny")) return { _tag: "None" };
+  if (P.isTagged(scope, "AllowAll")) return { _tag: "All" };
+  if (P.isTagged(scope, "Deny")) return { _tag: "None" };
   return { _tag: "Some", scope };
 };
 
@@ -240,7 +244,7 @@ export const publicReachByType = (
   bindings: ReadonlyArray<ReadScope.Binding>,
   options: PublicReachOptions = {},
 ): Readonly<Record<string, PublicReach["_tag"]>> =>
-  Rec.fromEntries(
+  R.fromEntries(
     Arr.map(bindings, (binding) => [
       binding.resourceType,
       publicReach(policies, binding, options)._tag,

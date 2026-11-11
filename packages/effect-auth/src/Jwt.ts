@@ -34,13 +34,13 @@ import {
   Deferred,
   Effect,
   Layer,
-  Option,
-  Predicate,
   Redacted,
   Ref,
   Result,
-  Schema,
 } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { SecureRandom } from "effect/crypto";
 import { Base64Url } from "effect/encoding";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
@@ -384,11 +384,11 @@ const registeredClaimFailure = (
   now: number,
 ): string | undefined => {
   const exp = payload["exp"];
-  if (!Predicate.isNumber(exp) || now >= exp * 1000 + expected.leewayMs) {
+  if (!P.isNumber(exp) || now >= exp * 1000 + expected.leewayMs) {
     return "Token has expired";
   }
   const nbf = payload["nbf"];
-  if (Predicate.isNumber(nbf) && now < nbf * 1000 - expected.leewayMs) {
+  if (P.isNumber(nbf) && now < nbf * 1000 - expected.leewayMs) {
     return "Token not yet valid";
   }
   if (payload["iss"] !== expected.issuer) {
@@ -734,7 +734,7 @@ export const remoteJwksVerifier = (
           const alg = jws.header["alg"];
           if (alg !== "ES256" && alg !== "EdDSA") {
             return yield* new JwtError({
-              message: `Unsupported or missing algorithm: ${Predicate.isString(alg) ? alg : "none"}`,
+              message: `Unsupported or missing algorithm: ${P.isString(alg) ? alg : "none"}`,
             });
           }
 

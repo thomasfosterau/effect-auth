@@ -17,7 +17,8 @@
  */
 
 import { eq, inArray } from "drizzle-orm";
-import { Effect, Layer, Record as Rec, Request, RequestResolver } from "effect";
+import { Effect, Layer, Request, RequestResolver } from "effect";
+import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   type PromotedValue,
@@ -57,7 +58,7 @@ type PromotedFields = { readonly [key: PromotedKey]: PromotedValue | undefined }
  */
 const selection = (users: UserSchema): UserColumns => ({
   ...users.columns,
-  ...Rec.mapKeys(users.promoted, promotedKey),
+  ...R.mapKeys(users.promoted, promotedKey),
 });
 
 /**
@@ -75,16 +76,16 @@ const makeToUser =
     // SAFETY: `selection` projects each promoted column under its `promotedKey`, and
     // `AuthSchemaSpec` only admits promoted columns that read back as a `PromotedValue`.
     const promotedFields = row as UserRow & PromotedFields;
-    const promoted = Rec.map(
+    const promoted = R.map(
       users.promoted,
       (_column, attribute) => promotedFields[promotedKey(attribute)],
     );
-    const attributes = Rec.filter(
+    const attributes = R.filter(
       { ...bag, ...promoted },
       // A bag read from JSON holds no `undefined`, so only a promoted column
       // that read back absent or `NULL` is dropped.
       (value, attribute): value is Auth.Json =>
-        value !== undefined && !(Rec.has(users.promoted, attribute) && value === null),
+        value !== undefined && !(R.has(users.promoted, attribute) && value === null),
     );
     return {
       id: row.id,

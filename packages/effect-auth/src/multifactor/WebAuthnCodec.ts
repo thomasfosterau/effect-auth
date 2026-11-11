@@ -14,7 +14,11 @@
  * @module webauthn-codec
  */
 
-import { Array as Arr, Data, Match, Option, Predicate, Result, Schema } from "effect";
+import { Data, Match, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { sha256 } from "../Cipher.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
 
@@ -166,9 +170,9 @@ const decodeItem = (
       const entries = new Map<string, CBORValue>();
       const end = Arr.reduce(indices(count), start, (cursor) => {
         const [key, afterKey] = decodeItem(data, cursor, depth + 1);
-        const stringifiedKey = Predicate.isString(key)
+        const stringifiedKey = P.isString(key)
           ? key
-          : Predicate.isNumber(key) || Predicate.isBigInt(key)
+          : P.isNumber(key) || P.isBigInt(key)
             ? key.toString()
             : null;
         if (stringifiedKey === null) throw new CBORParseError("Unsupported map key type");
@@ -262,7 +266,7 @@ export class COSEPublicKey {
   /** The `kty` parameter (label 1). */
   type(): number {
     const value = this.decoded.get("1");
-    if (!Predicate.isNumber(value)) {
+    if (!P.isNumber(value)) {
       throw new CodecError({ message: "Invalid or missing parameter 'kty'" });
     }
     if (value !== 1 && value !== 2 && value !== 3 && value !== 4 && value !== 5 && value !== 6) {
@@ -274,7 +278,7 @@ export class COSEPublicKey {
   /** Whether an `alg` parameter (label 3) is present and well-formed. */
   isAlgorithmDefined(): boolean {
     if (!this.decoded.has("3")) return false;
-    if (!Predicate.isNumber(this.decoded.get("3"))) {
+    if (!P.isNumber(this.decoded.get("3"))) {
       throw new CodecError({ message: "Invalid parameter 'alg'" });
     }
     return true;
@@ -283,7 +287,7 @@ export class COSEPublicKey {
   /** The `alg` parameter (label 3), e.g. {@link coseAlgorithmES256}. */
   algorithm(): number {
     const value = this.decoded.get("3");
-    if (!Predicate.isNumber(value)) {
+    if (!P.isNumber(value)) {
       throw new CodecError({ message: "Invalid or missing parameter 'alg'" });
     }
     return value;
@@ -295,7 +299,7 @@ export class COSEPublicKey {
       throw new CodecError({ message: "Expected an elliptic curve public key" });
     }
     const curve = this.decoded.get("-1");
-    if (!Predicate.isNumber(curve)) {
+    if (!P.isNumber(curve)) {
       throw new CodecError({ message: "Invalid or missing parameter 'crv'" });
     }
     const xBytes = this.decoded.get("-2");
@@ -331,7 +335,7 @@ export class COSEPublicKey {
       throw new CodecError({ message: "Expected an octet key pair public key" });
     }
     const curve = this.decoded.get("-1");
-    if (!Predicate.isNumber(curve)) {
+    if (!P.isNumber(curve)) {
       throw new CodecError({ message: "Invalid or missing parameter 'curve'" });
     }
     const x = this.decoded.get("-2");
@@ -445,8 +449,8 @@ const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema
 
 /** Decode a base64url string property, throwing `message` when it is not one. */
 const base64urlProperty = (value: object, key: string, message: string): Uint8Array => {
-  const raw = Predicate.hasProperty(value, key) ? value[key] : undefined;
-  if (!Predicate.isString(raw)) {
+  const raw = P.hasProperty(value, key) ? value[key] : undefined;
+  if (!P.isString(raw)) {
     throw new ClientDataParseError(message);
   }
   return Result.getOrThrowWith(
@@ -457,7 +461,7 @@ const base64urlProperty = (value: object, key: string, message: string): Uint8Ar
 
 /** The ceremony `type` of the client data. */
 const clientDataType = (parsed: object): ClientDataType => {
-  const rawType = Predicate.hasProperty(parsed, "type") ? parsed.type : undefined;
+  const rawType = P.hasProperty(parsed, "type") ? parsed.type : undefined;
   if (rawType === "webauthn.get") return ClientDataType.Get;
   if (rawType === "webauthn.create") return ClientDataType.Create;
   throw new ClientDataParseError("Missing or invalid property 'type'");
@@ -465,8 +469,8 @@ const clientDataType = (parsed: object): ClientDataType => {
 
 /** The optional `crossOrigin` flag, `false` when absent. */
 const clientDataCrossOrigin = (parsed: object): boolean => {
-  if (!Predicate.hasProperty(parsed, "crossOrigin")) return false;
-  if (!Predicate.isBoolean(parsed.crossOrigin)) {
+  if (!P.hasProperty(parsed, "crossOrigin")) return false;
+  if (!P.isBoolean(parsed.crossOrigin)) {
     throw new ClientDataParseError("Invalid property 'crossOrigin'");
   }
   return parsed.crossOrigin;
@@ -474,7 +478,7 @@ const clientDataCrossOrigin = (parsed: object): boolean => {
 
 /** The `tokenBinding.status` value. */
 const tokenBindingStatus = (raw: object): TokenBindingStatus => {
-  const rawStatus = Predicate.hasProperty(raw, "status") ? raw.status : undefined;
+  const rawStatus = P.hasProperty(raw, "status") ? raw.status : undefined;
   if (rawStatus === "present") return TokenBindingStatus.Present;
   if (rawStatus === "supported") return TokenBindingStatus.Supported;
   throw new ClientDataParseError("Missing or invalid property 'tokenBinding.status'");
@@ -482,10 +486,10 @@ const tokenBindingStatus = (raw: object): TokenBindingStatus => {
 
 /** The optional `tokenBinding` member, `null` when absent. */
 const clientDataTokenBinding = (parsed: object): TokenBinding | null => {
-  if (!Predicate.hasProperty(parsed, "tokenBinding")) return null;
+  if (!P.hasProperty(parsed, "tokenBinding")) return null;
   const raw = parsed.tokenBinding;
   // Any non-null object, arrays included.
-  if (!Predicate.isObjectOrArray(raw)) {
+  if (!P.isObjectOrArray(raw)) {
     throw new ClientDataParseError("Invalid property 'tokenBinding'");
   }
   const id = base64urlProperty(raw, "id", "Missing or invalid property 'tokenBinding.id'");
@@ -500,7 +504,7 @@ export function parseClientDataJSON(encoded: Uint8Array): ClientData {
     () => new ClientDataParseError("Invalid client data JSON"),
   );
   // Any non-null object, arrays included.
-  if (!Predicate.isObjectOrArray(parsed)) {
+  if (!P.isObjectOrArray(parsed)) {
     throw new ClientDataParseError("Invalid client data JSON");
   }
 
@@ -511,8 +515,8 @@ export function parseClientDataJSON(encoded: Uint8Array): ClientData {
     "Missing or invalid property 'challenge'",
   );
 
-  const origin = Predicate.hasProperty(parsed, "origin") ? parsed.origin : undefined;
-  if (!Predicate.isString(origin)) {
+  const origin = P.hasProperty(parsed, "origin") ? parsed.origin : undefined;
+  if (!P.isString(origin)) {
     throw new ClientDataParseError("Missing or invalid property 'origin'");
   }
 
@@ -670,7 +674,7 @@ export function parseAttestationObject(encoded: Uint8Array): AttestationObject {
   }
 
   const fmt = decoded.get("fmt");
-  if (!Predicate.isString(fmt)) {
+  if (!P.isString(fmt)) {
     throw new AttestationObjectParseError("Invalid or missing property 'fmt'");
   }
   const attStmt = decoded.get("attStmt");

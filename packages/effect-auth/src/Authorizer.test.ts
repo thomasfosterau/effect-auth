@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, MutableHashSet, Order } from "effect";
+import { DateTime, Effect, Layer, MutableHashSet, Order } from "effect";
+import * as Arr from "effect/Array";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";

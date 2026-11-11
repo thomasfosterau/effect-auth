@@ -1,14 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import {
-  Array as Arr,
-  Effect,
-  FileSystem,
-  Layer,
-  Order,
-  Path,
-  PlatformError,
-  Schema,
-} from "effect";
+import { Effect, FileSystem, Layer, Order, Path, PlatformError } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { SqlClient } from "effect/sql";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";

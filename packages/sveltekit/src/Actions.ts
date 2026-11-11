@@ -25,7 +25,10 @@
  *
  * @module actions
  */
-import { Array as Arr, DateTime, Option, Schema } from "effect";
+import { DateTime } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { safeRedirect } from "@thomasfosterau/effect-auth";
 
 /**

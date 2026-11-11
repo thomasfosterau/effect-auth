@@ -10,7 +10,10 @@
  *
  * @module twilio/twilio
  */
-import { Data, Effect, Formatter, Layer, Match, Option, Predicate, Redacted, Schema } from "effect";
+import { Data, Effect, Formatter, Layer, Match, Redacted } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { AuthError, SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -84,7 +87,7 @@ const decodeTwilioErrorBody = Schema.decodeUnknownOption(TwilioErrorBodyJson);
 
 /** A field of the error body as text: a string as is, anything else formatted. */
 const renderField = (value: Schema.Json): string =>
-  Predicate.isString(value) ? value : Formatter.format(value);
+  P.isString(value) ? value : Formatter.format(value);
 
 /** Parse Twilio's `{ code, message }` error body, when present, into readable text. */
 const describeTwilioError = (status: number, bodyText: string): string =>

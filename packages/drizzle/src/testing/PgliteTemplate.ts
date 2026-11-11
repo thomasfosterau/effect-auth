@@ -7,7 +7,7 @@
 
 import { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
-import { Record as Rec } from "effect";
+import * as R from "effect/Record";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -74,5 +74,5 @@ export const truncate = async (client: PGlite, names: ReadonlyArray<string>): Pr
 export const truncateTables = (client: PGlite): Promise<void> =>
   truncate(
     client,
-    Rec.values(tables).map((table) => getTableName(table)),
+    R.values(tables).map((table) => getTableName(table)),
   );

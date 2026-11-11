@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, MutableHashMap, Option } from "effect";
+import { DateTime, Effect, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { AuthError } from "./Errors.ts";
 import {
   type Identifier,

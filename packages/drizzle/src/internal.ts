@@ -9,7 +9,9 @@
  * @internal
  */
 
-import { Array as Arr, Effect, Exit, HashMap, Option } from "effect";
+import { Effect, Exit, HashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";
 import type { AuthDatabase, DrizzleHandle, DrizzleResult } from "./Database.ts";
 import { defaultTableNames, type TableNames } from "./Schema.ts";

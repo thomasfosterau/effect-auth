@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Order, Record as Rec } from "effect";
+import { Order } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { Resource } from "@thomasfosterau/effect-jsonapi";
 import { Identifier } from "../Identifier.ts";
 import type {
@@ -33,10 +35,10 @@ const storeFacingKeys = (
 ): ReadonlyArray<string> =>
   sorted([
     "id",
-    ...Rec.keys(Resource.declaredAttributes(resource))
+    ...R.keys(Resource.declaredAttributes(resource))
       .filter((key) => !(options.derived ?? []).includes(key))
       .map((key) => options.renamed?.[key] ?? key),
-    ...Rec.values(options.foreignKeys ?? {}),
+    ...R.values(options.foreignKeys ?? {}),
   ]);
 
 // The organization records are interfaces, not schemas: these key sets are
@@ -114,13 +116,13 @@ const teamMemberKeys = {
 describe("the JSON:API resources", () => {
   it("users carry exactly Types.User, plus the derived email fields", () => {
     expect(storeFacingKeys(Resources.User, { derived: ["email", "emailVerified"] })).toStrictEqual(
-      sorted(Rec.keys(User.fields)),
+      sorted(R.keys(User.fields)),
     );
   });
 
   it("sessions carry exactly Types.Session, userId as the user relationship", () => {
     expect(storeFacingKeys(Resources.Session, { foreignKeys: { user: "userId" } })).toStrictEqual(
-      sorted(Rec.keys(Session.fields)),
+      sorted(R.keys(Session.fields)),
     );
   });
 
@@ -130,7 +132,7 @@ describe("the JSON:API resources", () => {
         renamed: { kind: "type" },
         foreignKeys: { user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(Identifier.fields)));
+    ).toStrictEqual(sorted(R.keys(Identifier.fields)));
   });
 
   it("device-sessions carry exactly Types.Session, plus the derived active flag", () => {
@@ -217,7 +219,7 @@ describe("the JSON:API resources", () => {
 
   it("accepts no write to the attributes bag (#193)", () => {
     // Only `name` and `image` are writable, and only on update.
-    expect(sorted(Rec.keys(Resources.User.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.User.updateInput.fields))).toStrictEqual(
       sorted(["id", "name", "image"]),
     );
   });

@@ -1,17 +1,9 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Clock,
-  Data,
-  DateTime,
-  Effect,
-  Layer,
-  Order,
-  Predicate,
-  Record as Rec,
-  Schema,
-  Stream,
-} from "effect";
+import { Clock, Data, DateTime, Effect, Layer, Order, Stream } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
 import { TestClock } from "effect/testing";
@@ -41,7 +33,7 @@ const driverError = (cause: unknown): SqlError.SqlError =>
   new SqlError.SqlError({
     reason: new SqlError.UnknownError({
       cause,
-      message: Predicate.isError(cause) ? cause.message : "sqlite error",
+      message: P.isError(cause) ? cause.message : "sqlite error",
     }),
   });
 
@@ -170,7 +162,7 @@ const sqlite: StoreEngine = {
         readonly name: string;
         readonly type: string;
       }>`PRAGMA table_info(${sql.literal(table)})`;
-      return Rec.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
+      return R.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
     }),
 };
 
@@ -223,7 +215,7 @@ const postgres: StoreEngine = {
       const rows = yield* sql<{ readonly name: string; readonly type: string }>`
         SELECT column_name AS name, data_type AS type FROM information_schema.columns
         WHERE table_schema = current_schema() AND table_name = ${table}`;
-      return Rec.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
+      return R.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
     }),
 };
 
@@ -977,7 +969,7 @@ const storeContract = (engine: StoreEngine): void => {
       await run(
         Effect.gen(function* () {
           yield* Effect.forEach(
-            Rec.toEntries(timestampColumns),
+            R.toEntries(timestampColumns),
             ([table, columns]) =>
               engine.columnTypes(table).pipe(
                 Effect.map((typeByCol) => {

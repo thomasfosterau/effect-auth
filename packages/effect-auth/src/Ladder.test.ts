@@ -9,7 +9,10 @@
  * not have is a test failure rather than a passing refactor.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Record as Rec, Schema } from "effect";
+import { Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Entity from "./Entity.ts";
 import * as Ladder from "./Ladder.ts";
@@ -87,14 +90,14 @@ describe("hasAtLeast", () => {
   });
 
   it("denies an anonymous viewer at every rung and every axis", () => {
-    Arr.forEach([...Roles.rungs, ...Rec.values(Axes)], (min) => {
+    Arr.forEach([...Roles.rungs, ...R.values(Axes)], (min) => {
       expect(Roles.hasAtLeast(null, min)).toBe(false);
       expect(Roles.hasAtLeast(undefined, min)).toBe(false);
     });
   });
 
   it("denies a role string that is not on the ladder, at every rung and every axis", () => {
-    Arr.forEach([...Roles.rungs, ...Rec.values(Axes)], (min) => {
+    Arr.forEach([...Roles.rungs, ...R.values(Axes)], (min) => {
       Arr.forEach(NOT_RUNGS, (notARung) => {
         expect(Roles.hasAtLeast({ role: notARung }, min)).toBe(false);
       });
@@ -132,7 +135,7 @@ describe("axes", () => {
   });
 
   it("the base rung satisfies none of them, and the top rung satisfies all", () => {
-    Arr.forEach(Rec.values(Axes), (axis) => {
+    Arr.forEach(R.values(Axes), (axis) => {
       expect(Roles.hasAtLeast({ role: "admin" }, axis)).toBe(true);
       expect(Roles.hasAtLeast({ role: "user" }, axis)).toBe(false);
     });
@@ -181,7 +184,7 @@ const decide = (policy: Policy.DeclarativePolicy, role: string | undefined) =>
 
 describe("Policy.roleAtLeast", () => {
   it("agrees with hasAtLeast on every rung × axis pair, and on off-ladder roles", () => {
-    Arr.forEach(Rec.values(Axes), (axis) => {
+    Arr.forEach(R.values(Axes), (axis) => {
       const policy = Policy.roleAtLeast(Roles, axis);
       Arr.forEach([...Roles.rungs, ...NOT_RUNGS], (role) => {
         expect(decide(policy, role).allowed, `${role} on ${axis.name}`).toBe(

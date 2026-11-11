@@ -1,4 +1,5 @@
-import { Clock, Context, DateTime, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, DateTime, Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import type * as Types from "./Types.ts";
@@ -156,9 +157,9 @@ export const make = (
           Effect.withSpan(Obs.spanNames.validateSession),
           Effect.tap(() => Obs.recordSessionValidated("success")),
           Effect.tapError((e) =>
-            Predicate.isTagged(e, "SessionNotFoundError")
+            P.isTagged(e, "SessionNotFoundError")
               ? Obs.recordSessionValidated("not_found")
-              : Predicate.isTagged(e, "SessionExpiredError")
+              : P.isTagged(e, "SessionExpiredError")
                 ? Obs.recordSessionValidated("expired")
                 : Effect.void,
           ),

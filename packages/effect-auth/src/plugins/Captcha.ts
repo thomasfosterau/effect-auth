@@ -12,7 +12,9 @@
  *
  * @module plugins/captcha
  */
-import { Array as Arr, Effect, Predicate, Redacted } from "effect";
+import { Effect, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type PluginImpls } from "../Hooks.ts";
@@ -67,7 +69,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
             )
             .pipe(
               Effect.flatMap((response) => response.json),
-              Effect.map((body) => Predicate.hasProperty(body, "success") && body.success === true),
+              Effect.map((body) => P.hasProperty(body, "success") && body.success === true),
               Effect.catch(() => Effect.succeed(false)),
             );
           if (!success) {

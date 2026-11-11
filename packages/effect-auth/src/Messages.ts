@@ -53,7 +53,9 @@
  * @module messages
  */
 
-import { Context, Effect, Layer, Option, Predicate } from "effect";
+import { Context, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { ErrorCode } from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
@@ -104,7 +106,7 @@ const param = (
   fallback: number,
 ): string | number => {
   const value = params?.[key];
-  return Predicate.isString(value) || Predicate.isNumber(value) ? value : fallback;
+  return P.isString(value) || P.isNumber(value) ? value : fallback;
 };
 
 const catalog: Record<string, string | Resolver> = {
@@ -159,7 +161,7 @@ const catalog: Record<string, string | Resolver> = {
 function defaultResolve(code: string, _locale?: string, params?: MessageParams): string {
   const entry = catalog[code];
   if (entry === undefined) return code;
-  return Predicate.isFunction(entry) ? entry(params) : entry;
+  return P.isFunction(entry) ? entry(params) : entry;
 }
 
 // ---------------------------------------------------------------------------

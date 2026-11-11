@@ -20,7 +20,9 @@
  *
  * @module testing
  */
-import { type Context, DateTime, Effect, Layer, type Option, Record as Rec, Schema } from "effect";
+import { type Context, DateTime, Effect, Layer, type Option } from "effect";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "../Authorizer.ts";
 import * as SessionContext from "../SessionContext.ts";
 import type * as Types from "../Types.ts";
@@ -229,7 +231,7 @@ const defaultToUser = (viewer: ViewerFixture, now: Date): Types.User => {
   const { id, ...fields } = viewer;
   // Attributes are JSON: a field that is not (a `Date`, a function, …) stays
   // on the viewer and is left out of the user.
-  const attributes = Rec.filter<string, unknown, Types.Json>(fields, isJson);
+  const attributes = R.filter<string, unknown, Types.Json>(fields, isJson);
   return { id, createdAt: now, updatedAt: now, attributes };
 };
 
@@ -283,7 +285,8 @@ export function viewerLayerAs<Id, User extends ViewerFixture>(
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Exit, Option } from "effect"
+ * import { Context, Effect, Exit } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *

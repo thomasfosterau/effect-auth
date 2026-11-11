@@ -30,7 +30,8 @@
  * @example Attaching required auth to a group
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Path, Schema } from "effect"
+ * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import * as Schema from "effect/Schema"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { AuthMiddleware, CurrentUser, layer as authLayer } from "@thomasfosterau/effect-auth/http"
@@ -129,7 +130,8 @@
  * ```
  */
 
-import { Clock, Effect, Layer, Option, Redacted } from "effect";
+import { Clock, Effect, Layer, Redacted } from "effect";
+import * as Option from "effect/Option";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
 import { HttpServerRequest } from "effect/http";
 import { Hooks } from "../Hooks.ts";
@@ -409,7 +411,8 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Path, Schema } from "effect"
+ * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import * as Schema from "effect/Schema"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { AuthMiddleware, CurrentUser, layer } from "@thomasfosterau/effect-auth/http"
@@ -569,7 +572,9 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+ * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import * as Option from "effect/Option"
+ * import * as Schema from "effect/Schema"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { OptionalAuthMiddleware, optionalLayer } from "@thomasfosterau/effect-auth/http"

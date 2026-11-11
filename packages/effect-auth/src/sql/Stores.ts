@@ -30,17 +30,11 @@
  * bearer token.
  */
 
-import {
-  Array as Arr,
-  Clock,
-  DateTime,
-  Effect,
-  Layer,
-  Option,
-  Order,
-  Record as Rec,
-  Schema,
-} from "effect";
+import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { SqlClient } from "effect/sql";
 import * as Auth from "../index.ts";
 
@@ -456,7 +450,7 @@ export const readRbacPolicies: Effect.Effect<
   sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
     Effect.orDie,
     Effect.map((rows) => {
-      const rolePermissions = Rec.map(
+      const rolePermissions = R.map(
         Arr.groupBy(rows, (row) => row.role),
         (grants) => grants.map((row) => ({ resource: row.resource, action: row.action })),
       );

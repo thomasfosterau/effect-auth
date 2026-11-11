@@ -16,7 +16,9 @@ import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { eq, getTableName } from "drizzle-orm";
-import { Array as Arr, DateTime, Effect, Layer, Predicate } from "effect";
+import { DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { type AuthSchema, defineSchema } from "./Columns.ts";
@@ -249,7 +251,7 @@ const mappingRejects = () => [
 
 describe("stores over an application's own schema", () => {
   it("rejects a mapping whose columns do not read back as the store needs", () => {
-    expect(Predicate.isFunction(mappingRejects)).toBe(true);
+    expect(P.isFunction(mappingRejects)).toBe(true);
   });
 
   it("reads a user out of uuid-keyed columns under the application's names", async () => {

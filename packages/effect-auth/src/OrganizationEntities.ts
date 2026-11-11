@@ -87,7 +87,10 @@
  *
  * @module organization-entities
  */
-import { Array as Arr, Effect, HashSet, Layer, Match, Option, Predicate } from "effect";
+import { Effect, HashSet, Layer, Match } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import type * as Errors from "./Errors.ts";
 import { OrganizationStore, isActiveMember } from "./Organization.ts";
 import * as Entity from "./Entity.ts";
@@ -211,7 +214,7 @@ export const organizationEntityResolver = (
     );
     const nextSeen = Arr.reduce(pending, seen, (acc, ref) => HashSet.add(acc, Entity.refKey(ref)));
     return Effect.flatMap(Effect.forEach(pending, resolveOne, { concurrency: 1 }), (entities) => {
-      const found = Arr.filter(entities, Predicate.isNotNull);
+      const found = Arr.filter(entities, P.isNotNull);
       return walk(
         Arr.flatMap(found, (entity) => entity.parents),
         nextSeen,

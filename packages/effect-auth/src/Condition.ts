@@ -17,7 +17,10 @@
  *
  * @module condition
  */
-import { Array as Arr, Match, Predicate, Schema } from "effect";
+import { Match } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Entity from "./Entity.ts";
 
 // ---------------------------------------------------------------------------
@@ -261,11 +264,11 @@ const describeOperand = (operand: Operand): string =>
 
 /** The `typeof` of an attribute value, for error messages. */
 const typeName = (value: Entity.AttributeValue): string =>
-  Predicate.isString(value)
+  P.isString(value)
     ? "string"
-    : Predicate.isNumber(value)
+    : P.isNumber(value)
       ? "number"
-      : Predicate.isBoolean(value)
+      : P.isBoolean(value)
         ? "boolean"
         : "object";
 
@@ -273,7 +276,7 @@ const typeName = (value: Entity.AttributeValue): string =>
 const attributeRecord = (
   value: Entity.AttributeValue | null,
 ): { readonly [key: string]: Entity.AttributeValue } | null =>
-  value === null || !Predicate.isObject(value) || Entity.isEntityValue(value) ? null : value;
+  value === null || !P.isObject(value) || Entity.isEntityValue(value) ? null : value;
 
 const resolvePath = (
   root: Entity.AttributeValue | null,
@@ -354,7 +357,7 @@ export const evaluate = (
       if (!right.ok) return right;
       const l = left.value;
       const r = right.value;
-      if (!Predicate.isNumber(l) || !Predicate.isNumber(r)) {
+      if (!P.isNumber(l) || !P.isNumber(r)) {
         return err(
           `comparison "${compare.op}" requires numbers (got ${typeName(l)} and ${typeName(r)})`,
         );

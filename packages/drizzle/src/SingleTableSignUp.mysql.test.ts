@@ -11,7 +11,8 @@
 
 import { boolean, datetime, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
-import { Effect, Layer, Predicate } from "effect";
+import { Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { databaseLayer } from "./Database.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
@@ -60,7 +61,7 @@ describe("single-table MySQL / core sign-up on a NOT NULL email", () => {
     const proxy = makeProxy();
     const writer = makeAppWriter(async (row: UserRowInsert) => {
       const { email } = row;
-      assert(Predicate.isString(email), "sign-up hands the writer the address");
+      assert(P.isString(email), "sign-up hands the writer the address");
       await proxy.db.insert(strictUsers).values({ ...row, userId: row.id, email });
     }, "writes");
 

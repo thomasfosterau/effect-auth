@@ -20,7 +20,8 @@
  *
  * @module handle
  */
-import { type Cause, Effect, Option } from "effect";
+import { type Cause, Effect } from "effect";
+import * as Option from "effect/Option";
 import {
   SessionResolution,
   type SessionCookies,
@@ -147,7 +148,8 @@ const resolveSession = (
  * @example
  * ```ts
  * import { strictEqual } from "node:assert";
- * import { Effect, Option } from "effect";
+ * import { Effect } from "effect";
+ * import * as Option from "effect/Option";
  * import { handle } from "@thomasfosterau/effect-auth-sveltekit";
  *
  * const hook = handle({

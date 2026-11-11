@@ -13,7 +13,8 @@
  * (`tsconfig.json` excludes `src/testing/`).
  */
 
-import { DateTime, Effect, Layer, MutableHashMap, Option } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Email from "@thomasfosterau/effect-auth/email";

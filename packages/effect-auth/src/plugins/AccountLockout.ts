@@ -39,7 +39,8 @@
  *
  * @module plugins/account-lockout
  */
-import { Clock, Context, Duration, Effect, MutableHashMap, Option } from "effect";
+import { Clock, Context, Duration, Effect, MutableHashMap } from "effect";
+import * as Option from "effect/Option";
 import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
 import { makePlugin } from "../Hooks.ts";

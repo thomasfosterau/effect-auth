@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Schema } from "effect";
+import { Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";

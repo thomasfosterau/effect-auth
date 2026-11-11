@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, MutableHashSet } from "effect";
+import { MutableHashSet } from "effect";
+import * as Arr from "effect/Array";
 import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 

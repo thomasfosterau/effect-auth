@@ -1,4 +1,6 @@
-import { Array as Arr, Metric, Record as Rec, Struct } from "effect";
+import { Metric, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { describe, it, expect } from "vite-plus/test";
 import * as Obs from "./Observability.ts";
 
@@ -6,7 +8,7 @@ describe("Observability", () => {
   describe("Metric names", () => {
     // Read the ids off the exported metrics themselves, so a counter renamed
     // (or added) in Observability.ts is checked here without editing a list.
-    const exportedMetrics = Rec.toEntries(Obs).flatMap(([name, value]) =>
+    const exportedMetrics = R.toEntries(Obs).flatMap(([name, value]) =>
       Metric.isMetric(value) ? [{ name, id: value.id }] : [],
     );
 
@@ -24,7 +26,7 @@ describe("Observability", () => {
     });
 
     it("pins every counter's published name", () => {
-      expect(Rec.fromEntries(exportedMetrics.map(({ name, id }) => [name, id]))).toEqual({
+      expect(R.fromEntries(exportedMetrics.map(({ name, id }) => [name, id]))).toEqual({
         signInTotal: "effect_auth_sign_in_total",
         signUpTotal: "effect_auth_sign_up_total",
         sessionsCreated: "effect_auth_sessions_created_total",
@@ -54,7 +56,7 @@ describe("Observability", () => {
     it("span names follow dotted naming convention", () => {
       const dottedPattern = /^effect-auth\./;
 
-      Arr.forEach(Rec.toEntries(Obs.spanNames), ([key, spanName]) => {
+      Arr.forEach(R.toEntries(Obs.spanNames), ([key, spanName]) => {
         expect(
           dottedPattern.test(spanName),
           `Span name '${key}' has value '${spanName}' which doesn't start with 'effect-auth.'`,

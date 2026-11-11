@@ -3,7 +3,8 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Array as Arr, Clock, Context, Data, Effect, Layer, Result } from "effect";
+import { Clock, Context, Data, Effect, Layer, Result } from "effect";
+import * as Arr from "effect/Array";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { Digest, SecureRandom } from "effect/crypto";
 import {

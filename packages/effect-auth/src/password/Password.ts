@@ -8,7 +8,10 @@
  * - Extensible design for custom algorithms
  */
 
-import { Array as Arr, Context, Effect, Layer, Option, Predicate, Result } from "effect";
+import { Context, Effect, Layer, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import type * as Types from "../Types.ts";
 import * as Errors from "../Errors.ts";
 
@@ -216,7 +219,7 @@ const pbkdf2 = (
 
 /** Refuse a password `hash` will not hash: empty, not a string, or over the byte cap. */
 const refuseUnhashablePassword = (password: string): Effect.Effect<void, Errors.HashingError> => {
-  if (!password || !Predicate.isString(password)) {
+  if (!password || !P.isString(password)) {
     return Effect.fail(
       new Errors.HashingError({
         message: "Password must be a non-empty string",
@@ -246,13 +249,13 @@ const verifiableFields = <Fields extends ReadonlyArray<string>>(
   splitFields: (hash: string) => Fields | undefined,
 ): Effect.Effect<Fields | undefined, Errors.HashingError> =>
   Effect.gen(function* () {
-    if (!password || !Predicate.isString(password)) {
+    if (!password || !P.isString(password)) {
       return yield* new Errors.HashingError({
         message: "Password must be a non-empty string",
       });
     }
 
-    if (!hash || !Predicate.isString(hash)) {
+    if (!hash || !P.isString(hash)) {
       return yield* new Errors.HashingError({
         message: "Hash must be a non-empty string",
       });
