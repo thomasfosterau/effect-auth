@@ -180,6 +180,8 @@ const makeFixture = () => {
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    getMemberById: (memberId: string) =>
+      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     updateMember: (m: Member) =>
       Effect.sync(() => {
         const i = members.findIndex((x) => x.id === m.id);
@@ -414,7 +416,7 @@ const makeFixture = () => {
   );
   const { handler } = HttpServer.make({ services, cookie: { secure: false } });
 
-  return { handler, seedUser, makeSession, sessions };
+  return { handler, seedUser, makeSession, sessions, members };
 };
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
@@ -464,6 +466,92 @@ const req = (method: string, path: string, sessionId?: string, body?: Schema.Jso
     ...(body !== undefined ? { body: toJson(body) } : {}),
   });
 
+/** A JSON:API request (`application/vnd.api+json`), signed in as `sessionId` when given. */
+const apiReq = (method: string, path: string, body?: Schema.Json, sessionId?: string): Request =>
+  new Request(`http://test${path}`, {
+    method,
+    headers: {
+      ...(body !== undefined ? { "content-type": "application/vnd.api+json" } : {}),
+      ...(sessionId !== undefined ? withCookie(sessionId) : {}),
+    },
+    ...(body !== undefined ? { body: toJson(body) } : {}),
+  });
+
+/** One JSON:API resource object, read for its id and the attributes a test names. */
+const resourceBody = <F extends Schema.Struct.Fields>(attributes: F) =>
+  Schema.Struct({
+    data: Schema.Struct({ id: Schema.String, attributes: Schema.Struct(attributes) }),
+  });
+
+/** A JSON:API collection, read for each resource's id and the attributes a test names. */
+const collectionBody = <F extends Schema.Struct.Fields>(attributes: F) =>
+  Schema.Struct({
+    data: Schema.Array(Schema.Struct({ id: Schema.String, attributes: Schema.Struct(attributes) })),
+  });
+
+/** `POST /organizations` as `sessionId`; answers the new organization's id. */
+const createOrganization = async (
+  fx: ReturnType<typeof makeFixture>,
+  sessionId: string,
+  name = "Acme",
+  slug = "acme",
+): Promise<{ readonly id: string }> => {
+  const created = await fx.handler(
+    apiReq(
+      "POST",
+      "/organizations",
+      { data: { type: "organizations", attributes: { name, slug } } },
+      sessionId,
+    ),
+  );
+  expect(created.status).toBe(201);
+  return (await jsonBody(created, resourceBody({}))).data;
+};
+
+/** `POST /organizations/:id/members` as `sessionId`; answers the response. */
+const addMemberRequest = (
+  organizationId: string,
+  userId: string,
+  role: string,
+  sessionId: string,
+) =>
+  apiReq(
+    "POST",
+    `/organizations/${organizationId}/members`,
+    {
+      data: {
+        type: "organization-members",
+        attributes: { role },
+        relationships: { user: { data: { type: "users", id: userId } } },
+      },
+    },
+    sessionId,
+  );
+
+/** `PATCH /organization-members/:id` with `attributes`, as `sessionId`. */
+const patchMember = (memberId: string, attributes: Schema.Json, sessionId: string) =>
+  apiReq(
+    "PATCH",
+    `/organization-members/${memberId}`,
+    { data: { type: "organization-members", id: memberId, attributes } },
+    sessionId,
+  );
+
+/** `PATCH /invitations/:id` to `status`, as `sessionId`. */
+const transitionInvitation = (invitationId: string, status: string, sessionId: string) =>
+  apiReq(
+    "PATCH",
+    `/invitations/${invitationId}`,
+    { data: { type: "invitations", id: invitationId, attributes: { status } } },
+    sessionId,
+  );
+
+const MemberBody = resourceBody({
+  role: Schema.String,
+  status: Schema.String,
+  previousRole: Schema.optionalKey(Schema.String),
+});
+
 describe("HTTP organization endpoints", () => {
   it("runs a full organization lifecycle", async () => {
     const fx = makeFixture();
@@ -472,59 +560,130 @@ describe("HTTP organization endpoints", () => {
 
     // Create.
     const created = await fx.handler(
-      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, sid),
-    );
-    expect(created.status).toBe(200);
-    const org = await jsonBody(created, Schema.Struct({ id: Schema.String, slug: Schema.String }));
-    expect(org.slug).toBe("acme");
-
-    // Full org includes the creator as an owner member.
-    const full = await fx.handler(req("GET", `/organization/${org.id}`, sid));
-    expect(full.status).toBe(200);
-    const fullBody = await jsonBody(
-      full,
-      Schema.Struct({
-        organization: Schema.Struct({ id: Schema.String }),
-        members: Schema.Array(Schema.Struct({ userId: Schema.String, role: Schema.String })),
-      }),
-    );
-    expect(fullBody.members).toEqual([{ ...fullBody.members[0], userId: "u1", role: "owner" }]);
-
-    // List shows the org.
-    const list = await fx.handler(req("GET", "/organizations", sid));
-    expect((await jsonBody(list, IdListBody)).map((o) => o.id)).toEqual([org.id]);
-
-    // Invite a member.
-    const invited = await fx.handler(
-      jsonReq(
-        `/organization/${org.id}/invitations`,
-        { email: "new@test.com", role: "member" },
+      apiReq(
+        "POST",
+        "/organizations",
+        { data: { type: "organizations", attributes: { name: "Acme", slug: "acme" } } },
         sid,
       ),
     );
-    expect(invited.status).toBe(200);
-    const listInv = await fx.handler(req("GET", `/organization/${org.id}/invitations`, sid));
-    expect((await jsonBody(listInv, ListBody)).length).toBe(1);
+    expect(created.status).toBe(201);
+    expect(created.headers.get("content-type")).toContain("application/vnd.api+json");
+    const org = (
+      await jsonBody(
+        created,
+        resourceBody({
+          slug: Schema.String,
+          defaultRole: Schema.String,
+          jitProvisioning: Schema.Boolean,
+        }),
+      )
+    ).data;
+    expect(org.attributes).toEqual({ slug: "acme", defaultRole: "member", jitProvisioning: false });
 
-    // Update.
+    // Read it back, and its members: the creator, as an owner.
+    const read = await fx.handler(apiReq("GET", `/organizations/${org.id}`, undefined, sid));
+    expect((await jsonBody(read, resourceBody({ name: Schema.String }))).data.attributes.name).toBe(
+      "Acme",
+    );
+    const members = await fx.handler(
+      apiReq("GET", `/organizations/${org.id}/members`, undefined, sid),
+    );
+    const memberList = await jsonBody(
+      members,
+      Schema.Struct({
+        data: Schema.Array(
+          Schema.Struct({
+            id: Schema.String,
+            attributes: Schema.Struct({ role: Schema.String }),
+            relationships: Schema.Struct({
+              user: Schema.Struct({ data: Schema.Struct({ id: Schema.String }) }),
+            }),
+          }),
+        ),
+      }),
+    );
+    expect(memberList.data.map((m) => [m.relationships.user.data.id, m.attributes.role])).toEqual([
+      ["u1", "owner"],
+    ]);
+    // The member id is the stored one.
+    expect(memberList.data[0]?.id).toBe(fx.members[0]?.id);
+
+    // An unknown organization answers 404.
+    expect((await fx.handler(apiReq("GET", "/organizations/nope", undefined, sid))).status).toBe(
+      404,
+    );
+
+    // List shows the org.
+    const list = await fx.handler(apiReq("GET", "/organizations", undefined, sid));
+    expect((await jsonBody(list, collectionBody({}))).data.map((o) => o.id)).toEqual([org.id]);
+
+    // Invite a member.
+    const invited = await fx.handler(
+      apiReq(
+        "POST",
+        `/organizations/${org.id}/invitations`,
+        { data: { type: "invitations", attributes: { email: "new@test.com", role: "member" } } },
+        sid,
+      ),
+    );
+    expect(invited.status).toBe(201);
+    const listInv = await fx.handler(
+      apiReq("GET", `/organizations/${org.id}/invitations`, undefined, sid),
+    );
+    expect((await jsonBody(listInv, collectionBody({ status: Schema.String }))).data).toHaveLength(
+      1,
+    );
+
+    // Update, and the default role (owner-only) in the same document.
     const updated = await fx.handler(
-      req("PATCH", `/organization/${org.id}`, sid, { name: "Acme Inc" }),
+      apiReq(
+        "PATCH",
+        `/organizations/${org.id}`,
+        {
+          data: {
+            type: "organizations",
+            id: org.id,
+            attributes: { name: "Acme Inc", jitProvisioning: true, defaultRole: "admin" },
+          },
+        },
+        sid,
+      ),
     );
-    expect((await jsonBody(updated, NameBody)).name).toBe("Acme Inc");
-
-    // Set active organization (stored on the session).
-    const active = await fx.handler(
-      jsonReq("/organization/set-active", { organizationId: org.id }, sid),
-    );
-    expect(active.status).toBe(200);
     expect(
+      (
+        await jsonBody(
+          updated,
+          resourceBody({
+            name: Schema.String,
+            jitProvisioning: Schema.Boolean,
+            defaultRole: Schema.String,
+          }),
+        )
+      ).data.attributes,
+    ).toEqual({ name: "Acme Inc", jitProvisioning: true, defaultRole: "admin" });
+
+    // Set the active organization (stored on the session), then clear it.
+    const active = await fx.handler(
+      apiReq(
+        "PATCH",
+        "/organizations/active",
+        { data: { type: "organizations", id: org.id } },
+        sid,
+      ),
+    );
+    expect(active.status).toBe(204);
+    const activeOrganization = () =>
       Option.getOrUndefined(MutableHashMap.get(fx.sessions, hashToken(sid)))?.attributes[
         "activeOrganizationId"
-      ],
-    ).toBe(org.id);
+      ];
+    expect(activeOrganization()).toBe(org.id);
+    const cleared = await fx.handler(apiReq("PATCH", "/organizations/active", { data: null }, sid));
+    expect(cleared.status).toBe(204);
+    expect(activeOrganization()).toBeNull();
 
     // Delete.
-    const deleted = await fx.handler(req("DELETE", `/organization/${org.id}`, sid));
+    const deleted = await fx.handler(apiReq("DELETE", `/organizations/${org.id}`, undefined, sid));
     expect(deleted.status).toBe(204);
   });
 
@@ -535,21 +694,170 @@ describe("HTTP organization endpoints", () => {
     const ownerSid = fx.makeSession("owner");
     const strangerSid = fx.makeSession("stranger");
 
-    const created = await fx.handler(
-      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
-    );
-    const org = await jsonBody(created, IdBody);
+    const org = await createOrganization(fx, ownerSid);
 
     const res = await fx.handler(
-      req("PATCH", `/organization/${org.id}`, strangerSid, { name: "Hijack" }),
+      apiReq(
+        "PATCH",
+        `/organizations/${org.id}`,
+        { data: { type: "organizations", id: org.id, attributes: { name: "Hijack" } } },
+        strangerSid,
+      ),
     );
     expect(res.status).toBe(403);
+    expect(res.headers.get("content-type")).toContain("application/vnd.api+json");
   });
 
   it("requires authentication", async () => {
     const fx = makeFixture();
-    const res = await fx.handler(jsonReq("/organization/create", { name: "A", slug: "a" }));
+    const res = await fx.handler(
+      apiReq("POST", "/organizations", {
+        data: { type: "organizations", attributes: { name: "A", slug: "a" } },
+      }),
+    );
     expect(res.status).toBe(401);
+  });
+
+  it("manages a membership by its id: role, deactivation, reactivation, removal", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("staff", "staff@test.com");
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+
+    const added = await fx.handler(addMemberRequest(org.id, "staff", "admin", ownerSid));
+    expect(added.status).toBe(201);
+    const member = (await jsonBody(added, MemberBody)).data;
+    expect(member.attributes).toMatchObject({ role: "admin", status: "active" });
+
+    // A role change.
+    const demoted = await fx.handler(patchMember(member.id, { role: "member" }, ownerSid));
+    expect((await jsonBody(demoted, MemberBody)).data.attributes.role).toBe("member");
+
+    // Deactivation keeps the role to restore; reactivation restores it.
+    const deactivated = await fx.handler(patchMember(member.id, { status: "inactive" }, ownerSid));
+    expect((await jsonBody(deactivated, MemberBody)).data.attributes).toMatchObject({
+      status: "inactive",
+      previousRole: "member",
+    });
+    const reactivated = await fx.handler(
+      patchMember(member.id, { status: "active", role: "admin" }, ownerSid),
+    );
+    expect((await jsonBody(reactivated, MemberBody)).data.attributes).toMatchObject({
+      status: "active",
+      role: "admin",
+    });
+
+    // A stranger may neither change nor read back a membership, even by a
+    // no-op patch; an unknown id is 404.
+    expect((await fx.handler(patchMember(member.id, {}, strangerSid))).status).toBe(403);
+    expect((await fx.handler(patchMember(member.id, { role: "owner" }, strangerSid))).status).toBe(
+      403,
+    );
+    expect((await fx.handler(patchMember("unknown", { role: "member" }, ownerSid))).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await fx.handler(
+          apiReq("DELETE", `/organization-members/${member.id}`, undefined, strangerSid),
+        )
+      ).status,
+    ).toBe(403);
+
+    // The last owner can be neither deactivated nor removed.
+    const ownerMember = fx.members.find((m) => m.userId === "owner");
+    assert(ownerMember !== undefined, "the owner is a member");
+    expect(
+      (await fx.handler(patchMember(ownerMember.id, { status: "inactive" }, ownerSid))).status,
+    ).toBe(403);
+
+    const removed = await fx.handler(
+      apiReq("DELETE", `/organization-members/${member.id}`, undefined, ownerSid),
+    );
+    expect(removed.status).toBe(204);
+    expect(fx.members.map((m) => m.userId)).toEqual(["owner"]);
+  });
+
+  it("moves invitations through their statuses and re-delivers them", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("invitee", "invitee@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const inviteeSid = fx.makeSession("invitee");
+    const org = await createOrganization(fx, ownerSid);
+
+    const invite = async (email: string) => {
+      const res = await fx.handler(
+        apiReq(
+          "POST",
+          `/organizations/${org.id}/invitations`,
+          { data: { type: "invitations", attributes: { email, role: "member" } } },
+          ownerSid,
+        ),
+      );
+      expect(res.status).toBe(201);
+      return (await jsonBody(res, resourceBody({ status: Schema.String }))).data.id;
+    };
+
+    // Re-delivery: 202, the same invitation.
+    const first = await invite("invitee@test.com");
+    const delivered = await fx.handler(
+      apiReq("POST", `/invitations/${first}/deliveries`, undefined, ownerSid),
+    );
+    expect(delivered.status).toBe(202);
+    expect((await jsonBody(delivered, resourceBody({ status: Schema.String }))).data).toEqual({
+      id: first,
+      attributes: { status: "pending" },
+    });
+
+    // Only the invitee may accept; the answer carries the new membership.
+    expect((await fx.handler(transitionInvitation(first, "accepted", ownerSid))).status).toBe(400);
+    const accepted = await fx.handler(transitionInvitation(first, "accepted", inviteeSid));
+    expect(accepted.status).toBe(200);
+    const acceptedBody = await jsonBody(
+      accepted,
+      Schema.Struct({
+        data: Schema.Struct({ attributes: Schema.Struct({ status: Schema.String }) }),
+        meta: Schema.Struct({
+          membership: Schema.Struct({
+            type: Schema.Literal("organization-members"),
+            id: Schema.String,
+            attributes: Schema.Struct({ role: Schema.String }),
+          }),
+        }),
+      }),
+    );
+    expect(acceptedBody.data.attributes.status).toBe("accepted");
+    expect(acceptedBody.meta.membership.attributes.role).toBe("member");
+    expect(fx.members.find((m) => m.userId === "invitee")?.id).toBe(
+      acceptedBody.meta.membership.id,
+    );
+
+    // Rejection by the invitee, cancellation by the owner.
+    const second = await invite("invitee2@test.com");
+    expect((await fx.handler(transitionInvitation(second, "canceled", inviteeSid))).status).toBe(
+      403,
+    );
+    const canceled = await fx.handler(transitionInvitation(second, "canceled", ownerSid));
+    expect(
+      (await jsonBody(canceled, resourceBody({ status: Schema.String }))).data.attributes,
+    ).toEqual({
+      status: "canceled",
+    });
+    const third = await invite("invitee@test.com");
+    const rejected = await fx.handler(transitionInvitation(third, "rejected", inviteeSid));
+    expect(
+      (await jsonBody(rejected, resourceBody({ status: Schema.String }))).data.attributes,
+    ).toEqual({
+      status: "rejected",
+    });
+
+    // `pending` is not a transition.
+    const fourth = await invite("invitee3@test.com");
+    expect((await fx.handler(transitionInvitation(fourth, "pending", ownerSid))).status).toBe(400);
   });
 
   it("runs a full team lifecycle", async () => {
@@ -559,13 +867,8 @@ describe("HTTP organization endpoints", () => {
     const ownerSid = fx.makeSession("owner");
     const memberSid = fx.makeSession("member");
 
-    const created = await fx.handler(
-      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
-    );
-    const org = await jsonBody(created, IdBody);
-    await fx.handler(
-      jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
-    );
+    const org = await createOrganization(fx, ownerSid);
+    await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid));
 
     // Create.
     const teamRes = await fx.handler(
@@ -630,13 +933,8 @@ describe("HTTP organization endpoints", () => {
     const ownerSid = fx.makeSession("owner");
     const memberSid = fx.makeSession("member");
 
-    const created = await fx.handler(
-      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
-    );
-    const org = await jsonBody(created, IdBody);
-    await fx.handler(
-      jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
-    );
+    const org = await createOrganization(fx, ownerSid);
+    await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid));
 
     // Define a custom `member` role that may create teams.
     const upserted = await fx.handler(
@@ -684,13 +982,8 @@ describe("HTTP organization endpoints", () => {
     const ownerSid = fx.makeSession("owner");
     const adminSid = fx.makeSession("admin");
 
-    const created = await fx.handler(
-      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
-    );
-    const org = await jsonBody(created, IdBody);
-    await fx.handler(
-      jsonReq(`/organization/${org.id}/members`, { userId: "admin", role: "admin" }, ownerSid),
-    );
+    const org = await createOrganization(fx, ownerSid);
+    await fx.handler(addMemberRequest(org.id, "admin", "admin", ownerSid));
 
     // `role:manage` is owner-only by default.
     const adminUpsert = await fx.handler(
@@ -724,13 +1017,8 @@ describe("HTTP organization endpoints", () => {
     const ownerSid = fx.makeSession("owner");
     const memberSid = fx.makeSession("member");
 
-    const created = await fx.handler(
-      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
-    );
-    const org = await jsonBody(created, IdBody);
-    await fx.handler(
-      jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
-    );
+    const org = await createOrganization(fx, ownerSid);
+    await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid));
 
     const denied = await fx.handler(
       jsonReq(`/organization/${org.id}/teams`, { name: "Rogue" }, memberSid),

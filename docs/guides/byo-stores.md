@@ -408,7 +408,7 @@ Prefer one of these over writing your own when it fits your stack:
 
 ## 7. Check your store against the contract
 
-`@thomasfosterau/effect-auth/testing` publishes executable conformance suites for `SessionStore`, `UserStore`, `IdentifierStore` and `ApiKeyStore`: `sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance` and `apiKeyStoreConformance`. They check the conventions in §1 (misses are `null`, deletes of unknown ids are no-ops, `Date`s and `attributes` round-trip), `IdentifierStore`'s `(type, value)` uniqueness from §2, and every rule of `replace`. `packages/effect-auth/src/sql` runs them over SQLite and PostgreSQL, and the core runs them over `IdentifierStoreKV`.
+`@thomasfosterau/effect-auth/testing` publishes executable conformance suites for `SessionStore`, `UserStore`, `IdentifierStore` and `ApiKeyStore`: `sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance` and `apiKeyStoreConformance`, and for the membership half of `OrganizationStore` (`getMember`, `getMemberById`, updates and deletes): `organizationStoreConformance`. They check the conventions in §1 (misses are `null`, deletes of unknown ids are no-ops, `Date`s and `attributes` round-trip), `IdentifierStore`'s `(type, value)` uniqueness from §2, and every rule of `replace`. `packages/effect-auth/src/sql` runs them over SQLite and PostgreSQL, and the core runs them over `IdentifierStoreKV`.
 
 The module imports no test runner. A suite is a contract name and a list of cases. Each case is an `Effect` that succeeds when your store behaves and fails with a `ConformanceError` naming the contract, the case and the mismatch. A store that fails unexpectedly fails the case with its own `AuthError`. Register the cases with your own runner:
 

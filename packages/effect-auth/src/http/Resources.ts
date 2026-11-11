@@ -224,3 +224,141 @@ export const BackupCodeSet = Resource.make("backup-code-sets", {
  * @category resources
  */
 export type BackupCodeSet = typeof BackupCodeSet.Type;
+
+/**
+ * One of the accounts signed in on this device (`device-sessions`), when
+ * multi-session is on: a `sessions` resource as the device sees it, plus
+ * whether it is the `active` one the requests now carry. The id is the stored
+ * id (the hash of the session token), never the token, so listing the
+ * device's accounts discloses no credential and the id is safe in a URL.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const DeviceSession = Resource.make("device-sessions", {
+  id: Schema.String,
+  attributes: {
+    active: Resource.readOnlyAttribute(Schema.Boolean),
+    expiresAt: instant,
+    createdAt: instant,
+    lastActivityAt: instant,
+    attributes: Resource.readOnlyAttribute(Attributes),
+  },
+  relationships: {
+    user: Relationship.one(() => User),
+  },
+});
+
+/**
+ * The decoded `device-sessions` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type DeviceSession = typeof DeviceSession.Type;
+
+/** A server-maintained epoch-milliseconds instant, as the organization records keep it. */
+const epochMillis = Resource.readOnlyAttribute(Schema.Finite);
+
+/**
+ * An organization (`organizations`): `Organization.Organization`. The stored
+ * record leaves `defaultRole` and `jitProvisioning` optional; the resource
+ * carries them resolved (`"member"`, `false`), so a client never branches on
+ * "absent means the default". Both are set by `PATCH` only: `defaultRole`
+ * needs the `role:manage` permission, the rest `organization:update`.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const Organization = Resource.make("organizations", {
+  id: Schema.String,
+  attributes: {
+    name: Schema.String,
+    slug: Schema.String,
+    logo: Resource.attribute(Schema.String, { resource: "optional", create: "optional" }),
+    metadata: Resource.attribute(Attributes, { create: "optional" }),
+    defaultRole: Resource.attribute(Schema.String, { create: false }),
+    jitProvisioning: Resource.attribute(Schema.Boolean, { create: false }),
+    createdAt: epochMillis,
+  },
+});
+
+/**
+ * The decoded `organizations` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type Organization = typeof Organization.Type;
+
+/**
+ * A membership (`organization-members`): `Organization.Member`, its
+ * `organizationId` and `userId` as the `organization` and `user`
+ * relationships. The id is the stored `Member.id`. `role` and `status` are
+ * writable through `PATCH /organization-members/:id` (a `status` of
+ * `inactive` deactivates the membership, `active` restores it);
+ * `previousRole` is the role a reactivation restores.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const OrganizationMember = Resource.make("organization-members", {
+  id: Schema.String,
+  attributes: {
+    role: Resource.attribute(Schema.String, { create: "optional" }),
+    status: Resource.attribute(Schema.Literals(["active", "inactive"]), { create: false }),
+    previousRole: Resource.attribute(Schema.String, {
+      resource: "optional",
+      create: false,
+      update: false,
+    }),
+    createdAt: epochMillis,
+  },
+  relationships: {
+    organization: Relationship.one(() => Organization),
+    user: Relationship.one(() => User),
+  },
+});
+
+/**
+ * The decoded `organization-members` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type OrganizationMember = typeof OrganizationMember.Type;
+
+/**
+ * An invitation to join an organization (`invitations`):
+ * `Organization.Invitation`, its `organizationId` and `inviterId` as the
+ * `organization` and `inviter` relationships. `status` moves through
+ * `PATCH /invitations/:id`: the invitee sets `accepted` or `rejected`, a
+ * member holding `invitation:cancel` sets `canceled`.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export const Invitation = Resource.make("invitations", {
+  id: Schema.String,
+  attributes: {
+    email: Resource.attribute(Schema.String, { update: false }),
+    role: Resource.attribute(Schema.String, { update: false }),
+    status: Resource.attribute(Schema.Literals(["pending", "accepted", "rejected", "canceled"]), {
+      create: false,
+    }),
+    expiresAt: epochMillis,
+    createdAt: epochMillis,
+  },
+  relationships: {
+    organization: Relationship.one(() => Organization),
+    inviter: Relationship.one(() => User),
+  },
+});
+
+/**
+ * The decoded `invitations` resource object.
+ *
+ * @since 0.3.0
+ * @category resources
+ */
+export type Invitation = typeof Invitation.Type;

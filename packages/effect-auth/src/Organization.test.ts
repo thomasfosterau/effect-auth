@@ -5,6 +5,7 @@ import {
   Context,
   DateTime,
   Effect,
+  Exit,
   MutableHashMap,
   Option,
   Order,
@@ -35,6 +36,7 @@ import {
   type TeamMember,
 } from "./Organization.ts";
 import * as OrganizationModule from "./Organization.ts";
+import * as Testing from "./testing/index.ts";
 
 const organizations = MutableHashMap.empty<string, Organization>();
 const members = MutableHashMap.empty<string, Member>();
@@ -130,6 +132,9 @@ const organizationStore = {
           (member) => member.organizationId === organizationId && member.userId === userId,
         ) ?? null,
     ),
+
+  getMemberById: (memberId: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(members, memberId))),
 
   updateMember: (member: Member) =>
     Effect.sync(() => {
@@ -2011,5 +2016,29 @@ describe("OrganizationService - JIT provisioning", () => {
 
     expect(result.pending).toBeNull();
     expect(result.members.members).toHaveLength(1);
+  });
+});
+
+// The membership half of the store contract, `getMemberById` included, over
+// this file's in-memory store; and a store that loses the id-keyed lookup,
+// which the suite must fail.
+describe("OrganizationStore conformance", () => {
+  const suite = Testing.organizationStoreConformance();
+  it.each(suite.cases)("$name", async ({ run }) => {
+    await expect(
+      Effect.runPromise(run.pipe(Effect.provideService(OrganizationStore, organizationStore))),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails a store whose getMemberById misses", async () => {
+    const forgetful = { ...organizationStore, getMemberById: () => Effect.succeed(null) };
+    const exits = await Promise.all(
+      suite.cases.map((testCase) =>
+        Effect.runPromiseExit(
+          testCase.run.pipe(Effect.provideService(OrganizationStore, forgetful)),
+        ),
+      ),
+    );
+    expect(exits.filter(Exit.isFailure)).toHaveLength(suite.cases.length);
   });
 });

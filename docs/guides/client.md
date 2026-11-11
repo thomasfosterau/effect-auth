@@ -134,7 +134,7 @@ const session = await client.device.token({ deviceCode }); // 400 until decided
 
 **Account management** — `changeEmail.{request,confirm}`, `deleteUser.{request,confirm}`. Requests are session-authenticated and always answer `{ status: true }` (anti-enumeration); the confirm endpoints take the token from the email.
 
-**Multi-session** — several accounts signed in on one device: `multiSession.list()`, `multiSession.setActive({ sessionId })`, `multiSession.revoke({ sessionId })`. Requires the server's `multiSession` option; the active account is the primary session cookie.
+**Multi-session** — several accounts signed in on one device: `multiSession.list()`, `multiSession.setActive({ sessionId })`, `multiSession.revoke({ sessionId })`, where `sessionId` is the id the list gave (the session's stored id, never its token). Requires the server's `multiSession` option; the active account is the primary session cookie.
 
 **Multi-factor** — `multiFactor.enable`, `confirm`, `disable`, `regenerateBackupCodes`, `verifyTotp`, `verifyBackupCode`, plus the continuation helper in §5.
 
@@ -159,8 +159,10 @@ await client.organization.addMember(org.id, { userId }); // ...gets that role
 // Suspend a membership instead of deleting it. The row and the member's role
 // survive (the role comes back on reactivate), every permission check in this
 // organization now denies them, and their app session is left alone.
-await client.organization.deactivateMember(org.id, userId);
-await client.organization.reactivateMember(org.id, userId);
+// Memberships are addressed by their own id (`member.id`).
+const member = await client.organization.addMember(org.id, { userId, role: "admin" });
+await client.organization.deactivateMember(member.id);
+await client.organization.reactivateMember(member.id);
 
 // Claim a domain, publish the TXT record, then verify it. A verified domain
 // plus `update(org.id, { jitProvisioning: true })` provisions membership on

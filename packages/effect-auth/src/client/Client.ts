@@ -137,9 +137,9 @@ export interface AuthClientPlugin<TExtension extends object> {
  * ```ts
  * import { definePlugin } from "@thomasfosterau/effect-auth/client";
  *
- * const orgPlugin = definePlugin((ctx) => ({
- *   createOrg: (name: string) =>
- *     ctx.request("POST", "/organization/create", { name }),
+ * const reportPlugin = definePlugin((ctx) => ({
+ *   fileReport: (title: string) =>
+ *     ctx.request("POST", "/reports", { title }),
  * }));
  * ```
  */
@@ -179,7 +179,9 @@ interface WireResource<A> {
   readonly type: string;
   readonly id: string;
   readonly attributes: A;
-  readonly relationships?: { readonly user?: { readonly data: ResourceLinkage } };
+  readonly relationships?: {
+    readonly [name: string]: { readonly data: ResourceLinkage } | undefined;
+  };
 }
 
 interface WireUser {
@@ -207,13 +209,29 @@ interface WireIdentifier {
   readonly createdAt: number;
 }
 
+interface WireDeviceSession extends WireSession {
+  readonly active: boolean;
+}
+
+type WireOrganization = Omit<Http.OrganizationView, "id">;
+
+type WireMember = Omit<Http.MemberView, "id" | "organizationId" | "userId">;
+
+type WireInvitation = Omit<Http.InvitationView, "id" | "organizationId" | "inviterId">;
+
 interface DataDocument<A> {
   readonly data: WireResource<A>;
   readonly included?: ReadonlyArray<WireResource<WireUser>>;
 }
 
+/** What `PATCH /invitations/:id` answers; an acceptance carries the new membership in `meta`. */
+interface InvitationTransitionDocument extends DataDocument<WireInvitation> {
+  readonly meta?: { readonly membership?: WireResource<WireMember> };
+}
+
 interface CollectionDocument<A> {
   readonly data: ReadonlyArray<WireResource<A>>;
+  readonly included?: ReadonlyArray<WireResource<WireUser>>;
 }
 
 /**
@@ -238,6 +256,45 @@ const sessionView = (resource: WireResource<WireSession>): Http.SessionView => (
   userId: resource.relationships?.user?.data.id ?? "",
   ...resource.attributes,
 });
+
+/** The id a resource's to-one relationship `name` links to (`""` when absent). */
+const related = (resource: WireResource<unknown>, name: string): string =>
+  resource.relationships?.[name]?.data.id ?? "";
+
+const organizationView = ({
+  id,
+  attributes,
+}: WireResource<WireOrganization>): Http.OrganizationView => ({
+  id,
+  ...attributes,
+});
+
+const memberView = (resource: WireResource<WireMember>): Http.MemberView => ({
+  id: resource.id,
+  organizationId: related(resource, "organization"),
+  userId: related(resource, "user"),
+  ...resource.attributes,
+});
+
+const invitationView = (resource: WireResource<WireInvitation>): Http.InvitationView => ({
+  id: resource.id,
+  organizationId: related(resource, "organization"),
+  inviterId: related(resource, "inviter"),
+  ...resource.attributes,
+});
+
+/** A `device-sessions` resource with its included user, as the session-with-user view. */
+const deviceSessionView = (
+  resource: WireResource<WireDeviceSession>,
+  users: ReadonlyArray<WireResource<WireUser>>,
+): ReadonlyArray<Http.SessionWithUserView> => {
+  const { active: _active, ...attributes } = resource.attributes;
+  const userId = related(resource, "user");
+  const user = users.find((candidate) => candidate.id === userId);
+  return user === undefined
+    ? []
+    : [{ session: { id: resource.id, userId, ...attributes }, user: userView(user) }];
+};
 
 const identifierView = ({ id, attributes }: WireResource<WireIdentifier>): Http.IdentifierView => {
   const { kind, ...rest } = attributes;
@@ -342,7 +399,12 @@ export interface AuthClient {
     readonly confirm: (payload: Http.DeleteUserConfirmPayload) => Promise<Http.StatusResponse>;
   };
 
-  /** Multi-account management (several accounts per device). 404 when unconfigured. */
+  /**
+   * Multi-account management (several accounts per device), over
+   * `/device-sessions`. 404 when unconfigured. Each listed session's `id` is
+   * its stored id (the hash of its token, never the token), and `setActive` /
+   * `revoke` take that id.
+   */
   readonly multiSession: {
     readonly list: () => Promise<Http.MultiSessionListView>;
     readonly setActive: (payload: Http.MultiSessionActionPayload) => Promise<Http.StatusResponse>;
@@ -459,11 +521,12 @@ export interface AuthClient {
       organizationId: string,
       payload: Http.AddMemberPayload,
     ) => Promise<Http.MemberView>;
+    /** Change a membership's role; `memberId` is the membership's own `id`. */
     readonly updateMemberRole: (
-      organizationId: string,
+      memberId: string,
       payload: Http.UpdateMemberRolePayload,
     ) => Promise<Http.MemberView>;
-    readonly removeMember: (organizationId: string, userId: string) => Promise<void>;
+    readonly removeMember: (memberId: string) => Promise<void>;
     /**
      * Suspend a membership without deleting it: the row (and the member's
      * role, restored on reactivation) survives, but every permission check in
@@ -471,8 +534,8 @@ export interface AuthClient {
      * the server exposes an `onMemberDeactivated` hook for apps that want to
      * end them.
      */
-    readonly deactivateMember: (organizationId: string, userId: string) => Promise<Http.MemberView>;
-    readonly reactivateMember: (organizationId: string, userId: string) => Promise<Http.MemberView>;
+    readonly deactivateMember: (memberId: string) => Promise<Http.MemberView>;
+    readonly reactivateMember: (memberId: string) => Promise<Http.MemberView>;
     /** Set the role members added without one receive (owner-only). */
     readonly setDefaultRole: (
       organizationId: string,
@@ -716,6 +779,42 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       () => ({ status: true }),
     );
 
+  /** `PATCH /organizations/:id` with the attributes to change. */
+  const updateOrganization = (
+    organizationId: string,
+    attributes: Http.UpdateOrganizationPayload & { readonly defaultRole?: string | undefined },
+  ): Promise<Http.OrganizationView> =>
+    jsonApi<DataDocument<WireOrganization>>(
+      "PATCH",
+      `/organizations/${encodeURIComponent(organizationId)}`,
+      { data: { type: "organizations", id: organizationId, attributes } },
+    ).then((document) => organizationView(document.data));
+
+  /** `PATCH /organization-members/:id`: a new role, or a status to move to. */
+  const updateMember = (
+    memberId: string,
+    attributes: {
+      readonly role?: string | undefined;
+      readonly status?: Http.MemberView["status"] | undefined;
+    },
+  ): Promise<Http.MemberView> =>
+    jsonApi<DataDocument<WireMember>>(
+      "PATCH",
+      `/organization-members/${encodeURIComponent(memberId)}`,
+      { data: { type: "organization-members", id: memberId, attributes } },
+    ).then((document) => memberView(document.data));
+
+  /** `PATCH /invitations/:id`: move an invitation to `status`. */
+  const transitionInvitation = (
+    invitationId: string,
+    status: Exclude<Http.InvitationView["status"], "pending">,
+  ): Promise<InvitationTransitionDocument> =>
+    jsonApi<InvitationTransitionDocument>(
+      "PATCH",
+      `/invitations/${encodeURIComponent(invitationId)}`,
+      { data: { type: "invitations", id: invitationId, attributes: { status } } },
+    );
+
   /** Redeem a second-factor challenge with a TOTP or backup code. */
   const verifySecondFactor = (
     token: string,
@@ -872,10 +971,22 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     multiSession: {
-      list: () => request<Http.MultiSessionListView>("GET", "/multi-session/list"),
-      setActive: (payload) =>
-        mutating(() => request<Http.StatusResponse>("POST", "/multi-session/set-active", payload)),
-      revoke: (payload) => request<Http.StatusResponse>("POST", "/multi-session/revoke", payload),
+      list: () =>
+        jsonApi<CollectionDocument<WireDeviceSession>>("GET", "/device-sessions").then((document) =>
+          document.data.flatMap((resource) => deviceSessionView(resource, document.included ?? [])),
+        ),
+      setActive: ({ sessionId }) =>
+        mutating(() =>
+          jsonApi<void>("PATCH", "/device-sessions/active", {
+            data: { type: "device-sessions", id: sessionId },
+          }).then(() => ({ status: true })),
+        ),
+      revoke: ({ sessionId }) =>
+        mutating(() =>
+          jsonApi<void>("DELETE", `/device-sessions/${encodeURIComponent(sessionId)}`).then(() => ({
+            status: true,
+          })),
+        ),
     },
 
     magicLink: {
@@ -946,87 +1057,88 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     organization: {
-      create: (payload) => request<Http.OrganizationView>("POST", "/organization/create", payload),
-      list: () => request<Http.OrganizationListView>("GET", "/organizations"),
-      get: (organizationId) =>
-        request<Http.FullOrganizationView>(
-          "GET",
-          `/organization/${encodeURIComponent(organizationId)}`,
+      create: (payload) =>
+        jsonApi<DataDocument<WireOrganization>>("POST", "/organizations", {
+          data: { type: "organizations", attributes: payload },
+        }).then((document) => organizationView(document.data)),
+      list: () =>
+        jsonApi<CollectionDocument<WireOrganization>>("GET", "/organizations").then((document) =>
+          document.data.map(organizationView),
         ),
-      update: (organizationId, payload) =>
-        request<Http.OrganizationView>(
-          "PATCH",
-          `/organization/${encodeURIComponent(organizationId)}`,
-          payload,
-        ),
+      get: async (organizationId) => {
+        const path = `/organizations/${encodeURIComponent(organizationId)}`;
+        const [organization, members] = await Promise.all([
+          jsonApi<DataDocument<WireOrganization>>("GET", path),
+          jsonApi<CollectionDocument<WireMember>>("GET", `${path}/members`),
+        ]);
+        return {
+          organization: organizationView(organization.data),
+          members: members.data.map(memberView),
+        };
+      },
+      update: (organizationId, payload) => updateOrganization(organizationId, payload),
       delete: (organizationId) =>
-        request<void>("DELETE", `/organization/${encodeURIComponent(organizationId)}`),
+        jsonApi<void>("DELETE", `/organizations/${encodeURIComponent(organizationId)}`),
       // The active organization is stored on the session, so notify its observers.
-      setActive: (payload) =>
-        mutating(() => request<Http.StatusResponse>("POST", "/organization/set-active", payload)),
+      setActive: ({ organizationId }) =>
+        mutating(() =>
+          jsonApi<void>("PATCH", "/organizations/active", {
+            data: organizationId === null ? null : { type: "organizations", id: organizationId },
+          }).then(() => ({ status: true })),
+        ),
 
-      addMember: (organizationId, payload) =>
-        request<Http.MemberView>(
+      addMember: (organizationId, { userId, role }) =>
+        jsonApi<DataDocument<WireMember>>(
           "POST",
-          `/organization/${encodeURIComponent(organizationId)}/members`,
-          payload,
-        ),
-      updateMemberRole: (organizationId, payload) =>
-        request<Http.MemberView>(
-          "PATCH",
-          `/organization/${encodeURIComponent(organizationId)}/members`,
-          payload,
-        ),
-      removeMember: (organizationId, userId) =>
-        request<void>(
-          "DELETE",
-          `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
-        ),
-      deactivateMember: (organizationId, userId) =>
-        request<Http.MemberView>(
-          "POST",
-          `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/deactivate`,
-        ),
-      reactivateMember: (organizationId, userId) =>
-        request<Http.MemberView>(
-          "POST",
-          `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/reactivate`,
-        ),
-      setDefaultRole: (organizationId, payload) =>
-        request<Http.OrganizationView>(
-          "PUT",
-          `/organization/${encodeURIComponent(organizationId)}/default-role`,
-          payload,
-        ),
+          `/organizations/${encodeURIComponent(organizationId)}/members`,
+          {
+            data: {
+              type: "organization-members",
+              ...(role !== undefined && { attributes: { role } }),
+              relationships: { user: { data: { type: "users", id: userId } } },
+            },
+          },
+        ).then((document) => memberView(document.data)),
+      updateMemberRole: (memberId, { role }) => updateMember(memberId, { role }),
+      removeMember: (memberId) =>
+        jsonApi<void>("DELETE", `/organization-members/${encodeURIComponent(memberId)}`),
+      deactivateMember: (memberId) => updateMember(memberId, { status: "inactive" }),
+      reactivateMember: (memberId) => updateMember(memberId, { status: "active" }),
+      setDefaultRole: (organizationId, { role }) =>
+        updateOrganization(organizationId, { defaultRole: role }),
 
       invite: (organizationId, payload) =>
-        request<Http.InvitationView>(
+        jsonApi<DataDocument<WireInvitation>>(
           "POST",
-          `/organization/${encodeURIComponent(organizationId)}/invitations`,
-          payload,
-        ),
+          `/organizations/${encodeURIComponent(organizationId)}/invitations`,
+          { data: { type: "invitations", attributes: payload } },
+        ).then((document) => invitationView(document.data)),
       listInvitations: (organizationId) =>
-        request<Http.InvitationListView>(
+        jsonApi<CollectionDocument<WireInvitation>>(
           "GET",
-          `/organization/${encodeURIComponent(organizationId)}/invitations`,
-        ),
-      acceptInvitation: (invitationId) =>
-        request<Http.MemberView>("POST", `/invitations/${encodeURIComponent(invitationId)}/accept`),
+          `/organizations/${encodeURIComponent(organizationId)}/invitations`,
+        ).then((document) => document.data.map(invitationView)),
+      acceptInvitation: async (invitationId) => {
+        const document = await transitionInvitation(invitationId, "accepted");
+        const member = document.meta?.membership;
+        if (member === undefined) {
+          throw new AuthClientError(0, "The accepted invitation did not include its membership");
+        }
+        return memberView(member);
+      },
       rejectInvitation: (invitationId) =>
-        request<Http.InvitationView>(
-          "POST",
-          `/invitations/${encodeURIComponent(invitationId)}/reject`,
+        transitionInvitation(invitationId, "rejected").then((document) =>
+          invitationView(document.data),
         ),
       cancelInvitation: (invitationId) =>
-        request<Http.InvitationView>(
-          "POST",
-          `/invitations/${encodeURIComponent(invitationId)}/cancel`,
+        transitionInvitation(invitationId, "canceled").then((document) =>
+          invitationView(document.data),
         ),
       resendInvitation: (invitationId) =>
-        request<Http.InvitationView>(
+        jsonApi<DataDocument<WireInvitation>>(
           "POST",
-          `/invitations/${encodeURIComponent(invitationId)}/resend`,
-        ),
+          `/invitations/${encodeURIComponent(invitationId)}/deliveries`,
+        ).then((document) => invitationView(document.data)),
 
       listDomains: (organizationId) =>
         request<Http.OrganizationDomainListView>(

@@ -374,6 +374,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    getMemberById: (memberId) => Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     updateMember: (member) =>
       Effect.sync(() => {
         const index = members.findIndex((m) => m.id === member.id);

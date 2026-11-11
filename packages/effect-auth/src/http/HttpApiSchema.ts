@@ -584,9 +584,8 @@ export const AddMemberPayload = Schema.Struct({
 });
 export type AddMemberPayload = typeof AddMemberPayload.Type;
 
-/** Request body for updating a member's role. */
+/** The new role for a membership (`PATCH /organization-members/:id`). */
 export const UpdateMemberRolePayload = Schema.Struct({
-  userId: Schema.String,
   role: Schema.String,
 });
 export type UpdateMemberRolePayload = typeof UpdateMemberRolePayload.Type;

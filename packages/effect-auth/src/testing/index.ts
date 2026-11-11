@@ -46,6 +46,7 @@ export {
   type UserStoreConformanceOptions,
   apiKeyStoreConformance,
   identifierStoreConformance,
+  organizationStoreConformance,
   pendingMultiFactorStoreConformance,
   sessionStoreConformance,
   userStoreConformance,

@@ -69,6 +69,7 @@ import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
 import { type PendingMultiFactor, PendingMultiFactorStore } from "../multifactor/MultiFactor.ts";
+import { type Member, type Organization, OrganizationStore } from "../Organization.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
@@ -985,6 +986,126 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
             "the first count of a challenge recreated under the same token",
             yield* store.recordFailedAttempt(pending.token),
             1,
+          );
+        }),
+    },
+  ]);
+
+// ---------------------------------------------------------------------------
+// OrganizationStore (memberships)
+// ---------------------------------------------------------------------------
+
+const makeOrganization = (): Organization => {
+  const id = uuid();
+  return {
+    id,
+    name: "Conformance Organization",
+    slug: `conformance-${id}`,
+    metadata: { conformance: true },
+    createdAt: at().getTime(),
+  };
+};
+
+const makeMember = (organizationId: string, userId: string, role = "member"): Member => ({
+  id: uuid(),
+  organizationId,
+  userId,
+  role,
+  createdAt: at().getTime(),
+});
+
+/** A fresh organization with one new user's membership in it, both written to the store. */
+const newMembership = <E, R>(newUser: () => Effect.Effect<string, E, R>) =>
+  Effect.gen(function* () {
+    const store = yield* OrganizationStore;
+    const organization = yield* store.createOrganization(makeOrganization());
+    const member = makeMember(organization.id, yield* newUser());
+    yield* expectEqual("createMember", yield* store.createMember(member), member);
+    return { store, organization, member };
+  });
+
+/**
+ * The membership half of the `OrganizationStore` contract: a membership reads
+ * back by `(organizationId, userId)` and by its own id (`getMemberById`, which
+ * the HTTP tier's `/organization-members/:id` relies on), an update is what
+ * both lookups then answer, and a deleted or unknown membership is `null`.
+ *
+ * @since 0.3.0
+ * @category suites
+ */
+export const organizationStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | OrganizationStore> =>
+  suite<E, R, OrganizationStore>("OrganizationStore", options, [
+    {
+      name: "getMember and getMemberById read a membership back, and miss with null",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const { store, organization, member } = yield* newMembership(newUser);
+          yield* expectEqual(
+            "getMember",
+            yield* store.getMember(organization.id, member.userId),
+            member,
+          );
+          yield* expectEqual("getMemberById", yield* store.getMemberById(member.id), member);
+          yield* expectEqual(
+            "getMemberById of an unknown id",
+            yield* store.getMemberById(uuid()),
+            null,
+          );
+        }),
+    },
+    {
+      name: "getMemberById tells one user's memberships of two organizations apart",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* OrganizationStore;
+          const userId = yield* newUser();
+          const first = yield* store.createOrganization(makeOrganization());
+          const second = yield* store.createOrganization(makeOrganization());
+          const inFirst = makeMember(first.id, userId, "owner");
+          const inSecond = makeMember(second.id, userId, "member");
+          yield* store.createMember(inFirst);
+          yield* store.createMember(inSecond);
+          yield* expectEqual(
+            "getMemberById (first)",
+            yield* store.getMemberById(inFirst.id),
+            inFirst,
+          );
+          yield* expectEqual(
+            "getMemberById (second)",
+            yield* store.getMemberById(inSecond.id),
+            inSecond,
+          );
+        }),
+    },
+    {
+      name: "getMemberById answers the updated membership, and null once it is deleted",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const { store, organization, member } = yield* newMembership(newUser);
+          const updated: Member = {
+            ...member,
+            role: "admin",
+            status: "inactive",
+            previousRole: "member",
+          };
+          yield* store.updateMember(updated);
+          yield* expectEqual(
+            "getMemberById after update",
+            yield* store.getMemberById(member.id),
+            updated,
+          );
+          yield* store.deleteMember(member.id);
+          yield* expectEqual(
+            "getMemberById after delete",
+            yield* store.getMemberById(member.id),
+            null,
+          );
+          yield* expectEqual(
+            "getMember after delete",
+            yield* store.getMember(organization.id, member.userId),
+            null,
           );
         }),
     },
