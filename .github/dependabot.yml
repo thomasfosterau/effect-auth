@@ -112,9 +112,7 @@ updates:
     assignees:
       - thomasfosterau
   - package-ecosystem: "github-actions"
-    directories:
-      - "/"
-      - "/.github/actions/*"
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
