@@ -1,6 +1,9 @@
-# Composite setup shared by every workflow that needs the toolchain: pnpm +
-# Node.js, the pnpm store cache (keyed on pnpm-lock.yaml by setup-node), a
-# frozen-lockfile install and the repository's own `prepare` script. `vp` and
+# Composite setup shared by every workflow that needs the toolchain: Vite+
+# (`voidzero-dev/setup-vp`, #565), which installs `vp` at the catalog's
+# `vite-plus` pin, the Node.js runtime and the pnpm that package.json's
+# `packageManager` names, and caches the dependency store (keyed on
+# pnpm-lock.yaml); then a frozen-lockfile install and the repository's own
+# `prepare` script. `vp` and
 # the dev bins land in node_modules/.bin; later steps call them through
 # `pnpm exec` rather than through a `GITHUB_PATH` entry, which zizmor flags
 # (a step that can write the path can shadow every later command). Copied in
@@ -18,16 +21,14 @@
 # Callers must run `actions/checkout` BEFORE this (a local composite action
 # needs the repo on disk first).
 name: Setup toolchain
-description: Set up Node.js and pnpm, restore the package cache, install dependencies and patch the toolchain.
+description: Set up Vite+, Node.js and pnpm, restore the package cache, install dependencies and patch the toolchain.
 inputs:
   node-version:
-    # Never `latest`: setup-node resolves it to the first entry of the
-    # nodejs.org index, pre-releases included (a v27 alpha since 2026-10-29),
-    # which would run CI and publish on an alpha. `*` with `check-latest` is
-    # the newest stable release from setup-node's manifest.
-    description: The Node.js version to set up.
+    # Empty: Vite+ resolves the runtime (the project's setting, else the
+    # latest LTS release), never a pre-release. Pass a version to pin one.
+    description: The Node.js version to set up (empty lets Vite+ choose).
     required: false
-    default: "*"
+    default: ""
   ignore-scripts:
     description: Skip every dependency lifecycle script (the release job sets this).
     required: false
@@ -35,17 +36,16 @@ inputs:
 runs:
   using: composite
   steps:
-    # pnpm before Node so setup-node's `cache: pnpm` can resolve the store path.
-    # The pnpm version comes from the `packageManager` field in package.json.
-    - name: Setup pnpm
-      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-    - name: Setup Node.js
-      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+    # One action for the toolchain: `vp` (its version read from the catalog's
+    # `vite-plus` entry), Node.js and pnpm (`packageManager`), plus the
+    # dependency cache. It does not install: the retried step below does, so
+    # the release job's `ignore-scripts` still applies.
+    - name: Setup Vite+
+      uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
       with:
         node-version: ${{ inputs.node-version }}
-        check-latest: true
-        cache: pnpm
+        cache: true
+        run-install: false
 
     # Retried: pnpm's linker can race itself when a package with a build
     # script resolves twice and both copies build — a transient ENOENT on the
