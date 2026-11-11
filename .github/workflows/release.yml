@@ -54,7 +54,7 @@ jobs:
         with:
           cache: true
           run-install: |
-            args: ["--frozen-lockfile", "--ignore-scripts"]
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Patch the toolchain
         run: pnpm run prepare
       - name: Select mode
@@ -88,7 +88,7 @@ jobs:
         with:
           cache: true
           run-install: |
-            args: ["--frozen-lockfile", "--ignore-scripts"]
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Patch the toolchain
         run: pnpm run prepare
       - name: Create or update the version PR
@@ -145,7 +145,7 @@ jobs:
         with:
           cache: true
           run-install: |
-            args: ["--frozen-lockfile", "--ignore-scripts"]
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Patch the toolchain
         run: pnpm run prepare
 
