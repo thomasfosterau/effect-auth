@@ -1718,8 +1718,7 @@ export const str = (v: unknown): string | undefined => (P.isString(v) ? v : unde
  */
 export const nested = (v: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>(
-    (acc, key) =>
-      P.isObjectOrArray(acc) && P.hasProperty(acc, key) ? acc[key] : undefined,
+    (acc, key) => (P.isObjectOrArray(acc) && P.hasProperty(acc, key) ? acc[key] : undefined),
     v,
   );
 
