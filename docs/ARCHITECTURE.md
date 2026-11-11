@@ -172,10 +172,14 @@ directories, each with its own `index.ts` barrel and matching
   `HttpMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
-- **`client/`** (the `./client` subpath only): `Client.ts`, the browser
-  client over the HTTP contract (plain `fetch`, type-only imports from
-  `http/`, so no Effect runtime reaches the bundle), and `testing/fixture.ts`
-  (`./client/testing`, an in-memory server and a cookie-jar `fetch`).
+- **`client/`** (the `./client` subpaths only): `Client.ts` (`./client`), the
+  browser client over the HTTP contract (plain `fetch`, type-only imports from
+  `http/`, so no Effect runtime reaches the bundle), which holds no session
+  state and announces session-changing calls through `onSessionChange`;
+  `SessionAtoms.ts` (`./client/atoms`), the session as `effect/reactivity`
+  Atoms over the client, the one client module that imports `effect` at
+  runtime (#206); and `testing/fixture.ts` (`./client/testing`, an in-memory
+  server and a cookie-jar `fetch`).
 - **`sql/`** (the `./sql` subpath only): `Stores.ts` (every store it covers
   over `effect/sql`'s `SqlClient`, for SQLite, D1 and PostgreSQL), `Schema.ts`
   (the `auth_*` DDL, `migrate`, `authTableNames`), `ReadScope.ts` (a read
@@ -214,7 +218,8 @@ whole headless surface; the per-cluster subpaths (`effect-auth/email`,
 want a narrower import. The HTTP tier is published only as the
 `effect-auth/http` subpath (#205), so the root import's module graph never
 reaches `effect/http-api`; `ModuleGraph.test.ts` holds that line. The same
-goes for `effect-auth/client`, `effect-auth/client/testing`,
+goes for `effect-auth/client`, `effect-auth/client/atoms`,
+`effect-auth/client/testing`,
 `effect-auth/sql` and `effect-auth/saml`: subpaths only, never reached from
 the root, so the root graph loads neither `effect/sql` nor
 `@node-saml/node-saml` (`ModuleGraph.test.ts` checks both).

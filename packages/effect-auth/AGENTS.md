@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth
 
-The headless core: sessions, users and identifiers, every sign-in method, multi-factor, OAuth, organizations, admin, API keys, JWT, SSO, SCIM, the OIDC provider and the authorization kernel, as Effect services and layers, plus four opt-in subpaths the root never loads: the HTTP tier (`./http`), the browser client (`./client`, with its `./client/testing` fixture), SQL storage over `effect/sql` (`./sql`) and the Node-only SAML verifier (`./saml`). Client, SQL and SAML were their own packages until ADR-0022 merged them in.
+The headless core: sessions, users and identifiers, every sign-in method, multi-factor, OAuth, organizations, admin, API keys, JWT, SSO, SCIM, the OIDC provider and the authorization kernel, as Effect services and layers, plus four opt-in subpaths the root never loads: the HTTP tier (`./http`), the browser client (`./client`, with its session Atoms `./client/atoms` and its `./client/testing` fixture), SQL storage over `effect/sql` (`./sql`) and the Node-only SAML verifier (`./saml`). Client, SQL and SAML were their own packages until ADR-0022 merged them in.
 
 ## Boundary
 
@@ -18,6 +18,7 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 | `./plugins`        | `plugins/`                  | `Auth.Plugins`                    |
 | `./http`           | `http/`                     | — (subpath only, #205)            |
 | `./client`         | `client/index.ts`           | — (subpath only)                  |
+| `./client/atoms`   | `client/SessionAtoms.ts`    | — (subpath only)                  |
 | `./client/testing` | `client/testing/fixture.ts` | — (subpath only)                  |
 | `./sql`            | `sql/index.ts`              | — (subpath only)                  |
 | `./saml`           | `saml/index.ts`             | — (subpath only; Node-only)       |
@@ -34,11 +35,13 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 
 ### `./client`
 
-- **`client/Client.ts` has no runtime imports.** It imports the HTTP tier with `import type` only (`ModuleGraph.test.ts` pins it), so nothing server-side and no Effect runtime reaches a browser bundle. Only `./client/testing` imports the core at runtime. The package `tsconfig.json` adds the `DOM` lib for it (`window`, `document`, `BroadcastChannel`).
+- **`client/Client.ts` has no runtime imports**, and `./client` (`client/index.ts`) re-exports nothing else. It imports the HTTP tier with `import type` only (`ModuleGraph.test.ts` pins both), so nothing server-side and no Effect runtime reaches a browser bundle that loads only `./client`. `./client/atoms` (`client/SessionAtoms.ts`) is the one client entry that imports `effect` at runtime (`effect`, `effect/reactivity` and `./Client.ts`, pinned too); it is a subpath of its own, never re-exported from `./client`, so the Effect runtime is opt-in (#206). Only `./client/testing` imports the core at runtime. The package `tsconfig.json` adds the `DOM` lib for them (`window`, `document`, `BroadcastChannel`).
 - **One method per contract endpoint, named after it**, typed with the contract's own payload and view types, so a contract change is a compile error here. Optional server modules answer `404`; a method existing does not mean the server mounted the feature.
 - **Every request sends `credentials: "include"`**; a non-2xx rejects with `AuthClientError` carrying `status` and the server's JSON `message` (else the status text). JSON is detected by the media-type essence (`application/json` or `+json`), not a substring.
-- **The session store is lazy and refetch-skipping**: the first `subscribe` triggers the `GET /sessions/current?include=user` read; the state starts `isPending: true`; a `401` is `data: null`, not an error; a transient failure keeps the last `data` and sets `error`; session-changing calls refetch only while something is subscribed; an out-of-order refetch result is dropped.
-- **Background refresh is opt-in and degrades to a no-op** outside a browser (`intervalMs`, `onFocus`, `crossTab` via `BroadcastChannel`); it starts with the first subscriber and stops with the last.
+- **The client holds no session state.** Session-changing calls go through `mutating`, which runs the call, then every `onSessionChange` listener, and resolves once their promises settle (`Promise.allSettled`: a listener's rejection never fails the call). `invalidateSession()` notifies without a call.
+- **The session is an Atom graph** (`makeSessionAtoms`, `effect/reactivity`), and commands stay plain client calls the Atoms observe. The read is lazy: the first registry read or mount starts `GET /sessions/current?include=user`; it starts waiting (`isPending: true`); a `401` is `data: null`, not an error; a transient failure keeps the last `data` (the `AsyncResult`'s previous success) and sets `error`; a superseded refetch is interrupted, so an out-of-order result is dropped. The `onSessionChange` listener exists only while the session is mounted, so session-changing calls refetch only while observed; the read itself is `keepAlive`, so a later subscriber starts from the last read without a request. Derived Atoms forward `refresh` to the read. A session change propagates through the graph (`SessionAtoms.test.ts` pins it); nothing keeps an invalidation list.
+- **Background refresh is opt-in and degrades to a no-op** outside a browser (`makeSessionAtoms`'s `refresh`: `intervalMs`, `onFocus`, `crossTab` via `BroadcastChannel`); it lives in the observed Atom's lifetime, so it starts with the first subscriber and stops with the last. A cross-tab message replaces the shown session without a request and is not echoed; a waiting or failed read keeps what is shown.
+- **SSR hydration of the session Atoms is not implemented** (follow-up to #206, to match `@legation/svelte/kit`'s shape).
 - **The second-factor continuation refuses an expired challenge locally**, without a request; the server enforces expiry regardless.
 - **`./client/testing` runs the real `Http.make` handler** over in-memory stores with features off by default (so unconfigured endpoints answer `404`), and `makeCookieJarFetch` emulates the browser's cookie jar. It is published.
 
@@ -97,8 +100,9 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 - **Principal / entity** — the kernel's typed references (`Type::"id"`); a **system principal** is `System::"<name>"`.
 - **Ladder / rung / axis** — an ordered role list, one role per user, and a named "this rung or above" capability.
 - **Fail-open / fail-closed resolution** — `SessionResolution.resolveFailOpen` turns a session-service fault into an anonymous request reported as `degraded`; `resolve` fails. Neither is the default.
-- **Session store (client)** — `client.session`: `get`, `subscribe`, `refetch` over `{ data, isPending, error }`; the contract the Svelte binding adapts. Not the server-side `SessionStore` service.
-- **Mutating call** — a client request that changes the session, followed by a refetch when observed (`AuthClientPluginContext.mutating`). A client **plugin** is `definePlugin(install)`, adding typed methods via `client.extend`.
+- **Session Atoms (client)** — `SessionAtoms` from `makeSessionAtoms(client)` (`./client/atoms`): `result` (`AsyncResult`), `state` (`{ data, isPending, error }`), `data`, `isSignedIn`, `isPending`, `error`, `sessions`, `sessionsState`; what the Svelte binding adapts. Not the server-side `SessionStore` service.
+- **Session observer** — an `onSessionChange` listener; the session Atoms register one while mounted.
+- **Mutating call** — a client request that changes the session, followed by notifying the session observers (`AuthClientPluginContext.mutating`). A client **plugin** is `definePlugin(install)`, adding typed methods via `client.extend`.
 - **Store layer** — `./sql`'s `<Name>StoreLayer`: `Layer<Auth.<Name>Store, never, SqlClient>` over `make<Name>Store`.
 - **RBAC tables** — `auth_user_roles` (user → role) and `auth_role_permissions` (role → `resource`/`action`); data for the kernel, not a store service.
 - **IdP / SP** — the identity provider that signs a SAML assertion, and this application as the service provider (`spEntityId`, `acsUrl`). The **ACS URL** is the endpoint the `Response` is posted to; **RelayState** is the opaque `state` issued with the `AuthnRequest` and echoed back.

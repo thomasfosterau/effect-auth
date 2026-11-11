@@ -440,6 +440,8 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 - **Framework parity rule:** every binding exposes the same capability set over
   the observable `client.session` store; naming follows each framework's idiom
   (`useSession` React/Vue, `sessionStore` Svelte — settled as intentional).
+  (Since #206 the store is gone: the session is the `effect/reactivity` Atom
+  graph of `./client/atoms`, and the Svelte binding, the one left, adapts it.)
 - **Applied now (additive):** `listSessions` parity for Svelte
   (`listSessionsStore`) and Vue (`useListSessions`), closing the one concrete
   capability gap.

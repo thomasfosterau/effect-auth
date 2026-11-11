@@ -11,6 +11,7 @@
     "packages/effect-auth/src/multifactor/index.ts",
     "packages/effect-auth/src/testing/index.ts",
     "packages/effect-auth/src/client/index.ts",
+    "packages/effect-auth/src/client/SessionAtoms.ts",
     "packages/effect-auth/src/client/testing/fixture.ts",
     "packages/effect-auth/src/sql/index.ts",
     "packages/effect-auth/src/saml/index.ts",

@@ -2,9 +2,12 @@
  * Vanilla auth client for the effect-auth HTTP protocol.
  *
  * A small, dependency-free client (plain `fetch`, no Effect runtime in the
- * bundle) with methods mirroring the contract's endpoint names and an
- * observable session store that the framework binding package subscribes to
- * (`@thomasfosterau/effect-auth-svelte`).
+ * bundle) with methods mirroring the contract's endpoint names. The client
+ * holds no session state: it announces each session-changing call to its
+ * observers (`onSessionChange`), and the session itself is an
+ * `effect/reactivity` Atom graph over the client in the `./client/atoms`
+ * subpath (`SessionAtoms.ts`), which the Svelte binding
+ * (`@thomasfosterau/effect-auth-svelte`) adapts.
  *
  * Only the wire *types* are imported from the `http/` tier — they erase at
  * compile time, so the browser bundle contains just this file.
@@ -79,57 +82,16 @@ export interface SecondFactorContinuation {
   readonly verifyBackupCode: (code: string) => Promise<AuthResult>;
 }
 
-/** The session store's state. */
-export interface SessionState {
-  /** The authenticated session + user, or `null` when signed out. */
-  readonly data: Http.SessionWithUserView | null;
-  /** `true` while the initial fetch (or a refetch) is in flight. */
-  readonly isPending: boolean;
-  /** The last unexpected error (401s resolve to `data: null`, not an error). */
-  readonly error: AuthClientError | null;
-}
-
 /**
- * A minimal observable holding the current session. Framework adapters
- * subscribe to it; the vanilla client refreshes it after every
- * session-changing call (sign-in/up/out, second-factor redemption, ...).
+ * An observer of session-changing calls, registered with
+ * `AuthClient.onSessionChange`. A returned promise is awaited: the call that
+ * changed the session resolves only once every observer has settled
+ * (refetched, typically), so `await client.signIn(...)` is followed by an
+ * up-to-date session. A rejection is ignored; it never fails the call.
  */
-export interface SessionStore {
-  /** Current state (stable reference between changes). */
-  readonly get: () => SessionState;
-  /**
-   * Subscribe to state changes. The first subscription triggers the initial
-   * session fetch. Returns an unsubscribe function.
-   */
-  readonly subscribe: (listener: () => void) => () => void;
-  /** Re-fetch the session from the server and notify subscribers. */
-  readonly refetch: () => Promise<void>;
-}
+export type SessionChangeListener = () => void | Promise<void>;
 
-/** Options for opt-in background session refresh. */
-export interface RefreshOptions {
-  /**
-   * Poll the `/session` endpoint every `intervalMs` milliseconds. The interval
-   * starts when the first subscriber joins and is cancelled when the last one
-   * leaves. Off by default.
-   */
-  readonly intervalMs?: number | undefined;
-  /**
-   * Refetch when the browser tab becomes visible or the window gains focus.
-   * Falls back to a no-op in non-browser environments. Default: `false`.
-   */
-  readonly onFocus?: boolean | undefined;
-  /**
-   * Mirror session changes across browser tabs via `BroadcastChannel`.
-   * Pass `true` for the default channel name (`"effect-auth-session"`), or a
-   * string for a custom name (useful when multiple auth clients share a page).
-   * Falls back to a no-op when `BroadcastChannel` is unavailable (e.g. older
-   * Safari or Node.js). Default: `false`.
-   */
-  readonly crossTab?: boolean | string | undefined;
-}
-
-/** Options for {@link createAuthClient}: the base URL, a `fetch` override, extra headers and background refresh. */
+/** Options for {@link createAuthClient}: the base URL, a `fetch` override and extra headers. */
 export interface AuthClientOptions {
   /**
    * Base URL the auth handler is mounted at, e.g.
@@ -140,18 +102,17 @@ export interface AuthClientOptions {
   readonly fetch?: typeof globalThis.fetch | undefined;
   /** Extra headers attached to every request. */
   readonly headers?: Record<string, string> | undefined;
-  /** Opt-in background session refresh. All features are off by default. */
-  readonly refresh?: RefreshOptions | undefined;
 }
 
 /** Internals exposed to plugins during {@link AuthClientPlugin.install}. */
 export interface AuthClientPluginContext {
   /** Issue a raw HTTP request to the auth server. */
   readonly request: <T>(method: string, path: string, body?: unknown) => Promise<T>;
-  /** Issue a session-changing request, then refetch the session if observed. */
+  /**
+   * Issue a session-changing request, then notify the session observers
+   * (`AuthClient.onSessionChange`) and wait for them to settle.
+   */
   readonly mutating: <T>(run: () => Promise<T>) => Promise<T>;
-  /** The observable session store. */
-  readonly session: SessionStore;
 }
 
 /**
@@ -313,9 +274,26 @@ const errorMessage = (body: unknown): string | undefined => {
   return "message" in body && typeof body.message === "string" ? body.message : undefined;
 };
 
-/** The auth client: typed methods over the contract + the session store. */
+/** The auth client: typed methods over the contract, plus session-change notification. */
 export interface AuthClient {
-  readonly session: SessionStore;
+  /**
+   * Observe session-changing calls (sign-in / up / out, second-factor
+   * redemption, impersonation, switching the active organization, ...).
+   * `listener` runs after each such call succeeds, and the call resolves only
+   * once the listener's promise settles. Returns the function that removes it.
+   *
+   * The client keeps no session state of its own: the session Atoms in
+   * `@thomasfosterau/effect-auth/client/atoms` register here while they are
+   * observed and refetch on each notification, so a call nobody observes
+   * costs no session round trip.
+   */
+  readonly onSessionChange: (listener: SessionChangeListener) => () => void;
+  /**
+   * Notify the session observers as a session-changing call would, and wait
+   * for them to settle: the refetch for a change this client did not make
+   * (a sign-out on the server, a form posted outside it).
+   */
+  readonly invalidateSession: () => Promise<void>;
 
   readonly signUp: (payload: Http.SignUpPayload) => Promise<AuthResult>;
   readonly signIn: (payload: Http.SignInPayload) => Promise<AuthResult>;
@@ -629,8 +607,10 @@ export interface AuthClient {
  * ```ts skip-type-checking
  * const client = createAuthClient({ baseUrl: "/api/auth" });
  * const { user } = await client.signIn({ email, password });
- * client.session.subscribe(() => render(client.session.get()));
  * ```
+ *
+ * The session, as Atoms over this client, is `makeSessionAtoms(client)` from
+ * `@thomasfosterau/effect-auth/client/atoms`.
  */
 export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -680,35 +660,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   const jsonApi = <T>(method: string, path: string, body?: unknown): Promise<T> =>
     send<T>(method, path, body, JSON_API);
 
-  // --- Session store ----------------------------------------------------------
+  // --- Session observers -----------------------------------------------------
 
-  let state: SessionState = { data: null, isPending: true, error: null };
-  let fetchedOnce = false;
-  let refetchSeq = 0;
-  const listeners = new Set<() => void>();
-
-  // --- Background refresh state ---------------------------------------------
-
-  let refreshActive = false;
-  let intervalId: ReturnType<typeof setInterval> | undefined;
-  let broadcastChannel: BroadcastChannel | undefined;
-
-  const onFocus = (): void => {
-    void refetch();
-  };
-  const onVisibilityChange = (): void => {
-    if (globalThis.document !== undefined && document.visibilityState === "visible") {
-      void refetch();
-    }
-  };
-
-  const setState = (next: SessionState, broadcast = true): void => {
-    state = next;
-    listeners.forEach((listener) => listener());
-    if (broadcast && broadcastChannel !== undefined) {
-      broadcastChannel.postMessage({ data: next.data });
-    }
-  };
+  const sessionListeners = new Set<SessionChangeListener>();
 
   const getSession = (): Promise<Http.SessionWithUserView | null> =>
     jsonApi<DataDocument<WireSession>>("GET", "/sessions/current?include=user").then(
@@ -726,119 +680,24 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       },
     );
 
-  const refetch = async (): Promise<void> => {
-    const seq = ++refetchSeq;
-    setState({ ...state, isPending: true });
-    let next: SessionState;
-    try {
-      next = { data: await getSession(), isPending: false, error: null };
-    } catch (error) {
-      next = {
-        data: state.data,
-        isPending: false,
-        error:
-          error instanceof AuthClientError
-            ? error
-            : new AuthClientError(0, error instanceof Error ? error.message : String(error)),
-      };
-    }
-    if (seq !== refetchSeq) return;
-    setState(next);
-  };
-
-  const startRefresh = (): void => {
-    if (refreshActive) return;
-    refreshActive = true;
-
-    const cfg = options.refresh;
-    if (cfg === undefined) return;
-
-    if (cfg.intervalMs !== undefined && cfg.intervalMs > 0) {
-      intervalId = setInterval(() => void refetch(), cfg.intervalMs);
-    }
-
-    if (cfg.onFocus) {
-      if (globalThis.window !== undefined) {
-        window.addEventListener("focus", onFocus);
-      }
-      if (globalThis.document !== undefined) {
-        document.addEventListener("visibilitychange", onVisibilityChange);
-      }
-    }
-
-    if (cfg.crossTab) {
-      if (globalThis.BroadcastChannel !== undefined) {
-        const channelName = cfg.crossTab === true ? "effect-auth-session" : cfg.crossTab;
-        broadcastChannel = new BroadcastChannel(channelName);
-        broadcastChannel.addEventListener(
-          "message",
-          (event: MessageEvent<{ data: Http.SessionWithUserView | null }>) => {
-            setState({ data: event.data.data, isPending: false, error: null }, false);
-          },
-        );
-      }
-    }
-  };
-
-  const stopRefresh = (): void => {
-    if (!refreshActive) return;
-    refreshActive = false;
-
-    if (intervalId !== undefined) {
-      clearInterval(intervalId);
-      intervalId = undefined;
-    }
-
-    if (globalThis.window !== undefined) {
-      window.removeEventListener("focus", onFocus);
-    }
-    if (globalThis.document !== undefined) {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    }
-
-    if (broadcastChannel !== undefined) {
-      broadcastChannel.close();
-      broadcastChannel = undefined;
-    }
-  };
-
-  const session: SessionStore = {
-    get: () => state,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      if (!fetchedOnce) {
-        fetchedOnce = true;
-        void refetch();
-      }
-      if (listeners.size === 1) {
-        startRefresh();
-      }
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0) {
-          stopRefresh();
-        }
-      };
-    },
-    refetch,
+  /** Run every session observer and wait for all of them; a rejection is not the caller's. */
+  const notifySessionChange = async (): Promise<void> => {
+    await Promise.allSettled([...sessionListeners].map(async (listener) => listener()));
   };
 
   /**
-   * Run a session-changing call, then refresh the store only when there are
-   * active subscribers (skipping the round-trip when nobody is observing).
+   * Run a session-changing call, then notify the session observers. With none
+   * registered (nothing observes the session) no refetch happens at all.
    */
   const mutating = async <T>(run: () => Promise<T>): Promise<T> => {
     const result = await run();
-    if (listeners.size > 0) {
-      fetchedOnce = true;
-      await refetch();
-    }
+    await notifySessionChange();
     return result;
   };
 
-  const pluginContext: AuthClientPluginContext = { request, mutating, session };
+  const pluginContext: AuthClientPluginContext = { request, mutating };
 
-  /** Sign in with `credential` (`POST /sessions`), refreshing the session store. */
+  /** Sign in with `credential` (`POST /sessions`), notifying the session observers. */
   const signInWith = (credential: Http.SignInCredential, rememberMe?: boolean) =>
     mutating(() =>
       jsonApi<SignInDocument>("POST", "/sessions", {
@@ -904,7 +763,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   // Use `let` so the `extend` closure can reference `self` after assignment.
   let self!: AuthClient;
   self = {
-    session,
+    onSessionChange: (listener) => {
+      // A fresh entry per registration, so registering one listener twice
+      // takes two removals, as with `addEventListener`'s distinct handlers.
+      const entry: SessionChangeListener = () => listener();
+      sessionListeners.add(entry);
+      return () => {
+        sessionListeners.delete(entry);
+      };
+    },
+    invalidateSession: notifySessionChange,
 
     signUp: (payload) =>
       mutating(() =>
@@ -1093,7 +961,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         ),
       delete: (organizationId) =>
         request<void>("DELETE", `/organization/${encodeURIComponent(organizationId)}`),
-      // The active organization is stored on the session, so refresh the store.
+      // The active organization is stored on the session, so notify its observers.
       setActive: (payload) =>
         mutating(() => request<Http.StatusResponse>("POST", "/organization/set-active", payload)),
 

@@ -53,6 +53,10 @@
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"
     },
+    "./client/atoms": {
+      "types": "./dist/client/SessionAtoms.d.ts",
+      "import": "./dist/client/SessionAtoms.js"
+    },
     "./client/testing": {
       "types": "./dist/client/testing/fixture.d.ts",
       "import": "./dist/client/testing/fixture.js"

@@ -1,6 +1,6 @@
 # The browser client
 
-`@thomasfosterau/effect-auth/client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
+`@thomasfosterau/effect-auth/client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle). The session is an `effect/reactivity` Atom graph over that client, in `@thomasfosterau/effect-auth/client/atoms` (§2), so it lives in the same registry as the rest of a page's Atoms. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
 
 ## 1. Setup
 
@@ -13,12 +13,11 @@ export const client = createAuthClient({
 });
 ```
 
-| Option    | Purpose                                                         |
-| --------- | --------------------------------------------------------------- |
-| `baseUrl` | Mount point of the auth handler.                                |
-| `fetch`   | Custom `fetch` — SSR, tests, or an in-process handler.          |
-| `headers` | Extra headers on every request (e.g. a tenant header).          |
-| `refresh` | Opt-in background refresh; see §2. All of it is off by default. |
+| Option    | Purpose                                                |
+| --------- | ------------------------------------------------------ |
+| `baseUrl` | Mount point of the auth handler.                       |
+| `fetch`   | Custom `fetch` — SSR, tests, or an in-process handler. |
+| `headers` | Extra headers on every request (e.g. a tenant header). |
 
 Every call sends `credentials: "include"`, so the session cookie flows on cross-origin deployments too (the server must list your origin in `trustedOrigins`). A non-2xx response rejects with an `AuthClientError` carrying the HTTP `status` and the server's message:
 
@@ -34,53 +33,75 @@ try {
 
 Optional server modules that are not configured answer `404` — a client method existing does not mean the deployment mounted the feature.
 
-## 2. The session store
+## 2. The session Atoms
 
-`client.session` is a tiny observable holding `{ data, isPending, error }`. `data` is the `SessionWithUserView` or `null` when signed out; a `401` resolves to `data: null` rather than an error, and a _transient_ failure keeps the last known session while surfacing `error`.
+The client keeps no session state. `makeSessionAtoms(client)` from `@thomasfosterau/effect-auth/client/atoms` builds the session as Atoms, which you read through your application's `AtomRegistry` — the same one your other Atoms (a sync engine's live queries, say) live in, so one runtime serves the whole page:
 
 ```ts
-const unsubscribe = client.session.subscribe(() => render(client.session.get()));
-await client.session.refetch(); // manual refresh
+import { AtomRegistry } from "effect/reactivity";
+import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
+
+export const registry = AtomRegistry.make();
+export const auth = makeSessionAtoms(client);
+
+const unsubscribe = registry.subscribe(auth.state, render, { immediate: true });
+registry.refresh(auth.result); // manual refetch
 ```
 
-Two behaviours worth knowing:
+`auth.result` is the session read as an `AsyncResult<SessionWithUserView | null, AuthClientError>`; `state` (`{ data, isPending, error }`), `data`, `isSignedIn`, `isPending` and `error` derive from it, and `sessions` / `sessionsState` are the signed-in user's session list. A `401` is `data: null` rather than an error, and a _transient_ failure keeps the last known session while surfacing `error`.
 
-- **Lazy**: the first subscriber triggers the initial `GET /sessions/current` read. The store starts as `isPending: true` so a UI never flashes "signed out" on first paint.
-- **Refetch-skipping**: session-changing calls (sign-in/up/out, second-factor redemption, `setActive`, impersonation, …) refresh the store only while something is subscribed — with no observers, the round trip is skipped.
+Commands stay plain calls on the client. The Atoms observe them through `client.onSessionChange`, and four behaviours follow:
 
-Background refresh is opt-in per client:
+- **Lazy**: the first read or subscription starts the `GET /sessions/current` read. It starts pending, so a UI never flashes "signed out" on first paint.
+- **Awaited**: while a session Atom is mounted, a session-changing call (sign-in/up/out, second-factor redemption, `setActive`, impersonation, …) refetches it and resolves only once the refetch has settled, so the code after `await client.signIn(...)` sees the new session.
+- **Refetch-skipping**: with nothing mounted, the round trip is skipped; the next subscriber starts from the last read.
+- **Last dispatch wins**: a refetch superseded by a later one is interrupted, so a stale answer never lands.
+
+A session change propagates through the graph, with no invalidation list: an Atom that reads `auth.data` or `auth.isSignedIn` recomputes on sign-in and sign-out, and `auth.sessions` refetches when the session's id changes.
 
 ```ts
-createAuthClient({
-  baseUrl: "/api/auth",
+import { Atom } from "effect/reactivity";
+
+const greeting = Atom.make((get) => {
+  const user = get(auth.data)?.user;
+  return user === undefined ? "Hello, guest" : `Hello, ${user.email}`;
+});
+```
+
+Background refresh is opt-in per set of Atoms:
+
+```ts
+makeSessionAtoms(client, {
   refresh: {
-    intervalMs: 60_000, // poll while subscribed
+    intervalMs: 60_000, // poll while observed
     onFocus: true, // refetch on tab focus / visibility change
     crossTab: true, // mirror changes across tabs via BroadcastChannel
   },
 });
 ```
 
-The interval starts with the first subscriber and is cleared when the last one leaves; `onFocus` and `crossTab` degrade to no-ops outside the browser.
+Each feature starts with the first subscriber and stops with the last; `onFocus` and `crossTab` degrade to no-ops outside the browser.
+
+Server-side rendering has no hydration story yet: the Atoms start pending in the browser even when the server knew the session (follow-up to #206).
 
 ## 3. Framework binding
 
-The Svelte binding is its own package, depends on the core for its `/client` subpath, and subscribes to the same store, so an app that doesn't use Svelte installs only the client:
+The Svelte binding is its own package, depends on the core for its `/client` and `/client/atoms` subpaths, and adapts the session Atoms to Svelte stores, so an app that doesn't use Svelte installs only the client:
 
-| Framework | Package                              | Exports                                              |
-| --------- | ------------------------------------ | ---------------------------------------------------- |
-| Svelte    | `@thomasfosterau/effect-auth-svelte` | `sessionStore`, `listSessionsStore`, form components |
+| Framework | Package                              | Exports                                                           |
+| --------- | ------------------------------------ | ----------------------------------------------------------------- |
+| Svelte    | `@thomasfosterau/effect-auth-svelte` | `atomStore`, `sessionStore`, `listSessionsStore`, form components |
 
 ```svelte
 <!-- Svelte — @thomasfosterau/effect-auth-svelte -->
 <script>
   import { sessionStore } from "@thomasfosterau/effect-auth-svelte";
-  const session = sessionStore(client);
+  const session = sessionStore(registry, auth);
 </script>
 {#if $session.data}Signed in as {$session.data.user.email}{/if}
 ```
 
-The Svelte session stores implement Svelte's readable-store contract by hand; the components and context helpers use Svelte 5 runes, so the package requires `svelte >= 5.20` as a peer.
+`atomStore(registry, atom)` is the whole Svelte↔Atom binding — any Atom as a readable store, mounted while subscribed — and the session stores are it applied to the session Atoms. The stores implement Svelte's readable-store contract by hand; the components and context helpers use Svelte 5 runes, so the package requires `svelte >= 5.20` as a peer.
 
 ## 4. Form components
 
@@ -158,7 +179,7 @@ Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefa
 
 **JWT** — `jwtToken()` mints a signed token for the current session; `jwks()` serves the keys that verify it.
 
-**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `impersonate`/`stopImpersonating` swap the session cookie, so the store refreshes.
+**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches.
 
 **OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` (admin-gated) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
 
@@ -176,7 +197,7 @@ if (result.secondFactor) {
   await challenge.verifyTotp(codeFromUser); // or:
   await challenge.verifyBackupCode(backupCode); // single-use
 }
-// Signed in — the session store has refreshed.
+// Signed in — the observed session has refetched.
 ```
 
 Failure modes are typed as `SecondFactorChallengeError`:
@@ -195,7 +216,7 @@ import { definePlugin } from "@thomasfosterau/effect-auth/client";
 
 const billingPlugin = definePlugin((ctx) => ({
   listInvoices: () => ctx.request<Invoice[]>("GET", "/billing/invoices"),
-  // `mutating` runs the call, then refreshes the session store if observed.
+  // `mutating` runs the call, then notifies the session observers.
   switchPlan: (plan: string) =>
     ctx.mutating(() => ctx.request<void>("POST", "/billing/plan", { plan })),
 }));
@@ -204,7 +225,7 @@ const client = createAuthClient({ baseUrl: "/api/auth" }).extend(billingPlugin);
 await client.listInvoices(); // typed, alongside every built-in method
 ```
 
-The install context gives a plugin `request` (raw call), `mutating` (call + conditional session refresh) and `session` (the store). `extend` returns a new client — the original is untouched — and plugins compose by chaining `.extend()`.
+The install context gives a plugin `request` (raw call) and `mutating` (call, then notify the session observers). `extend` returns a new client — the original is untouched — and plugins compose by chaining `.extend()`.
 
 ## 8. Testing against a real server
 
