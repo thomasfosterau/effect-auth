@@ -28,8 +28,8 @@ catalogs:
       specifier: 0.63.0
       version: 0.63.0
     '@electric-sql/pglite':
-      specifier: ^0.5.15
-      version: 0.5.15
+      specifier: ^0.5.16
+      version: 0.5.16
     '@enfect/oxlint':
       specifier: ^0.10.0
       version: 0.10.0
@@ -225,7 +225,7 @@ importers:
         version: 4.1.3(effect@4.1.3)
       '@electric-sql/pglite':
         specifier: 'catalog:'
-        version: 0.5.15
+        version: 0.5.16
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
@@ -272,7 +272,7 @@ importers:
         version: 4.1.3(effect@4.1.3)
       '@electric-sql/pglite':
         specifier: 'catalog:'
-        version: 0.5.15
+        version: 0.5.16
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0
@@ -287,10 +287,10 @@ importers:
         version: 13.0.3
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.4(@cloudflare/workers-types@5.20261106.1)(@electric-sql/pglite@0.5.15)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)
+        version: 0.45.4(@cloudflare/workers-types@5.20261106.1)(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)
       drizzle-orm-effect:
         specifier: 'catalog:'
-        version: drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.3))(@effect/sql-pg@4.1.3(effect@4.1.3))(@effect/sql-pglite@4.1.3(effect@4.1.3))(@effect/sql-sqlite-do@4.0.0(effect@4.1.3))(@electric-sql/pglite@0.5.15)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.1.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2))
+        version: drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.3))(@effect/sql-pg@4.1.3(effect@4.1.3))(@effect/sql-pglite@4.1.3(effect@4.1.3))(@effect/sql-sqlite-do@4.0.0(effect@4.1.3))(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.1.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2))
       effect:
         specifier: 4.1.3
         version: 4.1.3
@@ -308,7 +308,7 @@ importers:
         version: 4.1.3(effect@4.1.3)
       '@electric-sql/pglite':
         specifier: 'catalog:'
-        version: 0.5.15
+        version: 0.5.16
       '@node-saml/node-saml':
         specifier: 'catalog:'
         version: 5.2.0
@@ -824,8 +824,8 @@ packages:
     resolution: {integrity: sha512-bRbvVj+YLE/nBmcBWGAwsul3mjEYlqqOmWMxvwSVKq/oNnJEuZYgi2OFDeUf7q49E2g3w+oMHMWyN2QayZ77RQ==}
     hasBin: true
 
-  '@electric-sql/pglite@0.5.15':
-    resolution: {integrity: sha512-ERZWgaRTxueGV4cvL1tfpAOzFCWTXoUtbCBqnf2FhHDVs/so9eAKaanvrwWF9Dntx7BYsmFQujVQ0/B4S8Mmiw==}
+  '@electric-sql/pglite@0.5.16':
+    resolution: {integrity: sha512-Nj8KcIsJL748W408U2N8q4+9IlONdpRIU8MJypIAAINMJ5nqKyqpX7Mgg/5XKkXiAib3AoZGR6hnJFlrlLBrcg==}
 
   '@emnapi/runtime@1.11.3':
     resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
@@ -4276,7 +4276,7 @@ snapshots:
 
   '@effect/sql-pglite@4.1.3(effect@4.1.3)':
     dependencies:
-      '@electric-sql/pglite': 0.5.15
+      '@electric-sql/pglite': 0.5.16
       effect: 4.1.3
 
   '@effect/sql-sqlite-do@4.0.0(effect@4.1.3)':
@@ -4315,7 +4315,7 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.63.0
       '@effect/tsgo-win32-x64': 0.63.0
 
-  '@electric-sql/pglite@0.5.15': {}
+  '@electric-sql/pglite@0.5.16': {}
 
   '@emnapi/runtime@1.11.3':
     dependencies:
@@ -5494,10 +5494,10 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
-  drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261106.1)(@electric-sql/pglite@0.5.15)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0):
+  drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261106.1)(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261106.1
-      '@electric-sql/pglite': 0.5.15
+      '@electric-sql/pglite': 0.5.16
       '@libsql/client': 0.17.4
       '@types/better-sqlite3': 9.6.0
       '@types/pg': 8.23.1
@@ -5505,14 +5505,14 @@ snapshots:
       mysql2: 3.24.2(@types/node@26.6.6)
       pg: 8.23.0
 
-  drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.3))(@effect/sql-pg@4.1.3(effect@4.1.3))(@effect/sql-pglite@4.1.3(effect@4.1.3))(@effect/sql-sqlite-do@4.0.0(effect@4.1.3))(@electric-sql/pglite@0.5.15)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.1.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2)):
+  drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.3))(@effect/sql-pg@4.1.3(effect@4.1.3))(@effect/sql-pglite@4.1.3(effect@4.1.3))(@effect/sql-sqlite-do@4.0.0(effect@4.1.3))(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.1.3)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2)):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261106.1
       '@effect/sql-d1': 4.1.2(effect@4.1.3)
       '@effect/sql-pg': 4.1.3(effect@4.1.3)
       '@effect/sql-pglite': 4.1.3(effect@4.1.3)
       '@effect/sql-sqlite-do': 4.0.0(effect@4.1.3)
-      '@electric-sql/pglite': 0.5.15
+      '@electric-sql/pglite': 0.5.16
       '@libsql/client': 0.17.4
       '@types/better-sqlite3': 9.6.0
       '@types/pg': 8.23.1

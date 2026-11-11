@@ -53,7 +53,7 @@ catalog:
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
   "@effect/tsgo": 0.63.0
-  "@electric-sql/pglite": ^0.5.15
+  "@electric-sql/pglite": ^0.5.16
   # The Effect lint rules (`effect/*`), `recommended` extended in the root
   # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, but
   # ranges its plugin API (`@oxlint/plugins ^1.85.0`), so Dependabot moves it
