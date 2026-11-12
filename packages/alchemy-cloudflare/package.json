@@ -45,7 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth": "workspace:*"
+    "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "catalog:",

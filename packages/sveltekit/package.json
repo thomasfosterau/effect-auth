@@ -40,7 +40,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth": "workspace:*"
+    "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "catalog:",

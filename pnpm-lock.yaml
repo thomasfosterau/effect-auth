@@ -186,7 +186,7 @@ importers:
   packages/alchemy-cloudflare:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@alchemy.run/cloudflare':
@@ -214,7 +214,7 @@ importers:
   packages/alchemy-postgres:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@effect/sql-pg':
@@ -242,7 +242,7 @@ importers:
   packages/argon2:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
       hash-wasm:
         specifier: 'catalog:'
@@ -261,7 +261,7 @@ importers:
   packages/drizzle:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@effect/sql-pg':
@@ -340,7 +340,7 @@ importers:
   packages/resend:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@types/node':
@@ -356,7 +356,7 @@ importers:
   packages/svelte:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@sveltejs/package':
@@ -387,7 +387,7 @@ importers:
   packages/sveltekit:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@types/node':
@@ -403,7 +403,7 @@ importers:
   packages/twilio:
     dependencies:
       '@thomasfosterau/effect-auth':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
       '@types/node':

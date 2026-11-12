@@ -41,7 +41,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth": "workspace:*",
+    "@thomasfosterau/effect-auth": "workspace:^",
     "hash-wasm": "catalog:"
   },
   "devDependencies": {

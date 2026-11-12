@@ -31,7 +31,7 @@ pipeline.
 pnpm add @thomasfosterau/effect-auth-drizzle @thomasfosterau/effect-auth drizzle-orm effect
 ```
 
-`drizzle-orm` (`>=0.44.0 || >=1.0.0-rc.5`) and `effect` (`^4.1.0`) are peer dependencies (`@types/pg` is an optional one), as is your driver of choice (`pg`,
+`drizzle-orm` (`>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`) and `effect` (`^4.1.0`) are peer dependencies, as is your driver of choice (`pg`,
 `postgres`, `@neondatabase/serverless`, `@electric-sql/pglite`,
 `better-sqlite3`, `@libsql/client`, `mysql2`, ...).
 
