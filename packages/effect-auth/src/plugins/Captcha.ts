@@ -1,15 +1,25 @@
 /**
  * Captcha plugin (transform hook with short-circuit).
  *
- * Verifies a captcha token against the provider's siteverify endpoint on
- * `beforeSignUp` and on `beforeAuthenticate` for the password sign-in
- * methods (`"email-password"` and `"username"`), and short-circuits with
- * `CaptchaError` when the token is missing or verification fails. The token
- * is read from the optional `captchaToken` field on `SignUpInput`,
- * `SignInInput` and `UsernameSignInInput` (wired through the `SignUpPayload`
- * HTTP schema and the `password` and `username` sign-in credentials). The
- * one-time-code, magic-link and second-factor flows carry no captcha token,
- * so the `"signIn"` endpoint does not guard them.
+ * Verifies a captcha token against the provider's siteverify endpoint and
+ * short-circuits with `CaptchaError` when the token is missing or
+ * verification fails, on three endpoints:
+ *
+ * - `"signUp"`: `beforeSignUp`, the token from `SignUpInput.captchaToken`
+ *   (the `SignUpPayload` HTTP schema).
+ * - `"signIn"`: `beforeAuthenticate` for the password sign-in methods
+ *   (`"email-password"` and `"username"`), the token from
+ *   `SignInInput.captchaToken` / `UsernameSignInInput.captchaToken` (the
+ *   `password` and `username` sign-in credentials).
+ * - `"sendCode"` (#678): `beforeSendCode`, every send of an email or SMS
+ *   one-time code and of a magic link, the token from the send's
+ *   `SendCodeOptions.captchaToken` (the `captchaToken` attribute of
+ *   `POST /otp-challenges`). A send is the step that costs money, so it is
+ *   where the captcha guards the passwordless flows; verifying a code or a
+ *   link carries no token.
+ *
+ * Second-factor redemption carries no token: only someone who passed the
+ * first factor reaches it.
  *
  * Supports Cloudflare Turnstile, Google reCAPTCHA and hCaptcha (all expose a
  * compatible `{ secret, response }` siteverify returning `{ success }`).
@@ -21,18 +31,24 @@ import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignUpInput } from "../email/EmailPassword.ts";
-import { type AuthenticateAttempt, makePlugin, type PluginImpls } from "../Hooks.ts";
+import {
+  type AuthenticateAttempt,
+  makePlugin,
+  type PluginImpls,
+  type SendCodeAttempt,
+} from "../Hooks.ts";
 import { CaptchaError } from "../Errors.ts";
 
 /** The captcha services {@link CaptchaPlugin} can verify tokens with. */
 export type CaptchaProvider = "cloudflare-turnstile" | "google-recaptcha" | "hcaptcha";
 
 /**
- * Which auth endpoints the captcha guards: `"signUp"` (`beforeSignUp`) and
+ * Which auth endpoints the captcha guards: `"signUp"` (`beforeSignUp`),
  * `"signIn"` (`beforeAuthenticate` for the password methods, by email or by
- * username).
+ * username) and `"sendCode"` (`beforeSendCode`: every one-time-code and
+ * magic-link send).
  */
-export type CaptchaEndpoint = "signUp" | "signIn";
+export type CaptchaEndpoint = "signUp" | "signIn" | "sendCode";
 
 /** Whether an attempt is a password sign-in, the attempts a captcha token rides on. */
 const isPasswordSignIn = (attempt: AuthenticateAttempt): boolean =>
@@ -48,7 +64,7 @@ const VERIFY_URLS: Record<CaptchaProvider, string> = {
 export interface CaptchaConfig {
   readonly provider: CaptchaProvider;
   readonly secretKey: Redacted.Redacted;
-  /** Endpoints to guard. Default `["signUp", "signIn"]`. */
+  /** Endpoints to guard. Default `["signUp", "signIn", "sendCode"]`. */
   readonly endpoints?: readonly CaptchaEndpoint[];
 }
 
@@ -58,7 +74,11 @@ export interface CaptchaConfig {
  * (or a stub) to satisfy the client.
  */
 export const CaptchaPlugin = (config: CaptchaConfig) => {
-  const endpoints: readonly CaptchaEndpoint[] = config.endpoints ?? ["signUp", "signIn"];
+  const endpoints: readonly CaptchaEndpoint[] = config.endpoints ?? [
+    "signUp",
+    "signIn",
+    "sendCode",
+  ];
   const url = VERIFY_URLS[config.provider];
 
   return makePlugin(
@@ -99,6 +119,10 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
             isPasswordSignIn(attempt)
               ? verify(attempt.captchaToken).pipe(Effect.as(attempt))
               : Effect.succeed(attempt),
+        }),
+        ...(Arr.contains(endpoints, "sendCode") && {
+          beforeSendCode: (attempt: SendCodeAttempt) =>
+            verify(attempt.captchaToken).pipe(Effect.as(attempt)),
         }),
       };
       return impls;

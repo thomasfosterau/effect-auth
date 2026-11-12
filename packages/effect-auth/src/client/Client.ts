@@ -496,24 +496,34 @@ export interface AuthClient {
     readonly revoke: (payload: Http.MultiSessionActionPayload) => Promise<Http.StatusResponse>;
   };
 
+  /** Magic links. `send` takes the captcha token the captcha plugin checks (#678). */
   readonly magicLink: {
-    readonly send: (payload: { email: string }) => Promise<Http.StatusResponse>;
+    readonly send: (payload: {
+      email: string;
+      captchaToken?: string | undefined;
+    }) => Promise<Http.StatusResponse>;
     readonly verify: (payload: { token: string }) => Promise<AuthResult>;
   };
 
+  /** Email one-time passcodes. `send` takes the captcha token the captcha plugin checks (#678). */
   readonly emailOtp: {
     readonly send: (payload: {
       email: string;
       purpose: Http.EmailOtpPurpose;
+      captchaToken?: string | undefined;
     }) => Promise<Http.StatusResponse>;
     readonly signIn: (payload: { email: string; otp: string }) => Promise<AuthResult>;
   };
 
-  /** SMS one-time passcodes. 404 when unconfigured. */
+  /**
+   * SMS one-time passcodes. 404 when unconfigured. `send` takes the captcha
+   * token the captcha plugin checks (#678).
+   */
   readonly phoneOtp: {
     readonly send: (payload: {
       phoneNumber: string;
       purpose: Http.PhoneOtpPurpose;
+      captchaToken?: string | undefined;
     }) => Promise<Http.StatusResponse>;
     readonly signIn: (payload: { phoneNumber: string; otp: string }) => Promise<AuthResult>;
   };
@@ -1148,17 +1158,34 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     magicLink: {
-      send: ({ email }) => sendChallenge({ channel: "magic-link", email }),
+      send: ({ email, captchaToken }) =>
+        sendChallenge({
+          channel: "magic-link",
+          email,
+          ...(captchaToken !== undefined && { captchaToken }),
+        }),
       verify: ({ token }) => signInWith({ method: "magic-link", token }),
     },
 
     emailOtp: {
-      send: ({ email, purpose }) => sendChallenge({ channel: "email", email, purpose }),
+      send: ({ email, purpose, captchaToken }) =>
+        sendChallenge({
+          channel: "email",
+          email,
+          purpose,
+          ...(captchaToken !== undefined && { captchaToken }),
+        }),
       signIn: ({ email, otp }) => signInWith({ method: "email-otp", email, otp }),
     },
 
     phoneOtp: {
-      send: ({ phoneNumber, purpose }) => sendChallenge({ channel: "phone", phoneNumber, purpose }),
+      send: ({ phoneNumber, purpose, captchaToken }) =>
+        sendChallenge({
+          channel: "phone",
+          phoneNumber,
+          purpose,
+          ...(captchaToken !== undefined && { captchaToken }),
+        }),
       signIn: ({ phoneNumber, otp }) => signInWith({ method: "phone-otp", phoneNumber, otp }),
     },
 

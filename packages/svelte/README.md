@@ -130,6 +130,12 @@ The two password-reset forms are the two halves of the flow; the second takes th
 
 `MagicLinkForm` asks the server to email a link; redeeming it is a page-load concern, so the landing route calls `client.magicLink.verify({ token })` itself.
 
+Both send forms take an optional `captchaToken` getter, read when the form submits. Pass it when the server's `CaptchaPlugin` guards code and link sends (its `"sendCode"` endpoint, on by default): render the captcha widget beside the form and return its current token.
+
+```svelte
+<MagicLinkForm captchaToken={() => turnstileToken} />
+```
+
 `EmailOtpForm` is both halves of a one-time-code sign-in in one component: it emails a code, swaps itself for a code field, and signs in. `onSuccess` fires only for the second step — the step that yields a session — and the rendered `<form>` carries `data-step="request"` or `data-step="verify"` so a stylesheet can tell them apart.
 
 ```svelte

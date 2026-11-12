@@ -36,7 +36,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 
 /** Error raised by phone OTP verification failures. */
@@ -235,11 +235,18 @@ export class PhoneOtpService extends Context.Service<
      * The marker record makes the cooldown apply to a number with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown number.
+     *
+     * The `beforeSendCode` hook runs first, before the number is looked up,
+     * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
      */
     readonly send: (
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
-    ) => Effect.Effect<void, PhoneOtpError | Errors.AuthError | Errors.ResendTooSoonError>;
+      options?: SendCodeOptions,
+    ) => Effect.Effect<
+      void,
+      PhoneOtpError | Errors.AuthError | Errors.ResendTooSoonError | HookError
+    >;
 
     /**
      * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
@@ -267,7 +274,10 @@ export class PhoneOtpService extends Context.Service<
       userId: string,
       phoneNumber: string,
       otp: string,
-    ) => Effect.Effect<Types.User, PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError>;
+    ) => Effect.Effect<
+      Types.User,
+      PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError | HookError
+    >;
   }
 >()("@effect-auth/PhoneOtpService") {
   /**
@@ -351,11 +361,21 @@ export const make = (
       send: Effect.fn("PhoneOtpService.send")(function* (
         rawPhoneNumber: string,
         purpose: PhoneOtpPurpose,
+        options?: SendCodeOptions,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
         if (!phoneNumber) {
           return yield* Effect.void;
         }
+
+        // The send gate (captcha, #678) runs before the number is looked
+        // up, so it answers alike for every number.
+        yield* hooks.beforeSendCode({
+          method: "phone-otp",
+          purpose,
+          address: phoneNumber,
+          captchaToken: options?.captchaToken,
+        });
 
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
@@ -451,6 +471,12 @@ export const make = (
         otp: string,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
+        // The signed-in user proves a number: the gate keys on them (#698).
+        yield* hooks.beforeAuthenticate({
+          method: "phone-otp",
+          identifier: { type: "phone", value: phoneNumber },
+          userId,
+        });
 
         yield* verifyOtp(phoneNumber, otp, "phone-verification");
 

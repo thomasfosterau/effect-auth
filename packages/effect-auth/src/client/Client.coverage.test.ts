@@ -165,6 +165,60 @@ describe("phone OTP", () => {
   });
 });
 
+describe("captcha tokens on the sends (#678)", () => {
+  it("puts captchaToken in the otp-challenges attributes only when given", async () => {
+    const { calls, fetch } = recordingFetch({});
+    const client = createAuthClient({ baseUrl: BASE, fetch });
+    await client.magicLink.send({ email: "a@client.test", captchaToken: "t1" });
+    await client.emailOtp.send({ email: "a@client.test", purpose: "sign-in", captchaToken: "t2" });
+    await client.phoneOtp.send({
+      phoneNumber: "+15550001",
+      purpose: "sign-in",
+      captchaToken: "t3",
+    });
+    await client.magicLink.send({ email: "a@client.test" });
+    expect(calls.map((call) => call.body)).toEqual([
+      {
+        data: {
+          type: "otp-challenges",
+          attributes: { channel: "magic-link", email: "a@client.test", captchaToken: "t1" },
+        },
+      },
+      {
+        data: {
+          type: "otp-challenges",
+          attributes: {
+            channel: "email",
+            email: "a@client.test",
+            purpose: "sign-in",
+            captchaToken: "t2",
+          },
+        },
+      },
+      {
+        data: {
+          type: "otp-challenges",
+          attributes: {
+            channel: "phone",
+            phoneNumber: "+15550001",
+            purpose: "sign-in",
+            captchaToken: "t3",
+          },
+        },
+      },
+      {
+        data: {
+          type: "otp-challenges",
+          attributes: { channel: "magic-link", email: "a@client.test" },
+        },
+      },
+    ]);
+    expect(Arr.dedupe(calls.map((call) => `${call.method} ${call.path}`))).toEqual([
+      "POST /otp-challenges",
+    ]);
+  });
+});
+
 describe("device authorization", () => {
   it("runs code -> approve -> token across two devices", async () => {
     const { browser } = withServer({ features: true });

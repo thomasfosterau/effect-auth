@@ -152,7 +152,18 @@ export const MAGIC_LINK_LABELS: MagicLinkLabels = {
 };
 
 /** Props for `MagicLinkForm`. */
-export interface MagicLinkFormProps extends AuthFormBaseProps<StatusResponse> {
+/**
+ * The captcha token for a code or link send, read when the form submits. Pass
+ * it when the server's `CaptchaPlugin` guards sends (its `sendCode` endpoint,
+ * on by default): render your captcha widget beside the form and return its
+ * current token, or `undefined` before it has one (the server then refuses the
+ * send). Omit it when sends are not captcha-guarded.
+ */
+export interface SendCaptchaProps {
+  readonly captchaToken?: (() => string | undefined) | undefined;
+}
+
+export interface MagicLinkFormProps extends AuthFormBaseProps<StatusResponse>, SendCaptchaProps {
   readonly labels?: Partial<MagicLinkLabels> | undefined;
 }
 
@@ -187,7 +198,7 @@ export const EMAIL_OTP_LABELS: EmailOtpLabels = {
 };
 
 /** Props for `EmailOtpForm`. */
-export interface EmailOtpFormProps extends AuthFormBaseProps<AuthSuccess> {
+export interface EmailOtpFormProps extends AuthFormBaseProps<AuthSuccess>, SendCaptchaProps {
   /**
    * What the emailed code is for. Defaults to `"sign-in"`, the only purpose
    * whose verification issues a session.

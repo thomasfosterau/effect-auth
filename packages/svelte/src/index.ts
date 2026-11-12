@@ -58,6 +58,7 @@ export type {
   PasswordResetConfirmLabels,
   PasswordResetRequestFormProps,
   PasswordResetRequestLabels,
+  SendCaptchaProps,
   SignInFormProps,
   SignInLabels,
   SignUpFormProps,
