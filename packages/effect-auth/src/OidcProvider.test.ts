@@ -96,6 +96,14 @@ const makeOidcStores = () => {
     create: (t) => Effect.sync(() => (MutableHashMap.set(tokens, t.tokenHash, t), t)),
     get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(tokens, hash)),
+    deleteByUserId: (userId) =>
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.keys(tokens)).forEach((hash) => {
+          if (Option.getOrUndefined(MutableHashMap.get(tokens, hash))?.userId === userId) {
+            MutableHashMap.remove(tokens, hash);
+          }
+        }),
+      ),
     listByFamily: (familyId) =>
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(tokens)).filter((t) => t.familyId === familyId),

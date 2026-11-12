@@ -498,6 +498,10 @@ export const memoryOidcTokenStore = (
   create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.tokenHash, token), token)),
   get: (tokenHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, tokenHash))),
   delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(tokens, tokenHash)),
+  deleteByUserId: (userId) =>
+    Effect.sync(() => {
+      removeWhere(tokens, (token) => token.userId === userId);
+    }),
   listByFamily: (familyId) =>
     Effect.sync(() =>
       Arr.fromIterable(MutableHashMap.values(tokens)).filter(

@@ -1,5 +1,5 @@
 /**
- * The first proof of an address (#425, #440, #671, #694).
+ * The first proof of an address (#425, #440, #671, #694, #704).
  *
  * An email identifier is created unverified only by a sign-up that proved
  * nothing about the address, so every credential on its account may belong to
@@ -7,10 +7,14 @@
  * that promotes such an identifier to verified on the strength of a proof (a
  * verification link, a magic link, an email OTP, an invitation, an IdP's
  * verified email claim through OAuth, Google One Tap or SSO) first clears the
- * account's password, removes its other credentials (linked OAuth accounts,
- * passkeys, API keys, multi-factor enrolment and trusted devices) and revokes
+ * account's password, removes its other credentials (unverified phone
+ * numbers, linked OAuth accounts, passkeys, API keys, multi-factor enrolment,
+ * trusted devices and the tokens the core's OIDC provider issued) and revokes
  * its sessions, so the prover is left the only one holding the account and
- * enrols their own credentials.
+ * enrols their own credentials. A phone number the account already verified
+ * stays: its holder proved it with a code sent to it, so it is not the
+ * earlier holder's to keep or lose. JWTs already issued (`Jwt`) cannot be
+ * revoked; they expire on their own.
  *
  * @internal
  */
@@ -23,6 +27,7 @@ import type { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
 import { CredentialStore } from "./multifactor/WebAuthn.ts";
 import { OAuthAccountStore } from "./oauth/OAuthAccount.ts";
+import { OidcTokenStore } from "./OidcProvider.ts";
 import type { SessionService } from "./SessionService.ts";
 import { TrustedDeviceStore } from "./TrustedDevice.ts";
 
@@ -39,6 +44,8 @@ export interface FirstProofCredentials {
   readonly apiKeys?: Pick<typeof ApiKeyStore.Service, "listByUserId" | "delete"> | undefined;
   readonly multiFactor?: Pick<typeof MultiFactorStore.Service, "delete"> | undefined;
   readonly trustedDevices?: Pick<typeof TrustedDeviceStore.Service, "deleteByUserId"> | undefined;
+  /** The access and refresh tokens the core's OIDC provider issued (#704). */
+  readonly oidcTokens?: Pick<typeof OidcTokenStore.Service, "deleteByUserId"> | undefined;
 }
 
 /** The services {@link proveAddress} writes through, resolved by the caller. */
@@ -60,6 +67,7 @@ const firstProofCredentials: Effect.Effect<FirstProofCredentials> = Effect.map(
       apiKeys: Effect.serviceOption(ApiKeyStore),
       multiFactor: Effect.serviceOption(MultiFactorStore),
       trustedDevices: Effect.serviceOption(TrustedDeviceStore),
+      oidcTokens: Effect.serviceOption(OidcTokenStore),
     },
     { concurrency: 1 },
   ),
@@ -69,6 +77,7 @@ const firstProofCredentials: Effect.Effect<FirstProofCredentials> = Effect.map(
     apiKeys: Option.getOrUndefined(found.apiKeys),
     multiFactor: Option.getOrUndefined(found.multiFactor),
     trustedDevices: Option.getOrUndefined(found.trustedDevices),
+    oidcTokens: Option.getOrUndefined(found.oidcTokens),
   }),
 );
 
@@ -89,7 +98,23 @@ const ifPresent = <S>(
   sweep: (store: S) => Effect.Effect<void, Errors.AuthError>,
 ): Effect.Effect<void, Errors.AuthError> => (store === undefined ? Effect.void : sweep(store));
 
-/** Remove every credential `userId` holds other than its password and sessions. */
+/**
+ * Remove the phone identifiers `userId` never verified (#704): whoever added
+ * one could sign in by phone code. A verified one was proven by its holder.
+ */
+const removeUnverifiedPhones = (
+  identifiers: typeof IdentifierStore.Service,
+  userId: string,
+): Effect.Effect<void, Errors.AuthError> =>
+  Effect.flatMap(identifiers.listByUser(userId), (held) =>
+    Effect.forEach(
+      held.filter((identifier) => identifier.type === "phone" && !identifier.verified),
+      (phone) => identifiers.delete(phone.id),
+      { concurrency: 1, discard: true },
+    ),
+  );
+
+/** Remove every credential `userId` holds other than its password, phone identifiers and sessions. */
 const removeCredentials = (credentials: FirstProofCredentials, userId: string) =>
   Effect.all(
     [
@@ -116,14 +141,16 @@ const removeCredentials = (credentials: FirstProofCredentials, userId: string) =
       ),
       ifPresent(credentials.multiFactor, (store) => store.delete(userId)),
       ifPresent(credentials.trustedDevices, (store) => store.deleteByUserId(userId)),
+      ifPresent(credentials.oidcTokens, (store) => store.deleteByUserId(userId)),
     ],
     { concurrency: 1, discard: true },
   );
 
 /**
  * Promote `identifier` to verified. When it is not verified yet, first clear
- * its account's password, remove the account's other credentials (the
- * {@link FirstProofCredentials} the caller passes) and revoke its sessions,
+ * its account's password, remove its unverified phone identifiers and its
+ * other credentials (the {@link FirstProofCredentials} the caller passes,
+ * OIDC-provider tokens included) and revoke its sessions,
  * last, so a session minted with a credential before its removal goes too;
  * the caller mints the prover's session (and, for OAuth, creates the link
  * being made now) afterwards. A prover who presented the proof over one of
@@ -141,6 +168,7 @@ export const proveAddress = (
   Effect.gen(function* () {
     if (!identifier.verified) {
       yield* services.passwords.clearPasswordHash(identifier.userId);
+      yield* removeUnverifiedPhones(services.identifiers, identifier.userId);
       yield* removeCredentials(services, identifier.userId);
       yield* proverSessionId === undefined
         ? services.sessions.invalidateUserSessions(identifier.userId)
