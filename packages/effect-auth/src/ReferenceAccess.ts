@@ -40,7 +40,9 @@
  *
  * @module reference-access
  */
-import { Effect, Option, Predicate } from "effect";
+import { Effect } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type * as Guard from "./Guard.ts";
@@ -132,7 +134,8 @@ const questionsFor = (row: ReferenceRow): OwnedAccess.RelationQuestions => {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Layer, Option } from "effect"
+ * import { Context, Effect, Layer } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string }
@@ -232,10 +235,10 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
       attributes: {
         ...(row.visibility === undefined ? {} : { visibility: row.visibility }),
         // The guards' principal type, so the anonymous principal never matches it.
-        ...(Predicate.isString(row.followersOf)
+        ...(P.isString(row.followersOf)
           ? { followersOf: Entity.entityValue(Entity.ref(guards.principalType, row.followersOf)) }
           : {}),
-        ...(Predicate.isString(row.groupId) ? { group: row.groupId } : {}),
+        ...(P.isString(row.groupId) ? { group: row.groupId } : {}),
       },
     });
     return Policy.decidePure(

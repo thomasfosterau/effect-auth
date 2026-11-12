@@ -16,16 +16,11 @@
  * row or viewer the rules say must not ask, is collected and fails the test.
  */
 import { describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Predicate,
-  Record as Rec,
-} from "effect";
+import { Context, Effect, Exit, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Cacheability from "./Cacheability.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -89,7 +84,7 @@ const atViewPrivate = (viewer: AppUser): boolean =>
   viewer.role === "moderator" || viewer.role === "admin";
 
 const label = (parts: Readonly<Record<string, string | boolean | null | undefined>>): string =>
-  Arr.map(Rec.toEntries(parts), ([key, value]) => `${key}=${String(value)}`).join(" ");
+  Arr.map(R.toEntries(parts), ([key, value]) => `${key}=${String(value)}`).join(" ");
 
 // ---------------------------------------------------------------------------
 // Spy seams
@@ -113,7 +108,7 @@ const spySeams = (
           isFollower: (account: string, subject: string) => {
             calls.push({ seam: "follower", account, subject });
             return Effect.succeed(
-              answer(follower, Predicate.isString(subject) && graphFollows(account, subject)),
+              answer(follower, P.isString(subject) && graphFollows(account, subject)),
             );
           },
           following: (account: string) => OwnedAccess.subquery(`following(${account})`),
@@ -126,7 +121,7 @@ const spySeams = (
           isMember: (account: string, subject: string) => {
             calls.push({ seam: "member", account, subject });
             return Effect.succeed(
-              answer(member, Predicate.isString(subject) && graphMember(account, subject)),
+              answer(member, P.isString(subject) && graphMember(account, subject)),
             );
           },
           groupsOf: (account: string) => OwnedAccess.subquery(`groups(${account})`),
@@ -161,8 +156,8 @@ const forbiddenCalls = (
     const expected = call.seam === "follower" ? allowed.follower : allowed.member;
     const ok =
       viewer !== null &&
-      Predicate.isString(call.account) &&
-      Predicate.isString(call.subject) &&
+      P.isString(call.account) &&
+      P.isString(call.subject) &&
       call.account === viewer.id &&
       expected !== undefined &&
       call.subject === expected;
@@ -177,13 +172,13 @@ const compiledAdmits = (
   follower: SeamMode,
   member: SeamMode,
 ): boolean | "inexact" => {
-  if (Predicate.isTagged(compiled, "Inexact")) return "inexact";
+  if (P.isTagged(compiled, "Inexact")) return "inexact";
   return ReadScope.matches(
     compiled.scope,
     columns,
     (set, value) =>
       viewer !== null &&
-      Predicate.isString(value) &&
+      P.isString(value) &&
       (set === "following"
         ? answer(follower, graphFollows(viewer.id, value))
         : set === "groups" && answer(member, graphMember(viewer.id, value))),
@@ -210,7 +205,7 @@ const compileFor = (
 
 /** Whether a set from a read scope contains `value`, answered by the seam mode. */
 const inScopeSet = (set: OwnedAccess.FollowingSet, mode: SeamMode, graph: boolean): boolean =>
-  Predicate.isTagged(set, "Subquery") && answer(mode, graph);
+  P.isTagged(set, "Subquery") && answer(mode, graph);
 
 // ---------------------------------------------------------------------------
 // Owned rows
@@ -365,7 +360,7 @@ describe("owned rows: canView matches the read rule on every cell", () => {
         runAs(owned.canView(row), viewer, follower, member, calls);
       }
     });
-    expect(Arr.filter(calls, (call) => !Predicate.isString(call.subject))).toEqual([]);
+    expect(Arr.filter(calls, (call) => !P.isString(call.subject))).toEqual([]);
     expect(Arr.filter(calls, (call) => call.seam === "follower" && call.subject !== OWNER)).toEqual(
       [],
     );
@@ -781,7 +776,7 @@ describe("the four role axes fail closed on a role outside the ladder", () => {
   const offLadder = ["superadmin", "", "ADMIN", "owner", "root"];
 
   it("decideRole and the gates refuse it at every axis", () => {
-    Arr.forEach(Rec.values(Axes), (axis) => {
+    Arr.forEach(R.values(Axes), (axis) => {
       Arr.forEach(offLadder, (role) => {
         const viewer = { id: "u-odd", role };
         expect(guards.decideRole(viewer, axis), `${role} @ ${axis.name}`).toBe(false);
