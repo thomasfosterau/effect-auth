@@ -145,6 +145,8 @@ const org = await client.organization.create({ name: "Acme", slug: "acme" });
 await client.organization.invite(org.id, { email: "new@acme.test", role: "member" });
 // As the invitee, with the token the invitation email's link carried:
 await client.organization.acceptInvitation(invitationId, token);
+// Or by id alone, once the invitee's matching email is verified (#673):
+await client.organization.acceptInvitation(invitationId);
 await client.organization.resendInvitation(invitationId); // same id, fresh token and expiry
 
 const team = await client.organization.createTeam(org.id, { name: "Engineering" });

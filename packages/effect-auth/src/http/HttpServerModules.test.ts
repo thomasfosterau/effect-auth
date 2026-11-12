@@ -68,7 +68,12 @@ const makeFixture = (admin?: AdminConfig) => {
   const apiKeys = MutableHashMap.empty<string, ApiKey>();
   const jwtKeys: JwtKeyPair[] = [];
 
-  const seedUser = (id: string, email: string, attributes: Types.Attributes = {}) => {
+  const seedUser = (
+    id: string,
+    email: string,
+    attributes: Types.Attributes = {},
+    verified = true,
+  ) => {
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     const user: Types.User = {
       id,
@@ -77,13 +82,14 @@ const makeFixture = (admin?: AdminConfig) => {
       attributes,
     };
     MutableHashMap.set(usersById, id, user);
-    // The login handle lives in the identifier store (verified email).
+    // The login handle lives in the identifier store (verified email, unless
+    // the test asks otherwise).
     const identifier = makeIdentifier({
       userId: id,
       type: "email",
       value: email,
-      verified: true,
-      verifiedAt: now,
+      verified,
+      ...(verified && { verifiedAt: now }),
       now,
     });
     MutableHashMap.set(identifierRecords, identifier.id, identifier);
@@ -549,6 +555,10 @@ const transitionInvitation = (
     sessionId,
   );
 
+/** The `status` attributes of an `invitations` resource response. */
+const invitationStatus = async (res: Response) =>
+  (await jsonBody(res, resourceBody({ status: Schema.String }))).data.attributes;
+
 const MemberBody = resourceBody({
   role: Schema.String,
   status: Schema.String,
@@ -871,15 +881,12 @@ describe("HTTP organization endpoints", () => {
       attributes: { status: "pending" },
     });
 
-    // Only the invitee may accept, and only with the emailed token (#586);
+    // Only the invitee may accept, and a wrong token accepts nothing (#586);
     // the answer carries the new membership.
     const token = fx.tokenFor(first);
     expect(
       (await fx.handler(transitionInvitation(first, "accepted", ownerSid, token))).status,
     ).toBe(400);
-    expect((await fx.handler(transitionInvitation(first, "accepted", inviteeSid))).status).toBe(
-      400,
-    );
     expect(
       (await fx.handler(transitionInvitation(first, "accepted", inviteeSid, "forged"))).status,
     ).toBe(400);
@@ -917,9 +924,9 @@ describe("HTTP organization endpoints", () => {
       status: "canceled",
     });
     const third = await invite("invitee@test.com");
-    expect((await fx.handler(transitionInvitation(third, "rejected", inviteeSid))).status).toBe(
-      400,
-    );
+    expect(
+      (await fx.handler(transitionInvitation(third, "rejected", inviteeSid, "forged"))).status,
+    ).toBe(400);
     const rejected = await fx.handler(
       transitionInvitation(third, "rejected", inviteeSid, fx.tokenFor(third)),
     );
@@ -932,6 +939,58 @@ describe("HTTP organization endpoints", () => {
     // `pending` is not a transition.
     const fourth = await invite("invitee3@test.com");
     expect((await fx.handler(transitionInvitation(fourth, "pending", ownerSid))).status).toBe(400);
+  });
+
+  it("answers an invitation by id from a verified address, and only from one (#673)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("verified", "verified@test.com");
+    fx.seedUser("unverified", "unverified@test.com", {}, false);
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const verifiedSid = fx.makeSession("verified");
+    const unverifiedSid = fx.makeSession("unverified");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+
+    const invite = async (email: string) => {
+      const res = await fx.handler(
+        apiReq(
+          "POST",
+          `/organizations/${org.id}/invitations`,
+          { data: { type: "invitations", attributes: { email, role: "member" } } },
+          ownerSid,
+        ),
+      );
+      expect(res.status).toBe(201);
+      return (await jsonBody(res, resourceBody({ status: Schema.String }))).data.id;
+    };
+    // A verified addressee accepts and rejects with no token; a stranger cannot.
+    const accept = await invite("verified@test.com");
+    expect((await fx.handler(transitionInvitation(accept, "accepted", strangerSid))).status).toBe(
+      400,
+    );
+    const accepted = await fx.handler(transitionInvitation(accept, "accepted", verifiedSid));
+    expect(accepted.status).toBe(200);
+    expect(await invitationStatus(accepted)).toEqual({ status: "accepted" });
+    expect(fx.members.some((m) => m.userId === "verified")).toBe(true);
+    const reject = await invite("verified@test.com");
+    expect(
+      await invitationStatus(
+        await fx.handler(transitionInvitation(reject, "rejected", verifiedSid)),
+      ),
+    ).toEqual({ status: "rejected" });
+
+    // An unverified addressee still needs the emailed token (the token path,
+    // a first proof of the address, is covered by the client suite).
+    const pending = await invite("unverified@test.com");
+    expect(
+      (await fx.handler(transitionInvitation(pending, "accepted", unverifiedSid))).status,
+    ).toBe(400);
+    expect(
+      (await fx.handler(transitionInvitation(pending, "rejected", unverifiedSid))).status,
+    ).toBe(400);
+    expect(fx.members.some((m) => m.userId === "unverified")).toBe(false);
   });
 
   it("runs a full team lifecycle", async () => {

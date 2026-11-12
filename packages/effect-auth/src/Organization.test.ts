@@ -1498,9 +1498,7 @@ describe("OrganizationService - no granting beyond your own permissions (#585)",
       }),
     );
 
-    expect(result.self).toBe(
-      "The 'owner' role carries 'organization:delete', which your role does not grant",
-    );
+    expect(result.self).toBe("The 'owner' role carries '*:*', which your role does not grant");
     expect(result.other).toBe(result.self);
     expect(result.full.members.filter((member) => member.role === "owner")).toHaveLength(1);
   });
@@ -1539,9 +1537,7 @@ describe("OrganizationService - no granting beyond your own permissions (#585)",
       }),
     );
 
-    expect(result).toBe(
-      "This member's 'owner' role carries 'organization:delete', which your role does not grant",
-    );
+    expect(result).toBe("This member's 'owner' role carries '*:*', which your role does not grant");
   });
 
   it("refuses an admin reactivating a deactivated owner", async () => {
@@ -1649,6 +1645,166 @@ describe("OrganizationService - no granting beyond your own permissions (#585)",
   });
 });
 
+/**
+ * An organization whose `manager` role holds `role:manage` and
+ * `posts:read` only, held by `manager-1`, beside an owner-defined
+ * `publisher` role that also carries `posts:write`.
+ */
+const withManager = <A, E>(
+  program: (
+    service: typeof OrganizationService.Service,
+    organization: Organization,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore>,
+) =>
+  withAdmin({}, (service, organization) =>
+    Effect.gen(function* () {
+      yield* service.upsertOrgRole("owner-1", organization.id, {
+        role: "manager",
+        permissions: ["role:manage", "posts:read"],
+      });
+      yield* service.upsertOrgRole("owner-1", organization.id, {
+        role: "publisher",
+        permissions: ["posts:read", "posts:write"],
+      });
+      yield* service.addMember("owner-1", organization.id, "manager-1", "manager");
+      return yield* program(service, organization);
+    }),
+  );
+
+describe("OrganizationService - custom-role management follows the grant rule (#673)", () => {
+  beforeEach(resetStores);
+
+  it("lets the default owner (`*:*`) grant custom roles with app permissions and wildcards", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.upsertOrgRole("owner-1", organization.id, {
+          role: "editor",
+          permissions: ["posts:write", "team:*"],
+        });
+        const added = yield* service.addMember("owner-1", organization.id, "editor-1", "editor");
+        const invited = yield* service.inviteMember("owner-1", organization.id, {
+          email: "editor-2@example.com",
+          role: "editor",
+        });
+        const writes = yield* service.checkPermission("editor-1", organization.id, "posts:write");
+        return { added, invited, writes };
+      }),
+    );
+
+    expect(defaultOrganizationRoles["owner"]).toEqual(["*:*"]);
+    expect(result.added.role).toBe("editor");
+    expect(result.invited.role).toBe("editor");
+    expect(result.writes).toBe(true);
+  });
+
+  it("refuses a `role:manage` holder defining a role beyond its own permissions", async () => {
+    const result = await withManager((service, organization) =>
+      Effect.gen(function* () {
+        const beyond = yield* refusal(
+          service.upsertOrgRole("manager-1", organization.id, {
+            role: "writer",
+            permissions: ["posts:write"],
+          }),
+        );
+        const wildcard = yield* refusal(
+          service.upsertOrgRole("manager-1", organization.id, {
+            role: "writer",
+            permissions: ["posts:*"],
+          }),
+        );
+        // Within its own permissions it still defines roles.
+        const within = yield* service.upsertOrgRole("manager-1", organization.id, {
+          role: "reader",
+          permissions: ["posts:read"],
+        });
+        const roles = yield* service.listOrgRoles("owner-1", organization.id);
+        return { beyond, wildcard, within, roles };
+      }),
+    );
+
+    expect(result.beyond).toBe(
+      "The 'writer' role carries 'posts:write', which your role does not grant",
+    );
+    expect(result.wildcard).toBe(
+      "The 'writer' role carries 'posts:*', which your role does not grant",
+    );
+    expect(result.within.permissions).toEqual(["posts:read"]);
+    expect(result.roles.map((role) => role.role).toSorted()).toEqual([
+      "manager",
+      "publisher",
+      "reader",
+    ]);
+  });
+
+  it("refuses redefining or deleting a role whose current permissions exceed the actor's", async () => {
+    const result = await withManager((service, organization) =>
+      Effect.gen(function* () {
+        // Narrowing `publisher` to what the manager holds still takes away
+        // `posts:write`, which the manager could not have granted.
+        const narrow = yield* refusal(
+          service.upsertOrgRole("manager-1", organization.id, {
+            role: "publisher",
+            permissions: ["posts:read"],
+          }),
+        );
+        const remove = yield* refusal(
+          service.deleteOrgRole("manager-1", organization.id, "publisher"),
+        );
+        // A static role counts as the name's current definition too.
+        const shadowAdmin = yield* refusal(
+          service.upsertOrgRole("manager-1", organization.id, {
+            role: "admin",
+            permissions: [],
+          }),
+        );
+        const roles = yield* service.listOrgRoles("owner-1", organization.id);
+        return { narrow, remove, shadowAdmin, roles };
+      }),
+    );
+
+    expect(result.narrow).toBe(
+      "The 'publisher' role currently carries 'posts:write', which your role does not grant",
+    );
+    expect(result.remove).toBe(result.narrow);
+    expect(result.shadowAdmin).toBe(
+      "The 'admin' role currently carries 'organization:update', which your role does not grant",
+    );
+    expect(result.roles.find((role) => role.role === "publisher")?.permissions).toEqual([
+      "posts:read",
+      "posts:write",
+    ]);
+    expect(result.roles.some((role) => role.role === "admin")).toBe(false);
+  });
+
+  it("refuses editing or deleting your own role", async () => {
+    const result = await withManager((service, organization) =>
+      Effect.gen(function* () {
+        const edit = yield* refusal(
+          service.upsertOrgRole("manager-1", organization.id, {
+            role: "manager",
+            permissions: ["role:manage"],
+          }),
+        );
+        const remove = yield* refusal(
+          service.deleteOrgRole("manager-1", organization.id, "manager"),
+        );
+        // The owner may still redefine and delete it.
+        const byOwner = yield* service.upsertOrgRole("owner-1", organization.id, {
+          role: "manager",
+          permissions: ["role:manage"],
+        });
+        yield* service.deleteOrgRole("owner-1", organization.id, "publisher");
+        const roles = yield* service.listOrgRoles("owner-1", organization.id);
+        return { edit, remove, byOwner, roles };
+      }),
+    );
+
+    expect(result.edit).toBe("You cannot redefine your own role");
+    expect(result.remove).toBe("You cannot delete your own role");
+    expect(result.byOwner.permissions).toEqual(["role:manage"]);
+    expect(result.roles.map((role) => role.role)).toEqual(["manager"]);
+  });
+});
 describe("OrganizationService - member status", () => {
   beforeEach(resetStores);
 
@@ -2134,6 +2290,86 @@ describe("OrganizationService - invitation tokens (#586)", () => {
   });
 });
 
+describe("OrganizationService - answering by id from a verified address (#673)", () => {
+  beforeEach(resetStores);
+
+  it("accepts by id, without the token, for a verified matching address", async () => {
+    const result = await withInvitation(true, (service, invitation, issued) =>
+      Effect.gen(function* () {
+        const member = yield* service.acceptInvitation("invitee-user", {
+          invitationId: invitation.id,
+        });
+        return { member, sessions: yield* alive(issued) };
+      }),
+    );
+
+    expect(result.member).toMatchObject({ userId: "invitee-user", role: "admin" });
+    expect(Arr.fromIterable(MutableHashMap.values(invitations))[0].status).toBe("accepted");
+    // The verified address was the proof: nothing is revoked or cleared.
+    expect(result.sessions).toEqual([true, true]);
+    expect(MutableHashMap.has(userTable.passwordHashes, "invitee-user")).toBe(true);
+  });
+
+  it("rejects by id, without the token, for a verified matching address", async () => {
+    const result = await withInvitation(true, (service, invitation) =>
+      service.rejectInvitation("invitee-user", { invitationId: invitation.id }),
+    );
+
+    expect(result.status).toBe("rejected");
+  });
+
+  it("refuses an unverified address without the token, and still takes the token", async () => {
+    const result = await withInvitation(false, (service, invitation, [current]) =>
+      Effect.gen(function* () {
+        const accept = yield* refusal(
+          service.acceptInvitation("invitee-user", { invitationId: invitation.id }),
+        );
+        const reject = yield* refusal(
+          service.rejectInvitation("invitee-user", { invitationId: invitation.id }),
+        );
+        const pending = Arr.fromIterable(MutableHashMap.values(invitations))[0].status;
+        const member = yield* service.acceptInvitation("invitee-user", {
+          ...answer(invitation),
+          currentSessionId: current.id,
+        });
+        return { accept, reject, pending, member };
+      }),
+    );
+
+    const unverified =
+      "Answering an invitation without its emailed token takes a verified email address";
+    expect(result.accept).toBe(unverified);
+    expect(result.reject).toBe(unverified);
+    expect(result.pending).toBe("pending");
+    expect(result.member.role).toBe("admin");
+    expect(Option.getOrUndefined(inviteeEmail())?.verified).toBe(true);
+  });
+
+  it("refuses a user whose verified email does not match, as if the id did not exist", async () => {
+    seedEmail("other-user", "other@example.com", true);
+    const result = await withInvitation(true, (service, invitation) =>
+      Effect.gen(function* () {
+        const accept = yield* refusal(
+          service.acceptInvitation("other-user", { invitationId: invitation.id }),
+        );
+        const reject = yield* refusal(
+          service.rejectInvitation("other-user", { invitationId: invitation.id }),
+        );
+        const unknown = yield* refusal(
+          service.acceptInvitation("invitee-user", { invitationId: "no-such-invitation" }),
+        );
+        return { accept, reject, unknown };
+      }),
+    );
+
+    expect(result).toEqual({
+      accept: "Invitation not found",
+      reject: "Invitation not found",
+      unknown: "Invitation not found",
+    });
+    expect(Arr.fromIterable(MutableHashMap.values(invitations))[0].status).toBe("pending");
+  });
+});
 describe("OrganizationService - domains", () => {
   beforeEach(resetStores);
 
