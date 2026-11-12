@@ -1,92 +1,43 @@
 name: CI
 
-# ONE required job (plus the non-required `alchemy` job below): the pipeline's task graph lives in vite.config.ts / vite.tasks.ts
-# (each package's `build`, `check` and `test:unit`, each depending on the
-# builds of the workspace packages it imports), not in GitHub Actions `needs:`.
-# Shape copied from effect-jsonapi (the library reference).
+# One workflow, one command: after checkout, Vite+ setup and a frozen install,
+# the job runs `vp run ci` (the root `ci` task in vite.config.ts), a fail-fast
+# chain of every gate in CI's order (AGENTS.md, Verification): build, format
+# and lint, docs, the two dist smokes, the type gate, the unit suites, the
+# audit, then the alchemy runtime suites. The task graph lives in
+# vite.config.ts / vite.tasks.ts, not in GitHub Actions `needs:`.
+#
+# Branch protection requires each matrix leg by name: `ci (node lts)` and
+# `ci (node latest)`. There is no aggregate job.
 
 on:
+  pull_request:
   push:
     branches: [trunk]
-  pull_request:
-    branches: [trunk]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# No permissions by default; the job grants only read access.
+# No permissions by default; each job grants only read access.
 permissions: {}
 
 jobs:
-  test:
-    name: Test & Typecheck
+  ci:
+    name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Vite+, Node.js and the `packageManager` pnpm, the dependency cache,
-      # and `vp install` (frozen on CI; runs the root `prepare` script).
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
-        with:
-          cache: true
-
-      - name: Restore the Vite+ task cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: node_modules/.vite/task-cache
-          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            vp-task-v1-${{ runner.os }}-
-
-      # Build first: type-aware lint resolves each workspace import through
-      # the sibling's built `dist/` (vite.config.ts, `lint.options`).
-      - name: Build packages
-        run: pnpm exec vp run build
-
-      - name: Format & lint (type-aware)
-        run: pnpm exec vp check
-
-      - name: API docs (docgen type-checks and runs every JSDoc example)
-        run: pnpm exec vp run docs
-
-      - name: Dist import smoke (each package's effect peer floor)
-        run: pnpm exec vp run check:dist
-
-      - name: Dist import smoke (catalog effect)
-        run: pnpm exec vp run check:dist -- --effect catalog
-
-      - name: Type check
-        run: pnpm exec vp run check
-
-      - name: Unit tests
-        run: pnpm exec vp run -r test:unit
-
-      - name: Audit
-        run: pnpm audit --audit-level high
-
-  # The suites that need the alchemy runtime (each Alchemy package's
-  # `AuthSchema.test.ts`, run by its `test:alchemy` task), kept in their own
-  # job so an alchemy break shows up on its own line. alchemy 2.0.0-beta.80 is
-  # the first release that imports only `effect/*` paths (effect-auth#250). Do
-  # not skip the tests.
-  #
-  # The job also runs a Postgres server, so effect-auth-alchemy-postgres's
-  # cases (`AuthSchema` and its stores over `@effect/sql-pg`, #184) run
-  # against a real server rather than skipping.
-  alchemy:
-    name: "Alchemy runtime"
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [lts, latest]
+    # alchemy-postgres's `Postgres.test.ts` and the real-server case of its
+    # `AuthSchema.test.ts` run against this service. `test:alchemy` declares
+    # `DATABASE_URL` and `CI`, so under CI a missing server fails them rather
+    # than skipping (#766).
     services:
       postgres:
         image: postgres:17
@@ -109,12 +60,28 @@ jobs:
         with:
           persist-credentials: false
 
-      # Vite+, Node.js and the `packageManager` pnpm, the dependency cache,
-      # and `vp install` (frozen on CI; runs the root `prepare` script).
+      # Vite+, Node.js and the `packageManager` pnpm, and the dependency
+      # cache; the install is the next step. `latest` maps to the semver range
+      # `*`, the newest stable release: Vite+ resolves the `latest` tag to the
+      # head of the Node.js release index, which can be a pre-release (it was
+      # v27.0.0-alpha when this was written).
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
         with:
+          node-version: ${{ matrix.node == 'latest' && '*' || matrix.node }}
           cache: true
+          run-install: false
 
-      - name: AuthSchema tests against the alchemy runtime
-        run: pnpm exec vp run --filter @thomasfosterau/effect-auth-alchemy-cloudflare --filter @thomasfosterau/effect-auth-alchemy-postgres test:alchemy
+      - name: Install
+        run: vp install --frozen-lockfile
+
+      - name: Restore the Vite+ task cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.vite/task-cache
+          key: vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-${{ github.sha }}
+          restore-keys: |
+            vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-
+
+      - name: CI
+        run: vp run ci

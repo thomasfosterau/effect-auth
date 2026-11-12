@@ -4,8 +4,8 @@ import { packageTasks } from "../../vite.tasks.ts";
 // `AuthSchema.test.ts` is the one suite that loads the alchemy engine (the
 // engine, the `Cloudflare.D1.Database` resource and its transitive
 // `@distilled.cloud/*` clients), so
-// it runs as its own `test:alchemy` task in CI's separate `alchemy` job
-// ("Alchemy runtime"); the rest of the package is ordinary:
+// it runs as its own `test:alchemy` task, which the root `ci` task runs after
+// the unit suites; the rest of the package is ordinary:
 //
 // - `build` and `check` (tsc over sources and tests) run as for any package;
 // - `test:unit` runs every test except `AuthSchema.test.ts` (`Storage.test.ts`
