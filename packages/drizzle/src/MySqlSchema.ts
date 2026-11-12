@@ -279,39 +279,10 @@ const dialect: DdlDialect = {
  * `CREATE TABLE IF NOT EXISTS`, which keeps the whole script replayable on
  * every deploy.
  *
- * `identifiers.value` is declared under {@link identifierCollation}. Being
- * `IF NOT EXISTS`, the script never changes a table that already exists: an
- * identifiers table created before #602 keeps the server's default collation
- * until {@link collationMigrationStatements} has run once.
+ * `identifiers.value` is declared under {@link identifierCollation}.
  */
 export const migrationStatements = (names?: Partial<TableNames>): ReadonlyArray<string> =>
   renderDdl(dialect, names);
-
-/**
- * The one-off migration for an identifiers table created before #602, whose
- * `value` column has the server's default collation: it converts the column to
- * {@link identifierCollation}. Running it again changes nothing, but each run
- * rebuilds the table, so it is not part of {@link migrationStatements}.
- *
- * The old case- and accent-insensitive unique key refused any two values that
- * compared equal under it, so no two existing rows collide under the binary
- * collation and the conversion cannot fail on them.
- *
- * @example
- * ```ts
- * for (const statement of MySql.collationMigrationStatements()) {
- *   await db.execute(sql.raw(statement));
- * }
- * ```
- */
-export const collationMigrationStatements = (
-  names?: Partial<TableNames>,
-): ReadonlyArray<string> => {
-  const t = resolveTableNames(names);
-  return [
-    `ALTER TABLE ${t.identifiers} MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL`,
-  ];
-};
 
 /** {@link migrationStatements} joined into a single runnable SQL script. */
 export const migrationSql = (names?: Partial<TableNames>): string =>

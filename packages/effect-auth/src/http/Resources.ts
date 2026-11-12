@@ -375,8 +375,12 @@ export type Invitation = typeof Invitation.Type;
  * `POST /organizations/:id/domains` (`domain`; always a `dns` claim) and
  * proved through `POST /organization-domains/:id/verifications`, or attested
  * by the operator through `POST /admin/organization-domains` (a `manual`
- * claim, #598); nothing else about it is writable. `verificationToken` is the
- * value a `dns` claim publishes as a TXT record.
+ * claim, #598), and released by the operator through
+ * `DELETE /admin/organization-domains/:id` (#680); nothing else about it is
+ * writable. `verificationToken` is the value a `dns` claim publishes as a TXT
+ * record. The `attester` relationship is its `attestedBy`: the platform admin
+ * who attested a `manual` claim, `null` for a `dns` claim or an attestation
+ * that recorded no one.
  *
  * @since 0.3.0
  * @category resources
@@ -406,6 +410,7 @@ export const OrganizationDomain = Resource.make("organization-domains", {
   },
   relationships: {
     organization: Relationship.one(() => Organization),
+    attester: Relationship.optional(() => User),
   },
 });
 

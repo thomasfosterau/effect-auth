@@ -2483,6 +2483,117 @@ describe("OrganizationService - domains", () => {
     );
   });
 
+  it("records who attested a claim, and keeps the first attester on a repeat (#680)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const pending = yield* service.addDomain("owner-1", acme.id, { domain: "acme.test" });
+        const attested = yield* service.attestDomain(acme.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+        const again = yield* service.attestDomain(acme.id, "acme.test", { attestedBy: "ops-2" });
+        const anonymous = yield* service.attestDomain(acme.id, "acme-corp.test");
+        const stored = yield* service.getDomainById(pending.id);
+        return { pending, attested, again, anonymous, stored };
+      }),
+    );
+
+    // A tenant's DNS claim never names an attester.
+    expect(result.pending.attestedBy).toBeUndefined();
+    expect(result.attested).toMatchObject({ id: result.pending.id, attestedBy: "ops-1" });
+    expect(result.attested.verifiedAt).toBeTypeOf("number");
+    expect(result.stored?.attestedBy).toBe("ops-1");
+    // A claim already verified is answered unchanged: the record of who
+    // attested it is not overwritten.
+    expect(result.again).toStrictEqual(result.attested);
+    expect("attestedBy" in result.anonymous).toBe(false);
+  });
+
+  it("lets the operator release an organization's claim in any state (#680)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const globex = yield* service.createOrganization("owner-2", {
+          name: "Globex",
+          slug: "globex",
+        });
+        const pending = yield* service.addDomain("owner-1", acme.id, { domain: "pending.test" });
+        const verified = yield* service.attestDomain(acme.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+        // Globex holds its own pending claim on the domain Acme holds verified.
+        const globexClaim = yield* service.addDomain("owner-2", globex.id, {
+          domain: "acme.test",
+        });
+
+        const releasedPending = yield* service.releaseDomain(acme.id, " PENDING.test ");
+        // The dispute: Acme's verified claim blocks Globex's attestation until
+        // the operator releases it.
+        const blocked = yield* Effect.result(service.attestDomain(globex.id, "acme.test"));
+        const releasedVerified = yield* service.releaseDomain(acme.id, "acme.test");
+        const handedOver = yield* service.attestDomain(globex.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+
+        const acmeDomains = yield* service.listDomains("owner-1", acme.id);
+        return {
+          pending,
+          verified,
+          globexClaim,
+          releasedPending,
+          blocked,
+          releasedVerified,
+          handedOver,
+          acmeDomains,
+        };
+      }),
+    );
+
+    expect(result.releasedPending).toStrictEqual(result.pending);
+    assert(Result.isFailure(result.blocked));
+    expect(result.blocked.failure.message).toBe(
+      "That domain is already verified for another organization",
+    );
+    expect(result.releasedVerified).toStrictEqual(result.verified);
+    expect(result.acmeDomains).toEqual([]);
+    // Globex's own pending claim is the one attested, in place.
+    expect(result.handedOver).toMatchObject({
+      id: result.globexClaim.id,
+      verificationState: "verified",
+      attestedBy: "ops-1",
+    });
+  });
+
+  it("refuses a release for an unknown organization, a bad domain or a domain it holds no claim on (#680)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const globex = yield* service.createOrganization("owner-2", {
+          name: "Globex",
+          slug: "globex",
+        });
+        yield* service.attestDomain(acme.id, "acme.test");
+
+        const unknown = yield* Effect.result(service.releaseDomain("org-nope", "acme.test"));
+        const invalid = yield* Effect.result(service.releaseDomain(acme.id, "not-a-domain"));
+        // Another organization's claim is never released through this one.
+        const unclaimed = yield* Effect.result(service.releaseDomain(globex.id, "acme.test"));
+        const acmeDomains = yield* service.listDomains("owner-1", acme.id);
+        return { unknown, invalid, unclaimed, acmeDomains };
+      }),
+    );
+
+    assert(Result.isFailure(result.unknown));
+    expect(result.unknown.failure._tag).toBe("OrganizationError");
+    assert(Result.isFailure(result.invalid));
+    expect(result.invalid.failure._tag).toBe("OrganizationError");
+    assert(Result.isFailure(result.unclaimed));
+    expect(result.unclaimed.failure.message).toBe(
+      "That organization holds no claim on that domain",
+    );
+    expect(result.acmeDomains).toHaveLength(1);
+  });
+
   it("refuses domain operations when no OrganizationDomainStore is wired", async () => {
     const result = await runServiceIn(baseContext, {}, (service) =>
       Effect.gen(function* () {
@@ -2495,15 +2606,17 @@ describe("OrganizationService - domains", () => {
           service.addDomain("owner-1", organization.id, { domain: "acme.test" }),
         );
         const attest = yield* Effect.result(service.attestDomain(organization.id, "acme.test"));
+        const release = yield* Effect.result(service.releaseDomain(organization.id, "acme.test"));
         // JIT is a no-op rather than a failure: it runs on a sign-in path.
         const jit = yield* service.provisionJitMembership("user-1", "user@acme.test");
-        return { list, add, attest, jit };
+        return { list, add, attest, release, jit };
       }),
     );
 
     expect(result.list._tag).toBe("Failure");
     expect(result.add._tag).toBe("Failure");
     expect(result.attest._tag).toBe("Failure");
+    expect(result.release._tag).toBe("Failure");
     expect(result.jit).toBeNull();
   });
 });

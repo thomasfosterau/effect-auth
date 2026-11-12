@@ -5,7 +5,8 @@
  * links).
  *
  * The two contracts have the same shape (`create`, `get`, `delete`,
- * `deleteByUserId` over `{ token, userId, email, createdAt, expiresAt }`), so
+ * `deleteByUserId` over `{ token, userId, email, createdAt, expiresAt }`;
+ * `EmailVerificationStore` adds `getLatestByUserId`, served for both), so
  * one `tokens` table holds both, told apart by its `purpose` column. Every
  * read and delete is scoped to the store's own purpose: a password-reset
  * request, which first clears the user's pending resets, never clears a
@@ -22,7 +23,7 @@
  *   preserved as `cause`.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
@@ -39,12 +40,17 @@ interface TokenRecord {
   readonly expiresAt: number;
 }
 
-/** The four operations both token contracts share. */
+/**
+ * The operations of both token contracts: the four they share, and
+ * `getLatestByUserId`, which `EmailVerificationStore` adds for its resend
+ * cooldown (#682).
+ */
 interface TokenStoreShape<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;
   readonly get: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Auth.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.AuthError>;
+  readonly getLatestByUserId: (userId: string) => Effect.Effect<A | null, Auth.AuthError>;
 }
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));
@@ -66,6 +72,7 @@ const makeFor = (
     const query = makeQuery(handle);
     const table = tables.tokens;
     const byToken = (token: string) => and(eq(table.token, token), eq(table.purpose, purpose));
+    const byUser = (userId: string) => and(eq(table.userId, userId), eq(table.purpose, purpose));
 
     return {
       create: (record) =>
@@ -95,11 +102,15 @@ const makeFor = (
 
       deleteByUserId: (userId) =>
         query(`${purpose}.deleteByUserId`, (db) =>
-          db
-            .delete(table)
-            .where(and(eq(table.userId, userId), eq(table.purpose, purpose)))
-            .execute(),
+          db.delete(table).where(byUser(userId)).execute(),
         ).pipe(Effect.asVoid),
+
+      // The fragment every dialect spells alike has no `limit` after
+      // `orderBy`; a user holds only the few rows each resend leaves.
+      getLatestByUserId: (userId) =>
+        query(`${purpose}.getLatestByUserId`, (db) =>
+          db.select().from(table).where(byUser(userId)).orderBy(desc(table.createdAt)).execute(),
+        ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
     };
   });
 

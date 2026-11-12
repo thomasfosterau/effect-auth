@@ -118,6 +118,16 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
           if (v.userId === userId) MutableHashMap.remove(verifications, token);
         });
       }),
+    getLatestByUserId: (userId) =>
+      Effect.sync(() => {
+        let latest: Auth.Email.EmailVerification | null = null;
+        MutableHashMap.forEach(verifications, (v) => {
+          if (v.userId === userId && (latest === null || v.createdAt > latest.createdAt)) {
+            latest = v;
+          }
+        });
+        return latest;
+      }),
   };
 
   const passwordResetStore: typeof Auth.Password.PasswordResetStore.Service = {

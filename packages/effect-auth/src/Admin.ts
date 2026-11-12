@@ -235,6 +235,16 @@ export class AdminService extends Context.Service<
   AdminService,
   {
     /**
+     * Whether `user` is an administrator under this service's
+     * {@link AdminConfig}: {@link isAdmin | `isAdmin(user, config)`}, the rule
+     * every other method gates on. The HTTP tier's platform-admin endpoints
+     * outside this service (SSO providers, OAuth clients, domain attestation
+     * and release) ask it too, so a custom `adminRoles` or `adminUserIds`
+     * governs them alike (#680).
+     */
+    readonly isAdmin: (user: Types.User) => boolean;
+
+    /**
      * List users with pagination and optional email search.
      */
     readonly listUsers: (
@@ -407,6 +417,8 @@ export const make = (
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
     return {
+      isAdmin: (user) => isAdmin(user, config),
+
       listUsers: Effect.fn("AdminService.listUsers")(function* (
         actor: Types.User,
         query: ListUsersQuery = {},

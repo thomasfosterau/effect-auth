@@ -2,9 +2,14 @@
  * Email verification types for effect-auth
  */
 
-import { Clock, Context, Effect, Layer } from "effect";
+import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
-import { AuthError, EmailVerificationError, type RateLimitError } from "../Errors.ts";
+import {
+  AuthError,
+  EmailVerificationError,
+  type RateLimitError,
+  ResendTooSoonError,
+} from "../Errors.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -34,6 +39,20 @@ export interface EmailVerificationResult {
  */
 export interface EmailVerificationConfig {
   readonly expiresIn?: number; // Default: 24 hours
+  /**
+   * Minimum interval (ms) between a user's verification email and a resend
+   * (`resendVerification`), measured from the newest token for the user.
+   * Inside it, `resendVerification` fails with {@link ResendTooSoonError} and
+   * sends nothing, leaving the outstanding token usable. Default `60_000`
+   * (60 s, as for the email and phone OTPs and the magic link, #682); `0`
+   * turns it off. `createVerification` (the first send, at sign-up) is never
+   * held back.
+   *
+   * The HTTP tier and `AuthLifecycleService` answer a resend inside the window
+   * as they answer any other, so the refusal never tells a caller whether the
+   * address belongs to an unverified account.
+   */
+  readonly resendCooldown?: number | undefined;
   readonly sendEmail: (to: string, token: string) => Effect.Effect<void, EmailVerificationError>;
 }
 
@@ -60,6 +79,14 @@ export class EmailVerificationStore extends Context.Service<
     readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, AuthError>;
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
+    /**
+     * The user's most recently created verification (greatest `createdAt`),
+     * expired or not, or `null` when the user has none. The resend cooldown
+     * reads it (#682).
+     */
+    readonly getLatestByUserId: (
+      userId: string,
+    ) => Effect.Effect<EmailVerification | null, AuthError>;
   }
 >()("@effect-auth/EmailVerificationStore") {}
 
@@ -119,8 +146,10 @@ export class EmailVerificationService extends Context.Service<
 
     /**
      * Invalidate any outstanding verification tokens for the user and send a
-     * fresh one. Combine with the rate-limiter (e.g.
-     * `RateLimitPresets.emailVerification`) to prevent abuse.
+     * fresh one. Fails with {@link ResendTooSoonError}, sending nothing and
+     * invalidating nothing, when the user's newest token was created within
+     * `resendCooldown` (default 60 s, #682). Combine with the rate-limiter
+     * (e.g. `RateLimitPresets.emailVerification`) to prevent abuse.
      */
     readonly resendVerification: (
       userId: string,
@@ -128,7 +157,7 @@ export class EmailVerificationService extends Context.Service<
       options?: CreateVerificationOptions,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
-      AuthError | RateLimitError | EmailVerificationError | HookError
+      AuthError | RateLimitError | ResendTooSoonError | EmailVerificationError | HookError
     >;
   }
 >()("@effect-auth/EmailVerificationService") {
@@ -158,6 +187,7 @@ export const make = (
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
+    const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
     const store = yield* EmailVerificationStore;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
@@ -276,6 +306,18 @@ export const make = (
         email: string,
         options?: CreateVerificationOptions,
       ) {
+        // Resend cooldown (#682): inside the window the outstanding token
+        // stays usable and nothing is sent.
+        const latest = resendCooldown > 0 ? yield* store.getLatestByUserId(userId) : null;
+        if (latest !== null) {
+          const elapsed = (yield* Clock.currentTimeMillis) - latest.createdAt;
+          if (elapsed < resendCooldown) {
+            return yield* new ResendTooSoonError({
+              message: "Please wait before requesting another verification email",
+              retryAfter: Duration.millis(resendCooldown - elapsed),
+            });
+          }
+        }
         // Invalidate outstanding tokens so only the latest one is usable.
         yield* store.deleteByUserId(userId);
         return yield* createVerification(userId, email, options);
