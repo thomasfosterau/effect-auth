@@ -71,6 +71,7 @@ export {
   memoryOtpFailures,
   memoryOtpSecondFactorStore,
   memoryPhoneOtpStore,
+  memoryRateLimitStore,
   memorySessionStore,
   memoryTrustedDeviceStore,
   memoryUserStore,

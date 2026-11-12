@@ -1,6 +1,11 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
+import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
-import { memoryApiKeyStore, memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
+import {
+  memoryApiKeyStore,
+  memoryEmailPasswordStore,
+  memoryRateLimitStore,
+} from "../testing/MemoryStores.ts";
 import { ApiKeyStore } from "../ApiKey.ts";
 import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Result, Tracer } from "effect";
 import * as Arr from "effect/Array";
@@ -205,7 +210,9 @@ const emailPasswordStore = memoryEmailPasswordStore({
   passwordHashes,
 });
 
-const makeTestContext = async () => {
+const makeTestContext = async (
+  rateLimits: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
+) => {
   // SessionService's `make` now resolves SessionStore | UserStore | Hooks at
   // construction time, so Hooks must be provided alongside the raw stores.
   const sessionManager = await Effect.runPromise(
@@ -218,24 +225,28 @@ const makeTestContext = async () => {
     ).pipe(Effect.provide(TestHooks)),
   );
 
-  return Context.merge(
-    Context.merge(
-      Context.make(SessionService, sessionManager),
-      Context.make(EmailPasswordStore, emailPasswordStore),
-    ),
+  return Context.add(
     Context.merge(
       Context.merge(
-        Context.make(EmailOtpStore, emailOtpStore),
-        Context.make(EmailOtpUserStore, emailOtpUserStore),
+        Context.make(SessionService, sessionManager),
+        Context.make(EmailPasswordStore, emailPasswordStore),
       ),
       Context.merge(
         Context.merge(
-          Context.make(IdentifierStore, identifierStore),
-          Context.make(UserStore, userStore),
+          Context.make(EmailOtpStore, emailOtpStore),
+          Context.make(EmailOtpUserStore, emailOtpUserStore),
         ),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        Context.merge(
+          Context.merge(
+            Context.make(IdentifierStore, identifierStore),
+            Context.make(UserStore, userStore),
+          ),
+          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        ),
       ),
     ),
+    RateLimitStore,
+    memoryRateLimitStore(rateLimits),
   );
 };
 
@@ -1178,6 +1189,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       | SessionService
       | EmailPasswordStore
       | Hooks
+      | RateLimitStore
       | SecureRandom.SecureRandom
     >,
   ) =>
@@ -1373,6 +1385,7 @@ const runInContext = <A, E>(
     | UserStore
     | SessionService
     | EmailPasswordStore
+    | RateLimitStore
     | SecureRandom.SecureRandom
     | Hooks
   >,
@@ -1479,7 +1492,12 @@ describe("EmailOtpService failure backoff across resends (#590)", () => {
   it("never locks the owner out: after the delay a code signs in and resets the count", async () => {
     const { first, afterSignIn } = await runInContext(
       Effect.gen(function* () {
-        const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+        // Six sends inside the hour: the per-recipient cap (#684) is off so
+        // the run measures the backoff alone.
+        const service = yield* EmailOtp.make({
+          sendVerificationOtp: recordingSend,
+          recipientSendLimit: false,
+        });
         // Three codes' worth of wrong guesses puts the email in the backoff.
         const spent = yield* bruteForce({
           send: service.send(member, "sign-in"),

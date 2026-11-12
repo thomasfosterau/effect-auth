@@ -11,7 +11,12 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { memoryEmailPasswordStore, memoryOtpFailures } from "./testing/MemoryStores.ts";
+import {
+  memoryEmailPasswordStore,
+  memoryOtpFailures,
+  memoryRateLimitStore,
+} from "./testing/MemoryStores.ts";
+import { RateLimitStore } from "./RateLimit.ts";
 import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -119,6 +124,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
     }),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
+    Layer.succeed(RateLimitStore)(memoryRateLimitStore()),
     Hooks.Default,
     PlatformCrypto.layer,
   );

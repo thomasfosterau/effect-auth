@@ -3,6 +3,7 @@ import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
+import { isRecipientSendCapped } from "./RecipientSendLimit.ts";
 import {
   answeredByStandIn,
   EmailPasswordService,
@@ -264,12 +265,15 @@ export const make = (
 
               // Unverified duplicate: resend to the holder (also invalidates
               // stale tokens, matching FIX 5 behaviour).
-              // Inside the resend cooldown the holder's outstanding link stands,
-              // and the answer is the same (#682).
+              // Inside the resend cooldown, or past the send cap, the holder's
+              // outstanding link stands, and the answer is the same (#682, #684).
               if (sendOnSignUp) {
                 yield* verification
                   .resendVerification(existing.id, identifier.value, { offResponsePath: true })
-                  .pipe(Effect.catchTag("ResendTooSoonError", () => Effect.void));
+                  .pipe(
+                    Effect.catchTag("ResendTooSoonError", () => Effect.void),
+                    Effect.catchIf(isRecipientSendCapped, () => Effect.void),
+                  );
               }
 
               // The caller has proven nothing about the address, so the answer
@@ -349,11 +353,13 @@ export const make = (
 
               // FIX 5: use resendVerification (which invalidates prior tokens
               // via deleteByUserId) instead of createVerification.
-              // Inside the resend cooldown the outstanding link stands (#682).
+              // Inside the resend cooldown, or past the send cap, the
+              // outstanding link stands (#682, #684).
               if (sendOnSignIn) {
-                yield* verification
-                  .resendVerification(user.id, identifier.value)
-                  .pipe(Effect.catchTag("ResendTooSoonError", () => Effect.void));
+                yield* verification.resendVerification(user.id, identifier.value).pipe(
+                  Effect.catchTag("ResendTooSoonError", () => Effect.void),
+                  Effect.catchIf(isRecipientSendCapped, () => Effect.void),
+                );
               }
 
               return {

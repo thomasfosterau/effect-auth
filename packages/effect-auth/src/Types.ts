@@ -272,3 +272,19 @@ export interface OtpBackoffConfig {
   /** The longest delay, in ms. Default 86 400 000 (one day). */
   readonly maxDelay?: number | undefined;
 }
+
+/**
+ * The per-recipient send cap (#684): at most `max` messages to one address or
+ * phone number for one purpose within `windowMs`, counted through the
+ * `RateLimitStore`. A send past it fails with `RateLimitError` (`429` over
+ * HTTP). It counts every request that reaches it, whether or not the address
+ * has an account, so a capped request reveals nothing about which addresses
+ * are registered. The services that take it (`recipientSendLimit`) default to
+ * 5 sends per hour; `false` turns it off.
+ */
+export interface RecipientSendLimit {
+  /** The sends one recipient may get for one purpose in a window. */
+  readonly max: number;
+  /** The window, in ms, from the first send counted in it. */
+  readonly windowMs: number;
+}

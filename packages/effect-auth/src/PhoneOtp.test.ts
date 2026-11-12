@@ -1,4 +1,6 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
+import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
+import { memoryRateLimitStore } from "./testing/MemoryStores.ts";
 import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -177,7 +179,9 @@ const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 1000 * 60 * 60 * 24, idlePeriod: 1000 * 60 * 60 * 12 },
 };
 
-const makeTestContext = async () => {
+const makeTestContext = async (
+  rateLimits: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
+) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       makeSessionService(sessionConfig),
@@ -187,18 +191,25 @@ const makeTestContext = async () => {
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
-  return Context.merge(
-    Context.merge(
-      Context.make(SessionService, sessionManager),
-      Context.merge(Context.make(IdentifierStore, identifiers), Context.make(UserStore, userStore)),
-    ),
+  return Context.add(
     Context.merge(
       Context.merge(
-        Context.make(PhoneOtpStore, phoneOtpStore),
-        Context.make(PhoneOtpUserStore, phoneOtpUserStore),
+        Context.make(SessionService, sessionManager),
+        Context.merge(
+          Context.make(IdentifierStore, identifiers),
+          Context.make(UserStore, userStore),
+        ),
       ),
-      Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+      Context.merge(
+        Context.merge(
+          Context.make(PhoneOtpStore, phoneOtpStore),
+          Context.make(PhoneOtpUserStore, phoneOtpUserStore),
+        ),
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+      ),
     ),
+    RateLimitStore,
+    memoryRateLimitStore(rateLimits),
   );
 };
 
@@ -694,6 +705,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
       | UserStore
       | SessionService
       | Hooks
+      | RateLimitStore
       | SecureRandom.SecureRandom
     >,
   ) =>
@@ -858,6 +870,7 @@ const runInContext = <A, E>(
     | IdentifierStore
     | UserStore
     | SessionService
+    | RateLimitStore
     | SecureRandom.SecureRandom
     | Hooks
   >,

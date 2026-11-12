@@ -44,6 +44,7 @@ import {
 import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
+import { isRecipientSendCapped } from "../RecipientSendLimit.ts";
 import * as S from "./HttpApiSchema.ts";
 import * as JsonApiErrors from "./JsonApiErrors.ts";
 import * as R from "./Resources.ts";
@@ -2101,9 +2102,11 @@ export const emailVerificationsGroupLayer = (
           );
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified, or is inside its resend
-          // cooldown (#682): a 429 there alone would name an unverified account.
+          // cooldown (#682) or past its send cap (#684): a 429 there alone
+          // would name an unverified account.
           if (identifier !== null && !identifier.verified) {
             yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
+              Effect.catchIf(isRecipientSendCapped, () => Effect.void),
               Effect.catchTags({
                 ResendTooSoonError: () => Effect.void,
                 AuthError: (e) => internalServerError(e),

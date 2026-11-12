@@ -6,6 +6,8 @@ import { SecureRandom } from "effect/crypto";
 import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { RateLimitStore } from "./RateLimit.ts";
+import { memoryRateLimitStore } from "./testing/MemoryStores.ts";
 import * as AuthLifecycle from "./AuthLifecycle.ts";
 import {
   type EmailVerification,
@@ -203,6 +205,8 @@ const makeTestContext = async (
     readonly hooks?: Layer.Layer<Hooks> | undefined;
     /** The `UserService` config (built after, and not seen by, `EmailPasswordService`). */
     readonly userService?: UserModule.UserServiceConfig | undefined;
+    /** The verification resends' `resendCooldown`. Default: the service's. */
+    readonly resendCooldown?: number | undefined;
   } = {},
 ) => {
   const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
@@ -228,8 +232,13 @@ const makeTestContext = async (
             Effect.sync(() => {
               sentEmails.push({ email, token });
             })),
+        ...(options.resendCooldown !== undefined && { resendCooldown: options.resendCooldown }),
       }),
-      Context.merge(Context.make(EmailVerificationStore, emailVerificationStore), cryptoContext),
+      Context.add(
+        Context.merge(Context.make(EmailVerificationStore, emailVerificationStore), cryptoContext),
+        RateLimitStore,
+        memoryRateLimitStore(),
+      ),
     ).pipe(Effect.provide(options.hooks ?? Hooks.Default)),
   );
 
@@ -501,6 +510,48 @@ describe("AuthLifecycleService", () => {
     expect(results.map((result) => result.needsEmailVerification)).toEqual([true, true, true]);
     expect(sentEmails.map((sent) => sent.email)).toEqual(["cooldown@example.com"]);
     expect(MutableHashMap.size(verifications)).toBe(1);
+  });
+
+  // The per-recipient cap (#684): past five resends in the hour, a sign-in and
+  // a duplicate sign-up answer as before and send nothing more.
+  it("holds the sign-in and sign-up resends back past the send cap, answering alike (#684)", async () => {
+    const testContext = await makeTestContext(
+      { requireEmailVerification: true },
+      { resendCooldown: 0 },
+    );
+    const hashResult = await Effect.runPromise(
+      Password.pbkdf2Hasher({ iterations: 1000 }).hash("password-123"),
+    );
+    MutableHashMap.set(users, "user-capped", {
+      id: "user-capped",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-capped", "capped@example.com", false);
+    MutableHashMap.set(passwordHashes, "user-capped", hashResult.hash);
+
+    const results = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({
+            requireEmailVerification: true,
+            sendOnSignIn: true,
+          });
+          const signIn = service.signIn({ email: "capped@example.com", password: "password-123" });
+          const signUp = service.signUp({ email: "capped@example.com", password: "password-456" });
+          return yield* Effect.all([signIn, signIn, signIn, signIn, signIn, signIn, signUp], {
+            concurrency: 1,
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(results.map((result) => result.needsEmailVerification)).toEqual(
+      Arr.makeBy(7, () => true),
+    );
+    expect(sentEmails.map((sent) => sent.email)).toEqual(Arr.makeBy(5, () => "capped@example.com"));
   });
 
   it("should verify token and auto sign in", async () => {

@@ -13,6 +13,10 @@ import {
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import type { RateLimitStore } from "../RateLimit.ts";
+import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
+import type { RecipientSendLimit } from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
 
 /**
  * Email verification token
@@ -53,6 +57,18 @@ export interface EmailVerificationConfig {
    * address belongs to an unverified account.
    */
   readonly resendCooldown?: number | undefined;
+  /**
+   * The per-recipient send cap (#684): at most `max` resends
+   * (`resendVerification`) to one email within `windowMs`, counted through
+   * the `RateLimitStore`. Default 5 an hour; `false` turns it off. A resend
+   * past it fails with `RateLimitError` and sends nothing. `createVerification`
+   * (the first send, at sign-up) is not counted.
+   *
+   * The HTTP tier and `AuthLifecycleService` answer a capped resend as they
+   * answer any other (`isRecipientSendCapped`), so the refusal never tells an
+   * unverified account from an unknown address.
+   */
+  readonly recipientSendLimit?: RecipientSendLimit | false | undefined;
   readonly sendEmail: (to: string, token: string) => Effect.Effect<void, EmailVerificationError>;
 }
 
@@ -148,8 +164,9 @@ export class EmailVerificationService extends Context.Service<
      * Invalidate any outstanding verification tokens for the user and send a
      * fresh one. Fails with {@link ResendTooSoonError}, sending nothing and
      * invalidating nothing, when the user's newest token was created within
-     * `resendCooldown` (default 60 s, #682). Combine with the rate-limiter
-     * (e.g. `RateLimitPresets.emailVerification`) to prevent abuse.
+     * `resendCooldown` (default 60 s, #682), and with `RateLimitError`,
+     * likewise sending and invalidating nothing, past the `recipientSendLimit`
+     * cap (default 5 resends per email an hour, #684).
      */
     readonly resendVerification: (
       userId: string,
@@ -183,7 +200,7 @@ export const make = (
 ): Effect.Effect<
   typeof EmailVerificationService.Service,
   never,
-  EmailVerificationStore | Hooks | SecureRandom.SecureRandom
+  EmailVerificationStore | Hooks | RateLimitStore | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
@@ -192,6 +209,7 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
+    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
     const createVerification = Effect.fn("EmailVerificationService.createVerification")(function* (
       rawUserId: string,
@@ -318,6 +336,9 @@ export const make = (
             });
           }
         }
+        // The per-recipient cap (#684): past it the outstanding token stays
+        // usable and nothing is sent.
+        yield* recipientSendGate("email-verification", normalizeEmail(email));
         // Invalidate outstanding tokens so only the latest one is usable.
         yield* store.deleteByUserId(userId);
         return yield* createVerification(userId, email, options);
