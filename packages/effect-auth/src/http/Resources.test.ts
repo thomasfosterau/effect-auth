@@ -169,7 +169,7 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.OrganizationDomain, {
         foreignKeys: { organization: "organizationId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(domainKeys)));
+    ).toStrictEqual(sorted(R.keys(domainKeys)));
   });
 
   it("organization-roles carry exactly OrgRole, its organization as a relationship", () => {
@@ -177,13 +177,13 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.OrganizationRole, {
         foreignKeys: { organization: "organizationId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(orgRoleKeys)));
+    ).toStrictEqual(sorted(R.keys(orgRoleKeys)));
   });
 
   it("teams carry exactly Team, its organization as a relationship", () => {
     expect(
       storeFacingKeys(Resources.Team, { foreignKeys: { organization: "organizationId" } }),
-    ).toStrictEqual(sorted(Rec.keys(teamKeys)));
+    ).toStrictEqual(sorted(R.keys(teamKeys)));
   });
 
   it("team-members carry exactly TeamMember, its keys as relationships", () => {
@@ -191,17 +191,15 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.TeamMember, {
         foreignKeys: { team: "teamId", user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(teamMemberKeys)));
+    ).toStrictEqual(sorted(R.keys(teamMemberKeys)));
   });
 
   it("accepts writes only to a team's name and a role's permissions", () => {
-    expect(sorted(Rec.keys(Resources.Team.updateInput.fields))).toStrictEqual(
-      sorted(["id", "name"]),
-    );
-    expect(sorted(Rec.keys(Resources.OrganizationRole.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.Team.updateInput.fields))).toStrictEqual(sorted(["id", "name"]));
+    expect(sorted(R.keys(Resources.OrganizationRole.updateInput.fields))).toStrictEqual(
       sorted(["id", "permissions"]),
     );
-    expect(sorted(Rec.keys(Resources.OrganizationDomain.createInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.OrganizationDomain.createInput.fields))).toStrictEqual(
       sorted(["domain", "verificationStrategy"]),
     );
   });

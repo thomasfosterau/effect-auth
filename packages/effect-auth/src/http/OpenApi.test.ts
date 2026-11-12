@@ -1,5 +1,7 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import { Array as Arr, Layer, Order, Schema, Struct } from "effect";
+import { Layer, Order, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
