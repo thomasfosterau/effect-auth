@@ -21,7 +21,7 @@
  *
  * @module testing
  */
-import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";
@@ -31,6 +31,7 @@ import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
 import { type KeyValueStoreKeys, layerKV, layerMemoryKeyValueStore } from "../KeyValueStores.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
+import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { MultiFactorStore, type MultiFactorRecord } from "../multifactor/MultiFactor.ts";
 import {
   OtpSecondFactorStore,
@@ -288,6 +289,35 @@ export const memoryOtpSecondFactorStore = (
   update: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
   delete: (pendingToken) => Effect.sync(() => void MutableHashMap.remove(records, pendingToken)),
+});
+
+/**
+ * `RateLimitStore` over a map, for the per-recipient send caps (#684) and the
+ * limiters in a test: `increment` starts a new window when there is none or
+ * it has expired, as the contract requires (#455). Pass `entries` to read the
+ * keys a test wrote.
+ *
+ * @since 0.3.0
+ * @category constructors
+ */
+export const memoryRateLimitStore = (
+  entries: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
+): typeof RateLimitStore.Service => ({
+  get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(entries, key))),
+  set: (key, entry) => Effect.sync(() => void MutableHashMap.set(entries, key, entry)),
+  increment: (key, ttl) =>
+    Effect.flatMap(Clock.currentTimeMillis, (now) =>
+      Effect.sync(() => {
+        const entry = Option.getOrUndefined(MutableHashMap.get(entries, key));
+        const next: RateLimitEntry =
+          entry === undefined || now >= entry.resetAt
+            ? { key, count: 1, resetAt: now + ttl * 1000 }
+            : { ...entry, count: entry.count + 1 };
+        MutableHashMap.set(entries, key, next);
+        return next.count;
+      }),
+    ),
+  delete: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
 });
 
 /**

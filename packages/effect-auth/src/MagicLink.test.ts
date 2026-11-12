@@ -1,6 +1,11 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import {
+  memoryApiKeyStore,
+  memoryEmailPasswordStore,
+  memoryRateLimitStore,
+} from "./testing/MemoryStores.ts";
+import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
 import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Order, Result } from "effect";
 import * as Arr from "effect/Array";
@@ -189,7 +194,9 @@ const emailPasswordStore = memoryEmailPasswordStore({
   passwordHashes,
 });
 
-const makeTestContext = async () => {
+const makeTestContext = async (
+  rateLimits: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
+) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -202,8 +209,11 @@ const makeTestContext = async () => {
 
   return Context.merge(
     Context.merge(
-      Context.make(SessionService, sessionManager),
-      Context.make(EmailPasswordStore, emailPasswordStore),
+      Context.merge(
+        Context.make(SessionService, sessionManager),
+        Context.make(EmailPasswordStore, emailPasswordStore),
+      ),
+      Context.make(RateLimitStore, memoryRateLimitStore(rateLimits)),
     ),
     Context.merge(
       Context.merge(

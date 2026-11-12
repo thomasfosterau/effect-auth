@@ -33,6 +33,8 @@ import {
 } from "./UserStore.ts";
 import * as OtpCode from "./OtpCode.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import type { RateLimitStore } from "./RateLimit.ts";
+import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
 import type * as Types from "./Types.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
@@ -185,6 +187,18 @@ export interface PhoneOtpConfig {
    * its first `sign-in` send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
+  /**
+   * The per-recipient send cap (#684): at most `max` sends to one number for
+   * one purpose within `windowMs`, counted through the `RateLimitStore`,
+   * which bounds SMS toll fraud against one number from many clients.
+   * Default 5 an hour; `false` turns it off. A send past it fails with
+   * {@link Errors.RateLimitError}. It counts every send the resend cooldown
+   * and the backoff let through, for a number with and without an account
+   * alike, so the refusal reveals nothing about which numbers are registered.
+   * `phone-verification` sends count too, though a signed-in user asks for
+   * them: `send` does not tell the two apart.
+   */
+  readonly recipientSendLimit?: Types.RecipientSendLimit | false | undefined;
   readonly sendOtp: (
     phoneNumber: string,
     otp: string,
@@ -213,7 +227,7 @@ export interface PhoneOtpAuthResult {
 /**
  * Sign-in and phone-number verification by SMS one-time code. Codes are stored hashed, with an attempt limit.
  *
- * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
+ * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore`, `SessionService`, `Hooks` and `RateLimitStore` (the per-recipient send cap).
  */
 export class PhoneOtpService extends Context.Service<
   PhoneOtpService,
@@ -235,6 +249,10 @@ export class PhoneOtpService extends Context.Service<
      * The marker record makes the cooldown apply to a number with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown number.
+     *
+     * Past the `recipientSendLimit` cap (default 5 sends per number and
+     * purpose an hour, #684), fails with {@link Errors.RateLimitError}, for a
+     * known and an unknown number alike.
      *
      * The `beforeSendCode` hook runs first, before the number is looked up,
      * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
@@ -315,6 +333,7 @@ export const make = (
   | UserStore
   | Hooks
   | SessionService
+  | RateLimitStore
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -329,6 +348,7 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
+    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined
@@ -388,6 +408,9 @@ export const make = (
         // marker record below and whose wrong codes are counted alike, so a
         // known and an unknown number get the same answer.
         yield* OtpCode.gateSend(store, phoneNumber, purpose, codes);
+
+        // The per-recipient cap (#684), counted whatever the lookup found.
+        yield* recipientSendGate(`phone-otp:${purpose}`, phoneNumber);
 
         // A number with no account gets a marker record that no code
         // redeems (see `issueCode`).

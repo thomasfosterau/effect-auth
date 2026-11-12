@@ -9,8 +9,12 @@
  */
 import * as Auth from "../../index.ts";
 import * as Http from "../../http/index.ts";
-import { memoryPhoneOtpStore, memorySessionStore } from "../../testing/MemoryStores.ts";
-import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
+import {
+  memoryPhoneOtpStore,
+  memoryRateLimitStore,
+  memorySessionStore,
+} from "../../testing/MemoryStores.ts";
+import { DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 
@@ -478,35 +482,16 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   // RateLimiter (Http.make throws without one, #389), so the feature set carries
   // an in-memory one. Device approve/deny are limited to 5 per user code per 15
   // minutes, as in production.
-  const rateLimitEntries = MutableHashMap.empty<string, Auth.RateLimitEntry>();
-  const rateLimitStore: typeof Auth.RateLimitStore.Service = {
-    get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(rateLimitEntries, key))),
-    set: (key, entry) => Effect.sync(() => void MutableHashMap.set(rateLimitEntries, key, entry)),
-    increment: (key, ttl) =>
-      // Starts a new window when there is none or it has expired, as the
-      // RateLimitStore contract requires (#455).
-      Effect.flatMap(Clock.currentTimeMillis, (now) =>
-        Effect.sync(() => {
-          const entry = Option.getOrUndefined(MutableHashMap.get(rateLimitEntries, key));
-          const next: Auth.RateLimitEntry =
-            entry === undefined || now >= entry.resetAt
-              ? { key, count: 1, resetAt: now + ttl * 1000 }
-              : { ...entry, count: entry.count + 1 };
-          MutableHashMap.set(rateLimitEntries, key, next);
-          return next.count;
-        }),
-      ),
-    delete: (key) => Effect.sync(() => void MutableHashMap.remove(rateLimitEntries, key)),
-  };
-  const rateLimiterLayer = Auth.RateLimiter.layer().pipe(
-    Layer.provide(Layer.succeed(Auth.RateLimitStore, rateLimitStore)),
-  );
+  const rateLimitStore = memoryRateLimitStore();
+  const rateLimitStoreLayer = Layer.succeed(Auth.RateLimitStore, rateLimitStore);
+  const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
 
+  // The same store carries the per-recipient send caps (#684).
   const services: Layer.Layer<Http.AuthServices> = Layer.mergeAll(
     core,
     options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
-  );
+  ).pipe(Layer.provide(rateLimitStoreLayer));
 
   // The fixture runs one in-process client, with no client address, so the
   // per-address IP limit `Http.make` applies by default is off (#583): it would

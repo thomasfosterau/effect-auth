@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
+import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
+import { memoryRateLimitStore } from "../testing/MemoryStores.ts";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
@@ -130,7 +132,9 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async () => {
+const makeTestContext = async (
+  rateLimits: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
+) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -141,27 +145,31 @@ const makeTestContext = async () => {
     ).pipe(Effect.provide(TestHooks)),
   );
 
-  return Context.merge(
-    Context.make(SessionService, sessionManager),
+  return Context.add(
     Context.merge(
-      Context.make(SessionStore, sessionStore),
+      Context.make(SessionService, sessionManager),
       Context.merge(
-        Context.make(UserStore, userStore),
+        Context.make(SessionStore, sessionStore),
         Context.merge(
-          Context.make(PasswordResetStore, passwordResetStore),
+          Context.make(UserStore, userStore),
           Context.merge(
+            Context.make(PasswordResetStore, passwordResetStore),
             Context.merge(
-              Context.make(PasswordResetUserStore, passwordResetUserStore),
-              Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
-            ),
-            Context.merge(
-              Context.make(IdentifierStore, identifierStore),
-              Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+              Context.merge(
+                Context.make(PasswordResetUserStore, passwordResetUserStore),
+                Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
+              ),
+              Context.merge(
+                Context.make(IdentifierStore, identifierStore),
+                Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+              ),
             ),
           ),
         ),
       ),
     ),
+    RateLimitStore,
+    memoryRateLimitStore(rateLimits),
   );
 };
 

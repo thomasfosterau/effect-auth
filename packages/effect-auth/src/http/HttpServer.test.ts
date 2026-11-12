@@ -184,6 +184,8 @@ const makeFixture = (
     readonly passwordless?:
       | { readonly disableSignUp: boolean; readonly resendCooldown?: number | undefined }
       | undefined;
+    /** The `EmailVerificationService` `resendCooldown`. Default the service's 60 s. */
+    readonly verificationResendCooldown?: number | undefined;
     /** The `EmailPasswordService` config. Default `{}`. */
     readonly emailPassword?: EmailPasswordConfig | undefined;
     /** The `AuthLifecycleService` config. Default `{}`. */
@@ -383,6 +385,8 @@ const makeFixture = (
     Layer.succeed(PasswordResetStore)(passwordResetStore),
     Layer.succeed(PasswordResetUserStore)(passwordResetUserStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
+    // The per-recipient send caps (#684).
+    memoryRateLimitStoreLayer(),
     options.hooks ?? Hooks.Default,
     // Detached sends run in place, so a test reads them as the response returns.
     inlineDeliveryScheduler,
@@ -397,6 +401,9 @@ const makeFixture = (
     UserService.layer().pipe(Layer.provide(storeLayer)),
     EmailVerificationService.layer({
       sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
+      ...(options.verificationResendCooldown !== undefined && {
+        resendCooldown: options.verificationResendCooldown,
+      }),
     }).pipe(Layer.provide(storeLayer)),
   );
 
@@ -2599,6 +2606,102 @@ describe("passwordless send within the resend cooldown", () => {
       expect(
         fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length,
       ).toBe(sentBefore + 1);
+    },
+  );
+});
+
+// #684: every unauthenticated send is capped per recipient and purpose (5 an
+// hour by default), across clients, and the cap answers an unknown address
+// exactly as it answers a known one: the same status, body and headers.
+describe("send past the per-recipient cap (#684)", () => {
+  /** Everything a caller can observe of a response. */
+  const observe = async (response: Response) => ({
+    status: response.status,
+    headers: Array.from(response.headers.entries()),
+    body: await response.text(),
+  });
+
+  const cases = [
+    {
+      flow: "magic link sign-in",
+      path: "send-magic-link",
+      payload: (email: string, _phone: string) => ({ email }),
+      capped: 429,
+    },
+    {
+      flow: "email OTP sign-in",
+      path: "send-email-otp",
+      payload: (email: string, _phone: string) => ({ email, purpose: "sign-in" }),
+      capped: 429,
+    },
+    {
+      flow: "email OTP forget-password",
+      path: "send-email-otp",
+      payload: (email: string, _phone: string) => ({ email, purpose: "forget-password" }),
+      capped: 429,
+    },
+    {
+      flow: "phone OTP sign-in",
+      path: "send-phone-otp",
+      payload: (_email: string, phoneNumber: string) => ({ phoneNumber, purpose: "sign-in" }),
+      capped: 429,
+    },
+    {
+      flow: "password reset",
+      path: "request-reset",
+      payload: (email: string, _phone: string) => ({ email }),
+      capped: 429,
+    },
+    {
+      // The resend answers every address alike, so a capped one does too.
+      flow: "email verification resend",
+      path: "send-verification",
+      payload: (email: string, _phone: string) => ({ email }),
+      capped: 202,
+    },
+  ] as const;
+
+  it.each(cases)(
+    "refuses the 6th send alike for a known and an unknown address: $flow",
+    async ({ path, payload, capped }) => {
+      const fixture = makeFixture({
+        passwordless: { disableSignUp: true, resendCooldown: 0 },
+        verificationResendCooldown: 0,
+      });
+      const handler = handlerFor(fixture, { features: true });
+
+      const up = await handler(
+        authRequest("sign-up", { email: "member@example.com", password: PW }),
+      );
+      expect(up.status).toBe(201);
+      const user = (await authBody(up, UserIdBody)).user;
+      fixture.registerPhone(user.id, "+15557770001");
+      const sent = () =>
+        fixture.sentMagicLinkTokens.length +
+        fixture.sentOtps.length +
+        fixture.sentPhoneOtps.length +
+        fixture.sentResetTokens.length +
+        fixture.sentVerificationTokens.length;
+      const sentBefore = sent();
+
+      const six = async (
+        email: string,
+        phoneNumber: string,
+        left = 6,
+      ): Promise<Array<Awaited<ReturnType<typeof observe>>>> =>
+        left === 0
+          ? []
+          : [
+              await observe(await handler(authRequest(path, payload(email, phoneNumber)))),
+              ...(await six(email, phoneNumber, left - 1)),
+            ];
+      const known = await six("member@example.com", "+15557770001");
+      const unknown = await six("missing@example.com", "+15557770002");
+
+      expect(unknown).toEqual(known);
+      expect(known.map((response) => response.status)).toEqual([202, 202, 202, 202, 202, capped]);
+      // Only the account holder was sent anything, five times.
+      expect(sent()).toBe(sentBefore + 5);
     },
   );
 });
