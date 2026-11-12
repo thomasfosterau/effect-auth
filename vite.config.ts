@@ -185,14 +185,10 @@ export default defineConfig({
         // WebAuthn CBOR decoder returns a CBOR map as `CBORMap`, a public
         // `ReadonlyMap` that callers tell from an array with `instanceof Map`,
         // and `RbacConfig` takes `ReadonlyMap` as well as records, which its
-        // test passes. The session cookie cache's `gateAttributes` are a public
-        // `ReadonlySet`, held until the owner decides whether it becomes a
-        // `HashSet` (asked on #443). Changing any of them is an API change.
+        // test passes. Changing either is an API change.
         files: [
           "packages/effect-auth/src/multifactor/WebAuthnCodec.ts",
           "packages/effect-auth/src/Rbac.test.ts",
-          "packages/effect-auth/src/SessionCookieCache.ts",
-          "packages/effect-auth/src/SessionCookieCache.test.ts",
         ],
         rules: { "effect/avoid-native-object-helpers": "off" },
       },
