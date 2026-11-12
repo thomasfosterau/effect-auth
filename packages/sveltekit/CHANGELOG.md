@@ -1,5 +1,64 @@
 # @thomasfosterau/effect-auth-sveltekit
 
+## 0.2.1
+
+### Patch Changes
+
+- 9b63f86: **Security hardening (#631):** every adapter now depends on `@thomasfosterau/effect-auth` through a caret range (`^0.x.y`) instead of an exact pin. A consumer who upgrades the core within a minor (say, for a security patch) gets one copy of it, and no adapter keeps running a nested, unpatched core of its own. Under 0.x a caret range covers one minor, so the adapters are released with every core minor.
+  
+  **effect-auth-drizzle (#635):** the `drizzle-orm` peer range is bounded to the tested lines, `>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`, and a new drizzle minor joins it once CI has run against it. The unused optional `@types/pg` peer is dropped.
+- cc2bac6: Import Effect's helper modules (`Array`, `Option`, `Predicate`, `Record`, `Schema`, `String`) from their own entry points (`effect/Array`, …) rather than the `effect` barrel. The emitted `dist/` and `.d.ts` change their import specifiers only; no API or behaviour changes.
+- 1e7d8f4: **Security fix (#581), breaking:** the raw session token no longer reaches a response body, so `HttpOnly` protects it again. Before, the `id` of the `sessions` resource that `POST /sessions`, `POST /users`, `POST /second-factor-challenges/verifications`, `POST /email-verifications/redemptions` and `GET /sessions/current` answered was the session cookie's value, and `Authorization: Bearer <that id>` was accepted, so any script on the origin could read and replay the session. Every session resource is now named by its stored id, the SHA-256 digest of the token, which is not a credential; the one session has one id across `GET /sessions`, `GET /sessions/:id`, `DELETE /sessions/:id`, `device-sessions` and `impersonations`. The token reaches a client only in the `HttpOnly` session cookie and, in the existing opt-in bearer mode (`cookie.bearerMode`), the `set-auth-token` header.
+  
+  - **`SessionService.createSession` returns `{ session, token }`** (`Types.IssuedSession`, new), and `Session.id` is always the stored id: `validateSession` and `setSessionAttributes` answer the session under its digest. Every sign-in result carries `token` beside `session` (`AuthResult`, `AuthLifecycleResult`, `MagicLinkResult`, `EmailOtpAuthResult`, `PhoneOtpAuthResult`, `OAuthSignInResult`, `SsoSignInResult`, `GoogleOneTapSignInResult`, `AnonymousResult`, `DevicePollResult`, `MultiFactorVerifyResult`, `OtpSecondFactorVerifyResult`, `redeemOneTimeTokenForSession`); `AdminService.impersonateUser` returns `{ session, token }`. Set the cookie from `token`, not `session.id`.
+  - **`revokeOtherSessions(userId, keepSessionId)` and `setSessionAttributes(storedSessionId, …)` take the stored id** (`session.id` as the services answer it), as `revokeSessionById` already did; `EmailPasswordService.changePassword`'s `currentSessionId` is that id too. `validateSession` and `invalidateSession` still take the raw token.
+  - **`afterSignOut` observes the stored id**, not the token, so `AuditPlugin`'s `auth.signOut` log no longer records a credential. `afterCreateSession` and `afterValidateSession` see sessions under their stored id.
+  - `CurrentSession` and the signed session-data cache cookie hold the digest; a cache cookie issued before this release no longer matches and falls back to one store read.
+  - `./client`: `getSession()`, `listSessions()` and the cross-tab `BroadcastChannel` message carry the stored id, which `revokeSession` takes (revoking the current session's id now signs it out). `Http.RemoteSession.read` resolves the session under its stored id.
+  - `@thomasfosterau/effect-auth-sveltekit`: with this core, `event.locals.auth.session` carries no credential, so a `load` that returns it no longer serializes the token into the page. No API change.
+- Updated dependencies [8d7fe03]
+- Updated dependencies [c80f91c]
+- Updated dependencies [fd32f3f]
+- Updated dependencies [eafa773]
+- Updated dependencies [701eebc]
+- Updated dependencies [fe036f1]
+- Updated dependencies [de98263]
+- Updated dependencies [3829977]
+- Updated dependencies [4037bcf]
+- Updated dependencies [9598882]
+- Updated dependencies [dd8715a]
+- Updated dependencies [ea7f4ea]
+- Updated dependencies [325f231]
+- Updated dependencies [4649a7b]
+- Updated dependencies [d66403e]
+- Updated dependencies [f49ee5d]
+- Updated dependencies [cf1e3c9]
+- Updated dependencies [7a651a3]
+- Updated dependencies [cc2bac6]
+- Updated dependencies [1e7d8f4]
+- Updated dependencies [8b65156]
+- Updated dependencies [2096e2a]
+- Updated dependencies [efba66d]
+- Updated dependencies [7d9579e]
+- Updated dependencies [4037bcf]
+- Updated dependencies [e2ff7f7]
+- Updated dependencies [6d33e11]
+- Updated dependencies [b386606]
+- Updated dependencies [32ebf2d]
+- Updated dependencies [a2624ea]
+- Updated dependencies [211f399]
+- Updated dependencies [93685f4]
+- Updated dependencies [f43b53d]
+- Updated dependencies [7f3ab3d]
+- Updated dependencies [68faced]
+- Updated dependencies [b96f201]
+- Updated dependencies [c50edb9]
+- Updated dependencies [63e45ac]
+- Updated dependencies [e57ea3c]
+- Updated dependencies [e1770e3]
+- Updated dependencies [88cd0a1]
+  - @thomasfosterau/effect-auth@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

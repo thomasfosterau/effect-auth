@@ -1,5 +1,58 @@
 # @thomasfosterau/effect-auth-alchemy-postgres
 
+## 0.1.2
+
+### Patch Changes
+
+- 9b63f86: **Security hardening (#631):** every adapter now depends on `@thomasfosterau/effect-auth` through a caret range (`^0.x.y`) instead of an exact pin. A consumer who upgrades the core within a minor (say, for a security patch) gets one copy of it, and no adapter keeps running a nested, unpatched core of its own. Under 0.x a caret range covers one minor, so the adapters are released with every core minor.
+  
+  **effect-auth-drizzle (#635):** the `drizzle-orm` peer range is bounded to the tested lines, `>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`, and a new drizzle minor joins it once CI has run against it. The unused optional `@types/pg` peer is dropped.
+- f49ee5d: Drop redundant default type arguments from the published declarations (`Redacted.Redacted<string>` is now written `Redacted.Redacted`, `Effect.Effect<A, E, never>` is `Effect.Effect<A, E>`, and so on); every type is unchanged (#503). Values that were stringified with `String(…)` are now converted explicitly: an OAuth profile id that is neither a string nor a number becomes `""` rather than `"[object Object]"`, the unsupported `id_token` algorithm error formats the header value (`"HS256"`), and a Twilio error body whose `code` or `message` is not a string is rendered as JSON.
+- cc2bac6: Import Effect's helper modules (`Array`, `Option`, `Predicate`, `Record`, `Schema`, `String`) from their own entry points (`effect/Array`, …) rather than the `effect` barrel. The emitted `dist/` and `.d.ts` change their import specifiers only; no API or behaviour changes.
+- a2624ea: Purge expired rate-limit rows (#686). `./sql`'s `purgeExpired` (and so the Alchemy packages' `purgeExpired`) now also deletes the `auth_rate_limits` rows whose window and block have both passed, in one `DELETE`, and `PurgeExpiredResult` gains `rateLimits`, the count it deleted. The drizzle package adds `RateLimitStore.purgeExpired(tables)`, one `DELETE` of the same rows from its rate-limit table. A row inside its window or still blocked stays.
+- Updated dependencies [8d7fe03]
+- Updated dependencies [c80f91c]
+- Updated dependencies [fd32f3f]
+- Updated dependencies [eafa773]
+- Updated dependencies [701eebc]
+- Updated dependencies [fe036f1]
+- Updated dependencies [de98263]
+- Updated dependencies [3829977]
+- Updated dependencies [4037bcf]
+- Updated dependencies [9598882]
+- Updated dependencies [dd8715a]
+- Updated dependencies [ea7f4ea]
+- Updated dependencies [325f231]
+- Updated dependencies [4649a7b]
+- Updated dependencies [d66403e]
+- Updated dependencies [f49ee5d]
+- Updated dependencies [cf1e3c9]
+- Updated dependencies [7a651a3]
+- Updated dependencies [cc2bac6]
+- Updated dependencies [1e7d8f4]
+- Updated dependencies [8b65156]
+- Updated dependencies [2096e2a]
+- Updated dependencies [efba66d]
+- Updated dependencies [7d9579e]
+- Updated dependencies [4037bcf]
+- Updated dependencies [e2ff7f7]
+- Updated dependencies [6d33e11]
+- Updated dependencies [b386606]
+- Updated dependencies [32ebf2d]
+- Updated dependencies [a2624ea]
+- Updated dependencies [211f399]
+- Updated dependencies [93685f4]
+- Updated dependencies [f43b53d]
+- Updated dependencies [7f3ab3d]
+- Updated dependencies [68faced]
+- Updated dependencies [b96f201]
+- Updated dependencies [c50edb9]
+- Updated dependencies [63e45ac]
+- Updated dependencies [e57ea3c]
+- Updated dependencies [e1770e3]
+- Updated dependencies [88cd0a1]
+  - @thomasfosterau/effect-auth@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes

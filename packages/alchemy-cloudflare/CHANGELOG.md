@@ -1,5 +1,60 @@
 # @thomasfosterau/effect-auth-alchemy-cloudflare
 
+## 0.1.2
+
+### Patch Changes
+
+- 9b63f86: **Security hardening (#631):** every adapter now depends on `@thomasfosterau/effect-auth` through a caret range (`^0.x.y`) instead of an exact pin. A consumer who upgrades the core within a minor (say, for a security patch) gets one copy of it, and no adapter keeps running a nested, unpatched core of its own. Under 0.x a caret range covers one minor, so the adapters are released with every core minor.
+  
+  **effect-auth-drizzle (#635):** the `drizzle-orm` peer range is bounded to the tested lines, `>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`, and a new drizzle minor joins it once CI has run against it. The unused optional `@types/pg` peer is dropped.
+- cc2bac6: Import Effect's helper modules (`Array`, `Option`, `Predicate`, `Record`, `Schema`, `String`) from their own entry points (`effect/Array`, …) rather than the `effect` barrel. The emitted `dist/` and `.d.ts` change their import specifiers only; no API or behaviour changes.
+- 6d33e11: Security fix (#590): email and phone OTP sign-in could be brute-forced, because each resend issued a fresh code with a fresh attempt counter, so `maxAttempts` bounded one code and nothing bounded an address. Every wrong code is now also counted against the (address, purpose) pair in a failure budget that a resend, an expiry or the attempt limit never resets, and `send` backs off once it grows: after `backoff.freeFailures` wrong codes (default 5), `send` fails with `ResendTooSoonError` until `backoff.baseDelay` (default one minute), doubled for each further wrong code and capped at `backoff.maxDelay` (default one day), has passed since the latest one. A successful verification resets the count. There is no lockout: once the delay has passed a send goes through, so an attacker can slow an address's owner down but not lock them out. Under the defaults an attacker gets 18 guesses at an address in the first day and 3 a day after that, where before there was no limit. The backoff applies alike to an address with and without an account. `resendCooldown` now defaults to 60 seconds for `EmailOtpConfig` and `PhoneOtpConfig` (was off; `0` turns it off). Codes stay 6 digits.
+  
+  Breaking: `EmailOtpStore` and `PhoneOtpStore` gain `getFailures`, `recordFailure(address, purpose, at)` and `clearFailures`, over the new `OtpFailures` type (`{ count, lastFailureAt }`; the three methods are `OtpFailureBudget<Purpose>`), with `OtpBackoffConfig` for the new `backoff` option. A store keeps the budget apart from the code's record, so `upsert`, `delete` and `purgeExpired` leave it, and should make `recordFailure` one atomic statement. `EmailOtpStoreKV` keeps it under `email-otp-failures:<purpose>:<email>`, and `./sql` in the new `auth_email_otp_failures` table, which `migrate` (and so effect-auth-alchemy-cloudflare's `AuthSchema` on the next deploy) creates. `./testing` adds `emailOtpStoreConformance` and `phoneOtpStoreConformance`, `memoryPhoneOtpStore` and `memoryOtpFailures` (the budget's three methods, to spread into a store of your own). Migration: implement the three methods on a custom store and run the new conformance suite against it; run `migrate` once on a SQL database; a caller that sent twice in a row on purpose passes `resendCooldown: 0`.
+- a2624ea: Purge expired rate-limit rows (#686). `./sql`'s `purgeExpired` (and so the Alchemy packages' `purgeExpired`) now also deletes the `auth_rate_limits` rows whose window and block have both passed, in one `DELETE`, and `PurgeExpiredResult` gains `rateLimits`, the count it deleted. The drizzle package adds `RateLimitStore.purgeExpired(tables)`, one `DELETE` of the same rows from its rate-limit table. A row inside its window or still blocked stays.
+- Updated dependencies [8d7fe03]
+- Updated dependencies [c80f91c]
+- Updated dependencies [fd32f3f]
+- Updated dependencies [eafa773]
+- Updated dependencies [701eebc]
+- Updated dependencies [fe036f1]
+- Updated dependencies [de98263]
+- Updated dependencies [3829977]
+- Updated dependencies [4037bcf]
+- Updated dependencies [9598882]
+- Updated dependencies [dd8715a]
+- Updated dependencies [ea7f4ea]
+- Updated dependencies [325f231]
+- Updated dependencies [4649a7b]
+- Updated dependencies [d66403e]
+- Updated dependencies [f49ee5d]
+- Updated dependencies [cf1e3c9]
+- Updated dependencies [7a651a3]
+- Updated dependencies [cc2bac6]
+- Updated dependencies [1e7d8f4]
+- Updated dependencies [8b65156]
+- Updated dependencies [2096e2a]
+- Updated dependencies [efba66d]
+- Updated dependencies [7d9579e]
+- Updated dependencies [4037bcf]
+- Updated dependencies [e2ff7f7]
+- Updated dependencies [6d33e11]
+- Updated dependencies [b386606]
+- Updated dependencies [32ebf2d]
+- Updated dependencies [a2624ea]
+- Updated dependencies [211f399]
+- Updated dependencies [93685f4]
+- Updated dependencies [f43b53d]
+- Updated dependencies [7f3ab3d]
+- Updated dependencies [68faced]
+- Updated dependencies [b96f201]
+- Updated dependencies [c50edb9]
+- Updated dependencies [63e45ac]
+- Updated dependencies [e57ea3c]
+- Updated dependencies [e1770e3]
+- Updated dependencies [88cd0a1]
+  - @thomasfosterau/effect-auth@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes
