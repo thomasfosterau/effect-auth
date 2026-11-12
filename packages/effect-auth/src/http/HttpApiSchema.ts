@@ -277,6 +277,8 @@ export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
 export const UsernameSignInPayload = Schema.Struct({
   username: Schema.String,
   password: Schema.String,
+  /** Optional captcha token consumed by the `CaptchaPlugin`. */
+  captchaToken: Schema.optional(Schema.String),
   /**
    * When `false`, the response sets a browser-session cookie. See
    * `SignInPayload.rememberMe` for details.

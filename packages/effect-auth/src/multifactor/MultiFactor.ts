@@ -22,7 +22,7 @@ import type { TokenCipher } from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import * as Obs from "../Observability.ts";
 import { EmailPasswordStore, SecondFactorGate } from "../email/EmailPassword.ts";
-import { type HookError } from "../Hooks.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -362,6 +362,7 @@ export const make = (
   | PasswordHasher
   | UserStore
   | SessionService
+  | Hooks
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -382,6 +383,7 @@ export const make = (
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const sessionManager = yield* SessionService;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const maxFailedAttempts = config.maxFailedAttempts ?? 5;
 
@@ -395,6 +397,18 @@ export const make = (
         const attempts = yield* pendingStore.recordFailedAttempt(pendingToken);
         if (attempts >= maxFailedAttempts) yield* pendingStore.delete(pendingToken);
         return yield* new MultiFactorError({ message });
+      });
+
+    /**
+     * Run the `beforeAuthenticate` gate for a second-factor redemption by
+     * the challenge's user, before the code is checked, so lockout and rate
+     * limits count attempts per user across challenges (#592).
+     */
+    const authenticate = (userId: string) =>
+      hooks.beforeAuthenticate({
+        method: "second-factor",
+        identifier: { type: "user", value: userId },
+        userId,
       });
 
     /**
@@ -599,6 +613,7 @@ export const make = (
         (pendingToken: string, code: string, options?: MultiFactorVerifyOptions) =>
           Effect.gen(function* () {
             const pending = yield* resolvePending(pendingToken, invalidTotpCode);
+            yield* authenticate(pending.userId);
             const record = yield* getVerifiedRecord(pending.userId);
 
             const plainSecret =
@@ -643,6 +658,7 @@ export const make = (
         (pendingToken: string, code: string, options?: MultiFactorVerifyOptions) =>
           Effect.gen(function* () {
             const pending = yield* resolvePending(pendingToken, invalidBackupCode);
+            yield* authenticate(pending.userId);
             const record = yield* getVerifiedRecord(pending.userId);
 
             const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
