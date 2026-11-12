@@ -52,6 +52,14 @@ const run = <A, E>(
   >,
 ): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())));
 
+/** A rate-limit entry as `RateLimitStore.set` takes it. */
+const limit = (key: string, resetAt: number, blockedUntil?: number): RateLimitEntry => ({
+  key,
+  count: 3,
+  resetAt,
+  ...(blockedUntil !== undefined && { blockedUntil }),
+});
+
 describe("KeyValueStores", () => {
   it("exports individual layers", () => {
     expect(OAuthStateStoreKV).toBeDefined();
@@ -509,6 +517,7 @@ describe("KeyValueStores", () => {
         | MagicLinkStore
         | EmailOtpStore
         | OAuthStateStore
+        | RateLimitStore
         | KeyValueStore.KeyValueStore
         | KeyValueStoreKeys
         | TestClock.TestClock
@@ -519,7 +528,12 @@ describe("KeyValueStores", () => {
           Effect.provide(
             Layer.merge(
               Layer.provideMerge(
-                Layer.mergeAll(MagicLinkStoreKV, EmailOtpStoreKV, OAuthStateStoreKV),
+                Layer.mergeAll(
+                  MagicLinkStoreKV,
+                  EmailOtpStoreKV,
+                  OAuthStateStoreKV,
+                  RateLimitStoreKV,
+                ),
                 layerMemoryKeyValueStore,
               ),
               TestClock.layer(),
@@ -573,7 +587,7 @@ describe("KeyValueStores", () => {
           };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 2 });
+      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 2, rateLimits: 0 });
       expect(result.old).toBeNull();
       expect(result.gone).toBeNull();
       expect(result.fresh?.token).toBe("new");
@@ -590,6 +604,42 @@ describe("KeyValueStores", () => {
       ]);
     });
 
+    it("deletes rate-limit entries whose window and block have both passed (#709)", async () => {
+      const result = await runPurge(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const limits = yield* RateLimitStore;
+          yield* limits.set("window-over", limit("window-over", now - 1), 60);
+          // `RateLimiter` opens a fresh window once `now >= resetAt` and lifts a
+          // block once `now >= blockedUntil`, so both edges are spent at `now`.
+          yield* limits.set("edges-now", limit("edges-now", now, now), 60);
+          yield* limits.set("block-over", limit("block-over", now - 60_000, now - 1), 60);
+          yield* limits.set("in-window", limit("in-window", now + 1), 60);
+          yield* limits.set("still-blocked", limit("still-blocked", now - 60_000, now + 1), 60);
+          const purged = yield* purgeExpiredKV;
+          const again = yield* purgeExpiredKV;
+          return {
+            purged,
+            again,
+            inWindow: yield* limits.get("in-window"),
+            stillBlocked: yield* limits.get("still-blocked"),
+            remaining: yield* (yield* KeyValueStoreKeys).list(""),
+            // A purged key counts as one never seen: the next hit opens a window.
+            restarted: yield* limits.increment("window-over", 60),
+          };
+        }),
+      );
+      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 3 });
+      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result.inWindow).toEqual(limit("in-window", now + 1));
+      expect(result.stillBlocked).toEqual(limit("still-blocked", now - 60_000, now + 1));
+      expect(Arr.sort(result.remaining, Order.String)).toEqual([
+        "rate-limit:in-window",
+        "rate-limit:still-blocked",
+      ]);
+      expect(result.restarted).toBe(1);
+    });
+
     it("keeps a record that expires exactly now, which the services still accept", async () => {
       const result = await runPurge(
         Effect.gen(function* () {
@@ -599,7 +649,7 @@ describe("KeyValueStores", () => {
           return yield* purgeExpiredKV;
         }),
       );
-      expect(result).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(result).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
     });
 
     it("leaves the other stores' records alone, expired or not", async () => {
@@ -618,7 +668,7 @@ describe("KeyValueStores", () => {
           return { purged, state: yield* states.consume("s1") };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
       expect(result.state?.state).toBe("s1");
     });
 
@@ -635,7 +685,7 @@ describe("KeyValueStores", () => {
           ),
         ),
       );
-      expect(purged).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
     });
 
     it("surfaces a listing failure as the AuthError it is", async () => {
@@ -683,7 +733,7 @@ describe("KeyValueStores", () => {
           ),
         ),
       );
-      expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 1 });
+      expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 1, rateLimits: 0 });
       expect(result.old).toBeNull();
       expect(result.fresh?.token).toBe("new");
       expect(Arr.sort(result.remaining, Order.String)).toEqual([

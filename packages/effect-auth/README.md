@@ -900,7 +900,7 @@ A key the list doesn't name is dropped without an error, so a client that sends 
 No store deletes an email OTP or a magic link that nobody redeems: it stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address. The services refuse an expired record, so this is about space, not access, but a caller can grow the store by one record per address it tries. The SQL rate-limit table grows the same way, one row per key, IP and identifier ever counted. Purge on a schedule the host owns (a cron trigger on Workers, a timer or job on a long-lived server):
 
 - `@thomasfosterau/effect-auth/sql`'s `purgeExpired` (and the Alchemy packages' `purgeExpired`) deletes the expired rows in one statement per table, rate-limit rows included once their window and block have both passed. `@thomasfosterau/effect-auth-drizzle`'s `RateLimitStore.purgeExpired(tables)` does the same for its rate-limit table.
-- `purgeExpiredKV` does the same for `MagicLinkStoreKV` and `EmailOtpStoreKV` (so `layerKV` and `Testing.memoryStores`). It finds the records through the store's own `keys` (Effect 4.1), so any `KeyValueStore` serves, `KeyValueStore.layerMemory` included. A backend that lists by prefix more cheaply than it lists everything (a large or shared Workers KV namespace, Redis) can also provide `KeyValueStoreKeys`, whose `list(prefix)` the purge then uses instead; `layerMemoryKeyValueStore` provides both over one in-memory map.
+- `purgeExpiredKV` does the same for `MagicLinkStoreKV`, `EmailOtpStoreKV` and `RateLimitStoreKV` (so `layerKV` and `Testing.memoryStores`), rate-limit entries once their window and block have both passed; `KeyValueStore` has no per-entry TTL, so the purge is the only thing that removes them. It finds the records through the store's own `keys` (Effect 4.1), so any `KeyValueStore` serves, `KeyValueStore.layerMemory` included. A backend that lists by prefix more cheaply than it lists everything (a large or shared Workers KV namespace, Redis) can also provide `KeyValueStoreKeys`, whose `list(prefix)` the purge then uses instead; `layerMemoryKeyValueStore` provides both over one in-memory map.
 
 ```ts
 import { Effect, Layer } from "effect";
@@ -932,7 +932,7 @@ export const workersKvKeys = (KV: {
   });
 
 // In the scheduled handler, with the same KeyValueStore the stores use:
-// yield* Auth.purgeExpiredKV  // { magicLinks, emailOtps }
+// yield* Auth.purgeExpiredKV  // { magicLinks, emailOtps, rateLimits }
 ```
 
 The listing must name keys as the `KeyValueStore` sees them: behind a `KeyValueStore.prefix` view, strip that prefix. The KV purge is read-then-delete like the stores' other multi-step writes, so an OTP re-sent for the same address and purpose mid-purge can be deleted with the expired one; that code is then refused and the user asks for another.
