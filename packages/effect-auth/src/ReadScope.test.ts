@@ -25,6 +25,10 @@ interface AppUser {
   readonly id: string;
   readonly role: string;
 }
+/** A viewer of the corpus; `principalType` overrides the guards' own type (#666). */
+interface CorpusViewer extends AppUser {
+  readonly principalType?: string | undefined;
+}
 class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
   "@test/ReadScope/CurrentViewer",
 ) {}
@@ -68,7 +72,7 @@ const corpus: ReadonlyArray<CorpusRow> = Arr.flatMap([...users, "", null], (owne
   ),
 );
 
-const viewers: ReadonlyArray<AppUser | null> = [
+const viewers: ReadonlyArray<CorpusViewer | null> = [
   null,
   { id: "u-admin", role: "admin" },
   { id: "u-moderator", role: "moderator" },
@@ -78,6 +82,9 @@ const viewers: ReadonlyArray<AppUser | null> = [
   { id: "u-stranger", role: "guest" },
   // An empty id names no principal (#661): refused, even at the top rung.
   { id: "", role: "admin" },
+  // An empty type names no principal either (#666): refused, whatever its id or rung.
+  { id: "u-member", role: "admin", principalType: "" },
+  { id: "", role: "admin", principalType: "" },
 ];
 
 /** Who follows whom: `u-other` follows `u-member` and `u-admin`. */
@@ -88,15 +95,29 @@ const followsEdge = (follower: string, owner: string): boolean =>
 const memberEdge = (account: string, group: string): boolean =>
   group === "g-club" && (account === "u-other" || account === "u-stranger");
 
-const principalOf = (viewer: AppUser | null): Entity.Entity =>
-  viewer === null ? anonymous : guards.principal(viewer);
+const principalOf = (viewer: CorpusViewer | null): Entity.Entity =>
+  viewer === null
+    ? anonymous
+    : viewer.principalType === undefined
+      ? guards.principal(viewer)
+      : Entity.entity(Entity.ref(viewer.principalType, viewer.id), {
+          attributes: { role: viewer.role },
+        });
+
+/** The entity type a binding gives the owner column. */
+const ownerTypeOf = (scoped: ReadScope.Binding): string => {
+  const kind = scoped.attributes["owner"];
+  return kind !== undefined && !P.isString(kind) ? kind.entity : guards.principalType;
+};
 
 /** A row's present columns as entity attributes: a NULL column is an absent attribute. */
-const rowAttributes = (row: CorpusRow): Readonly<Record<string, Entity.AttributeValue>> =>
+const rowAttributes = (
+  row: CorpusRow,
+  ownerType: string,
+): Readonly<Record<string, Entity.AttributeValue>> =>
   R.filter(
     {
-      owner:
-        row.owner === null ? null : Entity.entityValue(Entity.ref(guards.principalType, row.owner)),
+      owner: row.owner === null ? null : Entity.entityValue(Entity.ref(ownerType, row.owner)),
       visibility: row.visibility,
       draft: row.draft,
       unapproved: row.unapproved,
@@ -115,11 +136,14 @@ const relation = (
 /** The kernel's decision for one row: the specification. */
 const kernelAllows = (
   policies: ReadonlyArray<Policy.DeclarativePolicy>,
-  viewer: AppUser | null,
+  viewer: CorpusViewer | null,
   row: CorpusRow,
+  scoped: ReadScope.Binding = binding,
 ): boolean => {
   const principal = principalOf(viewer);
-  const resource = Entity.entity(Entity.ref("Owned", row.id), { attributes: rowAttributes(row) });
+  const resource = Entity.entity(Entity.ref(scoped.resourceType, row.id), {
+    attributes: rowAttributes(row, ownerTypeOf(scoped)),
+  });
   return Policy.decidePure(
     policies,
     Policy.request({
@@ -137,10 +161,11 @@ const kernelAllows = (
 
 const compileFor = (
   policies: ReadonlyArray<Policy.DeclarativePolicy>,
-  viewer: AppUser | null,
+  viewer: CorpusViewer | null,
+  scoped: ReadScope.Binding = binding,
 ): ReadScope.Compiled => {
   const principal = principalOf(viewer);
-  return ReadScope.compile(policies, binding, {
+  return ReadScope.compile(policies, scoped, {
     principal: principal.ref,
     action: read,
     slice: Entity.slice([principal]),
@@ -155,7 +180,11 @@ const exact = (compiled: ReadScope.Compiled): ReadScope.ReadScope => {
   return compiled.scope;
 };
 
-const scopeAllows = (scope: ReadScope.ReadScope, viewer: AppUser | null, row: CorpusRow): boolean =>
+const scopeAllows = (
+  scope: ReadScope.ReadScope,
+  viewer: CorpusViewer | null,
+  row: CorpusRow,
+): boolean =>
   ReadScope.matches(
     scope,
     {
@@ -171,18 +200,24 @@ const scopeAllows = (scope: ReadScope.ReadScope, viewer: AppUser | null, row: Co
       (set === "following" ? followsEdge(viewer.id, value) : memberEdge(viewer.id, value)),
   );
 
-/** Require the compiled scope and the kernel to agree on every row, for every viewer. */
-const expectAgreement = (policies: ReadonlyArray<Policy.DeclarativePolicy>): void => {
-  const disagreements = Arr.flatMap(viewers, (viewer) => {
-    const scope = exact(compileFor(policies, viewer));
+/** Every (viewer, row) on which the compiled scope and the kernel disagree. */
+const disagreementsWith = (
+  policies: ReadonlyArray<Policy.DeclarativePolicy>,
+  scoped: ReadScope.Binding = binding,
+): ReadonlyArray<{ readonly viewer: string; readonly row: string; readonly kernel: boolean }> =>
+  Arr.flatMap(viewers, (viewer) => {
+    const scope = exact(compileFor(policies, viewer, scoped));
     return Arr.flatMap(corpus, (row) => {
-      const kernel = kernelAllows(policies, viewer, row);
+      const kernel = kernelAllows(policies, viewer, row, scoped);
       return scopeAllows(scope, viewer, row) === kernel
         ? []
         : [{ viewer: viewer?.id ?? "anonymous", row: row.id, kernel }];
     });
   });
-  expect(disagreements).toEqual([]);
+
+/** Require the compiled scope and the kernel to agree on every row, for every viewer. */
+const expectAgreement = (policies: ReadonlyArray<Policy.DeclarativePolicy>): void => {
+  expect(disagreementsWith(policies)).toEqual([]);
 };
 
 /** Every text literal a predicate compares with. */
@@ -200,6 +235,35 @@ const literalTexts = (predicate: ReadScope.Predicate): ReadonlyArray<string> =>
 describe("ReadScope.compile", () => {
   it("agrees with the kernel on the owned-material policies, absent attributes included", () => {
     expectAgreement(owned.policies);
+  });
+
+  it("agrees with the kernel when the owner column holds empty-type references (#666)", () => {
+    // Every row's owner is `""::"<id>"`, which names no entity: an owner
+    // permit or a literal over it matches no row, for any viewer.
+    const untypedOwners: ReadScope.Binding = {
+      ...binding,
+      attributes: { ...binding.attributes, owner: { entity: "" } },
+    };
+    const disagreements = disagreementsWith(
+      [
+        ...owned.policies,
+        Policy.permit({
+          id: "owner",
+          resource: Policy.isType("Owned"),
+          when: Condition.eq(Condition.attr("resource", "owner"), Condition.principal),
+        }),
+        Policy.permit({
+          id: "literal",
+          resource: Policy.isType("Owned"),
+          when: Condition.eq(
+            Condition.attr("resource", "owner"),
+            Condition.lit(Entity.entityValue(Entity.ref("", "u-member"))),
+          ),
+        }),
+      ],
+      untypedOwners,
+    );
+    expect(disagreements).toEqual([]);
   });
 
   it("returns AllowAll for the viewPrivate axis, with no disjunction to render", () => {

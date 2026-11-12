@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import { Clock, DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 import { KeyValueStore } from "effect/persistence";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -73,19 +74,55 @@ describe("KeyValueStores", () => {
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 600_000,
     };
 
-    it("roundtrips create/get/delete", async () => {
+    it("hands a state out once: consume returns it, then null (#685)", async () => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* OAuthStateStore;
           yield* store.create(state);
-          const loaded = yield* store.get("state-1");
-          yield* store.delete("state-1");
-          const missing = yield* store.get("state-1");
-          return { loaded, missing };
+          const consumed = yield* store.consume("state-1");
+          const replayed = yield* store.consume("state-1");
+          const unknown = yield* store.consume("never-issued");
+          return { consumed, replayed, unknown };
         }),
       );
-      expect(result.loaded).toEqual(state);
-      expect(result.missing).toBeNull();
+      expect(result.consumed).toEqual(state);
+      expect(result.replayed).toBeNull();
+      expect(result.unknown).toBeNull();
+    });
+
+    it("gives a state to only one of two concurrent consumers (#685)", async () => {
+      // A backend whose reads suspend, so two unguarded read-then-delete
+      // consumes would both read the entry before either removed it.
+      const entries = MutableHashMap.empty<string, string>();
+      const slowKv = KeyValueStore.makeStringOnly({
+        get: (key) =>
+          Effect.andThen(
+            Effect.yieldNow,
+            Effect.sync(() => Option.getOrUndefined(MutableHashMap.get(entries, key))),
+          ),
+        set: (key, value) => Effect.sync(() => void MutableHashMap.set(entries, key, value)),
+        remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
+        clear: Effect.sync(() => void MutableHashMap.clear(entries)),
+        size: Effect.sync(() => MutableHashMap.size(entries)),
+        keys: Effect.sync(() => Arr.fromIterable(MutableHashMap.keys(entries))),
+      });
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const store = yield* OAuthStateStore;
+          yield* store.create(state);
+          return yield* Effect.all(
+            Arr.makeBy(4, () => store.consume("state-1")),
+            { concurrency: "unbounded" },
+          );
+        }).pipe(
+          Effect.provide(
+            OAuthStateStoreKV.pipe(
+              Layer.provide(Layer.succeed(KeyValueStore.KeyValueStore)(slowKv)),
+            ),
+          ),
+        ),
+      );
+      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
     });
   });
 
@@ -394,6 +431,7 @@ describe("KeyValueStores", () => {
         Effect.gen(function* () {
           const service = yield* EmailVerification.make({
             sendEmail: (to, token) => Effect.sync(() => void sent.push({ to, token })),
+            resendCooldown: 0,
           });
           const first = yield* service.createVerification("user-1", "user-1@example.com");
           // Resend invalidates the first token and issues a new one.
@@ -414,6 +452,49 @@ describe("KeyValueStores", () => {
         verified: true,
       });
       expect(outcome.reused._tag).toBe("EmailVerificationError");
+    });
+
+    it("holds a resend back for the default 60 s from the newest token, then sends (#682)", async () => {
+      const sent: Array<string> = [];
+      const layer = Layer.mergeAll(
+        EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+        Hooks.Default,
+        PlatformCrypto.layer,
+        TestClock.layer(),
+      );
+      const outcome = await Effect.runPromise(
+        Effect.gen(function* () {
+          const store = yield* EmailVerification.EmailVerificationStore;
+          const service = yield* EmailVerification.make({
+            sendEmail: (_to, token) => Effect.sync(() => void sent.push(token)),
+          });
+          yield* TestClock.setTime(1_000_000);
+          // An older token for the user, then the sign-up's.
+          yield* store.create({
+            token: "older",
+            userId: "user-1",
+            email: "user-1@example.com",
+            createdAt: 900_000,
+            expiresAt: 2_000_000,
+          });
+          const first = yield* service.createVerification("user-1", "user-1@example.com");
+          const latest = yield* store.getLatestByUserId("user-1");
+          yield* TestClock.adjust("59 seconds");
+          const early = yield* Effect.flip(
+            service.resendVerification("user-1", "user-1@example.com"),
+          );
+          const stillValid = yield* service.peekToken(first.token);
+          yield* TestClock.adjust("1 second");
+          const later = yield* service.resendVerification("user-1", "user-1@example.com");
+          return { latest, early, stillValid, later, none: yield* store.getLatestByUserId("x") };
+        }).pipe(Effect.provide(layer), Effect.orDie),
+      );
+
+      expect(outcome.latest?.createdAt).toBe(1_000_000);
+      expect(outcome.early._tag).toBe("ResendTooSoonError");
+      expect(outcome.stillValid.userId).toBe("user-1");
+      expect(sent).toEqual([expect.any(String), outcome.later.token]);
+      expect(outcome.none).toBeNull();
     });
   });
 
@@ -532,7 +613,7 @@ describe("KeyValueStores", () => {
             expiresAt: now - 1,
           });
           const purged = yield* purgeExpiredKV;
-          return { purged, state: yield* states.get("s1") };
+          return { purged, state: yield* states.consume("s1") };
         }),
       );
       expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0 });

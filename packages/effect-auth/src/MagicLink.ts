@@ -100,8 +100,9 @@ export interface MagicLinkConfig {
   /**
    * Minimum interval (ms) between successive send requests for the same email.
    * When an outstanding token created within this window already exists, `send`
-   * fails with {@link Errors.ResendTooSoonError}. Off by default; consider
-   * 60_000 for SMS-style flows. Complements the global RateLimit. It applies
+   * fails with {@link Errors.ResendTooSoonError}. Default `60_000` (60 s, as
+   * for the email and phone OTPs, #682); `0` turns it off. Complements the
+   * per-address limit on `POST /otp-challenges`. It applies
    * to every email alike, whether or not it has an account, so the error
    * reveals nothing about which emails are registered. With sign-up disabled,
    * a request for an email with no account stores an undelivered marker
@@ -155,8 +156,8 @@ export class MagicLinkService extends Context.Service<
      * the email's outstanding tokens with a marker token that is never sent,
      * so a known and an unknown email get the same store work.
      *
-     * When `resendCooldown` is configured and an outstanding token for the email
-     * was created within the cooldown window, fails with
+     * When an outstanding token for the email was created within the
+     * `resendCooldown` window (default 60 s), fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
      * The marker token makes the cooldown apply to an email with no account
      * as well, so a repeat within the window fails the same way for a known
@@ -223,6 +224,7 @@ export const make = (
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
     const disableSignUp = config.disableSignUp ?? false;
+    const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
 
     const store = yield* MagicLinkStore;
     const userStore = yield* MagicLinkUserStore;
@@ -265,14 +267,14 @@ export const make = (
         // the configured window. It runs for an address with no account too,
         // whose earlier request stored an undelivered token below, so a known
         // and an unknown address get the same answer inside the window.
-        if (config.resendCooldown !== undefined) {
+        if (resendCooldown > 0) {
           const existing = yield* store.getByEmail(email);
           if (existing !== null) {
             const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
-            if (elapsed < config.resendCooldown) {
+            if (elapsed < resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another magic link",
-                retryAfter: Duration.millis(config.resendCooldown - elapsed),
+                retryAfter: Duration.millis(resendCooldown - elapsed),
               });
             }
           }

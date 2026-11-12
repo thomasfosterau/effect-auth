@@ -629,7 +629,8 @@ semantics adopted on merit and, at most, an interop serialization (door-open
   **Fail-closed both ways** (deliberate Cedar deviation): an erroring permit
   cannot grant, an erroring forbid denies; errors land in the trace. A
   request naming an entity with an empty id is denied outright
-  (`"invalid-request"`), and an empty-id reference equals nothing (#661).
+  (`"invalid-request"`), and an empty-id reference equals nothing (#661);
+  so does an empty type (#666).
 - **Entities everywhere:** principals, resources, actions and roles are typed
   entities in one hierarchy, so RBAC (`principal in Role::"admin"`), ReBAC
   and action groups are the same data check. The declared `Model` doubles as

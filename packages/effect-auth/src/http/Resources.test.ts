@@ -90,6 +90,7 @@ const domainKeys = {
   verificationToken: true,
   createdAt: true,
   verifiedAt: true,
+  attestedBy: true,
 } satisfies Record<keyof OrganizationDomain, true>;
 
 const orgRoleKeys = {
@@ -249,10 +250,10 @@ describe("the JSON:API resources", () => {
     ).toStrictEqual(sorted(R.keys(invitationKeys)));
   });
 
-  it("organization-domains carry exactly OrganizationDomain, its organization as a relationship", () => {
+  it("organization-domains carry exactly OrganizationDomain, its organization and attester as relationships", () => {
     expect(
       storeFacingKeys(Resources.OrganizationDomain, {
-        foreignKeys: { organization: "organizationId" },
+        foreignKeys: { organization: "organizationId", attester: "attestedBy" },
       }),
     ).toStrictEqual(sorted(R.keys(domainKeys)));
   });

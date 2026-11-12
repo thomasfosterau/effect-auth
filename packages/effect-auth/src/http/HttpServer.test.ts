@@ -340,6 +340,16 @@ const makeFixture = (
           if (v.userId === userId) MutableHashMap.remove(verifications, token);
         });
       }),
+    getLatestByUserId: (userId) =>
+      Effect.sync(() => {
+        let latest: EmailVerification | null = null;
+        MutableHashMap.forEach(verifications, (v) => {
+          if (v.userId === userId && (latest === null || v.createdAt > latest.createdAt)) {
+            latest = v;
+          }
+        });
+        return latest;
+      }),
   };
 
   const passwordResetStore: typeof PasswordResetStore.Service = {
@@ -1802,6 +1812,26 @@ describe("email verification roundtrip", () => {
     // Tokens are single use.
     const replay = await handler(authRequest("verify-email", { token }));
     expect(replay.status).toBe(400);
+  });
+
+  // The default 60 s resend cooldown (#682) holds the second send back, and the
+  // answer stays the one an unknown address gets, so it names no account.
+  it("holds a resend back inside the cooldown with the same answer (#682)", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture);
+    await signUp(handler, "a@b.com");
+
+    const first = await handler(authRequest("send-verification", { email: "a@b.com" }));
+    const second = await handler(authRequest("send-verification", { email: "a@b.com" }));
+    const unknown = await handler(authRequest("send-verification", { email: "no@one.com" }));
+    expect([first.status, second.status, unknown.status]).toEqual([202, 202, 202]);
+    expect(await second.text()).toBe(await unknown.text());
+    expect(fixture.sentVerificationTokens).toHaveLength(1);
+    // The link sent first still verifies.
+    const verify = await handler(
+      authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
+    );
+    expect(verify.status).toBe(201);
   });
 
   it("acknowledges uniformly for unknown emails (anti-enumeration)", async () => {
@@ -3695,13 +3725,31 @@ describe("client IP at the HTTP boundary", () => {
     );
   });
 
-  it("builds with a trustedProxy or with the allowMissingClientIp opt-out", () => {
+  it("builds with a trustedProxy", () => {
     expect(() => limitedHandler({ trustedProxy: ClientIP.cloudflare })).not.toThrow();
-    expect(() => limitedHandler({ allowMissingClientIp: true })).not.toThrow();
+  });
+
+  // With no proxy no Web Request has an address, so the limit would refuse
+  // every request it covers: the handler refuses to start instead (#682).
+  it("refuses to start with allowMissingClientIp and no trustedProxy (#682)", async () => {
+    expect(() => limitedHandler({ allowMissingClientIp: true })).toThrow(
+      HttpServer.ClientAddressConfigError,
+    );
+    expect(() => limitedHandler({ allowMissingClientIp: true })).toThrow(
+      /allowMissingClientIp: true does not stand in for trustedProxy/,
+    );
+    await expect(
+      HttpServer.makeAsync({ services: limiter(), allowMissingClientIp: true }),
+    ).rejects.toBeInstanceOf(HttpServer.ClientAddressConfigError);
+    // ipRateLimit: false stays the off switch.
+    expect(() =>
+      HttpServer.make({ services: limiter(), ipRateLimit: false, allowMissingClientIp: true }),
+    ).not.toThrow();
   });
 
   it("refuses an address-less request to a limited endpoint, counts nothing, and leaves other endpoints alone", async () => {
-    const { handler, keys } = limitedHandler({ allowMissingClientIp: true });
+    // Behind Cloudflare, a request without CF-Connecting-IP has no address.
+    const { handler, keys } = limitedHandler({ trustedProxy: ClientIP.cloudflare });
 
     // Two address-less sign-ins: both refused, neither counted under a shared bucket.
     await Arr.reduce(Arr.range(1, 2), Promise.resolve(), async (previous) => {
@@ -3939,9 +3987,6 @@ describe("Http.make refuses to start without the IP limit's dependencies (#583)"
     expect(() => HttpServer.make({ services, trustedProxy: ClientIP.cloudflare })).toThrow(
       RateLimiterConfigError,
     );
-    expect(() => HttpServer.make({ services, allowMissingClientIp: true })).toThrow(
-      RateLimiterConfigError,
-    );
   });
 
   it("rejects makeAsync with the same errors", async () => {
@@ -3970,6 +4015,40 @@ describe("Http.make refuses to start without the IP limit's dependencies (#583)"
     });
     expect(statuses.slice(0, 10).every((status) => status === 401)).toBe(true);
     expect(statuses[10]).toBe(429);
+  });
+
+  // A confidential client's backend calls the token endpoint from one address
+  // (#682): a rule ahead of the defaults replaces that endpoint's limit only.
+  it("lets a rules override placed ahead of the defaults replace one endpoint's limit (#682)", async () => {
+    const handler = ipLimitedHandler({
+      rules: [
+        { path: "/oauth2/token", methods: ["POST"], maxRequests: 100, windowMs: 60_000 },
+        ...HttpServer.defaultEndpointRules,
+      ],
+    });
+    const statuses = (
+      method: string,
+      path: string,
+      ip: string,
+      count: number,
+    ): Promise<ReadonlyArray<number>> =>
+      Arr.reduce(
+        Arr.range(1, count),
+        Promise.resolve<ReadonlyArray<number>>([]),
+        async (previous) => [
+          ...(await previous),
+          (await handler(fromAddress(method, path, ip))).status,
+        ],
+      );
+
+    // The default allows 60 a minute; the override allows 100, then refuses.
+    const token = await statuses("POST", "/oauth2/token", "203.0.113.50", 101);
+    expect(token.slice(0, 100).includes(429)).toBe(false);
+    expect(token[100]).toBe(429);
+    // Every other endpoint keeps its default: sign-in still allows 10.
+    const signIn = await statuses("POST", "/sessions", "203.0.113.50", 11);
+    expect(signIn.slice(0, 10).includes(429)).toBe(false);
+    expect(signIn[10]).toBe(429);
   });
 
   it("builds with ipRateLimit: false and neither a RateLimiter nor an address source, and limits nothing", async () => {
@@ -4221,13 +4300,27 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
     expect((await signIn("203.0.113.21")).status).toBe(401);
   });
 
-  it("refuses an address-less sign-in with 429 when the app opts out with allowMissingClientIp", async () => {
+  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every sign-in (#682)", () => {
+    const { services } = makeFixture({ hooks: ipRateLimitHooks() });
+    const make = () =>
+      HttpServer.make({
+        ipRateLimit: false,
+        services,
+        cookie: { secure: false },
+        allowMissingClientIp: true,
+      });
+    expect(make).toThrow(ClientAddressConfigError);
+    expect(make).toThrow(/IPRateLimitPlugin keys its limits on the client address/);
+    expect(make).toThrow(/allowMissingClientIp: true does not stand in for trustedProxy/);
+  });
+
+  it("refuses an address-less sign-in with 429 under a trustedProxy", async () => {
     const fixture = makeFixture({ hooks: ipRateLimitHooks() });
     const { handler } = HttpServer.make({
       ipRateLimit: false,
       services: fixture.services,
       cookie: { secure: false },
-      allowMissingClientIp: true,
+      trustedProxy: ClientIP.cloudflare,
     });
 
     const res = await handler(

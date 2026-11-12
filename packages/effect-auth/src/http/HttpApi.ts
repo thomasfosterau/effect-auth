@@ -1057,10 +1057,15 @@ export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
  * - `POST /admin/organization-domains`: the operator's attestation, after
  *   checking ownership out of band, that the `organization` relationship
  *   controls `domain` (`OrganizationService.attestDomain`). Needs the
- *   server's `isAdmin`, never an organization permission; `201` with the
- *   organization's claim, now `verified` with the `manual` strategy. A refusal
- *   (an unknown organization, an invalid domain, a domain verified for
- *   another organization) answers `400`.
+ *   server's admin rule (the mounted `AdminService`'s `AdminConfig`, else
+ *   role `admin`), never an organization permission; `201` with the
+ *   organization's claim, now `verified` with the `manual` strategy and the
+ *   admin as its `attester`. A refusal (an unknown organization, an invalid
+ *   domain, a domain verified for another organization) answers `400`.
+ * - `DELETE /admin/organization-domains/:id`: the operator's release of any
+ *   organization's claim, whatever its state, for disputes
+ *   (`OrganizationService.releaseDomain`, #680). Gated as the attestation is;
+ *   `204`.
  *
  * An unknown id answers `404`; a tenant's refusal, or a server with no
  * `OrganizationDomainStore`, `403`.
@@ -1073,6 +1078,11 @@ export const organizationDomainsGroup = Group.make(
     name: "attest",
     path: "/admin/organization-domains",
     payload: DomainAttestationDocument,
+    errors: resourceErrors,
+  }),
+  Endpoint.delete(R.OrganizationDomain, {
+    name: "release",
+    path: "/admin/organization-domains/:id",
     errors: resourceErrors,
   }),
 );
@@ -1283,8 +1293,8 @@ export const apiKeysGroup = Group.make(
 
 /**
  * `oauth-clients`: the OIDC provider's registered clients. Every call needs
- * the server's `isAdmin` (`403` otherwise); `404` when the provider is not
- * enabled.
+ * the server's admin rule (the mounted `AdminService`'s `AdminConfig`, else
+ * role `admin`; `403` otherwise); `404` when the provider is not enabled.
  *
  * - `GET /oauth-clients`: every store-registered client.
  * - `POST /oauth-clients`: register one; `201` with the client and, for a
@@ -1334,8 +1344,8 @@ export type SsoProviderCreateDocument = typeof SsoProviderCreateDocument.Type;
 
 /**
  * `sso-providers`: `POST /sso-providers` registers an enterprise SSO
- * connection (OIDC or SAML); `201` with it. Needs the server's `isAdmin`
- * (`403` otherwise); a refused registration answers `400`, and `404` means SSO
+ * connection (OIDC or SAML); `201` with it. Needs the server's admin rule,
+ * as `oauth-clients` does (`403` otherwise); a refused registration answers `400`, and `404` means SSO
  * is not enabled.
  */
 export const ssoProvidersGroup = Group.make(

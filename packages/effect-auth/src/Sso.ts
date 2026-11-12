@@ -288,6 +288,11 @@ export class SsoService extends Context.Service<
      * Complete the OIDC SSO callback: exchange the code, verify the profile,
      * find-or-create the user by verified email, optionally add them to the
      * connection's organization, and issue a session.
+     *
+     * `state` is single-use (#685): it is spent with
+     * {@link OAuthStateStore}'s atomic `consume` before the code is
+     * exchanged, so a replayed callback (sequential or concurrent, after a
+     * success or after a failure) fails with {@link SsoError}.
      */
     readonly handleCallback: (
       state: string,
@@ -312,6 +317,10 @@ export class SsoService extends Context.Service<
      *
      * `samlResponse` is the `SAMLResponse` form field exactly as posted
      * (base64); `relayState` is the `RelayState` field when the IdP echoed one.
+     * The `RelayState` is single-use with the request it was minted with: it
+     * lives only on that `AuthnRequest` record, which {@link SamlReplayStore}'s
+     * atomic `consume` spends, so a replayed response fails with
+     * {@link SsoError} (#685).
      */
     readonly handleSamlCallback: (
       providerId: string,
@@ -792,14 +801,18 @@ export const make = (
       ) {
         const stateStore = yield* OAuthStateStore;
 
+        // Spend the state before anything else (#685): `consume` is an atomic
+        // get-and-delete, so a replayed or concurrent callback carrying the
+        // same state is refused, and a failed exchange leaves nothing to retry.
         const stateEntry = yield* stateStore
-          .get(state)
+          .consume(state)
           .pipe(Effect.mapError(() => new SsoError({ message: "SSO state not found or expired" })));
         if (stateEntry === null) {
-          return yield* new SsoError({ message: "SSO state not found or expired" });
+          return yield* new SsoError({
+            message: "SSO state not found, expired or already used",
+          });
         }
         if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
-          yield* stateStore.delete(state);
           return yield* new SsoError({ message: "SSO state expired" });
         }
 
@@ -830,8 +843,6 @@ export const make = (
             ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
           })
           .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
-
-        yield* stateStore.delete(state);
 
         if (profile.email === undefined || profile.email_verified === false) {
           return yield* new SsoError({

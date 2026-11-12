@@ -610,7 +610,10 @@ const domainResource = (d: OrganizationDomain): R.OrganizationDomain =>
       createdAt: d.createdAt,
       ...(d.verifiedAt !== undefined && { verifiedAt: d.verifiedAt }),
     },
-    relationships: { organization: { data: R.Organization.ref(d.organizationId) } },
+    relationships: {
+      organization: { data: R.Organization.ref(d.organizationId) },
+      attester: { data: d.attestedBy === undefined ? null : R.User.ref(d.attestedBy) },
+    },
   });
 
 /** The `invitations` resource of a stored invitation. */
@@ -1024,65 +1027,78 @@ const applyRegistrationRateLimit = (
   });
 
 /**
- * The build-time check of `make`'s `services` (#389). Returns the error `make`
- * raises, or `undefined` when the services are consistent with the options:
- *
- * - The `Hooks` include a plugin that keys on the client address
- *   (`IPRateLimitPlugin`), or the OIDC provider enables dynamic client
- *   registration, and there is no address source: no `trustedProxy`, and no
- *   `allowMissingClientIp: true`. A Web `Request` has no socket address.
- * - A limit is configured with no `RateLimiter`: `ipRateLimit`, dynamic client
- *   registration, or the device user-code limit (whenever the device service is
- *   present, unless it opted out with `allowMissingRateLimiter`).
+ * What a `ClientAddressConfigError` adds when `allowMissingClientIp: true` is
+ * set (#682): the option is no address source. With no `trustedProxy`, a Web
+ * `Request` under `Http.make` never has an address, so the limit would refuse
+ * every request it covers with `429`; the handler refuses to start instead.
  */
-const servicesConfigError = (
+const allowMissingClientIpNote = (options: AuthWebHandlerOptions): string =>
+  options.allowMissingClientIp === true
+    ? " allowMissingClientIp: true does not stand in for trustedProxy: with no proxy no request has an address, " +
+      "so every request the limit covers would be refused with 429."
+    : "";
+
+/**
+ * The `IPRateLimitPlugin` half of the client-address check (#389): the `Hooks`
+ * include a plugin that keys on the client address and there is no
+ * `trustedProxy`.
+ */
+const keyedPluginAddressError = (
   services: Context.Context<never>,
   options: AuthWebHandlerOptions,
-): ClientAddressConfigError | RateLimiterConfigError | undefined => {
+): ClientAddressConfigError | undefined => {
   const hooks = Context.getOption(services, Hooks);
-  if (
-    Option.isSome(hooks) &&
-    options.trustedProxy === undefined &&
-    options.allowMissingClientIp !== true
-  ) {
-    const keyed = clientAddressKeyedPlugins(hooks.value);
-    if (Arr.isReadonlyArrayNonEmpty(keyed)) {
-      return new ClientAddressConfigError({
-        message:
-          `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make or Http.makeAsync. ` +
-          "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address, " +
-          "or set allowMissingClientIp: true to accept that every request without an address is refused on those hooks.",
-      });
-    }
-  }
+  const keyed = Option.isSome(hooks) ? clientAddressKeyedPlugins(hooks.value) : [];
+  if (Arr.isReadonlyArrayEmpty(keyed)) return undefined;
+  return new ClientAddressConfigError({
+    message:
+      `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make or Http.makeAsync. ` +
+      "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address." +
+      allowMissingClientIpNote(options),
+  });
+};
 
-  // The registration limit keys on the `ClientIP` this handler resolves from
-  // `trustedProxy`, so registration needs the same address source (#388, #398).
+/**
+ * The dynamic client registration half of the client-address check: the
+ * registration limit keys on the `ClientIP` this handler resolves from
+ * `trustedProxy`, so registration needs the same address source (#388, #398).
+ */
+const registrationAddressError = (
+  services: Context.Context<never>,
+  options: AuthWebHandlerOptions,
+): ClientAddressConfigError | undefined => {
   const oidc = Context.getOption(services, OidcProviderService);
-  if (
-    Option.isSome(oidc) &&
-    oidc.value.dynamicRegistration.enabled &&
-    options.trustedProxy === undefined &&
-    options.allowMissingClientIp !== true
-  ) {
-    return new ClientAddressConfigError({
-      message:
-        "Dynamic client registration (POST /register) is rate limited per client address, and a Web Request has none under Http.make or Http.makeAsync. " +
-        "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-        "or set allowMissingClientIp: true to accept that address-less registrations are refused.",
-    });
-  }
+  if (Option.isNone(oidc) || !oidc.value.dynamicRegistration.enabled) return undefined;
+  return new ClientAddressConfigError({
+    message:
+      "Dynamic client registration (POST /register) is rate limited per client address, and a Web Request has none under Http.make or Http.makeAsync. " +
+      "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address." +
+      allowMissingClientIpNote(options),
+  });
+};
 
+/**
+ * The limits configured with no `RateLimiter` in `services` (#389):
+ * `ipRateLimit`, dynamic client registration, or the device user-code limit
+ * (whenever the device service is present, unless it opted out with
+ * `allowMissingRateLimiter`).
+ */
+const rateLimiterError = (
+  services: Context.Context<never>,
+  options: AuthWebHandlerOptions,
+): RateLimiterConfigError | undefined => {
   if (Option.isSome(Context.getOption(services, RateLimiter))) return undefined;
-  const configured: Array<string> = [];
-  if (options.ipRateLimit !== false) configured.push("ipRateLimit (on by default)");
-  if (Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled) {
-    configured.push("the dynamic client registration limit (POST /register)");
-  }
+  const oidc = Context.getOption(services, OidcProviderService);
   const device = Context.getOption(services, DeviceAuthorizationService);
-  if (Option.isSome(device) && device.value.allowMissingRateLimiter !== true) {
-    configured.push("the device user-code limit (approve and deny)");
-  }
+  const configured = [
+    ...(options.ipRateLimit === false ? [] : ["ipRateLimit (on by default)"]),
+    ...(Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled
+      ? ["the dynamic client registration limit (POST /register)"]
+      : []),
+    ...(Option.isSome(device) && device.value.allowMissingRateLimiter !== true
+      ? ["the device user-code limit (approve and deny)"]
+      : []),
+  ];
   if (Arr.isReadonlyArrayEmpty(configured)) return undefined;
   return new RateLimiterConfigError({
     message:
@@ -1091,6 +1107,25 @@ const servicesConfigError = (
       "(ipRateLimit: false; for the device user-code limit, DeviceAuthorizationConfig.allowMissingRateLimiter: true).",
   });
 };
+
+/**
+ * The build-time check of `make`'s `services` (#389). Returns the error `make`
+ * raises, or `undefined` when the services are consistent with the options:
+ *
+ * - The `Hooks` include a plugin that keys on the client address
+ *   (`IPRateLimitPlugin`), or the OIDC provider enables dynamic client
+ *   registration, and there is no `trustedProxy`. A Web `Request` has no
+ *   socket address, and `allowMissingClientIp: true` is no address source
+ *   (#682).
+ * - A limit is configured with no `RateLimiter` ({@link rateLimiterError}).
+ */
+const servicesConfigError = (
+  services: Context.Context<never>,
+  options: AuthWebHandlerOptions,
+): ClientAddressConfigError | RateLimiterConfigError | undefined =>
+  (options.trustedProxy === undefined
+    ? (keyedPluginAddressError(services, options) ?? registrationAddressError(services, options))
+    : undefined) ?? rateLimiterError(services, options);
 
 /**
  * The same check as a layer, for `services` that finish building only after
@@ -2065,10 +2100,12 @@ export const emailVerificationsGroupLayer = (
             Effect.catch(internalServerError),
           );
           // Anti-enumeration: the same answer whether or not the address has
-          // an account, or is already verified.
+          // an account, or is already verified, or is inside its resend
+          // cooldown (#682): a 429 there alone would name an unverified account.
           if (identifier !== null && !identifier.verified) {
             yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
               Effect.catchTags({
+                ResendTooSoonError: () => Effect.void,
                 AuthError: (e) => internalServerError(e),
                 EmailVerificationError: (e) => internalServerError(e),
                 ...hookFailures,
@@ -2828,8 +2865,8 @@ export const organizationMembersGroupLayer = (
 
 /**
  * Layer implementing the `organization-domains` group: one domain claim, by
- * id, and the operator's attestation (see `organizationDomainsGroup` in
- * `HttpApi.ts`).
+ * id, and the operator's attestation and release (see
+ * `organizationDomainsGroup` in `HttpApi.ts`).
  */
 export const organizationDomainsGroupLayer = (
   config?: CookieConfig,
@@ -2856,18 +2893,34 @@ export const organizationDomainsGroupLayer = (
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       // The operator's attestation (#598): gated on `isAdmin`, never on an
-      // organization permission, like SSO connection registration.
+      // organization permission, like SSO connection registration. The admin
+      // is recorded as the claim's attester (#680).
       .handle("attest", ({ payload, request }) =>
         Effect.gen(function* () {
-          yield* requireAdminCaller(request, cfg);
+          const admin = yield* requireAdminCaller(request, cfg);
           const org = yield* resolveOrganization;
           const attested = yield* refusedBadRequest(
             org.service.attestDomain(
               payload.data.relationships.organization.data.id,
               payload.data.attributes.domain,
+              { attestedBy: admin.id },
             ),
           );
           return Handlers.data(domainResource(attested));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // The operator's release of any organization's claim (#680), gated as
+      // the attestation is. The admin check comes first, so a non-admin never
+      // learns whether an id names a claim.
+      .handle("release", ({ params, request }) =>
+        Effect.gen(function* () {
+          yield* requireAdminCaller(request, cfg);
+          const org = yield* resolveOrganization;
+          const claim = yield* refusedBadRequest(org.service.getDomainById(params.id));
+          if (claim === null) return yield* new S.NotFound({ message: "Domain not found" });
+          return yield* refusedBadRequest(
+            org.service.releaseDomain(claim.organizationId, claim.domain),
+          ).pipe(Effect.asVoid);
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -3173,9 +3226,12 @@ const adminActor = (request: HttpServerRequest.HttpServerRequest, cfg: ResolvedC
   });
 
 /**
- * The signed-in caller, when `isAdmin` holds for them under the default admin
- * configuration (what the OAuth-client and SSO-connection endpoints gate on):
- * `401` without a session, `403` otherwise.
+ * The signed-in caller, when they are an administrator (what the OAuth-client,
+ * SSO-provider and domain attestation and release endpoints gate on): `401`
+ * without a session, `403` otherwise. The rule is the mounted
+ * `AdminService`'s, so its `AdminConfig` (`adminRoles`, `adminUserIds`)
+ * governs these endpoints as it does `/admin/users` (#680); without an
+ * `AdminService`, the default `isAdmin` rule (role `admin`).
  */
 const requireAdminCaller = (
   request: HttpServerRequest.HttpServerRequest,
@@ -3183,7 +3239,12 @@ const requireAdminCaller = (
 ) =>
   Effect.gen(function* () {
     const resolved = yield* requireSession(request, cfg);
-    if (!isAdmin(resolved.user)) {
+    const admin = yield* Effect.serviceOption(AdminService);
+    const allowed = Option.match(admin, {
+      onNone: () => isAdmin(resolved.user),
+      onSome: (service) => service.isAdmin(resolved.user),
+    });
+    if (!allowed) {
       return yield* new S.Forbidden({ message: "Admin privileges required" });
     }
     return resolved.user;
@@ -5053,8 +5114,17 @@ export interface AuthWebHandlerOptions {
    *
    * **Client address required**: the limiter keys each request by its client
    * address, so `make` throws {@link ClientAddressConfigError} unless this is
-   * `false` or {@link trustedProxy} or {@link allowMissingClientIp} is set. A
-   * Web `Request` has no socket address to fall back on.
+   * `false` or {@link trustedProxy} is set. A Web `Request` has no socket
+   * address to fall back on, and {@link allowMissingClientIp} is no address
+   * source (#682).
+   *
+   * **Overriding a default.** The first rule that matches an endpoint wins, so
+   * a deployment changes one endpoint's limit by putting its own rule ahead of
+   * the defaults: `{ rules: [{ path: "/oauth2/token", methods: ["POST"],
+   * maxRequests: 600, windowMs: 60_000 }, ...defaultEndpointRules] }` lets a
+   * confidential client's backend call the token endpoint from one address
+   * more often, and leaves every other default in force. Leaving
+   * `defaultEndpointRules` out of `rules` drops the defaults altogether.
    *
    * Each rule is matched against the endpoint the router matched, by its path
    * template and method, so no spelling of a path (case, trailing or duplicate
@@ -5067,23 +5137,21 @@ export interface AuthWebHandlerOptions {
    */
   readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
   /**
-   * Accept that a request may have no resolvable client address, so
-   * {@link ipRateLimit} (on unless it is `false`), or an `IPRateLimitPlugin` in
-   * the `services` `Hooks`, can run without {@link trustedProxy}. Default
-   * `false`; without it `make` throws `ClientAddressConfigError` for either.
+   * Not an address source, and not an opt-out of the client-address check
+   * (#682). Under `Http.make` a Web `Request` has no socket address, so with no
+   * {@link trustedProxy} no request has an address, and a limit keyed on it
+   * would refuse every request it covers with `429`. So `make` throws
+   * {@link ClientAddressConfigError} (and {@link makeAsync} rejects with it)
+   * whenever {@link ipRateLimit} (on unless it is `false`), an
+   * `IPRateLimitPlugin` in the `services` `Hooks`, or dynamic client
+   * registration in the `services`' `OidcProviderService` has no
+   * `trustedProxy`, whether or not this is set; with it set, the error's
+   * message says so. With a `trustedProxy` it changes nothing.
    *
-   * This opts out of the build-time check only. The limits still run: a request
-   * with no address that reaches a rate-limited endpoint, or an
-   * `IPRateLimitPlugin` hook (sign-in, sign-up, password-reset request), is
-   * refused with `429`, not skipped. Use it when that refusal is the intended
-   * behaviour for address-less requests, and prefer {@link trustedProxy}, which
-   * gives every request an address when the edge provides one.
-   *
-   * The same goes for the dynamic client registration limit (`POST /register`):
-   * with registration enabled in the `services`' `OidcProviderService` and
-   * neither option set, `make` throws `ClientAddressConfigError`. A
-   * registration with no address is refused with `429`, and is never counted
-   * under a shared bucket.
+   * Give the handler a `trustedProxy`, or serve without the IP limit with
+   * `ipRateLimit: false`, the only way to turn it off. Under a `trustedProxy`,
+   * a request whose forwarded address is missing or unusable is refused with
+   * `429` on a limited endpoint, and is never counted under a shared bucket.
    */
   readonly allowMissingClientIp?: boolean | undefined;
   /**
@@ -5200,20 +5268,20 @@ export interface AuthWebHandler {
 /**
  * The startup check of `ipRateLimit` (#358), which needs no build: a rate limit
  * keyed by client address needs an address source. A Web Request has no socket
- * address, so `trustedProxy` (or the explicit opt-out) must be configured.
+ * address, so `trustedProxy` must be configured; `allowMissingClientIp: true`
+ * without it would refuse every request to a limited endpoint, so it is
+ * refused too (#682).
  */
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined =>
-  options.ipRateLimit !== false &&
-  options.trustedProxy === undefined &&
-  options.allowMissingClientIp !== true
+  options.ipRateLimit !== false && options.trustedProxy === undefined
     ? new ClientAddressConfigError({
         message:
           "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-          "set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused, " +
-          "or set ipRateLimit: false to serve without the limit.",
+          "or set ipRateLimit: false to serve without the limit." +
+          allowMissingClientIpNote(options),
       })
     : undefined;
 
@@ -5462,8 +5530,8 @@ const tooManyRequests = (
  * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
  *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
- *   `OidcProviderService`, with neither `trustedProxy` nor
- *   `allowMissingClientIp: true`.
+ *   `OidcProviderService`, with no `trustedProxy`.
+ *   `allowMissingClientIp: true` does not stand in for one (#682).
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
@@ -5570,8 +5638,8 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
  *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
- *   `OidcProviderService`, with neither `trustedProxy` nor
- *   `allowMissingClientIp: true`.
+ *   `OidcProviderService`, with no `trustedProxy`.
+ *   `allowMissingClientIp: true` does not stand in for one (#682).
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
