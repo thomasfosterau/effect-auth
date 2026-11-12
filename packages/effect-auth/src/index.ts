@@ -227,6 +227,7 @@ export {
   type UpdateOrganizationInput,
   type InviteMemberInput,
   type AddOrganizationDomainInput,
+  type AttestDomainOptions,
   type CreateTeamInput,
   type UpdateTeamInput,
   type UpsertOrgRoleInput,

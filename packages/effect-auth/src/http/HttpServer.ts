@@ -574,7 +574,10 @@ const domainResource = (d: OrganizationDomain): R.OrganizationDomain =>
       createdAt: d.createdAt,
       ...(d.verifiedAt !== undefined && { verifiedAt: d.verifiedAt }),
     },
-    relationships: { organization: { data: R.Organization.ref(d.organizationId) } },
+    relationships: {
+      organization: { data: R.Organization.ref(d.organizationId) },
+      attester: { data: d.attestedBy === undefined ? null : R.User.ref(d.attestedBy) },
+    },
   });
 
 /** The `invitations` resource of a stored invitation. */
@@ -2781,8 +2784,8 @@ export const organizationMembersGroupLayer = (
 
 /**
  * Layer implementing the `organization-domains` group: one domain claim, by
- * id, and the operator's attestation (see `organizationDomainsGroup` in
- * `HttpApi.ts`).
+ * id, and the operator's attestation and release (see
+ * `organizationDomainsGroup` in `HttpApi.ts`).
  */
 export const organizationDomainsGroupLayer = (
   config?: CookieConfig,
@@ -2809,18 +2812,34 @@ export const organizationDomainsGroupLayer = (
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       // The operator's attestation (#598): gated on `isAdmin`, never on an
-      // organization permission, like SSO connection registration.
+      // organization permission, like SSO connection registration. The admin
+      // is recorded as the claim's attester (#680).
       .handle("attest", ({ payload, request }) =>
         Effect.gen(function* () {
-          yield* requireAdminCaller(request, cfg);
+          const admin = yield* requireAdminCaller(request, cfg);
           const org = yield* resolveOrganization;
           const attested = yield* refusedBadRequest(
             org.service.attestDomain(
               payload.data.relationships.organization.data.id,
               payload.data.attributes.domain,
+              { attestedBy: admin.id },
             ),
           );
           return Handlers.data(domainResource(attested));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // The operator's release of any organization's claim (#680), gated as
+      // the attestation is. The admin check comes first, so a non-admin never
+      // learns whether an id names a claim.
+      .handle("release", ({ params, request }) =>
+        Effect.gen(function* () {
+          yield* requireAdminCaller(request, cfg);
+          const org = yield* resolveOrganization;
+          const claim = yield* refusedBadRequest(org.service.getDomainById(params.id));
+          if (claim === null) return yield* new S.NotFound({ message: "Domain not found" });
+          return yield* refusedBadRequest(
+            org.service.releaseDomain(claim.organizationId, claim.domain),
+          ).pipe(Effect.asVoid);
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -3126,9 +3145,12 @@ const adminActor = (request: HttpServerRequest.HttpServerRequest, cfg: ResolvedC
   });
 
 /**
- * The signed-in caller, when `isAdmin` holds for them under the default admin
- * configuration (what the OAuth-client and SSO-connection endpoints gate on):
- * `401` without a session, `403` otherwise.
+ * The signed-in caller, when they are an administrator (what the OAuth-client,
+ * SSO-provider and domain attestation and release endpoints gate on): `401`
+ * without a session, `403` otherwise. The rule is the mounted
+ * `AdminService`'s, so its `AdminConfig` (`adminRoles`, `adminUserIds`)
+ * governs these endpoints as it does `/admin/users` (#680); without an
+ * `AdminService`, the default `isAdmin` rule (role `admin`).
  */
 const requireAdminCaller = (
   request: HttpServerRequest.HttpServerRequest,
@@ -3136,7 +3158,12 @@ const requireAdminCaller = (
 ) =>
   Effect.gen(function* () {
     const resolved = yield* requireSession(request, cfg);
-    if (!isAdmin(resolved.user)) {
+    const admin = yield* Effect.serviceOption(AdminService);
+    const allowed = Option.match(admin, {
+      onNone: () => isAdmin(resolved.user),
+      onSome: (service) => service.isAdmin(resolved.user),
+    });
+    if (!allowed) {
       return yield* new S.Forbidden({ message: "Admin privileges required" });
     }
     return resolved.user;

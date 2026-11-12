@@ -263,8 +263,18 @@ export interface OrganizationDomain {
   readonly verificationToken?: string;
   /** Epoch milliseconds */
   readonly createdAt: number;
-  /** Epoch milliseconds; set when the claim reached `verified` */
+  /**
+   * Epoch milliseconds; set when the claim reached `verified`. For a `manual`
+   * claim this is when the operator attested it.
+   */
   readonly verifiedAt?: number;
+  /**
+   * Who attested a `manual` claim: the id of the platform admin whose
+   * `POST /admin/organization-domains` attested it, or whatever the operator's
+   * own tooling passed as {@link AttestDomainOptions.attestedBy}. Absent for
+   * `dns` claims and for an attestation made without one (#680).
+   */
+  readonly attestedBy?: string | undefined;
 }
 
 /**
@@ -637,6 +647,19 @@ export interface AddOrganizationDomainInput {
 }
 
 /**
+ * Options for the operator's {@link OrganizationService.attestDomain}.
+ */
+export interface AttestDomainOptions {
+  /**
+   * Who is attesting, recorded on the claim as
+   * {@link OrganizationDomain.attestedBy} (#680): the platform admin's user id
+   * over HTTP, or any identifier the operator's tooling uses for its
+   * operators. Omitted, the claim records no attester.
+   */
+  readonly attestedBy?: string | undefined;
+}
+
+/**
  * Input for inviting a member by email
  */
 export interface InviteMemberInput {
@@ -970,17 +993,41 @@ export class OrganizationService extends Context.Service<
      * `domain`, made after checking ownership out of band (#598). No actor and
      * no organization permission is involved: this is a server-side call for
      * the operator's own tooling, or the platform-admin endpoint
-     * `POST /admin/organization-domains` (gated on `isAdmin`). Never expose it
+     * `POST /admin/organization-domains` (admin-gated). Never expose it
      * on a route an organization member can reach.
      *
      * Answers the organization's claim on the domain, now `verified` with the
      * `manual` strategy: its existing claim is attested in place (keeping its
-     * id and dropping its DNS token), or a new one is created. A claim already
-     * verified is answered unchanged. Refused for an unknown organization, an
-     * invalid domain, a domain another organization holds verified, or when no
-     * {@link OrganizationDomainStore} is configured.
+     * id and dropping its DNS token), or a new one is created. The claim
+     * records the attestation time as `verifiedAt` and `options.attestedBy`,
+     * when given, as {@link OrganizationDomain.attestedBy} (#680). A claim
+     * already verified is answered unchanged, its attester included. Refused
+     * for an unknown organization, an invalid domain, a domain another
+     * organization holds verified (release that claim first with
+     * {@link releaseDomain}), or when no {@link OrganizationDomainStore} is
+     * configured.
      */
     readonly attestDomain: (
+      organizationId: string,
+      domain: string,
+      options?: AttestDomainOptions,
+    ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
+
+    /**
+     * The application operator's release of `organizationId`'s claim on
+     * `domain`, whatever its state, for disputes (#680): releasing a verified
+     * claim frees the domain for another organization to prove or be attested
+     * for. Like {@link attestDomain}, a server-side call with no actor and no
+     * organization permission, also reached through the platform-admin
+     * endpoint `DELETE /admin/organization-domains/:id`; never expose it on a
+     * route an organization member can reach (a tenant releases its own claim
+     * with {@link removeDomain}).
+     *
+     * Answers the released claim. Refused for an unknown organization, an
+     * invalid domain, a domain the organization holds no claim on, or when no
+     * {@link OrganizationDomainStore} is configured.
+     */
+    readonly releaseDomain: (
       organizationId: string,
       domain: string,
     ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
@@ -2134,6 +2181,7 @@ export const make = (
       attestDomain: Effect.fn("OrganizationService.attestDomain")(function* (
         organizationId: string,
         input: string,
+        options: AttestDomainOptions = {},
       ) {
         const domainStore = yield* requireDomainStore();
         yield* getOrganizationOrFail(organizationId);
@@ -2154,8 +2202,26 @@ export const make = (
           verificationStrategy: "manual",
           createdAt: existing?.createdAt ?? now,
           verifiedAt: now,
+          ...(options.attestedBy !== undefined && { attestedBy: options.attestedBy }),
         };
         return yield* existing === null ? domainStore.create(claim) : domainStore.update(claim);
+      }),
+
+      releaseDomain: Effect.fn("OrganizationService.releaseDomain")(function* (
+        organizationId: string,
+        input: string,
+      ) {
+        const domainStore = yield* requireDomainStore();
+        yield* getOrganizationOrFail(organizationId);
+        const domain = yield* validDomain(input);
+        const claim = yield* ownClaimOn(domainStore, organizationId, domain);
+        if (claim === null) {
+          return yield* new OrganizationError({
+            message: "That organization holds no claim on that domain",
+          });
+        }
+        yield* domainStore.delete(claim.id);
+        return claim;
       }),
 
       provisionJitMembership: Effect.fn("OrganizationService.provisionJitMembership")(function* (
