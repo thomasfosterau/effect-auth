@@ -394,8 +394,12 @@ export type SamlSsoProviderView = typeof SamlSsoProviderView.Type;
 export const SsoProviderView = Schema.Union([OidcSsoProviderView, SamlSsoProviderView]);
 export type SsoProviderView = typeof SsoProviderView.Type;
 
-/** Request body for registering an **OIDC** SSO connection (admin-gated). */
-export const SsoRegisterOidcPayload = Schema.Struct({
+/**
+ * The attributes of a `POST /sso-providers` registering an **OIDC**
+ * connection (admin-gated). The organization is not one of them: the document
+ * names it as the `organization` relationship (#642).
+ */
+export const SsoRegisterOidcAttributes = Schema.Struct({
   /** Optional for backwards compatibility: OIDC is the default protocol. */
   protocol: Schema.optional(Schema.Literal("oidc")),
   issuer: Schema.String,
@@ -410,12 +414,11 @@ export const SsoRegisterOidcPayload = Schema.Struct({
   jwksEndpoint: Schema.optional(Schema.String),
   scopes: Schema.optional(Schema.Array(Schema.String)),
   usePKCE: Schema.optional(Schema.Boolean),
-  organizationId: Schema.optional(Schema.String),
 });
-export type SsoRegisterOidcPayload = typeof SsoRegisterOidcPayload.Type;
+export type SsoRegisterOidcAttributes = typeof SsoRegisterOidcAttributes.Type;
 
-/** Request body for registering a **SAML 2.0** SSO connection (admin-gated). */
-export const SsoRegisterSamlPayload = Schema.Struct({
+/** The attributes of a `POST /sso-providers` registering a **SAML 2.0** connection (admin-gated). */
+export const SsoRegisterSamlAttributes = Schema.Struct({
   protocol: Schema.Literal("saml"),
   domain: Schema.String,
   entityId: Schema.String,
@@ -427,6 +430,23 @@ export const SsoRegisterSamlPayload = Schema.Struct({
   wantAssertionsSigned: Schema.optional(Schema.Boolean),
   wantAuthnResponseSigned: Schema.optional(Schema.Boolean),
   forceAuthn: Schema.optional(Schema.Boolean),
+});
+export type SsoRegisterSamlAttributes = typeof SsoRegisterSamlAttributes.Type;
+
+/**
+ * Request body for registering an **OIDC** SSO connection, as the typed client
+ * takes it: the attributes plus the optional `organizationId`, which the
+ * client sends as the `organization` relationship.
+ */
+export const SsoRegisterOidcPayload = Schema.Struct({
+  ...SsoRegisterOidcAttributes.fields,
+  organizationId: Schema.optional(Schema.String),
+});
+export type SsoRegisterOidcPayload = typeof SsoRegisterOidcPayload.Type;
+
+/** Request body for registering a **SAML 2.0** SSO connection, as the typed client takes it. */
+export const SsoRegisterSamlPayload = Schema.Struct({
+  ...SsoRegisterSamlAttributes.fields,
   organizationId: Schema.optional(Schema.String),
 });
 export type SsoRegisterSamlPayload = typeof SsoRegisterSamlPayload.Type;
@@ -438,6 +458,13 @@ export type SsoRegisterSamlPayload = typeof SsoRegisterSamlPayload.Type;
  */
 export const SsoRegisterPayload = Schema.Union([SsoRegisterOidcPayload, SsoRegisterSamlPayload]);
 export type SsoRegisterPayload = typeof SsoRegisterPayload.Type;
+
+/** The attributes of `POST /sso-providers`, discriminated on `protocol` like the payload. */
+export const SsoRegisterAttributes = Schema.Union([
+  SsoRegisterOidcAttributes,
+  SsoRegisterSamlAttributes,
+]);
+export type SsoRegisterAttributes = typeof SsoRegisterAttributes.Type;
 
 /** Request body for starting an SSO sign-in (any one of the fields). */
 export const SsoSignInPayload = Schema.Struct({

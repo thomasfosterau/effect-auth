@@ -61,7 +61,7 @@ The metadata document advertises exactly what the provider implements:
 }
 ```
 
-`registration_endpoint` points at `/register` only while dynamic registration is enabled; otherwise it names the admin-gated `/oauth2/register`, which is all the provider has to offer.
+`registration_endpoint` (optional in RFC 8414) is advertised only while dynamic registration is enabled, and then points at `/register`. Without it the provider has no endpoint an OAuth client can register at: client administration (`/oauth-clients`) is admin-gated JSON:API, not RFC 7591, so it is not advertised.
 
 ## 3. The client's three calls
 

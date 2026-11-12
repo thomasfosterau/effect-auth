@@ -20,6 +20,7 @@ import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
 import {
   AuthError,
+  EmailInUseError,
   OAuthProviderError,
   OAuthStateNotFoundError,
   OAuthStateExpiredError,
@@ -876,8 +877,17 @@ export class OAuthService extends Context.Service<
 
     /**
      * Complete OAuth sign-in: verifies the callback, resolves or creates the
-     * user (auto-linking to an existing user when the provider reports a
-     * verified email, unless disabled), links the account, and issues a session.
+     * user, links the account, and issues a session.
+     *
+     * A provider identity seen for the first time whose email matches an
+     * existing user is auto-linked to that user only when the provider reports
+     * the email verified, the local address is verified too, and auto-linking
+     * applies to the provider ({@link OAuthServiceOptions.autoLinkByVerifiedEmail},
+     * {@link OAuthServiceOptions.trustedProviders}). Any other match fails with
+     * `EmailInUseError` and links nothing (#588): an unverified local address
+     * may belong to whoever signed up with it first, so its holder proves it
+     * another way (a verification link, magic link or email OTP) before
+     * signing in with the provider.
      *
      * This is the recommended high-level entrypoint; use {@link handleCallback}
      * only when managing users yourself.
@@ -893,6 +903,7 @@ export class OAuthService extends Context.Service<
       | OAuthStateExpiredError
       | OAuthAccountNotLinkedError
       | OAuthMissingEmailError
+      | EmailInUseError
       | UserNotFoundError
       | HookError
     >;
@@ -958,9 +969,11 @@ export const oauthServiceOptionsConfig = Config.all({
 export interface OAuthServiceOptions {
   /**
    * When a new OAuth account arrives with a provider-verified email that
-   * matches an existing user, link the account to that user instead of
-   * creating a new one. Defaults to `true`. Only ever applies when the
-   * provider reports `email_verified: true`.
+   * matches an existing user's verified email, link the account to that user
+   * instead of creating a new one. Defaults to `true`. Never links when the
+   * provider reports the email unverified or the local address is unverified
+   * (#588); {@link OAuthService.signInWithCallback} refuses those matches with
+   * `EmailInUseError`.
    */
   readonly autoLinkByVerifiedEmail?: boolean;
   /**
@@ -983,10 +996,11 @@ export interface OAuthServiceOptions {
     | { readonly cipher: TokenCipher };
 
   /**
-   * Providers whose email address is unconditionally trusted for auto-linking
-   * in {@link OAuthService.signInWithCallback}, even when the provider reports
-   * `email_verified: false`. Applies on top of {@link autoLinkByVerifiedEmail}.
-   * Defaults to `[]` — no provider is trusted beyond the verified-email check.
+   * Providers that auto-link in {@link OAuthService.signInWithCallback} even
+   * when {@link autoLinkByVerifiedEmail} is `false`. The same verified-match
+   * rule holds for them: the provider must report `email_verified: true` and
+   * the local address must be verified, or the sign-in is refused with
+   * `EmailInUseError` (#588). Defaults to `[]`.
    */
   readonly trustedProviders?: readonly string[];
 
@@ -1005,6 +1019,10 @@ export interface OAuthServiceOptions {
    */
   readonly updateUserInfoOnLink?: boolean;
 }
+
+/** The conflict an OAuth sign-in over an email another user holds fails with (#588). */
+const emailInUse = (email: string) =>
+  new EmailInUseError({ message: "This email is already associated with an account", email });
 
 /**
  * Create an OAuth service with configured providers
@@ -1186,6 +1204,48 @@ export const make = (
         } satisfies OAuthCallbackResult;
       });
 
+    /**
+     * The existing user a first sign-in with `providerName` auto-links to by its
+     * email, or `null` when no identifier holds the address. Links only a
+     * verified match on both sides (#588): the provider verified the address,
+     * and so did this application, since an unverified local address may
+     * belong to whoever signed up with it first. Anything else (an unverified
+     * side, auto-linking off for the provider, a dangling identifier) fails
+     * with `EmailInUseError`; nothing is linked and nothing is wiped.
+     */
+    const autoLinkTarget = (providerName: string, email: string, emailVerified: boolean) =>
+      Effect.gen(function* () {
+        const existing = yield* identifiers.getByValue("email", email);
+        if (existing === null) return null;
+        const mayLink =
+          emailVerified &&
+          existing.verified &&
+          (autoLinkByVerifiedEmail || trustedProviders.includes(providerName));
+        const user = mayLink ? yield* coreUsers.get(existing.userId) : null;
+        return user ?? (yield* emailInUse(email));
+      });
+
+    /** Create the user for a first sign-in whose email no identifier holds. */
+    const createSignInUser = (email: string, emailVerified: boolean, userInfo: OAuthUserInfo) =>
+      Effect.gen(function* () {
+        const created = yield* createUserWithIdentifier(
+          identifiers,
+          {
+            type: "email",
+            value: email,
+            verified: emailVerified,
+            ...(emailVerified ? { verifiedAt: yield* DateTime.nowAsDate } : {}),
+          },
+          (identifier) =>
+            userStore.createUser({
+              ...(userInfo.name !== undefined && { name: userInfo.name }),
+              ...(userInfo.picture !== undefined && { image: userInfo.picture }),
+              identifier,
+            }),
+        ).pipe(Effect.catchTag("IdentifierTakenError", () => Effect.fail(emailInUse(email))));
+        return created.user;
+      });
+
     return {
       generateAuthorizationUrl: Effect.fn("OAuthService.generateAuthorizationUrl")(
         (provider: string, options?: { scopes?: readonly string[]; returnTo?: string }) =>
@@ -1293,51 +1353,9 @@ export const make = (
               });
             }
 
-            let user: Types.User | null = null;
-            const existingIdentifier = yield* identifiers.getByValue("email", email);
-            const isTrustedProvider = trustedProviders.includes(stateEntry.provider);
-            if (
-              existingIdentifier !== null &&
-              ((autoLinkByVerifiedEmail && emailVerified) || isTrustedProvider)
-            ) {
-              user = yield* coreUsers.get(existingIdentifier.userId);
-            }
-
-            const isNewUser = user === null;
-            if (user === null) {
-              if (existingIdentifier !== null) {
-                // The email belongs to an account we may not auto-link to
-                // (unverified provider email, untrusted provider, or a
-                // dangling identifier). Refuse rather than double-claim.
-                return yield* new AuthError({
-                  message: "This email is already associated with an account",
-                });
-              }
-              const created = yield* createUserWithIdentifier(
-                identifiers,
-                {
-                  type: "email",
-                  value: email,
-                  verified: emailVerified,
-                  ...(emailVerified ? { verifiedAt: yield* DateTime.nowAsDate } : {}),
-                },
-                (identifier) =>
-                  userStore.createUser({
-                    ...(userInfo.name !== undefined && { name: userInfo.name }),
-                    ...(userInfo.picture !== undefined && { image: userInfo.picture }),
-                    identifier,
-                  }),
-              ).pipe(
-                Effect.catchTag("IdentifierTakenError", () =>
-                  Effect.fail(
-                    new AuthError({
-                      message: "This email is already associated with an account",
-                    }),
-                  ),
-                ),
-              );
-              user = created.user;
-            }
+            const linked = yield* autoLinkTarget(stateEntry.provider, email, emailVerified);
+            const isNewUser = linked === null;
+            const user = linked ?? (yield* createSignInUser(email, emailVerified, userInfo));
 
             const newAccountId = yield* randomAccountId();
             const account: OAuthAccount = {

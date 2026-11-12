@@ -987,6 +987,19 @@ const writeRequest = (
     body: toJson(body),
   });
 
+/** `POST /device-authorizations/decisions`: approve or deny a device's user code. */
+const deviceDecisionRequest = (
+  userCode: string,
+  decision: "approved" | "denied",
+  headers: Record<string, string> = {},
+) =>
+  writeRequest(
+    "POST",
+    "/device-authorizations/decisions",
+    { data: { type: "device-authorization-decisions", attributes: { userCode, decision } } },
+    headers,
+  );
+
 /**
  * The JSON:API request for `flow` with the fields a caller supplies: a sign-in
  * is `POST /sessions` carrying them as its `credential` (`rememberMe` beside
@@ -1909,13 +1922,13 @@ describe("CSRF protection (trusted origins)", () => {
     expect(crossReferer.status).toBe(403);
   });
 
-  it("applies CSRF check to GET /token (JWT issuance)", async () => {
+  it("applies the CSRF check to POST /tokens (JWT issuance)", async () => {
     const handler = handlerFor(makeFixture(), { trustedOrigins: [] });
 
-    // GET /token with a cross-origin Referer should be blocked.
+    // Minting a JWT from a cross-origin Referer should be blocked.
     const res = await handler(
-      new Request("http://test/token", {
-        method: "GET",
+      new Request("http://test/tokens", {
+        method: "POST",
         headers: { referer: "https://evil.example/page" },
       }),
     );
@@ -2294,10 +2307,8 @@ describe("HTTP device authorization (RFC 8628)", () => {
 
     // Approve from an authenticated verification page.
     const sid = await signUp(handler, "device-user@example.com");
-    const approve = await handler(
-      jsonRequest("/device/approve", { userCode: code.userCode }, asCookie(sid)),
-    );
-    expect(approve.status).toBe(200);
+    const approve = await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
+    expect(approve.status).toBe(204);
 
     // Now the device gets a session.
     const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
@@ -2309,8 +2320,28 @@ describe("HTTP device authorization (RFC 8628)", () => {
     const handler = handlerFor(makeFixture(), { features: true });
     const codeRes = await handler(jsonRequest("/device/code", {}));
     const code = await jsonBody(codeRes, Schema.Struct({ userCode: Schema.String }));
-    const res = await handler(jsonRequest("/device/approve", { userCode: code.userCode }));
+    const res = await handler(deviceDecisionRequest(code.userCode, "approved"));
     expect(res.status).toBe(401);
+  });
+
+  it("denies a code without a session, and the device's poll learns it", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const code = await jsonBody(
+      codeRes,
+      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
+    );
+    const denied = await handler(deviceDecisionRequest(code.userCode, "denied"));
+    expect(denied.status).toBe(204);
+    // An unknown code is refused.
+    expect((await handler(deviceDecisionRequest("ZZZZ-ZZZZ", "denied"))).status).toBe(400);
+    const poll = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    expect(poll.status).toBe(400);
+    expect((await jsonBody(poll, MessageBody)).message).toBe("access_denied");
+    // The code travels in the body: the old command routes are gone.
+    expect((await handler(jsonRequest("/device/deny", { userCode: code.userCode }))).status).toBe(
+      404,
+    );
   });
 
   it("returns 404 when device authorization is not configured", async () => {
@@ -3459,7 +3490,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     // An unknown code is a 400 every time: no limiter, by explicit choice.
     await Arr.reduce(Arr.range(1, 7), Promise.resolve(), async (previous) => {
       await previous;
-      const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+      const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
       expect(res.status).toBe(400);
     });
   });
@@ -3468,10 +3499,10 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     const handler = handlerFor(makeFixture(), { features: true });
     await Arr.reduce(Arr.range(1, 5), Promise.resolve(), async (previous) => {
       await previous;
-      const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+      const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
       expect(res.status).toBe(400);
     });
-    const sixth = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+    const sixth = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
     expect(sixth.status).toBe(429);
   });
 
@@ -3630,10 +3661,10 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
     const handler = handBuiltHandler(
       Layer.merge(makeFixture().featureServicesWithoutRateLimiter, Logger.layer([collector])),
     );
-    const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+    const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({
-      message: "No RateLimiter in services; this request cannot be rate limited",
+      errors: [{ detail: "No RateLimiter in services; this request cannot be rate limited" }],
     });
     // The misconfiguration reaches the server log, not only the response.
     expect(logs).toContainEqual({
@@ -3647,7 +3678,7 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
     const handler = handBuiltHandler(
       makeFixture({ deviceAllowMissingRateLimiter: true }).featureServicesWithoutRateLimiter,
     );
-    const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+    const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
     expect(res.status).toBe(400);
   });
 

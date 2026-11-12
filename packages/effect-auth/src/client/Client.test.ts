@@ -162,7 +162,7 @@ describe("createAuthClient", () => {
 });
 
 describe("JSON response detection", () => {
-  // `GET /token` answers plain JSON, so it probes the response handling
+  // `GET /jwks` answers plain JSON (RFC 7517), so it probes the response handling
   // every non-JSON:API endpoint shares.
   /** A client whose every request answers with `response`. */
   const clientReturning = (response: () => Response) =>
@@ -175,7 +175,7 @@ describe("JSON response detection", () => {
     const client = clientReturning(() =>
       respond(toJson([{ id: "s1" }]), "application/json; charset=utf-8"),
     );
-    expect(await client.jwtToken()).toEqual([{ id: "s1" }]);
+    expect(await client.jwks()).toEqual([{ id: "s1" }]);
   });
 
   it("reads the server's message from a `+json` suffix media type", async () => {
@@ -186,14 +186,14 @@ describe("JSON response detection", () => {
       }),
     );
 
-    const error = await rejectionOf(client.jwtToken(), AuthClientError);
+    const error = await rejectionOf(client.jwks(), AuthClientError);
     assert.instanceOf(error, AuthClientError);
     expect(error.message).toBe("Session expired");
   });
 
   it("does not parse a non-JSON body", async () => {
     const client = clientReturning(() => respond("<html>ok</html>", "text/html"));
-    expect(await client.jwtToken()).toBeUndefined();
+    expect(await client.jwks()).toBeUndefined();
   });
 
   it("matches the media type, not a substring of the header", async () => {
@@ -206,7 +206,7 @@ describe("JSON response detection", () => {
       }),
     );
 
-    const error = await rejectionOf(client.jwtToken(), AuthClientError);
+    const error = await rejectionOf(client.jwks(), AuthClientError);
     assert.instanceOf(error, AuthClientError);
     expect(error.message).toBe("Bad Request");
   });
@@ -217,7 +217,7 @@ describe("JSON response detection", () => {
       response.headers.delete("content-type");
       return response;
     });
-    expect(await client.jwtToken()).toBeUndefined();
+    expect(await client.jwks()).toBeUndefined();
   });
 });
 

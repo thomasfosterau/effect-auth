@@ -2,6 +2,7 @@ import { assert, describe, expect, it } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import { TestClock } from "effect/testing";
+import { ApiKeyStore } from "../ApiKey.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";
 import { IdentifierStore, memoryIdentifierStore } from "../Identifier.ts";
@@ -43,6 +44,9 @@ register(
       Effect.sync(() => void MutableHashMap.set(table.users, user.id, user)),
   }),
   () => Layer.succeed(UserStore, Testing.memoryUserStore(table)),
+);
+register(Testing.apiKeyStoreConformance(), () =>
+  Layer.succeed(ApiKeyStore, Testing.memoryApiKeyStore()),
 );
 register(Testing.identifierStoreConformance(), () =>
   Layer.succeed(IdentifierStore, memoryIdentifierStore()),
