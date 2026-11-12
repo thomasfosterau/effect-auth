@@ -2,15 +2,18 @@
  * The kernel against the hashes this package wrote before #744 and against
  * `@thomasfosterau/argon2`, whose wasm it embeds.
  */
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { hashPassword, verifyPassword } from "@thomasfosterau/argon2";
 import { Effect } from "effect";
+import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { hashWasmFixtures } from "./HashWasm.fixtures.ts";
 import * as Argon2 from "./index.ts";
 import { hashArgon2id, verifyArgon2 } from "./Wasm.ts";
-import { WASM_BASE64 } from "./WasmBinary.ts";
+import { WASM_BASE64, WASM_SHA256, WASM_SOURCE_VERSION } from "./WasmBinary.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -22,16 +25,34 @@ const costsOf = (hash: string): Argon2.Argon2Profile => {
   return { memoryCost: Number(m), timeCost: Number(t), parallelism: Number(p) };
 };
 
-describe("the embedded binary", () => {
-  it("is the wasm of the installed @thomasfosterau/argon2", async () => {
-    const source = await readFile(
-      new URL("../node_modules/@thomasfosterau/argon2/dist/index.js", import.meta.url),
-      "utf8",
+/**
+ * The source of `src/WasmBinary.ts`: the installed devDependency at the exact
+ * catalog pin, and the file in it that holds the wasm as `WASM_BASE64`.
+ */
+const SOURCE = new URL("../node_modules/@thomasfosterau/argon2/", import.meta.url);
+const SOURCE_FILE = "dist/index.js";
+const REGENERATE = "regenerate it with `vpx scripts/generate-argon2-wasm.ts`";
+
+const Manifest = Schema.fromJsonString(Schema.Struct({ version: Schema.String }));
+
+describe(`the embedded binary (@thomasfosterau/argon2/${SOURCE_FILE} @ ${WASM_SOURCE_VERSION})`, () => {
+  it("records the installed devDependency's version", async () => {
+    const manifest = Schema.decodeSync(Manifest)(
+      await readFile(new URL("package.json", SOURCE), "utf8"),
     );
-    const [, published] = /const WASM_BASE64 = "([A-Za-z0-9+/=]+)";/.exec(source) ?? [];
-    // On a bump of the catalog pin, copy that release's `WASM_BASE64` into
-    // src/WasmBinary.ts, after checking its ABI (src/lib.rs) is unchanged.
-    expect(WASM_BASE64 === published, "src/WasmBinary.ts matches the catalog pin").toBe(true);
+    expect(manifest.version, `src/WasmBinary.ts is stale: ${REGENERATE}`).toBe(WASM_SOURCE_VERSION);
+  });
+
+  it("holds that release's bytes, with the recorded SHA-256", async () => {
+    const source = await readFile(new URL(SOURCE_FILE, SOURCE), "utf8");
+    const published = /const WASM_BASE64 = "([A-Za-z0-9+/=]+)";/.exec(source)?.[1];
+    assert(published !== undefined, `${SOURCE_FILE} holds a WASM_BASE64 constant`);
+    const installed = Buffer.from(published, "base64");
+    const embedded = Buffer.from(WASM_BASE64, "base64");
+
+    expect(createHash("sha256").update(installed).digest("hex")).toBe(WASM_SHA256);
+    expect(createHash("sha256").update(embedded).digest("hex")).toBe(WASM_SHA256);
+    expect(embedded.equals(installed), `src/WasmBinary.ts differs: ${REGENERATE}`).toBe(true);
   });
 });
 
@@ -110,5 +131,55 @@ describe("the kernel's limits", () => {
     const hasher = Argon2.argon2Hasher(cheap);
     const { hash } = await run(hasher.hash("after the trap"));
     expect(await run(hasher.verify("after the trap", hash))).toBe(true);
+  });
+});
+
+describe("concurrency", () => {
+  // One instance serves every fiber; each kernel call runs from `alloc` to
+  // `dealloc` without yielding, so concurrent fibers can only interleave
+  // between calls, never inside one.
+  const hasher = Argon2.argon2Hasher(cheap);
+  const passwords = Arr.makeBy(24, (index) => `password-${index} ✓`);
+
+  it("concurrent hashes and verifies all come out right", async () => {
+    const hashed = await run(
+      Effect.all(
+        Arr.map(passwords, (password) => hasher.hash(password)),
+        { concurrency: "unbounded" },
+      ),
+    );
+    expect(Arr.dedupe(Arr.map(hashed, ({ hash }) => hash))).toHaveLength(passwords.length);
+
+    const verdicts = await run(
+      Effect.all(
+        Arr.flatMap(Arr.zip(passwords, hashed), ([password, { hash }]) => [
+          hasher.verify(password, hash),
+          hasher.verify(`${password}!`, hash),
+        ]),
+        { concurrency: "unbounded" },
+      ),
+    );
+    expect(verdicts).toEqual(Arr.flatMap(passwords, () => [true, false]));
+  });
+
+  it("interleaved hashes and fixture verifies do not disturb each other", async () => {
+    const verifier = Argon2.argon2Hasher();
+    const results = await run(
+      Effect.all(
+        Arr.flatMap(hashWasmFixtures, ({ password, hash }, index) => [
+          verifier.verify(password, hash),
+          Effect.flatMap(hasher.hash(`${password}-${index}`), (hashed) =>
+            hasher.verify(`${password}-${index}`, hashed.hash),
+          ),
+        ]),
+        { concurrency: "unbounded" },
+      ),
+    );
+    expect(results).toEqual(
+      Arr.map(
+        Arr.flatMap(hashWasmFixtures, () => [0, 1]),
+        () => true,
+      ),
+    );
   });
 });

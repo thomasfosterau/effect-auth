@@ -19,7 +19,10 @@
  * version, costs, salt and digest length from the stored string and compares
  * in constant time (RustCrypto's `subtle`). `hash` always derives argon2id,
  * v=19, with a 32-byte digest. The package's own exports take no cost
- * parameters, which is why this module calls the ABI itself.
+ * parameters, which is why this module calls the ABI itself. Planned
+ * follow-up: `@thomasfosterau/argon2` is being asked for a cost-parameter
+ * API; with it the adapter depends on that package at runtime again
+ * (ADR-0022) and this module's ABI calls and `WasmBinary.ts` go.
  *
  * @module argon2/wasm
  * @internal
@@ -96,12 +99,29 @@ export class KernelError extends Data.TaggedError("KernelError")<{
 /** A buffer copied into module memory: its pointer and length. */
 type Input = readonly [pointer: number, length: number];
 
+/** Overwrite `[pointer, pointer + length)` of the instance's memory with zeros. */
+const wipe = (instance: Argon2Exports, [pointer, length]: Input): void => {
+  new Uint8Array(instance.memory.buffer, pointer, length).fill(0);
+};
+
 /**
- * Run `call` with `first` and `second` copied into module memory; `call`
- * frees them. A trap (an allocation failure aborts the Rust side) is the
- * failure, and can leave the allocator mid-update, so the instance is
- * replaced: instantiating an already-compiled module generates no code, so
- * workerd allows it inside a request (`Workerd.test.ts`).
+ * Run `call` with `first` and `second` copied into module memory.
+ *
+ * Memory: on success both inputs are zeroed and then freed (the password
+ * never outlives the call in linear memory), and the JS-side copies of the
+ * inputs are zeroed too. A trap (an allocation failure aborts the Rust side)
+ * is the failure: it can leave the allocator mid-update, so the whole of the
+ * old instance's memory is zeroed and the instance replaced. Instantiating an
+ * already-compiled module generates no code, so workerd allows it inside a
+ * request (`Workerd.test.ts`). What the crate allocates itself (the
+ * `memoryCost` KiB of Argon2 blocks, its BLAKE2b state) is freed without
+ * zeroing, because `@thomasfosterau/argon2` builds `argon2` without its
+ * `zeroize` feature; the next call reuses and overwrites that memory.
+ *
+ * Concurrency: everything from the first `alloc` to the last `dealloc` is
+ * synchronous, with no `await` or yield in between, and a JS isolate runs one
+ * call stack at a time, so two hashes or verifies never interleave inside the
+ * one instance, however many fibers run them (`Wasm.test.ts`).
  */
 const withInputs = <A>(
   first: Uint8Array,
@@ -116,10 +136,24 @@ const withInputs = <A>(
     return [pointer, bytes.length];
   };
   const result = Result.try({
-    try: () => call(instance, write(first), write(second)),
+    try: () => {
+      const a = write(first);
+      const b = write(second);
+      const value = call(instance, a, b);
+      wipe(instance, a);
+      wipe(instance, b);
+      instance.dealloc(...a);
+      instance.dealloc(...b);
+      return value;
+    },
     catch: (cause) => new KernelError({ reason: "trapped", cause }),
   });
-  if (Result.isFailure(result)) current = instantiate();
+  first.fill(0);
+  second.fill(0);
+  if (Result.isFailure(result)) {
+    new Uint8Array(instance.memory.buffer).fill(0);
+    current = instantiate();
+  }
   return result;
 };
 
@@ -142,7 +176,8 @@ export const hashArgon2id = (
   Result.flatMap(
     withInputs(
       encoder.encode(password),
-      salt,
+      // A copy: `withInputs` zeroes its inputs, and the salt is the caller's.
+      salt.slice(),
       (instance, [pw, pwLength], [sp, saltLength]): Result.Result<string, KernelError> => {
         const length = instance.hash(
           pw,
@@ -153,12 +188,13 @@ export const hashArgon2id = (
           costs.timeCost,
           costs.parallelism,
         );
-        instance.dealloc(pw, pwLength);
-        instance.dealloc(sp, saltLength);
         if (length < 0) return Result.fail(new KernelError({ reason: "rejected" }));
-        const start = instance.last_ptr();
-        const bytes = new Uint8Array(instance.memory.buffer).slice(start, start + length);
-        return Result.succeed(decoder.decode(bytes));
+        // The PHC string stays allocated in the crate until the next `hash`;
+        // zero it once it is copied out.
+        const output: Input = [instance.last_ptr(), length];
+        const phc = decoder.decode(new Uint8Array(instance.memory.buffer, ...output).slice());
+        wipe(instance, output);
+        return Result.succeed(phc);
       },
     ),
     (outcome) => outcome,
@@ -181,8 +217,6 @@ export const verifyArgon2 = (
     encoder.encode(stored),
     (instance, [pw, pwLength], [hp, hashLength]): Verdict => {
       const result = instance.verify(pw, pwLength, hp, hashLength);
-      instance.dealloc(pw, pwLength);
-      instance.dealloc(hp, hashLength);
       return result === 1 ? "match" : result === 0 ? "mismatch" : "unverifiable";
     },
   );

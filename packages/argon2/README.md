@@ -105,4 +105,6 @@ Package root (`@thomasfosterau/effect-auth-argon2`):
 
 ## License
 
-MIT
+MIT.
+
+The embedded WebAssembly binary is copied from [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2) 0.1.1, MIT, Copyright (c) 2026 Thomas Foster. It is compiled from Rust, not from the Argon2 reference C implementation: the RustCrypto [`argon2`](https://crates.io/crates/argon2) crate and the RustCrypto crates it builds on (`blake2`, `password-hash`, `base64ct`, `subtle`) are dual-licensed MIT OR Apache-2.0, used here under MIT.
