@@ -27,7 +27,6 @@ import * as Schema from "effect/Schema";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
-import { normalizeSql } from "./testing/DrizzleLine.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 /** A stored visibility, checked to be one `OwnedAccess` names. */
@@ -283,7 +282,7 @@ describe("ownedListFilter's rendered SQL", () => {
     })(scope);
     if (where === undefined) return undefined;
     const { sql, params } = dialect.sqlToQuery(where);
-    return { sql: normalizeSql(sql), params };
+    return { sql, params };
   };
 
   it("is no filter at all for the all scope", () => {
@@ -292,7 +291,7 @@ describe("ownedListFilter's rendered SQL", () => {
 
   it("is public-and-published for the public scope, and omits draft on a table without one", () => {
     expect(render({ kind: "public" })).toEqual({
-      sql: '("posts"."visibility" = $1 and "posts"."draft" = $2)',
+      sql: '(("posts"."visibility" = $1) and ("posts"."draft" = $2))',
       params: ["public", false],
     });
     expect(render({ kind: "public" }, false)).toEqual({

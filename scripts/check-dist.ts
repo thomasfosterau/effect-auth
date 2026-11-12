@@ -80,10 +80,26 @@
  * request read, and asserts the SQL and parameters they generate. No connection
  * is opened.
  *
+ * The same project type-checks a consumer of the packed declarations
+ * (`typeCheckDrizzleConsumer`): the drizzle README's `defineSchema` example,
+ * read from the README itself, and `drizzleConsumer`, which queries the packed
+ * tables with the consumer's own drizzle and hands `databaseLayer` a real
+ * handle of each dialect. It runs once on the drizzle-orm the project
+ * installed and again on `drizzleApplicationsPin`, the commit build the
+ * applications run (the drizzle query smoke runs on both too). It runs the
+ * workspace's `tsc` strict, with
+ * `exactOptionalPropertyTypes` and without `skipLibCheck`, beside
+ * `@types/node` (the catalog version): an error in our `dist/` or in the
+ * fixtures fails the run. drizzle-orm's own declarations do not pass that
+ * configuration (1.0.0-rc.5's `PgPolicy` / `PgRole` classes fail
+ * `exactOptionalPropertyTypes`), so errors located inside drizzle-orm are
+ * printed and tolerated; a drizzle export our `dist/` names but drizzle lacks
+ * still fails, because tsc reports it at the importing file.
+ *
  * Not covered: the Svelte binding, which imports Effect
  * only through the core's `./client` subpath.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -471,7 +487,7 @@ const main = async () => {
   expectSql("eq, inArray and orderBy(asc) build", direct, {
     sql:
       select +
-      " where (" + table + '."type" = $1 and ' + table + '."value" in ($2, $3)) order by ' +
+      " where ((" + table + '."type" = $1) and (' + table + '."value" in ($2, $3))) order by ' +
       table + '."created_at" asc',
     params: ["email", "a@example.test", "b@example.test"],
   });
@@ -514,6 +530,170 @@ main().catch((error) => {
   process.exit(1);
 });
 `;
+
+/**
+ * A consumer of effect-auth-drizzle's packed declarations, type-checked by
+ * `typeCheckDrizzleConsumer`. The `Refuses` assertions prove the checks still
+ * bite: were the declarations to degrade to `any` (as a missing drizzle export
+ * does under `skipLibCheck`), each would resolve to `false` and fail to compile.
+ */
+const drizzleConsumer = `
+import { eq } from "drizzle-orm";
+import type { MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
+import { drizzle as pgProxy } from "drizzle-orm/pg-proxy";
+import type { SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
+import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+
+const pg = pgProxy(async () => ({ rows: [] }));
+// Declared by type: the proxies' callback shapes differ between rc.5 builds.
+declare const sqlite: SqliteRemoteDatabase;
+declare const mysql: MySqlRemoteDatabase;
+
+/** Compiles only when \`TValue\` is not assignable to \`TTarget\`. */
+type Refuses<TTarget, TValue> = [TValue] extends [TTarget] ? false : true;
+type Holds<T extends true> = T;
+
+// databaseLayer takes a real handle of each dialect, and nothing else.
+export const pgLayer = Drizzle.databaseLayer(pg);
+export const sqliteLayer = Drizzle.databaseLayer(sqlite);
+export const mysqlLayer = Drizzle.databaseLayer(mysql);
+// A plain object is not a drizzle handle (the last overload's parameter).
+export type NotAHandle = Holds<Refuses<Parameters<typeof Drizzle.databaseLayer>[0], {}>>;
+
+// The packed tables are ordinary tables to the consumer's own drizzle.
+export const projected = pg
+  .select({ id: Drizzle.Pg.identifiersTable.id })
+  .from(Drizzle.Pg.identifiersTable)
+  .where(eq(Drizzle.Pg.identifiersTable.userId, "user-1"));
+export const rows: Promise<Array<Drizzle.Pg.IdentifierRow>> = pg
+  .select()
+  .from(Drizzle.Pg.identifiersTable)
+  .execute();
+
+// defineSchema's column check still bites: an instant column is accepted
+// for a Date field, a text column is not.
+type SessionsTable = typeof Drizzle.Pg.sessionsTable;
+export const instant: Drizzle.ColumnKey<SessionsTable, Date> = "expiresAt";
+// A text column cannot hold a Date field.
+export type NotAnInstant = Holds<Refuses<Drizzle.ColumnKey<SessionsTable, Date>, "userId">>;
+`;
+
+/**
+ * The first `ts` code block under the drizzle README's "Adopting an existing
+ * schema" heading: the `defineSchema` example consumers copy.
+ */
+const readmeDefineSchemaExample = (): string => {
+  const readme = readFileSync(join(root, "packages", "drizzle", "README.md"), "utf8");
+  const section = readme.split("\n## Adopting an existing schema")[1];
+  const block = section === undefined ? undefined : /\n```ts\n([\s\S]*?)\n```/.exec(section)?.[1];
+  if (block === undefined) {
+    throw new Error(
+      "packages/drizzle/README.md has no ts block under `## Adopting an existing schema`",
+    );
+  }
+  return block;
+};
+
+/**
+ * The drizzle-orm build the applications pin: a commit-suffixed 1.0.0-rc.5
+ * prerelease whose declarations differ from the tagged rc.5 the package
+ * builds against. Moved by hand, with the applications.
+ */
+const drizzleApplicationsPin = "1.0.0-rc.5-ab785fc";
+
+/** The file a `tsc` error line is located in: the part before `(line,col): error TS…`. */
+const errorLocation = (line: string): string =>
+  /^(.*?)\(\d+,\d+\): error TS\d+:/.exec(line)?.[1] ?? "";
+
+/**
+ * An error located in a file inside the scratch project's drizzle-orm. Only the
+ * location counts: an error in our own declarations whose message names a
+ * drizzle-orm type (`import("…/node_modules/drizzle-orm/…")`) is ours, and an
+ * unlocated error is never tolerated.
+ */
+const insideDrizzleOrm = (line: string): boolean =>
+  /(?:^|\/)node_modules\/drizzle-orm\//.test(errorLocation(line));
+
+/**
+ * The classifier's own cases, checked before it is trusted: a mistake here
+ * would silently tolerate the class of failure #735 is about.
+ */
+const insideDrizzleOrmCases: ReadonlyArray<readonly [line: string, tolerated: boolean]> = [
+  [
+    "node_modules/drizzle-orm/pg-core/policies.d.ts(12,3): error TS2420: Class 'PgPolicy' incorrectly implements interface 'PgPolicyConfig'.",
+    true,
+  ],
+  [
+    "node_modules/@thomasfosterau/effect-auth-drizzle/dist/Database.d.ts(40,5): error TS2344: Type 'X' does not satisfy the constraint 'import(\"/tmp/p/node_modules/drizzle-orm/pg-core/table\").PgTable'.",
+    false,
+  ],
+  [
+    "drizzle-consumer.ts(3,1): error TS2305: Module '\"drizzle-orm\"' has no exported member 'PgDatabase' (see node_modules/drizzle-orm/index.d.ts).",
+    false,
+  ],
+  ["error TS5083: Cannot read file 'node_modules/drizzle-orm/tsconfig.json'.", false],
+];
+
+for (const [line, tolerated] of insideDrizzleOrmCases) {
+  if (insideDrizzleOrm(line) !== tolerated) {
+    throw new Error(
+      `insideDrizzleOrm misclassifies (expected tolerated=${String(tolerated)}): ${line}`,
+    );
+  }
+}
+
+/**
+ * Run the workspace's `tsc` in `project` and return its error lines. A failed
+ * run that printed no `error TS` line returns its whole output as one error, so
+ * it cannot pass for a clean one.
+ */
+const tscErrors = (project: string): ReadonlyArray<string> => {
+  const tsc = spawnSync(join(root, "node_modules", ".bin", "tsc"), ["-p", "."], {
+    cwd: project,
+    encoding: "utf8",
+  });
+  if (tsc.error) throw tsc.error;
+  const errors = tsc.stdout.split("\n").filter((line) => / error TS\d+:/.test(line));
+  return tsc.status === 0 || errors.length > 0
+    ? errors
+    : [`tsc exited ${tsc.status}: ${tsc.stdout}${tsc.stderr}`];
+};
+
+/** The scratch project's `tsconfig.json` for the drizzle consumer fixtures. */
+const drizzleConsumerTsconfig = JSON.stringify({
+  compilerOptions: {
+    target: "es2022",
+    module: "nodenext",
+    moduleResolution: "nodenext",
+    strict: true,
+    exactOptionalPropertyTypes: true,
+    skipLibCheck: false,
+    noEmit: true,
+    types: ["node"],
+  },
+  files: ["readme-define-schema.ts", "drizzle-consumer.ts"],
+});
+
+/**
+ * Type-check the drizzle consumer fixtures in `project` against the packed
+ * declarations and the drizzle-orm installed there (see the module docs).
+ */
+const typeCheckDrizzleConsumer = (project: string): void => {
+  writeFileSync(join(project, "readme-define-schema.ts"), readmeDefineSchemaExample());
+  writeFileSync(join(project, "drizzle-consumer.ts"), drizzleConsumer);
+  writeFileSync(join(project, "tsconfig.json"), drizzleConsumerTsconfig);
+  const errors = tscErrors(project);
+  for (const line of errors.filter((candidate) => insideDrizzleOrm(candidate))) {
+    console.log(`  tolerated, inside drizzle-orm's own declarations: ${line}`);
+  }
+  const ours = errors.filter((line) => !insideDrizzleOrm(line));
+  if (ours.length > 0) {
+    throw new Error(
+      `the drizzle consumer fixtures fail to type-check against the packed declarations:\n${ours.join("\n")}`,
+    );
+  }
+  console.log("ok   drizzle consumer fixtures type-check against the packed declarations");
+};
 
 const scratch = mkdtempSync(join(tmpdir(), "effect-auth-dist-"));
 try {
@@ -604,6 +784,10 @@ try {
             effect: effectVersion,
             ...Object.fromEntries([...peerVersions].map(([peer, { version }]) => [peer, version])),
             ...Object.fromEntries(names.map((name) => [name, siblings[name]])),
+            // The drizzle consumer fixtures type-check beside Node's types.
+            ...(names.includes("@thomasfosterau/effect-auth-drizzle") && {
+              "@types/node": catalogEntry("@types/node"),
+            }),
           },
           packageManager,
         },
@@ -689,8 +873,21 @@ process.exit(failed === 0 ? 0 : 1);
     }
     if (names.includes("@thomasfosterau/effect-auth-drizzle")) {
       writeFileSync(join(project, "drizzle.mjs"), drizzleSmoke);
-      console.log(`effect ${installed}: drizzle query smoke over the installed drizzle-orm`);
-      console.log(run("node", ["drizzle.mjs"], project));
+      const drizzleLines = [peerVersions.get("drizzle-orm")?.version, drizzleApplicationsPin];
+      for (const [index, line] of drizzleLines.entries()) {
+        if (line === undefined || drizzleLines.indexOf(line) !== index) continue;
+        if (index > 0) {
+          run(
+            "pnpm",
+            ["add", `drizzle-orm@${line}`, "--ignore-scripts", "--reporter=append-only"],
+            project,
+          );
+        }
+        console.log(`effect ${installed}: drizzle query smoke over drizzle-orm ${line}`);
+        console.log(run("node", ["drizzle.mjs"], project));
+        console.log(`effect ${installed}: type-checking drizzle consumers on drizzle-orm ${line}`);
+        typeCheckDrizzleConsumer(project);
+      }
     }
   }
 } finally {
