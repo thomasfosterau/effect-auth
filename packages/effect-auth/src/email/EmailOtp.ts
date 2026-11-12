@@ -11,7 +11,7 @@
 import { Clock, Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
-import { IdentifierStore, lookupIdentifier } from "../Identifier.ts";
+import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -473,11 +473,14 @@ export const make = (
 
         yield* verifyOtp(email, otp, "sign-in");
 
-        const identifier = yield* lookupIdentifier(identifiers, "email", email);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          return yield* new EmailOtpError({ message: "Account is unavailable" });
-        }
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "email",
+          email,
+          () => new EmailOtpError({ message: "Account is unavailable" }),
+        );
+        let user = owner;
         if (!user) {
           if (disableSignUp) {
             return yield* new EmailOtpError({

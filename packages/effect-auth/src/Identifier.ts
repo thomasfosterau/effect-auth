@@ -546,3 +546,30 @@ export const resolveUserByIdentifier = <E>(
     const user = yield* getUser(identifier.userId);
     return user === null ? null : { user, identifier };
   });
+
+/**
+ * The identifier holding exactly `(type, value)` and its owner, for a sign-in
+ * that creates the user when nobody holds the value (magic link, email and
+ * phone OTP, SSO, Google One Tap). Both are `null` when the value is
+ * unclaimed. A claimed identifier whose owner no longer exists fails with
+ * `onDangling()`, so the flow never creates a second claimant for it. The
+ * identifier is read through {@link lookupIdentifier} (#602).
+ */
+export const findIdentifierOwner = <E, E2>(
+  store: typeof IdentifierStore.Service,
+  getUser: (userId: string) => Effect.Effect<Types.User | null, E>,
+  type: IdentifierType,
+  value: string,
+  onDangling: () => E2,
+): Effect.Effect<
+  | { readonly identifier: Identifier; readonly user: Types.User }
+  | { readonly identifier: null; readonly user: null },
+  Errors.AuthError | E | E2
+> =>
+  Effect.gen(function* () {
+    const identifier = yield* lookupIdentifier(store, type, value);
+    if (identifier === null) return { identifier, user: null };
+    const user = yield* getUser(identifier.userId);
+    if (user === null) return yield* Effect.fail(onDangling());
+    return { identifier, user };
+  });

@@ -20,6 +20,7 @@ import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
   IdentifierStore,
+  findIdentifierOwner,
   lookupIdentifier,
   makeIdentifier,
   refusalAuthError,
@@ -447,11 +448,14 @@ export const make = (
 
         yield* verifyOtp(phoneNumber, otp, "sign-in");
 
-        const identifier = yield* lookupIdentifier(identifiers, "phone", phoneNumber);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          return yield* new PhoneOtpError({ message: "Account is unavailable" });
-        }
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "phone",
+          phoneNumber,
+          () => new PhoneOtpError({ message: "Account is unavailable" }),
+        );
+        let user = owner;
         if (!user) {
           if (disableSignUp) {
             return yield* new PhoneOtpError({ message: "Sign-up is disabled" });

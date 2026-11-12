@@ -11,7 +11,7 @@
 import { Clock, Context, DateTime, Duration, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
-import { IdentifierStore, lookupIdentifier } from "./Identifier.ts";
+import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "./Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -319,13 +319,14 @@ export const make = (
         // Consume the token (one-time use)
         yield* store.delete(tokenHash);
 
-        const identifier = yield* lookupIdentifier(identifiers, "email", magicLink.email);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          // Dangling identifier (owner row is gone) — fail rather than
-          // silently creating a second claimant.
-          return yield* new Errors.MagicLinkError({ message: "Account is unavailable" });
-        }
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "email",
+          magicLink.email,
+          () => new Errors.MagicLinkError({ message: "Account is unavailable" }),
+        );
+        let user = owner;
         if (!user) {
           if (disableSignUp) {
             return yield* new Errors.MagicLinkError({

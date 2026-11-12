@@ -8,6 +8,7 @@ import {
   IdentifierStore,
   claimIdentifier,
   lookupIdentifier,
+  findIdentifierOwner,
   resolveUserByIdentifier,
   type Identifier,
   makeIdentifier,
@@ -547,5 +548,44 @@ describe("lookupIdentifier", () => {
     const offenders = callers.filter((_, index) => /\.getByValue\(/.test(texts[index] ?? ""));
     expect(callers.length).toBeGreaterThan(50);
     expect(offenders).toEqual([]);
+  });
+});
+
+/** The `onDangling` error the owner tests expect. */
+const dangling = () => "dangling" as const;
+
+describe("findIdentifierOwner", () => {
+  it("resolves the exact holder and its owner", async () => {
+    const { bob, store } = seeded();
+    const found = await Effect.runPromise(
+      findIdentifierOwner(store, getUser, "email", "bob@example.com", dangling),
+    );
+    expect(found.identifier).toEqual(bob);
+    expect(found.user?.id).toBe("user-bob");
+  });
+
+  it("is null for an unclaimed value, look-alikes included", async () => {
+    const { store } = seeded();
+    expect(
+      await Effect.runPromise(
+        findIdentifierOwner(store, getUser, "email", "bob@exämple.com", dangling),
+      ),
+    ).toEqual({ identifier: null, user: null });
+  });
+
+  it("fails with onDangling when the holder's owner is gone", async () => {
+    const { store } = seeded();
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        findIdentifierOwner(
+          store,
+          () => Effect.succeed(null),
+          "email",
+          "bob@example.com",
+          dangling,
+        ),
+      ),
+    );
+    expect(failure).toBe("dangling");
   });
 });
