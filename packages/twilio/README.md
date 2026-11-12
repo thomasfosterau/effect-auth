@@ -109,11 +109,28 @@ twilioSmsSender({
 
 ## Errors
 
-Every failure — network error or a non-2xx response — surfaces as an
-`AuthError`. Non-2xx responses carry `{ status, body }` as `cause`, and when
-Twilio's JSON error body (`{ code, message }`) is parseable, its `code` and
-`message` are folded into the `AuthError.message` for easier debugging. The
-auth token is never included in any error.
+Every failure — network error, redirect or a non-2xx response — surfaces as an
+`AuthError`. Non-2xx responses carry `{ status, body }` as `cause`, where `body`
+is an excerpt of at most `MAX_ERROR_BODY_CHARS` (1024) characters: the
+response is read only that far, then cancelled, and a cut body ends in
+`TRUNCATION_MARKER`. When Twilio's JSON error body (`{ code, message }`) is
+parseable, its `code` and `message` are folded into the `AuthError.message`
+for easier debugging; otherwise the message carries the excerpt. The auth
+token is never included in any error, even when the response echoes the token
+or the Basic credentials back (either is replaced with `[redacted]`).
+
+Redirects are never followed. Every request is sent with `redirect: "manual"`
+(workerd's `fetch` rejects `"error"` on every request, so `"manual"` is the one
+value that works on Workers, Node and browsers alike), and any 3xx response,
+any status-0 response and any `"opaqueredirect"` fails the send as an
+`AuthError` whose `cause` is only `{ status }`. The redirect's body is
+cancelled unread and its `Location` is never read, so the credentials in
+`Authorization` never reach whatever it names and there is no second request.
+An injected `fetch` receives the same options. Each request also carries the
+`AbortSignal` of the surrounding fiber, so interrupting the send (an
+`Effect.timeout`, say) cancels the request, and an error body whose stream
+fails mid-read is an `AuthError` too, never a defect. See
+[issue #606](https://github.com/thomasfosterau/effect-auth/issues/606).
 
 ## API
 
@@ -121,6 +138,7 @@ auth token is never included in any error.
 - `layer(config)` — the same, as a `Layer<SmsSender>`.
 - `defaultRender(message)` — the built-in renderer, exported for reuse/testing.
 - `TwilioSmsSenderConfig` — the config type.
+- `MAX_ERROR_BODY_CHARS`, `TRUNCATION_MARKER` — the error-body excerpt's length cap and the marker a cut excerpt ends in.
 
 ## License
 

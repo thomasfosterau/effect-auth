@@ -26,6 +26,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
+import { UserStore } from "./UserStore.ts";
 
 /**
  * API key error
@@ -98,6 +99,12 @@ export class ApiKeyStore extends Context.Service<
     readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
     readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
     readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
+    /**
+     * Delete every key `userId` holds; a no-op when they hold none. Deleting
+     * a user calls it before the user row goes (#601), and the first proof of
+     * an address calls it too.
+     */
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/ApiKeyStore") {}
 
@@ -211,7 +218,8 @@ export interface ApiKeyUpdate {
 }
 
 /**
- * API key service
+ * API key service. Requires `ApiKeyStore`, `RateLimiter` and `UserStore`
+ * (a key verifies only while its owner exists, #601).
  */
 export class ApiKeyService extends Context.Service<
   ApiKeyService,
@@ -227,7 +235,9 @@ export class ApiKeyService extends Context.Service<
     ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError>;
 
     /**
-     * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
+     * Verify a plaintext API key: sha256 hash lookup, then the owner check (a
+     * key whose `userId` names no user answers `Invalid API key`, as an
+     * unknown key does, #601), then enabled / expiry /
      * remaining-uses / permission checks. On success `remaining` is
      * decremented (when set) and `lastUsedAt` is updated. `requiredPermissions`
      * maps resource → actions; every listed action must be granted on the key.
@@ -400,7 +410,7 @@ export const make = (
 ): Effect.Effect<
   typeof ApiKeyService.Service,
   never,
-  ApiKeyStore | RateLimiter | SecureRandom.SecureRandom
+  ApiKeyStore | RateLimiter | UserStore | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const defaultPrefix = config?.defaultPrefix ?? "ak_";
@@ -410,6 +420,7 @@ export const make = (
 
     const store = yield* ApiKeyStore;
     const rateLimiter = yield* RateLimiter;
+    const users = yield* UserStore;
     const crypto = yield* SecureRandom.SecureRandom;
 
     const randomToken = (): Effect.Effect<string> =>
@@ -458,10 +469,18 @@ export const make = (
       );
 
     /**
-     * Hash lookup for a plaintext key. Lookup is by exact sha256 digest, so
-     * the comparison carries no secret-dependent timing.
+     * Hash lookup for a plaintext key, `null` when no key matches or its owner
+     * no longer exists (#601): a key outlives its user only when something
+     * deleted the user row without the purge, and it must not authenticate.
+     * Lookup is by exact sha256 digest, so the comparison carries no
+     * secret-dependent timing.
      */
-    const lookup = (plaintextKey: string) => store.getByHash(hashApiKey(plaintextKey));
+    const lookup = (plaintextKey: string) =>
+      Effect.flatMap(store.getByHash(hashApiKey(plaintextKey)), (apiKey) =>
+        apiKey === null
+          ? Effect.succeed(null)
+          : Effect.map(users.get(apiKey.userId), (owner) => (owner === null ? null : apiKey)),
+      );
 
     return {
       create: Effect.fn("ApiKeyService.create")(function* (

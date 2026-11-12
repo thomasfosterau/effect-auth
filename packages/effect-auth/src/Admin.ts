@@ -22,6 +22,7 @@
  */
 
 import { Clock, Context, Data, DateTime, Effect, Layer, Match } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import { SecureRandom } from "effect/crypto";
@@ -30,9 +31,11 @@ import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType, refusalAuthError } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { AccountManagementStore } from "./AccountManagement.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
+import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { normalizeEmail, normalizeUsername } from "./utils.ts";
 import {
   createUserWithIdentifier,
@@ -280,7 +283,14 @@ export class AdminService extends Context.Service<
     ) => Effect.Effect<Types.User, AdminError | Errors.AuthError | Errors.UserNotFoundError>;
 
     /**
-     * Delete a user and revoke all of their sessions. Admins cannot remove
+     * Delete a user and everything the account holds (#601): every credential
+     * and token in the user-keyed stores present where this layer is built
+     * (OAuth links, passkeys, API keys, the multi-factor enrolment, trusted
+     * devices, OIDC provider tokens and consents, password-reset,
+     * email-verification and account-management tokens), then the sessions,
+     * then the identifiers (so the user's addresses and handles are free
+     * again), and the user row last. A failure part-way leaves the user row,
+     * and calling it again finishes the removal. Admins cannot remove
      * themselves.
      */
     readonly removeUser: (
@@ -413,6 +423,14 @@ export const make = (
     const identifierStore = yield* IdentifierStore;
     const hasher = yield* PasswordHasher;
     const crypto = yield* SecureRandom.SecureRandom;
+    const accountTokens = yield* Effect.serviceOption(AccountManagementStore);
+    const purgeServices = {
+      ...(yield* userPurgeStores),
+      accountTokens: Option.getOrUndefined(accountTokens),
+      identifiers: identifierStore,
+      revokeSessions: sessionManager.invalidateUserSessions,
+      deleteUser: userStore.delete,
+    };
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
@@ -521,8 +539,7 @@ export const make = (
           return yield* new AdminError({ message: "You cannot remove yourself" });
         }
 
-        yield* sessionManager.invalidateUserSessions(userId);
-        return yield* userStore.delete(userId);
+        return yield* purgeUser(purgeServices, userId);
       }),
 
       revokeUserSessions: Effect.fn("AdminService.revokeUserSessions")(function* (

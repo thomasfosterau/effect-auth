@@ -5,14 +5,14 @@
  * instead.
  *
  * 1. **Behaviourally, through `drizzle-orm/mysql-proxy`.** That driver is a real
- *    `MySqlDatabase`: it compiles the very same store calls down to real MySQL
+ *    `MySqlAsyncDatabase`: it compiles the very same store calls down to real MySQL
  *    SQL and hands the statement to a callback instead of a socket. So the
  *    assertions below are about the SQL and the bound parameters a MySQL server
  *    would actually receive — backtick quoting, `?` placeholders,
  *    `YYYY-MM-DD HH:MM:SS.mmm` datetimes, JSON-stringified attribute bags — and
  *    about the rows the store maps back out of a MySQL driver's wire shape.
  * 2. **Structurally, at the type level.** `MySql.tables` is a member of the
- *    shared `Tables` union, a `MySqlDatabase` handle satisfies `databaseLayer`,
+ *    shared `Tables` union, a `MySqlAsyncDatabase` handle satisfies `databaseLayer`,
  *    and MySQL's row types are interchangeable with PostgreSQL's — which is what
  *    lets one store implementation serve all three dialects.
  *
@@ -22,12 +22,11 @@
  * those events on engines that are available.
  */
 
-import { getTableColumns } from "drizzle-orm";
+import { type AnyRelations, getTableColumns } from "drizzle-orm";
 import {
   mysqlTable,
-  type MySqlDatabase,
+  type MySqlAsyncDatabase,
   type MySqlQueryResultHKT,
-  type PreparedQueryHKTBase,
 } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
 import { DateTime, Effect, Layer, Struct } from "effect";
@@ -38,7 +37,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { fromTables } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
-import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
+import { mysqlProxyConfig } from "./testing/MySqlProxy.ts";
 import { layer } from "./Layers.ts";
 import {
   binaryVarchar,
@@ -73,7 +72,7 @@ const makeProxy = (): Proxy => {
   const statements: Array<Statement> = [];
   let queued: ReadonlyArray<ReadonlyArray<unknown>> = [];
   const db = drizzle(async (sql, params, method) => {
-    statements.push({ sql: normalizeSql(sql), params });
+    statements.push({ sql, params });
     if (method === "all") {
       const rows = queued;
       queued = [];
@@ -263,7 +262,7 @@ describe("MySQL / statements", () => {
 
     expect(replaced).toEqual(to);
     expect(proxy.statements.map((statement) => statement.sql)).toEqual([
-      "select `id` from `effect_auth_identifiers` where (`effect_auth_identifiers`.`id` = ? and `effect_auth_identifiers`.`user_id` = ? and `effect_auth_identifiers`.`type` = ? and `effect_auth_identifiers`.`value` = ?) limit ?",
+      "select `id` from `effect_auth_identifiers` where ((`effect_auth_identifiers`.`id` = ?) and (`effect_auth_identifiers`.`user_id` = ?) and (`effect_auth_identifiers`.`type` = ?) and (`effect_auth_identifiers`.`value` = ?)) limit ?",
       "insert into `effect_auth_identifiers` (`id`, `user_id`, `type`, `value`, `verified`, `verified_at`, `created_at`) values (?, ?, ?, ?, ?, ?, ?)",
       "delete from `effect_auth_identifiers` where `effect_auth_identifiers`.`id` = ?",
     ]);
@@ -312,7 +311,7 @@ describe("MySQL / statements", () => {
     expect(unverified?.verified).toBe(false);
     expect(unverified && "verifiedAt" in unverified).toBe(false);
     expect(proxyWithRow.statements[0]?.sql).toContain(
-      "where (`effect_auth_identifiers`.`type` = ? and `effect_auth_identifiers`.`value` = ?)",
+      "where ((`effect_auth_identifiers`.`type` = ?) and (`effect_auth_identifiers`.`value` = ?))",
     );
   });
 
@@ -343,7 +342,7 @@ describe("MySQL / statements", () => {
     expect(resolved).toBeNull();
     expect(proxy.statements).toHaveLength(1);
     expect(proxy.statements[0]?.sql).toContain(
-      "where (`effect_auth_identifiers`.`type` = ? and `effect_auth_identifiers`.`value` = ?)",
+      "where ((`effect_auth_identifiers`.`type` = ?) and (`effect_auth_identifiers`.`value` = ?))",
     );
     expect(proxy.statements[0]?.params).toEqual(["email", "bob@exämple.com", 1]);
 
@@ -480,9 +479,8 @@ describe("MySQL / types", () => {
   it("is a member of the shared Tables union and a valid database handle", () => {
     // Compile-time assertions; the runtime expectations only keep them live.
     const asAnyTables: AnyTables = tables;
-    const anyMySqlHandle = (
-      db: MySqlDatabase<MySqlQueryResultHKT, PreparedQueryHKTBase, Record<string, never>>,
-    ) => databaseLayer(db);
+    const anyMySqlHandle = (db: MySqlAsyncDatabase<MySqlQueryResultHKT, AnyRelations>) =>
+      databaseLayer(db);
 
     expect(asAnyTables.sessions).toBe(tables.sessions);
     expect(P.isFunction(anyMySqlHandle)).toBe(true);

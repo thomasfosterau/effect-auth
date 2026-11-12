@@ -114,14 +114,22 @@ export const sessionServiceLayer = (
 export interface ApiKeyServiceLayerOptions {
   /** Records the layer's `ApiKeyStore` starts with (their `keyHash` is `hashApiKey` of the plaintext). */
   readonly keys?: Iterable<ApiKey> | undefined;
+  /**
+   * The users the layer's `UserStore` starts with (none by default). A key
+   * verifies only while its owner exists (#601), so seed the owners of the
+   * keys a test verifies.
+   */
+  readonly users?: Iterable<Types.User> | undefined;
   /** The service's own config; the service defaults apply when omitted. */
   readonly config?: ApiKeyConfig | undefined;
 }
 
 /**
- * `ApiKeyService` over an `ApiKeyStore` seeded with `keys` (none by default)
- * and an in-memory `RateLimiter`, so `verifyWithRateLimit` works. The
- * `ApiKeyStore` and `RateLimitStore` are provided too. `config` is
+ * `ApiKeyService` over an `ApiKeyStore` seeded with `keys` (none by default),
+ * a `UserStore` seeded with `users` (none by default; `verify` refuses a key
+ * whose owner it does not find) and an in-memory `RateLimiter`, so
+ * `verifyWithRateLimit` works. The `ApiKeyStore`, `UserStore` and
+ * `RateLimitStore` are provided too. `config` is
  * `ApiKeyService.layer`'s own, with its defaults (prefix `ak_`, 32 random
  * bytes, ten keys per user, no expiry). Each build starts from fresh state.
  *
@@ -132,16 +140,20 @@ export interface ApiKeyServiceLayerOptions {
  * import * as Auth from "@thomasfosterau/effect-auth"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
+ * const ada = Testing.fixtureUser({ name: "Ada" })
+ *
  * const program = Effect.gen(function* () {
  *   const apiKeys = yield* Auth.ApiKeyService
- *   const created = yield* apiKeys.create("user-1", { name: "CI" })
+ *   const created = yield* apiKeys.create(ada.id, { name: "CI" })
  *   assert.equal((yield* apiKeys.verify(created.key)).valid, true)
  *
- *   yield* apiKeys.delete("user-1", created.apiKey.id)
+ *   yield* apiKeys.delete(ada.id, created.apiKey.id)
  *   assert.equal((yield* apiKeys.verify(created.key)).valid, false)
  * })
  *
- * await Effect.runPromise(program.pipe(Effect.provide(Testing.apiKeyServiceLayer())))
+ * await Effect.runPromise(
+ *   program.pipe(Effect.provide(Testing.apiKeyServiceLayer({ users: [ada] }))),
+ * )
  * ```
  *
  * @since 0.1.0
@@ -149,14 +161,21 @@ export interface ApiKeyServiceLayerOptions {
  */
 export const apiKeyServiceLayer = (
   options: ApiKeyServiceLayerOptions = {},
-): Layer.Layer<ApiKeyService | ApiKeyStore | RateLimitStore> => {
+): Layer.Layer<ApiKeyService | ApiKeyStore | UserStore | RateLimitStore> => {
   const store = Layer.unwrap(
     Effect.sync(() => {
       const keys = MutableHashMap.empty<string, ApiKey>();
       Arr.forEach(Arr.fromIterable(options.keys ?? []), (key) => {
         MutableHashMap.set(keys, key.id, key);
       });
-      return Layer.succeed(ApiKeyStore, memoryApiKeyStore(keys));
+      const table = memoryUserTable();
+      Arr.forEach(Arr.fromIterable(options.users ?? []), (user) => {
+        MutableHashMap.set(table.users, user.id, user);
+      });
+      return Layer.merge(
+        Layer.succeed(ApiKeyStore, memoryApiKeyStore(keys)),
+        Layer.succeed(UserStore, memoryUserStore(table)),
+      );
     }),
   );
   const rateLimits = RateLimiter.layer().pipe(
