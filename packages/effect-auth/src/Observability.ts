@@ -166,6 +166,7 @@ export const spanNames = {
   resolveSession: "effect-auth.resolve-session",
   remoteSessionRead: "effect-auth.remote-session.read",
   remoteSessionRelay: "effect-auth.remote-session.relay",
+  remoteApiKeyRead: "effect-auth.remote-session.api-key-read",
   signOut: "effect-auth.sign-out",
   twoFactorChallenge: "effect-auth.2fa.challenge",
   twoFactorVerify: "effect-auth.2fa.verify",

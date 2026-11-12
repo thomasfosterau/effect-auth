@@ -36,6 +36,7 @@ import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
+import { isBanned } from "./UserStanding.ts";
 import { normalizeEmail, normalizeUsername } from "./utils.ts";
 import {
   createUserWithIdentifier,
@@ -200,23 +201,8 @@ export const isAdmin = (user: Types.User, config: AdminConfig = {}): boolean => 
   return P.isString(role) && adminRoles.includes(role);
 };
 
-/**
- * Whether a user is currently banned. A ban with `attributes.banExpires` in
- * the past has lapsed and no longer counts.
- *
- * An Effect because "the past" is read from the `Clock`, so `TestClock`
- * decides whether a ban has lapsed.
- */
-export const isBanned = (user: Types.User): Effect.Effect<boolean> => {
-  if (user.attributes["banned"] !== true) {
-    return Effect.succeed(false);
-  }
-  const banExpires = user.attributes["banExpires"];
-  if (!P.isNumber(banExpires)) {
-    return Effect.succeed(true);
-  }
-  return Effect.map(Clock.currentTimeMillis, (now) => banExpires > now);
-};
+// Lives in `UserStanding.ts`, which `ApiKey.ts` reads without a cycle.
+export { isBanned };
 
 /**
  * Options for banning a user

@@ -87,6 +87,7 @@ import {
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
+import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 
 // ---------------------------------------------------------------------------
@@ -133,22 +134,12 @@ const conflict = (message: string): ScimError =>
  */
 export const SCIM_USERNAME_ATTRIBUTE = "scimUserName";
 
-/** `User.attributes` key set to `true` while a user is SCIM-deactivated. */
-export const SCIM_DEACTIVATED_ATTRIBUTE = "scimDeactivated";
+// The deactivation flag and its read live in `UserStanding.ts`, which
+// `ApiKey.ts` reads without a cycle.
+export { SCIM_DEACTIVATED_ATTRIBUTE, isScimDeactivated };
 
 /** `User.attributes` key holding the IdP's own identifier for the user. */
 export const SCIM_EXTERNAL_ID_ATTRIBUTE = "scimExternalId";
-
-/**
- * Whether a user is currently deactivated by SCIM — the inverse of the SCIM
- * `active` attribute.
- *
- * Deactivation is deliberately a plain attribute rather than a column: it is
- * readable by any store, survives a round trip through JSON, and lets apps
- * gate on it without importing this module.
- */
-export const isScimDeactivated = (user: Types.User): boolean =>
-  user.attributes[SCIM_DEACTIVATED_ATTRIBUTE] === true;
 
 /**
  * Hooks plugin that blocks SCIM-deactivated users at session validation.

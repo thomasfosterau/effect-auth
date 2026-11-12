@@ -158,8 +158,12 @@ describe("ApiKeyService", () => {
       }),
     );
     expect(result.before.valid).toBe(true);
-    expect(result.verify).toEqual({ valid: false, error: "Invalid API key" });
-    expect(result.verifyWithRateLimit).toEqual({ valid: false, error: "Invalid API key" });
+    expect(result.verify).toEqual({ valid: false, error: "Invalid API key", reason: "invalid" });
+    expect(result.verifyWithRateLimit).toEqual({
+      valid: false,
+      error: "Invalid API key",
+      reason: "invalid",
+    });
     // Read-only: the key row is left as it was, unused.
     expect(result.stored.lastUsedAt).toBe(result.before.apiKey?.lastUsedAt);
   });
@@ -363,6 +367,39 @@ describe("ApiKeyService", () => {
     expect(result.second.valid).toBe(true);
     expect(result.third.valid).toBe(false);
     expect(result.third.error).toBe("Rate limit exceeded");
+    expect(result.third.reason).toBe("rate-limited");
+  });
+
+  it("refuses a disabled or exhausted key over its limit for what it is, not as rate-limited (#730)", async () => {
+    const testContext = await makeRateLimitContext();
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* ApiKey.make();
+          const rateLimit = { maxRequests: 1, windowMs: 60_000 };
+          const disabled = yield* service.create("user-1", { rateLimit });
+          const exhausted = yield* service.create("user-1", { rateLimit, remaining: 1 });
+          // Each key spends its one request in the window.
+          const firstDisabled = yield* service.verifyWithRateLimit(disabled.key);
+          const firstExhausted = yield* service.verifyWithRateLimit(exhausted.key);
+          yield* service.update("user-1", disabled.apiKey.id, { enabled: false });
+          return {
+            firstDisabled,
+            firstExhausted,
+            disabled: yield* service.verifyWithRateLimit(disabled.key),
+            exhausted: yield* service.verifyWithRateLimit(exhausted.key),
+          };
+        }),
+        testContext,
+      ),
+    );
+
+    expect(result.firstDisabled.valid).toBe(true);
+    expect(result.firstExhausted.valid).toBe(true);
+    expect(result.disabled).toMatchObject({ valid: false, reason: "disabled" });
+    expect(result.exhausted).toMatchObject({ valid: false, reason: "exhausted" });
+    expect(result.disabled.retryAfter).toBeUndefined();
   });
 
   it("should refill remaining uses after one interval elapses", async () => {

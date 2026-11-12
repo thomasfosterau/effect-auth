@@ -126,6 +126,55 @@ the request is, never what it may do. Without it, a key-bearing request reads as
 session and a policy like "an API key may act as this user, but may not mint another API key"
 silently stops holding at your edge.
 
+### An API key resolves to its user, not to a session
+
+A request carrying an API key (`x-api-key`, or the headers in `credentials.apiKeyHeaders`)
+is resolved through the auth service's `GET /api-keys/current` (#730), not the session
+read. The result is `{ session: None, user, apiKey, credentialClass: "machine" }`:
+`apiKey` holds the key's public fields (id, name, permissions, expiry, `remaining`,
+metadata, enabled, never its hash), and `user` is who it acts as. The key wins over a
+cookie the request also carries: the cookie is not forwarded on that call, so it can never
+answer for the key. A `401` (an unknown, disabled, expired or exhausted key, all answered
+alike) is anonymous. Any other answer, the `404` of an auth service with no `ApiKeyService`
+in its `services` included, fails `resolveAtEdge` closed and degrades
+`resolveAtEdgeFailOpen` to anonymous; neither falls back to the cookie.
+
+**Each resolution consumes one use of the key**: it is a verification, so `remaining`
+decrements and `lastUsedAt` moves, once per request you resolve. A key with
+`remaining: 100` serves 100 resolved requests. A non-consuming check is
+[#645](https://github.com/thomasfosterau/effect-auth/issues/645). The key's own
+`rateLimit` applies too: over it, the auth service answers `429` with `Retry-After`, which
+reaches you as a `RemoteSessionError` with `status: 429`.
+
+A disabled, expired or exhausted key is refused with the same `401` even when it is
+also over its own limit: every other check runs before the per-key limit, so only a key
+that would otherwise resolve ever sees `429`.
+
+The endpoint is also under the per-address limit in `defaultEndpointRules`: 300
+requests a minute per client address, then a 5-minute block. It counts every request
+before the key is read, refused and resolved alike, and a request it refuses (`429`)
+spends no use of the key. Behind a service binding every request arrives from your
+edge, so the address is the one your `trustedProxy` reads from the forwarded headers
+(`cf-connecting-ip`, which the relay forwards). Override it with a rule ahead of the
+defaults (the first match wins):
+
+```ts
+Http.make({
+  services,
+  trustedProxy: ClientIP.cloudflare,
+  ipRateLimit: {
+    rules: [
+      { path: "/api-keys/current", methods: ["GET"], maxRequests: 1_200, windowMs: 60_000 },
+      ...Http.defaultEndpointRules,
+    ],
+  },
+});
+```
+
+The endpoint checks no permissions; check the key's `permissions` through the policy
+kernel. Configure the header once and pass it to both sides: `cookie.apiKeyHeaders` on the
+auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`.
+
 ### Header forwarding is the library's job
 
 The forwarded set is an **allow-list**: the credential (`cookie`, `authorization`,
