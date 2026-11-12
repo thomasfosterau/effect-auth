@@ -277,6 +277,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 ### Authorization Security
 
 - Explicit permission checks, role-based access control (RBAC) with hierarchy, OAuth-style scopes; policies fail closed.
+- Authority-bearing user attributes are written only through privileged doors. `UserService.updateUserAttributes` refuses `UserServiceConfig.serverOnlyAttributes` (default `["role"]`); `EmailPasswordService.signUp` and `AuthLifecycleService.signUp` never store those, the ban keys, the SCIM keys or `isAnonymous` from their input (`SIGN_UP_PROTECTED_ATTRIBUTES`); and `POST /users` keeps only the attribute keys `Http.make`'s `signUpAttributes` allows (default none), within `SIGN_UP_ATTRIBUTES_MAX_BYTES` (#580).
 
 ### Timing and enumeration
 

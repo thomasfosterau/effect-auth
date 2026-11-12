@@ -32,7 +32,7 @@ import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
-import { UserServiceStore } from "./User.ts";
+import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
 import { normalizeEmail, normalizeUsername } from "./utils.ts";
 import {
   createUserWithIdentifier,
@@ -181,7 +181,7 @@ export interface AdminConfig {
 
 /** A copy of `attributes` without the ban keys (`banned`, `banReason`, `banExpires`). */
 const withoutBanAttributes = (attributes: Types.Attributes): Types.Attributes =>
-  R.filter(attributes, (_, key) => key !== "banned" && key !== "banReason" && key !== "banExpires");
+  R.filter(attributes, (_, key) => !BAN_ATTRIBUTES.includes(key));
 
 /**
  * Whether a user is an administrator under the given config: either their id

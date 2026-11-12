@@ -45,6 +45,11 @@ export interface ServerFixtureOptions {
   readonly organization?: boolean;
   /** Enable multi-session device lists (several accounts in one browser). */
   readonly multiSession?: { readonly maximumSessions?: number };
+  /**
+   * The attribute keys a sign-up may set (`Http.make`'s `signUpAttributes`).
+   * Default none: as in production, a sign-up keeps no attribute (#580).
+   */
+  readonly signUpAttributes?: ReadonlyArray<string> | undefined;
 }
 
 export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
@@ -507,6 +512,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     services,
     cookie: { secure: false },
     ...(options.multiSession !== undefined && { multiSession: options.multiSession }),
+    ...(options.signUpAttributes !== undefined && { signUpAttributes: options.signUpAttributes }),
   });
 
   /**

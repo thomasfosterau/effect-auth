@@ -21,6 +21,7 @@ import { hashToken } from "../TokenHash.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
+import { UserService, UserServiceStore } from "../User.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
@@ -1251,4 +1252,148 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
       ).toEqual([{ userId: owner.id, verified: false }]);
     },
   );
+});
+/** A `UserService` declaring `serverOnly`, over a store sign-up never reads. */
+const userServiceLayer = (serverOnly: ReadonlyArray<string>) =>
+  UserService.layer({ serverOnlyAttributes: serverOnly }).pipe(
+    Layer.provide(
+      Layer.succeed(UserServiceStore)({
+        get: () => Effect.succeed(null),
+        update: (user) => Effect.succeed(user),
+        delete: () => Effect.void,
+      }),
+    ),
+  );
+
+describe("EmailPasswordService — sign-up never stores authority-bearing attributes (#580)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+    createdWith.length = 0;
+  });
+
+  /** Every key a sign-up must drop by default, and one it keeps. */
+  const forged = {
+    role: "admin",
+    banned: false,
+    banReason: "none",
+    banExpires: 0,
+    scimUserName: "ceo",
+    scimDeactivated: false,
+    scimExternalId: "idp-1",
+    isAnonymous: true,
+    plan: "pro",
+  };
+
+  it("drops role, the ban keys, the SCIM keys and isAnonymous, and keeps the rest", async () => {
+    const testContext = await makeTestContext();
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        return yield* service.signUp({
+          email: "forge@example.com",
+          password: "strong-password-123",
+          attributes: forged,
+        });
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.user.attributes).toEqual({ plan: "pro" });
+    expect(Option.getOrUndefined(MutableHashMap.get(users, result.user.id))?.attributes).toEqual({
+      plan: "pro",
+    });
+  });
+
+  it("drops the UserService's own server-only attributes when it is in context", async () => {
+    const testContext = await makeTestContext();
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        return yield* service.signUp({
+          email: "tier@example.com",
+          password: "strong-password-123",
+          attributes: { tier: "gold", role: "admin", plan: "pro" },
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeedContext(testContext),
+            userServiceLayer(["role", "tier"]),
+            Hooks.Default,
+          ),
+        ),
+      ),
+    );
+
+    expect(result.user.attributes).toEqual({ plan: "pro" });
+  });
+
+  it("follows a UserService that opted out of server-only attributes, but still drops the ban and SCIM keys", async () => {
+    const testContext = await makeTestContext();
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        return yield* service.signUp({
+          email: "optout@example.com",
+          password: "strong-password-123",
+          attributes: forged,
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(Layer.succeedContext(testContext), userServiceLayer([]), Hooks.Default),
+        ),
+      ),
+    );
+
+    expect(result.user.attributes).toEqual({ role: "admin", plan: "pro" });
+  });
+
+  it("drops a role a beforeSignUp hook adds", async () => {
+    const testContext = await makeTestContext();
+    const promote = makePlugin({
+      beforeSignUp: (input) =>
+        Effect.succeed({ ...input, attributes: { ...input.attributes, role: "admin" } }),
+    });
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        return yield* service.signUp({
+          email: "hooked@example.com",
+          password: "strong-password-123",
+          attributes: { plan: "pro" },
+        });
+      }).pipe(
+        Effect.provide(testContext),
+        Effect.provide(composePlugins([promote]).pipe(Layer.provide(Hooks.Default))),
+      ),
+    );
+
+    expect(result.user.attributes).toEqual({ plan: "pro" });
+  });
+
+  it("answers an address another user holds with a stand-in stripped the same way (antiEnumeration)", async () => {
+    const testContext = await makeTestContext();
+    const { fresh, duplicate } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make({ antiEnumeration: true });
+        return {
+          fresh: yield* service.signUp({
+            email: "standin@example.com",
+            password: "strong-password-123",
+            attributes: forged,
+          }),
+          duplicate: yield* service.signUp({
+            email: "standin@example.com",
+            password: "strong-password-456",
+            attributes: forged,
+          }),
+        };
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    expect(fresh.user.attributes).toEqual({ plan: "pro" });
+    expect(duplicate.user.attributes).toEqual(fresh.user.attributes);
+  });
 });

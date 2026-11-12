@@ -9,6 +9,11 @@ import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { SessionService } from "../SessionService.ts";
 import {
+  DEFAULT_SERVER_ONLY_ATTRIBUTES,
+  UserService,
+  withoutSignUpProtectedAttributes,
+} from "../User.ts";
+import {
   createUserWithIdentifier,
   type CreateUserResult,
   type NewUserIdentifier,
@@ -150,6 +155,14 @@ export interface SignUpInput {
   readonly email: string;
   readonly password: string;
   readonly name?: string;
+  /**
+   * The new user's attribute bag. `signUp` drops, after the `beforeSignUp`
+   * hooks, every key that carries authority or another flow's state: the
+   * configured `UserServiceConfig.serverOnlyAttributes` (default `["role"]`)
+   * and `SIGN_UP_PROTECTED_ATTRIBUTES` (the ban, SCIM and anonymous-user
+   * keys), whoever supplied them (#580). Set those after the user exists,
+   * through their privileged door (`AdminService.setRole` for `role`).
+   */
   readonly attributes?: Types.Attributes;
   readonly sessionAttributes?: Types.Attributes;
   /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignUp` hook. */
@@ -274,6 +287,10 @@ export interface ChangePasswordInput {
  * Email-and-password sign-up, sign-in and password changes. Sign-in does constant work whether or not the account exists, and honours the multi-factor gate.
  *
  * Requires `EmailPasswordStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
+ * Reads `UserService`'s `serverOnlyAttributes` when it is in context as the
+ * layer is built (else the default `["role"]`): `signUp` never stores those,
+ * nor the ban, SCIM and anonymous-user keys, from its input (see
+ * {@link SignUpInput.attributes}).
  */
 export class EmailPasswordService extends Context.Service<
   EmailPasswordService,
@@ -393,6 +410,14 @@ export const make = (
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
+    // The attributes a sign-up never stores from its input (#580): the
+    // configured server-only ones (the `UserService`'s when it is in context
+    // as this layer is built, else the default `["role"]`) and the ban, SCIM
+    // and anonymous-user keys.
+    const serverOnly = Option.match(yield* Effect.serviceOption(UserService), {
+      onNone: () => DEFAULT_SERVER_ONLY_ATTRIBUTES,
+      onSome: (users) => users.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES,
+    });
 
     // Cached decoy hash — computed on first signIn call so that unknown-user
     // attempts always perform the same hashing work as known-user ones.
@@ -435,7 +460,17 @@ export const make = (
     return {
       signUp: Effect.fn("EmailPasswordService.signUp")((rawInput: SignUpInput) =>
         Effect.gen(function* () {
-          const input = yield* hooks.beforeSignUp(rawInput);
+          const hooked = yield* hooks.beforeSignUp(rawInput);
+          // Strip after the hooks, so no input (the caller's or a hook's)
+          // presets a role, a ban or a SCIM key (#580). Those are set through
+          // their privileged door once the user exists.
+          const input: SignUpInput =
+            hooked.attributes === undefined
+              ? hooked
+              : {
+                  ...hooked,
+                  attributes: withoutSignUpProtectedAttributes(hooked.attributes, serverOnly),
+                };
 
           if (resolved.disableSignUp) {
             return yield* new Errors.SignUpDisabledError({

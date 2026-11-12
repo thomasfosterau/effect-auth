@@ -17,7 +17,11 @@ import {
   EmailVerificationService,
 } from "./email/EmailVerification.ts";
 import { SessionService } from "./SessionService.ts";
-import { UserService } from "./User.ts";
+import {
+  DEFAULT_SERVER_ONLY_ATTRIBUTES,
+  UserService,
+  withoutSignUpProtectedAttributes,
+} from "./User.ts";
 import type * as Types from "./Types.ts";
 
 /**
@@ -99,7 +103,8 @@ export interface AuthLifecycleResult {
    *   `sendOnSignUp` is set. The `user` it answers with is a stand-in built
    *   only from the caller's input, never the holder's id or stored data: a
    *   random UUID for its `id`, the submitted `name` and `attributes` (`{}`
-   *   when none), no `image`, and one timestamp, taken during the request, for
+   *   when none, less the keys a sign-up never stores: see
+   *   `SignUpInput.attributes`), no `image`, and one timestamp, taken during the request, for
    *   both `createdAt` and `updatedAt`. The caller has not proven they own the
    *   address, so the holder's profile stays with the holder. An address held
    *   verified fails with `EmailInUseError`.
@@ -215,9 +220,21 @@ export const make = (
     const userService = yield* UserService;
     const sessionManager = yield* SessionService;
     const detached = yield* makeDetachedSend;
+    const serverOnly = userService.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
 
     return {
-      signUp: Effect.fn("AuthLifecycleService.signUp")(function* (input: SignUpInput) {
+      signUp: Effect.fn("AuthLifecycleService.signUp")(function* (rawInput: SignUpInput) {
+        // Never a role, a ban or a SCIM key from the input (#580): this
+        // `UserService`'s server-only attributes are stripped here even when
+        // `EmailPasswordService` was built without it in context, and the
+        // stand-in below carries the same stripped bag.
+        const input: SignUpInput =
+          rawInput.attributes === undefined
+            ? rawInput
+            : {
+                ...rawInput,
+                attributes: withoutSignUpProtectedAttributes(rawInput.attributes, serverOnly),
+              };
         // FIX 3: catch EmailInUseError to handle the atomicity gap — if
         // createVerification fails after the user+password are written, a retry
         // hits EmailInUseError for an unverified account. Re-issue the
