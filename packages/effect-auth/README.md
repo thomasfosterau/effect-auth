@@ -93,6 +93,12 @@ const customSessionLayer = Layer.effect(
 export { customSessionLayer };
 ```
 
+### The session hooks
+
+No hook ever sees a raw session token (#581, #669). `beforeValidateSession` (fired by `SessionService.validateSession`), `beforeSignOut` (fired by `invalidateSession`, so by every sign-out) and `afterSignOut` receive a `SessionRef`, `{ sessionId }`, whose `sessionId` is the session's stored id: `hashToken(token)`, the SHA-256 digest that `session.id` carries everywhere else. A plugin can log it or match it against `session.id` without ever holding the credential.
+
+The two `before*` session hooks are observe-or-deny. A plugin refuses the validation or the sign-out by failing, and the operation stops with that error (the session is not deleted on a refused sign-out). Otherwise the services read nothing back: the token the client presented decides which session is looked up or deleted, so a hook cannot rewrite it or redirect the operation to another session.
+
 ## What's included
 
 - **Sessions:** active and idle expiry with renewal, hashed session ids, an optional HMAC-signed session-data cookie (`cookie.cache`), multi-session, trusted devices.
@@ -102,12 +108,12 @@ export { customSessionLayer };
 - **OAuth 2.0 social login:** 20 provider presets (Google, GitHub, Discord, Microsoft, Apple, and more) plus custom providers, PKCE, and a complete sign-in flow with verified-email account linking.
 - **Enterprise:** OIDC and SAML SSO with per-organization connections and JIT provisioning (the SAML XML verification is the Node-only [`/saml` subpath](#saml-saml)), SCIM 2.0, and an OIDC provider with RFC 7591 dynamic client registration for MCP clients.
 - **Account management:** verification-gated email change and self-service account deletion (single-use tokens, session revocation, a `beforeDelete` cleanup hook).
-- **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role, verified email domains with opt-in JIT provisioning; admin ban and impersonation.
+- **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role (no member grants a role, or acts on a member, beyond the permissions their own role carries), verified email domains with opt-in JIT provisioning; admin ban and impersonation.
 - **API keys and JWT:** hashed API keys with permissions and quotas; ES256 / EdDSA JWTs with JWKS.
 - **Authorization:** one policy kernel (`Policy`, `Entity`, `Condition`, `Authorizer`) with RBAC as authoring sugar, schema-embedded field guards (`protectedField`), zero-IO guards and role ladders.
 - **Abuse protection:** rate limiting with presets and an optional `effect/persistence` backend (`rateLimiterPersistenceLayer`), per-IP limits, account lockout (`AccountLockoutPlugin`), captcha (Turnstile, reCAPTCHA, hCaptcha).
 - **HTTP API:** a typed `effect/http-api` contract served as a mountable Web handler (`Http.make`, or `Http.makeAsync` for services that build asynchronously), with session cookies, trusted-origin CSRF checks, a derived typed client and an OpenAPI 3.1 document (`Http.getOpenApiSpec()`, or `Http.make({ docs: true })` for a Scalar reference page).
-- **Hooks:** `before*` / `after*` hook points, composed as plugins with `composePlugins`; first-party plugins include audit logging and a last-login-method hint. Every credential-verifying flow fires `beforeAuthenticate` (see [Abuse protection](#abuse-protection)).
+- **Hooks:** `before*` / `after*` hook points, composed as plugins with `composePlugins`; first-party plugins include audit logging and a last-login-method hint. Every credential-verifying flow fires `beforeAuthenticate` (see [Abuse protection](#abuse-protection)). No hook ever sees a raw session token: the session hooks get the stored id, its digest (see [The session hooks](#the-session-hooks)).
 
 ## Authorization
 
@@ -539,8 +545,9 @@ const providers = {
 };
 
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
-// OAuthUserStore, IdentifierStore, UserStore and SessionService; a storage
-// adapter such as @thomasfosterau/effect-auth/sql provides the stores.
+// OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
+// unproven sign-up's password, #671) and SessionService; a storage adapter
+// such as @thomasfosterau/effect-auth/sql provides the stores.
 const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
@@ -555,9 +562,10 @@ const begin = Effect.gen(function* () {
 
 // Step 2: the provider redirects back with `code` and `state`. This resolves or
 // creates the user, links the account and issues a session. A first sign-in
-// whose email matches an existing user auto-links only when both the provider
-// and this application verified the address; otherwise it fails with
-// `EmailInUseError` (#588).
+// whose email matches an existing user auto-links only when the provider
+// verified the address (#588); an unverified local address is proven first,
+// clearing the earlier sign-up's password and sessions (#671). Otherwise it
+// fails with `EmailInUseError`.
 const callback = (state: string, code: string) =>
   Effect.gen(function* () {
     const oauth = yield* Auth.OAuth.OAuthService;
@@ -582,7 +590,7 @@ export { OAuthLive, begin, callback, link, refresh };
 
 **The callback `state` is single-use** (#685). `handleCallback`, `signInWithCallback`, `linkAccount` and the OIDC SSO callback (`SsoService.handleCallback`, `POST /sso/callback`) spend it with `OAuthStateStore.consume`, an atomic get-and-delete, before they exchange the code. A replayed callback fails with `OAuthStateNotFoundError` (an `SsoError` for SSO, `400` over HTTP), whether the first use succeeded or failed, and of two concurrent callbacks carrying the same state only one gets past it. A store you write yourself must implement `consume` as one atomic operation (`DELETE … RETURNING`, a compare-and-swap, Redis `GETDEL`); `/sql`'s store is one `DELETE … RETURNING`. `OAuthStateStoreKV` serializes `consume` within its process only, since a `KeyValueStore` has no get-and-delete: behind several instances sharing one backend, use `/sql` or a store with a native atomic consume. The SAML `RelayState` is single-use the same way: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends.
 
-Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true`, the local email identifier is verified, and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match fails with `EmailInUseError` and changes nothing. An unverified local address may have been claimed by someone who signed up with it and a password, so its real holder proves it first (the verification link, a magic link or an email OTP, which clear the earlier sign-up's password and sessions) and then signs in with the provider.
+Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true` and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match (an unverified provider email, auto-linking off for the provider) fails with `EmailInUseError` and changes nothing. When the local email identifier is still unverified, someone may have signed up with the address and a password before its holder did, so the provider's verification is the address's first proof, as in Google One Tap and SSO (#440, #671): the account's password is cleared and its sessions revoked, the address is marked verified, and then the provider is linked and the holder's session issued. A provider that does not report the email verified never takes over an address.
 
 ## Email verification
 
@@ -1010,7 +1018,7 @@ No response body carries a session token (#581). Every `sessions`, `device-sessi
 | `GET` · `POST /organizations/:id/members`                                              | Its `organization-members`; add one, the user as the `user` relationship (`201`)                                                                                                                                                                                                                                                                                              |
 | `PATCH` · `DELETE /organization-members/:id`                                           | One membership by its stored id: `role`, and `status` (`inactive` deactivates, `active` reactivates); remove it (`204`)                                                                                                                                                                                                                                                       |
 | `GET` · `POST /organizations/:id/invitations`                                          | Its invitations; invite by `email` and `role` (`201`)                                                                                                                                                                                                                                                                                                                         |
-| `PATCH /invitations/:id` · `POST /invitations/:id/deliveries`                          | Move the `status` to `accepted` (the new membership in `meta.membership`), `rejected` or `canceled`; send it again with a fresh expiry (`202`)                                                                                                                                                                                                                                |
+| `PATCH /invitations/:id` · `POST /invitations/:id/deliveries`                          | Move the `status` to `accepted` (the new membership in `meta.membership`) or `rejected`, with the invitation email's secret as the `token` attribute, or `canceled`; send it again with a fresh token and expiry (`202`)                                                                                                                                                      |
 | `GET` · `POST /organizations/:id/domains`                                              | Its `organization-domains` (any member); claim one by `domain`, always a `dns` claim answering the `verificationToken` to publish (`201`, `domain:manage`); `verificationStrategy: "manual"` answers `400` (#598). Another organization's claim on the domain is never revealed                                                                                               |
 | `DELETE /organization-domains/:id` · `POST /organization-domains/:id/verifications`    | Release a claim (`204`); run its DNS check, `200` with the claim `verified` or `failed`; `domain:manage` is never the proof, and a domain verified for another organization is refused                                                                                                                                                                                        |
 | `GET` · `POST /organizations/:id/roles`                                                | Its custom `organization-roles` (any member); define one by `role` and `permissions` (`201`, `role:manage`), `409` when the organization already defines it                                                                                                                                                                                                                   |
@@ -1194,7 +1202,7 @@ await client.signUp({ email: "ada@example.com", password: "correct horse battery
 console.log(server.sessions.size); // 1
 ```
 
-`makeServerFixture(options?)` serves with the per-address IP limit off (`ipRateLimit: false`), since its one client has no address, and mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`), for assertions.
+`makeServerFixture(options?)` serves with the per-address IP limit off (`ipRateLimit: false`), since its one client has no address, and mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`, `sentInvitations` with each invitation's token), for assertions.
 
 ### API
 

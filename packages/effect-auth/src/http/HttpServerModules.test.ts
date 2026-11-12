@@ -26,6 +26,7 @@ import {
   type Organization,
   type Member,
   type Invitation,
+  type InvitationDelivery,
   type Team,
   type TeamMember,
   type OrgRole,
@@ -392,7 +393,11 @@ const makeFixture = (admin?: AdminConfig) => {
   );
 
   // Stage 2: services that depend on stage-1 services (SessionService, etc.).
-  const organizationServiceLayer = OrganizationService.layer().pipe(Layer.provide(stage1));
+  // Invitations the server "emailed", with their secret tokens (newest last).
+  const sentInvitations: InvitationDelivery[] = [];
+  const organizationServiceLayer = OrganizationService.layer({
+    sendInvitationEmail: (delivery) => Effect.sync(() => void sentInvitations.push(delivery)),
+  }).pipe(Layer.provide(stage1));
   const adminServiceLayer = AdminService.layer({ adminRoles: ["admin"] }).pipe(
     Layer.provide(stage1),
   );
@@ -410,7 +415,14 @@ const makeFixture = (admin?: AdminConfig) => {
   );
   const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
-  return { handler, seedUser, makeSession, sessions, members };
+  /** The token the invitation's latest email carried. */
+  const tokenFor = (invitationId: string): string =>
+    Option.match(
+      Arr.findLast(sentInvitations, (sent) => sent.invitation.id === invitationId),
+      { onNone: () => assert.fail(`no email for ${invitationId}`), onSome: (sent) => sent.token },
+    );
+
+  return { handler, seedUser, makeSession, sessions, members, tokenFor };
 };
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
@@ -517,12 +529,23 @@ const patchMember = (memberId: string, attributes: Schema.Json, sessionId: strin
     sessionId,
   );
 
-/** `PATCH /invitations/:id` to `status`, as `sessionId`. */
-const transitionInvitation = (invitationId: string, status: string, sessionId: string) =>
+/** `PATCH /invitations/:id` to `status`, as `sessionId`, presenting `token` when given. */
+const transitionInvitation = (
+  invitationId: string,
+  status: string,
+  sessionId: string,
+  token?: string,
+) =>
   apiReq(
     "PATCH",
     `/invitations/${invitationId}`,
-    { data: { type: "invitations", id: invitationId, attributes: { status } } },
+    {
+      data: {
+        type: "invitations",
+        id: invitationId,
+        attributes: token === undefined ? { status } : { status, token },
+      },
+    },
     sessionId,
   );
 
@@ -848,9 +871,20 @@ describe("HTTP organization endpoints", () => {
       attributes: { status: "pending" },
     });
 
-    // Only the invitee may accept; the answer carries the new membership.
-    expect((await fx.handler(transitionInvitation(first, "accepted", ownerSid))).status).toBe(400);
-    const accepted = await fx.handler(transitionInvitation(first, "accepted", inviteeSid));
+    // Only the invitee may accept, and only with the emailed token (#586);
+    // the answer carries the new membership.
+    const token = fx.tokenFor(first);
+    expect(
+      (await fx.handler(transitionInvitation(first, "accepted", ownerSid, token))).status,
+    ).toBe(400);
+    expect((await fx.handler(transitionInvitation(first, "accepted", inviteeSid))).status).toBe(
+      400,
+    );
+    expect(
+      (await fx.handler(transitionInvitation(first, "accepted", inviteeSid, "forged"))).status,
+    ).toBe(400);
+    expect(fx.members.some((m) => m.userId === "invitee")).toBe(false);
+    const accepted = await fx.handler(transitionInvitation(first, "accepted", inviteeSid, token));
     expect(accepted.status).toBe(200);
     const acceptedBody = await jsonBody(
       accepted,
@@ -883,7 +917,12 @@ describe("HTTP organization endpoints", () => {
       status: "canceled",
     });
     const third = await invite("invitee@test.com");
-    const rejected = await fx.handler(transitionInvitation(third, "rejected", inviteeSid));
+    expect((await fx.handler(transitionInvitation(third, "rejected", inviteeSid))).status).toBe(
+      400,
+    );
+    const rejected = await fx.handler(
+      transitionInvitation(third, "rejected", inviteeSid, fx.tokenFor(third)),
+    );
     expect(
       (await jsonBody(rejected, resourceBody({ status: Schema.String }))).data.attributes,
     ).toEqual({

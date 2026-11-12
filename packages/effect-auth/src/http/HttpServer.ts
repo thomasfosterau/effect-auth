@@ -3045,10 +3045,18 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
     handlers
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const { org, actorId } = yield* actor(request);
-          const status = payload.data.attributes?.status;
+          const { org, actorId, resolved } = yield* actor(request);
+          const { status, token } = payload.data.attributes ?? {};
+          if ((status === "accepted" || status === "rejected") && token === undefined) {
+            return yield* new S.BadRequest({
+              message: "Answering an invitation takes the token its email carried",
+            });
+          }
+          const answer = { invitationId: params.id, token: token ?? "" };
           if (status === "accepted") {
-            const member = yield* refusedBadRequest(org.acceptInvitation(actorId, params.id));
+            const member = yield* refusedBadRequest(
+              org.acceptInvitation(actorId, { ...answer, currentSessionId: resolved.session.id }),
+            );
             const invitations = yield* storeFailure(org.listInvitations(member.organizationId));
             const accepted = Arr.findFirst(
               invitations,
@@ -3062,7 +3070,7 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
             });
           }
           if (status === "rejected") {
-            const rejected = yield* refusedBadRequest(org.rejectInvitation(actorId, params.id));
+            const rejected = yield* refusedBadRequest(org.rejectInvitation(actorId, answer));
             return Handlers.data(invitationResource(rejected));
           }
           if (status === "canceled") {

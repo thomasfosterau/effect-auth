@@ -140,11 +140,14 @@ not a User. Also avoid "the user's org" — a User may have many Memberships.
 
 **Invitation**:
 A pending request to join an Organization, addressed to an email (`Organization.ts`'s
-`Invitation`: `organizationId`, `email`, `role`, `inviterId`, `status`, `expiresAt`). It carries
-no secret token, so there is nothing to hash at rest: acceptance goes by the invitation id plus a
-signed-in User who owns the invited email as an Identifier, and creates the `Member` row.
-_Avoid_: treating the invitation id as a bearer secret — knowing it is not enough to accept;
-the accepting User must own the invited email.
+`Invitation`: `organizationId`, `email`, `tokenHash`, `role`, `inviterId`, `status`, `expiresAt`).
+Its email link carries a secret token, stored only as its digest (#586): presenting the token is
+the proof of the address, so acceptance (and rejection) takes the token plus a signed-in User who
+owns the invited email as an Identifier, verified or not, and creates the `Member` row. For an
+unverified Identifier the token is the address's first proof, so it clears the account's
+password and its other sessions, as a magic link does. A resend mints a new token.
+_Avoid_: treating the invitation id as a bearer secret — knowing it accepts nothing; the token
+does, and only for a User who owns the invited email.
 
 **Active organization**:
 The Organization the user is currently working in: `session.attributes.activeOrganizationId`,
@@ -184,7 +187,11 @@ A role name resolved against `OrganizationConfig.roles` (a role → `"resource:a
 map), optionally replaced for one organization by an `OrgRole` managed at runtime
 (`upsertOrgRole` / `deleteOrgRole`). The two never merge: a tenant's `OrgRole` grants exactly
 what it lists. The protected creator role (`OrganizationConfig.creatorRole`, default `"owner"`)
-always exists and can't be redefined.
+always exists and can't be redefined. No one grants beyond their own permissions (#585): a member
+assigns a role (add, invite, promote) only when their own role carries every permission it carries,
+and changes, deactivates, reactivates or removes a member only when it carries every permission of
+that member's role (or the `previousRole` a reactivation restores). A role name nothing defines is
+rejected.
 
 **Permission**:
 A resource paired with an action (`PermissionRef { resource, action }` in `Permission.ts`), with
