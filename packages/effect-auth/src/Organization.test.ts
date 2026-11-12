@@ -426,6 +426,54 @@ const resetStores = (): void => {
   sentInvitations.length = 0;
 };
 
+/** An organization operation on a record named by id, as `actorId`. */
+type ByIdOperation<A> = (
+  actorId: string,
+  id: string,
+) => Effect.Effect<A, OrganizationModule.OrganizationError | AuthError>;
+
+/**
+ * The refusals of `operation` for an unknown id (as `owner-1`) and for each of
+ * `actors` on the record `id` names (#718).
+ */
+const refusals = <A>(
+  operation: ByIdOperation<A>,
+  id: string,
+  actors: ReadonlyArray<string> = ["stranger-1", "member-1"],
+) =>
+  Effect.all(
+    {
+      unknown: Effect.flip(operation("owner-1", "no-such-id")),
+      others: Effect.forEach(actors, (actorId) => Effect.flip(operation(actorId, id)), {
+        concurrency: 1,
+      }),
+    },
+    { concurrency: 1 },
+  );
+
+/** An error's tag and message: its own equality ignores the message. */
+const errorShape = (error: OrganizationModule.OrganizationError | AuthError) => ({
+  tag: error._tag,
+  message: error.message,
+});
+
+/** Every refusal is the `OrganizationError` carrying `message`. */
+const expectAlike = (
+  refused: {
+    readonly unknown: OrganizationModule.OrganizationError | AuthError;
+    readonly others: ReadonlyArray<OrganizationModule.OrganizationError | AuthError>;
+  },
+  message: string,
+) => {
+  const expected = { tag: "OrganizationError", message };
+  expect(errorShape(refused.unknown)).toEqual(expected);
+  expect(refused.others.map(errorShape)).toEqual(refused.others.map(() => expected));
+};
+
+/** The refusal of an operation needing `permission` (#715, #718). */
+const missingPermission = (permission: string) =>
+  `Missing permission '${permission}' in this organization`;
+
 describe("OrganizationService", () => {
   beforeEach(resetStores);
 
@@ -868,25 +916,6 @@ describe("OrganizationService", () => {
         });
         yield* service.cancelInvitation("owner-1", canceled.id);
 
-        /** The refusals an unknown id, the stranger and the plain member get. */
-        const refusals = <A>(
-          operation: (
-            actorId: string,
-            id: string,
-          ) => Effect.Effect<A, OrganizationModule.OrganizationError | AuthError>,
-          id: string,
-          actors: ReadonlyArray<string> = ["stranger-1", "member-1"],
-        ) =>
-          Effect.all(
-            {
-              unknown: Effect.flip(operation("owner-1", "no-such-id")),
-              others: Effect.forEach(actors, (actorId) => Effect.flip(operation(actorId, id)), {
-                concurrency: 1,
-              }),
-            },
-            { concurrency: 1 },
-          );
-
         return {
           updateTeam: yield* refusals(
             (actorId, id) => service.updateTeam(actorId, id, { name: "X" }),
@@ -917,34 +946,15 @@ describe("OrganizationService", () => {
       }),
     );
 
-    const expectAlike = (
-      refused: {
-        readonly unknown: OrganizationModule.OrganizationError | AuthError;
-        readonly others: ReadonlyArray<OrganizationModule.OrganizationError | AuthError>;
-      },
-      message: string,
-    ) => {
-      // Compared by tag and message: the error's own equality ignores the message.
-      const shape = (error: OrganizationModule.OrganizationError | AuthError) => ({
-        tag: error._tag,
-        message: error.message,
-      });
-      expect(shape(refused.unknown)).toEqual({ tag: "OrganizationError", message });
-      expect(refused.others.map(shape)).toEqual(
-        refused.others.map(() => ({ tag: "OrganizationError", message })),
-      );
-    };
-    const missing = (permission: string) =>
-      `Missing permission '${permission}' in this organization`;
-    expectAlike(result.updateTeam, missing("team:update"));
-    expectAlike(result.deleteTeam, missing("team:delete"));
-    expectAlike(result.addTeamMember, missing("team:manage-members"));
-    expectAlike(result.removeTeamMember, missing("team:manage-members"));
+    expectAlike(result.updateTeam, missingPermission("team:update"));
+    expectAlike(result.deleteTeam, missingPermission("team:delete"));
+    expectAlike(result.addTeamMember, missingPermission("team:manage-members"));
+    expectAlike(result.removeTeamMember, missingPermission("team:manage-members"));
     expectAlike(result.listTeamMembers, "You are not a member of this organization");
-    expectAlike(result.cancelPending, missing("invitation:cancel"));
-    expectAlike(result.cancelCanceled, missing("invitation:cancel"));
-    expectAlike(result.resendPending, missing("invitation:create"));
-    expectAlike(result.resendCanceled, missing("invitation:create"));
+    expectAlike(result.cancelPending, missingPermission("invitation:cancel"));
+    expectAlike(result.cancelCanceled, missingPermission("invitation:cancel"));
+    expectAlike(result.resendPending, missingPermission("invitation:create"));
+    expectAlike(result.resendCanceled, missingPermission("invitation:create"));
     expect(result.ownerRecancel.message).toBe("Invitation is no longer pending");
     expect(result.ownerResendCanceled.message).toBe("Invitation is no longer pending");
     expect(result.memberListsTeam).toEqual([]);

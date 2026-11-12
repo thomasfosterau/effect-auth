@@ -2466,9 +2466,7 @@ const organizationTarget =
     Effect.gen(function* () {
       const { org, actorId } = yield* organizationActor(request, cfg);
       const target = yield* refusedForbidden(
-        Effect.flatMap(lookup(org, id), (found) =>
-          found === null ? Effect.fail(refusal) : Effect.succeed(found),
-        ),
+        Effect.filterOrFail(lookup(org, id), P.isNotNull, () => refusal),
       );
       return { org, actorId, target };
     });
