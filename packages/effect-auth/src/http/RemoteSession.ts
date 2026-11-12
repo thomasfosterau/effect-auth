@@ -52,6 +52,16 @@
  * a cookie and a key or token. Every other caller receives it, a browser with
  * no cookie yet included, so a first sign-in through the relay signs in (#619).
  *
+ * ### A key resolves to its user, not to a session
+ *
+ * {@link resolveAtEdge} sends a key-bearing request to `GET /api-keys/current`
+ * (#730) and answers `{ session: None, user, apiKey, credentialClass:
+ * "machine" }`; the key wins over any cookie the request also carries, which is
+ * not forwarded on that call. An auth service without an `ApiKeyService`
+ * answers `404`, which fails the resolution closed rather than reading the
+ * cookie. Each resolution consumes one use of the key (`remaining`
+ * decrements, `lastUsedAt` moves); a non-consuming check is #645.
+ *
  * @module remote-session
  */
 import { Data, Effect, Layer } from "effect";
@@ -61,12 +71,14 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient } from "effect/http";
+import type { ApiKey } from "../ApiKey.ts";
 import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import type * as Types from "../Types.ts";
 import { MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi/schema";
-import { SessionDocument } from "./HttpApi.ts";
+import { CurrentApiKeyDocument, SessionDocument } from "./HttpApi.ts";
 import * as S from "./HttpApiSchema.ts";
+import type * as Resources from "./Resources.ts";
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -292,11 +304,87 @@ export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
 export interface RemoteSessionResult {
   readonly session: Option.Option<Types.SessionWithUser>;
   readonly setCookie: ReadonlyArray<string>;
+  /**
+   * On the API-key path ({@link RemoteSessionClient.readApiKey}, #730): the
+   * user the presented key acts as. `session` is `None` there, since a key is
+   * not a session. Absent on a session read.
+   */
+  readonly user?: Types.User | undefined;
+  /** On the API-key path: the key that resolved, its public fields only. */
+  readonly apiKey?: RemoteApiKey | undefined;
 }
+
+/**
+ * An API key as `GET /api-keys/current` describes it: `ApiKey.ApiKey` without
+ * the key's hash and its refill bookkeeping, which never leave the auth
+ * service (and never the plaintext key, which nothing stores).
+ *
+ * @since 0.4.0
+ * @category models
+ */
+export type RemoteApiKey = Omit<
+  ApiKey,
+  "keyHash" | "refillAmount" | "refillInterval" | "refillMax" | "lastRefillAt"
+>;
 
 const emptyResult: RemoteSessionResult = { session: Option.none(), setCookie: [] };
 
 const decodeDocument = Schema.decodeUnknownEffect(SessionDocument);
+
+const decodeApiKeyDocument = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(CurrentApiKeyDocument),
+);
+
+/**
+ * The key and its user from the `GET /api-keys/current` document, or `None`
+ * when the document leaves the user out. As with {@link fromSessionDocument},
+ * the user's derived `email` fields are dropped.
+ *
+ * @since 0.4.0
+ * @category conversions
+ */
+export const fromApiKeyDocument = (
+  document: typeof CurrentApiKeyDocument.Type,
+): Option.Option<{ readonly apiKey: RemoteApiKey; readonly user: Types.User }> => {
+  const key = document.data;
+  const userId = key.relationships?.user.data.id;
+  const a = key.attributes;
+  return Option.map(
+    Arr.findFirst(document.included ?? [], (resource) => resource.id === userId),
+    (user) => ({
+      apiKey: {
+        id: key.id,
+        userId: user.id,
+        ...(a.name !== undefined && { name: a.name }),
+        ...(a.prefix !== undefined && { prefix: a.prefix }),
+        start: a.start,
+        enabled: a.enabled,
+        ...(a.expiresAt !== undefined && { expiresAt: a.expiresAt }),
+        ...(a.lastUsedAt !== undefined && { lastUsedAt: a.lastUsedAt }),
+        ...(a.permissions !== undefined && { permissions: a.permissions }),
+        metadata: a.metadata,
+        ...(a.remaining !== undefined && { remaining: a.remaining }),
+        ...(a.rateLimit !== undefined && { rateLimit: a.rateLimit }),
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
+      },
+      user: fromUserResource(user),
+    }),
+  );
+};
+
+/**
+ * The domain user of an included `users` resource; its derived `email` fields
+ * are not `Types.User` fields and are dropped.
+ */
+const fromUserResource = (user: Resources.User): Types.User => ({
+  id: user.id,
+  ...(user.attributes.name !== undefined && { name: user.attributes.name }),
+  ...(user.attributes.image !== undefined && { image: user.attributes.image }),
+  createdAt: user.attributes.createdAt,
+  updatedAt: user.attributes.updatedAt,
+  attributes: user.attributes.attributes,
+});
 
 /**
  * The domain record from the `GET /sessions/current?include=user` document:
@@ -325,14 +413,7 @@ export const fromSessionDocument = (
         lastActivityAt: session.attributes.lastActivityAt,
         attributes: session.attributes.attributes,
       },
-      user: {
-        id: user.id,
-        ...(user.attributes.name !== undefined && { name: user.attributes.name }),
-        ...(user.attributes.image !== undefined && { image: user.attributes.image }),
-        createdAt: user.attributes.createdAt,
-        updatedAt: user.attributes.updatedAt,
-        attributes: user.attributes.attributes,
-      },
+      user: fromUserResource(user),
     }),
   );
 };
@@ -428,6 +509,25 @@ export interface RemoteSessionClient {
    * {@link resolveAtEdge} to get the skip, the fault posture and the outcome.
    */
   readonly read: (request: Request) => Effect.Effect<RemoteSessionResult, RemoteSessionError>;
+  /**
+   * Resolve the API key the inbound request carries over the transport
+   * (`GET /api-keys/current`, #730): `{ session: None, user, apiKey }` for a
+   * key that resolves, `{ session: None }` with no `user` for the auth
+   * service's `401` (an unknown, disabled, expired or exhausted key). Any
+   * other answer (`404` when the auth service mounts no `ApiKeyService`,
+   * `429` for a key over its own limit, a `5xx`) is a
+   * {@link RemoteSessionError}. Only the API-key headers ride along, never the
+   * cookie, so the key cannot fall back to a session.
+   *
+   * Each call consumes one use of the key: `remaining` decrements and
+   * `lastUsedAt` moves (a non-consuming check is #645).
+   *
+   * Optional only so a hand-built client keeps compiling; {@link make}
+   * always provides it, and {@link resolveAtEdge} fails closed without it.
+   */
+  readonly readApiKey?:
+    | ((request: Request) => Effect.Effect<RemoteSessionResult, RemoteSessionError>)
+    | undefined;
   /**
    * Forward a request to the auth service and return its response verbatim —
    * status, body and `Set-Cookie` — subject to the machine-caller rule.
@@ -555,6 +655,64 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       return { session, setCookie };
     }).pipe(Effect.withSpan(spanNames.remoteSessionRead));
 
+  const apiKeyHeaders = options.credentials?.apiKeyHeaders ?? ["x-api-key"];
+
+  const readApiKey = (request: Request): Effect.Effect<RemoteSessionResult, RemoteSessionError> =>
+    Effect.gen(function* () {
+      // The key headers ride along (the configured spellings too); the session
+      // cookie and a bearer token never do, so the auth service cannot answer
+      // for the session instead of the key.
+      const headers = forwardedHeaders(request, {
+        ...options.headers,
+        also: [...(options.headers?.also ?? []), ...apiKeyHeaders],
+      });
+      headers.delete("cookie");
+      if (!Arr.some(apiKeyHeaders, (name) => name.toLowerCase() === "authorization")) {
+        headers.delete("authorization");
+      }
+      headers.set("accept", MEDIA_TYPE);
+      const outbound = new Request(url("/api-keys/current"), { method: "GET", headers });
+
+      const response = yield* promiseOrDie(() => send(outbound));
+
+      // A machine caller is never handed a cookie, so none is replayed here.
+      // 401 is "ran, the key does not resolve": anonymous, never the cookie.
+      if (response.status === 401) return emptyResult;
+
+      if (response.status !== 200) {
+        return yield* new RemoteSessionError({
+          message: `API key read returned ${response.status}`,
+          status: response.status,
+        });
+      }
+
+      const body = yield* Effect.tryPromise({
+        try: () => response.text(),
+        catch: (cause) =>
+          new RemoteSessionError({ message: "API key read body could not be read", cause }),
+      });
+
+      // The JSON parse and the document decode are one step.
+      const document = yield* decodeApiKeyDocument(body).pipe(
+        Effect.mapError(
+          (cause) => new RemoteSessionError({ message: "API key read body did not decode", cause }),
+        ),
+      );
+      const resolved = fromApiKeyDocument(document);
+      if (Option.isNone(resolved)) {
+        return yield* new RemoteSessionError({
+          message: "API key read body did not include the key's user",
+        });
+      }
+
+      return {
+        session: Option.none(),
+        setCookie: [],
+        user: resolved.value.user,
+        apiKey: resolved.value.apiKey,
+      };
+    }).pipe(Effect.withSpan(spanNames.remoteApiKeyRead));
+
   const relay = (request: Request, path?: string): Effect.Effect<Response> =>
     Effect.gen(function* () {
       const target = path === undefined ? new URL(request.url).pathname : `${prefix}${path}`;
@@ -581,7 +739,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       return relayResponse(response, credential(request));
     }).pipe(Effect.withSpan(spanNames.remoteSessionRelay));
 
-  return { credential, read, relay };
+  return { credential, read, readApiKey, relay };
 };
 
 /**
@@ -659,10 +817,43 @@ const toEdge =
   });
 
 /**
+ * The read an edge resolution runs (#730): a request carrying an API key is
+ * resolved through `GET /api-keys/current`, whatever cookie or bearer token
+ * it also carries (the key wins), and a client with no key read fails closed
+ * rather than falling back to the session.
+ */
+const edgeRead = (
+  options: ResolveAtEdgeOptions,
+  credential: SessionResolution.CredentialPresence,
+): Effect.Effect<RemoteSessionResult, RemoteSessionError> => {
+  if (!credential.hasApiKey) return options.client.read(options.request);
+  const readApiKey = options.client.readApiKey;
+  return readApiKey === undefined
+    ? Effect.fail(
+        new RemoteSessionError({
+          message: "This client cannot resolve an API key (no readApiKey)",
+        }),
+      )
+    : readApiKey(options.request);
+};
+
+/** Whether an edge read named a caller: a session, or an API key's user. */
+const edgeResolved = (result: RemoteSessionResult): boolean =>
+  Option.isSome(result.session) || result.user !== undefined;
+
+/**
  * Resolve the session over the transport at an app edge, **failing closed**.
  *
  * Skips the call entirely for a cookieless request, reports the outcome, and
  * carries the `Set-Cookie` lines to replay.
+ *
+ * A request carrying an API key resolves the key instead (#730), through
+ * {@link RemoteSessionClient.readApiKey}: `{ session: None, user, apiKey,
+ * credentialClass: "machine" }` for a key that resolves, anonymous for one the
+ * auth service refuses with `401`, and a {@link RemoteSessionError} for any
+ * other answer, the `404` of an auth service without an `ApiKeyService`
+ * included. It never falls back to a cookie the request also carries. Each
+ * resolution consumes one use of the key (a non-consuming check is #645).
  *
  * @since 0.1.0
  * @category resolution
@@ -674,8 +865,9 @@ export const resolveAtEdge = (
   return Effect.map(
     SessionResolution.resolveWith({
       credential,
-      resolve: options.client.read(options.request),
+      resolve: edgeRead(options, credential),
       session: (result) => result.session,
+      resolved: edgeResolved,
       empty: emptyResult,
     }),
     toEdge(credential),
@@ -692,6 +884,11 @@ export const resolveAtEdge = (
  * whole site, including routes that never touch auth. It is only safe when
  * anonymous is the lower-privilege outcome; `docs/ARCHITECTURE.md` states the
  * precondition, and `onDegraded` is mandatory so the degrade is never silent.
+ *
+ * A request carrying an API key resolves the key as {@link resolveAtEdge}
+ * does (#730), consuming one use of it; a fault on that path, the `404` of an
+ * auth service without an `ApiKeyService` included, degrades to anonymous,
+ * never to a session cookie the request also carries.
  *
  * @example A Worker front door
  * ```ts
@@ -778,8 +975,9 @@ export const resolveAtEdgeFailOpen = (
   return Effect.map(
     SessionResolution.resolveWithFailOpen({
       credential,
-      resolve: options.client.read(options.request),
+      resolve: edgeRead(options, credential),
       session: (result) => result.session,
+      resolved: edgeResolved,
       empty: emptyResult,
       onDegraded: options.onDegraded,
     }),

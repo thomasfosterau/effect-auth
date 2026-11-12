@@ -101,6 +101,7 @@ const EXPECTED_PATHS = [
   "/impersonations/{id}",
   "/api-keys",
   "/api-keys/{id}",
+  "/api-keys/current",
   "/sso-providers",
   "/sso-authorizations",
   "/sso/callback",
