@@ -965,6 +965,102 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.left).toEqual([null, null, null, entries[3], entries[4]]);
     });
 
+    it("purgeExpiredWith({ limit }) deletes at most limit rows per table per call, and repeated calls drain every expired row (#729)", async () => {
+      const now = 1_000_000;
+      const stale = Arr.makeBy(5, (i): Auth.RateLimitEntry => ({
+        key: `bounded-stale-${i}`,
+        count: 1,
+        resetAt: now - 60_000,
+        ...(i % 2 === 0 ? {} : { blockedUntil: now - 1 }),
+      }));
+      const kept: ReadonlyArray<Auth.RateLimitEntry> = [
+        { key: "bounded-open", count: 2, resetAt: now + 1 },
+        { key: "bounded-blocked", count: 9, resetAt: now - 60_000, blockedUntil: now + 1 },
+      ];
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          const links = yield* Auth.MagicLinkStore;
+          const otps = yield* Auth.Email.EmailOtpStore;
+          yield* Effect.forEach([...stale, ...kept], (entry) => store.set(entry.key, entry, 60), {
+            concurrency: 1,
+            discard: true,
+          });
+          yield* Effect.forEach(
+            Arr.range(0, 2),
+            (i) =>
+              links.create({
+                token: `bounded-link-${i}`,
+                email: `link-${i}@example.com`,
+                createdAt: 0,
+                expiresAt: now - 1,
+              }),
+            { concurrency: 1, discard: true },
+          );
+          // Two purposes for one address: the OTP key is (email, purpose).
+          yield* Effect.forEach(
+            ["sign-in", "forget-password", "email-verification"] as const,
+            (purpose) =>
+              otps.upsert({
+                email: "bounded@example.com",
+                otpHash: "hash",
+                purpose,
+                attempts: 0,
+                createdAt: 0,
+                expiresAt: now - 1,
+              }),
+            { concurrency: 1, discard: true },
+          );
+          const ticks = yield* Effect.forEach(
+            Arr.range(1, 4),
+            () => Sql.purgeExpiredWith({ limit: 2 }),
+            { concurrency: 1 },
+          );
+          const left = yield* Effect.forEach([...stale, ...kept], (entry) => store.get(entry.key), {
+            concurrency: 1,
+          });
+          return { ticks, left };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.ticks).toEqual([
+        { magicLinks: 2, emailOtps: 2, rateLimits: 2 },
+        { magicLinks: 1, emailOtps: 1, rateLimits: 2 },
+        { magicLinks: 0, emailOtps: 0, rateLimits: 1 },
+        { magicLinks: 0, emailOtps: 0, rateLimits: 0 },
+      ]);
+      expect(result.left).toEqual([...stale.map(() => null), ...kept]);
+    });
+
+    it("purgeExpiredWith() with no limit is purgeExpired, and a limit that is not a positive integer fails (#729)", async () => {
+      const now = 1_000_000;
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          yield* Effect.forEach(
+            Arr.range(0, 4),
+            (i) =>
+              store.set(
+                `unbounded-${i}`,
+                { key: `unbounded-${i}`, count: 1, resetAt: now - 1 },
+                60,
+              ),
+            { concurrency: 1, discard: true },
+          );
+          const unbounded = yield* Sql.purgeExpiredWith();
+          const refused = yield* Effect.forEach(
+            [0, -1, 1.5, Number.NaN],
+            (limit) => Effect.flip(Sql.purgeExpiredWith({ limit })),
+            { concurrency: 1 },
+          );
+          return { unbounded, refused: refused.map((error) => error._tag) };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.unbounded).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 5 });
+      expect(result.refused).toEqual(["AuthError", "AuthError", "AuthError", "AuthError"]);
+    });
+
     it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {
       const record: Auth.MultiFactor.MultiFactorRecord = {
         userId: "user-1",
@@ -1682,5 +1778,48 @@ describe("@thomasfosterau/effect-auth/sql IdentifierStore.replace on SQLite: tra
       BEGIN SELECT RAISE(ABORT, 'user left without an identifier'); END`);
     expect(result.outcome._tag).toBe("Success");
     expect(result.values).toEqual(["ada-new@example.com"]);
+  });
+});
+
+/** A `SqlClient` over a migrated in-memory SQLite that records each statement's text. */
+const recordingSqliteClient = (sent: Array<string>): Layer.Layer<SqlClient.SqlClient> =>
+  Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function* () {
+      const db = new Database(":memory:");
+      Arr.forEach(schemaStatements, (statement) => db.exec(statement));
+      const connection = makeConnection(db);
+      const recorded: SqlConnection.Connection = {
+        ...connection,
+        execute: (sqlText, params, transformRows) => {
+          sent.push(sqlText);
+          return connection.execute(sqlText, params, transformRows);
+        },
+      };
+      return yield* SqlClient.make({
+        acquirer: Effect.succeed(recorded),
+        compiler: Statement.makeCompilerSqlite(),
+        driver: "better-sqlite3",
+        spanAttributes: [],
+      });
+    }),
+  ).pipe(Layer.provide(Reactivity.layer));
+
+describe("purgeExpiredWith's capped DELETE (#729)", () => {
+  it("rechecks expiry outside the subquery, so a row refreshed after the subquery picked it survives", async () => {
+    // A concurrent refresh between the subquery's pick and the DELETE's row
+    // lock cannot be staged deterministically on one connection, so this pins
+    // the statement text: under PostgreSQL READ COMMITTED the DELETE rechecks
+    // only its own WHERE, which must therefore carry the expiry predicate.
+    const sent: Array<string> = [];
+    await Effect.runPromise(
+      Sql.purgeExpiredWith({ limit: 10 }).pipe(Effect.provide(recordingSqliteClient(sent))),
+    );
+    const deletes = sent.filter((statement) => statement.startsWith("DELETE"));
+    expect(deletes).toEqual([
+      "DELETE FROM auth_magic_links WHERE (expires_at < ?) AND (token) IN (SELECT token FROM auth_magic_links WHERE expires_at < ? LIMIT ?) RETURNING token",
+      "DELETE FROM auth_email_otps WHERE (expires_at < ?) AND (email, purpose) IN (SELECT email, purpose FROM auth_email_otps WHERE expires_at < ? LIMIT ?) RETURNING email, purpose",
+      "DELETE FROM auth_rate_limits WHERE (reset_at <= ? AND (blocked_until IS NULL OR blocked_until <= ?)) AND (key) IN (SELECT key FROM auth_rate_limits WHERE reset_at <= ? AND (blocked_until IS NULL OR blocked_until <= ?) LIMIT ?) RETURNING key",
+    ]);
   });
 });

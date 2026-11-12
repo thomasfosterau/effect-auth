@@ -155,23 +155,62 @@ export const layer = (
  * request opens a fresh window either way. A row still inside its window or
  * still blocked stays. Schedule it from the host (a cron trigger, a timer on a
  * long-lived server); now is read from the `Clock`.
+ *
+ * With `options.limit` (#729) the `DELETE` takes at most that many of those
+ * rows, chosen by key through a derived table, which PostgreSQL, SQLite and
+ * MySQL all accept (MySQL refuses a `LIMIT` directly inside `IN`):
+ * `DELETE … WHERE <spent> AND key IN (SELECT key FROM (SELECT key … WHERE
+ * <spent> LIMIT n) AS spent)`; the outer `<spent>` keeps a row a concurrent
+ * `increment` refreshed after the subquery picked it (PostgreSQL READ COMMITTED
+ * rechecks only the outer `WHERE`). It returns nothing on any dialect (MySQL has no `RETURNING`, and
+ * the drivers report affected rows each their own way), so a Workers cron that
+ * must stay inside its budget runs a fixed number of bounded calls per tick;
+ * whatever is left goes on the next tick. Which spent rows a capped call takes
+ * is unspecified. A `limit` that is not a positive integer fails with
+ * `AuthError` before any statement runs.
  */
 export const purgeExpired = (
   tables: Tables = defaultTables,
+  options?: PurgeExpiredOptions,
 ): Effect.Effect<void, Auth.AuthError, DrizzleDatabase> =>
   Effect.gen(function* () {
+    const limit = options?.limit;
+    yield* checkLimit(limit);
     const query = makeQuery(yield* DrizzleDatabase);
     const table = tables.rateLimits;
     const now = yield* DateTime.nowAsDate;
+    const spent = and(
+      lte(table.resetAt, now),
+      or(isNull(table.blockedUntil), lte(table.blockedUntil, now)),
+    );
+    const key = sql.identifier(table.key.name);
     yield* query("rateLimit.purgeExpired", (db) =>
       db
         .delete(table)
         .where(
-          and(
-            lte(table.resetAt, now),
-            or(isNull(table.blockedUntil), lte(table.blockedUntil, now)),
-          ),
+          limit === undefined
+            ? spent
+            : sql`${spent} and ${table.key} in (select ${key} from (select ${table.key} from ${table} where ${spent} limit ${sql.raw(String(limit))}) as ${sql.identifier("spent")})`,
         )
         .execute(),
     );
   });
+
+/** Refuse a purge `limit` that is not a positive integer; omitted is fine. */
+const checkLimit = (limit: number | undefined): Effect.Effect<void, Auth.AuthError> =>
+  limit === undefined || (Number.isSafeInteger(limit) && limit > 0)
+    ? Effect.void
+    : Effect.fail(
+        new Auth.AuthError({
+          message: `purgeExpired limit must be a positive integer, got ${String(limit)}`,
+        }),
+      );
+
+/** Options for {@link purgeExpired}. */
+export interface PurgeExpiredOptions {
+  /**
+   * The most rows one call deletes (#729), a positive integer; omitted, every
+   * spent row goes in one `DELETE`.
+   */
+  readonly limit?: number | undefined;
+}
