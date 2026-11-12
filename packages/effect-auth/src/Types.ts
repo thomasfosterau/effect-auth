@@ -6,7 +6,9 @@
  * type, runtime validation, and JSON serialization used by stores and the
  * HTTP protocol layer. Configuration shapes remain plain interfaces.
  */
+import type { Effect } from "effect";
 import * as Schema from "effect/Schema";
+import type * as Errors from "./Errors.ts";
 
 /**
  * Any JSON value: `null`, a number, a boolean, a string, a readonly array of
@@ -188,4 +190,57 @@ export interface Permission {
   readonly resource: string;
   readonly action: string;
   readonly granted: boolean;
+}
+
+/**
+ * The wrong codes counted against one (address, purpose) pair of a one-time
+ * code flow (email OTP, phone OTP): the failure budget that survives resends
+ * (#590). A store keeps it apart from the code's record, so replacing,
+ * expiring or deleting the code leaves it as it was; only a successful
+ * verification clears it.
+ */
+export interface OtpFailures {
+  /** Wrong codes since the last successful verification. */
+  readonly count: number;
+  /** When the latest one was counted, in epoch milliseconds. */
+  readonly lastFailureAt: number;
+}
+
+/**
+ * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore` (#590),
+ * over the store's purposes `P`: `getFailures` reads a pair's
+ * {@link OtpFailures} (`null` when it has none), `recordFailure` counts one
+ * wrong code at `at` (epoch ms) and returns the budget after it, and
+ * `clearFailures` forgets it.
+ */
+export interface OtpFailureBudget<P> {
+  readonly getFailures: (
+    address: string,
+    purpose: P,
+  ) => Effect.Effect<OtpFailures | null, Errors.AuthError>;
+  readonly recordFailure: (
+    address: string,
+    purpose: P,
+    at: number,
+  ) => Effect.Effect<OtpFailures, Errors.AuthError>;
+  readonly clearFailures: (address: string, purpose: P) => Effect.Effect<void, Errors.AuthError>;
+}
+
+/**
+ * How a one-time code flow (`EmailOtpConfig.backoff`, `PhoneOtpConfig.backoff`)
+ * delays sends to an (address, purpose) pair that keeps receiving wrong codes
+ * (#590). Once the pair's wrong codes reach `freeFailures`, a send is refused
+ * with `ResendTooSoonError` until `baseDelay * 2 ** (count - freeFailures)`,
+ * capped at `maxDelay`, has passed since the latest wrong code. A successful
+ * verification resets the count. There is no lockout: a send succeeds again
+ * once the delay has passed, so an attacker can slow the owner down but never
+ * lock them out.
+ */
+export interface OtpBackoffConfig {
+  /** Wrong codes allowed before sends are delayed. Default `5`. */
+  readonly freeFailures?: number | undefined;
+  /** The first delay, in ms, doubled for each further wrong code. Default 60 000 (one minute). */
+  readonly baseDelay?: number | undefined;
+  /** The longest delay, in ms. Default 86 400 000 (one day). */
+  readonly maxDelay?: number | undefined;
 }

@@ -15,7 +15,7 @@
  *
  * Concurrency: single-row upserts (`rateLimit.set`, `oauthAccount`,
  * `multiFactor`) and counters (`rateLimit.increment`,
- * `emailOtp.incrementAttempts`) use a single `ON CONFLICT … DO UPDATE` /
+ * `emailOtp.incrementAttempts`, `emailOtp.recordFailure`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
  * races. Multi-step writes (challenge, oauthState, emailOtp.upsert,
  * pendingMultiFactor.delete, and identifier.replace's claim-then-release) run
@@ -1020,7 +1020,21 @@ const rowToEmailOtp = (row: EmailOtpRow): Auth.Email.EmailOtpRecord => ({
   expiresAt: row.expires_at,
 });
 
-/** `Auth.Email.EmailOtpStore` over the `auth_email_otps` table; requires `SqlClient`. */
+interface EmailOtpFailuresRow {
+  readonly failures: number;
+  readonly last_failure_at: number;
+}
+
+const rowToOtpFailures = (row: EmailOtpFailuresRow): Auth.OtpFailures => ({
+  count: row.failures,
+  lastFailureAt: row.last_failure_at,
+});
+
+/**
+ * `Auth.Email.EmailOtpStore` over the `auth_email_otps` table, with each
+ * pair's failure budget (#590) in `auth_email_otp_failures`; requires
+ * `SqlClient`.
+ */
 export const makeEmailOtpStore: Effect.Effect<
   typeof Auth.Email.EmailOtpStore.Service,
   never,
@@ -1077,6 +1091,35 @@ export const makeEmailOtpStore: Effect.Effect<
         }
         return attempts;
       }),
+    getFailures: (email, purpose) =>
+      firstRow(
+        "emailOtp.getFailures",
+        sql<EmailOtpFailuresRow>`SELECT failures, last_failure_at FROM auth_email_otp_failures
+          WHERE email = ${email} AND purpose = ${purpose}`,
+      ).pipe(Effect.map((row) => (row ? rowToOtpFailures(row) : null))),
+    recordFailure: (email, purpose, at) =>
+      Effect.gen(function* () {
+        // One upsert + RETURNING: concurrent wrong codes are all counted.
+        const row = yield* firstRow(
+          "emailOtp.recordFailure",
+          sql<EmailOtpFailuresRow>`
+            INSERT INTO auth_email_otp_failures (email, purpose, failures, last_failure_at)
+              VALUES (${email}, ${purpose}, 1, ${at})
+            ON CONFLICT (email, purpose) DO UPDATE
+              SET failures = auth_email_otp_failures.failures + 1,
+                  last_failure_at = excluded.last_failure_at
+            RETURNING failures, last_failure_at`,
+        );
+        if (row === null) {
+          return yield* new Auth.AuthError({ message: "OTP failure count not returned" });
+        }
+        return rowToOtpFailures(row);
+      }),
+    clearFailures: (email, purpose) =>
+      asVoid(
+        "emailOtp.clearFailures",
+        sql`DELETE FROM auth_email_otp_failures WHERE email = ${email} AND purpose = ${purpose}`,
+      ),
   } satisfies typeof Auth.Email.EmailOtpStore.Service;
 });
 

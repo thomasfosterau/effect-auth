@@ -163,6 +163,12 @@ export interface UserColumnNames<TTable extends Table> {
   readonly attributes?: ColumnKey<TTable, Auth.JsonObject | null>;
   readonly createdAt: ColumnKey<TTable, Date>;
   readonly updatedAt: ColumnKey<TTable, Date>;
+  /**
+   * The password hash, a nullable text column. Optional: only
+   * `EmailPasswordStore` reads or writes it (`UserStore` never selects it), and
+   * that store's layer requires it.
+   */
+  readonly passwordHash?: ColumnKey<TTable, string | null> | undefined;
 }
 
 /** Which of `TTable`'s columns hold each field of an identifier. */
@@ -199,6 +205,7 @@ export type UserColumns = {
   readonly attributes?: NullableColumn<Auth.JsonObject>;
   readonly createdAt: StoreColumn<Date>;
   readonly updatedAt: StoreColumn<Date>;
+  readonly passwordHash?: NullableColumn<string>;
 };
 
 /** The identifier columns, resolved to drizzle column objects. */
@@ -368,6 +375,7 @@ export const fromTables = (tables: Tables): AuthSchema =>
         attributes: "attributes",
         createdAt: "createdAt",
         updatedAt: "updatedAt",
+        passwordHash: "passwordHash",
       },
     },
     identifiers: {
@@ -390,7 +398,9 @@ export const resolveSchema = (input: SchemaInput): AuthSchema =>
 
 /**
  * Re-key a logical row into the column names the target table uses, so a write
- * built from domain fields lands in the caller's columns.
+ * built from domain fields lands in the caller's columns. A field whose
+ * optional column the mapping left out (`users.passwordHash`) is dropped, so
+ * nothing is written to a column the table does not have.
  *
  * The values are checked against the resolved columns on the way through —
  * `GetColumnData` in `query` mode is what each column reads and writes,
@@ -402,9 +412,10 @@ export const resolveSchema = (input: SchemaInput): AuthSchema =>
 export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
   schema: TableSchema<TColumns>,
   values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K]> }>,
-): Table["$inferInsert"] =>
-  R.mapKeys(
-    values,
-    // SAFETY: `values` is keyed by `TColumns`' fields, which are `names`' keys.
-    (field) => schema.names[field as keyof TColumns & string],
+): Table["$inferInsert"] => {
+  const names: Readonly<Record<string, string | undefined>> = schema.names;
+  return R.mapKeys(
+    R.filter(values, (_value, field) => names[field] !== undefined),
+    (field) => names[field] ?? field,
   );
+};

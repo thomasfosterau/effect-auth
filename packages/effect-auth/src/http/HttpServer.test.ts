@@ -123,6 +123,7 @@ import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.t
 import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
+import { memoryOtpFailures } from "../testing/MemoryStores.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -457,6 +458,7 @@ const makeFixture = (
         MutableHashMap.set(emailOtps, otpKey(email, purpose), updated);
         return updated.attempts;
       }),
+    ...memoryOtpFailures<EmailOtpPurpose>(),
   };
   const emailOtpUserStore: typeof EmailOtpUserStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
@@ -538,6 +540,7 @@ const makeFixture = (
         MutableHashMap.set(phoneRecords, phoneKey(phone, purpose), updated);
         return updated.attempts;
       }),
+    ...memoryOtpFailures<PhoneOtpPurpose>(),
   };
   // The phone number itself is claimed as a verified `phone` identifier by the
   // service; the user store only creates the bare profile row.

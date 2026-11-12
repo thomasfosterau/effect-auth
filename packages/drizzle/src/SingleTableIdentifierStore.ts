@@ -153,7 +153,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { makeQuery, selectOne } from "./internal.ts";
 
 // ---------------------------------------------------------------------------
 // Mapping
@@ -283,9 +283,7 @@ export const make = (
     const holdsEmail = () => isNotNull(column.email);
 
     const readUser = (userId: string, label: string) =>
-      query(label, (db) =>
-        db.select(selection).from(table).where(eq(column.id, userId)).limit(1).execute(),
-      ).pipe(Effect.map((rows) => rows[0] ?? null));
+      selectOne(query, label, selection, table, eq(column.id, userId));
 
     /** Set the email columns back to "no address", leaving the user row in place. */
     const clearEmail = (userId: string, label: string) =>

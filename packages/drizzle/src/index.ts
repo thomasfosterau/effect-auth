@@ -3,8 +3,10 @@
  * effect-auth, on PostgreSQL, SQLite or MySQL.
  *
  * Implements `SessionStore`, `UserStore` and `IdentifierStore` — the three
- * stores every sign-in flow touches — against drizzle table objects you can
- * hand straight to `drizzle-kit`. One module per store, plus a batched
+ * stores every sign-in flow touches — plus `EmailPasswordStore` (with
+ * `PasswordResetUserStore`), `ApiKeyStore`, `RateLimitStore` and the email
+ * verification and password reset token stores, against drizzle table objects
+ * you can hand straight to `drizzle-kit`. One module per store, plus a batched
  * `Request`/`RequestResolver` read interface for application code.
  *
  * ### The export map
@@ -12,12 +14,15 @@
  * Each store is a namespace with the same two entry points, `make` and `layer`:
  *
  * - `SessionStore` / `UserStore` / `IdentifierStore` — the store modules.
+ * - `EmailPasswordStore` (`layer`, `passwordResetUserLayer`), `ApiKeyStore`,
+ *   `RateLimitStore` and `TokenStore` (`emailVerificationLayer`,
+ *   `passwordResetLayer`, `layer` for both) — the stores beyond sign-in.
  * - `SingleTableIdentifierStore` — the opt-in `IdentifierStore` whose email
  *   identifier is the application's own `users` row (one per user).
  * - `Requests` — the batched read interface (`Requests.layer`, `Requests.getUser`, ...).
  * - `Pg` / `Sqlite` / `MySql` — one dialect's tables and DDL each
  *   (`defineTables`, `tables`, `sessionsTable`, `migrationStatements`, ...).
- * - `layer` — the aggregate of all three stores.
+ * - `layer` — the aggregate of the three sign-in stores.
  * - `DrizzleDatabase` / `databaseLayer` / `effectDatabaseLayer` / `AuthDatabase`
  *   — the database seam.
  * - `TableNames` / `defaultTableNames` / `Tables` and the row types — what the
@@ -102,11 +107,15 @@ export { layer } from "./Layers.ts";
 export { ladderCheck } from "./LadderCheck.ts";
 export { isFollowerLayer, ownedListFilter, type OwnedColumns } from "./OwnedListFilter.ts";
 
+export * as ApiKeyStore from "./ApiKeyStore.ts";
+export * as EmailPasswordStore from "./EmailPasswordStore.ts";
 export * as IdentifierStore from "./IdentifierStore.ts";
 export * as MySql from "./MySqlSchema.ts";
 export * as Pg from "./PgSchema.ts";
+export * as RateLimitStore from "./RateLimitStore.ts";
 export * as Requests from "./Requests.ts";
 export * as SessionStore from "./SessionStore.ts";
 export * as SingleTableIdentifierStore from "./SingleTableIdentifierStore.ts";
 export * as Sqlite from "./SqliteSchema.ts";
+export * as TokenStore from "./TokenStore.ts";
 export * as UserStore from "./UserStore.ts";
