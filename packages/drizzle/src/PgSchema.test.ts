@@ -35,6 +35,9 @@ const names: TableNames = {
   sessions: "app_sessions",
   users: "app_users",
   identifiers: "app_identifiers",
+  apiKeys: "app_api_keys",
+  rateLimits: "app_rate_limits",
+  tokens: "app_tokens",
 };
 const customTables = defineTables(names);
 
@@ -168,7 +171,14 @@ describe("Schema", () => {
       }),
     );
 
-    expect(result.present).toEqual(["app_identifiers", "app_sessions", "app_users"]);
+    expect(result.present).toEqual([
+      "app_api_keys",
+      "app_identifiers",
+      "app_rate_limits",
+      "app_sessions",
+      "app_tokens",
+      "app_users",
+    ]);
     expect(result.session?.attributes).toEqual({ via: "custom" });
     expect(result.user?.id).toBe("user-1");
     expect(result.identifier?.id).toBe("identifier-1");
@@ -176,7 +186,7 @@ describe("Schema", () => {
 
   it("emits DDL matching the requested table names", () => {
     const statements = migrationStatements();
-    expect(statements).toHaveLength(6);
+    expect(statements).toHaveLength(12);
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_users");
     expect(statements[1]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_sessions");
     expect(statements[3]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_identifiers");
@@ -185,6 +195,12 @@ describe("Schema", () => {
     );
     // No email columns on users: handles live in the identifiers table.
     expect(statements[0]).not.toContain("email");
+    expect(statements[6]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_api_keys");
+    expect(statements[7]).toContain(
+      "CREATE UNIQUE INDEX IF NOT EXISTS effect_auth_api_keys_key_hash_key",
+    );
+    expect(statements[9]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_rate_limits");
+    expect(statements[10]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_tokens");
 
     const custom = migrationSql({ users: "app_users" });
     expect(custom).toContain("CREATE TABLE IF NOT EXISTS app_users");

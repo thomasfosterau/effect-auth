@@ -3,13 +3,18 @@
 Storage layers for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth), built on
 [Drizzle ORM](https://orm.drizzle.team) — **PostgreSQL, SQLite and MySQL**.
 
-Implements the three stores every sign-in flow touches:
+Implements the three stores every sign-in flow touches, and the four that
+sign-up, password reset, email verification, API keys and rate limiting need:
 
-| effect-auth tag   | Table                     | What it holds                                          |
-| ----------------- | ------------------------- | ------------------------------------------------------ |
-| `SessionStore`    | `effect_auth_sessions`    | Sessions keyed by the SHA-256 hash of the bearer token |
-| `UserStore`       | `effect_auth_users`       | User records and their password hash                   |
-| `IdentifierStore` | `effect_auth_identifiers` | Email / username / phone claims, unique per pair       |
+| effect-auth tag                                      | Table                     | What it holds                                          |
+| ---------------------------------------------------- | ------------------------- | ------------------------------------------------------ |
+| `SessionStore`                                       | `effect_auth_sessions`    | Sessions keyed by the SHA-256 hash of the bearer token |
+| `UserStore`                                          | `effect_auth_users`       | User records                                           |
+| `IdentifierStore`                                    | `effect_auth_identifiers` | Email / username / phone claims, unique per pair       |
+| `Email.EmailPasswordStore`, `PasswordResetUserStore` | `effect_auth_users`       | New users, and their `password_hash`                   |
+| `ApiKeyStore`                                        | `effect_auth_api_keys`    | API keys by the SHA-256 hash of the key                |
+| `RateLimitStore`                                     | `effect_auth_rate_limits` | One fixed-window counter per rate-limit key            |
+| `EmailVerificationStore`, `PasswordResetStore`       | `effect_auth_tokens`      | Pending verification and reset tokens, by hash         |
 
 This package **stands alone** — it does not wrap
 [`@thomasfosterau/effect-auth/sql`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth/src/sql). It speaks drizzle's query builder
@@ -77,6 +82,9 @@ Drizzle.UserStore.layer(); //       Layer<UserStore, never, DrizzleDatabase>
 Drizzle.IdentifierStore.layer(); // Layer<IdentifierStore, never, DrizzleDatabase>
 ```
 
+The stores beyond sign-in have layers of their own, described in
+[Sign-up, API keys, rate limits and tokens](#sign-up-api-keys-rate-limits-and-tokens).
+
 …as are the underlying `Effect`s, if you would rather assemble the store objects
 yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
 `Drizzle.IdentifierStore.make()`. Every one of them takes the same optional
@@ -84,18 +92,18 @@ yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
 
 ### The export map
 
-| Export                                                        | What it is                                                             |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `layer(schema?)`                                              | All three stores at once, over a dialect's `tables` or an `AuthSchema` |
-| `databaseLayer(db)`, `effectDatabaseLayer(db)`                | The database seam for Promise and Effect drivers (`DrizzleDatabase`)   |
-| `SessionStore`, `UserStore`, `IdentifierStore`                | One namespace per store: `make`, `layer`, requests, resolvers          |
-| `SingleTableIdentifierStore`                                  | The opt-in one-email-per-user store over your own `users` table        |
-| `Requests`                                                    | The batched read interface                                             |
-| `Pg`, `Sqlite`, `MySql`                                       | One namespace per dialect: tables, `defineTables`, DDL                 |
-| `defineSchema`, `fromTables`, `AuthSchema` and column types   | The stores pointed at tables you already have                          |
-| `TableNames`, `defaultTableNames`, `Tables`, row types        | What the three dialects agree on                                       |
-| `ladderCheck(column, ladder)`                                 | A role column's `CHECK` derived from an `Auth.Ladder`                  |
-| `ownedListFilter(columns)`, `isFollowerLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`           |
+| Export                                                        | What it is                                                                                                            |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `layer(schema?)`                                              | All three stores at once, over a dialect's `tables` or an `AuthSchema`                                                |
+| `databaseLayer(db)`, `effectDatabaseLayer(db)`                | The database seam for Promise and Effect drivers (`DrizzleDatabase`)                                                  |
+| `SessionStore`, `UserStore`, `IdentifierStore`                | One namespace per store: `make`, `layer`, requests, resolvers                                                         |
+| `SingleTableIdentifierStore`                                  | The opt-in one-email-per-user store over your own `users` table                                                       |
+| `Requests`                                                    | The batched read interface                                                                                            |
+| `Pg`, `Sqlite`, `MySql`                                       | One namespace per dialect: tables, `defineTables`, DDL (`MySql` also `binaryVarchar`, `collationMigrationStatements`) |
+| `defineSchema`, `fromTables`, `AuthSchema` and column types   | The stores pointed at tables you already have                                                                         |
+| `TableNames`, `defaultTableNames`, `Tables`, row types        | What the three dialects agree on                                                                                      |
+| `ladderCheck(column, ladder)`                                 | A role column's `CHECK` derived from an `Auth.Ladder`                                                                 |
+| `ownedListFilter(columns)`, `isFollowerLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`                                                          |
 
 ## Dialects
 
@@ -127,6 +135,62 @@ to the same TypeScript values: `string`, `Date`, `Auth.JsonObject`,
 `boolean`. MySQL uses `varchar(255)` where the others use `text`, because InnoDB
 cannot index a `TEXT` column without a prefix length and the `(type, value)`
 unique index has to be indexable.
+
+### MySQL: identifier values compare byte for byte
+
+MySQL compares a `VARCHAR` under its collation, and the server default
+(`utf8mb4_0900_ai_ci` on MySQL 8) is case-, accent- and width-insensitive: a
+lookup of `bob@exämple.com` finds `bob@example.com`'s row. A password reset or
+magic link requested for a look-alike address on a domain an attacker holds
+would then resolve the victim's account (#602). PostgreSQL and SQLite compare
+bytes and are not affected.
+
+So `MySql.tables.identifiers.value` is
+`VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin` (exported as
+`MySql.identifierCollation`), in the drizzle table and in `migrationSql`, and the
+`(type, value)` unique key is binary with it. Any column of your own that the
+stores look identifiers up in needs the same collation: the single-table
+store's `users.email`, or the value column of a table you map through
+`defineSchema`. Declare it with `MySql.binaryVarchar`:
+
+```ts
+import { boolean, mysqlTable, varchar } from "drizzle-orm/mysql-core";
+import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+
+const appUsers = mysqlTable("users", {
+  id: varchar("id", { length: 255 }).primaryKey(),
+  // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
+  email: Drizzle.MySql.binaryVarchar("email", { length: 255 }).unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+});
+```
+
+(On drizzle-orm 1.0, `varchar("email", { length: 255 }).collate("utf8mb4_bin")`
+declares the same column; 0.4x's `varchar` has no `collate`.) `utf8mb4_bin`
+treats trailing spaces as insignificant, which never matters here: core trims
+the addresses and usernames it stores. Core also never acts on a record whose
+value differs from the one it looked up (`Auth.lookupIdentifier`), so a table
+that has not been migrated yet fails closed (a look-alike reads as unknown)
+rather than resolving another account.
+
+#### Migrating an existing MySQL deployment
+
+`migrationSql` is `CREATE TABLE IF NOT EXISTS`, so it does not change an
+identifiers table created by an earlier release. Run
+`MySql.collationMigrationStatements(names?)` once:
+
+```sql
+ALTER TABLE effect_auth_identifiers
+  MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL;
+```
+
+The old unique key refused any two values that compared equal under the
+insensitive collation, so no existing rows collide under the binary one and the
+statement cannot fail on duplicates. It rebuilds the table, so schedule it like
+any `ALTER TABLE` on a large table. For the single-table store, run the same
+`MODIFY` on your `users.email` column (keeping its `NULL` / `NOT NULL`). If you
+use drizzle-kit, regenerating from `MySql.tables` (or from a table declared with
+`binaryVarchar`) produces the equivalent migration.
 
 ### Support status
 
@@ -267,7 +331,7 @@ table holds the email itself, see
 
 ### Custom table names
 
-`defineTables` builds the same three tables under names you choose; every
+`defineTables` builds the same tables under names you choose; every
 factory takes the result:
 
 ```ts
@@ -322,10 +386,55 @@ CREATE TABLE IF NOT EXISTS effect_auth_identifiers (
 CREATE UNIQUE INDEX IF NOT EXISTS effect_auth_identifiers_type_value_key ON effect_auth_identifiers (type, value);
 
 CREATE INDEX IF NOT EXISTS effect_auth_identifiers_user_id_idx ON effect_auth_identifiers (user_id);
+
+CREATE TABLE IF NOT EXISTS effect_auth_api_keys (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT,
+  prefix TEXT,
+  start TEXT NOT NULL,
+  key_hash TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  expires_at TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  permissions JSONB,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  remaining INTEGER,
+  refill_amount INTEGER,
+  refill_interval BIGINT,
+  refill_max INTEGER,
+  last_refill_at TIMESTAMPTZ,
+  rate_limit_max_requests INTEGER,
+  rate_limit_window_ms BIGINT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS effect_auth_api_keys_key_hash_key ON effect_auth_api_keys (key_hash);
+
+CREATE INDEX IF NOT EXISTS effect_auth_api_keys_user_id_idx ON effect_auth_api_keys (user_id);
+
+CREATE TABLE IF NOT EXISTS effect_auth_rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset_at TIMESTAMPTZ NOT NULL,
+  blocked_until TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS effect_auth_tokens (
+  token TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS effect_auth_tokens_purpose_user_id_idx ON effect_auth_tokens (purpose, user_id);
 ```
 
 ```sql
--- Drizzle.Sqlite.migrationSql() — same six statements, SQLite's types
+-- Drizzle.Sqlite.migrationSql() — the same twelve statements, SQLite's types
 CREATE TABLE IF NOT EXISTS effect_auth_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -337,13 +446,13 @@ CREATE TABLE IF NOT EXISTS effect_auth_sessions (
 ```
 
 ```sql
--- Drizzle.MySql.migrationSql() — three statements: MySQL has no
+-- Drizzle.MySql.migrationSql() — one statement per table: MySQL has no
 -- CREATE INDEX IF NOT EXISTS, so the indexes are declared inline
 CREATE TABLE IF NOT EXISTS effect_auth_identifiers (
   id VARCHAR(255) NOT NULL PRIMARY KEY,
   user_id VARCHAR(255) NOT NULL,
   type VARCHAR(32) NOT NULL,
-  value VARCHAR(255) NOT NULL,
+  value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   verified TINYINT NOT NULL DEFAULT 0,
   verified_at DATETIME(3),
   created_at DATETIME(3) NOT NULL,
@@ -416,7 +525,7 @@ export const stores = (db: Parameters<typeof Drizzle.databaseLayer>[0]) =>
   Drizzle.layer(schema).pipe(Layer.provide(Drizzle.databaseLayer(db)));
 ```
 
-The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Auth.JsonObject>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`. A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
+The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Auth.JsonObject>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`, compared byte for byte (on MySQL, declare `value` with `Drizzle.MySql.binaryVarchar`). A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
 
 ## Authorization helpers
 
@@ -497,6 +606,11 @@ part of `Drizzle.layer()`, so choosing it is an explicit provide.
 
   A unique index admits several `NULL`s on all three dialects, so a nullable
   `email` is fine with it.
+
+- **On MySQL, `email` has a binary collation** (`utf8mb4_bin`; declare it with
+  `Drizzle.MySql.binaryVarchar`). Under the default case- and
+  accent-insensitive collation a look-alike address finds another user's row
+  ([MySQL: identifier values compare byte for byte](#mysql-identifier-values-compare-byte-for-byte)).
 
 - **`email` is nullable or `NOT NULL`.** The store detects which from the column
   when you call `defineUsers`. See [Nullable or NOT NULL](#nullable-or-not-null-email).
@@ -720,6 +834,63 @@ address.
   store holds only email identifiers, so these are refused. Those flows report
   the refusal as an `AuthError`: the store cannot serve them at all.
 
+## Sign-up, API keys, rate limits and tokens
+
+Four more stores run on the same `DrizzleDatabase` and the same dialect
+`tables` (each defaults to `Pg.tables`; pass `Sqlite.tables`, `MySql.tables` or
+a `defineTables(...)` result to match your handle). They are not part of
+`Drizzle.layer()`: merge the ones your application uses.
+
+```ts
+const stores = Layer.mergeAll(
+  Drizzle.layer(tables), //                          Session, User, Identifier
+  Drizzle.EmailPasswordStore.layer(tables), //        EmailPasswordService
+  Drizzle.EmailPasswordStore.passwordResetUserLayer(tables), // PasswordResetService
+  Drizzle.TokenStore.layer(tables), //                EmailVerificationStore + PasswordResetStore
+  Drizzle.ApiKeyStore.layer(tables), //               ApiKeyService
+  Drizzle.RateLimitStore.layer(tables), //            RateLimiter, IP/RateLimit plugins
+).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+```
+
+Each namespace also exports the `make` its layer is built from
+(`TokenStore.emailVerificationLayer` / `passwordResetLayer` provide one token
+store each).
+
+- **`EmailPasswordStore`** works on the users table. `createUser` is a plain
+  `INSERT` under a fresh random UUID, so every success is a new user
+  (`created: true`); core then claims the address in the identifiers table. The
+  user it returns is read back through `UserStore`'s projection. The password
+  hash is `users.password_hash`; this is the only store that reads or writes
+  it. `passwordResetUserLayer` is the same `setPasswordHash` for
+  `PasswordResetService`.
+  - On a `defineSchema` mapping it works on your own users table too: map
+    `passwordHash` in the users entry (the layer dies with a defect naming it
+    when it is missing), and an attribute declared under `promoted` is written
+    to its own column (a sign-up that names none gets the column's database
+    default, which the returned user shows). Attributes for a users table with
+    no mapped bag fail the sign-up with `AuthError` rather than being dropped.
+    It does not write the address onto the row, so a
+    [single-table](#single-table-identifiers-opt-in) users table whose
+    `email` is NOT NULL still needs the writer shown there.
+- **`ApiKeyStore`** keeps `keyHash`, the SHA-256 digest `ApiKeyService`
+  computes (unique index), never the key. Optional fields absent from a key are
+  `NULL` and read back absent; instants are timestamps in the table and epoch
+  milliseconds in the record. The contract has no atomic "use": `verify` reads
+  the key and writes its decremented `remaining` back with `update`.
+- **`RateLimitStore`**'s `increment` never reads, modifies and writes. It runs
+  an `UPDATE` that re-opens the key's window when it has expired, then an
+  upsert that adds one (inserting a count of `1` for a new key): concurrent
+  callers get distinct counts. PostgreSQL and SQLite return the count from the
+  upsert (`RETURNING`); MySQL reads it back after `ON DUPLICATE KEY UPDATE`,
+  which can only read a later count, never an earlier one. `ttl` is not
+  stored: delete rows whose `reset_at` and `blocked_until` are past, on your own
+  schedule, if keys churn.
+- **`TokenStore`** holds email-verification and password-reset tokens in one
+  `effect_auth_tokens` table, by `purpose`. `token` is the SHA-256 digest the
+  services compute; every read and delete is scoped to the store's purpose, so
+  a password-reset request never clears a pending verification. Expiry is the
+  services' check: an expired row is returned as found.
+
 ## Store semantics
 
 The stores implement effect-auth's contracts exactly:
@@ -727,6 +898,9 @@ The stores implement effect-auth's contracts exactly:
 - **`null` on a miss.** `get`, `getByValue` and `setVerified` return `null`
   rather than failing when there is no matching row, and `replace` returns
   `null` when the identifier it replaces is no longer the user's.
+- **`getByValue` matches exactly.** Values that differ only by case, accent or
+  width are different identifiers on every dialect (on MySQL through the binary
+  collation above).
 - **Deletes are no-ops** when the row does not exist.
 - **Driver failures become `AuthError`** with the original error preserved as
   `cause` — including the unique-index violation raised when two users race for
@@ -739,15 +913,14 @@ The stores implement effect-auth's contracts exactly:
   otherwise each autocommits, and a failure between them leaves the user holding
   both, never neither. Confirming an email change again releases the old one.
   A value another user holds is refused before anything is deleted.
-- **Password hashes live outside `UserStore`.** Reading and writing
-  `password_hash` is the job of a store this package does not implement yet
-  (`EmailPasswordStore`), so pair it with the `sql` package or your own writer
-  for sign-up flows.
+- **Password hashes live outside `UserStore`.** Only `EmailPasswordStore`
+  reads or writes `password_hash`; `UserStore` never selects it.
 - **Session ids are token hashes.** The service layer hashes the bearer token
   before it reaches the store; the database never sees a raw token.
 
-Stores beyond these three — OAuth accounts, WebAuthn credentials, rate limits,
-and the rest — are not covered here yet.
+Stores this package does not implement — OAuth accounts, WebAuthn credentials,
+one-time tokens (`OneTimeTokenStore`) and the rest — come from the `sql`
+package or your own layer.
 
 ## License
 

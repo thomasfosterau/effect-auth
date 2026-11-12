@@ -1,8 +1,11 @@
 import { assert, describe, it, expect, vi } from "vite-plus/test";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
+import { hashToken } from "../TokenHash.ts";
 
 const EMAIL = "alice@client.test";
 const PW = "password-123";
@@ -48,6 +51,44 @@ describe("createAuthClient", () => {
     expect(session?.user.email).toBe(EMAIL);
 
     await client.signOut();
+    expect(await client.getSession()).toBeNull();
+  });
+
+  it("never sees the session token: every body names the session by its digest (#581)", async () => {
+    const server = makeServerFixture();
+    const tokens: string[] = [];
+    const bodies: string[] = [];
+    const base = makeCookieJarFetch(server.handler);
+    const client = createAuthClient({
+      baseUrl: "http://client.test",
+      fetch: async (input, init?) => {
+        const response = await base(input, init);
+        tokens.push(
+          ...Arr.getSomes(
+            Arr.map(response.headers.getSetCookie(), (line) =>
+              Option.fromNullishOr(/^conduit_session=([^;]+)/.exec(line)?.[1]),
+            ),
+          ),
+        );
+        bodies.push(await response.clone().text());
+        return response;
+      },
+    });
+
+    await client.signUp({ email: EMAIL, password: PW });
+    await client.signOut();
+    await client.signIn({ email: EMAIL, password: PW });
+    const current = await client.getSession();
+    const listed = await client.listSessions();
+
+    expect(tokens).toHaveLength(2);
+    expect(bodies.filter((body) => tokens.some((token) => body.includes(token)))).toEqual([]);
+    const token = tokens.at(-1) ?? "";
+    expect(current?.session.id).toBe(hashToken(token));
+    expect(listed.map((session) => session.id)).toEqual([current?.session.id]);
+
+    // The id the client holds signs the current session out.
+    await client.revokeSession(current?.session.id ?? "");
     expect(await client.getSession()).toBeNull();
   });
 

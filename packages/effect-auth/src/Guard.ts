@@ -164,6 +164,7 @@ import { Context, Data, Effect } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";
 import type * as Errors from "./Errors.ts";
@@ -241,7 +242,7 @@ export interface Capabilities {
 export interface Guards<Id, User extends ViewerShape, Rung extends string> {
   /** The ladder the kit compares against. */
   readonly ladder: Ladder.Ladder<Rung>;
-  /** The resolved viewer, `Option.none()` when anonymous. Never fails. */
+  /** The resolved viewer, `Option.none()` when anonymous (or its id is empty, #661). Never fails. */
   readonly viewer: Effect.Effect<Option.Option<User>, never, Id>;
   /**
    * The viewer as the kernel's principal entity — `<principalType>::"<id>"`
@@ -355,7 +356,8 @@ export interface GuardOptions<Id, User extends ViewerShape, Rung extends string>
   /**
    * The application's viewer service: `Option<User>`, `none` when anonymous.
    * Provide it with `SessionContext.viewerLayer` /
-   * `SessionContext.viewerFromSession`.
+   * `SessionContext.viewerFromSession`. A viewer whose `id` is empty is read
+   * as anonymous (#661): an empty id names no principal.
    */
   readonly viewer: Context.Key<Id, Option.Option<User>>;
   /**
@@ -455,7 +457,7 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
   ): boolean => {
     if (viewer === null || viewer === undefined) return false;
     const owned = Entity.entity(
-      Entity.ref(ownedType, ""),
+      Entity.ref(ownedType, "row"),
       ownerId === undefined
         ? {}
         : { attributes: { owner: Entity.entityValue(Entity.ref(principalType, ownerId)) } },
@@ -463,7 +465,12 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
     return decide(ownerOrRole(min), viewer, `owner-or-role:${axisName(min)}`, owned);
   };
 
-  const viewer: Effect.Effect<Option.Option<User>, never, Id> = options.viewer;
+  // An empty id names no principal (#661): such a viewer is anonymous, so no
+  // gate passes for it and no owned row with an empty owner is its own.
+  const viewer: Effect.Effect<Option.Option<User>, never, Id> = Effect.map(
+    options.viewer,
+    Option.filter((user) => Str.isNonEmpty(user.id)),
+  );
 
   const requireUser: Effect.Effect<User, Unauthorized, Id> = Effect.flatMap(viewer, (maybe) =>
     Option.isSome(maybe)

@@ -201,6 +201,16 @@ export const schemaStatements: readonly string[] = [
     token TEXT PRIMARY KEY,
     attempts INTEGER NOT NULL
   )`,
+  // Wrong email-OTP codes per (email, purpose), kept across resends (#590).
+  // A table of its own so `emailOtp.upsert`'s DELETE + INSERT and
+  // `purgeExpired` leave it; only a successful verification deletes the row.
+  `CREATE TABLE IF NOT EXISTS auth_email_otp_failures (
+    email TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    failures INTEGER NOT NULL,
+    last_failure_at BIGINT NOT NULL,
+    PRIMARY KEY (email, purpose)
+  )`,
   // The ceremony each WebAuthn challenge was issued for (#591), a table of
   // its own for the same reason. A challenge with no row here reads as
   // missing, so one written before the table existed is redeemable by neither

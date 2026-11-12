@@ -37,7 +37,7 @@ import { type HookError } from "../Hooks.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
-import { IdentifierStore } from "../Identifier.ts";
+import { IdentifierStore, lookupIdentifier } from "../Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -194,6 +194,8 @@ export interface OAuthSignInResult {
   readonly user: Types.User;
   readonly account: OAuthAccount;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
   readonly isNewUser: boolean;
   readonly returnTo?: string;
 }
@@ -1215,7 +1217,7 @@ export const make = (
      */
     const autoLinkTarget = (providerName: string, email: string, emailVerified: boolean) =>
       Effect.gen(function* () {
-        const existing = yield* identifiers.getByValue("email", email);
+        const existing = yield* lookupIdentifier(identifiers, "email", email);
         if (existing === null) return null;
         const mayLink =
           emailVerified &&
@@ -1331,12 +1333,13 @@ export const make = (
               yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
               const user = yield* userStore.getUser(updatedAccount.userId);
-              const session = yield* sessionManager.createSession(user.id);
+              const { session, token } = yield* sessionManager.createSession(user.id);
 
               return {
                 user,
                 account: updatedAccount,
                 session,
+                token,
                 isNewUser: false,
                 ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
               } satisfies OAuthSignInResult;
@@ -1372,12 +1375,13 @@ export const make = (
             };
             yield* accountStore.create(yield* encryptAccount(account));
 
-            const session = yield* sessionManager.createSession(user.id);
+            const { session, token } = yield* sessionManager.createSession(user.id);
 
             return {
               user,
               account,
               session,
+              token,
               isNewUser,
               ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
             } satisfies OAuthSignInResult;

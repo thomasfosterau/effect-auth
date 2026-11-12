@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { memoryEmailPasswordStore, memoryOtpFailures } from "./testing/MemoryStores.ts";
 import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -90,14 +90,17 @@ const makeWorld = (type: IdentifierType, value: string) => {
       Effect.sync(() => {
         sessionsFor.push(userId);
         return {
-          id: `s-${userId}`,
-          userId,
-          expiresAt: DateTime.toDateUtc(
-            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
-          ),
-          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-          lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-          attributes: {},
+          session: {
+            id: `s-${userId}`,
+            userId,
+            expiresAt: DateTime.toDateUtc(
+              DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+            ),
+            createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            attributes: {},
+          },
+          token: `token-${userId}`,
         };
       }),
     validateSession: () => Effect.die("unused"),
@@ -156,6 +159,7 @@ const memoryOtpStore = <R extends { readonly purpose: string; readonly attempts:
         MutableHashMap.set(records, key(address, purpose), { ...record, attempts });
         return attempts;
       }),
+    ...memoryOtpFailures<string>(),
   };
 };
 

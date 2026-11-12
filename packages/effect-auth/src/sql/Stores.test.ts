@@ -262,6 +262,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(tables).toEqual([
         "auth_account_lockouts",
         "auth_api_keys",
+        "auth_email_otp_failures",
         "auth_email_otps",
         "auth_email_verifications",
         "auth_identifiers",
@@ -1381,9 +1382,9 @@ const storeContract = (engine: StoreEngine): void => {
         const user = yield* makeUser("manager@example.com");
         const manager = yield* Auth.SessionService;
         const session = yield* manager.createSession(user.id, { ip: "127.0.0.1" });
-        const validated = yield* manager.validateSession(session.id);
-        yield* manager.invalidateSession(session.id);
-        const invalidated = yield* Effect.flip(manager.validateSession(session.id));
+        const validated = yield* manager.validateSession(session.token);
+        yield* manager.invalidateSession(session.token);
+        const invalidated = yield* Effect.flip(manager.validateSession(session.token));
         return { user, session, validated, invalidated };
       }).pipe(
         Effect.provide(
@@ -1534,6 +1535,7 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.identifierStoreConformance({ seedUser }),
       Testing.apiKeyStoreConformance({ seedUser }),
       Testing.challengeStoreConformance(),
+      Testing.emailOtpStoreConformance(),
     ];
     Arr.forEach(suites, (suite) => {
       describe(`${suite.contract} conformance`, () => {

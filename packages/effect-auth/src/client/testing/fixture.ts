@@ -9,7 +9,7 @@
  */
 import * as Auth from "../../index.ts";
 import * as Http from "../../http/index.ts";
-import { memorySessionStore } from "../../testing/MemoryStores.ts";
+import { memoryPhoneOtpStore, memorySessionStore } from "../../testing/MemoryStores.ts";
 import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -232,31 +232,6 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       }),
   };
 
-  const phoneRecords = MutableHashMap.empty<string, Auth.PhoneOtpRecord>();
-  const phoneKey = (phone: string, purpose: Auth.PhoneOtpPurpose) => `${phone}:${purpose}`;
-  const phoneOtpStore: typeof Auth.PhoneOtpStore.Service = {
-    upsert: (record) =>
-      Effect.sync(() => {
-        MutableHashMap.set(phoneRecords, phoneKey(record.phoneNumber, record.purpose), record);
-        return record;
-      }),
-    get: (phone, purpose) =>
-      Effect.sync(() =>
-        Option.getOrNull(MutableHashMap.get(phoneRecords, phoneKey(phone, purpose))),
-      ),
-    delete: (phone, purpose) =>
-      Effect.sync(() => void MutableHashMap.remove(phoneRecords, phoneKey(phone, purpose))),
-    incrementAttempts: (phone, purpose) =>
-      Effect.sync(() => {
-        const record = Option.getOrUndefined(
-          MutableHashMap.get(phoneRecords, phoneKey(phone, purpose)),
-        );
-        if (record === undefined) return 0;
-        const updated = { ...record, attempts: record.attempts + 1 };
-        MutableHashMap.set(phoneRecords, phoneKey(phone, purpose), updated);
-        return updated.attempts;
-      }),
-  };
   const phoneOtpUserStore: typeof Auth.PhoneOtpUserStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
@@ -293,7 +268,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Layer.succeed(Auth.AccountManagementStore)(accountStore),
     Layer.succeed(Auth.MultiFactor.MultiFactorStore)(multiFactorStore),
     Layer.succeed(Auth.MultiFactor.PendingMultiFactorStore)(pendingMultiFactorStore),
-    Layer.succeed(Auth.PhoneOtpStore)(phoneOtpStore),
+    Layer.succeed(Auth.PhoneOtpStore)(memoryPhoneOtpStore()),
     Layer.succeed(Auth.PhoneOtpUserStore)(phoneOtpUserStore),
     Layer.succeed(Auth.DeviceAuthorizationStore)(deviceStore),
   );
@@ -503,15 +478,19 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     options.organization === true ? organizationLayer : Layer.empty,
   );
 
+  // The fixture runs one in-process client, with no client address, so the
+  // per-address IP limit `Http.make` applies by default is off (#583): it would
+  // refuse every address-less request to a limited endpoint.
   const { handler } = Http.make({
     services,
     cookie: { secure: false },
+    ipRateLimit: false,
     ...(options.multiSession !== undefined && { multiSession: options.multiSession }),
   });
 
   /**
    * Claim a `username` login handle for a user (there is no HTTP endpoint for
-   * it: usernames are registered by the app, then used at `/sign-in/username`).
+   * it: usernames are registered by the app, then used by a `POST /sessions` with a `username` credential).
    */
   const registerUsername = (userId: string, username: string): Auth.Identifier => {
     const identifier = Auth.makeIdentifier({

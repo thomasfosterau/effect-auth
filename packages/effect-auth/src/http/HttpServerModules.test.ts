@@ -42,6 +42,7 @@ import {
 } from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
+import { expectSpecJson } from "../testing/WireFormat.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -404,7 +405,7 @@ const makeFixture = () => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   );
-  const { handler } = HttpServer.make({ services, cookie: { secure: false } });
+  const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
   return { handler, seedUser, makeSession, sessions, members };
 };
@@ -1338,6 +1339,8 @@ describe("HTTP impersonation endpoints", () => {
     expect(started.status).toBe(201);
     const token = sessionCookieOf(started);
     assert(token !== undefined && token !== "", "the impersonation's session is the cookie");
+    // The token reaches the browser in the cookie only, never the body (#581).
+    expect(await started.clone().text()).not.toContain(token);
     const document = await jsonBody(
       started,
       Schema.Struct({
@@ -1485,7 +1488,10 @@ describe("HTTP JWT endpoints", () => {
 
     const jwksRes = await fx.handler(req("GET", "/jwks"));
     expect(jwksRes.status).toBe(200);
-    const { keys } = Schema.decodeUnknownSync(Jwks)(await jwksRes.json());
+    // RFC 7517 JSON, served as `application/json`, never a JSON:API document.
+    const { keys } = Schema.decodeUnknownSync(Jwks)(
+      await expectSpecJson(jwksRes, "application/json", ["keys"]),
+    );
     expect(keys.length).toBe(1);
 
     // Verify the ES256 signature against the published JWK.

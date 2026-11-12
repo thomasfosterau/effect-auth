@@ -1,25 +1,45 @@
 /**
  * Account lockout plugin (transform hook with short-circuit).
  *
- * Counts consecutive failed sign-in attempts per normalized email and, once
- * `maxAttempts` is reached, locks the identifier for `lockoutDurationMs`.
- * `beforeSignIn` fails fast with `AccountLockedError` while locked;
- * `afterSignIn` (only fired on success) clears the counter, so a successful
- * sign-in resets the streak. The reset tap is isolated — a transient store
- * error while clearing the counter can never abort a sign-in that already
- * succeeded.
+ * Guards `beforeAuthenticate`, which every credential-verifying flow fires
+ * (email and password, username, email and phone OTP, magic link, and
+ * second-factor redemption). Each attempt is counted before the credential
+ * is checked, and once `maxAttempts` attempts have been counted without a
+ * session being issued, the account is locked for `lockoutDurationMs`:
+ * `beforeAuthenticate` fails fast with `AccountLockedError` while locked.
+ *
+ * - **Keyed on the account.** The counter is keyed on the resolved user
+ *   (`lockout:user:<id>`), so every handle of one account (its email, its
+ *   username, its phone number) shares one count. A handle no account holds
+ *   is keyed on the handle itself (`lockout:email:<address>`, ...), so an
+ *   unknown handle locks after the same number of attempts a known one does
+ *   (see `authenticationSubject`).
+ * - **Cleared only when a session is issued** (`afterCreateSession`), never by
+ *   a correct password that only earned a second-factor challenge: an
+ *   attacker who has the password cannot reset the count by signing in again.
+ * - **Second factor has its own per-user count** (`lockout:second-factor:
+ *   user:<id>`, `maxSecondFactorAttempts`), independent of the challenge
+ *   tokens: each challenge caps its own wrong codes, but the user's count
+ *   runs across every challenge, so fresh challenges buy no fresh guesses.
+ *   While it is locked, second-factor redemption fails with
+ *   `AccountLockedError`; only someone who passed the first factor can drive
+ *   it, so it is not a lever for locking out an account by its handle alone.
+ *
+ * The clearing tap is isolated: a transient store error while clearing the
+ * counter can never abort a sign-in that already succeeded.
  *
  * OWASP recommends account lockout as brute-force mitigation; better-auth does
- * not ship it. Hooks fire before user resolution, so the counter is keyed by
- * the normalized email rather than a user id.
+ * not ship it.
  *
  * ## Deliberate tradeoff: lockout-as-DoS
  *
- * Because the counter is keyed solely on the target email and increments
- * before credentials are checked, anyone who knows a victim's email can
+ * Because the counter is keyed on the target account and increments before
+ * credentials are checked, anyone who knows a victim's email or username can
  * submit `maxAttempts` wrong passwords and lock that account for
- * `lockoutDurationMs`, repeatably. That is inherent to email-keyed lockout
- * (the same tradeoff OWASP documents). Mitigations, in order of preference:
+ * `lockoutDurationMs`, repeatably, and the lock refuses every method of
+ * that account (a magic link or a one-time code included) until it lapses.
+ * That is inherent to account-keyed lockout (the same tradeoff OWASP
+ * documents). Mitigations, in order of preference:
  *
  * - Stack {@link ../plugins/IPRateLimit.ts | IPRateLimitPlugin} alongside this
  *   plugin so a single origin can't grind an account down — the IP dimension
@@ -41,9 +61,9 @@
  */
 import { Clock, Context, Duration, Effect, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
-import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
-import { makePlugin } from "../Hooks.ts";
+import { type AuthenticateAttempt, authenticationSubject, makePlugin } from "../Hooks.ts";
+import type * as Types from "../Types.ts";
 
 /** Per-identifier lockout state. `lockedUntil` is epoch-ms when present. */
 export interface AccountLockoutRecord {
@@ -62,7 +82,8 @@ export interface RegisterAttemptOptions {
 }
 
 /**
- * Persistence for lockout counters, keyed by the (prefixed, normalized) email.
+ * Persistence for lockout counters, keyed by the prefixed subject (see
+ * {@link AccountLockoutPlugin}).
  * Implement over your database (see `@thomasfosterau/effect-auth/sql` for an
  * atomic SQL implementation), or use {@link memoryAccountLockoutStore} for
  * single-instance deployments. Entries can safely expire after
@@ -148,7 +169,14 @@ export interface AccountLockoutConfig {
   /** Key namespace in the store. Default `"lockout:"`. */
   readonly keyPrefix?: string;
   /**
-   * What a lockout-store error during `beforeSignIn` does to the sign-in.
+   * Second-factor redemptions per user, across every challenge, before
+   * second-factor redemption is locked for `lockoutDurationMs`. Counted
+   * apart from first-factor attempts and cleared, like them, only when a
+   * session is issued. Default 5.
+   */
+  readonly maxSecondFactorAttempts?: number | undefined;
+  /**
+   * What a lockout-store error during `beforeAuthenticate` does to the attempt.
    * `"fail-closed"` (default): the sign-in fails — protection never silently
    * disappears. `"fail-open"`: the error is logged and the sign-in proceeds
    * without lockout protection (availability over brute-force hardening).
@@ -156,18 +184,43 @@ export interface AccountLockoutConfig {
   readonly onStoreError?: "fail-closed" | "fail-open";
 }
 
-const normalize = (email: string): string => email.trim().toLowerCase();
+/** The counter one attempt is registered on, its threshold and its refusal. */
+interface Counter {
+  readonly key: string;
+  readonly maxAttempts: number;
+  readonly message: string;
+}
 
 /**
  * Build an account-lockout plugin. The resulting layer is
  * `Layer<Hooks, never, Hooks | AccountLockoutStore>` - the store is acquired
- * when the layer is built and used by the `beforeSignIn`/`afterSignIn` hooks.
+ * when the layer is built and used by the `beforeAuthenticate` and
+ * `afterCreateSession` hooks.
  */
 export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
   const maxAttempts = config.maxAttempts ?? 5;
+  const maxSecondFactorAttempts = config.maxSecondFactorAttempts ?? 5;
   const lockoutDurationMs = config.lockoutDurationMs ?? 15 * 60 * 1000;
   const keyPrefix = config.keyPrefix ?? "lockout:";
   const failOpen = config.onStoreError === "fail-open";
+
+  const firstFactorKey = (subject: string) => `${keyPrefix}${subject}`;
+  const secondFactorKey = (subject: string) => `${keyPrefix}second-factor:${subject}`;
+
+  const counterFor = (attempt: AuthenticateAttempt): Counter => {
+    const subject = authenticationSubject(attempt);
+    return attempt.method === "second-factor"
+      ? {
+          key: secondFactorKey(subject),
+          maxAttempts: maxSecondFactorAttempts,
+          message: "Second-factor verification temporarily locked due to too many attempts",
+        }
+      : {
+          key: firstFactorKey(subject),
+          maxAttempts,
+          message: "Account temporarily locked due to too many failed sign-in attempts",
+        };
+  };
 
   return makePlugin(
     Effect.gen(function* () {
@@ -188,43 +241,48 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
           : effect;
 
       return {
-        beforeSignIn: (input: SignInInput) =>
+        beforeAuthenticate: (attempt: AuthenticateAttempt) =>
           Effect.gen(function* () {
-            const key = `${keyPrefix}${normalize(input.email)}`;
+            const counter = counterFor(attempt);
             const now = yield* Clock.currentTimeMillis;
 
-            const existing = yield* guarded(store.get(key), null);
+            const existing = yield* guarded(store.get(counter.key), null);
             if (
               existing !== null &&
               existing.lockedUntil !== undefined &&
               existing.lockedUntil > now
             ) {
               return yield* new Errors.AccountLockedError({
-                message: "Account temporarily locked due to too many failed sign-in attempts",
+                message: counter.message,
                 retryAfter: Duration.millis(existing.lockedUntil - now),
               });
             }
 
             // Atomic increment-or-reset: concurrent attempts each count.
-            yield* guarded(store.registerAttempt(key, { maxAttempts, lockoutDurationMs, now }), {
-              failures: 0,
-            });
+            yield* guarded(
+              store.registerAttempt(counter.key, {
+                maxAttempts: counter.maxAttempts,
+                lockoutDurationMs,
+                now,
+              }),
+              { failures: 0 },
+            );
 
-            return input;
+            return attempt;
           }),
 
-        afterSignIn: (result: AuthResult) =>
+        // Only an issued session clears the counts: a correct password that
+        // earned a second-factor challenge leaves them standing (#592).
+        afterCreateSession: (session: Types.Session) =>
           Effect.gen(function* () {
-            // Successful sign-in clears the counter (keyed by the email
-            // handle used to sign in; other handles have no counter).
-            if (result.identifier?.type === "email") {
-              yield* store.delete(`${keyPrefix}${normalize(result.identifier.value)}`);
-            }
-            return result;
+            const subject = `user:${session.userId}`;
+            yield* store.delete(firstFactorKey(subject));
+            yield* store.delete(secondFactorKey(subject));
+            return session;
           }),
       };
     }),
-    // Isolate the reset tap: a transient store error while clearing the
+    // Isolate the clearing tap: a transient store error while clearing the
     // counter must not abort a sign-in that already succeeded.
     { isolateTaps: true },
   );

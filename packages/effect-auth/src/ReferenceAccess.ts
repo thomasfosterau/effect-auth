@@ -231,7 +231,7 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
     facts: OwnedAccess.RelationFacts,
   ): boolean => {
     const principal = Option.isSome(viewer) ? guards.principal(viewer.value) : anonymousPrincipal;
-    const resource = Entity.entity(Entity.ref(referenceType, ""), {
+    const resource = Entity.entity(Entity.ref(referenceType, "row"), {
       attributes: {
         ...(row.visibility === undefined ? {} : { visibility: row.visibility }),
         // The guards' principal type, so the anonymous principal never matches it.

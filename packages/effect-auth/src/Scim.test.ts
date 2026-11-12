@@ -42,6 +42,7 @@ import { SessionService } from "./SessionService.ts";
 import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { UserService, UserServiceStore } from "./User.ts";
 import type * as Types from "./Types.ts";
+import { expectSpecJson } from "./testing/WireFormat.ts";
 
 const ORG_A = "org-a";
 const ORG_B = "org-b";
@@ -132,7 +133,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
           attributes: {},
         };
         MutableHashMap.set(sessions, session.id, session);
-        return session;
+        return { session, token: `token-${session.id}` };
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: (sessionId) =>
@@ -1044,9 +1045,13 @@ const makeHttpFixture = async (
     ...stores,
     token: connection.token,
     otherToken: other.token,
-    handler: HttpServer.make({ services: withScim, cookie: { secure: false } }).handler,
-    handlerWithoutScim: HttpServer.make({ services: withoutScim, cookie: { secure: false } })
+    handler: HttpServer.make({ services: withScim, cookie: { secure: false }, ipRateLimit: false })
       .handler,
+    handlerWithoutScim: HttpServer.make({
+      services: withoutScim,
+      cookie: { secure: false },
+      ipRateLimit: false,
+    }).handler,
   };
 };
 
@@ -1110,6 +1115,10 @@ const ScimErrorBody = Schema.Struct({
 /** A body's own fields, as the wire carried them. */
 const JsonFields = Schema.Record(Schema.String, Schema.Json);
 
+/** A SCIM body carrying `schemas` and each of `members`, never a JSON:API document. */
+const scimJson = (response: Response, members: ReadonlyArray<string> = []) =>
+  expectSpecJson(response, "application/scim+json", ["schemas", ...members]);
+
 describe("HTTP SCIM endpoints", () => {
   it("gates every route on the provisioning token", async () => {
     const fx = await makeHttpFixture();
@@ -1126,6 +1135,56 @@ describe("HTTP SCIM endpoints", () => {
 
     const authorized = await fx.handler(scimReq("GET", "/Users", { token: fx.token }));
     expect(authorized.status).toBe(200);
+  });
+
+  it("speaks application/scim+json on every route, never a JSON:API document (#205)", async () => {
+    const fx = await makeHttpFixture();
+    const { token } = fx;
+    const send = (method: string, path: string, body?: Schema.Json) =>
+      fx.handler(scimReq(method, path, { token, ...(body !== undefined && { body }) }));
+
+    const user = await scimJson(
+      await send("POST", "/Users", {
+        userName: "wire@acme.test",
+        emails: [{ value: "wire@acme.test" }],
+      }),
+      ["id", "userName", "meta"],
+    );
+    const userId = Schema.decodeUnknownSync(Schema.String)(user["id"]);
+    const group = await scimJson(await send("POST", "/Groups", { displayName: "Wire" }), ["id"]);
+    const groupId = Schema.decodeUnknownSync(Schema.String)(group["id"]);
+    const patch = {
+      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+      Operations: [{ op: "replace", path: "displayName", value: "Wire 2" }],
+    };
+
+    const answers = await Promise.all([
+      send("GET", "/Users"),
+      send("GET", `/Users/${userId}`),
+      send("PUT", `/Users/${userId}`, { userName: "wire@acme.test", displayName: "Wire" }),
+      send("PATCH", `/Users/${userId}`, patch),
+      send("GET", "/Groups"),
+      send("GET", `/Groups/${groupId}`),
+      send("PUT", `/Groups/${groupId}`, { displayName: "Wire 3" }),
+      send("PATCH", `/Groups/${groupId}`, patch),
+      send("GET", "/ServiceProviderConfig"),
+      send("GET", "/ResourceTypes"),
+      send("GET", "/Schemas"),
+      // Refusals are SCIM error bodies (RFC 7644 §3.12), not JSON:API ones.
+      send("GET", "/Users/unknown"),
+      fx.handler(scimReq("GET", "/Groups")),
+    ]);
+    expect(answers.map((response) => response.status)).toEqual([
+      200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 404, 401,
+    ]);
+    await Promise.all(answers.map((response) => scimJson(response)));
+
+    // Deletes answer `204` with no body.
+    const deleted = await Promise.all([
+      send("DELETE", `/Groups/${groupId}`),
+      send("DELETE", `/Users/${userId}`),
+    ]);
+    expect(deleted.map((response) => response.status)).toEqual([204, 204]);
   });
 
   it("returns 404 in SCIM's error shape when provisioning is not configured", async () => {

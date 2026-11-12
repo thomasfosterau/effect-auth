@@ -2,7 +2,12 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
-import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";
+import {
+  IdentifierStore,
+  lookupIdentifier,
+  resolveUserByIdentifier,
+  type IdentifierType,
+} from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { makeDecoyHash, verifyPasswordOrDecoy } from "../password/DecoyVerify.ts";
 import type * as Types from "../Types.ts";
@@ -161,7 +166,7 @@ export interface SignInInput {
   readonly email: string;
   readonly password: string;
   readonly sessionAttributes?: Types.Attributes;
-  /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignIn` hook. */
+  /** Optional captcha token, consumed by the `CaptchaPlugin` on the `beforeAuthenticate` hook. */
   readonly captchaToken?: string;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
@@ -209,6 +214,8 @@ export interface AuthResult {
    */
   readonly identifier?: { readonly type: IdentifierType; readonly value: string };
   readonly session?: Types.Session;
+  /** The raw session token, present with `session`: the credential the client presents; `session.id` is its digest. */
+  readonly token?: string | undefined;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
   /**
@@ -250,7 +257,8 @@ export const answeredByStandIn = (
   email: string,
 ): Effect.Effect<boolean, Errors.AuthError> =>
   Effect.gen(function* () {
-    const holder = yield* identifiers.getByValue(
+    const holder = yield* lookupIdentifier(
+      identifiers,
       "email",
       result.identifier?.value ?? normalizeEmail(email),
     );
@@ -266,7 +274,7 @@ export interface ChangePasswordInput {
   readonly newPassword: string;
   /** Revoke the user's other sessions after the change (keeps `currentSessionId`). */
   readonly revokeOtherSessions?: boolean;
-  /** The session to keep when `revokeOtherSessions` is set; omit to revoke all. */
+  /** The stored id (`session.id`) of the session to keep when `revokeOtherSessions` is set; omit to revoke all. */
   readonly currentSessionId?: string;
 }
 
@@ -456,7 +464,7 @@ export const make = (
             maxPasswordLength: resolved.maxPasswordLength,
           });
 
-          const taken = yield* identifiers.getByValue("email", email);
+          const taken = yield* lookupIdentifier(identifiers, "email", email);
           if (taken) return yield* addressTaken(input, email);
 
           // The identifier's unique (type, value) index is the real claim; a
@@ -496,10 +504,14 @@ export const make = (
             return yield* hooks.afterSignUp({ user, identifier: handle, method: "email-password" });
           }
 
-          const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const { session, token } = yield* sessionManager.createSession(
+            user.id,
+            input.sessionAttributes,
+          );
           const signUpResult = {
             user,
             session,
+            token,
             identifier: handle,
             method: "email-password" as const,
           };
@@ -543,6 +555,12 @@ export const make = (
             email,
           );
           const user = resolvedUser?.user ?? null;
+          yield* hooks.beforeAuthenticate({
+            method: "email-password",
+            identifier: { type: "email", value: email },
+            userId: user?.id,
+            captchaToken: input.captchaToken,
+          });
           const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
           // Always verify against a real or decoy hash so timing is constant
           // regardless of whether the account exists.
@@ -592,10 +610,14 @@ export const make = (
             });
           }
 
-          const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const { session, token } = yield* sessionManager.createSession(
+            user.id,
+            input.sessionAttributes,
+          );
           const signInResult = {
             user,
             session,
+            token,
             identifier: handle,
             method: "email-password" as const,
             ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),

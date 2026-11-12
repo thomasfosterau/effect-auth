@@ -7,8 +7,8 @@
  * Sign-up validates + reserves the username then delegates credential
  * creation to {@link EmailPasswordService}; sign-in resolves the user by
  * username identifier and verifies the password with the same
- * anti-enumeration error and the same `SecondFactorGate` seam as
- * email/password sign-in.
+ * anti-enumeration error, the same `beforeAuthenticate` hook and the same
+ * `SecondFactorGate` seam as email/password sign-in.
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
@@ -25,6 +25,7 @@ import {
   anyEmailValue,
   claimIdentifier,
   IdentifierStore,
+  lookupIdentifier,
   makeIdentifier,
   primaryEmail,
   refusalAuthError,
@@ -75,6 +76,8 @@ export interface UsernameSignInInput {
   readonly username: string;
   readonly password: string;
   readonly sessionAttributes?: Types.Attributes;
+  /** Optional captcha token, consumed by the `CaptchaPlugin` on the `beforeAuthenticate` hook. */
+  readonly captchaToken?: string | undefined;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
    * (a browser-session cookie). See `SignInInput.rememberMe` for details.
@@ -200,7 +203,7 @@ const make = (
       signUp: Effect.fn("UsernameService.signUp")(function* (input: UsernameSignUpInput) {
         const username = yield* validate(input.username);
 
-        if ((yield* identifiers.getByValue("username", username)) !== null) {
+        if ((yield* lookupIdentifier(identifiers, "username", username)) !== null) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
 
@@ -223,7 +226,7 @@ const make = (
         // silently leave a fresh sign-up's username unclaimed.
         const standIn = yield* answeredByStandIn(identifiers, users, result, input.email);
         if (standIn) {
-          if ((yield* identifiers.getByValue("username", username)) !== null) {
+          if ((yield* lookupIdentifier(identifiers, "username", username)) !== null) {
             return yield* new UsernameError({ message: "Username is already taken" });
           }
           return result;
@@ -263,8 +266,16 @@ const make = (
           return yield* invalid();
         }
 
-        const identifier = yield* identifiers.getByValue("username", username);
+        const identifier = yield* lookupIdentifier(identifiers, "username", username);
         const user = identifier === null ? null : yield* users.get(identifier.userId);
+        // The same gate as email and password sign-in: lockout, rate limits
+        // and captcha key on the resolved user (#592).
+        yield* hooks.beforeAuthenticate({
+          method: "username",
+          identifier: { type: "username", value: username },
+          userId: user?.id,
+          captchaToken: input.captchaToken,
+        });
         const passwordHash =
           user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
         // Always verify against a real or decoy hash so timing is constant
@@ -311,10 +322,14 @@ const make = (
           });
         }
 
-        const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+        const { session, token } = yield* sessionManager.createSession(
+          user.id,
+          input.sessionAttributes,
+        );
         return yield* hooks.afterSignIn({
           user,
           session,
+          token,
           identifier: handle,
           method: "username",
           ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
@@ -327,7 +342,7 @@ const make = (
       ) {
         const username = yield* validate(rawUsername);
 
-        const existing = yield* identifiers.getByValue("username", username);
+        const existing = yield* lookupIdentifier(identifiers, "username", username);
         if (existing !== null && existing.userId !== userId) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }

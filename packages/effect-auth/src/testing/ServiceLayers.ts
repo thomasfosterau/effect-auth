@@ -68,11 +68,11 @@ export interface SessionServiceLayerOptions {
  * const program = Effect.gen(function* () {
  *   const sessions = yield* Auth.SessionService
  *   const created = yield* sessions.createSession(ada.id)
- *   const valid = yield* sessions.validateSession(created.id)
+ *   const valid = yield* sessions.validateSession(created.token)
  *   assert.equal(valid.user.id, ada.id)
  *
- *   yield* sessions.invalidateSession(created.id)
- *   const revoked = yield* Effect.flip(sessions.validateSession(created.id))
+ *   yield* sessions.invalidateSession(created.token)
+ *   const revoked = yield* Effect.flip(sessions.validateSession(created.token))
  *   assert.equal(revoked._tag, "SessionNotFoundError")
  * })
  *

@@ -344,6 +344,7 @@ describe("D1-backed effect-auth storage: conformance", () => {
       Testing.userStoreConformance({ seedUser }),
       Testing.identifierStoreConformance({ seedUser }),
       Testing.apiKeyStoreConformance({ seedUser }),
+      Testing.emailOtpStoreConformance(),
       Testing.pendingMultiFactorStoreConformance({ seedUser }),
       Testing.challengeStoreConformance(),
     ],

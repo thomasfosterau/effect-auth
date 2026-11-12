@@ -23,10 +23,11 @@
  */
 
 import { getTableColumns } from "drizzle-orm";
-import type {
-  MySqlDatabase,
-  MySqlQueryResultHKT,
-  PreparedQueryHKTBase,
+import {
+  mysqlTable,
+  type MySqlDatabase,
+  type MySqlQueryResultHKT,
+  type PreparedQueryHKTBase,
 } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
 import { DateTime, Effect, Layer, Struct } from "effect";
@@ -39,7 +40,15 @@ import { fromTables } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
 import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
 import { layer } from "./Layers.ts";
-import { defineTables, migrationStatements, tables, type Tables } from "./MySqlSchema.ts";
+import {
+  binaryVarchar,
+  collationMigrationStatements,
+  defineTables,
+  identifierCollation,
+  migrationStatements,
+  tables,
+  type Tables,
+} from "./MySqlSchema.ts";
 import type * as Pg from "./PgSchema.ts";
 import * as Requests from "./Requests.ts";
 import type { Tables as AnyTables } from "./Schema.ts";
@@ -308,6 +317,50 @@ describe("MySQL / statements", () => {
     );
   });
 
+  it("never resolves the row an unmigrated case- and accent-insensitive column returns for a look-alike (#602)", async () => {
+    // A table still under `utf8mb4_0900_ai_ci` answers `bob@exämple.com` with
+    // Bob's row. The lookup goes out unchanged; core refuses the answer.
+    const bobRow = wireRow(projection.identifiers.names, {
+      id: "identifier-bob",
+      userId: "user-bob",
+      type: "email",
+      value: "bob@example.com",
+      verified: 1,
+      verifiedAt: "2026-01-01 00:00:00.000",
+      createdAt: "2026-01-01 00:00:00.000",
+    });
+    const proxy = makeProxy();
+    proxy.respondWith([bobRow]);
+
+    const resolved = await run(
+      proxy,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        const users = yield* Auth.UserStore;
+        return yield* Auth.resolveUserByIdentifier(store, users.get, "email", "bob@exämple.com");
+      }),
+    );
+
+    expect(resolved).toBeNull();
+    expect(proxy.statements).toHaveLength(1);
+    expect(proxy.statements[0]?.sql).toContain(
+      "where (`effect_auth_identifiers`.`type` = ? and `effect_auth_identifiers`.`value` = ?)",
+    );
+    expect(proxy.statements[0]?.params).toEqual(["email", "bob@exämple.com", 1]);
+
+    // The exact address still resolves through the same path.
+    const exact = makeProxy();
+    exact.respondWith([bobRow]);
+    const found = await run(
+      exact,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* Auth.lookupIdentifier(store, "email", "bob@example.com");
+      }),
+    );
+    expect(found?.userId).toBe("user-bob");
+  });
+
   it("batches the same way through the request resolvers", async () => {
     const proxy = makeProxy();
     proxy.respondWith([
@@ -343,8 +396,8 @@ describe("MySQL / statements", () => {
 describe("MySQL / Schema", () => {
   it("emits MySQL DDL with the indexes inline", () => {
     const statements = migrationStatements();
-    // Three, not six: MySQL has no `CREATE INDEX IF NOT EXISTS`.
-    expect(statements).toHaveLength(3);
+    // One per table: MySQL has no `CREATE INDEX IF NOT EXISTS`.
+    expect(statements).toHaveLength(6);
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_users");
     expect(statements[0]).toContain("id VARCHAR(255) NOT NULL PRIMARY KEY");
     expect(statements[0]).toContain("attributes JSON NOT NULL");
@@ -356,6 +409,38 @@ describe("MySQL / Schema", () => {
     expect(statements[2]).toContain(
       "UNIQUE KEY effect_auth_identifiers_type_value_key (type, value)",
     );
+  });
+
+  it("declares identifier values under a binary collation, in the table and the DDL (#602)", () => {
+    expect(identifierCollation).toBe("utf8mb4_bin");
+    // The drizzle column, as drizzle-kit emits it.
+    expect(tables.identifiers.value.getSQLType()).toBe(
+      "varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+    );
+    expect(tables.identifiers.value.notNull).toBe(true);
+    expect(migrationStatements()[2]).toContain(
+      "value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,",
+    );
+    // The unique key covers that column, so it is binary too.
+    expect(migrationStatements()[2]).toContain("(type, value)");
+    // An application's own identifier column gets the same type.
+    const appUsers = mysqlTable("app_users", {
+      email: binaryVarchar("email", { length: 320 }).unique(),
+    });
+    expect(appUsers.email.getSQLType()).toBe(
+      "varchar(320) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+    );
+  });
+
+  it("converts an existing identifiers table with a one-off migration (#602)", () => {
+    expect(collationMigrationStatements()).toEqual([
+      "ALTER TABLE effect_auth_identifiers MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL",
+    ]);
+    expect(collationMigrationStatements({ identifiers: "app_handles" })).toEqual([
+      "ALTER TABLE app_handles MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL",
+    ]);
+    // The everyday script stays replayable and leaves existing tables alone.
+    expect(migrationStatements().join("\n")).not.toContain("ALTER TABLE");
   });
 
   it("honours custom table names in both the tables and the DDL", () => {

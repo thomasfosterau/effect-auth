@@ -56,7 +56,7 @@ const SignInMeta = Schema.Struct({
  * a union tagged by `method`. It is write-only: no answer carries it back.
  *
  * - `password`: email and password (`captchaToken` for the captcha plugin).
- * - `username`: username and password.
+ * - `username`: username and password (`captchaToken` for the captcha plugin).
  * - `email-otp` / `phone-otp`: a one-time code sent through
  *   `POST /otp-challenges`.
  * - `magic-link`: the token from a magic-link email.
@@ -75,6 +75,7 @@ export const SignInCredential = Schema.Union([
     method: Schema.Literal("username"),
     username: Schema.String,
     password: Schema.String,
+    captchaToken: Schema.optional(Schema.String),
   }),
   Schema.Struct({ method: Schema.Literal("email-otp"), email: Schema.String, otp: Schema.String }),
   Schema.Struct({
@@ -271,7 +272,7 @@ const sendErrors = [
  *
  * - `GET /sessions`: every unexpired session of the caller.
  * - `GET /sessions/:id`: one of them; `current` names the session the request
- *   carries, and `?include=user` adds its user (what `GET /session` answered).
+ *   carries, and `?include=user` adds its user.
  * - `DELETE /sessions/:id`: revoke one; `DELETE /sessions/current` signs out,
  *   clearing the session cookies.
  * - `DELETE /sessions?filter[current]=false`: revoke every session but the
@@ -846,8 +847,9 @@ export const InvitationCreateDocument = writeDocument("invitations", S.InviteMem
 export type InvitationCreateDocument = typeof InvitationCreateDocument.Type;
 
 /**
- * The body of `POST /organizations/:id/domains`: the domain to claim, and
- * optionally how it is proved (`dns`, the default, or `manual`).
+ * The body of `POST /organizations/:id/domains`: the domain to claim. Its
+ * `verificationStrategy` may only be `dns` (the default); `manual` answers
+ * `400`, since manual attestation is the operator's (#598).
  */
 export const DomainCreateDocument = writeDocument(
   "organization-domains",
@@ -1011,21 +1013,53 @@ export const invitationsGroup = Group.make(
 );
 
 /**
- * `organization-domains`: one email-domain claim, by id. Both need
- * `domain:manage` in the claim's organization.
+ * The body of `POST /admin/organization-domains`: the domain the operator
+ * attests, and the organization it is attested for as the `organization`
+ * relationship.
+ */
+export const DomainAttestationDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("organization-domains"),
+    attributes: Schema.Struct({ domain: Schema.String }),
+    relationships: Schema.Struct({
+      organization: Schema.Struct({
+        data: Schema.Struct({ type: Schema.Literal("organizations"), id: Schema.String }),
+      }),
+    }),
+  }),
+});
+export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
+
+/**
+ * `organization-domains`: email-domain claims.
  *
- * - `DELETE /organization-domains/:id`: release the claim; `204`.
- * - `POST /organization-domains/:id/verifications`: run the proof (the DNS TXT
- *   record through the server's `DomainVerifier`, or the admin's attestation
- *   for a `manual` claim); `200` with the claim, now `verified` or `failed`.
+ * - `DELETE /organization-domains/:id`: release the claim (`domain:manage` in
+ *   its organization); `204`.
+ * - `POST /organization-domains/:id/verifications`: check the DNS TXT record
+ *   through the server's `DomainVerifier` (`domain:manage`); `200` with the
+ *   claim, now `verified` or `failed`. The permission is never the proof: an
+ *   unverified `manual` claim is refused (#598).
+ * - `POST /admin/organization-domains`: the operator's attestation, after
+ *   checking ownership out of band, that the `organization` relationship
+ *   controls `domain` (`OrganizationService.attestDomain`). Needs the
+ *   server's `isAdmin`, never an organization permission; `201` with the
+ *   organization's claim, now `verified` with the `manual` strategy. A refusal
+ *   (an unknown organization, an invalid domain, a domain verified for
+ *   another organization) answers `400`.
  *
- * An unknown id answers `404`; a refusal, or a server with no
+ * An unknown id answers `404`; a tenant's refusal, or a server with no
  * `OrganizationDomainStore`, `403`.
  */
 export const organizationDomainsGroup = Group.make(
   R.OrganizationDomain,
   Endpoint.delete(R.OrganizationDomain, { errors: resourceErrors }),
   itemAction("verify", "/organization-domains/:id/verifications", R.OrganizationDomain, 200),
+  Endpoint.create(R.OrganizationDomain, {
+    name: "attest",
+    path: "/admin/organization-domains",
+    payload: DomainAttestationDocument,
+    errors: resourceErrors,
+  }),
 );
 
 /**
@@ -1105,7 +1139,7 @@ export type AdminUserUpdateDocument = typeof AdminUserUpdateDocument.Type;
  *
  * - `GET /admin/users?filter[email]=…&page[offset]=…&page[limit]=…`: the
  *   users, filtered by a case-insensitive substring of an email address,
- *   `meta.total` counting every match (was `POST /admin/users/list`).
+ *   `meta.total` counting every match.
  * - `PATCH /admin/users/:id`: set the user's `role`.
  * - `DELETE /admin/users/:id`: delete the user and revoke their sessions; `204`.
  * - `DELETE /admin/users/:id/sessions`: revoke every session of the user; `204`.
@@ -1182,11 +1216,10 @@ export type ImpersonationCreateDocument = typeof ImpersonationCreateDocument.Typ
  *
  * - `POST /impersonations`: start one (`isAdmin`); `201` with the
  *   impersonation, the impersonated user included, and the session cookie now
- *   the impersonation's session (was `POST /admin/impersonate`).
+ *   the impersonation's session.
  * - `DELETE /impersonations/current`: end the impersonation the request
  *   carries, signing its session out and clearing the session cookies; `204`.
- *   A session that is not an impersonation answers `404` (was
- *   `POST /admin/stop-impersonating`).
+ *   A session that is not an impersonation answers `404`.
  */
 export const impersonationsGroup = Group.make(
   R.Impersonation,
@@ -1238,13 +1271,12 @@ export const apiKeysGroup = Group.make(
  * the server's `isAdmin` (`403` otherwise); `404` when the provider is not
  * enabled.
  *
- * - `GET /oauth-clients`: every store-registered client (was
- *   `GET /oauth2/clients`).
+ * - `GET /oauth-clients`: every store-registered client.
  * - `POST /oauth-clients`: register one; `201` with the client and, for a
  *   confidential (`web`) client, its secret in `meta.clientSecret`, shown this
- *   once (was `POST /oauth2/register`).
+ *   once.
  * - `PATCH /oauth-clients/:id` · `DELETE /oauth-clients/:id`: change or delete
- *   one (was `/oauth2/clients/:clientId`).
+ *   one.
  *
  * A refused change (an unknown or statically configured client) answers `400`.
  * RFC 7591 dynamic registration stays at `/register`.
@@ -1289,7 +1321,7 @@ export type SsoProviderCreateDocument = typeof SsoProviderCreateDocument.Type;
  * `sso-providers`: `POST /sso-providers` registers an enterprise SSO
  * connection (OIDC or SAML); `201` with it. Needs the server's `isAdmin`
  * (`403` otherwise); a refused registration answers `400`, and `404` means SSO
- * is not enabled (was `POST /sso/register`).
+ * is not enabled.
  */
 export const ssoProvidersGroup = Group.make(
   R.SsoProvider,
@@ -1313,7 +1345,7 @@ export type SsoAuthorizationCreateDocument = typeof SsoAuthorizationCreateDocume
  * `sso-authorizations`: `POST /sso-authorizations` starts an SSO sign-in;
  * `201` with the IdP `url` to send the browser to, the round-trip state as the
  * id. No connection for the selector answers `400`; `404` means SSO is not
- * enabled (was `POST /sign-in/sso`).
+ * enabled.
  */
 export const ssoAuthorizationsGroup = Group.make(
   R.SsoAuthorization,
@@ -1325,8 +1357,7 @@ export const ssoAuthorizationsGroup = Group.make(
 
 /**
  * `tokens`: `POST /tokens` signs a JWT for the signed-in user; `201` with it.
- * `404` when JWT is not enabled (was `GET /token`, a read that minted a
- * credential). The keys that verify it are at `GET /jwks`.
+ * `404` when JWT is not enabled. The keys that verify it are at `GET /jwks`.
  */
 export const tokensGroup = Group.make(
   R.Token,
@@ -1359,8 +1390,7 @@ export type DeviceAuthorizationDecisionDocument = typeof DeviceAuthorizationDeci
  * - `POST /device-authorizations/decisions`: approve (signed in: the device
  *   is granted the caller's session) or deny (no session needed) the pending
  *   authorization a user code names; `204`. An unknown or settled code
- *   answers `400`; each code allows 5 attempts per 15 minutes (`429`) (was
- *   `POST /device/approve` · `/device/deny`).
+ *   answers `400`; each code allows 5 attempts per 15 minutes (`429`).
  *
  * The device's own endpoints (`/device/code`, `/device/token`) keep RFC
  * 8628's wire format. `404` when device authorization is not enabled.

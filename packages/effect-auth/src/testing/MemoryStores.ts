@@ -52,6 +52,7 @@ import {
   type OidcToken,
   OidcTokenStore,
 } from "../OidcProvider.ts";
+import { type PhoneOtpPurpose, type PhoneOtpRecord, PhoneOtpStore } from "../PhoneOtp.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { TrustedDeviceStore, type TrustedDeviceRecord } from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
@@ -300,6 +301,74 @@ export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeySt
   getActive: () => Effect.sync(() => keys.at(-1) ?? null),
   create: (pair) => Effect.sync(() => (keys.push(pair), pair)),
   list: () => Effect.sync(() => [...keys]),
+});
+
+// ---------------------------------------------------------------------------
+// One-time codes
+// ---------------------------------------------------------------------------
+
+/** The key of an (address, purpose) pair in the one-time code maps. */
+const codeKey = (address: string, purpose: string): string => `${purpose}:${address}`;
+
+/**
+ * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore` (#590)
+ * over a `MutableHashMap` keyed by purpose and address, to spread into an
+ * in-memory code store. The budget lives apart from the code records, so
+ * replacing or deleting a code leaves it.
+ *
+ * @since 0.3.0
+ * @category constructors
+ */
+export const memoryOtpFailures = <P extends string>(
+  failures: MutableHashMap.MutableHashMap<string, Types.OtpFailures> = MutableHashMap.empty(),
+): Types.OtpFailureBudget<P> => ({
+  getFailures: (address, purpose) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(failures, codeKey(address, purpose)))),
+  recordFailure: (address, purpose, at) =>
+    Effect.sync(() => {
+      const count = Option.match(MutableHashMap.get(failures, codeKey(address, purpose)), {
+        onNone: () => 1,
+        onSome: (stored) => stored.count + 1,
+      });
+      const next: Types.OtpFailures = { count, lastFailureAt: at };
+      MutableHashMap.set(failures, codeKey(address, purpose), next);
+      return next;
+    }),
+  clearFailures: (address, purpose) =>
+    Effect.sync(() => void MutableHashMap.remove(failures, codeKey(address, purpose))),
+});
+
+/**
+ * `PhoneOtpStore` over `MutableHashMap`s: one record per phone number and
+ * purpose, and each pair's failure budget from {@link memoryOtpFailures}.
+ *
+ * @since 0.3.0
+ * @category constructors
+ */
+export const memoryPhoneOtpStore = (
+  records: MutableHashMap.MutableHashMap<string, PhoneOtpRecord> = MutableHashMap.empty(),
+  failures: MutableHashMap.MutableHashMap<string, Types.OtpFailures> = MutableHashMap.empty(),
+): typeof PhoneOtpStore.Service => ({
+  upsert: (record) =>
+    Effect.sync(() => {
+      MutableHashMap.set(records, codeKey(record.phoneNumber, record.purpose), record);
+      return record;
+    }),
+  get: (phoneNumber, purpose) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, codeKey(phoneNumber, purpose)))),
+  delete: (phoneNumber, purpose) =>
+    Effect.sync(() => void MutableHashMap.remove(records, codeKey(phoneNumber, purpose))),
+  incrementAttempts: (phoneNumber, purpose) =>
+    Effect.suspend(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, codeKey(phoneNumber, purpose)));
+      if (record === null) {
+        return Effect.fail(new Errors.AuthError({ message: "OTP record not found" }));
+      }
+      const updated: PhoneOtpRecord = { ...record, attempts: record.attempts + 1 };
+      MutableHashMap.set(records, codeKey(phoneNumber, purpose), updated);
+      return Effect.succeed(updated.attempts);
+    }),
+  ...memoryOtpFailures<PhoneOtpPurpose>(failures),
 });
 
 // ---------------------------------------------------------------------------

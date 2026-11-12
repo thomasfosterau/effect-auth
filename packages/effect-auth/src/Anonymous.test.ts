@@ -60,7 +60,8 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
   };
 
   const sessionManager: typeof SessionService.Service = {
-    createSession: (userId) => Effect.sync(() => makeSession(userId)),
+    createSession: (userId) =>
+      Effect.sync(() => ({ session: makeSession(userId), token: `token-${userId}` })),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
     invalidateUserSessions: (userId) =>

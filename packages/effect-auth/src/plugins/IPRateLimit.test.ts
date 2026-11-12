@@ -4,7 +4,8 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { ClientIP } from "../ClientIP.ts";
 import { Hooks } from "../Hooks.ts";
-import type { SignInInput } from "../email/EmailPassword.ts";
+import type { AuthenticateAttempt } from "../Hooks.ts";
+import type { SignUpInput } from "../email/EmailPassword.ts";
 import { RateLimitError } from "../Errors.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import { IPRateLimitPlugin } from "./IPRateLimit.ts";
@@ -61,17 +62,21 @@ const makeHooksLayer = (
   );
 };
 
-const signIn: SignInInput = { email: "u@example.com", password: "pw" };
+const signIn: AuthenticateAttempt = {
+  method: "email-password",
+  identifier: { type: "email", value: "u@example.com" },
+};
+const signUp: SignUpInput = { email: "u@example.com", password: "pw" };
 
 /**
- * Invoke `hooks.beforeSignIn` with a specific IP in scope.
+ * Invoke `hooks.beforeAuthenticate` with a specific IP in scope.
  * `Effect.provideService(ClientIP, { ip })` simulates what the HTTP middleware
  * does per-request so `Effect.serviceOption(ClientIP)` finds the value.
  */
 const callSignIn = (ip: string | undefined) =>
   Effect.gen(function* () {
     const hooks = yield* Hooks;
-    return yield* hooks.beforeSignIn(signIn).pipe(
+    return yield* hooks.beforeAuthenticate(signIn).pipe(
       Effect.provideService(ClientIP, { ip }),
       Effect.map(() => "ok" as const),
       Effect.catchTag("RateLimitError", () => Effect.succeed("limited" as const)),
@@ -123,7 +128,7 @@ describe("IPRateLimitPlugin", () => {
         );
         const hooks = yield* Hooks;
         const err = yield* Effect.flip(
-          hooks.beforeSignIn(signIn).pipe(Effect.provideService(ClientIP, { ip: undefined })),
+          hooks.beforeAuthenticate(signIn).pipe(Effect.provideService(ClientIP, { ip: undefined })),
         );
         expect(err).toBeInstanceOf(RateLimitError);
         expect(err).toMatchObject({ key: "ip:signin" });
@@ -144,9 +149,9 @@ describe("IPRateLimitPlugin", () => {
         const hooks = yield* Hooks;
         yield* Effect.forEach(
           [
-            hooks.beforeSignIn(signIn),
-            hooks.beforeSignUp(signIn),
-            hooks.beforeRequestPasswordReset({ email: signIn.email }),
+            Effect.asVoid(hooks.beforeAuthenticate(signIn)),
+            Effect.asVoid(hooks.beforeSignUp(signUp)),
+            Effect.asVoid(hooks.beforeRequestPasswordReset({ email: signUp.email })),
           ],
           (run) =>
             Effect.flip(run).pipe(
@@ -190,14 +195,14 @@ describe("IPRateLimitPlugin", () => {
           Arr.makeBy(5, () => signIn),
           (input) =>
             hooks
-              .beforeSignIn(input)
+              .beforeAuthenticate(input)
               .pipe(Effect.provideService(ClientIP, { ip: "9.9.9.9" }), Effect.ignore),
           { concurrency: 1, discard: true },
         );
 
         // 6th attempt should fail with RateLimitError
         const err = yield* Effect.flip(
-          hooks.beforeSignIn(signIn).pipe(Effect.provideService(ClientIP, { ip: "9.9.9.9" })),
+          hooks.beforeAuthenticate(signIn).pipe(Effect.provideService(ClientIP, { ip: "9.9.9.9" })),
         );
 
         expect(err).toBeInstanceOf(RateLimitError);

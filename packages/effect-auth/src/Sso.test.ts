@@ -53,6 +53,7 @@ import {
   type SamlReplayRecord,
 } from "./Saml.ts";
 import type * as Types from "./Types.ts";
+import { expectSpecJson, mediaTypeOf } from "./testing/WireFormat.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -188,14 +189,17 @@ const makeStores = (
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
-        id: `s-${userId}`,
-        userId,
-        expiresAt: DateTime.toDateUtc(
-          DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
-        ),
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
+        session: {
+          id: `s-${userId}`,
+          userId,
+          expiresAt: DateTime.toDateUtc(
+            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+          ),
+          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          attributes: {},
+        },
+        token: `token-${userId}`,
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -522,7 +526,7 @@ describe("SsoService", () => {
     const fx = jitFixture({
       domainStore: {
         ...memoryOrganizationDomainStore(),
-        getByDomain: () => Effect.fail(new AuthError({ message: "domain store is down" })),
+        getVerifiedByDomain: () => Effect.fail(new AuthError({ message: "domain store is down" })),
       },
     });
     fx.seedOrganization("org-jit", { jitProvisioning: true });
@@ -1202,8 +1206,13 @@ const makeHttpFixture = () => {
   return {
     seedUser,
     makeSession,
-    handler: HttpServer.make({ services: withSso, cookie: { secure: false } }).handler,
-    handlerWithoutSso: HttpServer.make({ services: withoutSso, cookie: { secure: false } }).handler,
+    handler: HttpServer.make({ services: withSso, cookie: { secure: false }, ipRateLimit: false })
+      .handler,
+    handlerWithoutSso: HttpServer.make({
+      services: withoutSso,
+      cookie: { secure: false },
+      ipRateLimit: false,
+    }).handler,
     providers,
     identifierRecords,
     samlRequests,
@@ -1290,7 +1299,11 @@ describe("HTTP SSO endpoints", () => {
     );
     expect(callback.status).toBe(200);
     expect(callback.headers.get("set-cookie")).toContain("conduit_session=");
-    expect((await jsonBody(callback, UserEmailBody)).user.email).toBe("worker@acme.test");
+    // The callback keeps its own JSON answer, never a JSON:API document (#205).
+    const callbackBody = await expectSpecJson(callback, "application/json", ["user"]);
+    expect(Schema.decodeUnknownSync(UserEmailBody)(callbackBody).user.email).toBe(
+      "worker@acme.test",
+    );
   });
 
   it("takes the organization as the relationship, and answers it the same way (#642)", async () => {
@@ -1421,7 +1434,9 @@ describe("HTTP SSO endpoints — SAML", () => {
     );
     expect(acs.status).toBe(200);
     expect(acs.headers.get("set-cookie")).toContain("conduit_session=");
-    expect((await jsonBody(acs, UserEmailBody)).user.email).toBe("worker@acme.test");
+    // The IdP posts a form; the answer is plain JSON, never a JSON:API document (#205).
+    const acsBody = await expectSpecJson(acs, "application/json", ["user"]);
+    expect(Schema.decodeUnknownSync(UserEmailBody)(acsBody).user.email).toBe("worker@acme.test");
   });
 
   it("answers 400 when the ACS response cannot be trusted", async () => {
@@ -1448,8 +1463,10 @@ describe("HTTP SSO endpoints — SAML", () => {
       new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),
     );
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("application/samlmetadata+xml");
-    expect(await res.text()).toContain(SAML_SP);
+    expect(mediaTypeOf(res)).toBe("application/samlmetadata+xml");
+    const xml = await res.text();
+    expect(xml.trimStart().startsWith("<")).toBe(true);
+    expect(xml).toContain(SAML_SP);
   });
 
   it("answers 400 for metadata on an OIDC connection", async () => {

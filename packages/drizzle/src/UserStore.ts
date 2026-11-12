@@ -55,18 +55,21 @@ type PromotedFields = { readonly [key: PromotedKey]: PromotedValue | undefined }
  *
  * The promoted entries ride along under {@link promotedKey}s the row type does
  * not name, and {@link makeToUser} reads them back out.
+ *
+ * @internal Also read back by `EmailPasswordStore.createUser`.
  */
-const selection = (users: UserSchema): UserColumns => ({
-  ...users.columns,
-  ...R.mapKeys(users.promoted, promotedKey),
-});
+export const selection = (users: UserSchema): UserColumns => {
+  // `UserStore` never reads the password hash, even when the mapping names it.
+  const { passwordHash: _passwordHash, ...columns } = users.columns;
+  return { ...columns, ...R.mapKeys(users.promoted, promotedKey) };
+};
 
 /**
  * Row → `Auth.User`. A promoted column is the sole authority for its attribute:
  * it replaces any value the `jsonb` bag holds under the same key, and a `NULL`
  * column leaves the key absent.
  */
-const makeToUser =
+export const makeToUser =
   (users: UserSchema) =>
   (row: UserRow): Auth.User => {
     // A users table with no mapped attribute bag reads back `undefined` here.
