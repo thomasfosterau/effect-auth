@@ -110,7 +110,8 @@ const readPast =
 
 /**
  * A non-2xx response's body as a bounded, scrubbed excerpt. The stream is
- * read only until it passes the limit, then cancelled.
+ * read only until it passes the limit, then cancelled (by {@link cancelBody},
+ * so a cancel that fails never replaces the result).
  */
 const errorBodyExcerpt = (
   response: Response,
@@ -122,6 +123,7 @@ const errorBodyExcerpt = (
   return Stream.runLast(
     Stream.fromReadableStream({
       evaluate: () => stream,
+      releaseLockOnEnd: true,
       onError: (cause) =>
         new AuthError({
           message: `Failed to read the Twilio API's error response (status ${response.status})`,
@@ -143,6 +145,7 @@ const errorBodyExcerpt = (
         longest,
       ),
     ),
+    Effect.ensuring(cancelBody(response)),
   );
 };
 
@@ -157,13 +160,17 @@ const isRedirect = (response: Response): boolean =>
   response.status === 0 ||
   response.type === "opaqueredirect";
 
-/** Cancel a redirect's body unread; one that fails to cancel is dropped all the same. */
+/**
+ * Cancel a body without reading (the rest of) it: under workerd an unread
+ * body holds the request's I/O open until it is cancelled. One that fails to
+ * cancel is dropped all the same, so the cancel never replaces the outcome.
+ */
 const cancelBody = (response: Response): Effect.Effect<void> => {
   const stream = response.body;
   if (stream === null) return Effect.void;
   return Effect.tryPromise({
     try: () => stream.cancel(),
-    catch: (cause) => new AuthError({ message: "Failed to cancel a redirect's body", cause }),
+    catch: (cause) => new AuthError({ message: "Failed to cancel a response body", cause }),
   }).pipe(Effect.ignore);
 };
 
@@ -281,7 +288,8 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
           cause: { status: response.status, body: bodyText },
         });
       }
-      return yield* Effect.void;
+      // Twilio's 2xx body (the message resource) is not read, so it is cancelled.
+      return yield* cancelBody(response);
     }).pipe(
       Effect.withSpan("effect-auth-twilio.send", {
         attributes: { purpose: message.purpose },

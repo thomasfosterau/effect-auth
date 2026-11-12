@@ -11,11 +11,13 @@
 import * as crypto from "node:crypto";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import { Base64Url } from "effect/encoding";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Cipher from "./Cipher.ts";
+import * as Rfc7515 from "./testing/Rfc7515.ts";
 import * as Types from "./Types.ts";
 
 /** The pre-#748 `signJws`. */
@@ -94,6 +96,36 @@ describe("signJws / verifyJws against the KeyObject implementation (#748)", () =
       expect(R.values(publicKeyJwk).every(P.isNotUndefined)).toBe(true);
       expect(publicKeyJwk).toEqual(publicJwk(crypto.createPublicKey(privateKeyPem)));
     });
+  });
+
+  describe("the exported public JWK carries every member its key needs", () => {
+    const ec = { kty: "EC", crv: "P-256", x: "x-coordinate", y: "y-coordinate" };
+    const okp = { kty: "OKP", crv: "Ed25519", x: "public-key" };
+
+    it("keeps a complete export, dropping its undefined members", () => {
+      expect(Cipher.exportedPublicJwk("ES256", { ...ec, alg: undefined })).toEqual(ec);
+      expect(Cipher.exportedPublicJwk("EdDSA", { ...okp, use: undefined })).toEqual(okp);
+    });
+
+    it.each([
+      ["ES256", { ...ec, y: undefined }, "y"],
+      ["ES256", { kty: "EC", crv: "P-256" }, "x, y"],
+      ["ES256", { ...ec, kty: undefined, crv: undefined }, "kty, crv"],
+      ["EdDSA", { ...okp, x: undefined }, "x"],
+      ["EdDSA", {}, "kty, crv, x"],
+    ] as const)("refuses a %s export lacking a member: %j", (algorithm, exported, missing) => {
+      expect(() => Cipher.exportedPublicJwk(algorithm, exported)).toThrow(
+        `The exported ${algorithm} public JWK lacks ${missing}`,
+      );
+    });
+  });
+
+  it("verifies RFC 7515 Appendix A.3's ES256 JWS with its published public JWK", () => {
+    const [header, payload, signature] = Rfc7515.compactJws.split(".");
+    const signingInput = enc(`${header}.${payload}`);
+    const bytes = Result.getOrElse(Base64Url.decode(signature ?? ""), () => new Uint8Array(0));
+    expect(Cipher.verifyJws("ES256", signingInput, bytes, Rfc7515.publicJwk)).toBe(true);
+    expect(Cipher.verifyJws("ES256", signingInput, flipLast(bytes), Rfc7515.publicJwk)).toBe(false);
   });
 
   it.each(ROUNDS)("round %i: ES256 signatures are raw JOSE r || s, never DER", (round) => {
@@ -178,6 +210,10 @@ describe("signJws / verifyJws against the KeyObject implementation (#748)", () =
       expect(outcome(() => Cipher.verifyJws(algorithm, input, signature, jwk))).toEqual(
         outcome(() => keyObjectVerify(algorithm, input, signature, jwk)),
       );
+    });
+
+    it("verifies a DER-encoded ES256 signature to false, without throwing", () => {
+      expect(Cipher.verifyJws("ES256", data, ecDer, ec.publicKeyJwk)).toBe(false);
     });
 
     const sec1Pem = crypto

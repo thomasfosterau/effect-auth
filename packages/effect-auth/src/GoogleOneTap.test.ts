@@ -590,6 +590,8 @@ describe("HTTP Google One Tap endpoint", () => {
     const fx = makeHttpFixture();
     const res = await fx.handler(nonceRequest());
     expect(res.status).toBe(201);
+    // The single-use nonce is this caller's alone (#628).
+    expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await jsonBody(res, NonceDocument);
     expect(body.data.type).toBe("google-one-tap-nonces");
     expect(P.isString(body.data.id)).toBe(true);

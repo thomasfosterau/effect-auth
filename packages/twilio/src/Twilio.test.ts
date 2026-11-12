@@ -63,6 +63,30 @@ const causeBody = (cause: unknown): string => {
   return cause.body;
 };
 
+/** What a {@link trackedBody} whose cancel fails throws. */
+class CancelFailed extends Data.TaggedError("CancelFailed") {}
+
+/**
+ * A body that never ends, recording whether it was cancelled; with
+ * `cancelFails`, its cancel throws, so `body.cancel()` rejects.
+ */
+const trackedBody = (
+  cancelFails: boolean,
+): { readonly stream: ReadableStream<Uint8Array>; readonly cancelled: () => boolean } => {
+  let cancelled = false;
+  const chunk = new TextEncoder().encode("x".repeat(4096));
+  return {
+    stream: new ReadableStream<Uint8Array>({
+      pull: (controller) => controller.enqueue(chunk),
+      cancel: () => {
+        cancelled = true;
+        if (cancelFails) throw new CancelFailed();
+      },
+    }),
+    cancelled: () => cancelled,
+  };
+};
+
 /** A body stream that never ends, recording whether the reader cancelled it. */
 const endlessBody = (): { readonly stream: ReadableStream<Uint8Array>; cancelled: boolean } => {
   const chunk = new TextEncoder().encode("x".repeat(4096));
@@ -255,6 +279,32 @@ describe("twilioSmsSender's outbound request (#606)", () => {
     expect(causeBody(err.cause).endsWith(TRUNCATION_MARKER)).toBe(true);
     expect(endless.cancelled).toBe(true);
   });
+
+  it.each([false, true])(
+    "cancels the 2xx body it does not read, and succeeds even when the cancel fails (%s)",
+    async (cancelFails) => {
+      const body = trackedBody(cancelFails);
+      const { fetch } = stubFetch(new Response(body.stream, { status: 200 }));
+
+      await run(Effect.flip(sendOneTo(twilioSmsSender({ ...baseConfig, fetch }))));
+
+      expect(body.cancelled()).toBe(true);
+    },
+  );
+
+  it.each([302, 502])(
+    "keeps the typed failure for a %i whose body fails to cancel",
+    async (status) => {
+      const body = trackedBody(true);
+      const { fetch } = stubFetch(new Response(body.stream, { status }));
+
+      const err = await run(sendOneTo(twilioSmsSender({ ...baseConfig, fetch })));
+
+      expect(err._tag).toBe("AuthError");
+      expect(err.message).toContain(`status ${status}`);
+      expect(body.cancelled()).toBe(true);
+    },
+  );
 
   it.each([
     ["the token echoed", "unauthorized: token test-auth-token"],

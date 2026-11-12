@@ -1299,6 +1299,8 @@ describe("HTTP SSO endpoints", () => {
     // Anonymous sign-in resolves the IdP URL by email domain.
     const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
     expect(signIn.status).toBe(201);
+    // The single-use state is this caller's alone (#628).
+    expect(signIn.headers.get("cache-control")).toBe("no-store");
     const { url, state } = await signInUrl(signIn);
     expect(new URL(url).origin).toBe("https://idp.acme.test");
 

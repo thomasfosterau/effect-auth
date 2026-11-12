@@ -14,6 +14,7 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { Effect, Result } from "effect";
+import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -223,9 +224,44 @@ const decodeExportedJwk = Schema.decodeUnknownSync(
   Schema.Record(Schema.String, Schema.UndefinedOr(Schema.Json)),
 );
 
+/** The members a public JWK of each algorithm must carry to be usable. */
+const REQUIRED_JWK_MEMBERS: Readonly<Record<"ES256" | "EdDSA", ReadonlyArray<string>>> = {
+  ES256: ["kty", "crv", "x", "y"],
+  EdDSA: ["kty", "crv", "x"],
+};
+
+/**
+ * The public JWK {@link generateJwsKeyPair} returns, from what
+ * `KeyObject.export({ format: "jwk" })` gave: `undefined` members dropped,
+ * then every member the algorithm's key needs (`kty`, `crv`, `x`, and `y` for
+ * ES256) checked present as a string. Throws an {@link AuthError} naming the
+ * missing members rather than return a JWK no verifier can use. `exported`
+ * is the JWK as Node types it, or as workerd returns it (string members, any
+ * of them `undefined`).
+ *
+ * @internal
+ */
+export const exportedPublicJwk = (
+  algorithm: "ES256" | "EdDSA",
+  exported: crypto.JsonWebKeyInput["key"] | Readonly<Record<string, string | undefined>>,
+): Types.JsonObject => {
+  // A JWK is JSON by construction, but for workerd's `undefined` members,
+  // which are dropped; the decode turns node's open-ended `JsonWebKey` into
+  // the JSON object type without a cast.
+  const jwk = R.filter(decodeExportedJwk(exported), P.isNotUndefined);
+  const missing = REQUIRED_JWK_MEMBERS[algorithm].filter((member) => !P.isString(jwk[member]));
+  if (Arr.isReadonlyArrayNonEmpty(missing))
+    throw new AuthError({
+      message: `The exported ${algorithm} public JWK lacks ${missing.join(", ")}`,
+    });
+  return jwk;
+};
+
 /**
  * Generate a fresh ES256 (P-256) or EdDSA (Ed25519) signing key pair. The
  * public key is exported as a JWK; the private key as a PKCS#8 PEM string.
+ * Throws an {@link AuthError} when the exported JWK lacks a member the key
+ * needs (`kty`, `crv`, `x`, and `y` for ES256).
  */
 export const generateJwsKeyPair = (
   algorithm: "ES256" | "EdDSA",
@@ -236,13 +272,7 @@ export const generateJwsKeyPair = (
       : crypto.generateKeyPairSync("ed25519");
 
   return {
-    // A JWK is JSON by construction, but for workerd's `undefined` members,
-    // which are dropped; the decode turns node's open-ended `JsonWebKey` into
-    // the JSON object type without a cast.
-    publicKeyJwk: R.filter(
-      decodeExportedJwk(publicKey.export({ format: "jwk" })),
-      P.isNotUndefined,
-    ),
+    publicKeyJwk: exportedPublicJwk(algorithm, publicKey.export({ format: "jwk" })),
     privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
