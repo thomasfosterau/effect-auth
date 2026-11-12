@@ -228,6 +228,8 @@ export const coseAlgorithmES256 = -7;
 export const coseAlgorithmEdDSA = -8;
 /** COSE algorithm identifier for RSASSA-PKCS1-v1_5 w/ SHA-256. */
 export const coseAlgorithmRS256 = -257;
+/** COSE elliptic curve identifier (`crv`) for P-256, the only curve ES256 signs on. */
+export const coseEllipticCurveP256 = 1;
 
 /** COSE key types (`kty`), as their registered integer values. */
 const COSEKeyType = {
@@ -551,6 +553,10 @@ export class AuthenticatorData {
     readonly relyingPartyIdHash: Uint8Array,
     readonly userPresent: boolean,
     readonly userVerified: boolean,
+    /** BE (bit 3): the credential may be backed up (a multi-device passkey). */
+    readonly backupEligible: boolean,
+    /** BS (bit 4): the credential is backed up right now. */
+    readonly backupState: boolean,
     readonly signatureCounter: number,
     readonly credential: AttestedCredential | null,
   ) {}
@@ -584,6 +590,8 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
   const flags = view(encoded).getUint8(32);
   const userPresent = (flags & 0x01) === 1;
   const userVerified = ((flags >> 2) & 0x01) === 1;
+  const backupEligible = ((flags >> 3) & 0x01) === 1;
+  const backupState = ((flags >> 4) & 0x01) === 1;
   const signatureCounter = bigEndianUint32(encoded, 33);
   const includesAttestedCredentialData = ((flags >> 6) & 0x01) === 1;
 
@@ -609,6 +617,8 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
     relyingPartyIdHash,
     userPresent,
     userVerified,
+    backupEligible,
+    backupState,
     signatureCounter,
     credential,
   );

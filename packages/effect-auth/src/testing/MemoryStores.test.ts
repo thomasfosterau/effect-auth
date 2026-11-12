@@ -53,6 +53,7 @@ register(Testing.identifierStoreConformance(), () =>
   Layer.succeed(IdentifierStore, memoryIdentifierStore()),
 );
 register(Testing.pendingMultiFactorStoreConformance(), () => Testing.memoryStores);
+register(Testing.challengeStoreConformance(), () => Testing.memoryStores);
 // `memoryStores` serves `EmailOtpStore` from `EmailOtpStoreKV`.
 register(Testing.emailOtpStoreConformance(), () => Testing.memoryStores);
 register(Testing.phoneOtpStoreConformance(), () =>

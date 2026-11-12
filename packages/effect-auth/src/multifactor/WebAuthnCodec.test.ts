@@ -490,6 +490,17 @@ describe("parseAuthenticatorData", () => {
     expect(parseAuthenticatorData(authData(0x04, 0)).userVerified).toBe(true);
   });
 
+  it("reads the backup-eligibility and backup-state flags independently", () => {
+    const none = parseAuthenticatorData(authData(0x01, 0));
+    expect([none.backupEligible, none.backupState]).toEqual([false, false]);
+    const eligible = parseAuthenticatorData(authData(0x09, 0));
+    expect([eligible.backupEligible, eligible.backupState]).toEqual([true, false]);
+    const backedUp = parseAuthenticatorData(authData(0x19, 0));
+    expect([backedUp.backupEligible, backedUp.backupState]).toEqual([true, true]);
+    const stateOnly = parseAuthenticatorData(authData(0x11, 0));
+    expect([stateOnly.backupEligible, stateOnly.backupState]).toEqual([false, true]);
+  });
+
   it("decodes large counters without sign overflow", () => {
     expect(parseAuthenticatorData(authData(0x01, 0xffffffff)).signatureCounter).toBe(4294967295);
   });
