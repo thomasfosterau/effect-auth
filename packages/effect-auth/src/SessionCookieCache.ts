@@ -43,7 +43,18 @@
  * Without `encrypt`, the cookie is signed but NOT encrypted: session and user
  * data (including any PII in `attributes`) is readable by the browser.
  */
-import { Data, DateTime, Effect, Option, Redacted, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Data,
+  DateTime,
+  Effect,
+  HashSet,
+  Option,
+  Record as Rec,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 import { Base64Url } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
@@ -166,18 +177,18 @@ const ENCRYPTED_PREFIX = "~";
  * `UserService` in context, or {@link DEFAULT_SERVER_ONLY_ATTRIBUTES} without
  * one.
  */
-export const sessionCacheGateAttributes: Effect.Effect<ReadonlySet<string>> = Effect.map(
+export const sessionCacheGateAttributes: Effect.Effect<HashSet.HashSet<string>> = Effect.map(
   Effect.serviceOption(UserService),
   (service) =>
-    new Set(
+    HashSet.fromIterable(
       Option.isSome(service)
         ? (service.value.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES)
         : DEFAULT_SERVER_ONLY_ATTRIBUTES,
     ),
 );
 
-const holdsGateAttribute = (user: Types.User, gate: ReadonlySet<string>): boolean =>
-  Object.keys(user.attributes).some((key) => gate.has(key));
+const holdsGateAttribute = (user: Types.User, gate: HashSet.HashSet<string>): boolean =>
+  Arr.some(Rec.keys<string, Types.Json>(user.attributes), (key) => HashSet.has(gate, key));
 
 // `Schema.Unknown` passes the payload through untouched, so encoding is exactly
 // `JSON.stringify`; decoding parses and validates in one step.
@@ -194,7 +205,7 @@ export const encodeSessionCacheCookie = (
   cache: ResolvedSessionCache,
   now: number,
   primarySessionId: string,
-  gateAttributes: ReadonlySet<string> = new Set(DEFAULT_SERVER_ONLY_ATTRIBUTES),
+  gateAttributes: HashSet.HashSet<string> = HashSet.fromIterable(DEFAULT_SERVER_ONLY_ATTRIBUTES),
 ): string | undefined => {
   const s = value.session;
   const u = value.user;
@@ -236,7 +247,7 @@ export const decodeSessionCacheCookie = (
   cache: ResolvedSessionCache,
   now: number,
   primarySessionId: string,
-  gateAttributes: ReadonlySet<string> = new Set(DEFAULT_SERVER_ONLY_ATTRIBUTES),
+  gateAttributes: HashSet.HashSet<string> = HashSet.fromIterable(DEFAULT_SERVER_ONLY_ATTRIBUTES),
 ): Types.SessionWithUser | null => {
   const dot = cookie.lastIndexOf(".");
   if (dot <= 0) return null;

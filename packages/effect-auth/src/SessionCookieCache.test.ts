@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Redacted } from "effect";
+import { DateTime, HashSet, Redacted } from "effect";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
@@ -249,7 +249,7 @@ describe("server-only attributes (#194)", () => {
   });
 
   it("follows the configured list", () => {
-    const gate = new Set(["tier"]);
+    const gate = HashSet.make("tier");
     expect(encodeSessionCacheCookie(admin, cache, now, SESSION_ID, gate)).toBeDefined();
     const tiered: Types.SessionWithUser = {
       session: makeSession(),
@@ -260,8 +260,10 @@ describe("server-only attributes (#194)", () => {
 
   it("never serves a cookie that carries one, so the request falls through to the store", () => {
     // Issued while `role` was not server-only, then read with the default list.
-    const cookie = mustEncode(admin, cache, now, SESSION_ID, new Set());
-    expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID, new Set())).not.toBeNull();
+    const cookie = mustEncode(admin, cache, now, SESSION_ID, HashSet.empty());
+    expect(
+      decodeSessionCacheCookie(cookie, cache, now, SESSION_ID, HashSet.empty()),
+    ).not.toBeNull();
     expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).toBeNull();
   });
 });
