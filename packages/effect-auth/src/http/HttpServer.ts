@@ -3175,8 +3175,8 @@ const userBanResource = (user: Types.User): R.UserBan => {
   return R.UserBan.make({
     id: user.id,
     attributes: {
-      reason: Predicate.isString(reason) ? reason : "",
-      ...(Predicate.isNumber(expiresAt) && { expiresAt }),
+      reason: P.isString(reason) ? reason : "",
+      ...(P.isNumber(expiresAt) && { expiresAt }),
     },
     relationships: { user: { data: R.User.ref(user.id) } },
   });
@@ -3261,7 +3261,7 @@ export const impersonationsGroupLayer = (
             return yield* new S.NotFound({ message: "Impersonation not found" });
           }
           const resolved = yield* requireSession(request, cfg);
-          if (!Predicate.isString(resolved.session.attributes["impersonatedBy"])) {
+          if (!P.isString(resolved.session.attributes["impersonatedBy"])) {
             return yield* new S.NotFound({ message: "This session is not an impersonation" });
           }
           const sessionManager = yield* SessionService;

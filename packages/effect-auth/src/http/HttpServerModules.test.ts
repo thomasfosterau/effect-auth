@@ -1,15 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import {
-  Array as Arr,
-  Clock,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  MutableHashSet,
-  Option,
-  Schema,
-} from "effect";
+import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";

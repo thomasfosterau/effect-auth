@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Order, Record as Rec } from "effect";
+import { Order } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { Resource } from "@thomasfosterau/effect-jsonapi";
 import { Identifier } from "../Identifier.ts";
 import type {
@@ -38,10 +40,10 @@ const storeFacingKeys = (
 ): ReadonlyArray<string> =>
   sorted([
     options.id ?? "id",
-    ...Rec.keys(Resource.declaredAttributes(resource))
+    ...R.keys(Resource.declaredAttributes(resource))
       .filter((key) => !(options.derived ?? []).includes(key))
       .map((key) => options.renamed?.[key] ?? key),
-    ...Rec.values(options.foreignKeys ?? {}),
+    ...R.values(options.foreignKeys ?? {}),
   ]);
 
 // The organization records are interfaces, not schemas: these key sets are
@@ -192,20 +194,20 @@ const ssoProviderKeys = {
 
 /** The fields of a key set the resource carries. */
 const carried = (keys: Readonly<Record<string, boolean>>): ReadonlyArray<string> =>
-  sorted(Rec.keys(Rec.filter(keys, (isCarried) => isCarried)));
+  sorted(R.keys(R.filter(keys, (isCarried) => isCarried)));
 
 // One declaration per entity (#205): each resource is the wire projection of
 // a store-facing schema, so a field added to one and not the other fails here.
 describe("the JSON:API resources", () => {
   it("users carry exactly Types.User, plus the derived email fields", () => {
     expect(storeFacingKeys(Resources.User, { derived: ["email", "emailVerified"] })).toStrictEqual(
-      sorted(Rec.keys(User.fields)),
+      sorted(R.keys(User.fields)),
     );
   });
 
   it("sessions carry exactly Types.Session, userId as the user relationship", () => {
     expect(storeFacingKeys(Resources.Session, { foreignKeys: { user: "userId" } })).toStrictEqual(
-      sorted(Rec.keys(Session.fields)),
+      sorted(R.keys(Session.fields)),
     );
   });
 
@@ -215,7 +217,7 @@ describe("the JSON:API resources", () => {
         renamed: { kind: "type" },
         foreignKeys: { user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(Identifier.fields)));
+    ).toStrictEqual(sorted(R.keys(Identifier.fields)));
   });
 
   it("device-sessions carry exactly Types.Session, plus the derived active flag", () => {
@@ -224,13 +226,11 @@ describe("the JSON:API resources", () => {
         derived: ["active"],
         foreignKeys: { user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(Session.fields)));
+    ).toStrictEqual(sorted(R.keys(Session.fields)));
   });
 
   it("organizations carry exactly Organization", () => {
-    expect(storeFacingKeys(Resources.Organization)).toStrictEqual(
-      sorted(Rec.keys(organizationKeys)),
-    );
+    expect(storeFacingKeys(Resources.Organization)).toStrictEqual(sorted(R.keys(organizationKeys)));
   });
 
   it("organization-members carry exactly Member, its keys as relationships", () => {
@@ -238,7 +238,7 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.OrganizationMember, {
         foreignKeys: { organization: "organizationId", user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(memberKeys)));
+    ).toStrictEqual(sorted(R.keys(memberKeys)));
   });
 
   it("invitations carry exactly Invitation, its keys as relationships", () => {
@@ -246,7 +246,7 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.Invitation, {
         foreignKeys: { organization: "organizationId", inviter: "inviterId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(invitationKeys)));
+    ).toStrictEqual(sorted(R.keys(invitationKeys)));
   });
 
   it("organization-domains carry exactly OrganizationDomain, its organization as a relationship", () => {
@@ -254,7 +254,7 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.OrganizationDomain, {
         foreignKeys: { organization: "organizationId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(domainKeys)));
+    ).toStrictEqual(sorted(R.keys(domainKeys)));
   });
 
   it("organization-roles carry exactly OrgRole, its organization as a relationship", () => {
@@ -262,13 +262,13 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.OrganizationRole, {
         foreignKeys: { organization: "organizationId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(orgRoleKeys)));
+    ).toStrictEqual(sorted(R.keys(orgRoleKeys)));
   });
 
   it("teams carry exactly Team, its organization as a relationship", () => {
     expect(
       storeFacingKeys(Resources.Team, { foreignKeys: { organization: "organizationId" } }),
-    ).toStrictEqual(sorted(Rec.keys(teamKeys)));
+    ).toStrictEqual(sorted(R.keys(teamKeys)));
   });
 
   it("team-members carry exactly TeamMember, its keys as relationships", () => {
@@ -276,33 +276,31 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.TeamMember, {
         foreignKeys: { team: "teamId", user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(teamMemberKeys)));
+    ).toStrictEqual(sorted(R.keys(teamMemberKeys)));
   });
 
   it("accepts writes only to a team's name and a role's permissions", () => {
-    expect(sorted(Rec.keys(Resources.Team.updateInput.fields))).toStrictEqual(
-      sorted(["id", "name"]),
-    );
-    expect(sorted(Rec.keys(Resources.OrganizationRole.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.Team.updateInput.fields))).toStrictEqual(sorted(["id", "name"]));
+    expect(sorted(R.keys(Resources.OrganizationRole.updateInput.fields))).toStrictEqual(
       sorted(["id", "permissions"]),
     );
-    expect(sorted(Rec.keys(Resources.OrganizationDomain.createInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.OrganizationDomain.createInput.fields))).toStrictEqual(
       sorted(["domain", "verificationStrategy"]),
     );
   });
 
   it("accepts no write to a membership's previousRole or an invitation's invitee", () => {
-    expect(sorted(Rec.keys(Resources.OrganizationMember.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.OrganizationMember.updateInput.fields))).toStrictEqual(
       sorted(["id", "role", "status"]),
     );
-    expect(sorted(Rec.keys(Resources.Invitation.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.Invitation.updateInput.fields))).toStrictEqual(
       sorted(["id", "status"]),
     );
   });
 
   it("accepts no write to the attributes bag (#193)", () => {
     // Only `name` and `image` are writable, and only on update.
-    expect(sorted(Rec.keys(Resources.User.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.User.updateInput.fields))).toStrictEqual(
       sorted(["id", "name", "image"]),
     );
   });
@@ -326,7 +324,7 @@ describe("the JSON:API resources", () => {
   });
 
   it("accepts writes to an API key's and an OAuth client's settings, never their secrets", () => {
-    expect(sorted(Rec.keys(Resources.ApiKey.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.ApiKey.updateInput.fields))).toStrictEqual(
       sorted([
         "id",
         "name",
@@ -338,10 +336,10 @@ describe("the JSON:API resources", () => {
         "rateLimit",
       ]),
     );
-    expect(sorted(Rec.keys(Resources.OAuthClient.createInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.OAuthClient.createInput.fields))).toStrictEqual(
       sorted(["name", "redirectUris", "clientType", "skipConsent", "metadata"]),
     );
-    expect(sorted(Rec.keys(Resources.OAuthClient.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.OAuthClient.updateInput.fields))).toStrictEqual(
       sorted(["id", "name", "redirectUris", "skipConsent", "disabled", "metadata"]),
     );
   });
@@ -353,7 +351,7 @@ describe("the JSON:API resources", () => {
       Resources.SsoProvider,
       Resources.SsoAuthorization,
       Resources.Token,
-    ].map((resource) => Rec.keys(resource.updateInput.fields));
+    ].map((resource) => R.keys(resource.updateInput.fields));
     expect(updatable).toStrictEqual([["id"], ["id"], ["id"], ["id"], ["id"]]);
   });
 });
