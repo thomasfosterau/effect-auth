@@ -22,9 +22,10 @@
  * *absent* is not serveable either, because a projection that dropped the one
  * attribute deciding who may see the row must not read as public.
  * {@link OwnedAccess.serveableAxes} are the axes derived from the owned-read
- * policy (visibility required; draft optional, since a leaf without the axis
- * never emits it), and the tests pin that a representation they admit is
- * visible to every viewer, anonymous included.
+ * policy (visibility required; draft, unapproved and moderation state
+ * optional, since a leaf without the axis never emits them; `deletedAt`
+ * absent), and the tests pin that a representation they admit is visible to
+ * every viewer, anonymous included.
  *
  * ### The `Cache-Control` corollary
  *

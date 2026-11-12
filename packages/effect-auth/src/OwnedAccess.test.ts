@@ -149,6 +149,7 @@ describe("readScope (the owned-material list scope)", () => {
       kind: "member",
       userId: contributor.id,
       following: OwnedAccess.subquery(`following(${contributor.id})`),
+      groups: OwnedAccess.nobody,
     });
   });
 
@@ -157,11 +158,13 @@ describe("readScope (the owned-material list scope)", () => {
       kind: "member",
       userId: member.id,
       following: OwnedAccess.nobody,
+      groups: OwnedAccess.nobody,
     });
     expect(scope(member, OwnedAccess.isFollowerNever)).toEqual({
       kind: "member",
       userId: member.id,
       following: OwnedAccess.nobody,
+      groups: OwnedAccess.nobody,
     });
   });
 });
@@ -173,6 +176,7 @@ describe("the policies canView decides", () => {
       "owned:owner",
       "owned:view-private",
       "owned:follower",
+      "owned:group",
     ]);
     Arr.forEach(owned.policies, (policy) => {
       expect(policy._tag).toBe("DeclarativePolicy");
@@ -223,6 +227,7 @@ describe("handed to an Authorizer, the policies decide reads and nothing else", 
         owner: Entity.entityValue(Entity.ref("User", member.id)),
         visibility,
         draft,
+        unapproved: false,
       },
     });
 

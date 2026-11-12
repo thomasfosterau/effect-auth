@@ -142,9 +142,12 @@ directories, each with its own `index.ts` barrel and matching
   predicates and capability hooks over an application-declared viewer — the
   kernel's fast path over a slice built from facts the caller holds; defines
   `Unauthorized` / `Forbidden`), and `OwnedAccess.ts` (owned-material reads:
-  three-state visibility plus drafts, the fail-closed `IsFollower` seam, the
-  per-row `canView` and the per-request `readScope` — rendered as SQL by
-  `effect-auth-drizzle`'s `ownedListFilter`), and `Cacheability.ts` (the two
+  four-state visibility narrowed by the draft and moderation axes, the
+  fail-closed `IsFollower` and `IsMember` seams, the per-row `canView` and the
+  per-request `readScope` — rendered as SQL by `effect-auth-drizzle`'s
+  `ownedListFilter`), and `ReferenceAccess.ts` (ownerless reference rows on the
+  same axis, read by a followers-of account and its followers or a group's
+  members, with the owned read scope's shape), and `Cacheability.ts` (the two
   viewer-less-cache questions — may this representation be served to anyone,
   and must this viewer bypass the cache for freshness — plus the
   `private, no-store` rule). Route-level gating lives in
