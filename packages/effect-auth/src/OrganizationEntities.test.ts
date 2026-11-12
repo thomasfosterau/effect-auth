@@ -60,6 +60,7 @@ const store = {
   deleteOrganization: () => Effect.die("unused"),
   createMember: () => Effect.die("unused"),
   getMember: () => Effect.die("unused"),
+  getMemberById: () => Effect.die("unused"),
   updateMember: () => Effect.die("unused"),
   deleteMember: () => Effect.die("unused"),
   listMembersByOrganization: () => Effect.die("unused"),

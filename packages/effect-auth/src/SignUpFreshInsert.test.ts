@@ -440,6 +440,7 @@ const cases: ReadonlyArray<Case> = [
       const unused = (name: string) => () => Effect.die(`unused: ${name}`);
       const orgs: typeof OrganizationStore.Service = {
         getMember: () => Effect.succeed(null),
+        getMemberById: () => Effect.succeed(null),
         createMember: (member: Member) => Effect.sync(() => (world.members.push(member), member)),
         createOrganization: unused("createOrganization"),
         getOrganizationById: unused("getOrganizationById"),

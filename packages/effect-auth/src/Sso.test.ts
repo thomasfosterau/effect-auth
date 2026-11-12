@@ -179,6 +179,8 @@ const makeStores = (
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    getMemberById: (memberId: string) =>
+      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     // Read for the organization's `defaultRole`, and by JIT provisioning:
     getOrganizationById: (organizationId: string) =>
       Effect.succeed(Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
@@ -1101,6 +1103,8 @@ const makeHttpFixture = () => {
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    getMemberById: (memberId: string) =>
+      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     getOrganizationById: () => Effect.succeed(null),
   };
 

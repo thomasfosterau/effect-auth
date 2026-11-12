@@ -167,6 +167,8 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    getMemberById: (memberId: string) =>
+      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     listMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId)),
     createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),

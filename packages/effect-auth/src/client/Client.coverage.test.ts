@@ -393,12 +393,10 @@ describe("organizations", () => {
     });
 
     // Direct role management, then removal.
-    const promoted = await owner.organization.updateMemberRole(org.id, {
-      userId: signedInUser(guest).id,
-      role: "admin",
-    });
+    // Memberships are addressed by their own id.
+    const promoted = await owner.organization.updateMemberRole(member.id, { role: "admin" });
     expect(promoted.role).toBe("admin");
-    await owner.organization.removeMember(org.id, signedInUser(guest).id);
+    await owner.organization.removeMember(member.id);
     expect((await owner.organization.get(org.id)).members).toHaveLength(1);
 
     // A second invitation, cancelled instead of accepted.
@@ -479,15 +477,12 @@ describe("organizations", () => {
     const employee = await staff.signUp({ email: "staff@client.test", password: PW });
 
     const org = await owner.organization.create({ name: "Initech", slug: "initech" });
-    await owner.organization.addMember(org.id, {
+    const membership = await owner.organization.addMember(org.id, {
       userId: signedInUser(employee).id,
       role: "admin",
     });
 
-    const deactivated = await owner.organization.deactivateMember(
-      org.id,
-      signedInUser(employee).id,
-    );
+    const deactivated = await owner.organization.deactivateMember(membership.id);
     expect(deactivated).toMatchObject({
       status: "inactive",
       role: "member",
@@ -506,20 +501,19 @@ describe("organizations", () => {
     // The session survives: deactivation is organization-scoped.
     expect((await staff.getSession())?.user.id).toBe(signedInUser(employee).id);
 
-    const reactivated = await owner.organization.reactivateMember(
-      org.id,
-      signedInUser(employee).id,
-    );
+    const reactivated = await owner.organization.reactivateMember(membership.id);
     expect(reactivated).toMatchObject({ status: "active", role: "admin" });
     expect((await staff.organization.createTeam(org.id, { name: "Platform" })).name).toBe(
       "Platform",
     );
 
     // The last active owner cannot be deactivated.
-    const ownerSession = await owner.getSession();
-    assert(ownerSession !== null, "the owner is signed in");
+    const ownerMembership = (await owner.organization.get(org.id)).members.find(
+      (m) => m.role === "owner",
+    );
+    assert(ownerMembership !== undefined, "the owner is a member");
     const lastOwner = await rejectionOf(
-      owner.organization.deactivateMember(org.id, ownerSession.user.id),
+      owner.organization.deactivateMember(ownerMembership.id),
 
       AuthClientError,
     );

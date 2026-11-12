@@ -2892,34 +2892,75 @@ describe("HTTP multi-session", () => {
 
     const deviceCookie = `conduit_session=${sidB}; conduit_session_multi=${multiB}`;
 
-    // List returns both accounts.
-    const list = await handler(getRequest("/multi-session/list", { cookie: deviceCookie }));
+    // List returns both accounts, by their stored ids (never the tokens), B active.
+    const list = await handler(getRequest("/device-sessions", { cookie: deviceCookie }));
     expect(list.status).toBe(200);
-    const emails = Arr.sort(
-      (
-        await jsonBody(
-          list,
-          Schema.Array(Schema.Struct({ user: Schema.Struct({ email: Schema.String }) })),
-        )
-      ).map((s) => s.user.email),
-      Order.String,
+    expect(list.headers.get("content-type")).toContain("application/vnd.api+json");
+    const listed = await jsonBody(
+      list.clone(),
+      Schema.Struct({
+        data: Schema.Array(
+          Schema.Struct({
+            type: Schema.Literal("device-sessions"),
+            id: Schema.String,
+            attributes: Schema.Struct({ active: Schema.Boolean }),
+          }),
+        ),
+        included: Schema.Array(
+          Schema.Struct({ attributes: Schema.Struct({ email: Schema.String }) }),
+        ),
+      }),
     );
-    expect(emails).toEqual(["a@example.com", "b@example.com"]);
+    expect(
+      Arr.sort(
+        listed.data.map((s) => s.id),
+        Order.String,
+      ),
+    ).toEqual(Arr.sort([hashToken(sidA), hashToken(sidB)], Order.String));
+    expect(listed.data.find((s) => s.attributes.active)?.id).toBe(hashToken(sidB));
+    expect(
+      Arr.sort(
+        listed.included.map((u) => u.attributes.email),
+        Order.String,
+      ),
+    ).toEqual(["a@example.com", "b@example.com"]);
+    const listedText = await list.text();
+    expect(listedText).not.toContain(sidA);
+    expect(listedText).not.toContain(sidB);
 
     // Set active -> A: primary cookie swaps to A.
     const setActive = await handler(
-      jsonRequest("/multi-session/set-active", { sessionId: sidA }, { cookie: deviceCookie }),
+      jsonApiRequest(
+        "/device-sessions/active",
+        { data: { type: "device-sessions", id: hashToken(sidA) } },
+        { cookie: deviceCookie },
+      ),
     );
-    expect(setActive.status).toBe(200);
+    expect(setActive.status).toBe(204);
     expect(setCookieValue(setActive, "conduit_session")).toBe(sidA);
 
-    // Revoke B: it drops from the list; A remains valid.
-    const revoke = await handler(
-      jsonRequest("/multi-session/revoke", { sessionId: sidB }, { cookie: deviceCookie }),
+    // A session the device does not hold cannot be switched to or revoked.
+    const foreign = await handler(
+      jsonApiRequest(
+        "/device-sessions/active",
+        { data: { type: "device-sessions", id: hashToken("not-on-this-device") } },
+        { cookie: deviceCookie },
+      ),
     );
-    expect(revoke.status).toBe(200);
+    expect(foreign.status).toBe(400);
+    expect(
+      (await handler(deleteRequest("/device-sessions/unknown", { cookie: deviceCookie }))).status,
+    ).toBe(404);
+
+    // Revoke B (the session this request carries): it drops from the list and
+    // the session cookie is cleared; A remains valid.
+    const revoke = await handler(
+      deleteRequest(`/device-sessions/${hashToken(sidB)}`, { cookie: deviceCookie }),
+    );
+    expect(revoke.status).toBe(204);
     const newMulti = requireSetCookie(revoke, "conduit_session_multi");
     expect(newMulti.split(".").filter(Boolean)).toEqual([sidA]);
+    expect(setCookieValue(revoke, "conduit_session")).toBe("");
     // B's session is now invalid, A still works.
     expect(
       (await handler(getRequest(CURRENT_SESSION, { cookie: `conduit_session=${sidB}` }))).status,
@@ -2956,7 +2997,7 @@ describe("HTTP multi-session", () => {
 
   it("returns 404 for multi-session endpoints when not enabled", async () => {
     const handler = handlerFor(makeFixture());
-    const res = await handler(getRequest("/multi-session/list"));
+    const res = await handler(getRequest("/device-sessions"));
     expect(res.status).toBe(404);
   });
 });

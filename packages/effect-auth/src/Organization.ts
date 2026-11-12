@@ -437,6 +437,12 @@ export class OrganizationStore extends Context.Service<
       organizationId: string,
       userId: string,
     ) => Effect.Effect<Member | null, Errors.AuthError>;
+    /**
+     * The membership whose {@link Member.id} is `memberId`, in whatever
+     * organization it belongs to; `null` when there is none. The HTTP tier
+     * addresses a membership by this id (`/organization-members/:id`).
+     */
+    readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
     readonly updateMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
     readonly deleteMember: (memberId: string) => Effect.Effect<void, Errors.AuthError>;
     readonly listMembersByOrganization: (
@@ -686,6 +692,14 @@ export class OrganizationService extends Context.Service<
     readonly getFullOrganization: (
       organizationId: string,
     ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError>;
+
+    /**
+     * The membership with this id, in whatever organization it belongs to;
+     * `null` when there is none. No permission is checked: the id names the
+     * row, and the operation applied to it (`updateMemberRole`,
+     * `removeMember`, ...) decides whether the actor may act on it.
+     */
+    readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
 
     /**
      * List the organizations a user belongs to.
@@ -1451,6 +1465,10 @@ export const make = (
         const organization = yield* getOrganizationOrFail(organizationId);
         const members = yield* store.listMembersByOrganization(organizationId);
         return { organization, members } satisfies FullOrganization;
+      }),
+
+      getMemberById: Effect.fn("OrganizationService.getMemberById")(function* (memberId: string) {
+        return yield* store.getMemberById(memberId);
       }),
 
       listOrganizations: Effect.fn("OrganizationService.listOrganizations")(function* (

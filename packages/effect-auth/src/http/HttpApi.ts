@@ -653,23 +653,239 @@ export const backupCodeSetsGroup = Group.make(
     .middleware(Middleware.SchemaErrors),
 );
 
+// -----------------------------------------------------------------------------
+// Device sessions, organizations, members and invitations (#205, slice 4a)
+// -----------------------------------------------------------------------------
+
+/**
+ * A JSON:API resource linkage to `type`, or `null`: the body of a `PATCH` that
+ * points a singleton (`/organizations/active`, `/device-sessions/active`) at
+ * one resource.
+ */
+const linkageDocument = <const T extends string>(type: T) =>
+  Schema.Struct({
+    data: Schema.NullOr(Schema.Struct({ type: Schema.Literal(type), id: Schema.String })),
+  });
+
+/** What `GET /device-sessions` answers: the device's accounts, their users included. */
+export const DeviceSessionsDocument = Document.CollectionDocument(R.DeviceSession, {
+  included: Schema.Union([R.User]),
+});
+
+/**
+ * The body of `PATCH /device-sessions/active`: the listed id of the device
+ * session to switch to. `null` is refused (`400`): signing out is
+ * `DELETE /sessions/current`.
+ */
+export const ActiveDeviceSessionDocument = linkageDocument("device-sessions");
+export type ActiveDeviceSessionDocument = typeof ActiveDeviceSessionDocument.Type;
+
+/**
+ * `device-sessions`: the accounts signed in on this device (multi-session).
+ *
+ * - `GET /device-sessions`: every still-valid session the device holds, with
+ *   its user included and `active` marking the one requests now carry.
+ * - `PATCH /device-sessions/active`: switch the active account to the device
+ *   session the linkage names; `204`, the session cookie rewritten.
+ * - `DELETE /device-sessions/:id`: sign one of them out; `204`. Signing out the
+ *   active one clears the session cookie too.
+ *
+ * Ids are the stored ids (the hash of each session token), never the tokens
+ * the device's cookies hold. An id the device does not hold answers `404` (or
+ * `400` for the switch); `404` when multi-session is not enabled.
+ */
+export const deviceSessionsGroup = Group.make(
+  R.DeviceSession,
+  Endpoint.list(R.DeviceSession, {
+    success: DeviceSessionsDocument,
+    errors: [E.NotFound, E.InternalServerError],
+  }),
+  HttpApiEndpoint.patch("setActive", "/device-sessions/active", {
+    payload: jsonApiPayload(ActiveDeviceSessionDocument),
+    success: HttpApiSchema.NoContent,
+    error: [E.BadRequest.wire, E.NotFound.wire, E.InternalServerError.wire],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  Endpoint.delete(R.DeviceSession, {
+    errors: [E.NotFound, E.InternalServerError],
+  }),
+);
+
+/** The errors an organization request can answer with. */
+const organizationErrors = [
+  E.BadRequest,
+  E.Unauthorized,
+  E.Forbidden,
+  E.NotFound,
+  E.InternalServerError,
+] as const;
+
+/** The same errors, as the wire schemas a hand-built endpoint declares. */
+const organizationErrorWires = [
+  E.BadRequest.wire,
+  E.Unauthorized.wire,
+  E.Forbidden.wire,
+  E.NotFound.wire,
+  E.InternalServerError.wire,
+];
+
+/** The body of `PATCH /organizations/active`: the organization, or `null` to clear it. */
+export const ActiveOrganizationDocument = linkageDocument("organizations");
+export type ActiveOrganizationDocument = typeof ActiveOrganizationDocument.Type;
+
+/**
+ * The body of `POST /organizations/:id/members`: the user to add, as the
+ * `user` relationship, and optionally the `role` (omitted, the organization's
+ * `defaultRole`).
+ */
+export const MemberCreateDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("organization-members"),
+    attributes: Schema.optionalKey(Schema.Struct({ role: Schema.optional(Schema.String) })),
+    relationships: Schema.Struct({
+      user: Schema.Struct({
+        data: Schema.Struct({ type: Schema.Literal("users"), id: Schema.String }),
+      }),
+    }),
+  }),
+});
+export type MemberCreateDocument = typeof MemberCreateDocument.Type;
+
+/** The body of `POST /organizations/:id/invitations`: the invitee's email and role. */
+export const InvitationCreateDocument = writeDocument("invitations", S.InviteMemberPayload);
+export type InvitationCreateDocument = typeof InvitationCreateDocument.Type;
+
+/** One `organization-members` resource. */
+export const MemberDocument = Document.DataDocument(R.OrganizationMember);
+
+/** One `invitations` resource. */
+export const InvitationDocument = Document.DataDocument(R.Invitation);
+
+/**
+ * What `PATCH /invitations/:id` answers: the invitation in its new status and,
+ * for an acceptance, the membership it created as `meta.membership` (the
+ * stored invitation links to no membership, so the membership cannot be an
+ * `included` resource: JSON:API requires full linkage).
+ */
+export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, {
+  meta: Schema.Struct({ membership: Schema.optionalKey(R.OrganizationMember) }),
+});
+
+/**
+ * `organizations`: the organizations the signed-in user belongs to.
+ *
+ * - `GET /organizations`: every organization the caller is a member of.
+ * - `POST /organizations`: create one; the caller becomes its owner. `201`.
+ * - `GET /organizations/:id`: one organization.
+ * - `PATCH /organizations/:id`: `name`, `slug`, `logo`, `metadata` and
+ *   `jitProvisioning` (`organization:update`) and `defaultRole`
+ *   (`role:manage`).
+ * - `DELETE /organizations/:id`: `organization:delete`; `204`.
+ * - `PATCH /organizations/active`: record the session's active organization
+ *   (a linkage to it, or `null` to clear it); `204`.
+ * - `GET /organizations/:id/members` · `POST /organizations/:id/members`: its
+ *   memberships, and add one directly (`member:create`).
+ * - `GET /organizations/:id/invitations` · `POST /organizations/:id/invitations`:
+ *   its invitations, and invite someone by email (`invitation:create`).
+ *
+ * `404` when organizations are not enabled; `403` when the actor's role lacks
+ * the permission.
+ */
+export const organizationsGroup = Group.make(
+  R.Organization,
+  Endpoint.list(R.Organization, {
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
+  Endpoint.create(R.Organization, { errors: organizationErrors }),
+  HttpApiEndpoint.patch("setActive", "/organizations/active", {
+    payload: jsonApiPayload(ActiveOrganizationDocument),
+    success: HttpApiSchema.NoContent,
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  Endpoint.get(R.Organization, {
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
+  Endpoint.update(R.Organization, { errors: organizationErrors }),
+  Endpoint.delete(R.Organization, { errors: organizationErrors }),
+  HttpApiEndpoint.get("listMembers", "/organizations/:id/members", {
+    params: { id: Schema.String },
+    success: MediaType.asJsonApi(Document.CollectionDocument(R.OrganizationMember), 200),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("addMember", "/organizations/:id/members", {
+    params: { id: Schema.String },
+    payload: jsonApiPayload(MemberCreateDocument),
+    success: MediaType.asJsonApi(MemberDocument, 201),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.get("listInvitations", "/organizations/:id/invitations", {
+    params: { id: Schema.String },
+    success: MediaType.asJsonApi(Document.CollectionDocument(R.Invitation), 200),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+  HttpApiEndpoint.post("invite", "/organizations/:id/invitations", {
+    params: { id: Schema.String },
+    payload: jsonApiPayload(InvitationCreateDocument),
+    success: MediaType.asJsonApi(InvitationDocument, 201),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * `organization-members`: one membership, by its stored id.
+ *
+ * - `PATCH /organization-members/:id`: change the `role`, or the `status`
+ *   (`inactive` deactivates the membership, `active` restores its previous
+ *   role), with `member:update`. The last active owner can be neither
+ *   demoted nor deactivated.
+ * - `DELETE /organization-members/:id`: remove it, with `member:delete`; `204`.
+ *
+ * An unknown id answers `404`, a refused change `403`.
+ */
+export const organizationMembersGroup = Group.make(
+  R.OrganizationMember,
+  Endpoint.update(R.OrganizationMember, { errors: organizationErrors }),
+  Endpoint.delete(R.OrganizationMember, { errors: organizationErrors }),
+);
+
+/**
+ * `invitations`: one invitation, by id.
+ *
+ * - `PATCH /invitations/:id` with a `status`: `accepted` or `rejected` by the
+ *   invitee (an acceptance includes the new membership), `canceled` by a member
+ *   holding `invitation:cancel`. A refused acceptance or rejection answers
+ *   `400`, a refused cancellation `403`.
+ * - `POST /invitations/:id/deliveries`: send a pending invitation again, with
+ *   a fresh expiry (`invitation:create`); `202` with the invitation.
+ */
+export const invitationsGroup = Group.make(
+  R.Invitation,
+  Endpoint.update(R.Invitation, {
+    success: InvitationTransitionDocument,
+    errors: organizationErrors,
+  }),
+  HttpApiEndpoint.post("deliver", "/invitations/:id/deliveries", {
+    params: { id: Schema.String },
+    success: MediaType.asJsonApi(InvitationDocument, 202),
+    error: organizationErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
 /** Email/password + session endpoints. */
 export const authGroup = HttpApiGroup.make("auth").add(
-  // Multi-session (several accounts per device). 404 when not enabled.
-  HttpApiEndpoint.get("multiSessionList", "/multi-session/list", {
-    success: S.MultiSessionListView,
-    error: [S.NotFoundError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("multiSessionSetActive", "/multi-session/set-active", {
-    payload: S.MultiSessionActionPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("multiSessionRevoke", "/multi-session/revoke", {
-    payload: S.MultiSessionActionPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.InternalError],
-  }),
   // Device authorization grant (RFC 8628). 404 when unconfigured.
   HttpApiEndpoint.post("deviceCode", "/device/code", {
     payload: S.DeviceCodePayload,
@@ -704,187 +920,9 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.StatusResponse,
     error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
   }),
-  // --- Organization (session-authenticated). 404 when the module is absent;
-  // --- 403 when the actor's role lacks the required permission.
-  HttpApiEndpoint.post("orgCreate", "/organization/create", {
-    payload: S.CreateOrganizationPayload,
-    success: S.OrganizationView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("orgList", "/organizations", {
-    success: S.OrganizationListView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.get("orgGet", "/organization/:organizationId", {
-    params: { organizationId: Schema.String },
-    success: S.FullOrganizationView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.patch("orgUpdate", "/organization/:organizationId", {
-    params: { organizationId: Schema.String },
-    payload: S.UpdateOrganizationPayload,
-    success: S.OrganizationView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("orgDelete", "/organization/:organizationId", {
-    params: { organizationId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("orgSetActive", "/organization/set-active", {
-    payload: S.SetActiveOrganizationPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("orgInvite", "/organization/:organizationId/invitations", {
-    params: { organizationId: Schema.String },
-    payload: S.InviteMemberPayload,
-    success: S.InvitationView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("orgListInvitations", "/organization/:organizationId/invitations", {
-    params: { organizationId: Schema.String },
-    success: S.InvitationListView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("orgAcceptInvitation", "/invitations/:invitationId/accept", {
-    params: { invitationId: Schema.String },
-    success: S.MemberView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("orgRejectInvitation", "/invitations/:invitationId/reject", {
-    params: { invitationId: Schema.String },
-    success: S.InvitationView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("orgCancelInvitation", "/invitations/:invitationId/cancel", {
-    params: { invitationId: Schema.String },
-    success: S.InvitationView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  // Same row, same id, a fresh expiry and another delivery attempt.
-  HttpApiEndpoint.post("orgResendInvitation", "/invitations/:invitationId/resend", {
-    params: { invitationId: Schema.String },
-    success: S.InvitationView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("orgAddMember", "/organization/:organizationId/members", {
-    params: { organizationId: Schema.String },
-    payload: S.AddMemberPayload,
-    success: S.MemberView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.patch("orgUpdateMemberRole", "/organization/:organizationId/members", {
-    params: { organizationId: Schema.String },
-    payload: S.UpdateMemberRolePayload,
-    success: S.MemberView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("orgRemoveMember", "/organization/:organizationId/members/:userId", {
-    params: { organizationId: Schema.String, userId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  // Member lifecycle: deactivation suspends a membership without deleting it,
-  // gated on `member:update` like a role change. The last active owner can be
-  // neither.
-  HttpApiEndpoint.post(
-    "orgDeactivateMember",
-    "/organization/:organizationId/members/:userId/deactivate",
-    {
-      params: { organizationId: Schema.String, userId: Schema.String },
-      success: S.MemberView,
-      error: [
-        S.NotFoundError,
-        S.UnauthorizedError,
-        S.ForbiddenError,
-        S.BadRequestError,
-        S.InternalError,
-      ],
-    },
-  ),
-  HttpApiEndpoint.post(
-    "orgReactivateMember",
-    "/organization/:organizationId/members/:userId/reactivate",
-    {
-      params: { organizationId: Schema.String, userId: Schema.String },
-      success: S.MemberView,
-      error: [
-        S.NotFoundError,
-        S.UnauthorizedError,
-        S.ForbiddenError,
-        S.BadRequestError,
-        S.InternalError,
-      ],
-    },
-  ),
-  // The role new members get when none is named: `role:manage`, i.e. owners.
-  HttpApiEndpoint.put("orgSetDefaultRole", "/organization/:organizationId/default-role", {
-    params: { organizationId: Schema.String },
-    payload: S.SetDefaultRolePayload,
-    success: S.OrganizationView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
+  // --- Organization domains, roles and teams (session-authenticated; their
+  // --- JSON:API conversion is slice 4b of #205). 404 when the module is
+  // --- absent; 403 when the actor's role lacks the required permission.
   // Email-domain claims. Writes need `domain:manage`; any member may list.
   // 404 means the organization module itself is absent; a server with no
   // `OrganizationDomainStore` wired answers 403 like any other refusal.
@@ -1522,6 +1560,10 @@ export const AuthApi = HttpApi.make("AuthApi")
   .add(accountDeletionsGroup)
   .add(multiFactorEnrollmentsGroup)
   .add(backupCodeSetsGroup)
+  .add(deviceSessionsGroup)
+  .add(organizationsGroup)
+  .add(organizationMembersGroup)
+  .add(invitationsGroup)
   .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({

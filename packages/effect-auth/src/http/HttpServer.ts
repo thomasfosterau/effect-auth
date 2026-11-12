@@ -66,6 +66,7 @@ import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
 import { UserService } from "../User.ts";
 import {
+  OrganizationError,
   OrganizationService,
   type Organization,
   type Member,
@@ -74,7 +75,6 @@ import {
   type TeamMember,
   type OrgRole,
   type OrganizationDomain,
-  type FullOrganization,
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
 import { ApiKeyService, type ApiKey } from "../ApiKey.ts";
@@ -503,26 +503,36 @@ const resolveOidcProvider = resolveOptional(OidcProviderService, "OIDC provider 
 // The stored record leaves the newer fields optional (rows written before they
 // existed keep working); the wire view is total, so clients never branch on
 // "absent means the default".
-const encodeOrganization = (o: Organization): S.OrganizationView => ({
-  id: o.id,
-  name: o.name,
-  slug: o.slug,
-  ...(o.logo !== undefined && { logo: o.logo }),
-  metadata: o.metadata,
-  defaultRole: o.defaultRole ?? "member",
-  jitProvisioning: o.jitProvisioning ?? false,
-  createdAt: o.createdAt,
-});
+/** The `organizations` resource of a stored organization. */
+const organizationResource = (o: Organization): R.Organization =>
+  R.Organization.make({
+    id: o.id,
+    attributes: {
+      name: o.name,
+      slug: o.slug,
+      ...(o.logo !== undefined && { logo: o.logo }),
+      metadata: o.metadata,
+      defaultRole: o.defaultRole ?? "member",
+      jitProvisioning: o.jitProvisioning ?? false,
+      createdAt: o.createdAt,
+    },
+  });
 
-const encodeMember = (m: Member): S.MemberView => ({
-  id: m.id,
-  organizationId: m.organizationId,
-  userId: m.userId,
-  role: m.role,
-  status: m.status ?? "active",
-  ...(m.previousRole !== undefined && { previousRole: m.previousRole }),
-  createdAt: m.createdAt,
-});
+/** The `organization-members` resource of a stored membership. */
+const memberResource = (m: Member): R.OrganizationMember =>
+  R.OrganizationMember.make({
+    id: m.id,
+    attributes: {
+      role: m.role,
+      status: m.status ?? "active",
+      ...(m.previousRole !== undefined && { previousRole: m.previousRole }),
+      createdAt: m.createdAt,
+    },
+    relationships: {
+      organization: { data: R.Organization.ref(m.organizationId) },
+      user: { data: R.User.ref(m.userId) },
+    },
+  });
 
 const encodeOrganizationDomain = (d: OrganizationDomain): S.OrganizationDomainView => ({
   id: d.id,
@@ -535,16 +545,22 @@ const encodeOrganizationDomain = (d: OrganizationDomain): S.OrganizationDomainVi
   ...(d.verifiedAt !== undefined && { verifiedAt: d.verifiedAt }),
 });
 
-const encodeInvitation = (i: Invitation): S.InvitationView => ({
-  id: i.id,
-  organizationId: i.organizationId,
-  email: i.email,
-  role: i.role,
-  status: i.status,
-  inviterId: i.inviterId,
-  expiresAt: i.expiresAt,
-  createdAt: i.createdAt,
-});
+/** The `invitations` resource of a stored invitation. */
+const invitationResource = (i: Invitation): R.Invitation =>
+  R.Invitation.make({
+    id: i.id,
+    attributes: {
+      email: i.email,
+      role: i.role,
+      status: i.status,
+      expiresAt: i.expiresAt,
+      createdAt: i.createdAt,
+    },
+    relationships: {
+      organization: { data: R.Organization.ref(i.organizationId) },
+      inviter: { data: R.User.ref(i.inviterId) },
+    },
+  });
 
 const encodeTeam = (t: Team): S.TeamView => ({
   id: t.id,
@@ -566,11 +582,6 @@ const encodeOrgRole = (r: OrgRole): S.OrgRoleView => ({
   permissions: r.permissions,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
-});
-
-const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => ({
-  organization: encodeOrganization(f.organization),
-  members: f.members.map(encodeMember),
 });
 
 /**
@@ -2188,6 +2199,441 @@ export const backupCodeSetsGroupLayer = (
 };
 
 /**
+ * Fail an organization operation the way its endpoint answers a refusal:
+ * the service's `OrganizationError` as `refuse` builds it, an `AuthError` as
+ * a `500`.
+ */
+const organizationRefusal =
+  <F>(refuse: (message: string) => F) =>
+  <A, R>(
+    self: Effect.Effect<A, OrganizationError | AuthError, R>,
+  ): Effect.Effect<A, F | S.InternalServerError, R> =>
+    self.pipe(
+      Effect.catchTags({
+        OrganizationError: (e) => Effect.fail(refuse(e.message)),
+        AuthError: (e) => internalServerError(e),
+      }),
+    );
+
+/** A refused organization operation, answered `403`. */
+const refusedForbidden = organizationRefusal((message) => new S.Forbidden({ message }));
+
+/** A refused organization operation, answered `400`. */
+const refusedBadRequest = organizationRefusal((message) => new S.BadRequest({ message }));
+
+/** An organization operation on one that does not exist, answered `404`. */
+const refusedNotFound = organizationRefusal((message) => new S.NotFound({ message }));
+
+/** A store (or hook) failure, answered `500`. */
+const storeFailure = <A, E extends Cause.YieldableError, R>(
+  self: Effect.Effect<A, E, R>,
+): Effect.Effect<A, S.InternalServerError, R> => Effect.catch(self, internalServerError);
+
+/**
+ * The organization service and the signed-in actor's id: `404` when
+ * organizations are not enabled, `401` when the request carries no session.
+ */
+const organizationActor = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+) =>
+  Effect.gen(function* () {
+    const org = yield* resolveOrganization;
+    const resolved = yield* requireSession(request, cfg);
+    return { org: org.service, actorId: resolved.user.id, resolved };
+  });
+
+/** The device's session token whose hash is the listed device-session `id`. */
+const deviceTokenFor = (tokens: ReadonlyArray<string>, id: string): Option.Option<string> =>
+  Arr.findFirst(tokens, (token) => hashToken(token) === id);
+
+/**
+ * Layer implementing the `device-sessions` group: the accounts signed in on
+ * this device (see `deviceSessionsGroup` in `HttpApi.ts`). The device's
+ * cookies hold the session tokens; the wire carries only their hashes.
+ */
+export const deviceSessionsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  /**
+   * The session tokens this device holds (its device list, then the active
+   * session when the list lacks it), and the active one; `404` when
+   * multi-session is off.
+   */
+  const deviceTokens = (request: HttpServerRequest.HttpServerRequest) =>
+    Effect.gen(function* () {
+      if (cfg.multiSession === undefined) {
+        return yield* new S.NotFound({ message: "Multi-session is not enabled" });
+      }
+      const active = sessionIdFromRequest(request, cfg);
+      const listed = readDeviceSessionIds(request, cfg);
+      const tokens = Arr.dedupe(active === undefined ? listed : [...listed, active]);
+      return { active, tokens };
+    });
+
+  return HttpApiBuilder.group(AuthApi, "device-sessions", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const { active, tokens } = yield* deviceTokens(request);
+          const sessionManager = yield* SessionService;
+          const valid = Arr.getSomes(
+            yield* Effect.forEach(
+              tokens,
+              (token) => Effect.option(sessionManager.validateSession(token)),
+              { concurrency: 1 },
+            ),
+          );
+          const users = yield* Effect.forEach(
+            Arr.dedupeWith(
+              valid.map(({ user }) => user),
+              (a, b) => a.id === b.id,
+            ),
+            loadUserResource,
+            { concurrency: 1 },
+          );
+          return Handlers.collection(
+            valid.map(({ session }) =>
+              R.DeviceSession.make({
+                // `validateSession` answers the session under its token; the
+                // wire names it by the stored id, its hash.
+                id: hashToken(session.id),
+                attributes: {
+                  active: session.id === active,
+                  expiresAt: session.expiresAt,
+                  createdAt: session.createdAt,
+                  lastActivityAt: session.lastActivityAt,
+                  attributes: session.attributes,
+                },
+                relationships: { user: { data: R.User.ref(session.userId) } },
+              }),
+            ),
+            { included: users },
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("setActive", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { tokens } = yield* deviceTokens(request);
+          const target = payload.data;
+          if (target === null) {
+            return yield* new S.BadRequest({
+              message:
+                "Name the device session to switch to; sign out with DELETE /sessions/current",
+            });
+          }
+          const token = deviceTokenFor(tokens, target.id);
+          if (Option.isNone(token)) {
+            return yield* new S.BadRequest({ message: "Session is not on this device" });
+          }
+          const sessionManager = yield* SessionService;
+          const resolved = yield* sessionManager
+            .validateSession(token.value)
+            .pipe(
+              Effect.mapError(() => new S.BadRequest({ message: "Invalid or expired session" })),
+            );
+          yield* setResponseCookie(
+            cfg.name,
+            token.value,
+            sessionCookieOptions(cfg, resolved.session.expiresAt),
+          );
+          // The cached session data describes the previous account.
+          return yield* cfg.cache === undefined
+            ? Effect.void
+            : setResponseCookie(dataCookieName(cfg), "", clearCookieOptions(cfg));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { active, tokens } = yield* deviceTokens(request);
+          const token = deviceTokenFor(tokens, params.id);
+          if (Option.isNone(token)) {
+            return yield* new S.NotFound({ message: "Session is not on this device" });
+          }
+          const sessionManager = yield* SessionService;
+          yield* storeFailure(sessionManager.invalidateSession(token.value));
+          if (token.value === active) {
+            // Signing out the active account clears the session cookies and
+            // drops it from the device list.
+            return yield* clearSessionCookies(request, cfg, token.value);
+          }
+          return yield* setResponseCookie(
+            multiCookieName(cfg),
+            readDeviceSessionIds(request, cfg)
+              .filter((id) => id !== token.value)
+              .join("."),
+            sessionCookieOptions(
+              cfg,
+              DateTime.toDateUtc(DateTime.add(yield* DateTime.now, { days: 30 })),
+            ),
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `organizations` group: the signed-in user's
+ * organizations, the session's active one, and each organization's members
+ * and invitations (see `organizationsGroup` in `HttpApi.ts`).
+ */
+export const organizationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  const actor = (request: HttpServerRequest.HttpServerRequest) => organizationActor(request, cfg);
+
+  /** The organization `id` names with its members, as the signed-in actor; `404` when none. */
+  const fullOrganization = (request: HttpServerRequest.HttpServerRequest, id: string) =>
+    Effect.flatMap(actor(request), ({ org }) => refusedNotFound(org.getFullOrganization(id)));
+
+  return HttpApiBuilder.group(AuthApi, "organizations", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const { org, resolved } = yield* actor(request);
+          const organizations = yield* storeFailure(org.listOrganizations(resolved.user.id));
+          return Handlers.collection(organizations.map(organizationResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { org, resolved } = yield* actor(request);
+          const { name, slug, logo, metadata } = payload.data.attributes;
+          const created = yield* refusedBadRequest(
+            org.createOrganization(resolved.user.id, {
+              name,
+              slug,
+              ...(logo !== undefined && { logo }),
+              ...(metadata !== undefined && { metadata }),
+            }),
+          );
+          return Handlers.data(organizationResource(created));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("setActive", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { resolved } = yield* actor(request);
+          const sessionManager = yield* SessionService;
+          yield* sessionManager
+            .setSessionAttributes(resolved.session.id, {
+              activeOrganizationId: payload.data?.id ?? null,
+            })
+            .pipe(
+              Effect.catchTags({
+                SessionNotFoundError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("get", ({ params, request }) =>
+        Effect.gen(function* () {
+          const full = yield* fullOrganization(request, params.id);
+          return Handlers.data(organizationResource(full.organization));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { org, resolved } = yield* actor(request);
+          const { defaultRole, ...fields } = payload.data.attributes ?? {};
+          const updates = {
+            ...(fields.name !== undefined && { name: fields.name }),
+            ...(fields.slug !== undefined && { slug: fields.slug }),
+            ...(fields.logo !== undefined && { logo: fields.logo }),
+            ...(fields.metadata !== undefined && { metadata: fields.metadata }),
+            ...(fields.jitProvisioning !== undefined && {
+              jitProvisioning: fields.jitProvisioning,
+            }),
+          };
+          // `defaultRole` alone needs only `role:manage`; anything else (or
+          // nothing at all) goes through `organization:update` first.
+          const updated =
+            defaultRole === undefined ||
+            Arr.some(
+              [fields.name, fields.slug, fields.logo, fields.metadata, fields.jitProvisioning],
+              Predicate.isNotUndefined,
+            )
+              ? yield* refusedForbidden(
+                  org.updateOrganization(resolved.user.id, params.id, updates),
+                )
+              : undefined;
+          const organization =
+            defaultRole === undefined
+              ? updated
+              : yield* refusedForbidden(
+                  org.setDefaultRole(resolved.user.id, params.id, defaultRole),
+                );
+          if (organization === undefined) {
+            return yield* new S.NotFound({ message: "Organization not found" });
+          }
+          return Handlers.data(organizationResource(organization));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { org, resolved } = yield* actor(request);
+          yield* refusedForbidden(org.deleteOrganization(resolved.user.id, params.id));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("listMembers", ({ params, request }) =>
+        Effect.gen(function* () {
+          const full = yield* fullOrganization(request, params.id);
+          return Handlers.collection(full.members.map(memberResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("addMember", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { org, resolved } = yield* actor(request);
+          const member = yield* refusedForbidden(
+            org.addMember(
+              resolved.user.id,
+              params.id,
+              payload.data.relationships.user.data.id,
+              payload.data.attributes?.role,
+            ),
+          );
+          return Handlers.data(memberResource(member));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("listInvitations", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { org } = yield* actor(request);
+          const invitations = yield* storeFailure(org.listInvitations(params.id));
+          return Handlers.collection(invitations.map(invitationResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("invite", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { org, resolved } = yield* actor(request);
+          const invitation = yield* refusedForbidden(
+            org.inviteMember(resolved.user.id, params.id, payload.data.attributes),
+          );
+          return Handlers.data(invitationResource(invitation));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** Whether a membership is active (`status` absent reads as active). */
+const memberStatus = (member: Member): "active" | "inactive" => member.status ?? "active";
+
+/**
+ * Layer implementing the `organization-members` group: one membership, by its
+ * stored id (see `organizationMembersGroup` in `HttpApi.ts`).
+ */
+export const organizationMembersGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  /** The signed-in actor, the service and the membership `id` names; `404` when there is none. */
+  const target = (request: HttpServerRequest.HttpServerRequest, id: string) =>
+    Effect.gen(function* () {
+      const { org, actorId } = yield* organizationActor(request, cfg);
+      const member = yield* storeFailure(org.getMemberById(id));
+      if (member === null) return yield* new S.NotFound({ message: "Member not found" });
+      return { org, actorId, member };
+    });
+
+  return HttpApiBuilder.group(AuthApi, "organization-members", (handlers) =>
+    handlers
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { org, actorId, member } = yield* target(request, params.id);
+          const { role, status } = payload.data.attributes ?? {};
+          const { organizationId, userId } = member;
+          // Reactivate before a role change (an inactive member's role is not
+          // editable), deactivate after one (so the new role is the one kept).
+          const reactivated =
+            status === "active" && memberStatus(member) === "inactive"
+              ? yield* refusedForbidden(org.reactivateMember(actorId, organizationId, userId))
+              : member;
+          const reassigned =
+            role === undefined
+              ? reactivated
+              : yield* refusedForbidden(
+                  org.updateMemberRole(actorId, organizationId, userId, role),
+                );
+          const deactivates = status === "inactive" && memberStatus(reassigned) === "active";
+          if (!deactivates && reassigned === member) {
+            // Nothing changes; the answer still needs the permission a change would.
+            yield* refusedForbidden(
+              org.requirePermission(actorId, organizationId, "member:update"),
+            );
+          }
+          const settled = deactivates
+            ? yield* refusedForbidden(org.deactivateMember(actorId, organizationId, userId))
+            : reassigned;
+          return Handlers.data(memberResource(settled));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { org, actorId, member } = yield* target(request, params.id);
+          yield* refusedForbidden(org.removeMember(actorId, member.organizationId, member.userId));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `invitations` group: an invitation's status
+ * transitions and re-deliveries (see `invitationsGroup` in `HttpApi.ts`).
+ */
+export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+  const actor = (request: HttpServerRequest.HttpServerRequest) => organizationActor(request, cfg);
+
+  return HttpApiBuilder.group(AuthApi, "invitations", (handlers) =>
+    handlers
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { org, actorId } = yield* actor(request);
+          const status = payload.data.attributes?.status;
+          if (status === "accepted") {
+            const member = yield* refusedBadRequest(org.acceptInvitation(actorId, params.id));
+            const invitations = yield* storeFailure(org.listInvitations(member.organizationId));
+            const accepted = Arr.findFirst(
+              invitations,
+              (invitation) => invitation.id === params.id,
+            );
+            if (Option.isNone(accepted)) {
+              return yield* new S.NotFound({ message: "Invitation not found" });
+            }
+            return Handlers.data(invitationResource(accepted.value), {
+              meta: { membership: memberResource(member) },
+            });
+          }
+          if (status === "rejected") {
+            const rejected = yield* refusedBadRequest(org.rejectInvitation(actorId, params.id));
+            return Handlers.data(invitationResource(rejected));
+          }
+          if (status === "canceled") {
+            const canceled = yield* refusedForbidden(org.cancelInvitation(actorId, params.id));
+            return Handlers.data(invitationResource(canceled));
+          }
+          return yield* new S.BadRequest({
+            message: "An invitation's status can move only to accepted, rejected or canceled",
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("deliver", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { org, actorId } = yield* actor(request);
+          const invitation = yield* refusedForbidden(org.resendInvitation(actorId, params.id));
+          return Handlers.data(invitationResource(invitation));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
  * Every group of the {@link AuthApi} contract, with the JSON:API protocol
  * middleware its resource groups declare: what `HttpApiBuilder.layer(AuthApi)`
  * needs to build. `make` and `makeAsync` use it; compose it yourself to serve
@@ -2212,6 +2658,10 @@ export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionCo
     accountDeletionsGroupLayer(config, multiSession),
     multiFactorEnrollmentsGroupLayer(config, multiSession),
     backupCodeSetsGroupLayer(config, multiSession),
+    deviceSessionsGroupLayer(config, multiSession),
+    organizationsGroupLayer(config, multiSession),
+    organizationMembersGroupLayer(config, multiSession),
+    invitationsGroupLayer(config, multiSession),
     scimGroupLayer(),
   ).pipe(
     // The protocol middleware the JSON:API endpoints declare: content
@@ -2226,117 +2676,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
-      .handle("multiSessionList", ({ request }) =>
-        Effect.gen(function* () {
-          if (cfg.multiSession === undefined) {
-            return yield* new S.NotFound({ message: "Multi-session is not enabled" });
-          }
-          const sessionManager = yield* SessionService;
-          const active = sessionIdFromRequest(request, cfg);
-          // Unique ids in first-seen order, with the active one last when new.
-          const ids = Arr.dedupe(
-            active === undefined
-              ? readDeviceSessionIds(request, cfg)
-              : [...readDeviceSessionIds(request, cfg), active],
-          );
-
-          const views = yield* Effect.forEach(
-            ids,
-            (id) =>
-              sessionManager.validateSession(id).pipe(
-                Effect.map(Option.some),
-                Effect.catch(() => Effect.succeed(Option.none())),
-                Effect.flatMap((resolved) =>
-                  Option.isNone(resolved)
-                    ? Effect.succeed(Option.none<S.SessionWithUserView>())
-                    : Effect.map(encodeSessionWithUserView(resolved.value), Option.some),
-                ),
-              ),
-            { concurrency: 1 },
-          );
-          return Arr.getSomes(views);
-        }),
-      )
-      .handle("multiSessionSetActive", ({ payload, request }) =>
-        Effect.gen(function* () {
-          if (cfg.multiSession === undefined) {
-            return yield* new S.NotFound({ message: "Multi-session is not enabled" });
-          }
-          if (!readDeviceSessionIds(request, cfg).includes(payload.sessionId)) {
-            return yield* new S.BadRequest({ message: "Session is not on this device" });
-          }
-          const sessionManager = yield* SessionService;
-          const resolved = yield* sessionManager
-            .validateSession(payload.sessionId)
-            .pipe(
-              Effect.mapError(() => new S.BadRequest({ message: "Invalid or expired session" })),
-            );
-          return yield* HttpServerResponse.json({ status: true }).pipe(
-            Effect.flatMap((response) =>
-              HttpServerResponse.setCookie(
-                response,
-                cfg.name,
-                resolved.session.id,
-                sessionCookieOptions(cfg, resolved.session.expiresAt),
-              ),
-            ),
-            Effect.flatMap((response) =>
-              cfg.cache !== undefined
-                ? HttpServerResponse.setCookie(
-                    response,
-                    dataCookieName(cfg),
-                    "",
-                    clearCookieOptions(cfg),
-                  )
-                : Effect.succeed(response),
-            ),
-            Effect.orDie,
-          );
-        }),
-      )
-      .handle("multiSessionRevoke", ({ payload, request }) =>
-        Effect.gen(function* () {
-          if (cfg.multiSession === undefined) {
-            return yield* new S.NotFound({ message: "Multi-session is not enabled" });
-          }
-          const sessionManager = yield* SessionService;
-          yield* sessionManager
-            .invalidateSession(payload.sessionId)
-            .pipe(Effect.catch(internalServerError));
-
-          const remaining = readDeviceSessionIds(request, cfg).filter(
-            (id) => id !== payload.sessionId,
-          );
-          const farFuture = DateTime.toDateUtc(DateTime.add(yield* DateTime.now, { days: 30 }));
-          const wasActive = sessionIdFromRequest(request, cfg) === payload.sessionId;
-          return yield* Effect.gen(function* () {
-            let response = yield* HttpServerResponse.json({ status: true });
-            response = yield* HttpServerResponse.setCookie(
-              response,
-              multiCookieName(cfg),
-              remaining.join("."),
-              sessionCookieOptions(cfg, farFuture),
-            );
-            if (wasActive) {
-              response = yield* HttpServerResponse.setCookie(
-                response,
-                cfg.name,
-                "",
-                clearCookieOptions(cfg),
-              );
-              if (cfg.cache !== undefined) {
-                response = yield* HttpServerResponse.setCookie(
-                  response,
-                  dataCookieName(cfg),
-                  "",
-                  clearCookieOptions(cfg),
-                );
-              }
-            }
-            return response;
-          }).pipe(Effect.orDie);
-        }),
-      )
       .handle("deviceCode", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
@@ -2428,281 +2767,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           return { status: true };
-        }),
-      )
-      // --- Organization -----------------------------------------------------
-      .handle("orgCreate", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const created = yield* org.service
-            .createOrganization(resolved.user.id, {
-              name: payload.name,
-              slug: payload.slug,
-              ...(payload.logo !== undefined && { logo: payload.logo }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-            })
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeOrganization(created);
-        }),
-      )
-      .handle("orgList", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const orgs = yield* org.service.listOrganizations(resolved.user.id).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return orgs.map(encodeOrganization);
-        }),
-      )
-      .handle("orgGet", ({ params, request }) =>
-        Effect.gen(function* () {
-          yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const full = yield* org.service.getFullOrganization(params.organizationId).pipe(
-            Effect.catchTags({
-              OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return encodeFullOrganization(full);
-        }),
-      )
-      .handle("orgUpdate", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const updated = yield* org.service
-            .updateOrganization(resolved.user.id, params.organizationId, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.slug !== undefined && { slug: payload.slug }),
-              ...(payload.logo !== undefined && { logo: payload.logo }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-            })
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeOrganization(updated);
-        }),
-      )
-      .handle("orgDelete", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          yield* org.service.deleteOrganization(resolved.user.id, params.organizationId).pipe(
-            Effect.catchTags({
-              OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-        }),
-      )
-      .handle("orgSetActive", ({ payload, request }) =>
-        Effect.gen(function* () {
-          yield* resolveOrganization; // 404 when organizations are not enabled
-          const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionService;
-          yield* sessionManager
-            .setSessionAttributes(resolved.session.id, {
-              activeOrganizationId: payload.organizationId,
-            })
-            .pipe(
-              Effect.catchTags({
-                SessionNotFoundError: (e) => internalServerError(e),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return { status: true };
-        }),
-      )
-      .handle("orgInvite", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const invitation = yield* org.service
-            .inviteMember(resolved.user.id, params.organizationId, {
-              email: payload.email,
-              role: payload.role,
-            })
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeInvitation(invitation);
-        }),
-      )
-      .handle("orgListInvitations", ({ params, request }) =>
-        Effect.gen(function* () {
-          yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const invitations = yield* org.service.listInvitations(params.organizationId).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return invitations.map(encodeInvitation);
-        }),
-      )
-      .handle("orgAcceptInvitation", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const member = yield* org.service
-            .acceptInvitation(resolved.user.id, params.invitationId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeMember(member);
-        }),
-      )
-      .handle("orgRejectInvitation", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const invitation = yield* org.service
-            .rejectInvitation(resolved.user.id, params.invitationId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeInvitation(invitation);
-        }),
-      )
-      .handle("orgCancelInvitation", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const invitation = yield* org.service
-            .cancelInvitation(resolved.user.id, params.invitationId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeInvitation(invitation);
-        }),
-      )
-      .handle("orgResendInvitation", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const invitation = yield* org.service
-            .resendInvitation(resolved.user.id, params.invitationId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeInvitation(invitation);
-        }),
-      )
-      .handle("orgAddMember", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const member = yield* org.service
-            .addMember(resolved.user.id, params.organizationId, payload.userId, payload.role)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeMember(member);
-        }),
-      )
-      .handle("orgUpdateMemberRole", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const member = yield* org.service
-            .updateMemberRole(resolved.user.id, params.organizationId, payload.userId, payload.role)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeMember(member);
-        }),
-      )
-      .handle("orgRemoveMember", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          yield* org.service
-            .removeMember(resolved.user.id, params.organizationId, params.userId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-        }),
-      )
-      .handle("orgDeactivateMember", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const member = yield* org.service
-            .deactivateMember(resolved.user.id, params.organizationId, params.userId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeMember(member);
-        }),
-      )
-      .handle("orgReactivateMember", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const member = yield* org.service
-            .reactivateMember(resolved.user.id, params.organizationId, params.userId)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeMember(member);
-        }),
-      )
-      .handle("orgSetDefaultRole", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const org = yield* resolveOrganization;
-          const organization = yield* org.service
-            .setDefaultRole(resolved.user.id, params.organizationId, payload.role)
-            .pipe(
-              Effect.catchTags({
-                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeOrganization(organization);
         }),
       )
       // --- Organization domains ----------------------------------------------
@@ -4159,15 +4223,6 @@ export const scimGroupLayer = () =>
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
-/** {@link encodeUserView} over a session+user pair. */
-const encodeSessionWithUserView = (
-  resolved: Types.SessionWithUser,
-): Effect.Effect<S.SessionWithUserView, never, IdentifierStore> =>
-  Effect.map(encodeUserView(resolved.user), (user) => ({
-    session: S.encodeSession(resolved.session),
-    user,
-  }));
-
 /** Resolve and validate the request's session or fail with 401. */
 /**
  * Resolve the authenticated session, preferring the signed cache cookie (no
@@ -4468,7 +4523,7 @@ export interface AuthWebHandlerOptions {
   /**
    * Enable multi-session: one browser can hold several signed-in accounts and
    * switch between them. Each sign-in appends to a device session list; the
-   * active session is the primary cookie. See the `/multi-session/*` endpoints.
+   * active session is the primary cookie. See the `/device-sessions` endpoints.
    */
   readonly multiSession?: MultiSessionConfig;
   /**
