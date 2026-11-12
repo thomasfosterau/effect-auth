@@ -511,7 +511,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   /**
    * Claim a `username` login handle for a user (there is no HTTP endpoint for
-   * it: usernames are registered by the app, then used at `/sign-in/username`).
+   * it: usernames are registered by the app, then used by a `POST /sessions` with a `username` credential).
    */
   const registerUsername = (userId: string, username: string): Auth.Identifier => {
     const identifier = Auth.makeIdentifier({

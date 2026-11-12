@@ -418,6 +418,13 @@ correct).
 **Risk.** operationId renames are the most consumer-visible proposal here;
 they're batched for one 0.x minor with a rename table.
 
+(Since #205 the path scheme and the single flat `auth` group above no longer
+hold: every endpoint this library designs is a JSON:API resource operation in a
+group per resource type (`/sessions`, `/organizations/:id/members`, …), and the
+`auth` group keeps only the endpoints whose wire format another specification
+fixes ([ADR-0024](./adr/0024-json-api-http-tier.md); the old routes are mapped
+in [the migration guide](./guides/jsonapi-migration.md)).)
+
 ## D8. Client API & framework parity
 
 **Status quo.** Two clients: the generated Effect client

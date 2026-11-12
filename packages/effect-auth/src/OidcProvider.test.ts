@@ -65,6 +65,7 @@ import {
 import * as OidcProvider from "./OidcProvider.ts";
 import { ClientAddressConfigError, RateLimiterConfigError } from "./Errors.ts";
 import type * as Types from "./Types.ts";
+import { expectSpecJson, JSON_API_MEDIA_TYPE, mediaTypeOf } from "./testing/WireFormat.ts";
 
 const ISSUER = "http://idp.test/api/auth";
 
@@ -2309,6 +2310,136 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     expect(
       (await withoutDCR.handlerWithoutOidc(get("/.well-known/oauth-authorization-server"))).status,
     ).toBe(404);
+  });
+});
+
+describe("HTTP OIDC provider: the RFC tier keeps its wire format (#205)", () => {
+  const REDIRECT = "https://rp.test/cb";
+
+  it("answers OAuth 2.0 / OIDC, RFC 7591 / 7592 and RFC 8414 as their specifications fix", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {} });
+    const userId = fx.seedUser("wire@idp.test");
+    const userSid = fx.makeSession(userId);
+
+    // RFC 8414 and OIDC discovery: plain JSON metadata, naming the RFC 7591
+    // endpoint (registration is on) and never the JSON:API client registry.
+    const documents = await Promise.all(
+      ["/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"].map(
+        async (path) =>
+          expectSpecJson(await fx.handler(get(path)), "application/json", [
+            "issuer",
+            "authorization_endpoint",
+            "token_endpoint",
+            "jwks_uri",
+            "registration_endpoint",
+          ]),
+      ),
+    );
+    expect(documents.map((metadata) => metadata["registration_endpoint"])).toEqual([
+      `${ISSUER}/register`,
+      `${ISSUER}/register`,
+    ]);
+    expect(
+      documents
+        .map((metadata) => encodeJson(metadata))
+        .filter((text) => text.includes("oauth-clients")),
+    ).toEqual([]);
+
+    // RFC 7517: the key set.
+    await expectSpecJson(await fx.handler(get("/.well-known/jwks.json")), "application/json", [
+      "keys",
+    ]);
+
+    // RFC 7591: a plain JSON request answered by plain JSON metadata (`201`).
+    const registered = await fx.handler(
+      post("/register", { redirect_uris: [REDIRECT], client_name: "Wire RP" }),
+    );
+    expect(registered.status).toBe(201);
+    const client = Schema.decodeUnknownSync(RegistrationResponse)(
+      await expectSpecJson(registered, "application/json", ["client_id", "redirect_uris"]),
+    );
+    const rat = client.registration_access_token;
+    assert(rat !== undefined, "registration returns an access token");
+    // Its refusals are RFC 7591 `{ error, error_description }` bodies.
+    const refused = await fx.handler(post("/register", { redirect_uris: ["not a url"] }));
+    expect(refused.status).toBe(400);
+    await expectSpecJson(refused, "application/json", ["error", "error_description"]);
+
+    // RFC 7592: read, replace and delete the registration with its token.
+    const read = await fx.handler(get(`/register/${client.client_id}`, {}, { bearer: rat }));
+    expect(read.status).toBe(200);
+    await expectSpecJson(read, "application/json", ["client_id"]);
+    const replaced = await fx.handler(
+      jsonRequest(
+        "PUT",
+        `/register/${client.client_id}`,
+        { client_id: client.client_id, redirect_uris: [REDIRECT], client_name: "Wire RP 2" },
+        rat,
+      ),
+    );
+    expect(replaced.status).toBe(200);
+    await expectSpecJson(replaced, "application/json", ["client_id", "client_name"]);
+
+    // OAuth 2.0: the authorization endpoint answers a redirect, no document.
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.client_id,
+          redirect_uri: REDIRECT,
+          scope: "openid",
+          state: "s",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    expect(authorize.status).toBe(302);
+    expect(mediaTypeOf(authorize)).not.toBe(JSON_API_MEDIA_TYPE);
+    // Registered without skipConsent, so the consent page decides; its decision
+    // answers plain JSON naming where to send the browser.
+    const consentCode = searchParam(locationOf(authorize), "consent_code");
+    const consent = await fx.handler(
+      post("/oauth2/consent", { consentCode, accept: true }, userSid),
+    );
+    expect(consent.status).toBe(200);
+    const { redirectTo } = Schema.decodeUnknownSync(Schema.Struct({ redirectTo: Schema.String }))(
+      await expectSpecJson(consent, "application/json", ["redirectTo"]),
+    );
+    const code = searchParam(new URL(redirectTo), "code");
+
+    // The token endpoint takes RFC 6749's form encoding and answers plain JSON.
+    const token = await fx.handler(
+      new Request("http://idp.test/oauth2/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: client.client_id,
+          ...(client.client_secret !== undefined && { client_secret: client.client_secret }),
+        }).toString(),
+      }),
+    );
+    expect(token.status).toBe(200);
+    const tokens = await expectSpecJson(token, "application/json", ["access_token", "token_type"]);
+    const accessToken = Schema.decodeUnknownSync(Schema.String)(tokens["access_token"]);
+
+    // UserInfo: the claims as a plain JSON object.
+    const userinfo = await expectSpecJson(
+      await fx.handler(get("/oauth2/userinfo", {}, { bearer: accessToken })),
+      "application/json",
+      ["sub"],
+    );
+    expect(userinfo["sub"]).toBe(userId);
+
+    // RFC 7592 delete answers `204` with no body at all.
+    const deleted = await fx.handler(
+      jsonRequest("DELETE", `/register/${client.client_id}`, undefined, rat),
+    );
+    expect(deleted.status).toBe(204);
+    expect(await deleted.text()).toBe("");
   });
 });
 

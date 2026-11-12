@@ -271,7 +271,7 @@ const sendErrors = [
  *
  * - `GET /sessions`: every unexpired session of the caller.
  * - `GET /sessions/:id`: one of them; `current` names the session the request
- *   carries, and `?include=user` adds its user (what `GET /session` answered).
+ *   carries, and `?include=user` adds its user.
  * - `DELETE /sessions/:id`: revoke one; `DELETE /sessions/current` signs out,
  *   clearing the session cookies.
  * - `DELETE /sessions?filter[current]=false`: revoke every session but the
@@ -1105,7 +1105,7 @@ export type AdminUserUpdateDocument = typeof AdminUserUpdateDocument.Type;
  *
  * - `GET /admin/users?filter[email]=…&page[offset]=…&page[limit]=…`: the
  *   users, filtered by a case-insensitive substring of an email address,
- *   `meta.total` counting every match (was `POST /admin/users/list`).
+ *   `meta.total` counting every match.
  * - `PATCH /admin/users/:id`: set the user's `role`.
  * - `DELETE /admin/users/:id`: delete the user and revoke their sessions; `204`.
  * - `DELETE /admin/users/:id/sessions`: revoke every session of the user; `204`.
@@ -1182,11 +1182,10 @@ export type ImpersonationCreateDocument = typeof ImpersonationCreateDocument.Typ
  *
  * - `POST /impersonations`: start one (`isAdmin`); `201` with the
  *   impersonation, the impersonated user included, and the session cookie now
- *   the impersonation's session (was `POST /admin/impersonate`).
+ *   the impersonation's session.
  * - `DELETE /impersonations/current`: end the impersonation the request
  *   carries, signing its session out and clearing the session cookies; `204`.
- *   A session that is not an impersonation answers `404` (was
- *   `POST /admin/stop-impersonating`).
+ *   A session that is not an impersonation answers `404`.
  */
 export const impersonationsGroup = Group.make(
   R.Impersonation,
@@ -1238,13 +1237,12 @@ export const apiKeysGroup = Group.make(
  * the server's `isAdmin` (`403` otherwise); `404` when the provider is not
  * enabled.
  *
- * - `GET /oauth-clients`: every store-registered client (was
- *   `GET /oauth2/clients`).
+ * - `GET /oauth-clients`: every store-registered client.
  * - `POST /oauth-clients`: register one; `201` with the client and, for a
  *   confidential (`web`) client, its secret in `meta.clientSecret`, shown this
- *   once (was `POST /oauth2/register`).
+ *   once.
  * - `PATCH /oauth-clients/:id` · `DELETE /oauth-clients/:id`: change or delete
- *   one (was `/oauth2/clients/:clientId`).
+ *   one.
  *
  * A refused change (an unknown or statically configured client) answers `400`.
  * RFC 7591 dynamic registration stays at `/register`.
@@ -1289,7 +1287,7 @@ export type SsoProviderCreateDocument = typeof SsoProviderCreateDocument.Type;
  * `sso-providers`: `POST /sso-providers` registers an enterprise SSO
  * connection (OIDC or SAML); `201` with it. Needs the server's `isAdmin`
  * (`403` otherwise); a refused registration answers `400`, and `404` means SSO
- * is not enabled (was `POST /sso/register`).
+ * is not enabled.
  */
 export const ssoProvidersGroup = Group.make(
   R.SsoProvider,
@@ -1313,7 +1311,7 @@ export type SsoAuthorizationCreateDocument = typeof SsoAuthorizationCreateDocume
  * `sso-authorizations`: `POST /sso-authorizations` starts an SSO sign-in;
  * `201` with the IdP `url` to send the browser to, the round-trip state as the
  * id. No connection for the selector answers `400`; `404` means SSO is not
- * enabled (was `POST /sign-in/sso`).
+ * enabled.
  */
 export const ssoAuthorizationsGroup = Group.make(
   R.SsoAuthorization,
@@ -1325,8 +1323,7 @@ export const ssoAuthorizationsGroup = Group.make(
 
 /**
  * `tokens`: `POST /tokens` signs a JWT for the signed-in user; `201` with it.
- * `404` when JWT is not enabled (was `GET /token`, a read that minted a
- * credential). The keys that verify it are at `GET /jwks`.
+ * `404` when JWT is not enabled. The keys that verify it are at `GET /jwks`.
  */
 export const tokensGroup = Group.make(
   R.Token,
@@ -1359,8 +1356,7 @@ export type DeviceAuthorizationDecisionDocument = typeof DeviceAuthorizationDeci
  * - `POST /device-authorizations/decisions`: approve (signed in: the device
  *   is granted the caller's session) or deny (no session needed) the pending
  *   authorization a user code names; `204`. An unknown or settled code
- *   answers `400`; each code allows 5 attempts per 15 minutes (`429`) (was
- *   `POST /device/approve` · `/device/deny`).
+ *   answers `400`; each code allows 5 attempts per 15 minutes (`429`).
  *
  * The device's own endpoints (`/device/code`, `/device/token`) keep RFC
  * 8628's wire format. `404` when device authorization is not enabled.
