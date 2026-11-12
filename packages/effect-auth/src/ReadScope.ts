@@ -470,7 +470,8 @@ const member = (fact: SetFact): Predicate => ({
 const equalsAtom = (name: string, kind: AttributeKind, value: Entity.AttributeValue): Expr => {
   const atom = (scalar: Scalar): Expr => ({ _tag: "Eq", attribute: name, value: scalar });
   if (!P.isString(kind)) {
-    // An empty id names no entity, so it equals no row (#661), as in the kernel.
+    // An empty id or type names no entity, so it equals no row (#661, #666),
+    // as in the kernel.
     return P.isObject(value) &&
       Entity.isEntityValue(value) &&
       value.__entity.type === kind.entity &&
@@ -750,8 +751,10 @@ const policyOutcomes = (env: Env, policy: Policy.DeclarativePolicy): Partial => 
  * When some applicable policy reads the row in a way a {@link Predicate} can't
  * express, the result is `Inexact` with the reasons, never an approximation.
  *
- * A principal or action with an empty id names no entity: the kernel refuses
- * every row for it (`"invalid-request"`), so the scope is {@link deny} (#661).
+ * A principal or action with an empty id or type names no entity: the kernel
+ * refuses every row for it (`"invalid-request"`), so the scope is
+ * {@link deny} (#661, #666). So is a binding whose `resourceType` is empty,
+ * since the kernel refuses each of its rows.
  *
  * @since 0.1.0
  * @category compilation

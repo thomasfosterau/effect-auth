@@ -710,6 +710,8 @@ export const OrganizationDomainView = Schema.Struct({
   verificationToken: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   verifiedAt: Schema.optional(Schema.Number),
+  /** Who attested a `manual` claim (the platform admin's user id), #680. */
+  attestedBy: Schema.optional(Schema.String),
 });
 export type OrganizationDomainView = typeof OrganizationDomainView.Type;
 
@@ -730,7 +732,7 @@ export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.T
 
 /**
  * The operator's attestation that `organizationId` controls `domain`
- * (`POST /admin/organization-domains`, `isAdmin`-gated, #598).
+ * (`POST /admin/organization-domains`, admin-gated, #598).
  */
 export const AdminAttestDomainPayload = Schema.Struct({
   organizationId: Schema.String,

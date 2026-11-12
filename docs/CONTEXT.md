@@ -170,8 +170,10 @@ verifies its claim only through DNS (a TXT record with the claim's server-minted
 by the app's `DomainVerifier`). **Operator attestation** is the other route: the application
 operator checks ownership out of band and calls `OrganizationService.attestDomain` (or the
 platform-admin `POST /admin/organization-domains`), which leaves the claim verified with the
-`manual` strategy (#598). Several Organizations may hold pending claims on one domain; at most
-one claim per domain is verified.
+`manual` strategy and records the attester as `attestedBy` (#598, #680). The operator also
+**releases** any Organization's claim, whatever its state, to settle a dispute
+(`OrganizationService.releaseDomain`, `DELETE /admin/organization-domains/:id`). Several
+Organizations may hold pending claims on one domain; at most one claim per domain is verified.
 _Avoid_: "manual verification" for anything an Organization member does — holding
 `domain:manage` proves nothing about a domain.
 
@@ -224,7 +226,8 @@ authentication credential/verification typology — same as Organization.
 
 **Admin**:
 A user whose `attributes.role` is in `AdminConfig.adminRoles` (default `["admin"]`) or whose id is
-in `AdminConfig.adminUserIds`.
+in `AdminConfig.adminUserIds`. Every admin-gated HTTP endpoint asks the mounted `AdminService`'s
+`isAdmin`, so one `AdminConfig` governs them all (#680).
 
 **Ban**:
 `attributes.banned: true` on the User, with optional `banReason` and `banExpires` (epoch ms;

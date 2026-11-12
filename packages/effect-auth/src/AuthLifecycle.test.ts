@@ -156,6 +156,17 @@ const emailVerificationStore = {
         }
       });
     }),
+
+  getLatestByUserId: (userId: string) =>
+    Effect.sync(() => {
+      let latest: EmailVerification | null = null;
+      MutableHashMap.forEach(verifications, (v) => {
+        if (v.userId === userId && (latest === null || v.createdAt > latest.createdAt)) {
+          latest = v;
+        }
+      });
+      return latest;
+    }),
 };
 
 const userServiceStore = {
@@ -445,6 +456,48 @@ describe("AuthLifecycleService", () => {
     expect(result.user.id).toBe(user.id);
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("signin@example.com");
+  });
+
+  // The default 60 s resend cooldown (#682): a second sign-in and a duplicate
+  // sign-up inside it answer as before and send nothing more.
+  it("holds the sign-in and sign-up resends back inside the cooldown, answering alike (#682)", async () => {
+    const testContext = await makeTestContext({ requireEmailVerification: true });
+    const hashResult = await Effect.runPromise(
+      Password.pbkdf2Hasher({ iterations: 1000 }).hash("password-123"),
+    );
+    MutableHashMap.set(users, "user-cooldown", {
+      id: "user-cooldown",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-cooldown", "cooldown@example.com", false);
+    MutableHashMap.set(passwordHashes, "user-cooldown", hashResult.hash);
+
+    const results = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({
+            requireEmailVerification: true,
+            sendOnSignIn: true,
+          });
+          const signIn = service.signIn({
+            email: "cooldown@example.com",
+            password: "password-123",
+          });
+          return [
+            yield* signIn,
+            yield* signIn,
+            yield* service.signUp({ email: "cooldown@example.com", password: "password-456" }),
+          ];
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(results.map((result) => result.needsEmailVerification)).toEqual([true, true, true]);
+    expect(sentEmails.map((sent) => sent.email)).toEqual(["cooldown@example.com"]);
+    expect(MutableHashMap.size(verifications)).toBe(1);
   });
 
   it("should verify token and auto sign in", async () => {
