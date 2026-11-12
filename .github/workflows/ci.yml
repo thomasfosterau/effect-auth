@@ -35,10 +35,9 @@ jobs:
       matrix:
         node: [lts, latest]
     # alchemy-postgres's `Postgres.test.ts` and the real-server case of its
-    # `AuthSchema.test.ts` need a server (`DATABASE_URL`; without one they
-    # skip). Kept as the old `alchemy` job had it; `test:alchemy` is a cached
-    # task that declares no environment variables, so the variable does not
-    # reach those cases yet (#766).
+    # `AuthSchema.test.ts` run against this service. `test:alchemy` declares
+    # `DATABASE_URL` and `CI`, so under CI a missing server fails them rather
+    # than skipping (#766).
     services:
       postgres:
         image: postgres:17

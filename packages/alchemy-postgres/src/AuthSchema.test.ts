@@ -190,6 +190,17 @@ const databaseUrl = Option.getOrUndefined(
   Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
 );
 
+/** `CI` is set (GitHub Actions sets `CI=true`): the real-server case is required, never skipped (#766). */
+const underCi = Effect.runSync(Config.Boolean("CI").pipe(Config.withDefault(false)));
+const skipWithoutServer = databaseUrl === undefined && !underCi;
+if (skipWithoutServer) {
+  Effect.runSync(
+    Effect.logWarning(
+      "AuthSchema.test.ts: DATABASE_URL is not set, so the real-server case skips (under CI it fails)",
+    ),
+  );
+}
+
 const pglite = async (): Promise<{
   readonly database: PostgresDatabase;
   readonly close: () => Promise<void>;
@@ -235,11 +246,12 @@ describe("AuthSchema resource on Postgres", () => {
   );
 
   // A real server, over `@effect/sql-pg` — CI's alchemy job runs one and sets
-  // DATABASE_URL; without it the case is skipped.
-  it.skipIf(databaseUrl === undefined)(
+  // DATABASE_URL, which `test:alchemy` declares; without it the case fails
+  // under CI and is skipped elsewhere.
+  it.skipIf(skipWithoutServer)(
     "deploys through @effect/sql-pg against a real Postgres server",
     async () => {
-      assert(databaseUrl !== undefined);
+      assert(databaseUrl !== undefined, "DATABASE_URL must name the Postgres server under CI");
       const database = Postgres.database(databaseUrl);
       const engine = makeEngine({ database });
       await engine.deploy(AuthSchema("auth-schema", { dropOnDelete: true }));

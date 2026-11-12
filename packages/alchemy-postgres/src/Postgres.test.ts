@@ -4,8 +4,10 @@
  * Worker runs over its Hyperdrive binding.
  *
  * It needs a server, so it runs where `DATABASE_URL` names one: CI's alchemy
- * job starts one and runs this file in `test:alchemy`. Anywhere else the cases
- * skip. A Hyperdrive binding is just `{ connectionString }`, so the
+ * job starts one and runs this file in `test:alchemy`, which declares the
+ * variable (and `CI`) so it reaches the suite (#766). Under CI a missing
+ * `DATABASE_URL` fails every case; anywhere else the cases skip with a
+ * warning. A Hyperdrive binding is just `{ connectionString }`, so the
  * binding-shaped source is exercised as such.
  */
 
@@ -20,12 +22,23 @@ const databaseUrl = Option.getOrUndefined(
   Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
 );
 
+/** `CI` is set (GitHub Actions sets `CI=true`): the server is required, never skipped. */
+const underCi = Effect.runSync(Config.Boolean("CI").pipe(Config.withDefault(false)));
+const skipWithoutServer = databaseUrl === undefined && !underCi;
+if (skipWithoutServer) {
+  Effect.runSync(
+    Effect.logWarning(
+      "Postgres.test.ts: DATABASE_URL is not set, so every case skips (under CI they fail)",
+    ),
+  );
+}
+
 const url = (): Redacted.Redacted => {
-  assert(databaseUrl !== undefined, "DATABASE_URL names the Postgres server");
+  assert(databaseUrl !== undefined, "DATABASE_URL must name the Postgres server under CI");
   return databaseUrl;
 };
 
-describe.skipIf(databaseUrl === undefined)("effect-auth on Postgres over @effect/sql-pg", () => {
+describe.skipIf(skipWithoutServer)("effect-auth on Postgres over @effect/sql-pg", () => {
   it("migrates by URL, then round-trips a user and a session over a Hyperdrive-shaped binding", async () => {
     await Effect.runPromise(Postgres.migrate(url()));
     const hyperdrive: Postgres.Hyperdrive = { connectionString: Redacted.value(url()) };
