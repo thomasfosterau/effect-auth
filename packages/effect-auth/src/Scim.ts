@@ -73,6 +73,7 @@ import { Hooks, makePlugin } from "./Hooks.ts";
 import {
   claimIdentifier,
   IdentifierStore,
+  lookupIdentifier,
   makeIdentifier,
   primaryEmail,
   type Identifier,
@@ -994,7 +995,7 @@ export const make = (
     /** Claim one email address for the user; another user's address is a `409`. */
     const addUserEmail = (user: Types.User, email: string) =>
       Effect.gen(function* () {
-        const existing = yield* identifiers.getByValue("email", email);
+        const existing = yield* lookupIdentifier(identifiers, "email", email);
         if (existing !== null) {
           if (existing.userId === user.id) return yield* Effect.void;
           return yield* conflict(`The email "${email}" is already in use`);
@@ -1241,7 +1242,10 @@ export const make = (
         // Check every address up front: a conflict discovered halfway through
         // would leave a user created with only some of its identifiers.
         const taken = yield* Effect.findFirst([userName, ...extras], (email) =>
-          Effect.map(identifiers.getByValue("email", email), (existing) => existing !== null),
+          Effect.map(
+            lookupIdentifier(identifiers, "email", email),
+            (existing) => existing !== null,
+          ),
         );
         if (Option.isSome(taken)) {
           return yield* conflict(`The email "${taken.value}" is already in use`);

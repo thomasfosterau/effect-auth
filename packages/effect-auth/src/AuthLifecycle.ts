@@ -10,7 +10,7 @@ import {
   type SignInInput,
   type SignUpInput,
 } from "./email/EmailPassword.ts";
-import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
+import { IdentifierStore, lookupIdentifier, type IdentifierType } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import {
   type EmailVerificationResult,
@@ -111,6 +111,8 @@ export interface AuthLifecycleResult {
    */
   readonly identifier?: { readonly type: IdentifierType; readonly value: string } | undefined;
   readonly session?: Types.Session;
+  /** The raw session token, present with `session`: the credential the client presents; `session.id` is its digest. */
+  readonly token?: string | undefined;
   readonly needsEmailVerification: boolean;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
@@ -247,7 +249,7 @@ export const make = (
               // The address `EmailPasswordService.signUp` found taken: the one
               // its `beforeSignUp` hooks returned, not the raw input (#426).
               const email = e.email ?? normalizeEmail(input.email);
-              const identifier = yield* identifiers.getByValue("email", email);
+              const identifier = yield* lookupIdentifier(identifiers, "email", email);
               const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
 
               if (!identifier || !existing || identifier.verified) {
@@ -317,7 +319,7 @@ export const make = (
           user: result.user,
           ...(result.identifier !== undefined && { identifier: result.identifier }),
           ...(!needsEmailVerification &&
-            result.session !== undefined && { session: result.session }),
+            result.session !== undefined && { session: result.session, token: result.token }),
           needsEmailVerification,
         } satisfies AuthLifecycleResult;
       }),
@@ -328,10 +330,10 @@ export const make = (
           "EmailNotVerifiedError",
           (error) =>
             Effect.gen(function* () {
-              const identifier = yield* identifiers.getByValue("email", error.email);
+              const identifier = yield* lookupIdentifier(identifiers, "email", error.email);
               const user = identifier === null ? null : yield* userStore.get(identifier.userId);
 
-              if (!user) {
+              if (identifier === null || user === null) {
                 return yield* new Errors.InvalidCredentialsError({
                   message: "Invalid email or password",
                 });
@@ -340,7 +342,7 @@ export const make = (
               // FIX 5: use resendVerification (which invalidates prior tokens
               // via deleteByUserId) instead of createVerification.
               if (sendOnSignIn) {
-                yield* verification.resendVerification(user.id, error.email);
+                yield* verification.resendVerification(user.id, identifier.value);
               }
 
               return {
@@ -356,7 +358,10 @@ export const make = (
 
         return {
           user: signInResult.user,
-          ...(signInResult.session !== undefined && { session: signInResult.session }),
+          ...(signInResult.session !== undefined && {
+            session: signInResult.session,
+            token: signInResult.token,
+          }),
           ...(signInResult.secondFactor !== undefined && {
             secondFactor: signInResult.secondFactor,
           }),
@@ -376,7 +381,7 @@ export const make = (
         // identifiers — a stale token for a since-removed address must not
         // verify anything.
         const tokenEmail = normalizeEmail(verificationRecord.email);
-        const identifier = yield* identifiers.getByValue("email", tokenEmail);
+        const identifier = yield* lookupIdentifier(identifiers, "email", tokenEmail);
         if (identifier === null || identifier.userId !== verificationRecord.userId) {
           return yield* new Errors.EmailVerificationError({
             message: "Verification token is no longer valid for this email address",
@@ -413,7 +418,7 @@ export const make = (
           } satisfies AuthLifecycleResult;
         }
 
-        const session = yield* sessionManager.createSession(
+        const { session, token } = yield* sessionManager.createSession(
           verificationRecord.userId,
           input.sessionAttributes,
         );
@@ -421,6 +426,7 @@ export const make = (
         return {
           user: verifiedUser,
           session,
+          token,
           needsEmailVerification: false,
         } satisfies AuthLifecycleResult;
       }),

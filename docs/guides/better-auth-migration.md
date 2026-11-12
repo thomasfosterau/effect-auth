@@ -24,7 +24,7 @@ The practical consequences are worth internalising before you start:
 | `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                                         |
 | `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth/sql`, `-drizzle`, `-alchemy-cloudflare` / `-alchemy-postgres`, or your own |
 | `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`                   |
-| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP                |
+| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(token)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP             |
 | `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration)            |
 | `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                                    |
 | `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`              |
@@ -55,18 +55,23 @@ const services = Layer.mergeAll(
   Auth.Password.PasswordHasher.layer(),
   Auth.UserService.layer(),
   Auth.Hooks.Default,
+  // The per-address limits Http.makeAsync applies by default count here; the
+  // counters live in the same database (`auth_rate_limits`).
+  Auth.RateLimiter.layer(),
 ).pipe(Layer.provideMerge(stores));
 
 const { handler } = await Http.makeAsync({
   services,
   prefix: "/api/auth",
   trustedOrigins: ["https://app.example.com"],
+  // The visitor's address, which the rate limits key on (here, behind Cloudflare).
+  trustedProxy: Auth.ClientIP.cloudflare,
 });
 ```
 
 `Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
 
-`services` connects to the database while it builds, so the example uses `Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter`, for example), so the app fails to start. `Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
+`services` connects to the database while it builds, so the example uses `Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter` or client address source, which the per-address limits on every sensitive endpoint need unless you pass `ipRateLimit: false`), so the app fails to start. `Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
 
 The set of services `Http.makeAsync` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
 

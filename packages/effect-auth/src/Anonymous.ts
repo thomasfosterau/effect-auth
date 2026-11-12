@@ -53,6 +53,8 @@ export interface AnonymousConfig {
 export interface AnonymousResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
@@ -112,9 +114,9 @@ const make = (
         sessionAttributes?: Types.Attributes,
       ) {
         const user = yield* store.createAnonymousUser();
-        const session = yield* sessionManager.createSession(user.id, sessionAttributes);
+        const { session, token } = yield* sessionManager.createSession(user.id, sessionAttributes);
 
-        return { user, session };
+        return { user, session, token };
       }),
 
       linkAccount: Effect.fn("AnonymousService.linkAccount")(function* (

@@ -1,7 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { DateTime, Duration, Effect, Layer, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
-import { Hooks, type HookError } from "../Hooks.ts";
+import { Hooks, type AuthenticateAttempt, type HookError } from "../Hooks.ts";
 import {
   AccountLockoutPlugin,
   AccountLockoutStore,
@@ -10,26 +10,35 @@ import {
   type AccountLockoutRecord,
 } from "./AccountLockout.ts";
 import { AccountLockedError, AuthError } from "../Errors.ts";
-import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import type * as Types from "../Types.ts";
 
-const signIn = (email: string): SignInInput => ({ email, password: "pw" });
-
-const authResult = (email: string): AuthResult => ({
-  user: {
-    id: "u1",
-    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    attributes: {},
-  } satisfies Types.User,
+/** A password attempt by email, resolved to `userId` when one is given. */
+const byEmail = (email: string, userId?: string): AuthenticateAttempt => ({
+  method: "email-password",
   identifier: { type: "email", value: email },
+  userId,
 });
+
+const session = (userId: string): Types.Session => {
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+  return {
+    id: "raw-token",
+    userId,
+    expiresAt: now,
+    createdAt: now,
+    lastActivityAt: now,
+    attributes: {},
+  };
+};
 
 interface Harness {
   readonly records: MutableHashMap.MutableHashMap<string, AccountLockoutRecord>;
-  readonly beforeSignIn: (email: string) => Promise<SignInInput>;
-  readonly beforeSignInResult: (email: string) => Promise<SignInInput | HookError>;
-  readonly afterSignIn: (email: string) => Promise<AuthResult>;
+  readonly attempt: (attempt: AuthenticateAttempt) => Promise<AuthenticateAttempt>;
+  readonly attemptResult: (
+    attempt: AuthenticateAttempt,
+  ) => Promise<AuthenticateAttempt | HookError>;
+  readonly sessionIssued: (userId: string) => Promise<Types.Session>;
+  readonly failures: (key: string) => number | undefined;
 }
 
 const makeHarness = (
@@ -54,34 +63,35 @@ const makeHarness = (
 
   return {
     records,
-    beforeSignIn: (email) => drive((hooks) => hooks.beforeSignIn(signIn(email))),
-    beforeSignInResult: (email) =>
-      drive((hooks) => Effect.catch(hooks.beforeSignIn(signIn(email)), (e) => Effect.succeed(e))),
-    afterSignIn: (email) => drive((hooks) => hooks.afterSignIn(authResult(email))),
+    attempt: (attempt) => drive((hooks) => hooks.beforeAuthenticate(attempt)),
+    attemptResult: (attempt) =>
+      drive((hooks) => Effect.catch(hooks.beforeAuthenticate(attempt), (e) => Effect.succeed(e))),
+    sessionIssued: (userId) => drive((hooks) => hooks.afterCreateSession(session(userId))),
+    failures: (key) => Option.getOrUndefined(MutableHashMap.get(records, key))?.failures,
   };
 };
 
 describe("AccountLockoutPlugin", () => {
-  it("locks the identifier after maxAttempts failed attempts", async () => {
+  it("locks the handle after maxAttempts attempts", async () => {
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
 
-    // The first three sign-in attempts pass through the hook (the credential
-    // check happens downstream); the counter climbs to the limit.
-    await h.beforeSignIn("user@example.com");
-    await h.beforeSignIn("user@example.com");
-    await h.beforeSignIn("user@example.com");
+    // The first three attempts pass through the hook (the credential check
+    // happens downstream); the counter climbs to the limit.
+    await h.attempt(byEmail("user@example.com"));
+    await h.attempt(byEmail("user@example.com"));
+    await h.attempt(byEmail("user@example.com"));
 
     // The next attempt is short-circuited while locked.
-    const blocked = await h.beforeSignInResult("user@example.com");
+    const blocked = await h.attemptResult(byEmail("user@example.com"));
     expect(blocked).toBeInstanceOf(AccountLockedError);
   });
 
   it("reports the time left on the lock as a Duration", async () => {
     const h = makeHarness({ maxAttempts: 1, lockoutDurationMs: 60_000 });
-    await h.beforeSignIn("user@example.com");
+    await h.attempt(byEmail("user@example.com"));
 
-    const blocked = await h.beforeSignInResult("user@example.com");
-    assert(blocked instanceof AccountLockedError, "the identifier is locked");
+    const blocked = await h.attemptResult(byEmail("user@example.com"));
+    assert(blocked instanceof AccountLockedError, "the handle is locked");
     assert(blocked.retryAfter !== undefined, "the lock reports its remaining time");
     expect(Duration.toMillis(blocked.retryAfter)).toBeGreaterThan(0);
     expect(Duration.toMillis(blocked.retryAfter)).toBeLessThanOrEqual(60_000);
@@ -89,12 +99,12 @@ describe("AccountLockoutPlugin", () => {
 
   it("unlocks once the lockout window elapses", async () => {
     const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
-    await h.beforeSignIn("user@example.com");
-    await h.beforeSignIn("user@example.com");
-    expect(await h.beforeSignInResult("user@example.com")).toBeInstanceOf(AccountLockedError);
+    await h.attempt(byEmail("user@example.com"));
+    await h.attempt(byEmail("user@example.com"));
+    expect(await h.attemptResult(byEmail("user@example.com"))).toBeInstanceOf(AccountLockedError);
 
     // Simulate the window elapsing by moving the lock into the past.
-    const key = "lockout:user@example.com";
+    const key = "lockout:email:user@example.com";
     const rec = Option.getOrUndefined(MutableHashMap.get(h.records, key));
     assert(rec !== undefined, "the lock is recorded");
 
@@ -104,36 +114,78 @@ describe("AccountLockoutPlugin", () => {
     });
 
     // Now allowed again (counter reset to a fresh streak).
-    const allowed = await h.beforeSignInResult("user@example.com");
+    const allowed = await h.attemptResult(byEmail("user@example.com"));
     expect(allowed).not.toBeInstanceOf(AccountLockedError);
-    expect(Option.getOrUndefined(MutableHashMap.get(h.records, key))?.failures).toBe(1);
+    expect(h.failures(key)).toBe(1);
   });
 
-  it("resets the counter on a successful sign-in", async () => {
+  it("keys a resolved handle on the user, so every handle of one account shares one count", async () => {
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
-    await h.beforeSignIn("user@example.com");
-    await h.beforeSignIn("user@example.com");
-    expect(
-      Option.getOrUndefined(MutableHashMap.get(h.records, "lockout:user@example.com"))?.failures,
-    ).toBe(2);
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt({
+      method: "username",
+      identifier: { type: "username", value: "ada" },
+      userId: "u1",
+    });
+    await h.attempt({
+      method: "phone-otp",
+      identifier: { type: "phone", value: "+1555" },
+      userId: "u1",
+    });
+    expect(h.failures("lockout:user:u1")).toBe(3);
 
-    await h.afterSignIn("user@example.com");
-    expect(MutableHashMap.has(h.records, "lockout:user@example.com")).toBe(false);
-
-    // A fresh streak starts from zero, so the identifier is nowhere near locked.
-    await h.beforeSignIn("user@example.com");
-    expect(
-      Option.getOrUndefined(MutableHashMap.get(h.records, "lockout:user@example.com"))?.failures,
-    ).toBe(1);
+    // Switching handles buys no fresh attempts.
+    const blocked = await h.attemptResult({
+      method: "magic-link",
+      identifier: { type: "email", value: "user@example.com" },
+      userId: "u1",
+    });
+    expect(blocked).toBeInstanceOf(AccountLockedError);
   });
 
-  it("keys by normalized email (case/whitespace-insensitive)", async () => {
-    const h = makeHarness({ maxAttempts: 5, lockoutDurationMs: 60_000 });
-    await h.beforeSignIn("User@Example.com");
-    await h.beforeSignIn("  user@example.com ");
-    expect(
-      Option.getOrUndefined(MutableHashMap.get(h.records, "lockout:user@example.com"))?.failures,
-    ).toBe(2);
+  it("resets the counts only when a session is issued for the user", async () => {
+    const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt({
+      method: "second-factor",
+      identifier: { type: "user", value: "u1" },
+      userId: "u1",
+    });
+    expect(h.failures("lockout:user:u1")).toBe(2);
+    expect(h.failures("lockout:second-factor:user:u1")).toBe(1);
+
+    await h.sessionIssued("u1");
+    expect(MutableHashMap.has(h.records, "lockout:user:u1")).toBe(false);
+    expect(MutableHashMap.has(h.records, "lockout:second-factor:user:u1")).toBe(false);
+
+    // A fresh streak starts from zero, so the account is nowhere near locked.
+    await h.attempt(byEmail("user@example.com", "u1"));
+    expect(h.failures("lockout:user:u1")).toBe(1);
+  });
+
+  it("counts second-factor redemptions per user across challenges, apart from first-factor attempts", async () => {
+    const h = makeHarness({
+      maxAttempts: 5,
+      maxSecondFactorAttempts: 2,
+      lockoutDurationMs: 60_000,
+    });
+    const secondFactor: AuthenticateAttempt = {
+      method: "second-factor",
+      identifier: { type: "user", value: "u1" },
+      userId: "u1",
+    };
+    await h.attempt(secondFactor);
+    await h.attempt(secondFactor);
+
+    const blocked = await h.attemptResult(secondFactor);
+    assert(blocked instanceof AccountLockedError, "second-factor redemption is locked");
+    expect(blocked.message).toMatch(/Second-factor/);
+
+    // The first factor has a count of its own and stays open.
+    expect(await h.attemptResult(byEmail("user@example.com", "u1"))).not.toBeInstanceOf(
+      AccountLockedError,
+    );
   });
 
   it("concurrent attempts do not lose increments (atomic registerAttempt)", async () => {
@@ -168,7 +220,7 @@ describe("AccountLockoutPlugin", () => {
     expect(result).toEqual({ failures: 5, lockedUntil: now + 60_000 });
   });
 
-  it("a delete failure after a successful sign-in is isolated (does not abort)", async () => {
+  it("a delete failure after a session is issued is isolated (does not abort)", async () => {
     const records = MutableHashMap.empty<string, AccountLockoutRecord>();
     const flaky: typeof AccountLockoutStore.Service = {
       ...memoryAccountLockoutStore(records),
@@ -176,12 +228,12 @@ describe("AccountLockoutPlugin", () => {
     };
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 }, flaky);
 
-    // The tap swallows the store error; the successful sign-in result flows on.
-    const result = await h.afterSignIn("user@example.com");
-    expect(result.identifier).toEqual({ type: "email", value: "user@example.com" });
+    // The tap swallows the store error; the new session flows on.
+    const result = await h.sessionIssued("u1");
+    expect(result.userId).toBe("u1");
   });
 
-  it("fails closed by default when the store errors during beforeSignIn", async () => {
+  it("fails closed by default when the store errors during beforeAuthenticate", async () => {
     const broken: typeof AccountLockoutStore.Service = {
       get: () => Effect.fail(new AuthError({ message: "store down" })),
       registerAttempt: () => Effect.fail(new AuthError({ message: "store down" })),
@@ -189,11 +241,11 @@ describe("AccountLockoutPlugin", () => {
     };
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 }, broken);
 
-    const result = await h.beforeSignInResult("user@example.com");
+    const result = await h.attemptResult(byEmail("user@example.com"));
     expect(result).toBeInstanceOf(AuthError);
   });
 
-  it("onStoreError: 'fail-open' lets the sign-in proceed when the store errors", async () => {
+  it("onStoreError: 'fail-open' lets the attempt proceed when the store errors", async () => {
     const broken: typeof AccountLockoutStore.Service = {
       get: () => Effect.fail(new AuthError({ message: "store down" })),
       registerAttempt: () => Effect.fail(new AuthError({ message: "store down" })),
@@ -204,8 +256,8 @@ describe("AccountLockoutPlugin", () => {
       broken,
     );
 
-    const result = await h.beforeSignInResult("user@example.com");
+    const result = await h.attemptResult(byEmail("user@example.com"));
     expect(result).not.toBeInstanceOf(AuthError);
-    expect(result).toEqual(signIn("user@example.com"));
+    expect(result).toEqual(byEmail("user@example.com"));
   });
 });

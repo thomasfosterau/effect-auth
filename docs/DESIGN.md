@@ -33,7 +33,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // Canonical: the service name IS the export; layers are statics on it.
 const app = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
-  const session = yield* sessions.createSession(userId);
+  const { session, token } = yield* sessions.createSession(userId);
 }).pipe(
   Effect.provide(Auth.SessionService.layer({ sessionExpiresIn })),
   Effect.provide(Auth.Email.EmailPasswordService.layer()),
@@ -567,7 +567,10 @@ global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
 (`Identifier.ts`; KV, sql and alchemy implementations). Consequences:
 
 - **Resolution**: every "who owns this handle" goes through
-  `IdentifierStore.getByValue` (helper: `resolveUserByIdentifier`). The
+  `IdentifierStore.getByValue`, read through `lookupIdentifier` (helper:
+  `resolveUserByIdentifier`), which treats a record whose value differs from
+  the one asked for as a miss, so a store that compares loosely (a MySQL
+  `_ai_ci` collation) never resolves another account (#602). The
   removed members: `User.email`/`emailVerified`, `UserServiceStore.getByEmail`,
   `UserService.getUserByEmail`/`markEmailVerified`, every feature store's
   `getUserByEmail`, and `UsernameStore` outright.
@@ -624,7 +627,9 @@ semantics adopted on merit and, at most, an interop serialization (door-open
 - **Semantics:** default deny; forbid overrides permit; order-independent;
   the `Decision` carries determining policies + per-policy outcomes.
   **Fail-closed both ways** (deliberate Cedar deviation): an erroring permit
-  cannot grant, an erroring forbid denies; errors land in the trace.
+  cannot grant, an erroring forbid denies; errors land in the trace. A
+  request naming an entity with an empty id is denied outright
+  (`"invalid-request"`), and an empty-id reference equals nothing (#661).
 - **Entities everywhere:** principals, resources, actions and roles are typed
   entities in one hierarchy, so RBAC (`principal in Role::"admin"`), ReBAC
   and action groups are the same data check. The declared `Model` doubles as

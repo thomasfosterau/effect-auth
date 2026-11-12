@@ -3,8 +3,9 @@ import { DateTime, Effect } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import type { SessionWithUser } from "@thomasfosterau/effect-auth";
+import { hashToken, type SessionWithUser } from "@thomasfosterau/effect-auth";
 import { makeServerFixture } from "@thomasfosterau/effect-auth/client/testing";
+import * as Http from "@thomasfosterau/effect-auth/http";
 import {
   type ActionEvent,
   type CookieOptions,
@@ -158,6 +159,7 @@ const formText = (form: FormData, name: string): string => {
 
 /** A JSON body for a stubbed handler response. */
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+const encodeUnknown = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const kit = {
   redirect: (status: 303, location: string): never => {
@@ -502,6 +504,90 @@ describe("remote functions", () => {
       kind: "signed-in",
       location: "/elsewhere",
     });
+  });
+});
+
+describe("against the real auth handler (#581)", () => {
+  it("relays the token as a cookie only, and locals.auth carries no credential", async () => {
+    const server = makeServerFixture();
+    const signUp = await server.handler(
+      new Request("http://auth.internal/users", {
+        method: "POST",
+        headers: { "content-type": "application/vnd.api+json" },
+        body: encodeJson({
+          data: {
+            type: "users",
+            attributes: { email: "ada@example.com", password: "password-123" },
+          },
+        }),
+      }),
+    );
+    expect(signUp.status).toBe(201);
+
+    // Sign in through the form action: the session reaches the browser as a cookie.
+    const bodies: Array<string> = [];
+    const { event: input, cookies } = submit("https://app.example/login?redirect=/dashboard");
+    const action = credentialAction(kit, {
+      fetch: async (request) => {
+        // The app and its auth service share an origin in production; here the
+        // handler runs under another, so the app origin is not one it trusts.
+        const sameOrigin = new Request(request);
+        sameOrigin.headers.delete("origin");
+        const response = await server.handler(sameOrigin);
+        bodies.push(await response.clone().text());
+        return response;
+      },
+      endpoint: "http://auth.internal/sessions",
+      body: (form) => ({
+        data: {
+          type: "sessions",
+          attributes: {
+            credential: {
+              method: "password",
+              email: formText(form, "email"),
+              password: "password-123",
+            },
+          },
+        },
+      }),
+      fields: (form) => ({ email: formText(form, "email") }),
+      fallback: "/home",
+    });
+    await expect(action(input)).rejects.toMatchObject({ status: 303, location: "/dashboard" });
+    const relayed = cookies.find(([name]) => name === "conduit_session");
+    assert(relayed !== undefined, "the action relayed the session cookie");
+    const [, token, cookieOptions] = relayed;
+    expect(cookieOptions.httpOnly).toBe(true);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).not.toContain(token);
+
+    // Resolve it on the next request over the auth service's own session read.
+    const remoteSession = Http.RemoteSession.make({
+      fetcher: server.handler,
+      baseUrl: "http://auth.internal",
+      prefix: "",
+    });
+    const hook = handle({
+      cookies: { secure: false },
+      lookup: (request) => Effect.map(remoteSession.read(request), (result) => result.session),
+      failure: { mode: "closed" },
+    });
+    const locals: { auth?: LocalsAuth } = {};
+    await hook({
+      event: {
+        request: new Request("https://app.example/page", {
+          headers: { cookie: `conduit_session=${token}` },
+        }),
+        cookies: { get: (name: string) => (name === "conduit_session" ? token : undefined) },
+        locals,
+      },
+      resolve: () => new Response("page"),
+    });
+    const resolved = locals.auth?.session;
+    assert(resolved !== null && resolved !== undefined, "the viewer is signed in");
+    expect(resolved.session.id).toBe(hashToken(token));
+    // A `load` that returns `locals.auth` serializes no credential into the page.
+    expect(encodeUnknown(locals.auth)).not.toContain(token);
   });
 });
 

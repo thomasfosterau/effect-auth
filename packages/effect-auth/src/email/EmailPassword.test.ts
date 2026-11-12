@@ -932,9 +932,11 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signInResult.identifier).toEqual({ type: "email", value: "alice@example.com" });
 
     // The session is live in the store — no dangling session.
-    expect(
-      signInResult.session && MutableHashMap.has(localSessions, hashToken(signInResult.session.id)),
-    ).toBe(true);
+    expect(signInResult.session && MutableHashMap.has(localSessions, signInResult.session.id)).toBe(
+      true,
+    );
+    // The record carries the stored id; the token travels beside it (#581).
+    expect(signInResult.session?.id).toBe(hashToken(signInResult.token ?? ""));
   });
 
   it("signUp succeeds and returns the session even when afterSignUp hook fails (no dangling session)", async () => {
@@ -959,9 +961,11 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signUpResult.identifier).toEqual({ type: "email", value: "bob@example.com" });
 
     // The session is live in the store — no dangling session.
-    expect(
-      signUpResult.session && MutableHashMap.has(localSessions, hashToken(signUpResult.session.id)),
-    ).toBe(true);
+    expect(signUpResult.session && MutableHashMap.has(localSessions, signUpResult.session.id)).toBe(
+      true,
+    );
+    // The record carries the stored id; the token travels beside it (#581).
+    expect(signUpResult.session?.id).toBe(hashToken(signUpResult.token ?? ""));
   });
 });
 

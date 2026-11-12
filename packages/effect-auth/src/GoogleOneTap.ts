@@ -36,7 +36,7 @@ import { SessionService } from "./SessionService.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { proveAddress } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -103,6 +103,8 @@ export interface GoogleOneTapConfig {
 export interface GoogleOneTapSignInResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
   readonly isNewUser: boolean;
   /** The verified id_token claims (sub, email, name, picture, ...). */
   readonly claims: Types.JsonObject;
@@ -239,11 +241,14 @@ export const make = (
         }
         const normalized = email.trim().toLowerCase();
 
-        const identifier = yield* identifiers.getByValue("email", normalized);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          return yield* new GoogleOneTapError({ message: "Account is unavailable" });
-        }
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "email",
+          normalized,
+          () => new GoogleOneTapError({ message: "Account is unavailable" }),
+        );
+        let user = owner;
         const isNewUser = user === null;
         if (user === null) {
           // Google attested the address as verified.
@@ -273,8 +278,8 @@ export const make = (
           yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
         }
 
-        const session = yield* sessionManager.createSession(user.id);
-        return { user, session, isNewUser, claims };
+        const { session, token } = yield* sessionManager.createSession(user.id);
+        return { user, session, token, isNewUser, claims };
       }),
     };
   });

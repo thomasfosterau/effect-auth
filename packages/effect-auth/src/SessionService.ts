@@ -50,7 +50,7 @@ export const make = (
             );
 
             const session: Types.Session = {
-              id: hashToken(rawToken), // store only the hash; raw token goes to the cookie
+              id: hashToken(rawToken), // the store, and every reader, sees only the digest
               userId: args.userId,
               expiresAt,
               createdAt: now,
@@ -59,8 +59,9 @@ export const make = (
             };
 
             yield* sessionStore.create(session);
-            // Return the raw token as session.id so the HTTP layer can set it as the cookie value.
-            return yield* hooks.afterCreateSession({ ...session, id: rawToken });
+            // The raw token travels beside the record, never as its id (#581).
+            const created = yield* hooks.afterCreateSession(session);
+            return { session: created, token: rawToken } satisfies Types.IssuedSession;
           }).pipe(
             Effect.withSpan(Obs.spanNames.createSession),
             Effect.tap(() => Obs.recordSessionCreated()),
@@ -147,12 +148,9 @@ export const make = (
             });
           }
 
-          // Return the raw token as session.id so the HTTP layer can bind the session
-          // cookie and cache correctly — the stored hash stays in the database only.
-          return yield* hooks.afterValidateSession({
-            session: { ...updatedSession, id: rawToken },
-            user,
-          });
+          // The session answers under its stored id: the caller already holds
+          // the token it presented (#581).
+          return yield* hooks.afterValidateSession({ session: updatedSession, user });
         }).pipe(
           Effect.withSpan(Obs.spanNames.validateSession),
           Effect.tap(() => Obs.recordSessionValidated("success")),
@@ -169,8 +167,10 @@ export const make = (
       invalidateSession: Effect.fn("SessionService.invalidateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
           const { sessionId: rawToken } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
-          yield* sessionStore.delete(hashToken(rawToken));
-          yield* hooks.afterSignOut({ sessionId: rawToken });
+          const storedId = hashToken(rawToken);
+          yield* sessionStore.delete(storedId);
+          // Observers get the stored id, so an audit log never records a credential.
+          yield* hooks.afterSignOut({ sessionId: storedId });
         }).pipe(
           Effect.withSpan(Obs.spanNames.signOut),
           Effect.tap(() => Obs.recordSessionInvalidated()),
@@ -199,37 +199,32 @@ export const make = (
 
       revokeOtherSessions: Effect.fn("SessionService.revokeOtherSessions")(function* (
         userId: string,
-        currentSessionId: string,
+        keepSessionId: string,
       ) {
-        const currentHash = hashToken(currentSessionId);
         const sessions = yield* sessionStore.listByUserId(userId);
         yield* Effect.forEach(
-          // session.id values from the store are hashes; compare against hashed current token
-          sessions.filter((session) => session.id !== currentHash),
+          sessions.filter((session) => session.id !== keepSessionId),
           (session) => sessionStore.delete(session.id),
           { concurrency: 1, discard: true },
         );
       }),
 
       setSessionAttributes: Effect.fn("SessionService.setSessionAttributes")(function* (
-        rawSessionId: string,
+        storedSessionId: string,
         attributes: Types.Attributes,
       ) {
-        const tokenHash = hashToken(rawSessionId);
-        const session = yield* sessionStore.get(tokenHash);
+        const session = yield* sessionStore.get(storedSessionId);
         if (session === null) {
           return yield* new Errors.SessionNotFoundError({
             message: "Session not found",
-            sessionId: tokenHash,
+            sessionId: storedSessionId,
           });
         }
         const updated: Types.Session = {
           ...session,
           attributes: { ...session.attributes, ...attributes },
         };
-        const result = yield* sessionStore.update(updated);
-        // Return raw token as id, matching the pattern from createSession/validateSession.
-        return { ...result, id: rawSessionId };
+        return yield* sessionStore.update(updated);
       }),
     };
   });
@@ -243,18 +238,23 @@ export class SessionService extends Context.Service<
   SessionService,
   {
     /**
-     * Create a new session for a user
+     * Create a new session for a user. Answers the stored record (its `id`
+     * the digest of the token) and the raw `token`, the credential to hand
+     * the client in the session cookie (or, in bearer mode, the
+     * `set-auth-token` header). The token is never the record's id (#581).
      */
     readonly createSession: (
       userId: string,
       attributes?: Types.Attributes,
-    ) => Effect.Effect<Types.Session, Errors.AuthError | HookError>;
+    ) => Effect.Effect<Types.IssuedSession, Errors.AuthError | HookError>;
 
     /**
-     * Validate a session and return it with the user
+     * Validate the session a raw token names and return it with the user. The
+     * session answers under its stored id (the token's digest), never the
+     * token.
      */
     readonly validateSession: (
-      sessionId: string,
+      token: string,
     ) => Effect.Effect<
       Types.SessionWithUser,
       | Errors.SessionNotFoundError
@@ -264,10 +264,11 @@ export class SessionService extends Context.Service<
     >;
 
     /**
-     * Invalidate a session
+     * Invalidate the session a raw token names. The sign-out hooks run;
+     * `afterSignOut` observes the stored id, never the token.
      */
     readonly invalidateSession: (
-      sessionId: string,
+      token: string,
     ) => Effect.Effect<void, Errors.AuthError | HookError>;
 
     /**
@@ -296,21 +297,23 @@ export class SessionService extends Context.Service<
     ) => Effect.Effect<boolean, Errors.AuthError>;
 
     /**
-     * Invalidate every session for a user except the given one (e.g. keep the
-     * current device signed in while revoking all others).
+     * Invalidate every session for a user except the one with the given
+     * stored id (e.g. keep the current device signed in while revoking all
+     * others). Pass `session.id` as `validateSession` or `createSession`
+     * answers it, the digest, not the token.
      */
     readonly revokeOtherSessions: (
       userId: string,
-      currentSessionId: string,
+      keepSessionId: string,
     ) => Effect.Effect<void, Errors.AuthError>;
 
     /**
-     * Merge `attributes` into a session's stored attributes (e.g. record the
-     * `activeOrganizationId`). Existing keys are overwritten; others are kept.
-     * Returns the updated session.
+     * Merge `attributes` into the stored attributes of the session with the
+     * given stored id (e.g. record the `activeOrganizationId`). Existing keys
+     * are overwritten; others are kept. Returns the updated session.
      */
     readonly setSessionAttributes: (
-      sessionId: string,
+      storedSessionId: string,
       attributes: Types.Attributes,
     ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
   }

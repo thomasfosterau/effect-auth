@@ -26,10 +26,13 @@
  * alone; see {@link OrganizationConfig.onMemberDeactivated}.
  *
  * **Domains:** an organization may claim email domains
- * ({@link OrganizationDomain}), each proved through DNS (via an app-provided
- * {@link DomainVerifier}) or attested manually. A *verified* domain is what
- * lets an SSO sign-in provision membership just in time, per organization and
- * off by default ({@link Organization.jitProvisioning}).
+ * ({@link OrganizationDomain}). A tenant proves its claim only through DNS
+ * (via an app-provided {@link DomainVerifier}); manual attestation is the
+ * application operator's alone ({@link OrganizationService.attestDomain}, a
+ * server-side call made after checking ownership out of band), never a
+ * member's (#598). A *verified* domain is what lets an SSO sign-in provision
+ * membership just in time, per organization and off by default
+ * ({@link Organization.jitProvisioning}).
  *
  * **Active organization:** this module deliberately does not manage a
  * per-session "active organization" (better-auth's `setActiveOrganization`).
@@ -228,21 +231,23 @@ export type DomainVerificationState = "pending" | "verified" | "failed";
  * How a domain claim is proved.
  *
  * `dns` - a TXT record carrying {@link OrganizationDomain.verificationToken},
- * checked by a {@link DomainVerifier} the app provides; `manual` - the app (or
- * an org owner/admin acting through the verify endpoint) attests to it out of
- * band.
+ * checked by a {@link DomainVerifier} the app provides; the only proof an
+ * organization can offer for its own claim. `manual` - the application
+ * operator attested the claim out of band
+ * ({@link OrganizationService.attestDomain}); no organization member can make
+ * or verify a `manual` claim (#598).
  */
 export type DomainVerificationStrategy = "dns" | "manual";
 
 /**
  * An email domain claimed by an organization.
  *
- * Domains are globally unique: `domain` identifies at most one row across all
- * organizations, pending claims included. Allowing two tenants to hold pending
- * claims on the same domain would make "who gets it" a race decided by
- * verification order, and would leak one tenant's claim to another - so a
- * second organization claiming a domain is refused outright, whatever state
- * the first claim is in.
+ * An organization holds at most one claim per domain, and at most one claim
+ * per domain is `verified` across all organizations. Several organizations
+ * may hold unverified claims on the same domain, each with its own token:
+ * whether another tenant claims a domain is never revealed to a tenant, and a
+ * pending claim cannot squat a domain its real owner later proves (#598).
+ * Only the verified claim carries authority.
  */
 export interface OrganizationDomain {
   readonly id: string;
@@ -253,7 +258,7 @@ export interface OrganizationDomain {
   readonly verificationStrategy: DomainVerificationStrategy;
   /**
    * Random token the DNS TXT record must contain, generated server-side when
-   * the claim is added with the `dns` strategy. Absent for `manual` claims.
+   * an organization adds the claim. Absent for `manual` claims.
    */
   readonly verificationToken?: string;
   /** Epoch milliseconds */
@@ -272,8 +277,11 @@ export interface OrganizationDomain {
  *
  * Conventions: lookups answer `null` when the record does not exist, deletes of
  * unknown ids are no-ops, and failures are reported as `AuthError`. Put a
- * unique index on `domain` - the service checks for a conflicting claim before
- * writing, but the index is what makes the guarantee hold under concurrency.
+ * unique index on `(organizationId, domain)` and, where the database has
+ * partial indexes, a unique index on `domain` over the `verified` rows: the
+ * service checks both rules before writing, but the indexes are what make
+ * them hold under concurrency. Never a unique index on `domain` alone, which
+ * would let one tenant's pending claim block every other organization.
  * {@link OrganizationService.deleteOrganization} releases an organization's
  * claims before deleting it, so this store needs no cascade of its own - but a
  * direct `OrganizationStore.deleteOrganization` call bypasses that, so delete
@@ -288,8 +296,12 @@ export class OrganizationDomainStore extends Context.Service<
     readonly getById: (
       domainId: string,
     ) => Effect.Effect<OrganizationDomain | null, Errors.AuthError>;
-    /** Resolve a claim by its normalized domain, across every organization. */
-    readonly getByDomain: (
+    /**
+     * The `verified` claim on a normalized domain, across every organization;
+     * `null` when no claim on it is verified. Unverified claims are never
+     * answered here.
+     */
+    readonly getVerifiedByDomain: (
       domain: string,
     ) => Effect.Effect<OrganizationDomain | null, Errors.AuthError>;
     readonly listByOrganization: (
@@ -314,11 +326,11 @@ export const memoryOrganizationDomainStore = (
 ): typeof OrganizationDomainStore.Service => ({
   create: (domain) => Effect.sync(() => (MutableHashMap.set(records, domain.id, domain), domain)),
   getById: (domainId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, domainId))),
-  getByDomain: (domain) =>
+  getVerifiedByDomain: (domain) =>
     Effect.sync(
       () =>
         Arr.fromIterable(MutableHashMap.values(records)).find(
-          (record) => record.domain === domain,
+          (record) => record.domain === domain && record.verificationState === "verified",
         ) ?? null,
     ),
   listByOrganization: (organizationId) =>
@@ -342,8 +354,8 @@ export const memoryOrganizationDomainStore = (
  * as a TXT record). Implement it over whatever resolver your runtime has - Node
  * `dns/promises`, Cloudflare's DoH endpoint, a hosting provider's API - and
  * provide it with `Layer.succeed(DomainVerifier)(impl)`. Without it in context
- * the `dns` strategy is unavailable and `manual` attestation is the only route
- * to a verified domain.
+ * no organization can verify a domain, and the operator's
+ * {@link OrganizationService.attestDomain} is the only route to a verified one.
  */
 export class DomainVerifier extends Context.Service<
   DomainVerifier,
@@ -615,10 +627,13 @@ export interface UpdateOrganizationInput {
  * Input for claiming an email domain for an organization
  */
 export interface AddOrganizationDomainInput {
-  /** Domain to claim; normalized (trimmed, lowercased) before storage */
+  /**
+   * Domain to claim; normalized (trimmed, lowercased) before storage. The
+   * claim is always proved through DNS: an organization cannot choose
+   * `manual` attestation, which is the operator's
+   * ({@link OrganizationService.attestDomain}, #598).
+   */
   readonly domain: string;
-  /** Defaults to `"dns"` */
-  readonly verificationStrategy?: DomainVerificationStrategy;
 }
 
 /**
@@ -907,10 +922,12 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Claim an email domain for the organization. Requires the
-     * `domain:manage` permission. The claim starts `pending`; with the `dns`
-     * strategy a random verification token is generated server-side to publish
-     * as a TXT record. A domain already claimed by any organization - pending
-     * or verified - is refused.
+     * `domain:manage` permission. The claim starts `pending` with the `dns`
+     * strategy, and a random verification token is generated server-side to
+     * publish as a TXT record. A domain this organization already claims is
+     * refused; other organizations' claims are not consulted, so the answer
+     * never reveals one (only one claim per domain becomes verified, see
+     * {@link verifyDomain}).
      */
     readonly addDomain: (
       actorUserId: string,
@@ -930,20 +947,42 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
-     * Attempt to verify a domain claim. Requires the `domain:manage`
-     * permission.
+     * Attempt to verify a domain claim through DNS. Requires the
+     * `domain:manage` permission, which is never itself the proof (#598).
      *
-     * `dns` claims ask the ambient {@link DomainVerifier} whether the domain
-     * publishes the claim's token; without that service the strategy is
-     * unavailable and the call fails. `manual` claims are attested by the
-     * caller's `domain:manage` permission alone. A failed DNS check answers
-     * with the claim in state `"failed"` (retryable) rather than an error -
-     * "the record is not there yet" is an outcome, not a fault.
+     * Asks the ambient {@link DomainVerifier} whether the domain publishes the
+     * claim's token; without that service the call fails. A failed DNS check
+     * answers with the claim in state `"failed"` (retryable) rather than an
+     * error - "the record is not there yet" is an outcome, not a fault. A
+     * passed check is refused while another organization holds the verified
+     * claim on the domain (only the domain's controller learns of it). An
+     * unverified `manual` claim is refused: only the operator attests one
+     * ({@link attestDomain}).
      */
     readonly verifyDomain: (
       actorUserId: string,
       organizationId: string,
       domainId: string,
+    ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
+
+    /**
+     * The application operator's attestation that `organizationId` controls
+     * `domain`, made after checking ownership out of band (#598). No actor and
+     * no organization permission is involved: this is a server-side call for
+     * the operator's own tooling, or the platform-admin endpoint
+     * `POST /admin/organization-domains` (gated on `isAdmin`). Never expose it
+     * on a route an organization member can reach.
+     *
+     * Answers the organization's claim on the domain, now `verified` with the
+     * `manual` strategy: its existing claim is attested in place (keeping its
+     * id and dropping its DNS token), or a new one is created. A claim already
+     * verified is answered unchanged. Refused for an unknown organization, an
+     * invalid domain, a domain another organization holds verified, or when no
+     * {@link OrganizationDomainStore} is configured.
+     */
+    readonly attestDomain: (
+      organizationId: string,
+      domain: string,
     ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
 
     /**
@@ -954,9 +993,10 @@ export class OrganizationService extends Context.Service<
      *
      * Answers the new membership, or `null` when nothing applies (no matching
      * domain, the claim is not verified, JIT is off, the user is already a
-     * member, or no {@link OrganizationDomainStore} is configured). Callers
-     * must only pass addresses whose ownership has been proved - this is what
-     * turns a domain claim into membership.
+     * member, or no {@link OrganizationDomainStore} is configured). Only a
+     * DNS-verified or operator-attested claim counts. Callers must only pass
+     * addresses whose ownership has been proved - this is what turns a domain
+     * claim into membership.
      */
     readonly provisionJitMembership: (
       userId: string,
@@ -1114,6 +1154,14 @@ const normalizeDomain = (domain: string): string => domain.trim().toLowerCase();
 
 /** The domain part of an email address, normalized; `""` when there is none. */
 const domainOfEmail = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");
+
+/** `input`, normalized, or a refusal when it is not a plausible domain. */
+const validDomain = (input: string): Effect.Effect<string, OrganizationError> => {
+  const domain = normalizeDomain(input);
+  return domain === "" || domain.includes("@") || !domain.includes(".")
+    ? Effect.fail(new OrganizationError({ message: `'${input}' is not a valid domain` }))
+    : Effect.succeed(domain);
+};
 
 /**
  * Create an organization service
@@ -1345,6 +1393,52 @@ export const make = (
         }
         return member;
       });
+
+    /**
+     * This organization's own claim on a normalized domain, `null` when it has
+     * none. Other organizations' claims are never consulted (#598).
+     */
+    const ownClaimOn = (
+      domainStore: typeof OrganizationDomainStore.Service,
+      organizationId: string,
+      domain: string,
+    ) =>
+      domainStore
+        .listByOrganization(organizationId)
+        .pipe(Effect.map((claims) => claims.find((claim) => claim.domain === domain) ?? null));
+
+    /**
+     * Refuse when another organization holds the verified claim on `domain`:
+     * at most one claim per domain is verified. Asked only once ownership is
+     * proved (a passed DNS check, or the operator's attestation), so a tenant
+     * that does not control the domain never learns of another's claim.
+     */
+    const requireNotVerifiedElsewhere = (
+      domainStore: typeof OrganizationDomainStore.Service,
+      organizationId: string,
+      domain: string,
+    ) =>
+      domainStore.getVerifiedByDomain(domain).pipe(
+        Effect.flatMap((holder) =>
+          holder === null || holder.organizationId === organizationId
+            ? Effect.void
+            : Effect.fail(
+                new OrganizationError({
+                  message: "That domain is already verified for another organization",
+                }),
+              ),
+        ),
+      );
+
+    /** Whether the claim's domain publishes its token, through the ambient verifier. */
+    const proveByDns = (claim: OrganizationDomain) =>
+      Option.isNone(domainVerifierOption)
+        ? Effect.fail(
+            new OrganizationError({
+              message: "DNS domain verification is not available: provide a DomainVerifier layer",
+            }),
+          )
+        : domainVerifierOption.value.verify(claim.domain, claim.verificationToken ?? "");
 
     /**
      * Load one of the organization's domain claims. Claims are addressed by id
@@ -1966,33 +2060,27 @@ export const make = (
         yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
         yield* getOrganizationOrFail(organizationId);
 
-        const domain = normalizeDomain(input.domain);
-        if (domain === "" || domain.includes("@") || !domain.includes(".")) {
+        const domain = yield* validDomain(input.domain);
+        // Only this organization's own claims are consulted: a refusal over
+        // another tenant's claim would confirm it exists, and would let a
+        // pending claim squat the domain (#598).
+        if ((yield* ownClaimOn(domainStore, organizationId, domain)) !== null) {
           return yield* new OrganizationError({
-            message: `'${input.domain}' is not a valid domain`,
+            message: "This organization has already claimed that domain",
           });
         }
 
-        const conflicting = yield* domainStore.getByDomain(domain);
-        if (conflicting) {
-          return yield* new OrganizationError({
-            message:
-              conflicting.organizationId === organizationId
-                ? "This organization has already claimed that domain"
-                : "That domain is already claimed by another organization",
-          });
-        }
-
-        const strategy = input.verificationStrategy ?? "dns";
+        // A tenant's claim is always proved through DNS; `manual` attestation
+        // is the operator's (`attestDomain`).
         const claim: OrganizationDomain = {
           id: yield* generateId(),
           organizationId,
           domain,
           verificationState: "pending",
-          verificationStrategy: strategy,
+          verificationStrategy: "dns",
           // The token is ours to mint: a client-chosen one would let a tenant
           // "prove" a domain with a record it had already published elsewhere.
-          ...(strategy === "dns" && { verificationToken: yield* generateId() }),
+          verificationToken: yield* generateId(),
           createdAt: yield* Clock.currentTimeMillis,
         };
         return yield* domainStore.create(claim);
@@ -2024,31 +2112,50 @@ export const make = (
 
         if (domain.verificationState === "verified") return domain;
 
+        // `domain:manage` is never the proof (#598): only the operator attests
+        // a `manual` claim, through `attestDomain`.
         if (domain.verificationStrategy === "manual") {
-          // The `domain:manage` permission *is* the attestation here.
-          return yield* domainStore.update({
-            ...domain,
-            verificationState: "verified",
-            verifiedAt: yield* Clock.currentTimeMillis,
-          });
-        }
-
-        if (Option.isNone(domainVerifierOption)) {
           return yield* new OrganizationError({
-            message:
-              "DNS domain verification is not available: provide a DomainVerifier layer, or claim the domain with the 'manual' strategy",
+            message: "A manual claim is attested by the application operator, not the organization",
           });
         }
 
-        const proved = yield* domainVerifierOption.value.verify(
-          domain.domain,
-          domain.verificationToken ?? "",
-        );
+        const proved = yield* proveByDns(domain);
+        if (proved) {
+          yield* requireNotVerifiedElsewhere(domainStore, organizationId, domain.domain);
+        }
         return yield* domainStore.update({
           ...domain,
           verificationState: proved ? "verified" : "failed",
           ...(proved && { verifiedAt: yield* Clock.currentTimeMillis }),
         });
+      }),
+
+      attestDomain: Effect.fn("OrganizationService.attestDomain")(function* (
+        organizationId: string,
+        input: string,
+      ) {
+        const domainStore = yield* requireDomainStore();
+        yield* getOrganizationOrFail(organizationId);
+        const domain = yield* validDomain(input);
+        yield* requireNotVerifiedElsewhere(domainStore, organizationId, domain);
+
+        const existing = yield* ownClaimOn(domainStore, organizationId, domain);
+        if (existing?.verificationState === "verified") return existing;
+
+        const now = yield* Clock.currentTimeMillis;
+        // Built field by field, so a pending DNS claim's token does not
+        // survive its attestation.
+        const claim: OrganizationDomain = {
+          id: existing?.id ?? (yield* generateId()),
+          organizationId,
+          domain,
+          verificationState: "verified",
+          verificationStrategy: "manual",
+          createdAt: existing?.createdAt ?? now,
+          verifiedAt: now,
+        };
+        return yield* existing === null ? domainStore.create(claim) : domainStore.update(claim);
       }),
 
       provisionJitMembership: Effect.fn("OrganizationService.provisionJitMembership")(function* (
@@ -2057,7 +2164,7 @@ export const make = (
       ) {
         if (Option.isNone(domainStoreOption)) return null;
 
-        const domain = yield* domainStoreOption.value.getByDomain(domainOfEmail(email));
+        const domain = yield* domainStoreOption.value.getVerifiedByDomain(domainOfEmail(email));
         // Only a *verified* claim carries authority; a pending one is just a
         // request, and honoring it would let anyone absorb a domain by asking.
         if (!domain || domain.verificationState !== "verified") return null;

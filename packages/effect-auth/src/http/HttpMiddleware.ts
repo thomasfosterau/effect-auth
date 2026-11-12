@@ -110,7 +110,7 @@
  *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
  *   const sessionService = yield* SessionService
  *   // The raw token is the session id; the store keeps only its hash.
- *   return (yield* sessionService.createSession("u-1")).id
+ *   return (yield* sessionService.createSession("u-1")).token
  * }).pipe(Effect.provide(myServiceLayer))
  *
  * const token = await Effect.runPromise(program)
@@ -155,6 +155,7 @@ import {
   type ResolvedCookieConfig,
 } from "./HttpServer.ts";
 import { decodeSessionCacheCookie, sessionCacheGateAttributes } from "../SessionCookieCache.ts";
+import { hashToken } from "../TokenHash.ts";
 
 // =============================================================================
 // Context services
@@ -343,7 +344,7 @@ const resolveSessionFromRequest = (
             cached,
             cfg.cache,
             yield* Clock.currentTimeMillis,
-            primaryId,
+            hashToken(primaryId),
             gate,
           );
           if (resolved !== null) return Option.some(resolved);
@@ -486,7 +487,7 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  *   const now = new Date()
  *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
  *   const sessionService = yield* SessionService
- *   return (yield* sessionService.createSession("u-1")).id
+ *   return (yield* sessionService.createSession("u-1")).token
  * }).pipe(Effect.provide(myServiceLayer))
  *
  * const token = await Effect.runPromise(program)
@@ -649,7 +650,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *   const now = new Date()
  *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
  *   const sessionService = yield* SessionService
- *   return (yield* sessionService.createSession("u-1")).id
+ *   return (yield* sessionService.createSession("u-1")).token
  * }).pipe(Effect.provide(myServiceLayer))
  *
  * const token = await Effect.runPromise(program)

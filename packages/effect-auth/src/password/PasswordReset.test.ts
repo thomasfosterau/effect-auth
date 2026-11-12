@@ -24,6 +24,7 @@ import * as Password from "./Password.ts";
 import { hashToken } from "../TokenHash.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
+import { looseCollationIdentifierStore } from "../testing/LooseCollation.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -205,6 +206,48 @@ describe("PasswordResetService", () => {
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("reset@example.com");
     expect(MutableHashMap.size(resetTokens)).toBe(1);
+  });
+
+  it("sends nothing for a look-alike address a loose store matches to another account (#602)", async () => {
+    const testContext = await makeTestContext();
+    const bob: User = {
+      id: "user-bob",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    };
+    MutableHashMap.set(users, bob.id, bob);
+    seedEmailIdentifier(bob.id, "bob@example.com", true);
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({
+            sendResetPassword: (email, token) =>
+              Effect.sync(() => {
+                sentEmails.push({ email, token });
+              }),
+          });
+          // A store under a case- and accent-insensitive collation answers
+          // these with Bob's record; none of them may reach Bob's account.
+          yield* service.requestPasswordReset("bob@exämple.com");
+          yield* service.requestPasswordReset("ｂｏｂ@example.com");
+          expect(sentEmails).toEqual([]);
+          expect(MutableHashMap.size(resetTokens)).toBe(0);
+
+          // Bob's own address still gets Bob's link, at the stored address.
+          yield* service.requestPasswordReset("  Bob@Example.com ");
+        }).pipe(
+          Effect.provideService(IdentifierStore, looseCollationIdentifierStore(identifierRecords)),
+        ),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(sentEmails.map((sent) => sent.email)).toEqual(["bob@example.com"]);
+    const [reset] = MutableHashMap.values(resetTokens);
+    expect(reset?.userId).toBe(bob.id);
+    expect(reset?.email).toBe("bob@example.com");
   });
 
   it("should not reveal whether an email exists", async () => {

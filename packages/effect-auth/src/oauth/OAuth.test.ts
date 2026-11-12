@@ -1333,7 +1333,7 @@ describe("OAuthService linking controls", () => {
     };
     const user: Types.User = makeUser({ id: userId });
     return Layer.succeed(SessionService, {
-      createSession: (id) => Effect.sync(() => (minted.push(id), session)),
+      createSession: (id) => Effect.sync(() => (minted.push(id), { session, token: "token-test" })),
       validateSession: () => Effect.succeed({ session, user }),
       invalidateSession: () => Effect.void,
       invalidateUserSessions: () => Effect.void,
@@ -1521,6 +1521,7 @@ describe("OAuthService linking controls", () => {
     expect(outcome.result.success.user.id).toBe(outcome.existingUser.id);
     expect(outcome.accounts).toBe(1);
     expect(outcome.minted).toEqual([outcome.existingUser.id]);
+    expect(outcome.result.success.token).toBe("token-test");
   });
 
   it("refuses to auto-link a provider-verified email to an unverified local address (#588)", async () => {

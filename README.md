@@ -99,22 +99,22 @@ const program = Effect.gen(function* () {
   const auth = yield* Auth.Email.EmailPasswordService;
   yield* auth.signUp({ email: "ada@example.com", password: "correct horse battery staple" });
 
-  const { session, secondFactor } = yield* auth.signIn({
+  const { token, secondFactor } = yield* auth.signIn({
     email: "ada@example.com",
     password: "correct horse battery staple",
   });
-  if (session === undefined) return `second factor required until ${secondFactor?.expiresAt}`;
+  if (token === undefined) return `second factor required until ${secondFactor?.expiresAt}`;
 
-  // `session.id` is the raw token for the cookie; the store only sees its hash.
+  // `token` is the raw token for the cookie; `session.id` is its hash, the stored id.
   const sessionService = yield* Auth.SessionService;
-  const { user } = yield* sessionService.validateSession(session.id);
+  const { user } = yield* sessionService.validateSession(token);
   return `signed in as ${user.id}`;
 });
 
 console.log(await Effect.runPromise(program.pipe(Effect.provide(AuthLive))));
 ```
 
-From here: mount the HTTP API with `Http.make({ services })` from the `@thomasfosterau/effect-auth/http` subpath, swap the in-memory stores for [`@thomasfosterau/effect-auth/sql`](packages/effect-auth/README.md#sql-storage-sql) or [`effect-auth-drizzle`](packages/drizzle), and talk to it from the browser with [`@thomasfosterau/effect-auth/client`](packages/effect-auth/README.md#browser-client-client). The [core README](packages/effect-auth/README.md) covers every feature.
+From here: mount the HTTP API with `Http.make({ services, trustedProxy })` from the `@thomasfosterau/effect-auth/http` subpath (its per-address rate limits are on by default, so `services` needs a `RateLimiter`), swap the in-memory stores for [`@thomasfosterau/effect-auth/sql`](packages/effect-auth/README.md#sql-storage-sql) or [`effect-auth-drizzle`](packages/drizzle), and talk to it from the browser with [`@thomasfosterau/effect-auth/client`](packages/effect-auth/README.md#browser-client-client). The [core README](packages/effect-auth/README.md) covers every feature.
 
 ## Documentation
 
