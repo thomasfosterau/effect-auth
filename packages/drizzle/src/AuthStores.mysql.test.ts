@@ -7,7 +7,7 @@
  */
 
 import { drizzle } from "drizzle-orm/mysql-proxy";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -16,6 +16,7 @@ import { tables } from "./MySqlSchema.ts";
 import * as RateLimitStore from "./RateLimitStore.ts";
 import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
 import * as TokenStore from "./TokenStore.ts";
+import * as UserServiceStore from "./UserServiceStore.ts";
 
 /** Records each statement; every `SELECT` answers with `rows`. */
 const recording = (rows: ReadonlyArray<ReadonlyArray<unknown>>) => {
@@ -79,5 +80,44 @@ describe("MySQL / TokenStore", () => {
       ["digest", "password-reset", 1],
       ["user-1", "password-reset"],
     ]);
+  });
+});
+
+describe("MySQL / UserServiceStore", () => {
+  it("reads, updates and deletes the user row by id, with no RETURNING", async () => {
+    const proxy = recording([]);
+    const user: Auth.User = {
+      id: "user-1",
+      name: "Ada",
+      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
+      updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+      attributes: { team: "core" },
+    };
+    const read = await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* Auth.UserServiceStore;
+        const missing = yield* store.get("user-1");
+        yield* store.update(user);
+        yield* store.delete("user-1");
+        return missing;
+      }).pipe(
+        Effect.provide(UserServiceStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
+      ),
+    );
+    expect(read).toBeNull();
+    expect(proxy.sent.map((statement) => statement.sql)).toEqual([
+      "select `id`, `name`, `image`, `attributes`, `created_at`, `updated_at` from `effect_auth_users` where `effect_auth_users`.`id` = ? limit ?",
+      // The whole user: an absent `image` is written as NULL; never `password_hash`.
+      "update `effect_auth_users` set `name` = ?, `image` = ?, `attributes` = ?, `updated_at` = ? where `effect_auth_users`.`id` = ?",
+      "delete from `effect_auth_users` where `effect_auth_users`.`id` = ?",
+    ]);
+    expect(proxy.sent[1]?.params).toEqual([
+      "Ada",
+      null,
+      '{"team":"core"}',
+      expect.anything(),
+      "user-1",
+    ]);
+    expect(proxy.sent[2]?.params).toEqual(["user-1"]);
   });
 });

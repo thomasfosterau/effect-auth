@@ -1,13 +1,15 @@
 /**
  * The contracts of the stores beyond sign-in — `EmailPasswordStore`,
- * `ApiKeyStore`, `RateLimitStore` and the two token stores — as one suite each
- * dialect's file runs against a real engine (#675).
+ * `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the two token stores —
+ * as one suite each dialect's file runs against a real engine (#675, #728).
  *
  * `ApiKeyStore` runs the core's published conformance suite. The others have
  * none, so their cases here are written from the contracts' documented
- * semantics (`EmailPasswordStore`, `RateLimitStore.increment`,
- * `EmailVerificationStore`, `PasswordResetStore`), and the email-password
- * cases end with a real sign-up and sign-in through `EmailPasswordService`.
+ * semantics (`EmailPasswordStore`, `UserServiceStore` as core's `/sql` store
+ * implements it, `RateLimitStore.increment`, `EmailVerificationStore`,
+ * `PasswordResetStore`); the email-password cases end with a real sign-up and
+ * sign-in through `EmailPasswordService`, the user-service cases with a round
+ * trip through `UserService`.
  *
  * Never published (`tsconfig.json` excludes `src/testing/`).
  */
@@ -26,6 +28,7 @@ import * as RateLimitStore from "../RateLimitStore.ts";
 import type { Tables } from "../Schema.ts";
 import * as SessionStore from "../SessionStore.ts";
 import * as TokenStore from "../TokenStore.ts";
+import * as UserServiceStore from "../UserServiceStore.ts";
 import * as UserStore from "../UserStore.ts";
 import { conformance } from "./Conformance.ts";
 
@@ -49,6 +52,7 @@ export type AuthStores =
   | Auth.Password.PasswordResetStore
   | Auth.SessionStore
   | Auth.UserStore
+  | Auth.UserServiceStore
   | Auth.IdentifierStore;
 
 /** The stores over one dialect's tables, still needing the database. */
@@ -61,6 +65,7 @@ export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, 
     TokenStore.layer(tables),
     SessionStore.layer(tables),
     UserStore.layer(tables),
+    UserServiceStore.layer(tables),
     IdentifierStore.layer(tables),
     Layer.effect(
       PurgeRateLimits,
@@ -77,6 +82,8 @@ const millis = (offset: number): number =>
   DateTime.toEpochMillis(
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offset }),
   );
+
+const dateAt = (offset: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis(offset)));
 
 const uuid = (): string => globalThis.crypto.randomUUID();
 
@@ -172,6 +179,120 @@ const emailPasswordCases = (label: string, run: Run): void => {
       expect(result.sessionId).toBe(result.digest);
       expect(result.storedId).toBe(result.digest);
       expect(result.wrong).toBe("InvalidCredentialsError");
+    });
+  });
+};
+
+const userServiceCases = (label: string, run: Run): void => {
+  describe(`${label}: UserServiceStore`, () => {
+    it("get reads the user UserStore reads, and null on a miss", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
+            store.createUser({ name: "Ada", attributes: { team: "core" } }),
+          );
+          const store = yield* Auth.UserServiceStore;
+          return {
+            user,
+            read: yield* store.get(user.id),
+            viaUserStore: yield* Auth.UserStore.use((users) => users.get(user.id)),
+            missing: yield* store.get(uuid()),
+          };
+        }),
+      );
+      expect(result.read).toEqual(result.user);
+      expect(result.read).toEqual(result.viaUserStore);
+      expect(result.missing).toBeNull();
+    });
+
+    it("update writes name, image, updatedAt and the attributes, and returns the user", async () => {
+      const updatedAt = dateAt(90_000);
+      const result = await run(
+        Effect.gen(function* () {
+          const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
+            store.createUser({ name: "Ada", image: "a.png", attributes: { team: "core" } }),
+          );
+          const store = yield* Auth.UserServiceStore;
+          const renamed = yield* store.update({
+            ...user,
+            name: "Grace",
+            image: "g.png",
+            updatedAt,
+            attributes: { plan: "pro", nested: { seats: 3 } },
+          });
+          const first = yield* store.get(user.id);
+          // Absent fields are cleared, not kept.
+          const { name: _name, image: _image, ...bare } = renamed;
+          yield* store.update({ ...bare, attributes: {} });
+          return { renamed, first, cleared: yield* store.get(user.id) };
+        }),
+      );
+      expect(result.first).toEqual(result.renamed);
+      expect(result.first?.name).toBe("Grace");
+      expect(result.first?.image).toBe("g.png");
+      expect(result.first?.updatedAt).toEqual(updatedAt);
+      expect(result.first?.attributes).toEqual({ plan: "pro", nested: { seats: 3 } });
+      expect(result.cleared?.name).toBeUndefined();
+      expect(result.cleared?.image).toBeUndefined();
+      expect(result.cleared?.attributes).toEqual({});
+    });
+
+    it("update of a missing user writes nothing and returns the user given", async () => {
+      const ghost: Auth.User = {
+        id: uuid(),
+        name: "Nobody",
+        createdAt: dateAt(0),
+        updatedAt: dateAt(0),
+        attributes: {},
+      };
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.UserServiceStore;
+          return { returned: yield* store.update(ghost), read: yield* store.get(ghost.id) };
+        }),
+      );
+      expect(result).toEqual({ returned: ghost, read: null });
+    });
+
+    it("delete removes the user; a delete of a missing user is a no-op", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
+            store.createUser({}),
+          );
+          const { user: other } = yield* Auth.Email.EmailPasswordStore.use((store) =>
+            store.createUser({}),
+          );
+          const store = yield* Auth.UserServiceStore;
+          yield* store.delete(user.id);
+          yield* store.delete(uuid());
+          return { deleted: yield* store.get(user.id), other: yield* store.get(other.id) };
+        }),
+      );
+      expect(result.deleted).toBeNull();
+      expect(result.other).not.toBeNull();
+    });
+
+    it("UserService round-trips over the store", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
+            store.createUser({ name: "Ada" }),
+          );
+          const service = yield* Auth.UserService;
+          const renamed = yield* service.updateUser(user.id, { name: "Grace" });
+          const tagged = yield* service.updateUserAttributes(user.id, { theme: "dark" });
+          const read = yield* service.getUser(user.id);
+          yield* service.deleteUser(user.id);
+          const gone = yield* Effect.flip(service.getUser(user.id));
+          return { renamed, tagged, read, gone: gone._tag };
+        }).pipe(Effect.provide(Auth.UserService.layer())),
+      );
+      expect(result.renamed.name).toBe("Grace");
+      expect(result.read).toEqual(result.tagged);
+      expect(result.read.name).toBe("Grace");
+      expect(result.read.attributes).toEqual({ theme: "dark" });
+      expect(result.gone).toBe("UserNotFoundError");
     });
   });
 };
@@ -413,6 +534,7 @@ const tokenCases = (label: string, run: Run): void => {
 export const authStoresContract = (label: string, run: Run): void => {
   conformance(`${label}: ApiKeyStore`, Testing.apiKeyStoreConformance(), run);
   emailPasswordCases(label, run);
+  userServiceCases(label, run);
   rateLimitCases(label, run);
   tokenCases(label, run);
 };
