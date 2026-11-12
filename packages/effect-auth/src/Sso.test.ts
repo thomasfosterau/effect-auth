@@ -68,6 +68,23 @@ const ProviderDocument = Schema.Struct({
   data: Schema.Struct({ id: Schema.String, attributes: Schema.JsonObject }),
 });
 
+/** The `organization` relationship of a registered connection: its linkage, or `null`. */
+const providerOrganization = async (response: Response) =>
+  (
+    await jsonBody(
+      response,
+      Schema.Struct({
+        data: Schema.Struct({
+          relationships: Schema.Struct({
+            organization: Schema.Struct({
+              data: Schema.NullOr(Schema.Struct({ type: Schema.String, id: Schema.String })),
+            }),
+          }),
+        }),
+      }),
+    )
+  ).data.relationships.organization.data;
+
 /** A registered connection's attributes. */
 const providerAttributes = async (response: Response) =>
   (await jsonBody(response, ProviderDocument)).data.attributes;
@@ -1206,14 +1223,16 @@ const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
 /** A JSON:API create of a `type` resource with `attributes`, at `path`. */
 const create =
   (path: string, type: string) =>
-  (attributes: Schema.Json, sessionId?: string): Request =>
+  (attributes: Schema.Json, sessionId?: string, relationships?: Schema.Json): Request =>
     new Request(`http://test${path}`, {
       method: "POST",
       headers: {
         "content-type": "application/vnd.api+json",
         ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
       },
-      body: encodeJson({ data: { type, attributes } }),
+      body: encodeJson({
+        data: { type, attributes, ...(relationships !== undefined && { relationships }) },
+      }),
     });
 
 /** `POST /sso-providers`: register a connection. */
@@ -1272,6 +1291,38 @@ describe("HTTP SSO endpoints", () => {
     expect(callback.status).toBe(200);
     expect(callback.headers.get("set-cookie")).toContain("conduit_session=");
     expect((await jsonBody(callback, UserEmailBody)).user.email).toBe("worker@acme.test");
+  });
+
+  it("takes the organization as the relationship, and answers it the same way (#642)", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+
+    const linked = await fx.handler(
+      registerProvider(REGISTER_BODY, adminSid, {
+        organization: { data: { type: "organizations", id: "org-1" } },
+      }),
+    );
+    expect(linked.status).toBe(201);
+    expect(await providerOrganization(linked)).toEqual({ type: "organizations", id: "org-1" });
+    expect(
+      Arr.fromIterable(MutableHashMap.values(fx.providers)).map((p) => p.organizationId),
+    ).toEqual(["org-1"]);
+
+    // `data: null` and an absent relationship both mean no organization.
+    const none = await fx.handler(
+      registerProvider({ ...REGISTER_BODY, domain: "b.test" }, adminSid, {
+        organization: { data: null },
+      }),
+    );
+    expect(none.status).toBe(201);
+    expect(await providerOrganization(none)).toBeNull();
+
+    // `organizationId` is no longer an attribute: sent as one, it is ignored.
+    const attribute = await fx.handler(
+      registerProvider({ ...REGISTER_BODY, domain: "c.test", organizationId: "org-1" }, adminSid),
+    );
+    expect(attribute.status).toBe(201);
+    expect(await providerOrganization(attribute)).toBeNull();
   });
 
   it("returns 404 when SSO is not configured", async () => {

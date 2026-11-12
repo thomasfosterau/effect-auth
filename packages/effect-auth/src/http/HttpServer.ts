@@ -3029,13 +3029,19 @@ const oauthClientUpdate = (a: S.OidcClientUpdatePayload): UpdateOidcClientInput 
 });
 
 /** A SAML registration document's attributes, as the SSO service's input. */
-const samlRegistration = (p: S.SsoRegisterSamlPayload): RegisterSamlProviderInput => ({
+const samlRegistration = (
+  p: S.SsoRegisterSamlAttributes,
+  organizationId: string | undefined,
+): RegisterSamlProviderInput => ({
   ...samlConnection(p),
-  ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
+  ...(organizationId !== undefined && { organizationId }),
 });
 
 /** An OIDC registration document's attributes, as the SSO service's input. */
-const oidcRegistration = (p: S.SsoRegisterOidcPayload): RegisterProviderInput => ({
+const oidcRegistration = (
+  p: S.SsoRegisterOidcAttributes,
+  organizationId: string | undefined,
+): RegisterProviderInput => ({
   issuer: p.issuer,
   domain: p.domain,
   clientId: p.clientId,
@@ -3050,7 +3056,7 @@ const oidcRegistration = (p: S.SsoRegisterOidcPayload): RegisterProviderInput =>
   ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
   ...(p.scopes !== undefined && { scopes: p.scopes }),
   ...(p.usePKCE !== undefined && { usePKCE: p.usePKCE }),
-  ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
+  ...(organizationId !== undefined && { organizationId }),
 });
 
 /** A sign-in document's selector (`email`, `domain` or `providerId`), as the SSO service's. */
@@ -3421,13 +3427,17 @@ export const ssoProvidersGroupLayer = (
         // The attributes are a union discriminated on `protocol`; without one
         // they are an OIDC registration.
         const attributes = payload.data.attributes;
+        const organizationId = payload.data.relationships?.organization?.data?.id;
         const provider =
           attributes.protocol === "saml"
             ? yield* asSsoRequest(
-                sso.service.registerSamlProvider(user.id, samlRegistration(attributes)),
+                sso.service.registerSamlProvider(
+                  user.id,
+                  samlRegistration(attributes, organizationId),
+                ),
               )
             : yield* asSsoRequest(
-                sso.service.registerProvider(user.id, oidcRegistration(attributes)),
+                sso.service.registerProvider(user.id, oidcRegistration(attributes, organizationId)),
               );
         return Handlers.data(ssoProviderResource(provider));
       }).pipe(JsonApiErrors.mapHttpErrors),

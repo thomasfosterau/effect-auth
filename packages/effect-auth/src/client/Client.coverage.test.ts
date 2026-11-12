@@ -895,8 +895,17 @@ describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
       idpCertificates: [],
       spEntityId: "sp",
       acsUrl: "https://app.test/acs",
+      organizationId: "o1",
     });
     expect(registered).toMatchObject({ id: "p1", protocol: "saml", organizationId: "o1" });
+    // The organization travels as the relationship, never as an attribute (#642).
+    expect(calls[0]?.body).toMatchObject({
+      data: {
+        type: "sso-providers",
+        relationships: { organization: { data: { type: "organizations", id: "o1" } } },
+      },
+    });
+    expect(calls[0]?.body).not.toHaveProperty("data.attributes.organizationId");
     expect(await client.sso.signIn({ email: "user@corp.test" })).toEqual({
       url: "https://idp.test/authorize",
       state: "xyz",

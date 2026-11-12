@@ -1262,9 +1262,27 @@ export const oauthClientsGroup = Group.make(
 
 /**
  * The body of `POST /sso-providers`: one protocol's registration fields,
- * discriminated by `protocol` (omitted, `oidc`).
+ * discriminated by `protocol` (omitted, `oidc`), and the connection's
+ * organization as the optional `organization` relationship (absent or
+ * `data: null` for none), as the answer carries it (#642).
  */
-export const SsoProviderCreateDocument = writeDocument("sso-providers", S.SsoRegisterPayload);
+export const SsoProviderCreateDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("sso-providers"),
+    attributes: S.SsoRegisterAttributes,
+    relationships: Schema.optionalKey(
+      Schema.Struct({
+        organization: Schema.optionalKey(
+          Schema.Struct({
+            data: Schema.NullOr(
+              Schema.Struct({ type: Schema.Literal("organizations"), id: Schema.String }),
+            ),
+          }),
+        ),
+      }),
+    ),
+  }),
+});
 export type SsoProviderCreateDocument = typeof SsoProviderCreateDocument.Type;
 
 /**

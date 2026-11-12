@@ -1375,9 +1375,17 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     sso: {
-      register: (attributes) =>
+      register: ({ organizationId, ...attributes }) =>
         jsonApi<DataDocument<WireSsoProvider>>("POST", "/sso-providers", {
-          data: { type: "sso-providers", attributes },
+          data: {
+            type: "sso-providers",
+            attributes,
+            ...(organizationId !== undefined && {
+              relationships: {
+                organization: { data: { type: "organizations", id: organizationId } },
+              },
+            }),
+          },
         }).then((document) => ssoProviderView(document.data)),
       signIn: (attributes) =>
         jsonApi<DataDocument<{ readonly url: string }>>("POST", "/sso-authorizations", {
