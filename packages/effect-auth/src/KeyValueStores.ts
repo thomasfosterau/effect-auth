@@ -300,7 +300,10 @@ const rateLimitKey = (key: string) => `rate-limit:${key}`;
  * `increment` is read-modify-write and therefore not atomic (see the module
  * docs) — fine for best-effort limiting, not for strict quota enforcement.
  * The `ttl` arguments are honoured logically via each entry's `resetAt`
- * rather than by backend-level expiry, since `KeyValueStore` has no TTL API.
+ * rather than by backend-level expiry, since `KeyValueStore` has no TTL API:
+ * `set` takes a key and a value only. An entry therefore stays until
+ * {@link purgeExpiredKV} deletes it once its window and block have both
+ * passed (#709).
  */
 export const rateLimitStoreKV: Effect.Effect<
   typeof RateLimitStore.Service,
@@ -719,6 +722,8 @@ export interface PurgeExpiredKVResult {
   readonly magicLinks: number;
   /** Email OTP records deleted (`EmailOtpStoreKV`). */
   readonly emailOtps: number;
+  /** Rate-limit entries deleted (`RateLimitStoreKV`): their window and block have both passed (#709). */
+  readonly rateLimits: number;
 }
 
 /** The listing a store's own `keys` gives: every key, kept under `prefix`. */
@@ -732,12 +737,32 @@ const storeKeys = (store: KeyValueStore.KeyValueStore): typeof KeyValueStoreKeys
     ),
 });
 
-const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: {
+/**
+ * The services refuse a record once `now > expiresAt`, so a record with
+ * `expiresAt === now` is still live and stays.
+ */
+const hasExpired =
+  (now: number) =>
+  (record: { readonly expiresAt: number }): boolean =>
+    record.expiresAt < now;
+
+/**
+ * `RateLimiter` opens a fresh window once `now >= resetAt` and lifts a block
+ * once `now >= blockedUntil`, so an entry past both counts for nothing: the
+ * limiter treats its key as one it has never seen (#709, as `./sql`'s #686).
+ */
+const isSpentRateLimit =
+  (now: number) =>
+  (entry: RateLimitEntry): boolean =>
+    entry.resetAt <= now && (entry.blockedUntil === undefined || entry.blockedUntil <= now);
+
+const purgeExpiredRecords = <A>(options: {
   readonly kv: ReturnType<typeof jsonKv>;
   readonly keys: typeof KeyValueStoreKeys.Service;
   readonly prefix: string;
-  readonly now: number;
   readonly label: string;
+  /** Whether the record can go: the services would no longer honour it. */
+  readonly isPurgeable: (record: A) => boolean;
   /** Read the record under `key` (from {@link jsonKv}'s `read`, typed to the store's record). */
   readonly read: (key: string) => Effect.Effect<A | null, Errors.AuthError>;
   readonly onRemoved: (record: A, key: string) => Effect.Effect<void, Errors.AuthError>;
@@ -750,9 +775,7 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
         (removed, key) =>
           Effect.gen(function* () {
             const record = yield* options.read(key);
-            // The services refuse a record once `now > expiresAt`, so a record
-            // with `expiresAt === now` is still live and stays.
-            if (record == null || record.expiresAt >= options.now) return removed;
+            if (record == null || !options.isPurgeable(record)) return removed;
             yield* options.kv.remove(key, options.label);
             yield* options.onRemoved(record, key);
             return removed + 1;
@@ -763,9 +786,10 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
 
 /**
  * Delete the magic-link tokens and email OTP records whose `expiresAt` has
- * passed from the `KeyValueStore`-backed stores (`MagicLinkStoreKV`,
- * `EmailOtpStoreKV`, and so `layerKV` and the testing package's
- * `memoryStores`); requires the `KeyValueStore`. It finds the records through
+ * passed, and the rate-limit entries whose window and block have both passed,
+ * from the `KeyValueStore`-backed stores (`MagicLinkStoreKV`,
+ * `EmailOtpStoreKV`, `RateLimitStoreKV`, and so `layerKV` and the testing
+ * package's `memoryStores`); requires the `KeyValueStore`. It finds the records through
  * {@link KeyValueStoreKeys} when one is provided, and through the store's own
  * `keys` otherwise.
  *
@@ -776,6 +800,13 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
  * the store stays bounded. The services already refuse an expired record, so a
  * purge changes no outcome; it only reclaims the space. Expiry is read from the
  * `Clock`. A deleted magic link also leaves its address's index.
+ *
+ * `KeyValueStore` has no per-entry expiry, so rate-limit entries (one per key,
+ * IP, identifier and, since #684, recipient and purpose ever counted) stay
+ * until this purge too (#709). It deletes an entry once its `resetAt` is not
+ * after now and its `blockedUntil` is unset or not after now: the limiter then
+ * treats the key as one it has never seen. An entry inside its window or still
+ * blocked stays.
  *
  * Like the stores' other multi-step writes, this is read-then-delete, not
  * atomic (see the module docs): an OTP re-sent for the same address and
@@ -807,7 +838,7 @@ const purgeExpiredRecords = <A extends { readonly expiresAt: number }>(options: 
  *   yield* otps.upsert({ ...record, purpose: "forget-password", expiresAt: 60_000 })
  *
  *   const purged = yield* Auth.purgeExpiredKV
- *   assert.deepEqual(purged, { magicLinks: 0, emailOtps: 1 })
+ *   assert.deepEqual(purged, { magicLinks: 0, emailOtps: 1, rateLimits: 0 })
  *   assert.equal(yield* otps.get("a@example.com", "sign-in"), null)
  *   assert.notEqual(yield* otps.get("a@example.com", "forget-password"), null)
  * })
@@ -832,8 +863,8 @@ export const purgeExpiredKV: Effect.Effect<
             kv,
             keys,
             prefix: magicLinkTokenKey(""),
-            now,
             label: "purgeExpired.magicLinks",
+            isPurgeable: hasExpired(now),
             read: (key) => kv.read<MagicLinkToken>(key, "purgeExpired.magicLinks"),
             onRemoved: (token) =>
               kv.indexRemove(
@@ -846,9 +877,18 @@ export const purgeExpiredKV: Effect.Effect<
             kv,
             keys,
             prefix: "email-otp:",
-            now,
             label: "purgeExpired.emailOtps",
+            isPurgeable: hasExpired(now),
             read: (key) => kv.read<EmailOtpRecord>(key, "purgeExpired.emailOtps"),
+            onRemoved: () => Effect.void,
+          }),
+          rateLimits: purgeExpiredRecords({
+            kv,
+            keys,
+            prefix: rateLimitKey(""),
+            label: "purgeExpired.rateLimits",
+            isPurgeable: isSpentRateLimit(now),
+            read: (key) => kv.read<RateLimitEntry>(key, "purgeExpired.rateLimits"),
             onRemoved: () => Effect.void,
           }),
         },

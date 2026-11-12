@@ -226,7 +226,7 @@ describe("memoryStores", () => {
         };
       }).pipe(Effect.provide(Layer.merge(Testing.memoryStores, TestClock.layer()))),
     );
-    expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 0 });
+    expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 0, rateLimits: 0 });
     expect(result.link).toBeNull();
     expect(result.otp?.expiresAt).toBe(20_000);
   });
