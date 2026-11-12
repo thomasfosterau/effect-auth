@@ -33,16 +33,19 @@ pipeline.
 pnpm add @thomasfosterau/effect-auth-drizzle @thomasfosterau/effect-auth drizzle-orm effect
 ```
 
-`drizzle-orm` (`>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`) and `effect` (`^4.1.0`) are peer dependencies, as is your driver of choice (`pg`,
+`drizzle-orm` (`>=1.0.0-rc.5 <2`) and `effect` (`^4.1.0`) are peer dependencies, as is your driver of choice (`pg`,
 `postgres`, `@neondatabase/serverless`, `@electric-sql/pglite`,
 `better-sqlite3`, `@libsql/client`, `mysql2`, ...).
 
-Both drizzle-orm lines are supported, and the package's suite runs on each:
-the classic `0.44`/`0.45` line and the 1.0 line from `1.0.0-rc.5` (the
-release candidate that ships drizzle's Effect drivers). Hand a driver its
-client as `drizzle({ client })`, which both lines read the same way: 1.0
-reads any argument that is not a string as a config, so `drizzle(pool)`
-there ignores `pool` and opens a default connection of its own. On 1.0, `drizzle-orm/mysql-proxy` decodes nothing itself
+The drizzle-orm 1.0 line is supported, from `1.0.0-rc.5` (the release
+candidate that ships drizzle's Effect drivers; its commit-suffixed builds such
+as `1.0.0-rc.5-ab785fc` are in range too) through 1.x. The published
+declarations are built against it, so the tables, rows and `databaseLayer`
+type-check in a 1.0 application. The `0.44`/`0.45` line is not supported since
+0.3.0: its column types differ from 1.0's, so no one set of declarations serves
+both. Hand a driver its client as `drizzle({ client })`: 1.0 reads any argument
+that is not a string as a config, so `drizzle(pool)` ignores `pool` and opens a
+default connection of its own. On 1.0, `drizzle-orm/mysql-proxy` decodes nothing itself
 (drizzle moved decoding into each driver's codecs), so a proxy that returns
 mysql2's wire values must pass mysql2's codecs as `codecs` for the stores to
 read `Date`s and booleans.
@@ -113,7 +116,7 @@ One store implementation serves all three dialects. The fragment of drizzle's
 query builder the stores use — `insert().values()`,
 `select().from().where().limit()/.orderBy()`, `update().set().where()`,
 `delete().where()`, each terminated by `.execute()` — is spelled identically by
-`PgDatabase`, `BaseSQLiteDatabase` and `MySqlDatabase`, so `AuthDatabase`
+`PgAsyncDatabase`, `SQLiteAsyncDatabase` and `MySqlAsyncDatabase`, so `AuthDatabase`
 describes exactly that fragment and nothing more. Row and insert types are still
 derived from whichever table you pass; there is no `any` in the public surface.
 
@@ -167,8 +170,8 @@ const appUsers = mysqlTable("users", {
 });
 ```
 
-(On drizzle-orm 1.0, `varchar("email", { length: 255 }).collate("utf8mb4_bin")`
-declares the same column; 0.4x's `varchar` has no `collate`.) `utf8mb4_bin`
+(`varchar("email", { length: 255 }).collate("utf8mb4_bin")` declares the same
+column.) `utf8mb4_bin`
 treats trailing spaces as insignificant, which never matters here: core trims
 the addresses and usernames it stores. Core also never acts on a record whose
 value differs from the one it looked up (`Auth.lookupIdentifier`), so a
@@ -183,7 +186,7 @@ rather than resolving another account.
 | **SQLite**     | Covered end-to-end by a `better-sqlite3` suite                  |
 | **MySQL**      | No server available to the test suite — see below               |
 
-MySQL is exercised through `drizzle-orm/mysql-proxy`, a genuine `MySqlDatabase`
+MySQL is exercised through `drizzle-orm/mysql-proxy`, a genuine `MySqlAsyncDatabase`
 that compiles the store's calls to real MySQL SQL and hands the statement to a
 callback rather than a socket. The suite asserts the statements and bound
 parameters a server would receive, and the rows the store maps back out of the
@@ -864,13 +867,20 @@ store each).
   returns the user it was given; an update of a missing user writes nothing.
   Promoted attributes go to their columns (`NULL` when the user no longer has
   one) and the rest replace the bag; attributes a table with no mapped bag
-  cannot hold fail with `AuthError`. `delete` removes the user row only.
-  These are the semantics of core's `/sql` `UserServiceStore`.
+  cannot hold fail with `AuthError`. `delete` removes the user row only:
+  core's account deletion (`AdminService.removeUser`, the confirmed
+  `AccountManagementService` deletion) deletes the user's credentials,
+  sessions and identifiers through their stores first. These are the semantics
+  of core's `/sql` `UserServiceStore` (which also drops its own
+  `auth_user_roles` rows, a table this package does not have).
 - **`ApiKeyStore`** keeps `keyHash`, the SHA-256 digest `ApiKeyService`
   computes (unique index), never the key. Optional fields absent from a key are
   `NULL` and read back absent; instants are timestamps in the table and epoch
   milliseconds in the record. The contract has no atomic "use": `verify` reads
   the key and writes its decremented `remaining` back with `update`.
+  `deleteByUserId` deletes every key of one user in one `DELETE`; core calls
+  it when it deletes the user (#601), and `verify` refuses a key whose owner
+  `UserStore` no longer finds.
 - **`RateLimitStore`**'s `increment` never reads, modifies and writes. It runs
   an `UPDATE` that re-opens the key's window when it has expired, then an
   upsert that adds one (inserting a count of `1` for a new key): concurrent

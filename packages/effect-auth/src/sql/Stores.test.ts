@@ -16,6 +16,7 @@ import { migrate, schemaStatements } from "./Schema.ts";
 import * as Sql from "./Stores.ts";
 import { layer } from "./Stores.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
+import { purgeUser, userPurgeStores } from "../UserPurge.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal test-only SqlClient over better-sqlite3.
@@ -391,6 +392,76 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.loaded?.name).toBe("Renamed");
       expect(result.loaded?.image).toBe("https://example.com/x.png");
       expect(result.gone).toBeNull();
+    });
+
+    it("UserServiceStore.delete removes the user's role rows with the user, and only theirs (#601)", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const store = yield* Auth.UserServiceStore;
+          const gone = yield* makeUser("roles-gone@example.com");
+          const kept = yield* makeUser("roles-kept@example.com");
+          yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES (${gone.id}, 'admin')`;
+          yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES (${gone.id}, 'editor')`;
+          yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES (${kept.id}, 'admin')`;
+          yield* store.delete(gone.id);
+          const roles = (userId: string) =>
+            sql<{ role: string }>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`;
+          return { gone: yield* roles(gone.id), kept: yield* roles(kept.id) };
+        }),
+      );
+      expect(result.gone).toEqual([]);
+      expect(result.kept).toEqual([{ role: "admin" }]);
+    });
+
+    it("the user purge joins an ambient sql.withTransaction, so a failing step rolls it all back (#601)", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const user = yield* makeUser("purge-tx@example.com");
+          const apiKeys = yield* Auth.ApiKeyStore;
+          const sessions = yield* Auth.SessionStore;
+          const identifiers = yield* Auth.IdentifierStore;
+          const now = yield* Clock.currentTimeMillis;
+          yield* apiKeys.create({
+            id: crypto.randomUUID(),
+            start: "abc123",
+            keyHash: crypto.randomUUID(),
+            userId: user.id,
+            enabled: true,
+            metadata: {},
+            createdAt: now,
+            updatedAt: now,
+          });
+          yield* (yield* Auth.MultiFactor.MultiFactorStore).upsert({
+            userId: user.id,
+            secret: "JBSWY3DPEHPK3PXP",
+            backupCodes: [],
+            verified: true,
+            createdAt: now,
+          });
+          const purge = purgeUser(
+            {
+              ...(yield* userPurgeStores),
+              identifiers,
+              revokeSessions: sessions.deleteByUserId,
+              deleteUser: () => Effect.fail(new Auth.AuthError({ message: "user delete failed" })),
+            },
+            user.id,
+          );
+          const failure = yield* Effect.flip(sql.withTransaction(purge));
+          return {
+            failure: failure.message,
+            keys: (yield* apiKeys.listByUserId(user.id)).length,
+            multiFactor: yield* (yield* Auth.MultiFactor.MultiFactorStore).get(user.id),
+            identifiers: (yield* identifiers.listByUser(user.id)).length,
+          };
+        }),
+      );
+      expect(result.failure).toBe("user delete failed");
+      expect(result.keys).toBe(1);
+      expect(result.multiFactor).not.toBeNull();
+      expect(result.identifiers).toBe(1);
     });
 
     it("PasswordResetUserStore sets password hashes by user", async () => {
@@ -1711,6 +1782,12 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.apiKeyStoreConformance({ seedUser }),
       Testing.challengeStoreConformance(),
       Testing.emailOtpStoreConformance(),
+      // The per-user deletes account deletion calls (#601).
+      Testing.oauthAccountStoreConformance({ seedUser }),
+      Testing.credentialStoreConformance({ seedUser }),
+      Testing.multiFactorStoreConformance({ seedUser }),
+      Testing.emailVerificationStoreConformance({ seedUser }),
+      Testing.passwordResetStoreConformance({ seedUser }),
     ];
     Arr.forEach(suites, (suite) => {
       describe(`${suite.contract} conformance`, () => {

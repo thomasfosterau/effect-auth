@@ -10,6 +10,7 @@
 import * as Auth from "../../index.ts";
 import * as Http from "../../http/index.ts";
 import {
+  memoryApiKeyStore,
   memoryPhoneOtpStore,
   memoryRateLimitStore,
   memorySessionStore,
@@ -54,6 +55,17 @@ export interface ServerFixtureOptions {
    * Default none: as in production, a sign-up keeps no attribute (#580).
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
+  /**
+   * Mount `ApiKeyService` (an in-memory store and `RateLimiter`), so
+   * `/api-keys` and `GET /api-keys/current` answer instead of `404`.
+   */
+  readonly apiKeys?: boolean | undefined;
+  /** A layer merged into the server's services, such as `Logger.layer([...])` to capture its log. */
+  readonly layer?: Layer.Layer<never> | undefined;
+  /** The server's cookie settings beyond `secure: false` (`apiKeyHeaders`, …). */
+  readonly cookie?: Http.CookieConfig | undefined;
+  /** The `RateLimitStore` every limiter in the fixture runs on; default in-memory. */
+  readonly rateLimitStore?: typeof Auth.RateLimitStore.Service | undefined;
 }
 
 export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
@@ -482,15 +494,31 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   // RateLimiter (Http.make throws without one, #389), so the feature set carries
   // an in-memory one. Device approve/deny are limited to 5 per user code per 15
   // minutes, as in production.
-  const rateLimitStore = memoryRateLimitStore();
+  const rateLimitStore = options.rateLimitStore ?? memoryRateLimitStore();
   const rateLimitStoreLayer = Layer.succeed(Auth.RateLimitStore, rateLimitStore);
   const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
+
+  // API keys over an in-memory store, with the RateLimiter their per-key
+  // `rateLimit` runs on (#730), and the UserStore that `verify` reads the key's
+  // owner from (#601).
+  const apiKeyRecords = MutableHashMap.empty<string, Auth.ApiKey>();
+  const apiKeyLayer = Auth.ApiKeyService.layer().pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(Auth.ApiKeyStore, memoryApiKeyStore(apiKeyRecords)),
+        Layer.succeed(Auth.UserStore)(userStore),
+        rateLimiterLayer,
+      ),
+    ),
+  );
 
   // The same store carries the per-recipient send caps (#684).
   const services: Layer.Layer<Http.AuthServices> = Layer.mergeAll(
     core,
     options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
+    options.apiKeys === true ? apiKeyLayer : Layer.empty,
+    options.layer ?? Layer.empty,
   ).pipe(Layer.provide(rateLimitStoreLayer));
 
   // The fixture runs one in-process client, with no client address, so the
@@ -498,7 +526,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   // refuse every address-less request to a limited endpoint.
   const { handler } = Http.make({
     services,
-    cookie: { secure: false },
+    cookie: { ...options.cookie, secure: false },
     ipRateLimit: false,
     ...(options.multiSession !== undefined && { multiSession: options.multiSession }),
     ...(options.signUpAttributes !== undefined && { signUpAttributes: options.signUpAttributes }),
@@ -523,6 +551,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     handler,
     sessions,
     usersById,
+    /** The API keys `apiKeys: true` stores, by id. */
+    apiKeyRecords,
     identifierRecords,
     registerUsername,
     /** Change-email verifications the server "sent" (newest last). */

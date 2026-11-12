@@ -14,8 +14,8 @@
  * drizzle's query builder it uses — `insert().values()`,
  * `select().from().where().limit()/.orderBy()`, `update().set().where()`,
  * `delete().where()`, all terminated by `.execute()` — is spelled identically by
- * `PgDatabase`, `BaseSQLiteDatabase`, `MySqlDatabase` and drizzle's Effect
- * drivers. What is *not* shared is their static types: each dialect brands its
+ * `PgAsyncDatabase`, `SQLiteAsyncDatabase`, `MySqlAsyncDatabase` and drizzle's
+ * Effect drivers. What is *not* shared is their static types: each dialect brands its
  * own `PgTable` / `SQLiteTable` / `MySqlTable`, so no single drizzle type covers
  * them.
  *
@@ -28,7 +28,7 @@
  *
  * `.execute()` returns a `Promise` on the classic drivers and an `Effect` on
  * drizzle's Effect drivers (`drizzle-orm/effect-postgres` and friends, new in
- * drizzle `1.0`). {@link DrizzleResult} is the union of the two, and the store
+ * the drizzle `1.0` line this package targets). {@link DrizzleResult} is the union of the two, and the store
  * layer adapts at runtime — an Effect-shaped handle reaches the database with
  * no Promise round trip in between.
  *
@@ -61,7 +61,7 @@
  * import { Context, Effect, Layer } from "effect";
  * import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
  *
- * const RequestDatabase = Context.Reference<PgDatabase<PgQueryResultHKT>>(
+ * const RequestDatabase = Context.Reference<PgAsyncDatabase<PgQueryResultHKT>>(
  *   "app/RequestDatabase",
  *   { defaultValue: () => fallbackHandle },
  * );
@@ -76,20 +76,18 @@
 
 import { Context, Effect, Layer } from "effect";
 import type {
+  AnyRelations,
   Column,
   InferColumnsDataTypes,
+  InferInsertModel,
+  InferSelectModel,
   SQL,
   SQLWrapper,
   Table,
-  TablesRelationalConfig,
 } from "drizzle-orm";
-import type {
-  MySqlDatabase,
-  MySqlQueryResultHKT,
-  PreparedQueryHKTBase,
-} from "drizzle-orm/mysql-core";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import type { MySqlAsyncDatabase, MySqlQueryResultHKT } from "drizzle-orm/mysql-core";
+import type { PgAsyncDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import type { SQLiteAsyncDatabase } from "drizzle-orm/sqlite-core";
 
 // ---------------------------------------------------------------------------
 // The query-builder fragment the stores use
@@ -110,7 +108,7 @@ export interface DrizzleExecutable<out A> {
 }
 
 /** The rows a `SELECT *` over `TTable` yields. */
-export type DrizzleRows<TTable extends Table> = Array<TTable["$inferSelect"]>;
+export type DrizzleRows<TTable extends Table> = Array<InferSelectModel<TTable>>;
 
 /**
  * A `SELECT` yielding `TRow`s, with its `WHERE` already applied: it can still be
@@ -128,12 +126,12 @@ export interface DrizzleRowSelectFrom<out TRow> extends DrizzleRowSelectFiltered
 
 /** A `SELECT *` over `TTable` with its `WHERE` already applied. */
 export interface DrizzleSelectFiltered<TTable extends Table> extends DrizzleRowSelectFiltered<
-  TTable["$inferSelect"]
+  InferSelectModel<TTable>
 > {}
 
 /** A `SELECT * ... FROM table`, before any `WHERE`. */
 export interface DrizzleSelectFrom<TTable extends Table> extends DrizzleRowSelectFrom<
-  TTable["$inferSelect"]
+  InferSelectModel<TTable>
 > {}
 
 /** The value `db.select()` returns. */
@@ -197,7 +195,7 @@ export interface DrizzleInsertValues extends DrizzleExecutable<unknown> {
 
 /** The value `db.insert(table)` returns. */
 export interface DrizzleInsertBuilder<TTable extends Table> {
-  values(values: TTable["$inferInsert"]): DrizzleInsertValues;
+  values(values: InferInsertModel<TTable>): DrizzleInsertValues;
 }
 
 /** A statement whose only remaining step is its `WHERE`. */
@@ -207,14 +205,14 @@ export interface DrizzleWhereStep {
 
 /** The value `db.update(table)` returns. */
 export interface DrizzleUpdateBuilder<TTable extends Table> {
-  set(values: Partial<TTable["$inferInsert"]>): DrizzleWhereStep;
+  set(values: Partial<InferInsertModel<TTable>>): DrizzleWhereStep;
 }
 
 /**
  * Every drizzle database operation this package performs, in the smallest shape
  * that describes them.
  *
- * A `PgDatabase`, a `BaseSQLiteDatabase` (sync or async), a `MySqlDatabase` and
+ * A `PgAsyncDatabase`, a `SQLiteAsyncDatabase` (sync or async), a `MySqlAsyncDatabase` and
  * drizzle's Effect databases all implement this fragment at runtime;
  * {@link databaseLayer} and {@link effectDatabaseLayer} are what turn a concrete
  * handle into one.
@@ -247,12 +245,10 @@ type ChainStep<TNext> = (...args: never[]) => TNext;
  *
  * ### Why this is shaped differently from the other doors
  *
- * {@link databaseLayer} names its argument's type exactly (`PgDatabase` and
- * friends). This door cannot: drizzle's Effect drivers live behind entrypoints
- * that only exist from drizzle `1.0`, and this package's peer range starts at
- * `0.44`, so importing `EffectPgDatabase` here would break every consumer on an
- * older drizzle. What is checked instead is the *shape of the builder chain* —
- * that `select()` yields a `from()`, that `insert()` yields a `values()`, and so
+ * {@link databaseLayer} names its argument's type exactly (`PgAsyncDatabase`
+ * and friends). This door checks the *shape of the builder chain* instead, so
+ * one signature covers every Effect driver, whatever dialect and Effect HKT it
+ * carries: it checks that `select()` yields a `from()`, that `insert()` yields a `values()`, and so
  * on, down to the `execute()` the store layer calls. The table types cannot be
  * checked at this boundary (no real drizzle handle is assignable to a signature
  * generic over drizzle's shared `Table`, which is why {@link databaseLayer} ends
@@ -337,12 +333,11 @@ const toHandle = (db: object | Effect.Effect<object>): DrizzleHandle => ({
  */
 export function databaseLayer<
   TQueryResult extends PgQueryResultHKT,
-  TFullSchema extends Record<string, unknown>,
-  TSchema extends TablesRelationalConfig,
+  TRelations extends AnyRelations,
 >(
   db:
-    | PgDatabase<TQueryResult, TFullSchema, TSchema>
-    | Effect.Effect<PgDatabase<TQueryResult, TFullSchema, TSchema>>,
+    | PgAsyncDatabase<TQueryResult, TRelations>
+    | Effect.Effect<PgAsyncDatabase<TQueryResult, TRelations>>,
 ): Layer.Layer<DrizzleDatabase>;
 /**
  * Provide a Promise-shaped SQLite drizzle handle (or an `Effect` yielding one, run per
@@ -351,12 +346,11 @@ export function databaseLayer<
 export function databaseLayer<
   TResultKind extends "sync" | "async",
   TRunResult,
-  TFullSchema extends Record<string, unknown>,
-  TSchema extends TablesRelationalConfig,
+  TRelations extends AnyRelations,
 >(
   db:
-    | BaseSQLiteDatabase<TResultKind, TRunResult, TFullSchema, TSchema>
-    | Effect.Effect<BaseSQLiteDatabase<TResultKind, TRunResult, TFullSchema, TSchema>>,
+    | SQLiteAsyncDatabase<TResultKind, TRunResult, TRelations>
+    | Effect.Effect<SQLiteAsyncDatabase<TResultKind, TRunResult, TRelations>>,
 ): Layer.Layer<DrizzleDatabase>;
 /**
  * Provide a Promise-shaped MySQL drizzle handle (or an `Effect` yielding one, run per
@@ -364,13 +358,11 @@ export function databaseLayer<
  */
 export function databaseLayer<
   TQueryResult extends MySqlQueryResultHKT,
-  TPreparedQueryHKT extends PreparedQueryHKTBase,
-  TFullSchema extends Record<string, unknown>,
-  TSchema extends TablesRelationalConfig,
+  TRelations extends AnyRelations,
 >(
   db:
-    | MySqlDatabase<TQueryResult, TPreparedQueryHKT, TFullSchema, TSchema>
-    | Effect.Effect<MySqlDatabase<TQueryResult, TPreparedQueryHKT, TFullSchema, TSchema>>,
+    | MySqlAsyncDatabase<TQueryResult, TRelations>
+    | Effect.Effect<MySqlAsyncDatabase<TQueryResult, TRelations>>,
 ): Layer.Layer<DrizzleDatabase>;
 export function databaseLayer(db: object | Effect.Effect<object>): Layer.Layer<DrizzleDatabase> {
   return Layer.succeed(DrizzleDatabase, toHandle(db));

@@ -325,6 +325,13 @@ const makeFixture = (admin?: AdminConfig) => {
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((k) => k.userId === userId),
       ),
+    deleteByUserId: (userId: string) =>
+      Effect.sync(() => {
+        Arr.forEach(
+          Arr.filter(Arr.fromIterable(MutableHashMap.values(apiKeys)), (k) => k.userId === userId),
+          (k) => void MutableHashMap.remove(apiKeys, k.id),
+        );
+      }),
   };
 
   const jwtKeyStore = {

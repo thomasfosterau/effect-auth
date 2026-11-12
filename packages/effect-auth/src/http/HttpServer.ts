@@ -100,6 +100,7 @@ import {
   type ApiKeyUpdate,
 } from "../ApiKey.ts";
 import { type CredentialClass } from "../Authorizer.ts";
+import { extractApiKey, fromHeaders } from "../SessionResolution.ts";
 import { JwtService } from "../Jwt.ts";
 import {
   OidcProviderService,
@@ -269,6 +270,14 @@ export interface CookieConfig {
    * header from cross-origin responses.
    */
   readonly bearerMode?: boolean | "always" | "opt-in";
+  /**
+   * The header names `GET /api-keys/current` reads a machine API key from, the
+   * first non-empty one winning. Default `["x-api-key"]`. A key is never read
+   * from the URL or the query. This is `SessionResolution.CredentialConfig`'s
+   * `apiKeyHeaders`: pass the same value to `RemoteSession.make`'s
+   * `credentials` so the edge and the auth service agree on where the key is.
+   */
+  readonly apiKeyHeaders?: ReadonlyArray<string> | undefined;
 }
 
 /** Multiple concurrent accounts per client (device-scoped session list). */
@@ -290,6 +299,7 @@ export interface ResolvedCookieConfig {
   readonly multiSession: { readonly maximumSessions: number } | undefined;
   readonly lastLoginMethod: { readonly maxAge: number } | undefined;
   readonly bearerMode: "always" | "opt-in" | false;
+  readonly apiKeyHeaders: ReadonlyArray<string> | undefined;
 }
 
 /**
@@ -324,6 +334,7 @@ export const resolveCookieConfig = (
               30 * 24 * 60 * 60 * 1000,
           },
     bearerMode: bm === true || bm === "always" ? "always" : bm === "opt-in" ? "opt-in" : false,
+    apiKeyHeaders: config?.apiKeyHeaders,
   };
 };
 
@@ -3498,7 +3509,84 @@ const asApiKeyOwner = <A, R>(
   });
 
 /**
- * Layer implementing the `api-keys` group: the signed-in user's API keys (see
+ * The one message every API key that does not resolve is answered with
+ * (#730): unknown, disabled, expired, exhausted, missing or ownerless alike,
+ * so the answer never tells them apart. The reason goes to the server log.
+ */
+const API_KEY_REFUSED = "Invalid API key";
+
+/**
+ * Refuse a key resolution with the identical `401`, logging only why (never
+ * the key, which no log line or error ever carries).
+ */
+const refuseApiKey = (reason: string): Effect.Effect<never, S.Unauthorized> =>
+  Effect.logInfo("[effect-auth] API key refused").pipe(
+    Effect.annotateLogs({ reason }),
+    Effect.andThen(Effect.fail(new S.Unauthorized({ message: API_KEY_REFUSED }))),
+  );
+
+/** Set `name: value` on whatever response the handler ends up sending, error or not. */
+const setResponseHeader = (
+  name: string,
+  value: string,
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeader(response, name, value)),
+  );
+
+/**
+ * The `429` of a real key over its own `rateLimit`, with `Retry-After` in
+ * whole seconds (rounded up) when the limiter said how long.
+ */
+const apiKeyRateLimited = (
+  retryAfter: Duration.Duration | undefined,
+): Effect.Effect<never, S.TooManyRequests, HttpServerRequest.HttpServerRequest> =>
+  Effect.gen(function* () {
+    if (retryAfter !== undefined) {
+      yield* setResponseHeader("retry-after", String(Math.ceil(Duration.toSeconds(retryAfter))));
+    }
+    return yield* new S.TooManyRequests({ message: "Too many requests" });
+  });
+
+/**
+ * `GET /api-keys/current` (#730): the key the request carries in an API-key
+ * header, verified with `verifyWithRateLimit` (no required permissions, so
+ * the app checks those through the policy kernel), and the user it acts as.
+ * The session cookie and bearer token are never read here, so a key always
+ * wins over them. `404` before anything is read when API keys are off.
+ */
+const resolveCurrentApiKey = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+) =>
+  Effect.gen(function* () {
+    yield* setResponseHeader("cache-control", "no-store");
+    const apiKey = yield* resolveApiKey; // 404 when API keys are not enabled
+    const presented = extractApiKey(fromHeaders(request.headers), {
+      ...(cfg.apiKeyHeaders !== undefined && { apiKeyHeaders: cfg.apiKeyHeaders }),
+    });
+    if (presented === undefined) return yield* refuseApiKey("no API key header");
+    const result = yield* storeFailure(apiKey.service.verifyWithRateLimit(presented));
+    if (result.reason === "rate-limited") return yield* apiKeyRateLimited(result.retryAfter);
+    if (!result.valid || result.apiKey === undefined) {
+      return yield* refuseApiKey(result.error ?? "API key refused");
+    }
+    const key = result.apiKey;
+    const userService = yield* UserService;
+    const user = yield* userService.getUser(key.userId).pipe(
+      Effect.catchTags({
+        // Owner existence, ban and SCIM deactivation are decided in `verify`, before
+        // the limit and the spend (#755); this covers a delete racing the read.
+        UserNotFoundError: () => refuseApiKey("API key owner not found"),
+        AuthError: (e) => internalServerError(e),
+      }),
+    );
+    return Handlers.data(apiKeyResource(key), { included: [yield* loadUserResource(user)] });
+  });
+
+/**
+ * Layer implementing the `api-keys` group: the signed-in user's API keys, and
+ * `GET /api-keys/current`, the resolution of a presented key (see
  * `apiKeysGroup` in `HttpApi.ts`).
  */
 export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
@@ -3514,6 +3602,9 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
 
   return HttpApiBuilder.group(AuthApi, "api-keys", (handlers) =>
     handlers
+      .handle("current", ({ request }) =>
+        resolveCurrentApiKey(request, cfg).pipe(JsonApiErrors.mapHttpErrors),
+      )
       .handle("list", ({ request }) =>
         Effect.gen(function* () {
           const { apiKey, userId } = yield* owner(request);
@@ -4936,6 +5027,7 @@ const postRule = (
  * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
  * | `POST /oauth2/token`                                           | 60 req  | 1 min  | 5 min  |
  * | `POST /register` (dynamic client registration)                 | 10 req  | 1 hr   | 1 hr   |
+ * | `GET /api-keys/current` (API-key resolution, #730)             | 300 req | 1 min  | 5 min  |
  *
  * Endpoints named on one row share one bucket.
  */
@@ -4981,6 +5073,17 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   postRule("/oauth2/token", 60, MINUTE_MS, 5 * MINUTE_MS),
   // RFC 7591 dynamic client registration is open to anonymous callers.
   postRule("/register", 10, HOUR_MS, HOUR_MS),
+  // Verifies a secret on every call; a machine caller resolves its key per
+  // request, so the window is short and generous. Like every rule it counts
+  // each request before the handler runs, refused and resolved alike, and a
+  // request it refuses never reaches the key (no use spent).
+  {
+    path: "/api-keys/current",
+    methods: ["GET"],
+    maxRequests: 300,
+    windowMs: MINUTE_MS,
+    blockDurationMs: 5 * MINUTE_MS,
+  },
 ];
 
 /**

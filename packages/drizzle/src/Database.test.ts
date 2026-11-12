@@ -11,18 +11,15 @@
  *    calling fiber, so two overlapping "requests" each talk to their own
  *    connection.
  *
- * `drizzle-orm-effect` is drizzle `1.0.0-rc` installed under an alias: the
- * Effect drivers only exist from `1.0`, while this package's peer range starts
- * at `0.44`, so the two are exercised side by side. The tables are this
- * package's ordinary `Pg.tables` — drizzle brands its schema objects with
- * `Symbol.for`, so one table definition serves both handles.
+ * The tables are this package's ordinary `Pg.tables`: one table definition
+ * serves the Promise and the Effect handles alike.
  */
 
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
-import type { EffectPgDatabase } from "drizzle-orm-effect/effect-postgres";
+import type { EffectPgDatabase } from "drizzle-orm/effect-postgres";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import * as EffectPglite from "drizzle-orm-effect/effect-pglite";
+import * as EffectPglite from "drizzle-orm/effect-pglite";
 import { Context, DateTime, Effect, Latch, Layer } from "effect";
 import * as P from "effect/Predicate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";

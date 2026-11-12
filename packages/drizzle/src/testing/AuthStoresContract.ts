@@ -3,8 +3,8 @@
  * `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the two token stores —
  * as one suite each dialect's file runs against a real engine (#675, #728).
  *
- * `ApiKeyStore` runs the core's published conformance suite. The others have
- * none, so their cases here are written from the contracts' documented
+ * `ApiKeyStore` runs the core's published conformance suite, and the two
+ * token stores its per-user-delete suites (#601). The others have none, so their cases here are written from the contracts' documented
  * semantics (`EmailPasswordStore`, `UserServiceStore` as core's `/sql` store
  * implements it, `RateLimitStore.increment`, `EmailVerificationStore`,
  * `PasswordResetStore`); the email-password cases end with a real sign-up and
@@ -276,6 +276,15 @@ const userServiceCases = (label: string, run: Run): void => {
     });
 
     it("UserService round-trips over the store", async () => {
+      // `deleteUser` deletes the account through `AccountDeletion` (#601).
+      const accountDeletion = Auth.accountDeletionLayer.pipe(
+        Layer.provide(
+          Auth.SessionService.layer({
+            sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 },
+          }),
+        ),
+        Layer.provide(Auth.Hooks.Default),
+      );
       const result = await run(
         Effect.gen(function* () {
           const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
@@ -288,7 +297,7 @@ const userServiceCases = (label: string, run: Run): void => {
           yield* service.deleteUser(user.id);
           const gone = yield* Effect.flip(service.getUser(user.id));
           return { renamed, tagged, read, gone: gone._tag };
-        }).pipe(Effect.provide(Auth.UserService.layer())),
+        }).pipe(Effect.provide(Auth.UserService.layer().pipe(Layer.provide(accountDeletion)))),
       );
       expect(result.renamed.name).toBe("Grace");
       expect(result.read).toEqual(result.tagged);
@@ -579,6 +588,9 @@ const tokenCases = (label: string, run: Run): void => {
 /** Register every case, `label` naming the engine and driver. */
 export const authStoresContract = (label: string, run: Run): void => {
   conformance(`${label}: ApiKeyStore`, Testing.apiKeyStoreConformance(), run);
+  // The per-user deletes core's account deletion calls (#601).
+  conformance(`${label}: EmailVerificationStore`, Testing.emailVerificationStoreConformance(), run);
+  conformance(`${label}: PasswordResetStore`, Testing.passwordResetStoreConformance(), run);
   emailPasswordCases(label, run);
   userServiceCases(label, run);
   rateLimitCases(label, run);
