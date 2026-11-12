@@ -77,6 +77,10 @@ export const SignUpPayload = Schema.Struct({
   email: Schema.String,
   password: Schema.String,
   name: Schema.optional(Schema.String),
+  /**
+   * Attributes for the new user. The server keeps only the keys `Http.make`'s
+   * `signUpAttributes` allows (default none) and drops the rest (#580).
+   */
   attributes: Schema.optional(Attributes),
   /** Optional captcha token consumed by the `CaptchaPlugin`. */
   captchaToken: Schema.optional(Schema.String),

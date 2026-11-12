@@ -187,6 +187,8 @@ const makeTestContext = async (
     readonly sendEmail?: EmailVerificationConfig["sendEmail"] | undefined;
     /** The `Hooks` the verification and email-password services run. Default `Hooks.Default`. */
     readonly hooks?: Layer.Layer<Hooks> | undefined;
+    /** The `UserService` config (built after, and not seen by, `EmailPasswordService`). */
+    readonly userService?: UserModule.UserServiceConfig | undefined;
   } = {},
 ) => {
   const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
@@ -237,7 +239,10 @@ const makeTestContext = async (
   );
 
   const userService = await Effect.runPromise(
-    Effect.provide(UserModule.make(), Context.make(UserServiceStore, userServiceStore)),
+    Effect.provide(
+      UserModule.make(options.userService),
+      Context.make(UserServiceStore, userServiceStore),
+    ),
   );
 
   return Context.merge(
@@ -921,5 +926,78 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
     expect(result.failure._tag).toBe("EmailInUseError");
     expect(sentEmails).toEqual([]);
     expect(MutableHashMap.size(verifications)).toBe(0);
+  });
+});
+
+describe("AuthLifecycleService.signUp never stores authority-bearing attributes (#580)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+    MutableHashMap.clear(verifications);
+    sentEmails.splice(0, sentEmails.length);
+  });
+
+  const forged = {
+    role: "admin",
+    tier: "gold",
+    banned: false,
+    banReason: "none",
+    banExpires: 0,
+    scimUserName: "ceo",
+    scimDeactivated: false,
+    scimExternalId: "idp-1",
+    isAnonymous: true,
+    plan: "pro",
+  };
+
+  const signUp = (testContext: Awaited<ReturnType<typeof makeTestContext>>, email: string) =>
+    Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+          return yield* service.signUp({
+            email,
+            password: "strong-password-123",
+            attributes: forged,
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+  it("strips the UserService's server-only attributes, which EmailPasswordService never saw, and the ban, SCIM and anonymous keys", async () => {
+    const testContext = await makeTestContext(
+      {},
+      { userService: { serverOnlyAttributes: ["role", "tier"] } },
+    );
+
+    const result = await signUp(testContext, "fresh@example.com");
+
+    expect(result.user.attributes).toEqual({ plan: "pro" });
+    expect(Option.getOrUndefined(MutableHashMap.get(users, result.user.id))?.attributes).toEqual({
+      plan: "pro",
+    });
+  });
+
+  it("answers an address held unverified with a stand-in stripped the same way", async () => {
+    const testContext = await makeTestContext(
+      {},
+      { userService: { serverOnlyAttributes: ["role", "tier"] } },
+    );
+    const holder: User = {
+      id: "user-holder",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    };
+    MutableHashMap.set(users, holder.id, holder);
+    addEmailIdentifier(holder.id, "held@example.com", false);
+
+    const result = await signUp(testContext, "held@example.com");
+
+    expect(result.user.id).not.toBe(holder.id);
+    expect(result.user.attributes).toEqual({ plan: "pro" });
   });
 });
