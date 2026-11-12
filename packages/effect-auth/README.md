@@ -539,8 +539,9 @@ const providers = {
 };
 
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
-// OAuthUserStore, IdentifierStore, UserStore and SessionService; a storage
-// adapter such as @thomasfosterau/effect-auth/sql provides the stores.
+// OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
+// unproven sign-up's password, #671) and SessionService; a storage adapter
+// such as @thomasfosterau/effect-auth/sql provides the stores.
 const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
@@ -555,9 +556,10 @@ const begin = Effect.gen(function* () {
 
 // Step 2: the provider redirects back with `code` and `state`. This resolves or
 // creates the user, links the account and issues a session. A first sign-in
-// whose email matches an existing user auto-links only when both the provider
-// and this application verified the address; otherwise it fails with
-// `EmailInUseError` (#588).
+// whose email matches an existing user auto-links only when the provider
+// verified the address (#588); an unverified local address is proven first,
+// clearing the earlier sign-up's password and sessions (#671). Otherwise it
+// fails with `EmailInUseError`.
 const callback = (state: string, code: string) =>
   Effect.gen(function* () {
     const oauth = yield* Auth.OAuth.OAuthService;
@@ -582,7 +584,7 @@ export { OAuthLive, begin, callback, link, refresh };
 
 **The callback `state` is single-use** (#685). `handleCallback`, `signInWithCallback`, `linkAccount` and the OIDC SSO callback (`SsoService.handleCallback`, `POST /sso/callback`) spend it with `OAuthStateStore.consume`, an atomic get-and-delete, before they exchange the code. A replayed callback fails with `OAuthStateNotFoundError` (an `SsoError` for SSO, `400` over HTTP), whether the first use succeeded or failed, and of two concurrent callbacks carrying the same state only one gets past it. A store you write yourself must implement `consume` as one atomic operation (`DELETE … RETURNING`, a compare-and-swap, Redis `GETDEL`); `/sql`'s store is one `DELETE … RETURNING`. `OAuthStateStoreKV` serializes `consume` within its process only, since a `KeyValueStore` has no get-and-delete: behind several instances sharing one backend, use `/sql` or a store with a native atomic consume. The SAML `RelayState` is single-use the same way: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends.
 
-Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true`, the local email identifier is verified, and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match fails with `EmailInUseError` and changes nothing. An unverified local address may have been claimed by someone who signed up with it and a password, so its real holder proves it first (the verification link, a magic link or an email OTP, which clear the earlier sign-up's password and sessions) and then signs in with the provider.
+Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true` and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match (an unverified provider email, auto-linking off for the provider) fails with `EmailInUseError` and changes nothing. When the local email identifier is still unverified, someone may have signed up with the address and a password before its holder did, so the provider's verification is the address's first proof, as in Google One Tap and SSO (#440, #671): the account's password is cleared and its sessions revoked, the address is marked verified, and then the provider is linked and the holder's session issued. A provider that does not report the email verified never takes over an address.
 
 ## Email verification
 
