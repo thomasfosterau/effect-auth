@@ -159,8 +159,10 @@ export const layer = (
  * With `options.limit` (#729) the `DELETE` takes at most that many of those
  * rows, chosen by key through a derived table, which PostgreSQL, SQLite and
  * MySQL all accept (MySQL refuses a `LIMIT` directly inside `IN`):
- * `DELETE … WHERE key IN (SELECT key FROM (SELECT key … WHERE <spent> LIMIT n)
- * AS spent)`. It returns nothing on any dialect (MySQL has no `RETURNING`, and
+ * `DELETE … WHERE <spent> AND key IN (SELECT key FROM (SELECT key … WHERE
+ * <spent> LIMIT n) AS spent)`; the outer `<spent>` keeps a row a concurrent
+ * `increment` refreshed after the subquery picked it (PostgreSQL READ COMMITTED
+ * rechecks only the outer `WHERE`). It returns nothing on any dialect (MySQL has no `RETURNING`, and
  * the drivers report affected rows each their own way), so a Workers cron that
  * must stay inside its budget runs a fixed number of bounded calls per tick;
  * whatever is left goes on the next tick. Which spent rows a capped call takes
@@ -188,7 +190,7 @@ export const purgeExpired = (
         .where(
           limit === undefined
             ? spent
-            : sql`${table.key} in (select ${key} from (select ${table.key} from ${table} where ${spent} limit ${sql.raw(String(limit))}) as ${sql.identifier("spent")})`,
+            : sql`${spent} and ${table.key} in (select ${key} from (select ${table.key} from ${table} where ${spent} limit ${sql.raw(String(limit))}) as ${sql.identifier("spent")})`,
         )
         .execute(),
     );

@@ -1780,3 +1780,46 @@ describe("@thomasfosterau/effect-auth/sql IdentifierStore.replace on SQLite: tra
     expect(result.values).toEqual(["ada-new@example.com"]);
   });
 });
+
+/** A `SqlClient` over a migrated in-memory SQLite that records each statement's text. */
+const recordingSqliteClient = (sent: Array<string>): Layer.Layer<SqlClient.SqlClient> =>
+  Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function* () {
+      const db = new Database(":memory:");
+      Arr.forEach(schemaStatements, (statement) => db.exec(statement));
+      const connection = makeConnection(db);
+      const recorded: SqlConnection.Connection = {
+        ...connection,
+        execute: (sqlText, params, transformRows) => {
+          sent.push(sqlText);
+          return connection.execute(sqlText, params, transformRows);
+        },
+      };
+      return yield* SqlClient.make({
+        acquirer: Effect.succeed(recorded),
+        compiler: Statement.makeCompilerSqlite(),
+        driver: "better-sqlite3",
+        spanAttributes: [],
+      });
+    }),
+  ).pipe(Layer.provide(Reactivity.layer));
+
+describe("purgeExpiredWith's capped DELETE (#729)", () => {
+  it("rechecks expiry outside the subquery, so a row refreshed after the subquery picked it survives", async () => {
+    // A concurrent refresh between the subquery's pick and the DELETE's row
+    // lock cannot be staged deterministically on one connection, so this pins
+    // the statement text: under PostgreSQL READ COMMITTED the DELETE rechecks
+    // only its own WHERE, which must therefore carry the expiry predicate.
+    const sent: Array<string> = [];
+    await Effect.runPromise(
+      Sql.purgeExpiredWith({ limit: 10 }).pipe(Effect.provide(recordingSqliteClient(sent))),
+    );
+    const deletes = sent.filter((statement) => statement.startsWith("DELETE"));
+    expect(deletes).toEqual([
+      "DELETE FROM auth_magic_links WHERE (expires_at < ?) AND (token) IN (SELECT token FROM auth_magic_links WHERE expires_at < ? LIMIT ?) RETURNING token",
+      "DELETE FROM auth_email_otps WHERE (expires_at < ?) AND (email, purpose) IN (SELECT email, purpose FROM auth_email_otps WHERE expires_at < ? LIMIT ?) RETURNING email, purpose",
+      "DELETE FROM auth_rate_limits WHERE (reset_at <= ? AND (blocked_until IS NULL OR blocked_until <= ?)) AND (key) IN (SELECT key FROM auth_rate_limits WHERE reset_at <= ? AND (blocked_until IS NULL OR blocked_until <= ?) LIMIT ?) RETURNING key",
+    ]);
+  });
+});

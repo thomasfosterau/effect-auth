@@ -1224,7 +1224,7 @@ export interface PurgeExpiredOptions {
  * {@link purgeExpired} with options; requires `SqlClient`.
  *
  * With `limit`, each table's `DELETE` takes at most `limit` of its expired
- * rows (`DELETE … WHERE key IN (SELECT key … WHERE <expired> LIMIT n)`, which
+ * rows (`DELETE … WHERE <expired> AND key IN (SELECT key … WHERE <expired> LIMIT n)`, which
  * SQLite, D1 and PostgreSQL all run), so one run's work is bounded: a Workers
  * cron tick with a CPU budget calls it once per tick, or loops until every
  * count in the result is `0`. Which expired rows a capped run takes is
@@ -1260,6 +1260,12 @@ export const purgeExpiredWith = (
  * One table's purge: every row matching `expired`, or with `limit` at most
  * that many of them, chosen by `key` (a column list, so a composite key
  * compares as a row value). Returns how many rows went.
+ *
+ * The capped form repeats `expired` in the outer `WHERE`: under PostgreSQL's
+ * READ COMMITTED a row the subquery picked can be refreshed concurrently (a
+ * rate-limit window reopened, an OTP re-issued for the same address), and the
+ * `DELETE` rechecks only its own `WHERE` after waiting on the row lock. Without
+ * the predicate it would delete the fresh row.
  */
 const purgeTable = (
   sql: SqlClient.SqlClient,
@@ -1276,7 +1282,7 @@ const purgeTable = (
   const statement =
     options.limit === undefined
       ? sql`DELETE FROM ${table} WHERE ${options.expired} RETURNING ${key}`
-      : sql`DELETE FROM ${table} WHERE (${key}) IN (SELECT ${key} FROM ${table} WHERE ${options.expired} LIMIT ${options.limit}) RETURNING ${key}`;
+      : sql`DELETE FROM ${table} WHERE (${options.expired}) AND (${key}) IN (SELECT ${key} FROM ${table} WHERE ${options.expired} LIMIT ${options.limit}) RETURNING ${key}`;
   return allRows(options.label, statement).pipe(Effect.map((rows) => rows.length));
 };
 
