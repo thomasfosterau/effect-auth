@@ -51,8 +51,13 @@ import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { proveAddress } from "./FirstProof.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
+import { SessionService } from "./SessionService.ts";
+import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
@@ -137,12 +142,22 @@ export type InvitationStatus = "pending" | "accepted" | "rejected" | "canceled";
 
 /**
  * An email invitation to join an organization.
+ *
+ * The invitation link carries a secret token (#586): only the token's SHA-256
+ * digest is stored, and presenting the token is what proves the invitee holds
+ * the invited address. The id alone accepts nothing.
  */
 export interface Invitation {
   readonly id: string;
   readonly organizationId: string;
   /** Normalized (trimmed, lowercased) invitee email */
   readonly email: string;
+  /**
+   * SHA-256 hex digest (`hashToken`) of the invitation's secret token. The
+   * raw token reaches the invitee once, through
+   * {@link OrganizationConfig.sendInvitationEmail}; a resend replaces it.
+   */
+  readonly tokenHash: string;
   /** Role the invitee receives upon acceptance */
   readonly role: string;
   readonly status: InvitationStatus;
@@ -559,10 +574,15 @@ export interface OrganizationConfig {
    * custom roles carry, or owners cannot hand those roles out.
    */
   readonly roles?: Record<string, ReadonlyArray<string>>;
-  /** Optional invitation email delivery */
+  /**
+   * Invitation email delivery. The email's link carries `delivery.token`,
+   * the invitation's secret, which the invitee presents to accept or reject
+   * it (#586); the token is never stored and is handed to nothing else.
+   * Without this callback no token can reach an invitee, so
+   * `inviteMember` and `resendInvitation` refuse.
+   */
   readonly sendInvitationEmail?: (
-    invitation: Invitation,
-    organization: Organization,
+    delivery: InvitationDelivery,
   ) => Effect.Effect<void, OrganizationError>;
   /**
    * Called after a member is deactivated, with the updated (inactive)
@@ -633,6 +653,39 @@ export interface AddOrganizationDomainInput {
 export interface InviteMemberInput {
   readonly email: string;
   readonly role: string;
+}
+
+/**
+ * What {@link OrganizationConfig.sendInvitationEmail} delivers: the stored
+ * invitation, its organization, and the raw secret token for the link.
+ */
+export interface InvitationDelivery {
+  readonly invitation: Invitation;
+  readonly organization: Organization;
+  /** The invitation's secret token (256 bits, base64url); put it in the link. */
+  readonly token: string;
+}
+
+/**
+ * The invitee's answer to an invitation: its id and the secret token the
+ * invitation email carried.
+ */
+export interface InvitationResponseInput {
+  readonly invitationId: string;
+  readonly token: string;
+}
+
+/**
+ * Input for accepting an invitation.
+ */
+export interface AcceptInvitationInput extends InvitationResponseInput {
+  /**
+   * The raw token of the session the acceptance arrives over. When the
+   * token is the first proof of the invited address (the account's matching
+   * email identifier is unverified), every other session of the account is
+   * revoked and this one kept; without it, all are revoked.
+   */
+  readonly currentSessionId?: string | undefined;
 }
 
 /**
@@ -758,9 +811,9 @@ export class OrganizationService extends Context.Service<
      * `invitation:create` permission, a `role` the organization defines, and
      * that the inviter holds every permission that role carries (no granting
      * beyond your own permissions, #585). Rejects duplicate pending invitations for
-     * the same email + organization and enforces `membershipLimit`. When
-     * `sendInvitationEmail` is configured it is invoked with the created
-     * invitation.
+     * the same email + organization and enforces `membershipLimit`. Mints the
+     * invitation's secret token, stores its digest and hands the raw token to
+     * `sendInvitationEmail`, which must be configured (#586).
      */
     readonly inviteMember: (
       inviterId: string,
@@ -769,23 +822,33 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
-     * Accept a pending invitation. Validates that the invitation is pending,
-     * unexpired, and addressed to one of the user's email identifiers.
-     * Creates the membership and marks
-     * the invitation accepted.
+     * Accept a pending invitation with the secret token its email carried
+     * (#586): the invitation must be pending and unexpired, the token must
+     * match its digest (a wrong token answers "Invitation not found"), and it
+     * must be addressed to one of the user's email identifiers. Creates the
+     * membership and marks the invitation accepted.
+     *
+     * The token proves the address, so acceptance works for apps that run
+     * without email verification. When the matching identifier is not
+     * verified yet, the token is its first proof: like a magic link or an
+     * email OTP (#440), the account's password is cleared and its other
+     * sessions are revoked (all of them without `currentSessionId`) before
+     * the identifier is marked verified, so whoever signed up with the
+     * address unproven no longer holds the account.
      */
     readonly acceptInvitation: (
       userId: string,
-      invitationId: string,
+      input: AcceptInvitationInput,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
      * Reject a pending invitation addressed to one of the user's email
-     * identifiers.
+     * identifiers, with the secret token its email carried: declining is the
+     * addressee's act too, so the id alone rejects nothing (#586).
      */
     readonly rejectInvitation: (
       userId: string,
-      invitationId: string,
+      input: InvitationResponseInput,
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
@@ -812,9 +875,10 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     /**
-     * Resend a pending invitation: the same row and id, its `expiresAt` pushed
-     * out by the configured invitation TTL from now, and
-     * `sendInvitationEmail` invoked again. Requires the `invitation:create`
+     * Resend a pending invitation: the same row and id, a fresh secret token
+     * (the link sent earlier stops working), its `expiresAt` pushed out by the
+     * configured invitation TTL from now, and `sendInvitationEmail` invoked
+     * again. Requires the `invitation:create`
      * permission, like issuing one. Unknown, accepted, rejected and canceled
      * invitations are refused with an `OrganizationError` rather than silently
      * re-issued.
@@ -1121,6 +1185,10 @@ export class OrganizationService extends Context.Service<
 >()("@effect-auth/OrganizationService") {
   /**
    * Construct a Layer providing this service.
+   *
+   * Requires `OrganizationStore`, `IdentifierStore`, `EmailPasswordStore` and
+   * `SessionService`: accepting an invitation is a first proof of the invited
+   * address, which clears an unproven account's password and sessions (#586).
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
@@ -1140,7 +1208,11 @@ export const make = (
 ): Effect.Effect<
   typeof OrganizationService.Service,
   never,
-  OrganizationStore | IdentifierStore | SecureRandom.SecureRandom
+  | OrganizationStore
+  | IdentifierStore
+  | EmailPasswordStore
+  | SessionService
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
@@ -1152,6 +1224,8 @@ export const make = (
 
     const store = yield* OrganizationStore;
     const identifiers = yield* IdentifierStore;
+    const passwords = yield* EmailPasswordStore;
+    const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
 
     /**
@@ -1457,24 +1531,45 @@ export const make = (
       });
 
     /**
-     * Load a pending invitation addressed to one of `userId`'s email
-     * identifiers, enforcing expiry. (Matching mirrors the pre-identifier
-     * behavior: the identifier does not need to be verified.)
+     * Mint an invitation's secret token and deliver it, returning the digest
+     * to store. Refuses when no `sendInvitationEmail` is configured: the token
+     * would reach nobody, and the invitation could never be accepted.
      */
-    const getPendingInvitationFor = (invitationId: string, userId: string) =>
+    const issueInvitationToken = Effect.fn("issueInvitationToken")(function* () {
+      const send = config.sendInvitationEmail;
+      if (send === undefined) {
+        return yield* new OrganizationError({
+          message: "Invitations are not enabled: configure sendInvitationEmail",
+        });
+      }
+      const token = yield* randomBase64UrlToken(crypto);
+      const deliver = (invitation: Invitation, organization: Organization) =>
+        send({ invitation, organization, token });
+      return { tokenHash: hashToken(token), deliver };
+    });
+
+    /**
+     * Load a pending invitation the user answers with its secret token: the
+     * token must match the stored digest (a mismatch answers "not found", so
+     * the id alone confirms nothing), and the invitation must be addressed to
+     * one of `userId`'s email identifiers, which is returned with it.
+     * Enforces expiry.
+     */
+    const getPendingInvitationFor = (input: InvitationResponseInput, userId: string) =>
       Effect.gen(function* () {
-        const invitation = yield* store.getInvitation(invitationId);
-        if (!invitation) {
+        const invitation = yield* store.getInvitation(input.invitationId);
+        if (!invitation || !constantTimeHashEqual(hashToken(input.token), invitation.tokenHash)) {
           return yield* new OrganizationError({ message: "Invitation not found" });
         }
         if (invitation.status !== "pending") {
           return yield* new OrganizationError({ message: "Invitation is no longer pending" });
         }
-        const userIdentifiers = yield* identifiers.listByUser(userId);
-        const ownsEmail = userIdentifiers.some(
-          (id) => id.type === "email" && id.value === normalizeEmail(invitation.email),
+        const email = normalizeEmail(invitation.email);
+        const identifier = Arr.findFirst(
+          yield* identifiers.listByUser(userId),
+          (id) => id.type === "email" && id.value === email,
         );
-        if (!ownsEmail) {
+        if (Option.isNone(identifier)) {
           return yield* new OrganizationError({
             message: "This invitation is addressed to a different email",
           });
@@ -1482,7 +1577,7 @@ export const make = (
         if ((yield* Clock.currentTimeMillis) > invitation.expiresAt) {
           return yield* new OrganizationError({ message: "Invitation has expired" });
         }
-        return invitation;
+        return { invitation, identifier: identifier.value };
       });
 
     return {
@@ -1650,10 +1745,12 @@ export const make = (
           });
         }
 
+        const { tokenHash, deliver } = yield* issueInvitationToken();
         const invitation: Invitation = {
           id: yield* generateId(),
           organizationId,
           email,
+          tokenHash,
           role: input.role,
           status: "pending",
           inviterId,
@@ -1662,19 +1759,15 @@ export const make = (
         };
 
         const created = yield* store.createInvitation(invitation);
-
-        if (config.sendInvitationEmail) {
-          yield* config.sendInvitationEmail(created, organization);
-        }
-
+        yield* deliver(created, organization);
         return created;
       }),
 
       acceptInvitation: Effect.fn("OrganizationService.acceptInvitation")(function* (
         userId: string,
-        invitationId: string,
+        input: AcceptInvitationInput,
       ) {
-        const invitation = yield* getPendingInvitationFor(invitationId, userId);
+        const { invitation, identifier } = yield* getPendingInvitationFor(input, userId);
 
         const existingMember = yield* store.getMember(invitation.organizationId, userId);
         if (existingMember) {
@@ -1685,6 +1778,18 @@ export const make = (
 
         yield* ensureMembershipCapacity(invitation.organizationId);
 
+        // The token proves the address (#586). For an unverified identifier
+        // it is the first proof, so it goes through proveAddress (#440): the
+        // password an unproven sign-up set is cleared and every session but
+        // the prover's is revoked before the address counts as verified.
+        if (!identifier.verified) {
+          yield* proveAddress(
+            { identifiers, passwords, sessions },
+            identifier,
+            input.currentSessionId,
+          );
+        }
+
         const member = yield* createMembership(invitation.organizationId, userId, invitation.role);
         yield* store.updateInvitation({ ...invitation, status: "accepted" });
         return member;
@@ -1692,9 +1797,9 @@ export const make = (
 
       rejectInvitation: Effect.fn("OrganizationService.rejectInvitation")(function* (
         userId: string,
-        invitationId: string,
+        input: InvitationResponseInput,
       ) {
-        const invitation = yield* getPendingInvitationFor(invitationId, userId);
+        const { invitation } = yield* getPendingInvitationFor(input, userId);
         return yield* store.updateInvitation({ ...invitation, status: "rejected" });
       }),
 
@@ -1730,17 +1835,16 @@ export const make = (
         yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
         const organization = yield* getOrganizationOrFail(invitation.organizationId);
 
-        // The same row and id: an already-delivered link keeps working, and an
-        // expired-but-pending invitation is revived rather than duplicated.
+        // The same row and id, so an expired-but-pending invitation is revived
+        // rather than duplicated; only the digest is stored, so the token is
+        // minted afresh and the link delivered earlier stops working.
+        const { tokenHash, deliver } = yield* issueInvitationToken();
         const refreshed = yield* store.updateInvitation({
           ...invitation,
+          tokenHash,
           expiresAt: (yield* Clock.currentTimeMillis) + invitationExpiresIn,
         });
-
-        if (config.sendInvitationEmail) {
-          yield* config.sendInvitationEmail(refreshed, organization);
-        }
-
+        yield* deliver(refreshed, organization);
         return refreshed;
       }),
 

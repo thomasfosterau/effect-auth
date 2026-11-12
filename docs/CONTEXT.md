@@ -139,11 +139,14 @@ not a User. Also avoid "the user's org" — a User may have many Memberships.
 
 **Invitation**:
 A pending request to join an Organization, addressed to an email (`Organization.ts`'s
-`Invitation`: `organizationId`, `email`, `role`, `inviterId`, `status`, `expiresAt`). It carries
-no secret token, so there is nothing to hash at rest: acceptance goes by the invitation id plus a
-signed-in User who owns the invited email as an Identifier, and creates the `Member` row.
-_Avoid_: treating the invitation id as a bearer secret — knowing it is not enough to accept;
-the accepting User must own the invited email.
+`Invitation`: `organizationId`, `email`, `tokenHash`, `role`, `inviterId`, `status`, `expiresAt`).
+Its email link carries a secret token, stored only as its digest (#586): presenting the token is
+the proof of the address, so acceptance (and rejection) takes the token plus a signed-in User who
+owns the invited email as an Identifier, verified or not, and creates the `Member` row. For an
+unverified Identifier the token is the address's first proof, so it clears the account's
+password and its other sessions, as a magic link does. A resend mints a new token.
+_Avoid_: treating the invitation id as a bearer secret — knowing it accepts nothing; the token
+does, and only for a User who owns the invited email.
 
 **Active organization**:
 The Organization the user is currently working in: `session.attributes.activeOrganizationId`,

@@ -250,6 +250,11 @@ const makeStores = (
     deleteOrgRole: () => Effect.die("unused"),
   };
 
+  const emailPasswords = memoryEmailPasswordStore({
+    users: MutableHashMap.empty(),
+    passwordHashes,
+  });
+
   const layer = Layer.mergeAll(
     Layer.succeed(SsoProviderStore)(ssoStore),
     Layer.succeed(OAuthStateStore)(stateStore),
@@ -257,9 +262,7 @@ const makeStores = (
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
-    Layer.succeed(EmailPasswordStore)(
-      memoryEmailPasswordStore({ users: MutableHashMap.empty(), passwordHashes }),
-    ),
+    Layer.succeed(EmailPasswordStore)(emailPasswords),
     Layer.succeed(OrganizationStore)(orgStore),
     Layer.succeed(OrganizationDomainStore)(domainStore),
     // The organization service is what SSO asks for JIT membership; wiring it
@@ -271,6 +274,8 @@ const makeStores = (
           Layer.succeed(OrganizationStore)(orgStore),
           Layer.succeed(IdentifierStore)(identifiers),
           Layer.succeed(OrganizationDomainStore)(domainStore),
+          Layer.succeed(SessionService)(sessionManager),
+          Layer.succeed(EmailPasswordStore)(emailPasswords),
         ),
       ),
     ),

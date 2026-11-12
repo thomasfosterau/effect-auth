@@ -12,6 +12,7 @@
 import * as Auth from "../index.ts";
 import { DateTime, Effect, MutableHashSet, Order } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { assert, describe, expect, it } from "vite-plus/test";
@@ -362,7 +363,7 @@ describe("change email and delete user", () => {
 
 describe("organizations", () => {
   it("runs an organization lifecycle: create, members, invitations, delete", async () => {
-    const { browser } = withServer({ organization: true });
+    const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const invitee = browser();
 
@@ -388,7 +389,10 @@ describe("organizations", () => {
       invitation.id,
     ]);
 
-    const member = await invitee.organization.acceptInvitation(invitation.id);
+    const [sent] = server.sentInvitations;
+    assert(sent !== undefined, "the invitation was emailed");
+    expect(sent).toMatchObject({ invitationId: invitation.id, email: "invitee@client.test" });
+    const member = await invitee.organization.acceptInvitation(invitation.id, sent.token);
     expect(member).toMatchObject({
       organizationId: org.id,
       userId: signedInUser(guest).id,
@@ -537,6 +541,60 @@ describe("organizations", () => {
     );
     assert.instanceOf(lastOwner, AuthClientError);
     expect(lastOwner.status).toBe(403);
+  });
+
+  it("accepts an invitation only with its emailed token, as a first proof of the address (#586)", async () => {
+    const { server, browser } = withServer({ organization: true });
+    const owner = browser();
+    const invitee = browser();
+    const otherDevice = browser();
+
+    await owner.signUp({ email: "lead@client.test", password: PW });
+    const org = await owner.organization.create({ name: "Pied Piper", slug: "pied-piper" });
+    const invitation = await owner.organization.invite(org.id, {
+      email: "squatted@client.test",
+      role: "admin",
+    });
+    const [sent] = server.sentInvitations;
+    assert(sent !== undefined, "the invitation was emailed");
+    // The wire never carries the token back.
+    expect(toJson(await owner.organization.listInvitations(org.id))).not.toContain(sent.token);
+
+    // Signed up with the invited address, unverified, on two devices.
+    const account = await invitee.signUp({ email: "squatted@client.test", password: PW });
+    await otherDevice.signIn({ email: "squatted@client.test", password: PW });
+
+    // The id alone (an empty token), or a wrong token, accepts nothing.
+    const noToken = await rejectionOf(
+      invitee.organization.acceptInvitation(invitation.id, ""),
+      AuthClientError,
+    );
+    expect(noToken.status).toBe(400);
+    const wrong = await rejectionOf(
+      invitee.organization.acceptInvitation(invitation.id, "not-the-token"),
+      AuthClientError,
+    );
+    expect(wrong.status).toBe(400);
+    expect((await owner.organization.get(org.id)).members).toHaveLength(1);
+
+    const member = await invitee.organization.acceptInvitation(invitation.id, sent.token);
+    expect(member).toMatchObject({ userId: signedInUser(account).id, role: "admin" });
+
+    // The token was the address's first proof: the identifier is verified,
+    // the unproven password is gone, and only the accepting session survives.
+    const email = Arr.findFirst(
+      Arr.fromIterable(server.identifierRecords),
+      ([, identifier]) => identifier.value === "squatted@client.test",
+    );
+    assert(Option.isSome(email), "the invitee has an email identifier");
+    expect(email.value[1].verified).toBe(true);
+    expect((await invitee.getSession())?.user.id).toBe(signedInUser(account).id);
+    expect(await otherDevice.getSession()).toBeNull();
+    const signIn = await rejectionOf(
+      browser().signIn({ email: "squatted@client.test", password: PW }),
+      AuthClientError,
+    );
+    expect(signIn.status).toBe(401);
   });
 
   it("refuses an admin granting the owner role, to themselves included (#585)", async () => {

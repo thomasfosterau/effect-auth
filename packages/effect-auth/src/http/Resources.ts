@@ -331,10 +331,12 @@ export type OrganizationMember = typeof OrganizationMember.Type;
 
 /**
  * An invitation to join an organization (`invitations`):
- * `Organization.Invitation`, its `organizationId` and `inviterId` as the
- * `organization` and `inviter` relationships. `status` moves through
- * `PATCH /invitations/:id`: the invitee sets `accepted` or `rejected`, a
- * member holding `invitation:cancel` sets `canceled`.
+ * `Organization.Invitation` but its `tokenHash`, its `organizationId` and
+ * `inviterId` as the `organization` and `inviter` relationships. `status`
+ * moves through `PATCH /invitations/:id`: the invitee sets `accepted` or
+ * `rejected`, presenting the invitation email's secret as the input-only
+ * `token` attribute (#586); a member holding `invitation:cancel` sets
+ * `canceled`.
  *
  * @since 0.3.0
  * @category resources
@@ -347,6 +349,8 @@ export const Invitation = Resource.make("invitations", {
     status: Resource.attribute(Schema.Literals(["pending", "accepted", "rejected", "canceled"]), {
       create: false,
     }),
+    // Input-only: the invitation email's secret, never on the resource.
+    token: Resource.attribute(Schema.String, { resource: false, create: false }),
     expiresAt: epochMillis,
     createdAt: epochMillis,
   },
