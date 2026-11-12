@@ -12,8 +12,9 @@
  * Never published (`tsconfig.json` excludes `src/testing/`).
  */
 
-import { DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -28,8 +29,18 @@ import * as TokenStore from "../TokenStore.ts";
 import * as UserStore from "../UserStore.ts";
 import { conformance } from "./Conformance.ts";
 
+/**
+ * `RateLimitStore.purgeExpired` over the same database and tables as the
+ * stores, so a case can run it without knowing the dialect.
+ */
+class PurgeRateLimits extends Context.Service<
+  PurgeRateLimits,
+  Effect.Effect<void, Auth.AuthError>
+>()("@thomasfosterau/effect-auth-drizzle/testing/AuthStoresContract/PurgeRateLimits") {}
+
 /** Every store the suite exercises. */
 export type AuthStores =
+  | PurgeRateLimits
   | Auth.ApiKeyStore
   | Auth.Email.EmailPasswordStore
   | Auth.Password.PasswordResetUserStore
@@ -51,6 +62,12 @@ export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, 
     SessionStore.layer(tables),
     UserStore.layer(tables),
     IdentifierStore.layer(tables),
+    Layer.effect(
+      PurgeRateLimits,
+      Effect.map(Effect.context<DrizzleDatabase>(), (context) =>
+        RateLimitStore.purgeExpired(tables).pipe(Effect.provide(context)),
+      ),
+    ),
   );
 
 /** Runs a case against the file's database, with {@link authStoresLayer} provided. */
@@ -243,6 +260,41 @@ const rateLimitCases = (label: string, run: Run): void => {
         }),
       );
       expect(result).toEqual({ gone: null, restarted: 1 });
+    });
+
+    it("purgeExpired deletes rows whose window and block have both passed, keeps open or blocked ones, and is idempotent (#686)", async () => {
+      // A fixed instant before the real clock: the other cases' rows all reset
+      // after it, so the purge leaves them alone.
+      const now = millis(0);
+      const entries: ReadonlyArray<Auth.RateLimitEntry> = [
+        // Window and block both passed, or the block never set: purged.
+        { key: `ip:${uuid()}`, count: 3, resetAt: now - 60_000 },
+        { key: `ip:${uuid()}`, count: 9, resetAt: now - 60_000, blockedUntil: now - 60_000 },
+        // Both end exactly now, which the limiter already treats as over: purged.
+        { key: `ip:${uuid()}`, count: 1, resetAt: now, blockedUntil: now },
+        // Inside its window, and past its window but still blocked: kept.
+        { key: `ip:${uuid()}`, count: 2, resetAt: now + 60_000 },
+        { key: `ip:${uuid()}`, count: 9, resetAt: now - 60_000, blockedUntil: now + 60_000 },
+      ];
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          yield* Effect.forEach(entries, (entry) => store.set(entry.key, entry, 60), {
+            concurrency: 1,
+            discard: true,
+          });
+          const read = Effect.forEach(entries, (entry) => store.get(entry.key), {
+            concurrency: 1,
+          });
+          yield* yield* PurgeRateLimits;
+          const first = yield* read;
+          yield* yield* PurgeRateLimits;
+          return { first, second: yield* read };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.first).toEqual([null, null, null, entries[3], entries[4]]);
+      expect(result.second).toEqual(result.first);
     });
   });
 };
