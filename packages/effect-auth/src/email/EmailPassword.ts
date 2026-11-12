@@ -2,7 +2,12 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
-import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";
+import {
+  IdentifierStore,
+  lookupIdentifier,
+  resolveUserByIdentifier,
+  type IdentifierType,
+} from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { makeDecoyHash, verifyPasswordOrDecoy } from "../password/DecoyVerify.ts";
 import type * as Types from "../Types.ts";
@@ -252,7 +257,8 @@ export const answeredByStandIn = (
   email: string,
 ): Effect.Effect<boolean, Errors.AuthError> =>
   Effect.gen(function* () {
-    const holder = yield* identifiers.getByValue(
+    const holder = yield* lookupIdentifier(
+      identifiers,
       "email",
       result.identifier?.value ?? normalizeEmail(email),
     );
@@ -458,7 +464,7 @@ export const make = (
             maxPasswordLength: resolved.maxPasswordLength,
           });
 
-          const taken = yield* identifiers.getByValue("email", email);
+          const taken = yield* lookupIdentifier(identifiers, "email", email);
           if (taken) return yield* addressTaken(input, email);
 
           // The identifier's unique (type, value) index is the real claim; a

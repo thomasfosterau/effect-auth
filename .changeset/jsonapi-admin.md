@@ -25,3 +25,4 @@
 - **`DELETE /impersonations/current` answers `404` on a session that is not an impersonation**; `POST /admin/stop-impersonating` signed any session out. Ending an impersonation also drops the session from a multi-session device list, as `DELETE /sessions/current` does.
 - Permissions and refusal statuses are unchanged: admin calls need `isAdmin` (`403`), an unknown user answers `400`, a key the caller does not own `400`, an unknown or statically configured OAuth client `400`. No store contract changes: every resource is addressed by an id the stores already keep.
 - `./client`: the methods keep their arguments and results and call the new endpoints, except `admin.unbanUser`, which now resolves with nothing (the lifted ban answers `204`, not the user).
+- Every old endpoint, store-contract, client and status-code change of the conversion is in [the migration guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/jsonapi-migration.md).

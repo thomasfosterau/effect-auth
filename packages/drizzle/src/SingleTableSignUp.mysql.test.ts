@@ -15,13 +15,14 @@ import { Effect, Layer } from "effect";
 import * as P from "effect/Predicate";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { databaseLayer } from "./Database.ts";
+import { binaryVarchar } from "./MySqlSchema.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
 import { makeAppWriter, type UserRowInsert } from "./testing/SingleTableSignUpContract.ts";
 
 /** The application's users table with `email` NOT NULL. */
 const strictUsers = mysqlTable("app_users_strict", {
   userId: varchar("id", { length: 255 }).primaryKey(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
+  email: binaryVarchar("email", { length: 255 }).notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
 });

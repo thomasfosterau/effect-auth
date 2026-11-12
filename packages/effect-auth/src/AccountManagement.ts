@@ -27,6 +27,7 @@ import {
   anyEmailValue,
   claimIdentifier,
   IdentifierStore,
+  lookupIdentifier,
   makeIdentifier,
   refusalAuthError,
   replaceIdentifier,
@@ -228,7 +229,7 @@ const make = (
         const newEmail = normalizeEmail(rawNewEmail);
 
         // Uniqueness: reject if another account already owns the address.
-        const existing = yield* identifiers.getByValue("email", newEmail);
+        const existing = yield* lookupIdentifier(identifiers, "email", newEmail);
         if (existing !== null && existing.userId !== userId) {
           return yield* new Errors.EmailInUseError({
             message: "Email already in use",
@@ -278,7 +279,7 @@ const make = (
 
         // Re-check uniqueness at confirm time (the address may have been
         // taken between request and confirm).
-        const clash = yield* identifiers.getByValue("email", newEmail);
+        const clash = yield* lookupIdentifier(identifiers, "email", newEmail);
         if (clash !== null && clash.userId !== user.id) {
           yield* store.delete(token);
           return yield* new AccountTokenError({ message: "Email already in use" });
@@ -320,7 +321,9 @@ const make = (
               IdentifierTakenError: () =>
                 Effect.gen(function* () {
                   const found =
-                    current === null ? yield* identifiers.getByValue("email", newEmail) : null;
+                    current === null
+                      ? yield* lookupIdentifier(identifiers, "email", newEmail)
+                      : null;
                   if (found !== null && found.userId === user.id) {
                     return { identifier: found, converged: currentIdentifiers };
                   }

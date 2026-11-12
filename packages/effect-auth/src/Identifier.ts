@@ -101,6 +101,12 @@ export class IdentifierStore extends Context.Service<
     /**
      * Look up an identifier by its `(type, value)` pair (the natural unique key).
      * Returns `null` when no matching record exists.
+     *
+     * The match is exact: the store compares `value` code unit for code unit,
+     * never under a case- or accent-insensitive collation, since the services
+     * hand it values that are already normalized. The services read it through
+     * {@link lookupIdentifier}, which treats a record whose `type` or `value`
+     * differs from the one asked for as a miss (#602).
      */
     readonly getByValue: (
       type: IdentifierType,
@@ -193,6 +199,39 @@ export class IdentifierStore extends Context.Service<
 // ---------------------------------------------------------------------------
 // Read views & helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Look up an identifier by its exact `(type, value)` through
+ * {@link IdentifierStore} `getByValue`, which is how every core service reads
+ * one.
+ *
+ * A store whose comparison is looser than byte equality (a MySQL column under
+ * a case- and accent-insensitive collation such as `utf8mb4_0900_ai_ci`, where
+ * `bob@exämple.com` matches `bob@example.com`) can answer with another
+ * address's record. A flow that bound a token to that record's user and sent it
+ * to the address the caller typed would hand that account to whoever holds the
+ * typed address (#602). This helper treats such an answer as a miss and logs a
+ * warning without either value, so every store, bring-your-own ones included,
+ * resolves only the identifier asked for. A flow that delivers to the
+ * identifier sends to the returned `identifier.value`, which then equals
+ * `value`.
+ */
+export const lookupIdentifier = (
+  store: typeof IdentifierStore.Service,
+  type: IdentifierType,
+  value: string,
+): Effect.Effect<Identifier | null, Errors.AuthError> =>
+  Effect.filterOrElse(
+    store.getByValue(type, value),
+    (identifier) => identifier === null || (identifier.type === type && identifier.value === value),
+    () =>
+      Effect.as(
+        Effect.logWarning(
+          `IdentifierStore.getByValue returned a different ${type} than the one asked for; treated as a miss. The store's comparison is not exact (check the column's collation).`,
+        ),
+        null,
+      ),
+  );
 
 /**
  * A `User` enriched with all of their identifiers. This is a read-only view:
@@ -314,7 +353,7 @@ export const claimIdentifier = (
   identifier: Identifier,
 ): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError | IdentifierRefusedError> =>
   Effect.gen(function* () {
-    const existing = yield* store.getByValue(identifier.type, identifier.value);
+    const existing = yield* lookupIdentifier(store, identifier.type, identifier.value);
     if (existing !== null) {
       return yield* new IdentifierTakenError({
         message: `This ${identifier.type} is already in use`,
@@ -333,7 +372,7 @@ export const claimIdentifier = (
           Effect.gen(function* () {
             // The unique index may have rejected a concurrent claim — re-check
             // so the caller sees a conflict, not an infrastructure error.
-            const raced = yield* store.getByValue(identifier.type, identifier.value);
+            const raced = yield* lookupIdentifier(store, identifier.type, identifier.value);
             if (raced !== null) {
               return yield* new IdentifierTakenError({
                 message: `This ${identifier.type} is already in use`,
@@ -370,7 +409,7 @@ export const replaceIdentifier = (
   to: Identifier,
 ): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError | IdentifierNotFoundError> =>
   Effect.gen(function* () {
-    const existing = yield* store.getByValue(to.type, to.value);
+    const existing = yield* lookupIdentifier(store, to.type, to.value);
     if (existing !== null && existing.userId !== to.userId) {
       return yield* takenError(to.type);
     }
@@ -381,7 +420,7 @@ export const replaceIdentifier = (
           Effect.gen(function* () {
             // The unique index may have rejected `to` because another user
             // claimed it concurrently: re-check so the caller sees a conflict.
-            const raced = yield* store.getByValue(to.type, to.value);
+            const raced = yield* lookupIdentifier(store, to.type, to.value);
             if (raced !== null && raced.userId !== to.userId) {
               return yield* takenError(to.type);
             }
@@ -389,7 +428,7 @@ export const replaceIdentifier = (
             // already gave this user `to`'s value and released `from`: report
             // that `from` is gone, as a store that checks `from` first does.
             if (raced !== null) {
-              const held = yield* store.getByValue(from.type, from.value);
+              const held = yield* lookupIdentifier(store, from.type, from.value);
               if (held === null || held.id !== from.id || held.userId !== from.userId) {
                 return null;
               }
@@ -502,8 +541,35 @@ export const resolveUserByIdentifier = <E>(
   value: string,
 ): Effect.Effect<{ user: Types.User; identifier: Identifier } | null, Errors.AuthError | E> =>
   Effect.gen(function* () {
-    const identifier = yield* store.getByValue(type, value);
+    const identifier = yield* lookupIdentifier(store, type, value);
     if (identifier === null) return null;
     const user = yield* getUser(identifier.userId);
     return user === null ? null : { user, identifier };
+  });
+
+/**
+ * The identifier holding exactly `(type, value)` and its owner, for a sign-in
+ * that creates the user when nobody holds the value (magic link, email and
+ * phone OTP, SSO, Google One Tap). Both are `null` when the value is
+ * unclaimed. A claimed identifier whose owner no longer exists fails with
+ * `onDangling()`, so the flow never creates a second claimant for it. The
+ * identifier is read through {@link lookupIdentifier} (#602).
+ */
+export const findIdentifierOwner = <E, E2>(
+  store: typeof IdentifierStore.Service,
+  getUser: (userId: string) => Effect.Effect<Types.User | null, E>,
+  type: IdentifierType,
+  value: string,
+  onDangling: () => E2,
+): Effect.Effect<
+  | { readonly identifier: Identifier; readonly user: Types.User }
+  | { readonly identifier: null; readonly user: null },
+  Errors.AuthError | E | E2
+> =>
+  Effect.gen(function* () {
+    const identifier = yield* lookupIdentifier(store, type, value);
+    if (identifier === null) return { identifier, user: null };
+    const user = yield* getUser(identifier.userId);
+    if (user === null) return yield* Effect.fail(onDangling());
+    return { identifier, user };
   });

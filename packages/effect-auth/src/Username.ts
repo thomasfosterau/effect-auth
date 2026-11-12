@@ -25,6 +25,7 @@ import {
   anyEmailValue,
   claimIdentifier,
   IdentifierStore,
+  lookupIdentifier,
   makeIdentifier,
   primaryEmail,
   refusalAuthError,
@@ -200,7 +201,7 @@ const make = (
       signUp: Effect.fn("UsernameService.signUp")(function* (input: UsernameSignUpInput) {
         const username = yield* validate(input.username);
 
-        if ((yield* identifiers.getByValue("username", username)) !== null) {
+        if ((yield* lookupIdentifier(identifiers, "username", username)) !== null) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
 
@@ -223,7 +224,7 @@ const make = (
         // silently leave a fresh sign-up's username unclaimed.
         const standIn = yield* answeredByStandIn(identifiers, users, result, input.email);
         if (standIn) {
-          if ((yield* identifiers.getByValue("username", username)) !== null) {
+          if ((yield* lookupIdentifier(identifiers, "username", username)) !== null) {
             return yield* new UsernameError({ message: "Username is already taken" });
           }
           return result;
@@ -263,7 +264,7 @@ const make = (
           return yield* invalid();
         }
 
-        const identifier = yield* identifiers.getByValue("username", username);
+        const identifier = yield* lookupIdentifier(identifiers, "username", username);
         const user = identifier === null ? null : yield* users.get(identifier.userId);
         const passwordHash =
           user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
@@ -331,7 +332,7 @@ const make = (
       ) {
         const username = yield* validate(rawUsername);
 
-        const existing = yield* identifiers.getByValue("username", username);
+        const existing = yield* lookupIdentifier(identifiers, "username", username);
         if (existing !== null && existing.userId !== userId) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }

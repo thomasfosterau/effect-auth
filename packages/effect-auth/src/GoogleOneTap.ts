@@ -36,7 +36,7 @@ import { SessionService } from "./SessionService.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { proveAddress } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -241,11 +241,14 @@ export const make = (
         }
         const normalized = email.trim().toLowerCase();
 
-        const identifier = yield* identifiers.getByValue("email", normalized);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          return yield* new GoogleOneTapError({ message: "Account is unavailable" });
-        }
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "email",
+          normalized,
+          () => new GoogleOneTapError({ message: "Account is unavailable" }),
+        );
+        let user = owner;
         const isNewUser = user === null;
         if (user === null) {
           // Google attested the address as verified.

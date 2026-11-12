@@ -121,6 +121,7 @@ import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
 import { AuthApi } from "./HttpApi.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
+import { expectSpecJson } from "../testing/WireFormat.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -2312,6 +2313,36 @@ describe("HTTP device authorization (RFC 8628)", () => {
     const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
     expect(token.status).toBe(200);
     expect(token.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+
+  it("keeps its own JSON wire format, never a JSON:API document (#205)", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+
+    // The device posts plain `application/json` and gets plain JSON back.
+    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const code = await expectSpecJson(codeRes, "application/json", [
+      "deviceCode",
+      "userCode",
+      "verificationUri",
+      "expiresIn",
+      "interval",
+    ]);
+    const deviceCode = Schema.decodeUnknownSync(Schema.String)(code["deviceCode"]);
+    const userCode = Schema.decodeUnknownSync(Schema.String)(code["userCode"]);
+
+    // The poll's refusal is the grant's error code, not a JSON:API error document.
+    const pending = await handler(jsonRequest("/device/token", { deviceCode }));
+    expect(pending.status).toBe(400);
+    const refusal = await expectSpecJson(pending, "application/json", ["message"]);
+    expect(refusal["message"]).toBe("authorization_pending");
+
+    const sid = await signUp(handler, "device-wire@example.com");
+    expect((await handler(deviceDecisionRequest(userCode, "approved", asCookie(sid)))).status).toBe(
+      204,
+    );
+    const token = await handler(jsonRequest("/device/token", { deviceCode }));
+    expect(token.status).toBe(200);
+    await expectSpecJson(token, "application/json", ["user", "needsEmailVerification"]);
   });
 
   it("requires authentication to approve a code", async () => {
