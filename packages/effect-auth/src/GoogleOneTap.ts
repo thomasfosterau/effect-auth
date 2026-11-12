@@ -34,7 +34,7 @@ import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { proveAddress } from "./FirstProof.ts";
+import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
@@ -187,6 +187,11 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
+    const firstProof = yield* firstProofServices({
+      identifiers,
+      passwords,
+      sessions: sessionManager,
+    });
     const crypto = yield* SecureRandom.SecureRandom;
 
     return {
@@ -275,7 +280,7 @@ export const make = (
         } else if (identifier !== null && !identifier.verified) {
           // Google verified the address: clear what an earlier, unproven
           // sign-up left on the account before promoting it (#440).
-          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
+          yield* proveAddress(firstProof, identifier);
         }
 
         const { session, token } = yield* sessionManager.createSession(user.id);

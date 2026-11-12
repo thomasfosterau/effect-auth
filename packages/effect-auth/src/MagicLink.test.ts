@@ -1,6 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { ApiKeyStore } from "./ApiKey.ts";
 import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Order, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -520,7 +521,7 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("clears a squatter's password and sessions on the address's first proof (#440)", async () => {
+  it("clears a squatter's password, sessions and credentials on the address's first proof (#440, #694)", async () => {
     const testContext = await makeTestContext();
 
     // A squatter signed up with the address and a password they know, and
@@ -543,13 +544,28 @@ describe("MagicLinkService", () => {
       attributes: {},
     });
 
+    // The squatter also minted an API key, which the first proof removes (#694).
+    const apiKeys = memoryApiKeyStore();
+    await Effect.runPromise(
+      apiKeys.create({
+        id: "squatter-key",
+        start: "abcdef",
+        keyHash: "squatter-key-hash",
+        userId: "user-squat",
+        enabled: true,
+        metadata: {},
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    );
+
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
           yield* service.send("victim@example.com");
           return yield* service.verify(recorded(sentLinks).token);
-        }),
+        }).pipe(Effect.provideService(ApiKeyStore, apiKeys)),
         testContext,
       ).pipe(Effect.provide(TestHooks)),
     );
@@ -562,6 +578,7 @@ describe("MagicLinkService", () => {
     expect(
       Arr.fromIterable(MutableHashMap.values(sessions)).map((session) => session.userId),
     ).toEqual(["user-squat"]);
+    expect(await Effect.runPromise(apiKeys.listByUserId("user-squat"))).toEqual([]);
     expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
   });
 

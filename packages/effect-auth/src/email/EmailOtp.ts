@@ -25,7 +25,7 @@ import * as OtpCode from "../OtpCode.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
-import { proveAddress } from "../FirstProof.ts";
+import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -355,6 +355,11 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
+    const firstProof = yield* firstProofServices({
+      identifiers,
+      passwords,
+      sessions: sessionManager,
+    });
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
@@ -486,9 +491,9 @@ export const make = (
           user = created.user;
         } else if (identifier !== null && !identifier.verified) {
           // The OTP proves ownership — promote the identifier to verified,
-          // first clearing the password and sessions an earlier, unproven
-          // sign-up left on the account (#440).
-          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
+          // first clearing the password, credentials and sessions an earlier, unproven
+          // sign-up left on the account (#440, #694).
+          yield* proveAddress(firstProof, identifier);
         }
 
         const { session, token } = yield* sessionManager.createSession(

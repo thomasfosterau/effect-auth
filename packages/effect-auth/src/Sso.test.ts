@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { ApiKeyStore } from "./ApiKey.ts";
 import { DateTime, Effect, Layer, MutableHashMap, Result, Struct } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -441,24 +442,26 @@ describe("SsoService", () => {
         email_verified: true,
       },
     };
-    const signIn = async () => {
-      const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(stores.layer)));
+    /** Sign in through the IdP; `extra` adds stores beside the fixture's. */
+    const signIn = async (extra?: Layer.Layer<ApiKeyStore>) => {
+      const layer = extra === undefined ? stores.layer : Layer.merge(stores.layer, extra);
+      const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
       await Effect.runPromise(
-        sso.registerProvider("admin", withoutOrganization).pipe(Effect.provide(stores.layer)),
+        sso.registerProvider("admin", withoutOrganization).pipe(Effect.provide(layer)),
       );
       return withFetch(idpRoutes, () =>
         Effect.runPromise(
           Effect.gen(function* () {
             const start = yield* sso.signIn({ email: "worker@acme.test" });
             return yield* sso.handleCallback(start.state, "auth-code");
-          }).pipe(Effect.provide(stores.layer)),
+          }).pipe(Effect.provide(layer)),
         ),
       );
     };
     return { ...stores, signIn };
   };
 
-  it("clears a squatter's password and sessions when the IdP proves the address (#440)", async () => {
+  it("clears a squatter's password, sessions and credentials when the IdP proves the address (#440, #694)", async () => {
     const fx = jitFixture();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
@@ -481,7 +484,22 @@ describe("SsoService", () => {
     );
     MutableHashMap.set(fx.passwordHashes, "user-squat", "squatter-hash");
 
-    const result = await fx.signIn();
+    // The squatter also minted an API key, which the first proof removes (#694).
+    const apiKeys = memoryApiKeyStore();
+    await Effect.runPromise(
+      apiKeys.create({
+        id: "squatter-key",
+        start: "abcdef",
+        keyHash: "squatter-key-hash",
+        userId: "user-squat",
+        enabled: true,
+        metadata: {},
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    );
+
+    const result = await fx.signIn(Layer.succeed(ApiKeyStore, apiKeys));
 
     expect(result.isNewUser).toBe(false);
     expect(result.user.id).toBe("user-squat");
@@ -490,6 +508,7 @@ describe("SsoService", () => {
     const identifier = await Effect.runPromise(
       fx.identifiers.getByValue("email", "worker@acme.test"),
     );
+    expect(await Effect.runPromise(apiKeys.listByUserId("user-squat"))).toEqual([]);
     expect(identifier?.verified).toBe(true);
   });
 

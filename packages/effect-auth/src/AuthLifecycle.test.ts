@@ -36,6 +36,9 @@ import {
 } from "./email/EmailPassword.ts";
 import * as EmailPassword from "./email/EmailPassword.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+import { ApiKeyStore } from "./ApiKey.ts";
+import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
+import { memoryApiKeyStore, memoryMultiFactorStore } from "./testing/MemoryStores.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -877,6 +880,58 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
     expect(result.session).toBeUndefined();
     expect(MutableHashMap.has(passwordHashes, user.id)).toBe(false);
     expect(MutableHashMap.size(sessions)).toBe(0);
+    expect(findEmailIdentifier(VICTIM)?.verified).toBe(true);
+  });
+
+  it("the first proof also removes the squatter's API keys and multi-factor enrolment (#694)", async () => {
+    const context = await makeTestContext();
+    const user: User = {
+      id: "user-1",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    };
+    MutableHashMap.set(users, user.id, user);
+    addEmailIdentifier(user.id, VICTIM, false);
+    const apiKeys = memoryApiKeyStore();
+    const multiFactor = memoryMultiFactorStore();
+
+    const left = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* apiKeys.create({
+          id: "squatter-key",
+          start: "abcdef",
+          keyHash: "squatter-key-hash",
+          userId: user.id,
+          enabled: true,
+          metadata: {},
+          createdAt: 0,
+          updatedAt: 0,
+        });
+        yield* multiFactor.upsert({
+          userId: user.id,
+          secret: "JBSWY3DPEHPK3PXP",
+          backupCodes: ["backup-code-hash"],
+          verified: true,
+          createdAt: 0,
+        });
+        const verification = yield* EmailVerificationService;
+        const { token } = yield* verification.createVerification(user.id, VICTIM);
+        const service = yield* AuthLifecycle.make({});
+        yield* service.verifyEmail({ token });
+        return {
+          apiKeys: yield* apiKeys.listByUserId(user.id),
+          multiFactor: yield* multiFactor.get(user.id),
+        };
+      }).pipe(
+        Effect.provideService(ApiKeyStore, apiKeys),
+        Effect.provideService(MultiFactorStore, multiFactor),
+        Effect.provide(context),
+        Effect.provide(TestHooks),
+      ),
+    );
+
+    expect(left).toEqual({ apiKeys: [], multiFactor: null });
     expect(findEmailIdentifier(VICTIM)?.verified).toBe(true);
   });
 
