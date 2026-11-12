@@ -394,9 +394,10 @@ export class DomainVerifier extends Context.Service<
  * Default role → permission map, mirroring better-auth's built-in
  * organization roles. Permissions are `"resource:action"` strings.
  *
- * - `owner` - full control (organization update/delete, member, invitation,
- *   domain and team management, plus `role:manage` for custom organization
- *   roles and the organization's default role)
+ * - `owner` - `"*:*"`, every permission (#673): organization update/delete,
+ *   member, invitation, domain and team management, `role:manage` for custom
+ *   organization roles and the default role, and any application permission,
+ *   so an owner can grant every custom role under the grant rule (#585)
  * - `admin` - member, invitation, domain and team management plus organization
  *   updates, but cannot delete the organization or manage custom roles
  * - `member` - read-only participant (no management permissions; may still
@@ -407,21 +408,7 @@ export class DomainVerifier extends Context.Service<
  * closed, as it does for every other permission.
  */
 export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
-  owner: [
-    "organization:update",
-    "organization:delete",
-    "member:create",
-    "member:update",
-    "member:delete",
-    "invitation:create",
-    "invitation:cancel",
-    "domain:manage",
-    "team:create",
-    "team:update",
-    "team:delete",
-    "team:manage-members",
-    "role:manage",
-  ],
+  owner: ["*:*"],
   admin: [
     "organization:update",
     "member:create",
@@ -591,9 +578,9 @@ export interface OrganizationConfig {
    * here for that organization.
    *
    * A member grants a role (adds, invites or promotes someone to it) only
-   * when their own role carries every permission that role carries (#585),
-   * so give the owner role the application permissions (or `"*:*"`) your
-   * custom roles carry, or owners cannot hand those roles out.
+   * when their own role carries every permission that role carries (#585).
+   * The default owner role is `"*:*"`; a map that narrows it leaves owners
+   * unable to hand out roles carrying what it omits.
    */
   readonly roles?: Record<string, ReadonlyArray<string>>;
   /**
@@ -705,12 +692,18 @@ export interface InvitationDelivery {
 }
 
 /**
- * The invitee's answer to an invitation: its id and the secret token the
- * invitation email carried.
+ * The invitee's answer to an invitation: its id and, unless the user's
+ * matching email identifier is verified, the secret token the invitation
+ * email carried (#673).
  */
 export interface InvitationResponseInput {
   readonly invitationId: string;
-  readonly token: string;
+  /**
+   * The invitation email's secret token. Omit it to answer from a verified
+   * matching email identifier (an in-app "pending invitations" list); an
+   * unverified one needs the token, which is then its first proof.
+   */
+  readonly token?: string | undefined;
 }
 
 /**
@@ -862,10 +855,12 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Accept a pending invitation with the secret token its email carried
-     * (#586): the invitation must be pending and unexpired, the token must
+     * (#586), or by id alone from a verified matching email identifier
+     * (#673): the invitation must be pending and unexpired, a token must
      * match its digest (a wrong token answers "Invitation not found"), and it
-     * must be addressed to one of the user's email identifiers. Creates the
-     * membership and marks the invitation accepted.
+     * must be addressed to one of the user's email identifiers (without a
+     * token, a verified one; anyone else is told "Invitation not found").
+     * Creates the membership and marks the invitation accepted.
      *
      * The token proves the address, so acceptance works for apps that run
      * without email verification. When the matching identifier is not
@@ -882,8 +877,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Reject a pending invitation addressed to one of the user's email
-     * identifiers, with the secret token its email carried: declining is the
-     * addressee's act too, so the id alone rejects nothing (#586).
+     * identifiers, with the secret token its email carried or, without one,
+     * from a verified matching identifier: declining is the addressee's act
+     * too, so the id alone rejects nothing for anyone else (#586, #673).
      */
     readonly rejectInvitation: (
       userId: string,
@@ -1218,6 +1214,11 @@ export class OrganizationService extends Context.Service<
      * (`config.creatorRole`, default `owner`) is refused with an
      * `OrganizationError`: owner semantics stay static, so a tenant can never
      * lock itself out of role management.
+     *
+     * The grant rule applies (#585, #673): the actor's role must carry every
+     * permission in the new definition and every permission the name
+     * resolves to now (its custom definition, else its static entry), and an
+     * actor may not redefine their own role.
      */
     readonly upsertOrgRole: (
       actorUserId: string,
@@ -1230,6 +1231,9 @@ export class OrganizationService extends Context.Service<
      * `config.roles` entry (if any) for members still holding the role.
      * Requires the `role:manage` permission; deleting the protected owner
      * role is refused, and deleting a role that was never defined is a no-op.
+     * The grant rule applies (#673): the actor's role must carry every
+     * permission the definition held and every permission of the static
+     * entry it falls back to, and an actor may not delete their own role.
      */
     readonly deleteOrgRole: (
       actorUserId: string,
@@ -1296,6 +1300,19 @@ const validDomain = (input: string): Effect.Effect<string, OrganizationError> =>
     ? Effect.fail(new OrganizationError({ message: `'${input}' is not a valid domain` }))
     : Effect.succeed(domain);
 };
+
+/**
+ * Refuse a custom-role write against the actor's own role (#673): a
+ * `role:manage` holder never widens, narrows or removes what it acts with.
+ */
+const ensureNotOwnRole = (
+  actor: Member,
+  role: string,
+  verb: "redefine" | "delete",
+): Effect.Effect<void, OrganizationError> =>
+  actor.role === role
+    ? Effect.fail(new OrganizationError({ message: `You cannot ${verb} your own role` }))
+    : Effect.void;
 
 /**
  * Create an organization service
@@ -1437,15 +1454,35 @@ export const make = (
       );
 
     /**
+     * Refuse unless the actor holds every permission `role` resolves to now;
+     * `subject` names it in the refusal. A role nothing defines carries no
+     * permissions, so it never blocks.
+     */
+    const requireHoldsResolved = (
+      organizationId: string,
+      actor: Member,
+      role: string,
+      subject: string,
+    ) =>
+      Effect.flatMap(resolveRolePermissions(organizationId, role), (permissions) =>
+        requireHoldsAll(organizationId, actor, permissions ?? [], subject),
+      );
+
+    /**
      * Refuse to act on a member (change, deactivate, reactivate or remove
      * them) unless the actor holds every permission `role` carries: the
      * member's current role, or the `previousRole` a reactivation restores.
-     * A role nothing defines carries no permissions, so it never blocks.
      */
     const requireOutranks = (organizationId: string, actor: Member, role: string) =>
-      Effect.flatMap(resolveRolePermissions(organizationId, role), (permissions) =>
-        requireHoldsAll(organizationId, actor, permissions ?? [], `This member's '${role}' role`),
-      );
+      requireHoldsResolved(organizationId, actor, role, `This member's '${role}' role`);
+
+    /**
+     * Refuse to redefine or delete `role` unless the actor holds every
+     * permission it currently resolves to, custom or static (#673): a
+     * custom-role write takes those away from every member holding it.
+     */
+    const requireHoldsCurrent = (organizationId: string, actor: Member, role: string) =>
+      requireHoldsResolved(organizationId, actor, role, `The '${role}' role currently`);
 
     /** Load an organization, failing when it does not exist. */
     const getOrganizationOrFail = (organizationId: string) =>
@@ -1693,26 +1730,60 @@ export const make = (
     });
 
     /**
-     * Load a pending invitation the user answers with its secret token: the
-     * token must match the stored digest (a mismatch answers "not found", so
-     * the id alone confirms nothing), and the invitation must be addressed to
-     * one of `userId`'s email identifiers, which is returned with it.
-     * Enforces expiry.
+     * The proof an answer to `invitation` brings, with the user's email
+     * identifier it is addressed to (if any). With a token, the token: it
+     * must match the stored digest, and a mismatch answers "not found", so
+     * the id alone confirms nothing (#586). Without one, a verified matching
+     * identifier is the proof (#673): a user the invitation is not addressed
+     * to still learns nothing ("not found"), and an unverified match is told
+     * to bring the token, which then serves as the address's first proof.
      */
-    const getPendingInvitationFor = (input: InvitationResponseInput, userId: string) =>
+    const proveAnswer = (
+      invitation: Invitation | null,
+      input: InvitationResponseInput,
+      userId: string,
+    ) =>
       Effect.gen(function* () {
-        const invitation = yield* store.getInvitation(input.invitationId);
-        if (!invitation || !constantTimeHashEqual(hashToken(input.token), invitation.tokenHash)) {
+        if (invitation === null) {
           return yield* new OrganizationError({ message: "Invitation not found" });
-        }
-        if (invitation.status !== "pending") {
-          return yield* new OrganizationError({ message: "Invitation is no longer pending" });
         }
         const email = normalizeEmail(invitation.email);
         const identifier = Arr.findFirst(
           yield* identifiers.listByUser(userId),
           (id) => id.type === "email" && id.value === email,
         );
+        const proved =
+          input.token === undefined
+            ? Option.isSome(identifier)
+            : constantTimeHashEqual(hashToken(input.token), invitation.tokenHash);
+        if (!proved) {
+          return yield* new OrganizationError({ message: "Invitation not found" });
+        }
+        if (input.token === undefined && Option.exists(identifier, (id) => !id.verified)) {
+          return yield* new OrganizationError({
+            message:
+              "Answering an invitation without its emailed token takes a verified email address",
+          });
+        }
+        return { invitation, identifier };
+      });
+
+    /**
+     * Load a pending invitation the user answers, with its secret token or
+     * from a verified matching address ({@link proveAnswer}): it must be
+     * addressed to one of `userId`'s email identifiers, which is returned
+     * with it. Enforces expiry.
+     */
+    const getPendingInvitationFor = (input: InvitationResponseInput, userId: string) =>
+      Effect.gen(function* () {
+        const { invitation, identifier } = yield* proveAnswer(
+          yield* store.getInvitation(input.invitationId),
+          input,
+          userId,
+        );
+        if (invitation.status !== "pending") {
+          return yield* new OrganizationError({ message: "Invitation is no longer pending" });
+        }
         if (Option.isNone(identifier)) {
           return yield* new OrganizationError({
             message: "This invitation is addressed to a different email",
@@ -1926,6 +1997,8 @@ export const make = (
         // it is the first proof, so it goes through proveAddress (#440): the
         // password an unproven sign-up set is cleared and every session but
         // the prover's is revoked before the address counts as verified.
+        // An answer without the token arrives only from a verified
+        // identifier (#673), so it never reaches proveAddress.
         if (!identifier.verified) {
           yield* proveAddress(firstProof, identifier, input.currentSessionId);
         }
@@ -2439,9 +2512,19 @@ export const make = (
         organizationId: string,
         input: UpsertOrgRoleInput,
       ) {
-        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        const actor = yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
         yield* getOrganizationOrFail(organizationId);
         yield* ensureNotOwnerRole(input.role);
+        yield* ensureNotOwnRole(actor, input.role, "redefine");
+        // The grant rule (#585, #673): the new definition is a grant, and
+        // whatever the name carries now (custom or static) is taken away.
+        yield* requireHoldsAll(
+          organizationId,
+          actor,
+          input.permissions,
+          `The '${input.role}' role`,
+        );
+        yield* requireHoldsCurrent(organizationId, actor, input.role);
 
         const now = yield* Clock.currentTimeMillis;
         const existing = yield* store.getOrgRole(organizationId, input.role);
@@ -2460,8 +2543,15 @@ export const make = (
         organizationId: string,
         role: string,
       ) {
-        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        const actor = yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
         yield* ensureNotOwnerRole(role);
+        yield* ensureNotOwnRole(actor, role, "delete");
+        const existing = yield* store.getOrgRole(organizationId, role);
+        if (existing === null) return;
+        // Deleting takes away the custom definition and brings back the
+        // static entry, if any: the actor must hold both (#673).
+        yield* requireHoldsCurrent(organizationId, actor, role);
+        yield* requireHoldsAll(organizationId, actor, roles[role] ?? [], `The '${role}' role`);
         yield* store.deleteOrgRole(organizationId, role);
       }),
 

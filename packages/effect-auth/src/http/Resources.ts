@@ -335,7 +335,8 @@ export type OrganizationMember = typeof OrganizationMember.Type;
  * `inviterId` as the `organization` and `inviter` relationships. `status`
  * moves through `PATCH /invitations/:id`: the invitee sets `accepted` or
  * `rejected`, presenting the invitation email's secret as the input-only
- * `token` attribute (#586); a member holding `invitation:cancel` sets
+ * `token` attribute (#586), which an invitee whose matching email identifier
+ * is verified may omit (#673); a member holding `invitation:cancel` sets
  * `canceled`.
  *
  * @since 0.3.0

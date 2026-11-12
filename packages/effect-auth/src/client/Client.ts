@@ -644,13 +644,18 @@ export interface AuthClient {
     readonly listInvitations: (organizationId: string) => Promise<Http.InvitationListView>;
     /**
      * Accept an invitation addressed to the signed-in user's email, with the
-     * secret `token` the invitation email's link carried.
+     * secret `token` the invitation email's link carried. Omit the token to
+     * accept by id when the user's matching email is verified (#673), as an
+     * in-app "pending invitations" list does.
      */
-    readonly acceptInvitation: (invitationId: string, token: string) => Promise<Http.MemberView>;
-    /** Decline an invitation, with the secret `token` its email carried. */
+    readonly acceptInvitation: (invitationId: string, token?: string) => Promise<Http.MemberView>;
+    /**
+     * Decline an invitation, with the secret `token` its email carried, or
+     * by id alone when the user's matching email is verified (#673).
+     */
     readonly rejectInvitation: (
       invitationId: string,
-      token: string,
+      token?: string,
     ) => Promise<Http.InvitationView>;
     readonly cancelInvitation: (invitationId: string) => Promise<Http.InvitationView>;
     /** Re-send a pending invitation: same id, a fresh token and expiry, delivered again. */
