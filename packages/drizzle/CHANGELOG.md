@@ -1,5 +1,87 @@
 # @thomasfosterau/effect-auth-drizzle
 
+## 0.2.0
+
+### Minor Changes
+
+- 9b63f86: **Security hardening (#631):** every adapter now depends on `@thomasfosterau/effect-auth` through a caret range (`^0.x.y`) instead of an exact pin. A consumer who upgrades the core within a minor (say, for a security patch) gets one copy of it, and no adapter keeps running a nested, unpatched core of its own. Under 0.x a caret range covers one minor, so the adapters are released with every core minor.
+  
+  **effect-auth-drizzle (#635):** the `drizzle-orm` peer range is bounded to the tested lines, `>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`, and a new drizzle minor joins it once CI has run against it. The unused optional `@types/pg` peer is dropped.
+- bb4b527: Add Drizzle implementations of `EmailPasswordStore` (with `PasswordResetUserStore`), `ApiKeyStore`, `RateLimitStore`, and the email-verification and password-reset token stores (#675), so sign-up, sign-in, password reset, email verification, API keys and rate limiting run on Drizzle alone.
+  
+  - New store namespaces: `EmailPasswordStore` (`layer`, `passwordResetUserLayer`, `make`), `ApiKeyStore` (`layer`, `make`), `RateLimitStore` (`layer`, `make`) and `TokenStore` (`emailVerificationLayer`, `passwordResetLayer`, `layer` for both, `makeEmailVerificationStore`, `makePasswordResetStore`). Each takes a dialect's `tables` and defaults to `Pg.tables`; `EmailPasswordStore` also takes a `defineSchema` mapping.
+  - Three new default tables in every dialect, built by `defineTables` and covered by `migrationStatements` / `migrationSql`: `effect_auth_api_keys` (unique on `key_hash`), `effect_auth_rate_limits` and `effect_auth_tokens` (one table for both token kinds, by `purpose`). `Pg` / `Sqlite` / `MySql` export them as `apiKeysTable`, `rateLimitsTable` and `tokensTable`. `TableNames` gains `apiKeys`, `rateLimits` and `tokens`, and `Tables` the three tables; re-run `migrationSql()` (or drizzle-kit) to create them.
+  - `RateLimitStore.increment` is atomic per statement: it re-opens an expired window, then upserts the count (`ON CONFLICT ... RETURNING` on PostgreSQL and SQLite, `ON DUPLICATE KEY UPDATE` and a read-back on MySQL).
+  - `defineSchema`'s users entry takes an optional `passwordHash` column for `EmailPasswordStore`; `UserStore` still never selects it. `EmailPasswordStore.createUser` writes promoted attributes to their columns.
+  - `AuthDatabase`'s `insert().values()` now returns `DrizzleInsertValues`, which describes the two upsert spellings.
+- 9598882: Attribute, metadata and claims bags are typed as JSON (#443). The core exports `Json` and `JsonObject` (Effect's `Schema.Json` / `Schema.JsonObject`, as types and as schemas), and `Attributes` is now `JsonObject` (was `Record<string, unknown>`). The same type replaces `Record<string, unknown>` for user and session `attributes` and every `sessionAttributes` option, API-key, organization, OIDC-client and one-time-token `metadata`, JWT claims (`definePayload`, `sign`'s extra claims, `verify`, `RemoteJwksVerifier.verify`) and JWKs (`JwtKeyPair.publicKeyJwk`, `Jwks.keys`), Google One Tap `claims`, `OAuthUserInfo`'s extra fields and `mapProfile`'s input, the OIDC provider's `userinfo` and metadata documents, and `Messages` params; the HTTP tier's `Attributes`, `ClaimsView` and `JwksView` schemas validate JSON. In effect-auth-drizzle, the attribute columns are `$type<Auth.JsonObject>()` and `defineSchema`'s `attributes` mappings expect that type. The stores already persisted these bags as JSON, so nothing changes at runtime for JSON values.
+  
+  Migration: a value in one of these bags must be JSON: a string, a number, a boolean, `null`, or arrays and objects of those. Convert anything else before it goes in: a `Date` to an ISO string or epoch milliseconds, a class instance to a plain object, and leave a key out instead of setting it to `undefined`; functions, `Map`s, `Set`s and `bigint`s have no JSON form. A value read out of a bag is now `Json` rather than `unknown`, so narrow it (`Predicate.isString`, …) before use. An `interface` is not assignable to `JsonObject` (it has no index signature); declare the bag's shape with a `type` alias instead. A drizzle table your app defines writes `jsonb().$type<Auth.JsonObject>()` (or `json()` / `text({ mode: "json" })`) for its attribute bag. `./testing`'s `viewerLayerAs` default `toUser` now copies only the viewer's JSON-valued fields into `attributes`.
+- 7a651a3: Security fix (#602): identifier lookups no longer resolve a different account when the database compares strings loosely.
+  
+  On MySQL the identifiers table's `value` column used the server's default collation (`utf8mb4_0900_ai_ci` on MySQL 8), which is case-, accent- and width-insensitive. A password reset or magic link requested for a look-alike address such as `bob@exämple.com` (an IDN domain an attacker holds) found `bob@example.com`'s identifier, so the reset token for Bob's account was mailed to the attacker's address. PostgreSQL and SQLite compare bytes and were not affected.
+  
+  **effect-auth-drizzle (schema change).** `MySql.tables.identifiers.value` is now `VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`, in the drizzle table and in `MySql.migrationStatements` / `migrationSql`, so the lookup and the `(type, value)` unique key compare byte for byte. New exports: `MySql.binaryVarchar(name, { length })`, a `varchar` column under that collation for your own identifier columns; and `MySql.identifierCollation` (`"utf8mb4_bin"`). An application's own column the stores look identifiers up in, such as the single-table store's `users.email` or a `defineSchema` value column, needs the same collation on MySQL.
+  
+  **effect-auth (core).** Every service now reads identifiers through the new `lookupIdentifier(store, type, value)`, which treats a record whose `type` or `value` differs from the one asked for as a miss and logs a warning. This covers every store, bring-your-own ones included, and a store that compares loosely: a look-alike reads as an unknown address. `resolveUserByIdentifier`, `claimIdentifier` and `replaceIdentifier` use it too, as does the new `findIdentifierOwner(store, getUser, type, value, onDangling)`, which the sign-in-or-create flows (magic link, email and phone OTP, SSO, Google One Tap) now share. A password reset is bound to, stored with and sent to the resolved identifier's own value, and the email-verification resends go to the identifier's value. Behaviour change for a store that compares loosely: a sign-up of a look-alike value now fails on the store's unique index (`AuthError`) instead of reporting `IdentifierTakenError`. `identifierStoreConformance` (`/testing`) gains a case that checks values differing only by case, accent or width are distinct identifiers.
+  
+  Whether email input is restricted or punycoded is not decided here.
+- a2624ea: Purge expired rate-limit rows (#686). `./sql`'s `purgeExpired` (and so the Alchemy packages' `purgeExpired`) now also deletes the `auth_rate_limits` rows whose window and block have both passed, in one `DELETE`, and `PurgeExpiredResult` gains `rateLimits`, the count it deleted. The drizzle package adds `RateLimitStore.purgeExpired(tables)`, one `DELETE` of the same rows from its rate-limit table. A row inside its window or still blocked stays.
+- 93685f4: **Security hardening (#682), breaking:** `allowMissingClientIp: true` no longer starts a handler that would refuse every rate-limited request, and the magic link and the email-verification resend get the 60-second resend cooldown the OTPs have.
+  
+  - **`allowMissingClientIp: true` without a `trustedProxy` refuses to start.** Under `Http.make` a Web `Request` has no socket address, so with no `trustedProxy` no request has one, and every request the IP limit (`ipRateLimit`), an `IPRateLimitPlugin` or the dynamic client registration limit covers was answered `429`. `Http.make` now throws `ClientAddressConfigError`, and `Http.makeAsync` rejects with it, whenever one of those limits is on with no `trustedProxy`, whether or not `allowMissingClientIp` is set; the error's message says why when it is. Give the handler a `trustedProxy` (for example `ClientIP.cloudflare`), or pass `ipRateLimit: false`, still the only way to serve without the IP limit. With a `trustedProxy`, a request whose forwarded address is missing or unusable is refused with `429` on a limited endpoint as before.
+  - **Magic link and email verification have a 60 s `resendCooldown` by default** (was off for the magic link, and absent for email verification), as the email and phone OTPs have since #590; `0` turns it off. `MagicLinkConfig.resendCooldown` defaults to `60_000`. `EmailVerificationConfig` gains `resendCooldown` (default `60_000`): `resendVerification` fails with `ResendTooSoonError`, sending nothing and keeping the outstanding link usable, when the user's newest token is younger than it. `POST /email-verifications` and the `AuthLifecycleService` sign-in and duplicate sign-up resends answer a resend inside the window as they answer any other, so it never tells an unverified account from an unknown address.
+  - **`EmailVerificationStore` has a new method, `getLatestByUserId(userId)`**, the user's verification with the greatest `createdAt` or `null`, which the cooldown reads. The `./sql` store, `EmailVerificationStoreKV` and effect-auth-drizzle's token store implement it; a custom store must add it.
+  - **The default IP limits stay**, and the README and `ipRateLimit`'s TSDoc now show how to override one endpoint: the first matching rule wins, so a rule ahead of `...Http.defaultEndpointRules` (for example a higher `POST /oauth2/token` limit for a confidential client's backend calling from one address) replaces that endpoint's default and keeps the rest.
+
+### Patch Changes
+
+- f49ee5d: Drop redundant default type arguments from the published declarations (`Redacted.Redacted<string>` is now written `Redacted.Redacted`, `Effect.Effect<A, E, never>` is `Effect.Effect<A, E>`, and so on); every type is unchanged (#503). Values that were stringified with `String(…)` are now converted explicitly: an OAuth profile id that is neither a string nor a number becomes `""` rather than `"[object Object]"`, the unsupported `id_token` algorithm error formats the header value (`"HS256"`), and a Twilio error body whose `code` or `message` is not a string is rendered as JSON.
+- cc2bac6: Import Effect's helper modules (`Array`, `Option`, `Predicate`, `Record`, `Schema`, `String`) from their own entry points (`effect/Array`, …) rather than the `effect` barrel. The emitted `dist/` and `.d.ts` change their import specifiers only; no API or behaviour changes.
+- b386606: `ownedListFilter`'s docs now say what it does not render yet: the new `group` visibility and the moderation axis of `Auth.OwnedAccess` (#637). A `group` row lists only for its owner, and the read scope's `groups` set is ignored.
+- Updated dependencies [8d7fe03]
+- Updated dependencies [c80f91c]
+- Updated dependencies [fd32f3f]
+- Updated dependencies [eafa773]
+- Updated dependencies [701eebc]
+- Updated dependencies [fe036f1]
+- Updated dependencies [de98263]
+- Updated dependencies [3829977]
+- Updated dependencies [4037bcf]
+- Updated dependencies [9598882]
+- Updated dependencies [dd8715a]
+- Updated dependencies [ea7f4ea]
+- Updated dependencies [325f231]
+- Updated dependencies [4649a7b]
+- Updated dependencies [d66403e]
+- Updated dependencies [f49ee5d]
+- Updated dependencies [cf1e3c9]
+- Updated dependencies [7a651a3]
+- Updated dependencies [cc2bac6]
+- Updated dependencies [1e7d8f4]
+- Updated dependencies [8b65156]
+- Updated dependencies [2096e2a]
+- Updated dependencies [efba66d]
+- Updated dependencies [7d9579e]
+- Updated dependencies [4037bcf]
+- Updated dependencies [e2ff7f7]
+- Updated dependencies [6d33e11]
+- Updated dependencies [b386606]
+- Updated dependencies [32ebf2d]
+- Updated dependencies [a2624ea]
+- Updated dependencies [211f399]
+- Updated dependencies [93685f4]
+- Updated dependencies [f43b53d]
+- Updated dependencies [7f3ab3d]
+- Updated dependencies [68faced]
+- Updated dependencies [b96f201]
+- Updated dependencies [c50edb9]
+- Updated dependencies [63e45ac]
+- Updated dependencies [e57ea3c]
+- Updated dependencies [e1770e3]
+- Updated dependencies [88cd0a1]
+  - @thomasfosterau/effect-auth@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes

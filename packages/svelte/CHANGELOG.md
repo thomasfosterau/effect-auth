@@ -1,5 +1,74 @@
 # @thomasfosterau/effect-auth-svelte
 
+## 0.2.0
+
+### Minor Changes
+
+- 7f3ab3d: The client session is now an `effect/reactivity` Atom graph (#206). **Breaking.**
+  
+  `@thomasfosterau/effect-auth`: the new `./client/atoms` subpath's `makeSessionAtoms(client, options?)` exposes the session read (`result`, an `AsyncResult`), its derived states (`state`, `data`, `isSignedIn`, `isPending`, `error`) and the signed-in user's session list (`sessions`, `sessionsState`) as Atoms, read through the application's own `AtomRegistry`. The semantics of the old store carry over: the read is lazy and starts pending, a `401` is `data: null`, a transient failure keeps the last session and sets `error`, a superseded refetch never lands, and session-changing calls refetch only while the session is observed, now resolving once that refetch has settled. A session change reaches every Atom that reads the session through the graph. `./client` itself still imports nothing at runtime: it drops its session store and instead announces session-changing calls through `client.onSessionChange(listener)` and `client.invalidateSession()`.
+  
+  `@thomasfosterau/effect-auth-svelte`: the stores are now adapters over those Atoms. `atomStore(registry, atom)` turns any Atom into a readable store; `sessionStore` and `listSessionsStore` take `(registry, atoms)`. `effect` is a new peer dependency, used for its types only. The form components are unchanged.
+  
+  Migration:
+  
+  - `client.session.subscribe(listener)` / `client.session.get()` → `const auth = makeSessionAtoms(client)` once, then `registry.subscribe(auth.state, listener, { immediate: true })` / `registry.get(auth.state)`. `SessionState` keeps its `{ data, isPending, error }` shape and moves to `./client/atoms`.
+  - `client.session.refetch()` → `registry.refresh(auth.result)`, or `await client.invalidateSession()` to wait for it.
+  - `createAuthClient({ refresh })` → `makeSessionAtoms(client, { refresh })`; `RefreshOptions` moves to `./client/atoms`.
+  - `AuthClientPluginContext.session` is gone; `mutating` notifies the session observers instead.
+  - Svelte: `sessionStore(client)` → `sessionStore(registry, auth)`, `listSessionsStore(client)` → `listSessionsStore(registry, auth)`. The session list now follows the session (empty, with no request, while signed out) and keeps its last data through a failed read.
+  
+  Server-side hydration of the session Atoms is not part of this release.
+- 32ebf2d: `MagicLinkForm` and `EmailOtpForm` take a `captchaToken` getter (`SendCaptchaProps`), read when the form submits and sent with the code or link request (#698). Released together with the core's captcha on sends (#678), which `CaptchaPlugin` turns on by default: pass `captchaToken={() => widgetToken}` when the server's `CaptchaPlugin` guards sends.
+
+### Patch Changes
+
+- 9b63f86: **Security hardening (#631):** every adapter now depends on `@thomasfosterau/effect-auth` through a caret range (`^0.x.y`) instead of an exact pin. A consumer who upgrades the core within a minor (say, for a security patch) gets one copy of it, and no adapter keeps running a nested, unpatched core of its own. Under 0.x a caret range covers one minor, so the adapters are released with every core minor.
+  
+  **effect-auth-drizzle (#635):** the `drizzle-orm` peer range is bounded to the tested lines, `>=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2`, and a new drizzle minor joins it once CI has run against it. The unused optional `@types/pg` peer is dropped.
+- Updated dependencies [8d7fe03]
+- Updated dependencies [c80f91c]
+- Updated dependencies [fd32f3f]
+- Updated dependencies [eafa773]
+- Updated dependencies [701eebc]
+- Updated dependencies [fe036f1]
+- Updated dependencies [de98263]
+- Updated dependencies [3829977]
+- Updated dependencies [4037bcf]
+- Updated dependencies [9598882]
+- Updated dependencies [dd8715a]
+- Updated dependencies [ea7f4ea]
+- Updated dependencies [325f231]
+- Updated dependencies [4649a7b]
+- Updated dependencies [d66403e]
+- Updated dependencies [f49ee5d]
+- Updated dependencies [cf1e3c9]
+- Updated dependencies [7a651a3]
+- Updated dependencies [cc2bac6]
+- Updated dependencies [1e7d8f4]
+- Updated dependencies [8b65156]
+- Updated dependencies [2096e2a]
+- Updated dependencies [efba66d]
+- Updated dependencies [7d9579e]
+- Updated dependencies [4037bcf]
+- Updated dependencies [e2ff7f7]
+- Updated dependencies [6d33e11]
+- Updated dependencies [b386606]
+- Updated dependencies [32ebf2d]
+- Updated dependencies [a2624ea]
+- Updated dependencies [211f399]
+- Updated dependencies [93685f4]
+- Updated dependencies [f43b53d]
+- Updated dependencies [7f3ab3d]
+- Updated dependencies [68faced]
+- Updated dependencies [b96f201]
+- Updated dependencies [c50edb9]
+- Updated dependencies [63e45ac]
+- Updated dependencies [e57ea3c]
+- Updated dependencies [e1770e3]
+- Updated dependencies [88cd0a1]
+  - @thomasfosterau/effect-auth@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes
