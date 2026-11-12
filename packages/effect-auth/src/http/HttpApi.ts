@@ -1299,9 +1299,27 @@ export type ApiKeyCreateDocument = typeof ApiKeyCreateDocument.Type;
 const apiKeyErrors = [E.BadRequest, E.Unauthorized, E.NotFound, E.InternalServerError] as const;
 
 /**
+ * What `GET /api-keys/current` answers: the `api-keys` resource of the key
+ * the request presented (never its hash or its plaintext), and the user it
+ * acts as in `included`.
+ */
+export const CurrentApiKeyDocument = Document.DataDocument(R.ApiKey, {
+  included: Schema.Union([R.User]),
+});
+
+/**
  * `api-keys`: the signed-in user's API keys. `404` when API keys are not
  * enabled.
  *
+ * - `GET /api-keys/current`: resolve the key the request carries in an API-key
+ *   header (`cookie.apiKeyHeaders`, default `x-api-key`; never the URL) to the
+ *   key and its user (#730). The key wins over any cookie or bearer token on
+ *   the request, which this endpoint never reads. Each call is a verification
+ *   and consumes one use of the key (`remaining` decrements, `lastUsedAt`
+ *   moves; a non-consuming check is #645). An unknown, disabled, expired or
+ *   exhausted key (or none) gets one identical `401`; a real key over its own
+ *   `rateLimit` gets `429` with `Retry-After`. Every answer is
+ *   `Cache-Control: no-store`.
  * - `GET /api-keys`: every key the caller owns.
  * - `POST /api-keys`: mint one; `201` with the key and, in `meta.key`, the
  *   plaintext key, shown this once. Minting needs an interactive credential
@@ -1314,6 +1332,17 @@ const apiKeyErrors = [E.BadRequest, E.Unauthorized, E.NotFound, E.InternalServer
  */
 export const apiKeysGroup = Group.make(
   R.ApiKey,
+  HttpApiEndpoint.get("current", "/api-keys/current", {
+    success: MediaType.asJsonApi(CurrentApiKeyDocument, 200),
+    error: [
+      E.Unauthorized.wire,
+      E.NotFound.wire,
+      E.TooManyRequests.wire,
+      E.InternalServerError.wire,
+    ],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
   Endpoint.list(R.ApiKey, { errors: [E.Unauthorized, E.NotFound, E.InternalServerError] }),
   Endpoint.create(R.ApiKey, {
     payload: ApiKeyCreateDocument,

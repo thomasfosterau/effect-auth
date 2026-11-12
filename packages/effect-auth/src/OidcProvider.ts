@@ -216,6 +216,12 @@ export class OidcConsentStore extends Context.Service<
     ) => Effect.Effect<OidcConsent | null, AuthError>;
     readonly upsert: (consent: OidcConsent) => Effect.Effect<OidcConsent, AuthError>;
     readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
+    /**
+     * Delete every consent `userId` granted, for every client; a no-op when
+     * they granted none. Deleting a user calls it before the user row goes
+     * (#601).
+     */
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
   }
 >()("@effect-auth/OidcConsentStore") {}
 

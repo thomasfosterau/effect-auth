@@ -904,6 +904,7 @@ describe("OAuthService encryptTokens", () => {
         Effect.sync(() => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
         }),
+      deleteByUserId: () => Effect.void,
       unlinkFromUser: (uid, p) =>
         Effect.sync(() => {
           MutableHashMap.forEach(stored, (v, k) => {
@@ -1142,6 +1143,7 @@ describe("OAuthService unlinkAccount guard", () => {
         Effect.sync(() => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
         }),
+      deleteByUserId: () => Effect.void,
       unlinkFromUser: (uid, p) =>
         Effect.sync(() => {
           MutableHashMap.forEach(stored, (v, k) => {
@@ -1279,6 +1281,7 @@ describe("OAuthService linking controls", () => {
         Effect.sync(() => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
         }),
+      deleteByUserId: () => Effect.void,
       unlinkFromUser: () => Effect.void,
       delete: (p, id) =>
         Effect.sync(() => {
@@ -1807,6 +1810,7 @@ describe("OAuthService linking controls", () => {
       update: (a) => Effect.sync(() => (MutableHashMap.set(accounts, a.id, a), a)),
       linkToUser: (uid, a) =>
         Effect.sync(() => void MutableHashMap.set(accounts, a.id, { ...a, userId: uid })),
+      deleteByUserId: () => Effect.void,
       unlinkFromUser: () => Effect.void,
       delete: () => Effect.void,
     });
@@ -1981,6 +1985,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
           return a;
         }),
       linkToUser: () => Effect.void,
+      deleteByUserId: () => Effect.void,
       unlinkFromUser: () => Effect.void,
       delete: () => Effect.void,
     };
