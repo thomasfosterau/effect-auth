@@ -311,6 +311,10 @@ export const RateLimitStoreKV: Layer.Layer<RateLimitStore, never, KeyValueStore.
 
 const emailVerificationTokenKey = (token: string) => `email-verification:token:${token}`;
 const emailVerificationUserKey = (userId: string) => `email-verification:user:${userId}`;
+const verificationByCreatedAt: Order.Order<EmailVerification> = Order.mapInput(
+  Order.Number,
+  (verification) => verification.createdAt,
+);
 
 /**
  * Build an {@link EmailVerificationStore} over the ambient `KeyValueStore`.
@@ -368,6 +372,25 @@ export const emailVerificationStoreKV: Effect.Effect<
           { concurrency: 1, discard: true },
         );
         yield* kv.remove(emailVerificationUserKey(userId), "emailVerification.deleteByUserId");
+      }),
+    getLatestByUserId: (userId) =>
+      Effect.gen(function* () {
+        const tokens = yield* kv.readIndex(
+          emailVerificationUserKey(userId),
+          "emailVerification.getLatestByUserId",
+        );
+        const records = yield* Effect.forEach(
+          tokens,
+          (token) =>
+            kv.read<EmailVerification>(
+              emailVerificationTokenKey(token),
+              "emailVerification.getLatestByUserId",
+            ),
+          { concurrency: 1 },
+        );
+        // A stale index entry reads as a miss and is skipped.
+        const live = Arr.filter(records, P.isNotNullish);
+        return Arr.isReadonlyArrayNonEmpty(live) ? Arr.max(live, verificationByCreatedAt) : null;
       }),
   } satisfies typeof EmailVerificationStore.Service;
 });

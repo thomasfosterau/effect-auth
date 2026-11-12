@@ -394,6 +394,7 @@ describe("KeyValueStores", () => {
         Effect.gen(function* () {
           const service = yield* EmailVerification.make({
             sendEmail: (to, token) => Effect.sync(() => void sent.push({ to, token })),
+            resendCooldown: 0,
           });
           const first = yield* service.createVerification("user-1", "user-1@example.com");
           // Resend invalidates the first token and issues a new one.
@@ -414,6 +415,49 @@ describe("KeyValueStores", () => {
         verified: true,
       });
       expect(outcome.reused._tag).toBe("EmailVerificationError");
+    });
+
+    it("holds a resend back for the default 60 s from the newest token, then sends (#682)", async () => {
+      const sent: Array<string> = [];
+      const layer = Layer.mergeAll(
+        EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+        Hooks.Default,
+        PlatformCrypto.layer,
+        TestClock.layer(),
+      );
+      const outcome = await Effect.runPromise(
+        Effect.gen(function* () {
+          const store = yield* EmailVerification.EmailVerificationStore;
+          const service = yield* EmailVerification.make({
+            sendEmail: (_to, token) => Effect.sync(() => void sent.push(token)),
+          });
+          yield* TestClock.setTime(1_000_000);
+          // An older token for the user, then the sign-up's.
+          yield* store.create({
+            token: "older",
+            userId: "user-1",
+            email: "user-1@example.com",
+            createdAt: 900_000,
+            expiresAt: 2_000_000,
+          });
+          const first = yield* service.createVerification("user-1", "user-1@example.com");
+          const latest = yield* store.getLatestByUserId("user-1");
+          yield* TestClock.adjust("59 seconds");
+          const early = yield* Effect.flip(
+            service.resendVerification("user-1", "user-1@example.com"),
+          );
+          const stillValid = yield* service.peekToken(first.token);
+          yield* TestClock.adjust("1 second");
+          const later = yield* service.resendVerification("user-1", "user-1@example.com");
+          return { latest, early, stillValid, later, none: yield* store.getLatestByUserId("x") };
+        }).pipe(Effect.provide(layer), Effect.orDie),
+      );
+
+      expect(outcome.latest?.createdAt).toBe(1_000_000);
+      expect(outcome.early._tag).toBe("ResendTooSoonError");
+      expect(outcome.stillValid.userId).toBe("user-1");
+      expect(sent).toEqual([expect.any(String), outcome.later.token]);
+      expect(outcome.none).toBeNull();
     });
   });
 

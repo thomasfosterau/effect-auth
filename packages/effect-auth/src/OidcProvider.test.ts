@@ -2483,17 +2483,16 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
   });
 
-  it("builds with Http.make's allowMissingClientIp opt-out, and refuses address-less registrations (#398)", async () => {
-    const fx = makeHttpFixture({
+  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every registration (#682)", () => {
+    const options = {
       dynamicRegistration: {},
       declareRegistrationAddress: false,
       allowMissingClientIp: true,
-    });
-
-    const res = await fx.handler(register({ "cf-connecting-ip": "203.0.113.9" }));
-
-    expect(res.status).toBe(429);
-    expect([...fx.rateLimitKeys]).toEqual([]);
+    };
+    const make = () => makeHttpFixture(options);
+    expect(make).toThrow(ClientAddressConfigError);
+    expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
+    expect(make).toThrow(/allowMissingClientIp: true does not stand in for trustedProxy/);
   });
 
   it("rejects Http.makeAsync with ClientAddressConfigError when registration has no address source and services build asynchronously (#400)", async () => {

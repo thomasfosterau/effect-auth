@@ -329,6 +329,31 @@ const tokenCases = (label: string, run: Run): void => {
       );
       expect(result).toEqual({ afterDelete: second, first: null, second: null, other });
     });
+
+    it("getLatestByUserId reads the user's newest record of its own purpose, and null for none (#682)", async () => {
+      const userId = uuid();
+      const older = tokenRecord(userId);
+      const newer = { ...tokenRecord(userId), createdAt: millis(2_000) };
+      const middle = { ...tokenRecord(userId), createdAt: millis(1_000) };
+      // A newer reset for the same user is the other purpose's.
+      const reset = { ...tokenRecord(userId), createdAt: millis(5_000) };
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.Email.EmailVerificationStore;
+          const resets = yield* Auth.Password.PasswordResetStore;
+          yield* Effect.forEach([older, newer, middle], store.create, {
+            concurrency: 1,
+            discard: true,
+          });
+          yield* resets.create(reset);
+          return {
+            latest: yield* store.getLatestByUserId(userId),
+            none: yield* store.getLatestByUserId(uuid()),
+          };
+        }),
+      );
+      expect(result).toEqual({ latest: newer, none: null });
+    });
   });
 };
 
