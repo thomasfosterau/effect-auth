@@ -31,6 +31,25 @@ const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 const del = (fetch: typeof globalThis.fetch, path: string) =>
   fetch(`${BASE}${path}`, { method: "DELETE", headers: { accept: "application/vnd.api+json" } });
 
+/** A response's status and raw body, to compare two refusals byte for byte. */
+const answer = async (response: Promise<Response>) => {
+  const res = await response;
+  return { status: res.status, body: await res.text() };
+};
+
+/** `DELETE /organization-domains/:id`, answered as its status and body. */
+const removeClaim = (fetch: typeof globalThis.fetch, id: string) =>
+  answer(del(fetch, `/organization-domains/${id}`));
+
+/** `POST /organization-domains/:id/verifications`, answered as its status and body. */
+const verifyClaim = (fetch: typeof globalThis.fetch, id: string) =>
+  answer(
+    fetch(`${BASE}/organization-domains/${id}/verifications`, {
+      method: "POST",
+      headers: { accept: "application/vnd.api+json" },
+    }),
+  );
+
 /** The status a client call was refused with. */
 const refusal = (call: Promise<unknown>) =>
   call.then(
@@ -274,6 +293,40 @@ describe("HTTP domain claims (#598)", () => {
     );
     expect(anonymous.status).toBe(401);
     expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(true);
+  });
+
+  it("refuses an unknown claim id exactly as another tenant's claim and a member without domain:manage (#718)", async () => {
+    const { server, browser } = withServer();
+    const owner = await signUp(server, browser, "owner@acme.test");
+    const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
+    const claim = await owner.client.organization.addDomain(org.id, { domain: "acme.test" });
+    const member = await signUp(server, browser, "member@acme.test");
+    const memberSession = await member.client.getSession();
+    assert(memberSession !== null, "the member is signed in");
+    await owner.client.organization.addMember(org.id, {
+      userId: memberSession.user.id,
+      role: "member",
+    });
+    // The stranger owns another tenant, so holds `domain:manage` there.
+    const stranger = await signUp(server, browser, "owner@other.test");
+    await stranger.client.organization.create({ name: "Other", slug: "other" });
+
+    const unknownRemove = await removeClaim(owner.fetch, "no-such-claim");
+    expect(unknownRemove.status).toBe(403);
+    expect(unknownRemove.body).toContain("Missing permission 'domain:manage'");
+    expect(await removeClaim(stranger.fetch, claim.id)).toEqual(unknownRemove);
+    expect(await removeClaim(member.fetch, claim.id)).toEqual(unknownRemove);
+    const unknownVerify = await verifyClaim(owner.fetch, "no-such-claim");
+    expect(unknownVerify).toEqual(unknownRemove);
+    expect(await verifyClaim(stranger.fetch, claim.id)).toEqual(unknownVerify);
+    expect(await verifyClaim(member.fetch, claim.id)).toEqual(unknownVerify);
+    expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(true);
+
+    // The owner, holding the permission, verifies and releases the claim.
+    MutableHashSet.add(server.publishedDnsDomains, "acme.test");
+    expect((await verifyClaim(owner.fetch, claim.id)).status).toBe(200);
+    expect((await removeClaim(owner.fetch, claim.id)).status).toBe(204);
+    expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(false);
   });
 
   it("verifies a tenant's claim only through its published DNS record", async () => {

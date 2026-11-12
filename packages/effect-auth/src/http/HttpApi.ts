@@ -1007,7 +1007,10 @@ export const organizationsGroup = Group.make(
  * - `GET /organization-members/:id/teams`: the teams of its organization the
  *   member belongs to (any member of that organization).
  *
- * An unknown id answers `404`, a refused change `403`.
+ * A refusal answers `403`. An unknown id gets exactly what another tenant's
+ * membership and a member without the permission get (#718): `Missing
+ * permission 'member:update'` (or `'member:delete'`) for a change or a
+ * removal, `You are not a member of this organization` for the teams.
  */
 export const organizationMembersGroup = Group.make(
   R.OrganizationMember,
@@ -1032,6 +1035,11 @@ export const organizationMembersGroup = Group.make(
  *   `400`, a refused cancellation `403`.
  * - `POST /invitations/:id/deliveries`: send a pending invitation again, with
  *   a fresh expiry (`invitation:create`); `202` with the invitation.
+ *
+ * A cancellation and a re-delivery check the permission first (#718): an
+ * unknown id, a stranger and a member without it get the same `403` and
+ * body, and only a permitted member learns that an invitation is no longer
+ * pending.
  */
 export const invitationsGroup = Group.make(
   R.Invitation,
@@ -1085,8 +1093,10 @@ export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
  *   (`OrganizationService.releaseDomain`, #680). Gated as the attestation is;
  *   `204`.
  *
- * An unknown id answers `404`; a tenant's refusal, or a server with no
- * `OrganizationDomainStore`, `403`.
+ * A tenant's refusal, or a server with no `OrganizationDomainStore`, answers
+ * `403`; an unknown id gets the same `403` and body as another tenant's claim
+ * and a member without `domain:manage` (#718). The operator's release of an
+ * unknown id answers `404`, after the admin check.
  */
 export const organizationDomainsGroup = Group.make(
   R.OrganizationDomain,
@@ -1114,7 +1124,8 @@ export const organizationDomainsGroup = Group.make(
  * - `DELETE /organization-roles/:id`: remove it, so the static role of that
  *   name (if any) applies again; `204`.
  *
- * An unknown id answers `404`, a refusal `403`.
+ * A refusal answers `403`; an unknown id gets the same `403` and body as
+ * another tenant's definition and a member without `role:manage` (#718).
  */
 export const organizationRolesGroup = Group.make(
   R.OrganizationRole,
@@ -1132,7 +1143,10 @@ export const organizationRolesGroup = Group.make(
  *   member of the organization), and add a member of the organization to it,
  *   as the `user` relationship (`team:manage-members`).
  *
- * An unknown team answers `403`, as every refusal does.
+ * A refusal answers `403`. An unknown team gets exactly what another
+ * tenant's team and a member without the permission get (#718): `Missing
+ * permission '<permission>'` for a change, `You are not a member of this
+ * organization` for the member list.
  */
 export const teamsGroup = Group.make(
   R.Team,
@@ -1150,8 +1164,9 @@ export const teamsGroup = Group.make(
 
 /**
  * `team-members`: one team membership, by its stored id.
- * `DELETE /team-members/:id` removes it (`team:manage-members`); `204`. An
- * unknown id answers `404`, a refusal `403`.
+ * `DELETE /team-members/:id` removes it (`team:manage-members`); `204`. A
+ * refusal answers `403`, and an unknown id gets the same `403` and body as
+ * another tenant's membership and a member without the permission (#718).
  */
 export const teamMembersGroup = Group.make(
   R.TeamMember,

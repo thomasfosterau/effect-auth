@@ -144,6 +144,22 @@ export interface Member {
 export const isActiveMember = (member: Member): boolean => member.status !== "inactive";
 
 /**
+ * The refusal of an operation that needs `permission` in an organization. A
+ * stranger, a deactivated member, a member without the permission and an id
+ * that names no record get this same error (#715, #718), so the refusal never
+ * confirms that an organization or a record exists.
+ */
+export const missingPermission = (permission: string): OrganizationError =>
+  new OrganizationError({ message: `Missing permission '${permission}' in this organization` });
+
+/**
+ * The refusal of a member-only read. A stranger, a deactivated member and an
+ * id that names no record get this same error (#717, #718).
+ */
+export const notAMember = (): OrganizationError =>
+  new OrganizationError({ message: "You are not a member of this organization" });
+
+/**
  * Lifecycle states of an invitation.
  */
 export type InvitationStatus = "pending" | "accepted" | "rejected" | "canceled";
@@ -822,7 +838,9 @@ export class OrganizationService extends Context.Service<
      * The membership with this id, in whatever organization it belongs to;
      * `null` when there is none. No permission is checked: the id names the
      * row, and the operation applied to it (`updateMemberRole`,
-     * `removeMember`, ...) decides whether the actor may act on it.
+     * `removeMember`, ...) decides whether the actor may act on it. A caller
+     * that answers `null` differently from that operation's refusal confirms
+     * which ids exist; the HTTP tier answers both alike (#718).
      */
     readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
 
@@ -914,7 +932,10 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Cancel a pending invitation. The canceler needs the `invitation:cancel`
-     * permission in the invitation's organization.
+     * permission in the invitation's organization, checked before anything
+     * else (#718): an unknown id, a stranger and a member without it get the
+     * same `OrganizationError`, and only a permitted member learns that the
+     * invitation is no longer pending.
      */
     readonly cancelInvitation: (
       cancelerId: string,
@@ -959,10 +980,11 @@ export class OrganizationService extends Context.Service<
      * Resend a pending invitation: the same row and id, a fresh secret token
      * (the link sent earlier stops working), its `expiresAt` pushed out by the
      * configured invitation TTL from now, and `sendInvitationEmail` invoked
-     * again. Requires the `invitation:create`
-     * permission, like issuing one. Unknown, accepted, rejected and canceled
-     * invitations are refused with an `OrganizationError` rather than silently
-     * re-issued.
+     * again. Requires the `invitation:create` permission, like issuing one,
+     * checked before anything else (#718): an unknown id, a stranger and a
+     * member without it get the same `OrganizationError`. A permitted member's
+     * accepted, rejected or canceled invitation is refused with an
+     * `OrganizationError` rather than silently re-issued.
      */
     readonly resendInvitation: (
       actorId: string,
@@ -1186,7 +1208,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Rename a team. Requires the `team:update` permission in the team's
-     * organization.
+     * organization. As in every team operation, an unknown team id is refused
+     * with the same `OrganizationError` a stranger and a member without the
+     * permission get (#718).
      */
     readonly updateTeam: (
       actorUserId: string,
@@ -1233,7 +1257,9 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Team>, OrganizationError | Errors.AuthError>;
 
     /**
-     * List a team's members. Any member of the team's organization may do so.
+     * List a team's members. Any active member of the team's organization may
+     * do so; a stranger and an unknown team id get the same `OrganizationError`
+     * (#717, #718).
      */
     readonly listTeamMembers: (
       actorUserId: string,
@@ -1570,11 +1596,7 @@ export const make = (
         const member = yield* getActiveMember(organizationId, userId);
         const granted =
           member !== null && (yield* roleHasPermission(organizationId, member.role, permission));
-        if (!member || !granted) {
-          return yield* new OrganizationError({
-            message: `Missing permission '${permission}' in this organization`,
-          });
-        }
+        if (!member || !granted) return yield* missingPermission(permission);
         return member;
       });
 
@@ -1586,11 +1608,7 @@ export const make = (
     const requireMembership = (userId: string, organizationId: string) =>
       Effect.gen(function* () {
         const member = yield* getActiveMember(organizationId, userId);
-        if (!member) {
-          return yield* new OrganizationError({
-            message: "You are not a member of this organization",
-          });
-        }
+        if (!member) return yield* notAMember();
         return member;
       });
 
@@ -1604,23 +1622,26 @@ export const make = (
       return domainStoreOption.value;
     });
 
-    /** Load a team, failing when it does not exist. */
-    const getTeamOrFail = (teamId: string) =>
+    /**
+     * Load a team, failing with `refusal` when it does not exist: the error
+     * the caller's check gives a stranger, so an unknown team id and another
+     * tenant's team are refused alike (#718).
+     */
+    const getTeamOr = (teamId: string, refusal: OrganizationError) =>
       Effect.gen(function* () {
         const team = yield* store.getTeam(teamId);
-        if (!team) {
-          return yield* new OrganizationError({ message: "Team not found" });
-        }
+        if (!team) return yield* refusal;
         return team;
       });
 
     /**
      * Load a team and enforce a permission in *its* organization, returning the
-     * team so callers can use its `organizationId`.
+     * team so callers can use its `organizationId`. An unknown team id gets
+     * the refusal a stranger or a member without the permission gets (#718).
      */
     const requireTeamPermission = (userId: string, teamId: string, permission: string) =>
       Effect.gen(function* () {
-        const team = yield* getTeamOrFail(teamId);
+        const team = yield* getTeamOr(teamId, missingPermission(permission));
         yield* requireMemberPermission(userId, team.organizationId, permission);
         return team;
       });
@@ -2093,15 +2114,15 @@ export const make = (
         cancelerId: string,
         invitationId: string,
       ) {
+        // The permission first (#718): an unknown id, a stranger and a member
+        // without it are refused alike, and only a permitted member learns
+        // that an invitation is no longer pending.
         const invitation = yield* store.getInvitation(invitationId);
-        if (!invitation) {
-          return yield* new OrganizationError({ message: "Invitation not found" });
-        }
+        if (!invitation) return yield* missingPermission("invitation:cancel");
+        yield* requireMemberPermission(cancelerId, invitation.organizationId, "invitation:cancel");
         if (invitation.status !== "pending") {
           return yield* new OrganizationError({ message: "Invitation is no longer pending" });
         }
-
-        yield* requireMemberPermission(cancelerId, invitation.organizationId, "invitation:cancel");
 
         return yield* store.updateInvitation({ ...invitation, status: "canceled" });
       }),
@@ -2110,15 +2131,13 @@ export const make = (
         actorId: string,
         invitationId: string,
       ) {
+        // The permission first, as for `cancelInvitation` (#718).
         const invitation = yield* store.getInvitation(invitationId);
-        if (!invitation) {
-          return yield* new OrganizationError({ message: "Invitation not found" });
-        }
+        if (!invitation) return yield* missingPermission("invitation:create");
+        yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
         if (invitation.status !== "pending") {
           return yield* new OrganizationError({ message: "Invitation is no longer pending" });
         }
-
-        yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
         const organization = yield* getOrganizationOrFail(invitation.organizationId);
 
         // The same row and id, so an expired-but-pending invitation is revived
@@ -2423,7 +2442,7 @@ export const make = (
         actorUserId: string,
         teamId: string,
       ) {
-        const team = yield* getTeamOrFail(teamId);
+        const team = yield* getTeamOr(teamId, notAMember());
         yield* requireMembership(actorUserId, team.organizationId);
         return yield* store.listTeamMembers(teamId);
       }),

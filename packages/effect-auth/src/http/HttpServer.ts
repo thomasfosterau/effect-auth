@@ -72,6 +72,8 @@ import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
 import { onlyAttributes, UserService } from "../User.ts";
 import {
+  missingPermission,
+  notAMember,
   OrganizationError,
   OrganizationService,
   type Organization,
@@ -2445,8 +2447,12 @@ const asOrganizationActor = <A>(
 
 /**
  * How an item group reads its record by the URL's id: as the signed-in actor,
- * the service and the record `lookup` finds, `404` (`missing`) when there is
- * none, `403` when the lookup is refused.
+ * the service and the record `lookup` finds, `403` when the lookup is refused.
+ * An id that names no record fails with `refusal`, the error the operation
+ * gives a stranger (`missingPermission` of the permission it needs, or
+ * `notAMember` for a member-only read), and the operation checks that
+ * permission before anything else. So an unknown id, another tenant's record
+ * and a member without the permission get the same `403` and body (#718).
  */
 const organizationTarget =
   <A>(
@@ -2455,13 +2461,13 @@ const organizationTarget =
       org: typeof OrganizationService.Service,
       id: string,
     ) => Effect.Effect<A | null, OrganizationError | AuthError>,
-    missing: string,
   ) =>
-  (request: HttpServerRequest.HttpServerRequest, id: string) =>
+  (request: HttpServerRequest.HttpServerRequest, id: string, refusal: OrganizationError) =>
     Effect.gen(function* () {
       const { org, actorId } = yield* organizationActor(request, cfg);
-      const target = yield* refusedForbidden(lookup(org, id));
-      if (target === null) return yield* new S.NotFound({ message: missing });
+      const target = yield* refusedForbidden(
+        Effect.filterOrFail(lookup(org, id), P.isNotNull, () => refusal),
+      );
       return { org, actorId, target };
     });
 
@@ -2823,13 +2829,17 @@ export const organizationMembersGroupLayer = (
 ) => {
   const cfg = resolveCookieConfig(config, multiSession);
 
-  const target = organizationTarget(cfg, (org, id) => org.getMemberById(id), "Member not found");
+  const target = organizationTarget(cfg, (org, id) => org.getMemberById(id));
 
   return HttpApiBuilder.group(AuthApi, "organization-members", (handlers) =>
     handlers
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const { org, actorId, target: member } = yield* target(request, params.id);
+          const {
+            org,
+            actorId,
+            target: member,
+          } = yield* target(request, params.id, missingPermission("member:update"));
           const { role, status } = payload.data.attributes ?? {};
           const { organizationId, userId } = member;
           // Reactivate before a role change (an inactive member's role is not
@@ -2859,13 +2869,17 @@ export const organizationMembersGroupLayer = (
       )
       .handle("delete", ({ params, request }) =>
         Effect.gen(function* () {
-          const { org, actorId, target: member } = yield* target(request, params.id);
+          const {
+            org,
+            actorId,
+            target: member,
+          } = yield* target(request, params.id, missingPermission("member:delete"));
           yield* refusedForbidden(org.removeMember(actorId, member.organizationId, member.userId));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("listTeams", ({ params, request }) =>
         Effect.gen(function* () {
-          const { org, actorId, target: member } = yield* target(request, params.id);
+          const { org, actorId, target: member } = yield* target(request, params.id, notAMember());
           const teams = yield* refusedForbidden(
             org.listTeamsForMember(actorId, member.organizationId, member.userId),
           );
@@ -2885,19 +2899,21 @@ export const organizationDomainsGroupLayer = (
   multiSession?: MultiSessionConfig,
 ) => {
   const cfg = resolveCookieConfig(config, multiSession);
-  const target = organizationTarget(cfg, (org, id) => org.getDomainById(id), "Domain not found");
+  const target = organizationTarget(cfg, (org, id) => org.getDomainById(id));
+  const manage = (request: HttpServerRequest.HttpServerRequest, id: string) =>
+    target(request, id, missingPermission("domain:manage"));
 
   return HttpApiBuilder.group(AuthApi, "organization-domains", (handlers) =>
     handlers
       .handle("delete", ({ params, request }) =>
         Effect.gen(function* () {
-          const { org, actorId, target: domain } = yield* target(request, params.id);
+          const { org, actorId, target: domain } = yield* manage(request, params.id);
           yield* refusedForbidden(org.removeDomain(actorId, domain.organizationId, domain.id));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("verify", ({ params, request }) =>
         Effect.gen(function* () {
-          const { org, actorId, target: domain } = yield* target(request, params.id);
+          const { org, actorId, target: domain } = yield* manage(request, params.id);
           const verified = yield* refusedForbidden(
             org.verifyDomain(actorId, domain.organizationId, domain.id),
           );
@@ -2947,7 +2963,9 @@ export const organizationRolesGroupLayer = (
   multiSession?: MultiSessionConfig,
 ) => {
   const cfg = resolveCookieConfig(config, multiSession);
-  const target = organizationTarget(cfg, (org, id) => org.getOrgRoleById(id), "Role not found");
+  const lookup = organizationTarget(cfg, (org, id) => org.getOrgRoleById(id));
+  const target = (request: HttpServerRequest.HttpServerRequest, id: string) =>
+    lookup(request, id, missingPermission("role:manage"));
 
   return HttpApiBuilder.group(AuthApi, "organization-roles", (handlers) =>
     handlers
@@ -3029,16 +3047,18 @@ export const teamsGroupLayer = (config?: CookieConfig, multiSession?: MultiSessi
  * stored id (see `teamMembersGroup` in `HttpApi.ts`).
  */
 export const teamMembersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
-  const target = organizationTarget(
-    resolveCookieConfig(config, multiSession),
-    (org, id) => org.getTeamMemberById(id),
-    "Team member not found",
+  const target = organizationTarget(resolveCookieConfig(config, multiSession), (org, id) =>
+    org.getTeamMemberById(id),
   );
 
   return HttpApiBuilder.group(AuthApi, "team-members", (handlers) =>
     handlers.handle("delete", ({ params, request }) =>
       Effect.gen(function* () {
-        const { org, actorId, target: member } = yield* target(request, params.id);
+        const {
+          org,
+          actorId,
+          target: member,
+        } = yield* target(request, params.id, missingPermission("team:manage-members"));
         yield* refusedForbidden(org.removeTeamMember(actorId, member.teamId, member.userId));
       }).pipe(JsonApiErrors.mapHttpErrors),
     ),

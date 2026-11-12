@@ -426,6 +426,54 @@ const resetStores = (): void => {
   sentInvitations.length = 0;
 };
 
+/** An organization operation on a record named by id, as `actorId`. */
+type ByIdOperation<A> = (
+  actorId: string,
+  id: string,
+) => Effect.Effect<A, OrganizationModule.OrganizationError | AuthError>;
+
+/**
+ * The refusals of `operation` for an unknown id (as `owner-1`) and for each of
+ * `actors` on the record `id` names (#718).
+ */
+const refusals = <A>(
+  operation: ByIdOperation<A>,
+  id: string,
+  actors: ReadonlyArray<string> = ["stranger-1", "member-1"],
+) =>
+  Effect.all(
+    {
+      unknown: Effect.flip(operation("owner-1", "no-such-id")),
+      others: Effect.forEach(actors, (actorId) => Effect.flip(operation(actorId, id)), {
+        concurrency: 1,
+      }),
+    },
+    { concurrency: 1 },
+  );
+
+/** An error's tag and message: its own equality ignores the message. */
+const errorShape = (error: OrganizationModule.OrganizationError | AuthError) => ({
+  tag: error._tag,
+  message: error.message,
+});
+
+/** Every refusal is the `OrganizationError` carrying `message`. */
+const expectAlike = (
+  refused: {
+    readonly unknown: OrganizationModule.OrganizationError | AuthError;
+    readonly others: ReadonlyArray<OrganizationModule.OrganizationError | AuthError>;
+  },
+  message: string,
+) => {
+  const expected = { tag: "OrganizationError", message };
+  expect(errorShape(refused.unknown)).toEqual(expected);
+  expect(refused.others.map(errorShape)).toEqual(refused.others.map(() => expected));
+};
+
+/** The refusal of an operation needing `permission` (#715, #718). */
+const missingPermission = (permission: string) =>
+  `Missing permission '${permission}' in this organization`;
+
 describe("OrganizationService", () => {
   beforeEach(resetStores);
 
@@ -845,6 +893,74 @@ describe("OrganizationService", () => {
     expect(result.stranger._tag).toBe("OrganizationError");
     expect(result.member).toEqual(result.stranger);
     expect(result.unknown).toEqual(result.stranger);
+  });
+
+  it("refuses an unknown team or invitation id exactly as a stranger and a member without the permission (#718)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        // The stranger owns another tenant, so holds every permission there.
+        yield* service.createOrganization("stranger-1", { name: "Other", slug: "other" });
+        const team = yield* service.createTeam("owner-1", organization.id, { name: "Eng" });
+        const pending = yield* service.inviteMember("owner-1", organization.id, {
+          email: "invitee@example.com",
+          role: "member",
+        });
+        const canceled = yield* service.inviteMember("owner-1", organization.id, {
+          email: "gone@example.com",
+          role: "member",
+        });
+        yield* service.cancelInvitation("owner-1", canceled.id);
+
+        return {
+          updateTeam: yield* refusals(
+            (actorId, id) => service.updateTeam(actorId, id, { name: "X" }),
+            team.id,
+          ),
+          deleteTeam: yield* refusals(service.deleteTeam, team.id),
+          addTeamMember: yield* refusals(
+            (actorId, id) => service.addTeamMember(actorId, id, "member-1"),
+            team.id,
+          ),
+          removeTeamMember: yield* refusals(
+            (actorId, id) => service.removeTeamMember(actorId, id, "member-1"),
+            team.id,
+          ),
+          listTeamMembers: yield* refusals(service.listTeamMembers, team.id, ["stranger-1"]),
+          cancelPending: yield* refusals(service.cancelInvitation, pending.id),
+          cancelCanceled: yield* refusals(service.cancelInvitation, canceled.id),
+          resendPending: yield* refusals(service.resendInvitation, pending.id),
+          resendCanceled: yield* refusals(service.resendInvitation, canceled.id),
+          // A permitted member still learns an invitation is no longer pending.
+          ownerRecancel: yield* Effect.flip(service.cancelInvitation("owner-1", canceled.id)),
+          ownerResendCanceled: yield* Effect.flip(service.resendInvitation("owner-1", canceled.id)),
+          memberListsTeam: yield* service.listTeamMembers("member-1", team.id),
+          ownerResends: yield* service.resendInvitation("owner-1", pending.id),
+          ownerCancels: yield* service.cancelInvitation("owner-1", pending.id),
+          ownerRenames: yield* service.updateTeam("owner-1", team.id, { name: "Platform" }),
+        };
+      }),
+    );
+
+    expectAlike(result.updateTeam, missingPermission("team:update"));
+    expectAlike(result.deleteTeam, missingPermission("team:delete"));
+    expectAlike(result.addTeamMember, missingPermission("team:manage-members"));
+    expectAlike(result.removeTeamMember, missingPermission("team:manage-members"));
+    expectAlike(result.listTeamMembers, "You are not a member of this organization");
+    expectAlike(result.cancelPending, missingPermission("invitation:cancel"));
+    expectAlike(result.cancelCanceled, missingPermission("invitation:cancel"));
+    expectAlike(result.resendPending, missingPermission("invitation:create"));
+    expectAlike(result.resendCanceled, missingPermission("invitation:create"));
+    expect(result.ownerRecancel.message).toBe("Invitation is no longer pending");
+    expect(result.ownerResendCanceled.message).toBe("Invitation is no longer pending");
+    expect(result.memberListsTeam).toEqual([]);
+    expect(result.ownerResends.status).toBe("pending");
+    expect(result.ownerCancels.status).toBe("canceled");
+    expect(result.ownerRenames.name).toBe("Platform");
   });
 
   it("enforces the membership limit on invites and direct adds", async () => {
