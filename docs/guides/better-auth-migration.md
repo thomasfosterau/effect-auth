@@ -129,18 +129,18 @@ Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiF
 
 ### Admin
 
-`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/*`. Pair it with `BannedUserPlugin` so a ban takes effect on the next request rather than at session expiry.
+`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/users` (list with `filter[email]` and `page[offset]` / `page[limit]`, `PATCH` a `role`, `DELETE` a user or `/admin/users/:id/sessions`), `/user-bans` (ban, lift) and `/impersonations` (start, `DELETE /impersonations/current` to end). Pair it with `BannedUserPlugin` so a ban takes effect on the next request rather than at session expiry.
 
 ### API keys
 
-`Auth.ApiKeyService` (`create`, `verify`, `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys*`. Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
+`Auth.ApiKeyService` (`create`, `verify`, `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys` and `/api-keys/:id` (the plaintext only in the create's `meta.key`). Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
 
 ### Enterprise SSO (as a relying party) and the OIDC provider
 
 Two separate features, as in Better Auth:
 
-- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso/register`, `POST /sign-in/sso`, `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
-- **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*`, `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
+- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso-providers` (registration, admin-gated), `POST /sso-authorizations` (start a sign-in), `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
+- **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*` (client administration is `/oauth-clients`, admin-gated), `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
 
 SCIM provisioning (`Auth.ScimService`) has no Better Auth counterpart; [`scim.md`](./scim.md) covers it.
 

@@ -68,8 +68,7 @@ const EXPECTED_PATHS = [
   "/device-sessions/{id}",
   "/device/code",
   "/device/token",
-  "/device/approve",
-  "/device/deny",
+  "/device-authorizations/decisions",
   "/organizations",
   "/organizations/active",
   "/organizations/{id}",
@@ -88,26 +87,24 @@ const EXPECTED_PATHS = [
   "/teams/{id}",
   "/teams/{id}/members",
   "/team-members/{id}",
-  "/admin/users/list",
-  "/admin/users/set-role",
-  "/admin/users/ban",
-  "/admin/users/unban",
-  "/admin/users/remove",
-  "/admin/users/revoke-sessions",
-  "/admin/impersonate",
-  "/admin/stop-impersonating",
+  "/admin/users",
+  "/admin/users/{id}",
+  "/admin/users/{id}/sessions",
+  "/user-bans",
+  "/user-bans/{id}",
+  "/impersonations",
+  "/impersonations/{id}",
   "/api-keys",
-  "/api-keys/{keyId}",
-  "/sso/register",
-  "/sign-in/sso",
+  "/api-keys/{id}",
+  "/sso-providers",
+  "/sso-authorizations",
   "/sso/callback",
   "/sso/saml/acs/{providerId}",
   "/sso/saml/metadata/{providerId}",
-  "/token",
   "/jwks",
-  "/oauth2/register",
-  "/oauth2/clients",
-  "/oauth2/clients/{clientId}",
+  "/tokens",
+  "/oauth-clients",
+  "/oauth-clients/{id}",
   "/oauth2/authorize",
   "/oauth2/consent",
   "/oauth2/token",
@@ -188,6 +185,17 @@ describe("getOpenApiSpec", () => {
       "406",
       "415",
       "500",
+    ]);
+  });
+
+  it("documents minting a JWT and a key as creates, never as reads", () => {
+    const { paths } = getOpenApiSpec();
+    expect(paths["/tokens"]?.get).toBeUndefined();
+    expect(Struct.keys(paths["/tokens"]?.post?.responses ?? {})).toContain("201");
+    expect(Struct.keys(paths["/api-keys"]?.post?.responses ?? {})).toContain("201");
+    // Device approval carries the user code in the body: no path names it.
+    expect(Struct.keys(paths).filter((path) => path.startsWith("/device-authorizations"))).toEqual([
+      "/device-authorizations/decisions",
     ]);
   });
 

@@ -81,8 +81,20 @@ import {
   type OrgRole,
   type OrganizationDomain,
 } from "../Organization.ts";
-import { AdminService, isAdmin } from "../Admin.ts";
-import { ApiKeyService, type ApiKey } from "../ApiKey.ts";
+import {
+  type AdminError,
+  AdminService,
+  type BanUserOptions,
+  isAdmin,
+  type ListUsersQuery,
+} from "../Admin.ts";
+import {
+  ApiKeyService,
+  type ApiKey,
+  type ApiKeyCreateOptions,
+  type ApiKeyError,
+  type ApiKeyUpdate,
+} from "../ApiKey.ts";
 import { type CredentialClass } from "../Authorizer.ts";
 import { JwtService } from "../Jwt.ts";
 import {
@@ -91,8 +103,17 @@ import {
   type OidcClientMetadata,
   type OidcProviderError,
   type OidcRegistrationError,
+  type RegisterOidcClientInput,
+  type UpdateOidcClientInput,
 } from "../OidcProvider.ts";
-import { SsoService, type SsoProvider } from "../Sso.ts";
+import {
+  type RegisterProviderInput,
+  type RegisterSamlProviderInput,
+  SsoService,
+  type SsoError,
+  type SsoProvider,
+  type SsoSignInSelector,
+} from "../Sso.ts";
 import {
   ScimService,
   type ScimError,
@@ -639,34 +660,45 @@ const orgRoleResource = (r: OrgRole): R.OrganizationRole =>
   });
 
 /**
- * Encode an SSO connection for the wire, one arm of the `protocol` union at a
- * time. Neither arm carries a secret: the OIDC arm drops `clientSecret`, and
- * both drop the registrar's `userId`.
+ * The fields of a SAML connection that its registration and its stored record
+ * share, each optional one left out when absent.
  */
-const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView =>
+const samlConnection = <Algorithm extends string>(p: {
+  readonly domain: string;
+  readonly entityId: string;
+  readonly ssoUrl: string;
+  readonly idpCertificates: ReadonlyArray<string>;
+  readonly spEntityId: string;
+  readonly acsUrl: string;
+  readonly signatureAlgorithms?: ReadonlyArray<Algorithm> | undefined;
+  readonly wantAssertionsSigned?: boolean | undefined;
+  readonly wantAuthnResponseSigned?: boolean | undefined;
+  readonly forceAuthn?: boolean | undefined;
+}) => ({
+  protocol: "saml" as const,
+  domain: p.domain,
+  entityId: p.entityId,
+  ssoUrl: p.ssoUrl,
+  idpCertificates: p.idpCertificates,
+  spEntityId: p.spEntityId,
+  acsUrl: p.acsUrl,
+  ...(p.signatureAlgorithms !== undefined && { signatureAlgorithms: p.signatureAlgorithms }),
+  ...(p.wantAssertionsSigned !== undefined && { wantAssertionsSigned: p.wantAssertionsSigned }),
+  ...(p.wantAuthnResponseSigned !== undefined && {
+    wantAuthnResponseSigned: p.wantAuthnResponseSigned,
+  }),
+  ...(p.forceAuthn !== undefined && { forceAuthn: p.forceAuthn }),
+});
+
+/**
+ * The attributes of an SSO connection's `sso-providers` resource, one arm of
+ * the `protocol` union at a time. Neither arm carries a secret: the OIDC arm
+ * drops `clientSecret`, and both drop the registrar's `userId`.
+ */
+const ssoProviderAttributes = (p: SsoProvider): R.SsoProvider["attributes"] =>
   p.protocol === "saml"
-    ? {
-        id: p.id,
-        domain: p.domain,
-        protocol: p.protocol,
-        entityId: p.entityId,
-        ssoUrl: p.ssoUrl,
-        idpCertificates: p.idpCertificates,
-        spEntityId: p.spEntityId,
-        acsUrl: p.acsUrl,
-        ...(p.signatureAlgorithms !== undefined && { signatureAlgorithms: p.signatureAlgorithms }),
-        ...(p.wantAssertionsSigned !== undefined && {
-          wantAssertionsSigned: p.wantAssertionsSigned,
-        }),
-        ...(p.wantAuthnResponseSigned !== undefined && {
-          wantAuthnResponseSigned: p.wantAuthnResponseSigned,
-        }),
-        ...(p.forceAuthn !== undefined && { forceAuthn: p.forceAuthn }),
-        ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
-        createdAt: p.createdAt,
-      }
+    ? { ...samlConnection(p), createdAt: p.createdAt }
     : {
-        id: p.id,
         issuer: p.issuer,
         domain: p.domain,
         protocol: p.protocol,
@@ -677,21 +709,43 @@ const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView =>
         ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
         ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
         scopes: p.scopes,
-        ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
         createdAt: p.createdAt,
       };
 
-const encodeOidcClient = (c: OidcClient): S.OidcClientView => ({
-  clientId: c.clientId,
-  name: c.name,
-  redirectUris: c.redirectUris,
-  type: c.type,
-  skipConsent: c.skipConsent,
-  disabled: c.disabled,
-  metadata: c.metadata,
-  createdAt: c.createdAt,
-  updatedAt: c.updatedAt,
-});
+/** The `sso-providers` resource of a connection, its `organizationId` as a relationship. */
+const ssoProviderResource = (provider: SsoProvider): R.SsoProvider =>
+  R.SsoProvider.make({
+    id: provider.id,
+    attributes: ssoProviderAttributes(provider),
+    relationships: {
+      organization: {
+        data:
+          provider.organizationId === undefined
+            ? null
+            : R.Organization.ref(provider.organizationId),
+      },
+    },
+  });
+
+/**
+ * The `oauth-clients` resource of a registered client: never the secret's
+ * hash, the registration metadata or the registrar. JSON:API reserves `type`,
+ * so the client's own type travels as `clientType`.
+ */
+const oauthClientResource = (c: OidcClient): R.OAuthClient =>
+  R.OAuthClient.make({
+    id: c.clientId,
+    attributes: {
+      name: c.name,
+      redirectUris: c.redirectUris,
+      clientType: c.type,
+      skipConsent: c.skipConsent,
+      disabled: c.disabled,
+      metadata: c.metadata,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    },
+  });
 
 /**
  * Encode a client as an RFC 7591 §3.2.1 client information response. The
@@ -791,22 +845,29 @@ const registrationMetadata = (payload: S.OidcRegistrationPayload): OidcClientMet
   ...(payload.scope !== undefined && { scope: payload.scope }),
 });
 
-const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
-  id: k.id,
-  ...(k.name !== undefined && { name: k.name }),
-  ...(k.prefix !== undefined && { prefix: k.prefix }),
-  start: k.start,
-  userId: k.userId,
-  enabled: k.enabled,
-  ...(k.expiresAt !== undefined && { expiresAt: k.expiresAt }),
-  ...(k.lastUsedAt !== undefined && { lastUsedAt: k.lastUsedAt }),
-  ...(k.permissions !== undefined && { permissions: k.permissions }),
-  metadata: k.metadata,
-  ...(k.remaining !== undefined && { remaining: k.remaining }),
-  ...(k.rateLimit !== undefined && { rateLimit: k.rateLimit }),
-  createdAt: k.createdAt,
-  updatedAt: k.updatedAt,
-});
+/**
+ * The `api-keys` resource of a stored key, its owner as `user`: never the
+ * key's hash or its refill bookkeeping.
+ */
+const apiKeyResource = (k: ApiKey): R.ApiKey =>
+  R.ApiKey.make({
+    id: k.id,
+    attributes: {
+      ...(k.name !== undefined && { name: k.name }),
+      ...(k.prefix !== undefined && { prefix: k.prefix }),
+      start: k.start,
+      enabled: k.enabled,
+      ...(k.expiresAt !== undefined && { expiresAt: k.expiresAt }),
+      ...(k.lastUsedAt !== undefined && { lastUsedAt: k.lastUsedAt }),
+      ...(k.permissions !== undefined && { permissions: k.permissions }),
+      metadata: k.metadata,
+      ...(k.remaining !== undefined && { remaining: k.remaining }),
+      ...(k.rateLimit !== undefined && { rateLimit: k.rateLimit }),
+      createdAt: k.createdAt,
+      updatedAt: k.updatedAt,
+    },
+    relationships: { user: { data: R.User.ref(k.userId) } },
+  });
 
 /**
  * Log the real error server-side and return a generic 500 body so internal
@@ -1601,7 +1662,7 @@ type Pending = typeof PendingDocument.Type;
 const issueSession = (
   session: Types.Session,
   cfg: ResolvedCookieConfig,
-  method: string,
+  method: string | undefined,
   rememberMe: boolean | undefined,
 ): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
   HttpEffect.appendPreResponseHandler((request, response) =>
@@ -2935,6 +2996,586 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
   );
 };
 
+// -----------------------------------------------------------------------------
+// Admin, impersonation, API keys, OAuth clients, SSO, JWTs and device approval
+// (#205, slice 5)
+// -----------------------------------------------------------------------------
+
+// The service inputs below leave an optional key out rather than set it to
+// `undefined` (`exactOptionalPropertyTypes`), so each is built field by field.
+
+/** `GET /admin/users`' query as the admin service's listing query. */
+const listUsersQuery = (query: {
+  readonly page?: { readonly offset?: number; readonly limit?: number } | undefined;
+  readonly filter?: { readonly email?: string } | undefined;
+}): ListUsersQuery => ({
+  ...(query.page?.limit !== undefined && { limit: query.page.limit }),
+  ...(query.page?.offset !== undefined && { offset: query.page.offset }),
+  ...(query.filter?.email !== undefined && { searchEmail: query.filter.email }),
+});
+
+/** A ban's `reason` and `expiresIn`, as the admin service's ban options. */
+const banOptions = (attributes: {
+  readonly reason?: string | undefined;
+  readonly expiresIn?: number | undefined;
+}): BanUserOptions => ({
+  ...(attributes.reason !== undefined && { reason: attributes.reason }),
+  ...(attributes.expiresIn !== undefined && { expiresIn: attributes.expiresIn }),
+});
+
+/** The settings an API key's create and update share: its name, grants and limits. */
+const apiKeySettings = (a: S.ApiKeyUpdatePayload) => ({
+  ...(a.name !== undefined && { name: a.name }),
+  ...(a.permissions !== undefined && { permissions: a.permissions }),
+  ...(a.metadata !== undefined && { metadata: a.metadata }),
+  ...(a.remaining !== undefined && { remaining: a.remaining }),
+  ...(a.rateLimit !== undefined && { rateLimit: a.rateLimit }),
+});
+
+/** The settings of `POST /api-keys`, as the API-key service's create options. */
+const apiKeyCreateOptions = (a: S.ApiKeyCreatePayload): ApiKeyCreateOptions => ({
+  ...apiKeySettings(a),
+  ...(a.prefix !== undefined && { prefix: a.prefix }),
+  ...(a.expiresIn !== undefined && { expiresIn: a.expiresIn }),
+});
+
+/** The attributes of `PATCH /api-keys/:id`, as the API-key service's update. */
+const apiKeyUpdate = (a: S.ApiKeyUpdatePayload): ApiKeyUpdate => ({
+  ...apiKeySettings(a),
+  ...(a.enabled !== undefined && { enabled: a.enabled }),
+  ...(a.expiresAt !== undefined && { expiresAt: a.expiresAt }),
+});
+
+/** The attributes of `POST /oauth-clients`, as the provider's registration input. */
+const oauthClientInput = (a: {
+  readonly name: string;
+  readonly redirectUris: ReadonlyArray<string>;
+  readonly clientType?: "web" | "native" | undefined;
+  readonly skipConsent?: boolean | undefined;
+  readonly metadata?: Types.Attributes | undefined;
+}): RegisterOidcClientInput => ({
+  name: a.name,
+  redirectUris: a.redirectUris,
+  ...(a.clientType !== undefined && { type: a.clientType }),
+  ...(a.skipConsent !== undefined && { skipConsent: a.skipConsent }),
+  ...(a.metadata !== undefined && { metadata: a.metadata }),
+});
+
+/** The attributes of `PATCH /oauth-clients/:id`, as the provider's client update. */
+const oauthClientUpdate = (a: S.OidcClientUpdatePayload): UpdateOidcClientInput => ({
+  ...(a.name !== undefined && { name: a.name }),
+  ...(a.redirectUris !== undefined && { redirectUris: a.redirectUris }),
+  ...(a.skipConsent !== undefined && { skipConsent: a.skipConsent }),
+  ...(a.disabled !== undefined && { disabled: a.disabled }),
+  ...(a.metadata !== undefined && { metadata: a.metadata }),
+});
+
+/** A SAML registration document's attributes, as the SSO service's input. */
+const samlRegistration = (
+  p: S.SsoRegisterSamlAttributes,
+  organizationId: string | undefined,
+): RegisterSamlProviderInput => ({
+  ...samlConnection(p),
+  ...(organizationId !== undefined && { organizationId }),
+});
+
+/** An OIDC registration document's attributes, as the SSO service's input. */
+const oidcRegistration = (
+  p: S.SsoRegisterOidcAttributes,
+  organizationId: string | undefined,
+): RegisterProviderInput => ({
+  issuer: p.issuer,
+  domain: p.domain,
+  clientId: p.clientId,
+  clientSecret: p.clientSecret,
+  redirectUri: p.redirectUri,
+  ...(p.discover !== undefined && { discover: p.discover }),
+  ...(p.authorizationEndpoint !== undefined && {
+    authorizationEndpoint: p.authorizationEndpoint,
+  }),
+  ...(p.tokenEndpoint !== undefined && { tokenEndpoint: p.tokenEndpoint }),
+  ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
+  ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
+  ...(p.scopes !== undefined && { scopes: p.scopes }),
+  ...(p.usePKCE !== undefined && { usePKCE: p.usePKCE }),
+  ...(organizationId !== undefined && { organizationId }),
+});
+
+/** A sign-in document's selector (`email`, `domain` or `providerId`), as the SSO service's. */
+const ssoSelector = (p: S.SsoSignInPayload): SsoSignInSelector => ({
+  ...(p.email !== undefined && { email: p.email }),
+  ...(p.domain !== undefined && { domain: p.domain }),
+  ...(p.providerId !== undefined && { providerId: p.providerId }),
+});
+
+/**
+ * An admin call's failures as the client sees them: a refusal (`isAdmin`
+ * fails, or the target is protected) is `403`, an unknown user `400`, a store
+ * failure `500`.
+ */
+const asAdmin = <A, R>(
+  self: Effect.Effect<A, AdminError | UserNotFoundError | AuthError, R>,
+): Effect.Effect<A, S.Forbidden | S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(self, adminFailures);
+
+/** The `catchTags` cases of {@link asAdmin}. */
+const adminFailures = {
+  AdminError: (e: AdminError) => Effect.fail(new S.Forbidden({ message: e.message })),
+  UserNotFoundError: (e: UserNotFoundError) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  AuthError: (e: AuthError) => internalServerError(e),
+};
+
+/**
+ * The signed-in actor and the admin service: `401` without a session, `404`
+ * when admin is not enabled.
+ */
+const adminActor = (request: HttpServerRequest.HttpServerRequest, cfg: ResolvedCookieConfig) =>
+  Effect.gen(function* () {
+    const resolved = yield* requireSession(request, cfg);
+    const admin = yield* resolveAdmin;
+    return { admin: admin.service, actor: resolved.user };
+  });
+
+/**
+ * The signed-in caller, when `isAdmin` holds for them under the default admin
+ * configuration (what the OAuth-client and SSO-connection endpoints gate on):
+ * `401` without a session, `403` otherwise.
+ */
+const requireAdminCaller = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+) =>
+  Effect.gen(function* () {
+    const resolved = yield* requireSession(request, cfg);
+    if (!isAdmin(resolved.user)) {
+      return yield* new S.Forbidden({ message: "Admin privileges required" });
+    }
+    return resolved.user;
+  });
+
+/**
+ * A bodiless admin call on the user the URL's `:id` names (a removal, a
+ * revocation, a lifted ban), as the signed-in actor: `204` once it is done.
+ */
+const adminAction =
+  (
+    cfg: ResolvedCookieConfig,
+    act: (
+      admin: typeof AdminService.Service,
+      actor: Types.User,
+      userId: string,
+    ) => Effect.Effect<unknown, AdminError | UserNotFoundError | AuthError>,
+  ) =>
+  ({
+    params,
+    request,
+  }: {
+    readonly params: { readonly id: string };
+    readonly request: HttpServerRequest.HttpServerRequest;
+  }) =>
+    Effect.gen(function* () {
+      const { admin, actor } = yield* adminActor(request, cfg);
+      yield* asAdmin(act(admin, actor, params.id));
+    }).pipe(JsonApiErrors.mapHttpErrors);
+
+/**
+ * Layer implementing the `admin-users` group: user administration (see
+ * `adminUsersGroup` in `HttpApi.ts`).
+ */
+export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "admin-users", (handlers) =>
+    handlers
+      .handle("list", ({ query, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const result = yield* asAdmin(admin.listUsers(actor, listUsersQuery(query)));
+          const users = yield* Effect.forEach(result.users, loadUserResource, { concurrency: 1 });
+          return Handlers.collection(users, { meta: { total: result.total } });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const user = yield* asAdmin(
+            admin.setRole(actor, params.id, payload.data.attributes.role),
+          );
+          return Handlers.data(yield* loadUserResource(user));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle(
+        "delete",
+        adminAction(cfg, (admin, actor, id) => admin.removeUser(actor, id)),
+      )
+      .handle(
+        "deleteSessions",
+        adminAction(cfg, (admin, actor, id) => admin.revokeUserSessions(actor, id)),
+      ),
+  );
+};
+
+/** The `user-bans` resource of a banned user: the ban fields of its `attributes`. */
+const userBanResource = (user: Types.User): R.UserBan => {
+  const reason = user.attributes["banReason"];
+  const expiresAt = user.attributes["banExpires"];
+  return R.UserBan.make({
+    id: user.id,
+    attributes: {
+      reason: P.isString(reason) ? reason : "",
+      ...(P.isNumber(expiresAt) && { expiresAt }),
+    },
+    relationships: { user: { data: R.User.ref(user.id) } },
+  });
+};
+
+/**
+ * Layer implementing the `user-bans` group: ban and unban users (see
+ * `userBansGroup` in `HttpApi.ts`).
+ */
+export const userBansGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "user-bans", (handlers) =>
+    handlers
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const banned = yield* asAdmin(
+            admin.banUser(
+              actor,
+              payload.data.relationships.user.data.id,
+              banOptions(payload.data.attributes ?? {}),
+            ),
+          );
+          return Handlers.data(userBanResource(banned), {
+            included: [yield* loadUserResource(banned)],
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle(
+        "delete",
+        adminAction(cfg, (admin, actor, id) => admin.unbanUser(actor, id)),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `impersonations` group: start and end an
+ * administrator's impersonation of a user (see `impersonationsGroup` in
+ * `HttpApi.ts`).
+ */
+export const impersonationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "impersonations", (handlers) =>
+    handlers
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const session = yield* Effect.catchTags(
+            admin.impersonateUser(actor, payload.data.relationships.user.data.id),
+            { ...hookFailures, ...adminFailures },
+          );
+          const userService = yield* UserService;
+          const user = yield* userService
+            .getUser(session.userId)
+            .pipe(Effect.catch(internalServerError));
+          // The session cookie becomes the impersonation's session.
+          yield* issueSession(session, cfg, undefined, undefined);
+          return Handlers.data(
+            R.Impersonation.make({
+              // `createSession` answers the session under its token; the wire
+              // names it by the stored id, its hash.
+              id: hashToken(session.id),
+              attributes: { expiresAt: session.expiresAt, createdAt: session.createdAt },
+              relationships: {
+                user: { data: R.User.ref(session.userId) },
+                impersonator: { data: R.User.ref(actor.id) },
+              },
+            }),
+            { included: [yield* loadUserResource(user)] },
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          yield* resolveAdmin; // 404 when admin is not enabled
+          if (params.id !== CURRENT) {
+            return yield* new S.NotFound({ message: "Impersonation not found" });
+          }
+          const resolved = yield* requireSession(request, cfg);
+          if (!P.isString(resolved.session.attributes["impersonatedBy"])) {
+            return yield* new S.NotFound({ message: "This session is not an impersonation" });
+          }
+          const sessionManager = yield* SessionService;
+          yield* storeFailure(sessionManager.invalidateSession(resolved.session.id));
+          return yield* clearSessionCookies(request, cfg, resolved.session.id);
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** An API-key call's failures: a refusal (or a key the caller does not own) is `400`. */
+const asApiKeyOwner = <A, R>(
+  self: Effect.Effect<A, ApiKeyError | AuthError, R>,
+): Effect.Effect<A, S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(self, {
+    ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Layer implementing the `api-keys` group: the signed-in user's API keys (see
+ * `apiKeysGroup` in `HttpApi.ts`).
+ */
+export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  /** The caller's id and the API-key service: `401` without a session, `404` when off. */
+  const owner = (request: HttpServerRequest.HttpServerRequest) =>
+    Effect.gen(function* () {
+      const resolved = yield* requireSession(request, cfg);
+      const apiKey = yield* resolveApiKey;
+      return { apiKey: apiKey.service, userId: resolved.user.id };
+    });
+
+  return HttpApiBuilder.group(AuthApi, "api-keys", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const { apiKey, userId } = yield* owner(request);
+          const keys = yield* storeFailure(apiKey.list(userId));
+          return Handlers.collection(keys.map(apiKeyResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          // A key is never minted from a machine credential (a bearer token,
+          // another key): only from the interactive session cookie.
+          yield* requireInteractiveCredential(request);
+          const apiKey = yield* resolveApiKey;
+          const result = yield* asApiKeyOwner(
+            apiKey.service.create(resolved.user.id, apiKeyCreateOptions(payload.data.attributes)),
+          );
+          // The plaintext key is shown this once, in `meta`.
+          return Handlers.data(apiKeyResource(result.apiKey), { meta: { key: result.key } });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { apiKey, userId } = yield* owner(request);
+          const updated = yield* asApiKeyOwner(
+            apiKey.update(userId, params.id, apiKeyUpdate(payload.data.attributes ?? {})),
+          );
+          return Handlers.data(apiKeyResource(updated));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { apiKey, userId } = yield* owner(request);
+          yield* asApiKeyOwner(apiKey.delete(userId, params.id));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `oauth-clients` group: the OIDC provider's client
+ * registry, for administrators (see `oauthClientsGroup` in `HttpApi.ts`).
+ */
+export const oauthClientsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  /** The administrator's id and the provider: `401`, `403`, or `404` when it is off. */
+  const administrator = (request: HttpServerRequest.HttpServerRequest) =>
+    Effect.gen(function* () {
+      const user = yield* requireAdminCaller(request, cfg);
+      const oidc = yield* resolveOidcProvider;
+      return { oidc: oidc.service, userId: user.id };
+    });
+
+  return HttpApiBuilder.group(AuthApi, "oauth-clients", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const { oidc } = yield* administrator(request);
+          const clients = yield* storeFailure(oidc.listClients());
+          return Handlers.collection(clients.map(oauthClientResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { oidc, userId } = yield* administrator(request);
+          const result = yield* oidcProviderFailures(
+            oidc.registerClient(oauthClientInput(payload.data.attributes), userId),
+          );
+          // A confidential client's secret is shown this once, in `meta`.
+          return Handlers.data(oauthClientResource(result.client), {
+            meta: result.clientSecret === undefined ? {} : { clientSecret: result.clientSecret },
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { oidc } = yield* administrator(request);
+          const updated = yield* oidcProviderFailures(
+            oidc.updateClient(params.id, oauthClientUpdate(payload.data.attributes ?? {})),
+          );
+          return Handlers.data(oauthClientResource(updated));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { oidc } = yield* administrator(request);
+          yield* oidcProviderFailures(oidc.deleteClient(params.id));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** An SSO call's failures: a refusal is `400`, a store failure `500`. */
+const asSsoRequest = <A, R>(
+  self: Effect.Effect<A, SsoError | AuthError, R>,
+): Effect.Effect<A, S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(self, {
+    SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Layer implementing the `sso-providers` group: register an enterprise SSO
+ * connection (see `ssoProvidersGroup` in `HttpApi.ts`).
+ */
+export const ssoProvidersGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "sso-providers", (handlers) =>
+    handlers.handle("create", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const user = yield* requireAdminCaller(request, cfg);
+        const sso = yield* resolveSso;
+        // The attributes are a union discriminated on `protocol`; without one
+        // they are an OIDC registration.
+        const attributes = payload.data.attributes;
+        const organizationId = payload.data.relationships?.organization?.data?.id;
+        const provider =
+          attributes.protocol === "saml"
+            ? yield* asSsoRequest(
+                sso.service.registerSamlProvider(
+                  user.id,
+                  samlRegistration(attributes, organizationId),
+                ),
+              )
+            : yield* asSsoRequest(
+                sso.service.registerProvider(user.id, oidcRegistration(attributes, organizationId)),
+              );
+        return Handlers.data(ssoProviderResource(provider));
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
+/**
+ * Layer implementing the `sso-authorizations` group: start an SSO sign-in
+ * (see `ssoAuthorizationsGroup` in `HttpApi.ts`).
+ */
+export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
+  AuthApi,
+  "sso-authorizations",
+  (handlers) =>
+    handlers.handle("create", ({ payload }) =>
+      Effect.gen(function* () {
+        const sso = yield* resolveSso;
+        const result = yield* asSsoRequest(
+          sso.service.signIn(ssoSelector(payload.data.attributes)),
+        );
+        return Handlers.data(
+          R.SsoAuthorization.make({ id: result.state, attributes: { url: result.url } }),
+        );
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+);
+
+/**
+ * Layer implementing the `tokens` group: sign a JWT for the signed-in user
+ * (see `tokensGroup` in `HttpApi.ts`).
+ */
+export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "tokens", (handlers) =>
+    handlers.handle("create", ({ request }) =>
+      Effect.gen(function* () {
+        const resolved = yield* requireSession(request, cfg);
+        const jwt = yield* resolveJwt;
+        const { token, expiresAt } = yield* storeFailure(jwt.service.sign(resolved.user));
+        // A token is not stored: its id is its digest, never the token itself.
+        return Handlers.data(
+          R.Token.make({ id: hashToken(token), attributes: { token, expiresAt } }),
+        );
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
+/**
+ * Settle a device authorization: done, or an unknown or settled code as
+ * `400`, a store failure as `500`.
+ */
+const deviceDecision = <R>(
+  decision: Effect.Effect<void, DeviceCodeError | AuthError, R>,
+): Effect.Effect<void, S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(decision, {
+    DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Layer implementing the `device-authorizations` group: the verification
+ * page's approval or denial of a device's user code (see
+ * `deviceAuthorizationsGroup` in `HttpApi.ts`).
+ */
+export const deviceAuthorizationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "device-authorizations", (handlers) =>
+    handlers.handle("decide", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const { userCode, decision } = payload.data.attributes;
+        // Approving grants the device the caller's session, so it needs one;
+        // denying needs none.
+        const approver =
+          decision === "approved" ? (yield* requireSession(request, cfg)).user.id : undefined;
+        const device = yield* resolveDevice;
+        // Rate-limit user_code attempts per RFC 8628 §5.2: user codes are ~39
+        // bits, so without a per-code limit pending codes could be enumerated
+        // (approve) or griefed at scale (deny, which is unauthenticated).
+        yield* applyUserCodeRateLimit(userCode, device.service);
+        return yield* deviceDecision(
+          approver === undefined
+            ? device.service.deny(userCode)
+            : device.service.approve(userCode, approver),
+        );
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
 /**
  * Every group of the {@link AuthApi} contract, with the JSON:API protocol
  * middleware its resource groups declare: what `HttpApiBuilder.layer(AuthApi)`
@@ -2974,27 +3615,21 @@ export const groupLayers = (
     organizationRolesGroupLayer(config, multiSession),
     teamsGroupLayer(config, multiSession),
     teamMembersGroupLayer(config, multiSession),
+    adminUsersGroupLayer(config, multiSession),
+    userBansGroupLayer(config, multiSession),
+    impersonationsGroupLayer(config, multiSession),
+    apiKeysGroupLayer(config, multiSession),
+    oauthClientsGroupLayer(config, multiSession),
+    ssoProvidersGroupLayer(config, multiSession),
+    ssoAuthorizationsGroupLayer,
+    tokensGroupLayer(config, multiSession),
+    deviceAuthorizationsGroupLayer(config, multiSession),
     scimGroupLayer(),
   ).pipe(
     // The protocol middleware the JSON:API endpoints declare: content
     // negotiation, schema errors as error documents, and the create's
     // `Location` header.
     Layer.provideMerge(JsonApiMiddleware.layer),
-  );
-
-/**
- * Answer a device-code approval or denial: `{ status: true }`, an unknown or
- * settled code as `400`, a store failure as `500`.
- */
-const deviceDecision = <R>(
-  decision: Effect.Effect<void, DeviceCodeError | AuthError, R>,
-): Effect.Effect<S.StatusResponse, S.BadRequest | S.InternalServerError, R> =>
-  decision.pipe(
-    Effect.catchTags({
-      DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-      AuthError: (e) => internalServerError(e),
-    }),
-    Effect.as({ status: true }),
   );
 
 /** Layer implementing the `auth` group handlers. */
@@ -3061,360 +3696,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "device");
-        }),
-      )
-      .handle("deviceApprove", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const device = yield* resolveDevice;
-          // Rate-limit user_code attempts per RFC 8628 §5.2 to prevent
-          // enumeration of pending codes (approve is session-gated, but
-          // still benefits from per-code throttling).
-          yield* applyUserCodeRateLimit(payload.userCode, device.service);
-          return yield* deviceDecision(device.service.approve(payload.userCode, resolved.user.id));
-        }),
-      )
-      .handle("deviceDeny", ({ payload }) =>
-        Effect.gen(function* () {
-          const device = yield* resolveDevice;
-          // Rate-limit unauthenticated deny attempts per RFC 8628 §5.2.
-          // User codes are ~39 bits; without throttling an attacker can grief
-          // pending codes at scale.
-          yield* applyUserCodeRateLimit(payload.userCode, device.service);
-          return yield* deviceDecision(device.service.deny(payload.userCode));
-        }),
-      )
-      // --- Admin ------------------------------------------------------------
-      .handle("adminListUsers", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const result = yield* admin.service
-            .listUsers(resolved.user, {
-              ...(payload.limit !== undefined && { limit: payload.limit }),
-              ...(payload.offset !== undefined && { offset: payload.offset }),
-              ...(payload.searchEmail !== undefined && { searchEmail: payload.searchEmail }),
-            })
-            .pipe(
-              Effect.catchTags({
-                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          const users = yield* Effect.forEach(result.users, encodeUserView, { concurrency: 1 });
-          return { users, total: result.total };
-        }),
-      )
-      .handle("adminSetRole", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const user = yield* admin.service
-            .setRole(resolved.user, payload.userId, payload.role)
-            .pipe(
-              Effect.catchTags({
-                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return yield* encodeUserView(user);
-        }),
-      )
-      .handle("adminBanUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const user = yield* admin.service
-            .banUser(resolved.user, payload.userId, {
-              ...(payload.reason !== undefined && { reason: payload.reason }),
-              ...(payload.expiresIn !== undefined && { expiresIn: payload.expiresIn }),
-            })
-            .pipe(
-              Effect.catchTags({
-                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return yield* encodeUserView(user);
-        }),
-      )
-      .handle("adminUnbanUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const user = yield* admin.service.unbanUser(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return yield* encodeUserView(user);
-        }),
-      )
-      .handle("adminRemoveUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          yield* admin.service.removeUser(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-        }),
-      )
-      .handle("adminRevokeSessions", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          yield* admin.service.revokeUserSessions(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("adminImpersonate", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const userService = yield* UserService;
-          const session = yield* admin.service.impersonateUser(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const user = yield* userService
-            .getUser(session.userId)
-            .pipe(Effect.catch(internalServerError));
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, session, cfg);
-        }),
-      )
-      .handle("adminStopImpersonating", ({ request }) =>
-        Effect.gen(function* () {
-          yield* resolveAdmin; // 404 when admin is not enabled
-          const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionService;
-          yield* sessionManager
-            .invalidateSession(resolved.session.id)
-            .pipe(Effect.catch(internalServerError));
-          return yield* HttpServerResponse.json({ status: true }).pipe(
-            Effect.flatMap((response) =>
-              HttpServerResponse.setCookie(response, cfg.name, "", clearCookieOptions(cfg)),
-            ),
-            Effect.flatMap((response) =>
-              cfg.cache !== undefined
-                ? HttpServerResponse.setCookie(
-                    response,
-                    dataCookieName(cfg),
-                    "",
-                    clearCookieOptions(cfg),
-                  )
-                : Effect.succeed(response),
-            ),
-            Effect.orDie,
-          );
-        }),
-      )
-      // --- API keys ---------------------------------------------------------
-      .handle("apiKeyCreate", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          yield* requireInteractiveCredential(request);
-          const apiKey = yield* resolveApiKey;
-          const result = yield* apiKey.service
-            .create(resolved.user.id, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.prefix !== undefined && { prefix: payload.prefix }),
-              ...(payload.expiresIn !== undefined && { expiresIn: payload.expiresIn }),
-              ...(payload.permissions !== undefined && { permissions: payload.permissions }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-              ...(payload.remaining !== undefined && { remaining: payload.remaining }),
-              ...(payload.rateLimit !== undefined && { rateLimit: payload.rateLimit }),
-            })
-            .pipe(
-              Effect.catchTags({
-                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return { key: result.key, apiKey: encodeApiKey(result.apiKey) };
-        }),
-      )
-      .handle("apiKeyList", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveApiKey;
-          const keys = yield* apiKey.service.list(resolved.user.id).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return keys.map(encodeApiKey);
-        }),
-      )
-      .handle("apiKeyUpdate", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveApiKey;
-          const updated = yield* apiKey.service
-            .update(resolved.user.id, params.keyId, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.enabled !== undefined && { enabled: payload.enabled }),
-              ...(payload.expiresAt !== undefined && { expiresAt: payload.expiresAt }),
-              ...(payload.permissions !== undefined && { permissions: payload.permissions }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-              ...(payload.remaining !== undefined && { remaining: payload.remaining }),
-              ...(payload.rateLimit !== undefined && { rateLimit: payload.rateLimit }),
-            })
-            .pipe(
-              Effect.catchTags({
-                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeApiKey(updated);
-        }),
-      )
-      .handle("apiKeyDelete", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveApiKey;
-          yield* apiKey.service.delete(resolved.user.id, params.keyId).pipe(
-            Effect.catchTags({
-              ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-        }),
-      )
-      // --- Enterprise SSO ---------------------------------------------------
-      .handle("ssoRegister", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const sso = yield* resolveSso;
-          // The payload is a union discriminated on `protocol`; a body without
-          // one is an OIDC registration (what every pre-SAML client sends).
-          if (payload.protocol === "saml") {
-            const samlProvider = yield* sso.service
-              .registerSamlProvider(resolved.user.id, {
-                protocol: "saml",
-                domain: payload.domain,
-                entityId: payload.entityId,
-                ssoUrl: payload.ssoUrl,
-                idpCertificates: payload.idpCertificates,
-                spEntityId: payload.spEntityId,
-                acsUrl: payload.acsUrl,
-                ...(payload.signatureAlgorithms !== undefined && {
-                  signatureAlgorithms: payload.signatureAlgorithms,
-                }),
-                ...(payload.wantAssertionsSigned !== undefined && {
-                  wantAssertionsSigned: payload.wantAssertionsSigned,
-                }),
-                ...(payload.wantAuthnResponseSigned !== undefined && {
-                  wantAuthnResponseSigned: payload.wantAuthnResponseSigned,
-                }),
-                ...(payload.forceAuthn !== undefined && { forceAuthn: payload.forceAuthn }),
-                ...(payload.organizationId !== undefined && {
-                  organizationId: payload.organizationId,
-                }),
-              })
-              .pipe(
-                Effect.catchTags({
-                  SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                  AuthError: (e) => internalServerError(e),
-                }),
-              );
-            return encodeSsoProvider(samlProvider);
-          }
-          const provider = yield* sso.service
-            .registerProvider(resolved.user.id, {
-              issuer: payload.issuer,
-              domain: payload.domain,
-              clientId: payload.clientId,
-              clientSecret: payload.clientSecret,
-              redirectUri: payload.redirectUri,
-              ...(payload.discover !== undefined && { discover: payload.discover }),
-              ...(payload.authorizationEndpoint !== undefined && {
-                authorizationEndpoint: payload.authorizationEndpoint,
-              }),
-              ...(payload.tokenEndpoint !== undefined && {
-                tokenEndpoint: payload.tokenEndpoint,
-              }),
-              ...(payload.userInfoEndpoint !== undefined && {
-                userInfoEndpoint: payload.userInfoEndpoint,
-              }),
-              ...(payload.jwksEndpoint !== undefined && { jwksEndpoint: payload.jwksEndpoint }),
-              ...(payload.scopes !== undefined && { scopes: payload.scopes }),
-              ...(payload.usePKCE !== undefined && { usePKCE: payload.usePKCE }),
-              ...(payload.organizationId !== undefined && {
-                organizationId: payload.organizationId,
-              }),
-            })
-            .pipe(
-              Effect.catchTags({
-                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeSsoProvider(provider);
-        }),
-      )
-      .handle("signInSso", ({ payload }) =>
-        Effect.gen(function* () {
-          const sso = yield* resolveSso;
-          const result = yield* sso.service
-            .signIn({
-              ...(payload.email !== undefined && { email: payload.email }),
-              ...(payload.domain !== undefined && { domain: payload.domain }),
-              ...(payload.providerId !== undefined && { providerId: payload.providerId }),
-            })
-            .pipe(
-              Effect.catchTags({
-                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return { url: result.url, state: result.state };
         }),
       )
       .handle("ssoCallback", ({ payload }) =>
@@ -3515,93 +3796,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
         }),
       )
-      // --- JWT --------------------------------------------------------------
-      .handle("jwtToken", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const jwt = yield* resolveJwt;
-          const result = yield* jwt.service.sign(resolved.user).pipe(
-            Effect.catchTags({
-              JwtError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { token: result.token, expiresAt: result.expiresAt };
-        }),
-      )
       .handle("jwtJwks", () => jwksDocument())
       // --- OIDC provider ------------------------------------------------------
-      .handle("oidcRegisterClient", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          const result = yield* oidc.service
-            .registerClient(
-              {
-                name: payload.name,
-                redirectUris: payload.redirectUris,
-                ...(payload.type !== undefined && { type: payload.type }),
-                ...(payload.skipConsent !== undefined && { skipConsent: payload.skipConsent }),
-                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-              },
-              resolved.user.id,
-            )
-            .pipe(oidcProviderFailures);
-          return {
-            client: encodeOidcClient(result.client),
-            ...(result.clientSecret !== undefined && { clientSecret: result.clientSecret }),
-          };
-        }),
-      )
-      .handle("oidcListClients", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          const clients = yield* oidc.service.listClients().pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return clients.map(encodeOidcClient);
-        }),
-      )
-      .handle("oidcUpdateClient", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          const updated = yield* oidc.service
-            .updateClient(params.clientId, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.redirectUris !== undefined && {
-                redirectUris: payload.redirectUris,
-              }),
-              ...(payload.skipConsent !== undefined && { skipConsent: payload.skipConsent }),
-              ...(payload.disabled !== undefined && { disabled: payload.disabled }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-            })
-            .pipe(oidcProviderFailures);
-          return encodeOidcClient(updated);
-        }),
-      )
-      .handle("oidcDeleteClient", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          return yield* oidc.service.deleteClient(params.clientId).pipe(oidcProviderFailures);
-        }),
-      )
       .handle("oidcAuthorize", ({ query, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
@@ -4651,9 +4847,6 @@ export interface AuthWebHandlerOptions {
    * as seen by the application. When deployed behind a reverse proxy you MUST
    * configure {@link trustedProxy} (from issue #81 / `ClientIP`) so the proxy
    * forwards the correct `Host` and the origin comparison is accurate.
-   *
-   * Note: `GET /token` (JWT issuance) is treated as state-changing and
-   * therefore also subject to this check.
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
   /**
@@ -4807,24 +5000,13 @@ const referenceResponse = (): Response =>
 /**
  * CSRF guard for the web handler.
  *
- * Returns `true` when the request may proceed.
- *
- * @param inner - The path relative to the mount prefix (e.g. `/sessions`), or
- *   `null` when the request is outside the prefix.  Used to detect `GET /token`
- *   which issues a JWT and must be treated as state-changing.
+ * Returns `true` when the request may proceed. Every state-changing request is
+ * checked; a read (`GET`, `HEAD`, `OPTIONS`) mints nothing (a JWT is
+ * `POST /tokens`), so it passes.
  */
-const isTrustedRequest = (
-  request: Request,
-  trustedOrigins: ReadonlyArray<string>,
-  inner: string | null,
-): boolean => {
+const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string>): boolean => {
   const method = request.method.toUpperCase();
-
-  // GET /token issues a signed JWT — treat as state-changing so it is subject
-  // to the same origin check as POST requests.
-  const isStateSafe =
-    (method === "GET" || method === "HEAD" || method === "OPTIONS") && inner !== "/token";
-  if (isStateSafe) return true;
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
 
   const origin = request.headers.get("origin");
 
@@ -5046,7 +5228,7 @@ const serve = (
       return Promise.resolve(Response.json({ message: "Not Found" }, { status: 404 }));
     }
 
-    if (!isTrustedRequest(request, trustedOrigins, inner)) {
+    if (!isTrustedRequest(request, trustedOrigins)) {
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
 

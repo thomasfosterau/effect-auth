@@ -1,6 +1,13 @@
 import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
-import { Document, Endpoint, Group, MediaType, Middleware } from "@thomasfosterau/effect-jsonapi";
+import {
+  Document,
+  Endpoint,
+  Group,
+  MediaType,
+  Middleware,
+  Query,
+} from "@thomasfosterau/effect-jsonapi";
 import * as S from "./HttpApiSchema.ts";
 import * as E from "./JsonApiErrors.ts";
 import * as R from "./Resources.ts";
@@ -713,8 +720,8 @@ export const deviceSessionsGroup = Group.make(
   }),
 );
 
-/** The errors an organization request can answer with. */
-const organizationErrors = [
+/** The errors a request on a signed-in resource (an organization, an admin action, a key) can answer with. */
+const resourceErrors = [
   E.BadRequest,
   E.Unauthorized,
   E.Forbidden,
@@ -723,7 +730,7 @@ const organizationErrors = [
 ] as const;
 
 /** The same errors, as the wire schemas a hand-built endpoint declares. */
-const organizationErrorWires = [
+const resourceErrorWires = [
   E.BadRequest.wire,
   E.Unauthorized.wire,
   E.Forbidden.wire,
@@ -731,12 +738,12 @@ const organizationErrorWires = [
   E.InternalServerError.wire,
 ];
 
-/** The organization errors and a `409` (`POST /organizations/:id/roles` of a defined role). */
-const organizationConflictErrorWires = [...organizationErrorWires, E.Conflict.wire];
+/** Those errors and a `409` (`POST /organizations/:id/roles` of a defined role). */
+const resourceConflictErrorWires = [...resourceErrorWires, E.Conflict.wire];
 
 /**
  * `GET <path>`, the `:id` in it naming the parent: a JSON:API collection of
- * `resource`, answering the organization errors.
+ * `resource`, answering the resource errors.
  */
 const childCollection = <
   const Name extends string,
@@ -750,7 +757,7 @@ const childCollection = <
   HttpApiEndpoint.get(name, path, {
     params: { id: Schema.String },
     success: MediaType.asJsonApi(Document.CollectionDocument(resource), 200),
-    error: organizationErrorWires,
+    error: resourceErrorWires,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors);
@@ -769,7 +776,7 @@ const childCreate = <
   path: Path,
   payload: Payload,
   resource: Resource,
-  errors: ReadonlyArray<(typeof organizationConflictErrorWires)[number]>,
+  errors: ReadonlyArray<(typeof resourceConflictErrorWires)[number]>,
 ) =>
   HttpApiEndpoint.post(name, path, {
     params: { id: Schema.String },
@@ -797,7 +804,7 @@ const itemAction = <
   HttpApiEndpoint.post(name, path, {
     params: { id: Schema.String },
     success: MediaType.asJsonApi(Document.DataDocument(resource), status),
-    error: organizationErrorWires,
+    error: resourceErrorWires,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors);
@@ -909,26 +916,26 @@ export const organizationsGroup = Group.make(
   Endpoint.list(R.Organization, {
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
-  Endpoint.create(R.Organization, { errors: organizationErrors }),
+  Endpoint.create(R.Organization, { errors: resourceErrors }),
   HttpApiEndpoint.patch("setActive", "/organizations/active", {
     payload: jsonApiPayload(ActiveOrganizationDocument),
     success: HttpApiSchema.NoContent,
-    error: organizationErrorWires,
+    error: resourceErrorWires,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
   Endpoint.get(R.Organization, {
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
-  Endpoint.update(R.Organization, { errors: organizationErrors }),
-  Endpoint.delete(R.Organization, { errors: organizationErrors }),
+  Endpoint.update(R.Organization, { errors: resourceErrors }),
+  Endpoint.delete(R.Organization, { errors: resourceErrors }),
   childCollection("listMembers", "/organizations/:id/members", R.OrganizationMember),
   childCreate(
     "addMember",
     "/organizations/:id/members",
     MemberCreateDocument,
     R.OrganizationMember,
-    organizationErrorWires,
+    resourceErrorWires,
   ),
   childCollection("listInvitations", "/organizations/:id/invitations", R.Invitation),
   childCreate(
@@ -936,7 +943,7 @@ export const organizationsGroup = Group.make(
     "/organizations/:id/invitations",
     InvitationCreateDocument,
     R.Invitation,
-    organizationErrorWires,
+    resourceErrorWires,
   ),
   childCollection("listDomains", "/organizations/:id/domains", R.OrganizationDomain),
   childCreate(
@@ -944,7 +951,7 @@ export const organizationsGroup = Group.make(
     "/organizations/:id/domains",
     DomainCreateDocument,
     R.OrganizationDomain,
-    organizationErrorWires,
+    resourceErrorWires,
   ),
   childCollection("listRoles", "/organizations/:id/roles", R.OrganizationRole),
   childCreate(
@@ -952,7 +959,7 @@ export const organizationsGroup = Group.make(
     "/organizations/:id/roles",
     RoleCreateDocument,
     R.OrganizationRole,
-    organizationConflictErrorWires,
+    resourceConflictErrorWires,
   ),
   childCollection("listTeams", "/organizations/:id/teams", R.Team),
   childCreate(
@@ -960,7 +967,7 @@ export const organizationsGroup = Group.make(
     "/organizations/:id/teams",
     TeamCreateDocument,
     R.Team,
-    organizationErrorWires,
+    resourceErrorWires,
   ),
 );
 
@@ -979,8 +986,8 @@ export const organizationsGroup = Group.make(
  */
 export const organizationMembersGroup = Group.make(
   R.OrganizationMember,
-  Endpoint.update(R.OrganizationMember, { errors: organizationErrors }),
-  Endpoint.delete(R.OrganizationMember, { errors: organizationErrors }),
+  Endpoint.update(R.OrganizationMember, { errors: resourceErrors }),
+  Endpoint.delete(R.OrganizationMember, { errors: resourceErrors }),
   childCollection("listTeams", "/organization-members/:id/teams", R.Team),
 );
 
@@ -998,7 +1005,7 @@ export const invitationsGroup = Group.make(
   R.Invitation,
   Endpoint.update(R.Invitation, {
     success: InvitationTransitionDocument,
-    errors: organizationErrors,
+    errors: resourceErrors,
   }),
   itemAction("deliver", "/invitations/:id/deliveries", R.Invitation, 202),
 );
@@ -1017,7 +1024,7 @@ export const invitationsGroup = Group.make(
  */
 export const organizationDomainsGroup = Group.make(
   R.OrganizationDomain,
-  Endpoint.delete(R.OrganizationDomain, { errors: organizationErrors }),
+  Endpoint.delete(R.OrganizationDomain, { errors: resourceErrors }),
   itemAction("verify", "/organization-domains/:id/verifications", R.OrganizationDomain, 200),
 );
 
@@ -1034,8 +1041,8 @@ export const organizationDomainsGroup = Group.make(
  */
 export const organizationRolesGroup = Group.make(
   R.OrganizationRole,
-  Endpoint.update(R.OrganizationRole, { errors: organizationErrors }),
-  Endpoint.delete(R.OrganizationRole, { errors: organizationErrors }),
+  Endpoint.update(R.OrganizationRole, { errors: resourceErrors }),
+  Endpoint.delete(R.OrganizationRole, { errors: resourceErrors }),
 );
 
 /**
@@ -1052,15 +1059,15 @@ export const organizationRolesGroup = Group.make(
  */
 export const teamsGroup = Group.make(
   R.Team,
-  Endpoint.update(R.Team, { errors: organizationErrors }),
-  Endpoint.delete(R.Team, { errors: organizationErrors }),
+  Endpoint.update(R.Team, { errors: resourceErrors }),
+  Endpoint.delete(R.Team, { errors: resourceErrors }),
   childCollection("listMembers", "/teams/:id/members", R.TeamMember),
   childCreate(
     "addMember",
     "/teams/:id/members",
     TeamMemberCreateDocument,
     R.TeamMember,
-    organizationErrorWires,
+    resourceErrorWires,
   ),
 );
 
@@ -1071,9 +1078,316 @@ export const teamsGroup = Group.make(
  */
 export const teamMembersGroup = Group.make(
   R.TeamMember,
-  Endpoint.delete(R.TeamMember, { errors: organizationErrors }),
+  Endpoint.delete(R.TeamMember, { errors: resourceErrors }),
 );
-/** Email/password + session endpoints. */
+
+// -----------------------------------------------------------------------------
+// Admin, impersonation, API keys, OAuth clients, SSO, JWTs and device approval
+// (#205, slice 5)
+// -----------------------------------------------------------------------------
+
+/** The `meta` of `GET /admin/users`: how many users match, before paging. */
+const AdminUsersMeta = Schema.Struct({ total: Schema.Finite });
+
+/** The body of `PATCH /admin/users/:id`: the user's new `role`. */
+export const AdminUserUpdateDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("users"),
+    id: Schema.String,
+    attributes: Schema.Struct({ role: Schema.String }),
+  }),
+});
+export type AdminUserUpdateDocument = typeof AdminUserUpdateDocument.Type;
+
+/**
+ * `admin-users`: user administration. Every call needs the server's `isAdmin`
+ * (`403` otherwise); `404` when admin is not enabled.
+ *
+ * - `GET /admin/users?filter[email]=…&page[offset]=…&page[limit]=…`: the
+ *   users, filtered by a case-insensitive substring of an email address,
+ *   `meta.total` counting every match (was `POST /admin/users/list`).
+ * - `PATCH /admin/users/:id`: set the user's `role`.
+ * - `DELETE /admin/users/:id`: delete the user and revoke their sessions; `204`.
+ * - `DELETE /admin/users/:id/sessions`: revoke every session of the user; `204`.
+ *
+ * An unknown user answers `400`, as it always has.
+ */
+export const adminUsersGroup = Group.make(
+  "admin-users",
+  Endpoint.list(R.User, {
+    path: "/admin/users",
+    page: Query.Page.Offset,
+    filter: { email: Schema.optionalKey(Schema.String) },
+    meta: AdminUsersMeta,
+    errors: resourceErrors,
+  }),
+  Endpoint.update(R.User, {
+    path: "/admin/users/:id",
+    payload: AdminUserUpdateDocument,
+    errors: resourceErrors,
+  }),
+  Endpoint.delete(R.User, { path: "/admin/users/:id", errors: resourceErrors }),
+  HttpApiEndpoint.delete("deleteSessions", "/admin/users/:id/sessions", {
+    params: { id: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: resourceErrorWires,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * The body of `POST /user-bans`: the user to ban, as the `user` relationship,
+ * and optionally the `reason` and how long the ban lasts (`expiresIn`, in
+ * milliseconds; omitted, the server's default, else permanent).
+ */
+export const UserBanCreateDocument = userLinkDocument(
+  "user-bans",
+  Schema.Struct({
+    reason: Schema.optional(Schema.String),
+    expiresIn: Schema.optional(Schema.Finite),
+  }),
+);
+export type UserBanCreateDocument = typeof UserBanCreateDocument.Type;
+
+/** A resource of `R` with the user it names in `included`. */
+const withUserDocument = <S extends Schema.Top>(resource: S) =>
+  Document.DataDocument(resource, { included: Schema.Union([R.User]) });
+
+/**
+ * `user-bans`: bans, keyed by the banned user's id. Both need `isAdmin`.
+ *
+ * - `POST /user-bans`: ban the user the `user` relationship names, revoking
+ *   their sessions; `201` with the ban, the updated user included. An
+ *   administrator can be banned by nobody, and nobody can ban themselves
+ *   (`403`).
+ * - `DELETE /user-bans/:id`: lift the ban on user `:id`; `204`.
+ */
+export const userBansGroup = Group.make(
+  R.UserBan,
+  Endpoint.create(R.UserBan, {
+    payload: UserBanCreateDocument,
+    success: withUserDocument(R.UserBan),
+    errors: resourceErrors,
+  }),
+  Endpoint.delete(R.UserBan, { errors: resourceErrors }),
+);
+
+/** The body of `POST /impersonations`: the user to act as, as the `user` relationship. */
+export const ImpersonationCreateDocument = userLinkDocument("impersonations", Schema.Struct({}));
+export type ImpersonationCreateDocument = typeof ImpersonationCreateDocument.Type;
+
+/**
+ * `impersonations`: an administrator signed in as another user.
+ *
+ * - `POST /impersonations`: start one (`isAdmin`); `201` with the
+ *   impersonation, the impersonated user included, and the session cookie now
+ *   the impersonation's session (was `POST /admin/impersonate`).
+ * - `DELETE /impersonations/current`: end the impersonation the request
+ *   carries, signing its session out and clearing the session cookies; `204`.
+ *   A session that is not an impersonation answers `404` (was
+ *   `POST /admin/stop-impersonating`).
+ */
+export const impersonationsGroup = Group.make(
+  R.Impersonation,
+  Endpoint.create(R.Impersonation, {
+    payload: ImpersonationCreateDocument,
+    success: withUserDocument(R.Impersonation),
+    errors: [...resourceErrors, E.TooManyRequests],
+  }),
+  Endpoint.delete(R.Impersonation, {
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
+);
+
+/** The body of `POST /api-keys`: the new key's settings, all optional. */
+export const ApiKeyCreateDocument = writeDocument("api-keys", S.ApiKeyCreatePayload);
+export type ApiKeyCreateDocument = typeof ApiKeyCreateDocument.Type;
+
+/** The errors a request on one of the caller's own keys can answer with. */
+const apiKeyErrors = [E.BadRequest, E.Unauthorized, E.NotFound, E.InternalServerError] as const;
+
+/**
+ * `api-keys`: the signed-in user's API keys. `404` when API keys are not
+ * enabled.
+ *
+ * - `GET /api-keys`: every key the caller owns.
+ * - `POST /api-keys`: mint one; `201` with the key and, in `meta.key`, the
+ *   plaintext key, shown this once. Minting needs an interactive credential
+ *   (the session cookie): over a bearer credential it answers `403`.
+ * - `PATCH /api-keys/:id`: change its `name`, `enabled`, `expiresAt`,
+ *   `permissions`, `metadata`, `remaining` or `rateLimit`.
+ * - `DELETE /api-keys/:id`: delete it; `204`.
+ *
+ * A key the caller does not own answers `400`, as an unknown one does.
+ */
+export const apiKeysGroup = Group.make(
+  R.ApiKey,
+  Endpoint.list(R.ApiKey, { errors: [E.Unauthorized, E.NotFound, E.InternalServerError] }),
+  Endpoint.create(R.ApiKey, {
+    payload: ApiKeyCreateDocument,
+    meta: Schema.Struct({ key: Schema.String }),
+    errors: resourceErrors,
+  }),
+  Endpoint.update(R.ApiKey, { errors: apiKeyErrors }),
+  Endpoint.delete(R.ApiKey, { errors: apiKeyErrors }),
+);
+
+/**
+ * `oauth-clients`: the OIDC provider's registered clients. Every call needs
+ * the server's `isAdmin` (`403` otherwise); `404` when the provider is not
+ * enabled.
+ *
+ * - `GET /oauth-clients`: every store-registered client (was
+ *   `GET /oauth2/clients`).
+ * - `POST /oauth-clients`: register one; `201` with the client and, for a
+ *   confidential (`web`) client, its secret in `meta.clientSecret`, shown this
+ *   once (was `POST /oauth2/register`).
+ * - `PATCH /oauth-clients/:id` · `DELETE /oauth-clients/:id`: change or delete
+ *   one (was `/oauth2/clients/:clientId`).
+ *
+ * A refused change (an unknown or statically configured client) answers `400`.
+ * RFC 7591 dynamic registration stays at `/register`.
+ */
+export const oauthClientsGroup = Group.make(
+  R.OAuthClient,
+  Endpoint.list(R.OAuthClient, { errors: resourceErrors }),
+  Endpoint.create(R.OAuthClient, {
+    meta: Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) }),
+    errors: resourceErrors,
+  }),
+  Endpoint.update(R.OAuthClient, { errors: resourceErrors }),
+  Endpoint.delete(R.OAuthClient, { errors: resourceErrors }),
+);
+
+/**
+ * The body of `POST /sso-providers`: one protocol's registration fields,
+ * discriminated by `protocol` (omitted, `oidc`), and the connection's
+ * organization as the optional `organization` relationship (absent or
+ * `data: null` for none), as the answer carries it (#642).
+ */
+export const SsoProviderCreateDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("sso-providers"),
+    attributes: S.SsoRegisterAttributes,
+    relationships: Schema.optionalKey(
+      Schema.Struct({
+        organization: Schema.optionalKey(
+          Schema.Struct({
+            data: Schema.NullOr(
+              Schema.Struct({ type: Schema.Literal("organizations"), id: Schema.String }),
+            ),
+          }),
+        ),
+      }),
+    ),
+  }),
+});
+export type SsoProviderCreateDocument = typeof SsoProviderCreateDocument.Type;
+
+/**
+ * `sso-providers`: `POST /sso-providers` registers an enterprise SSO
+ * connection (OIDC or SAML); `201` with it. Needs the server's `isAdmin`
+ * (`403` otherwise); a refused registration answers `400`, and `404` means SSO
+ * is not enabled (was `POST /sso/register`).
+ */
+export const ssoProvidersGroup = Group.make(
+  R.SsoProvider,
+  Endpoint.create(R.SsoProvider, {
+    payload: SsoProviderCreateDocument,
+    errors: resourceErrors,
+  }),
+);
+
+/**
+ * The body of `POST /sso-authorizations`: how to find the connection, by any
+ * one of `email` (its domain), `domain` or `providerId`.
+ */
+export const SsoAuthorizationCreateDocument = writeDocument(
+  "sso-authorizations",
+  S.SsoSignInPayload,
+);
+export type SsoAuthorizationCreateDocument = typeof SsoAuthorizationCreateDocument.Type;
+
+/**
+ * `sso-authorizations`: `POST /sso-authorizations` starts an SSO sign-in;
+ * `201` with the IdP `url` to send the browser to, the round-trip state as the
+ * id. No connection for the selector answers `400`; `404` means SSO is not
+ * enabled (was `POST /sign-in/sso`).
+ */
+export const ssoAuthorizationsGroup = Group.make(
+  R.SsoAuthorization,
+  Endpoint.create(R.SsoAuthorization, {
+    payload: SsoAuthorizationCreateDocument,
+    errors: [E.BadRequest, E.NotFound, E.InternalServerError],
+  }),
+);
+
+/**
+ * `tokens`: `POST /tokens` signs a JWT for the signed-in user; `201` with it.
+ * `404` when JWT is not enabled (was `GET /token`, a read that minted a
+ * credential). The keys that verify it are at `GET /jwks`.
+ */
+export const tokensGroup = Group.make(
+  R.Token,
+  HttpApiEndpoint.post("create", "/tokens", {
+    success: MediaType.asJsonApi(Document.DataDocument(R.Token), 201),
+    error: [E.Unauthorized.wire, E.NotFound.wire, E.InternalServerError.wire],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * The body of `POST /device-authorizations/decisions`: the user code the
+ * device showed, and the decision. The code travels in the body, never in the
+ * URL, so no access log or `Referer` carries it.
+ */
+export const DeviceAuthorizationDecisionDocument = writeDocument(
+  "device-authorization-decisions",
+  Schema.Struct({
+    userCode: Schema.String,
+    decision: Schema.Literals(["approved", "denied"]),
+  }),
+);
+export type DeviceAuthorizationDecisionDocument = typeof DeviceAuthorizationDecisionDocument.Type;
+
+/**
+ * `device-authorizations`: the verification page's side of the device grant
+ * (RFC 8628 §3.3, which leaves its shape to the server).
+ *
+ * - `POST /device-authorizations/decisions`: approve (signed in: the device
+ *   is granted the caller's session) or deny (no session needed) the pending
+ *   authorization a user code names; `204`. An unknown or settled code
+ *   answers `400`; each code allows 5 attempts per 15 minutes (`429`) (was
+ *   `POST /device/approve` · `/device/deny`).
+ *
+ * The device's own endpoints (`/device/code`, `/device/token`) keep RFC
+ * 8628's wire format. `404` when device authorization is not enabled.
+ */
+export const deviceAuthorizationsGroup = Group.make(
+  "device-authorizations",
+  HttpApiEndpoint.post("decide", "/device-authorizations/decisions", {
+    payload: jsonApiPayload(DeviceAuthorizationDecisionDocument),
+    success: HttpApiSchema.NoContent,
+    error: [
+      E.BadRequest.wire,
+      E.Unauthorized.wire,
+      E.NotFound.wire,
+      E.TooManyRequests.wire,
+      E.InternalServerError.wire,
+    ],
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
+);
+
+/**
+ * The externally specified endpoints: the RFC 8628 device grant
+ * (`/device/code`, `/device/token`), the SSO callbacks, the JWKS, and the OIDC
+ * provider's OAuth 2.0 / OIDC / RFC 7591 / RFC 8414 surface. Their wire
+ * formats are fixed by those specifications, so they are not JSON:API.
+ */
 export const authGroup = HttpApiGroup.make("auth").add(
   // Device authorization grant (RFC 8628). 404 when unconfigured.
   HttpApiEndpoint.post("deviceCode", "/device/code", {
@@ -1093,135 +1407,9 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.TooManyRequestsError,
     ],
   }),
-  HttpApiEndpoint.post("deviceApprove", "/device/approve", {
-    payload: S.DeviceUserCodePayload,
-    success: S.StatusResponse,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.BadRequestError,
-      S.TooManyRequestsError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("deviceDeny", "/device/deny", {
-    payload: S.DeviceUserCodePayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
-  }),
-  // --- Admin (session-authenticated; the actor must satisfy `isAdmin`).
-  // --- Authorization failures answer 403.
-  HttpApiEndpoint.post("adminListUsers", "/admin/users/list", {
-    payload: S.AdminListUsersPayload,
-    success: S.AdminUserListView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("adminSetRole", "/admin/users/set-role", {
-    payload: S.AdminSetRolePayload,
-    success: S.UserView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("adminBanUser", "/admin/users/ban", {
-    payload: S.AdminBanUserPayload,
-    success: S.UserView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("adminUnbanUser", "/admin/users/unban", {
-    payload: S.AdminUserActionPayload,
-    success: S.UserView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.post("adminRemoveUser", "/admin/users/remove", {
-    payload: S.AdminUserActionPayload,
-    success: HttpApiSchema.NoContent,
-    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("adminRevokeSessions", "/admin/users/revoke-sessions", {
-    payload: S.AdminUserActionPayload,
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
-  }),
-  HttpApiEndpoint.post("adminImpersonate", "/admin/impersonate", {
-    payload: S.AdminUserActionPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
-  HttpApiEndpoint.post("adminStopImpersonating", "/admin/stop-impersonating", {
-    success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  // --- API keys (session-authenticated management; `apiKeyCreate` additionally
-  // requires an interactive credential — see `requireInteractiveCredential`).
-  HttpApiEndpoint.post("apiKeyCreate", "/api-keys", {
-    payload: S.ApiKeyCreatePayload,
-    success: S.ApiKeyCreatedView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("apiKeyList", "/api-keys", {
-    success: S.ApiKeyListView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
-  HttpApiEndpoint.patch("apiKeyUpdate", "/api-keys/:keyId", {
-    params: { keyId: Schema.String },
-    payload: S.ApiKeyUpdatePayload,
-    success: S.ApiKeyView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  HttpApiEndpoint.delete("apiKeyDelete", "/api-keys/:keyId", {
-    params: { keyId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
-  // --- Enterprise SSO (OIDC relying party). 404 when the module is absent.
-  // Register is admin-gated (403 for non-admins).
-  HttpApiEndpoint.post("ssoRegister", "/sso/register", {
-    payload: S.SsoRegisterPayload,
-    success: S.SsoProviderView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  // Returns the IdP authorization URL; unknown domain/provider -> 400.
-  HttpApiEndpoint.post("signInSso", "/sign-in/sso", {
-    payload: S.SsoSignInPayload,
-    success: S.SsoUrlView,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
-  }),
+  // --- Enterprise SSO callbacks (relying party). 404 when the module is
+  // --- absent. The IdP sends the browser back here, so they keep their
+  // --- binding's wire format.
   // Completes the OIDC callback and issues a session (cookie).
   HttpApiEndpoint.post("ssoCallback", "/sso/callback", {
     payload: S.SsoCallbackPayload,
@@ -1254,55 +1442,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.SamlMetadataView,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
-  // --- JWT: issue a token for the session (`/token`) and serve the JWKS.
-  HttpApiEndpoint.get("jwtToken", "/token", {
-    success: S.JwtTokenView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
+  // --- JWT: the JWKS (RFC 7517) that verifies the tokens `POST /tokens` signs.
   HttpApiEndpoint.get("jwtJwks", "/jwks", {
     success: S.JwksView,
     error: [S.NotFoundError, S.InternalError],
   }),
   // --- OIDC provider (this server as an OpenID Connect IdP). 404 when the
-  // --- module is absent. Client management is admin-gated.
-  HttpApiEndpoint.post("oidcRegisterClient", "/oauth2/register", {
-    payload: S.OidcRegisterClientPayload,
-    success: S.OidcClientCreatedView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.get("oidcListClients", "/oauth2/clients", {
-    success: S.OidcClientListView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
-  }),
-  HttpApiEndpoint.patch("oidcUpdateClient", "/oauth2/clients/:clientId", {
-    params: { clientId: Schema.String },
-    payload: S.OidcClientUpdatePayload,
-    success: S.OidcClientView,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
-  HttpApiEndpoint.delete("oidcDeleteClient", "/oauth2/clients/:clientId", {
-    params: { clientId: Schema.String },
-    success: HttpApiSchema.NoContent,
-    error: [
-      S.NotFoundError,
-      S.UnauthorizedError,
-      S.ForbiddenError,
-      S.BadRequestError,
-      S.InternalError,
-    ],
-  }),
+  // --- module is absent. Client administration is `oauth-clients`.
   // Authorization endpoint: answers 302 (to the client's redirect_uri, the
   // login page, or the consent page). Declared NoContent — handlers return
   // raw redirect responses.
@@ -1568,6 +1714,15 @@ export const AuthApi = HttpApi.make("AuthApi")
   .add(organizationRolesGroup)
   .add(teamsGroup)
   .add(teamMembersGroup)
+  .add(adminUsersGroup)
+  .add(userBansGroup)
+  .add(impersonationsGroup)
+  .add(apiKeysGroup)
+  .add(oauthClientsGroup)
+  .add(ssoProvidersGroup)
+  .add(ssoAuthorizationsGroup)
+  .add(tokensGroup)
+  .add(deviceAuthorizationsGroup)
   .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({

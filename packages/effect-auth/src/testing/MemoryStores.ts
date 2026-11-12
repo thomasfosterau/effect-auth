@@ -25,6 +25,7 @@ import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";
+import { type ApiKey, ApiKeyStore } from "../ApiKey.ts";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
 import { type KeyValueStoreKeys, layerKV, layerMemoryKeyValueStore } from "../KeyValueStores.ts";
@@ -204,6 +205,34 @@ export const memorySessionStore = (
       Arr.fromIterable(MutableHashMap.values(sessions)).filter(
         (session) => session.userId === userId,
       ),
+    ),
+});
+
+/**
+ * `ApiKeyStore` over a `MutableHashMap` keyed by the key's id; `getByHash`
+ * finds the record whose `keyHash` (the SHA-256 digest of the plaintext key)
+ * matches. It honours the whole contract, which `apiKeyStoreConformance`
+ * checks.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const memoryApiKeyStore = (
+  keys: MutableHashMap.MutableHashMap<string, ApiKey> = MutableHashMap.empty(),
+): typeof ApiKeyStore.Service => ({
+  create: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
+  get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(keys, id))),
+  getByHash: (keyHash) =>
+    Effect.sync(() =>
+      Option.getOrNull(
+        Arr.findFirst(MutableHashMap.values(keys), (key) => key.keyHash === keyHash),
+      ),
+    ),
+  update: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
+  delete: (id) => Effect.sync(() => void MutableHashMap.remove(keys, id)),
+  listByUserId: (userId) =>
+    Effect.sync(() =>
+      Arr.filter(Arr.fromIterable(MutableHashMap.values(keys)), (key) => key.userId === userId),
     ),
 });
 
@@ -419,6 +448,7 @@ export type MemoryStores =
   | OAuthUserStore
   | OAuthAccountStore
   | SessionStore
+  | ApiKeyStore
   | IdentifierStore
   | MultiFactorStore
   | TrustedDeviceStore
@@ -471,6 +501,7 @@ export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(
       Layer.succeed(OAuthUserStore, memoryOAuthUserStore(table)),
       Layer.succeed(OAuthAccountStore, memoryOAuthAccountStore(table)),
       Layer.succeed(SessionStore, memorySessionStore()),
+      Layer.succeed(ApiKeyStore, memoryApiKeyStore()),
       Layer.succeed(IdentifierStore, memoryIdentifierStore()),
       Layer.succeed(MultiFactorStore, memoryMultiFactorStore()),
       Layer.succeed(TrustedDeviceStore, memoryTrustedDeviceStore()),
