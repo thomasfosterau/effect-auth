@@ -535,6 +535,39 @@ export const identifierStoreConformance = <E = never, R = never>(
         }),
     },
     {
+      name: "getByValue matches exactly: values differing only by case, accent or width are distinct (#602)",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* Identifier.IdentifierStore;
+          const owner = yield* newUser();
+          const rival = yield* newUser();
+          const claim = { ...email(owner), value: `bob-${uuid()}@example.test` };
+          yield* store.create(claim);
+          const lookAlike = claim.value.replace("@example.", "@exämple.");
+          yield* expectEqual(
+            "getByValue of an accented, an upper-case and a full-width variant",
+            yield* Effect.forEach(
+              [lookAlike, claim.value.toUpperCase(), claim.value.replace("bob-", "ｂｏｂ-")],
+              (value) => store.getByValue("email", value),
+              { concurrency: 1 },
+            ),
+            [null, null, null],
+          );
+          // The look-alike is a value of its own, which another user can hold.
+          yield* store.create({ ...email(rival), value: lookAlike });
+          yield* expectEqual(
+            "the look-alike's holder",
+            (yield* store.getByValue("email", lookAlike))?.userId,
+            rival,
+          );
+          yield* expectEqual(
+            "the original's holder",
+            (yield* store.getByValue("email", claim.value))?.userId,
+            owner,
+          );
+        }),
+    },
+    {
       name: "listByUser lists a user's identifiers, and [] for a user with none",
       run: (newUser) =>
         Effect.gen(function* () {

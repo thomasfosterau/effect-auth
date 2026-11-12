@@ -5,6 +5,7 @@ import {
   claimIdentifier,
   type Identifier,
   IdentifierStore,
+  lookupIdentifier,
   IdentifierTakenError,
   type IdentifierType,
   makeIdentifier,
@@ -90,9 +91,9 @@ const takenOr = <E>(
   error: E,
 ): Effect.Effect<never, E | IdentifierTakenError> =>
   Effect.gen(function* () {
-    const held = yield* store
-      .getByValue(identifier.type, identifier.value)
-      .pipe(Effect.orElseSucceed(() => null));
+    const held = yield* lookupIdentifier(store, identifier.type, identifier.value).pipe(
+      Effect.orElseSucceed(() => null),
+    );
     if (held === null) return yield* Effect.fail(error);
     return yield* takenError(identifier);
   });
@@ -155,7 +156,7 @@ export const createUserWithIdentifier = <E, R>(
       Effect.catchTags({
         IdentifierTakenError: (taken) =>
           Effect.gen(function* () {
-            const held = yield* store.getByValue(identifier.type, identifier.value);
+            const held = yield* lookupIdentifier(store, identifier.type, identifier.value);
             if (held === null || held.userId !== user.id) return yield* taken;
             if (!identifier.verified || held.verified) return held;
             const verified = yield* store.setVerified(
