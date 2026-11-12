@@ -2,7 +2,6 @@ import { assert, describe, it, expect } from "vite-plus/test";
 import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
@@ -43,6 +42,7 @@ import {
 } from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
+import { expectSpecJson } from "../testing/WireFormat.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -405,7 +405,7 @@ const makeFixture = () => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   );
-  const { handler } = HttpServer.make({ services, cookie: { secure: false } });
+  const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
   return { handler, seedUser, makeSession, sessions, members };
 };
@@ -421,25 +421,14 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
 ): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
-// A response body several tests read.
-/** A JSON array, read for its length. */
-const ListBody = Schema.Array(Schema.Unknown);
-
 // Same raw session token, delivered as `Authorization: Bearer` instead of
 // the cookie — the "machine" credential path (`credentialClassFromRequest`).
-const jsonReqBearer = (path: string, body: Schema.Json, sessionId: string): Request =>
-  new Request(`http://test${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${sessionId}` },
-    body: toJson(body),
-  });
-
-const jsonReq = (path: string, body: Schema.Json, sessionId?: string): Request =>
+const apiReqBearer = (path: string, body: Schema.Json, sessionId: string): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
     headers: {
-      "content-type": "application/json",
-      ...(sessionId !== undefined ? withCookie(sessionId) : {}),
+      "content-type": "application/vnd.api+json",
+      authorization: `Bearer ${sessionId}`,
     },
     body: toJson(body),
   });
@@ -1179,100 +1168,293 @@ describe("HTTP organization endpoints", () => {
   });
 });
 
+/** A `users` resource, read for its id and its `attributes` bag. */
+const UserResource = Schema.Struct({
+  id: Schema.String,
+  attributes: Schema.Struct({ attributes: Schema.Record(Schema.String, Schema.Json) }),
+});
+
+/** The session token a response's `Set-Cookie` carries, if any. */
+const sessionCookieOf = (response: Response): string | undefined =>
+  /conduit_session=([^;]*)/.exec(response.headers.get("set-cookie") ?? "")?.[1];
+
+/** A fixture with an admin and a plain user, each signed in. */
+const adminFixture = () => {
+  const fx = makeFixture();
+  fx.seedUser("admin", "admin@test.com", { role: "admin" });
+  fx.seedUser("u", "u@test.com");
+  return { fx, adminSid: fx.makeSession("admin"), userSid: fx.makeSession("u") };
+};
+
+/** A to-one relationship naming user `userId`, as a write document carries it. */
+const userLink = (userId: string) => ({ user: { data: { type: "users", id: userId } } });
+
 describe("HTTP admin endpoints", () => {
-  it("bans a user (revoking their sessions) and rejects non-admins", async () => {
-    const fx = makeFixture();
-    fx.seedUser("admin", "admin@test.com", { role: "admin" });
-    fx.seedUser("victim", "victim@test.com");
-    const adminSid = fx.makeSession("admin");
-    const victimSid = fx.makeSession("victim");
+  it("lists users, filtered by email and paged, and refuses non-admins", async () => {
+    const { fx, adminSid, userSid } = adminFixture();
+    fx.seedUser("v", "v@other.test");
 
-    // A non-admin cannot ban.
-    const denied = await fx.handler(jsonReq("/admin/users/ban", { userId: "admin" }, victimSid));
-    expect(denied.status).toBe(403);
-
-    // The admin bans the victim.
-    const banned = await fx.handler(
-      jsonReq("/admin/users/ban", { userId: "victim", reason: "spam" }, adminSid),
+    const all = await fx.handler(apiReq("GET", "/admin/users", undefined, adminSid));
+    expect(all.status).toBe(200);
+    const listed = await jsonBody(
+      all,
+      Schema.Struct({
+        data: Schema.Array(UserResource),
+        meta: Schema.Struct({ total: Schema.Finite }),
+      }),
     );
-    expect(banned.status).toBe(200);
-    expect(
-      (
-        await jsonBody(
-          banned,
-          Schema.Struct({ attributes: Schema.Struct({ banned: Schema.Boolean }) }),
-        )
-      ).attributes.banned,
-    ).toBe(true);
+    expect(listed.meta.total).toBe(3);
 
-    // The victim's session was revoked.
-    const check = await fx.handler(req("GET", "/sessions/current?include=user", victimSid));
-    expect(check.status).toBe(401);
+    const page = await fx.handler(
+      apiReq(
+        "GET",
+        "/admin/users?filter%5Bemail%5D=test.com&page%5Boffset%5D=1&page%5Blimit%5D=1",
+        undefined,
+        adminSid,
+      ),
+    );
+    expect(page.status).toBe(200);
+    const paged = await jsonBody(
+      page,
+      Schema.Struct({
+        data: Schema.Array(UserResource),
+        meta: Schema.Struct({ total: Schema.Finite }),
+      }),
+    );
+    // Two addresses match; the page holds the second.
+    expect(paged.meta.total).toBe(2);
+    expect(paged.data.length).toBe(1);
+
+    expect((await fx.handler(apiReq("GET", "/admin/users", undefined, userSid))).status).toBe(403);
+    expect((await fx.handler(apiReq("GET", "/admin/users"))).status).toBe(401);
+    // The old command endpoint is gone.
+    expect((await fx.handler(apiReq("POST", "/admin/users/list", {}, adminSid))).status).toBe(404);
   });
 
-  it("sets a user's role", async () => {
-    const fx = makeFixture();
-    fx.seedUser("admin", "admin@test.com", { role: "admin" });
-    fx.seedUser("u", "u@test.com");
-    const adminSid = fx.makeSession("admin");
-    const res = await fx.handler(
-      jsonReq("/admin/users/set-role", { userId: "u", role: "moderator" }, adminSid),
-    );
+  it("sets a user's role, and answers 400 for an unknown user", async () => {
+    const { fx, adminSid } = adminFixture();
+    const setRole = (userId: string) =>
+      fx.handler(
+        apiReq(
+          "PATCH",
+          `/admin/users/${userId}`,
+          { data: { type: "users", id: userId, attributes: { role: "moderator" } } },
+          adminSid,
+        ),
+      );
+    const res = await setRole("u");
     expect(res.status).toBe(200);
+    const { data } = await jsonBody(res, Schema.Struct({ data: UserResource }));
+    expect(data.attributes.attributes["role"]).toBe("moderator");
+    expect((await setRole("nobody")).status).toBe(400);
+  });
+
+  it("bans a user (revoking their sessions) and lifts the ban", async () => {
+    const { fx, adminSid, userSid } = adminFixture();
+    const ban = (userId: string, sessionId: string) =>
+      fx.handler(
+        apiReq(
+          "POST",
+          "/user-bans",
+          {
+            data: {
+              type: "user-bans",
+              attributes: { reason: "spam", expiresIn: HOUR },
+              relationships: userLink(userId),
+            },
+          },
+          sessionId,
+        ),
+      );
+
+    // A non-admin cannot ban, and nobody can ban an administrator.
+    expect((await ban("admin", userSid)).status).toBe(403);
+    expect((await ban("admin", adminSid)).status).toBe(403);
+
+    const banned = await ban("u", adminSid);
+    expect(banned.status).toBe(201);
+    const document = await jsonBody(
+      banned,
+      Schema.Struct({
+        data: Schema.Struct({
+          id: Schema.String,
+          attributes: Schema.Struct({ reason: Schema.String, expiresAt: Schema.Finite }),
+        }),
+        included: Schema.Array(UserResource),
+      }),
+    );
+    expect(document.data.id).toBe("u");
+    expect(document.data.attributes.reason).toBe("spam");
+    expect(document.included[0]?.attributes.attributes["banned"]).toBe(true);
+
+    // The banned user's session was revoked.
+    expect((await fx.handler(req("GET", "/sessions/current", userSid))).status).toBe(401);
+
+    const lifted = await fx.handler(apiReq("DELETE", "/user-bans/u", undefined, adminSid));
+    expect(lifted.status).toBe(204);
+    const after = await fx.handler(
+      apiReq("GET", "/admin/users?filter%5Bemail%5D=u%40test.com", undefined, adminSid),
+    );
+    const { data } = await jsonBody(after, Schema.Struct({ data: Schema.Array(UserResource) }));
+    expect(data[0]?.attributes.attributes["banned"]).toBe(false);
+  });
+
+  it("revokes a user's sessions and removes the user", async () => {
+    const { fx, adminSid, userSid } = adminFixture();
+    const revoked = await fx.handler(
+      apiReq("DELETE", "/admin/users/u/sessions", undefined, adminSid),
+    );
+    expect(revoked.status).toBe(204);
+    expect((await fx.handler(req("GET", "/sessions/current", userSid))).status).toBe(401);
+
+    // An administrator cannot remove themselves.
     expect(
-      (await jsonBody(res, Schema.Struct({ attributes: Schema.Struct({ role: Schema.String }) })))
-        .attributes.role,
-    ).toBe("moderator");
+      (await fx.handler(apiReq("DELETE", "/admin/users/admin", undefined, adminSid))).status,
+    ).toBe(403);
+    const removed = await fx.handler(apiReq("DELETE", "/admin/users/u", undefined, adminSid));
+    expect(removed.status).toBe(204);
+    const left = await fx.handler(apiReq("GET", "/admin/users", undefined, adminSid));
+    expect(
+      (await jsonBody(left, Schema.Struct({ meta: Schema.Struct({ total: Schema.Finite }) }))).meta
+        .total,
+    ).toBe(1);
   });
 });
 
+describe("HTTP impersonation endpoints", () => {
+  it("starts an impersonation as a session cookie and ends it", async () => {
+    const { fx, adminSid, userSid } = adminFixture();
+    const impersonate = (sessionId: string) =>
+      fx.handler(
+        apiReq(
+          "POST",
+          "/impersonations",
+          { data: { type: "impersonations", relationships: userLink("u") } },
+          sessionId,
+        ),
+      );
+    expect((await impersonate(userSid)).status).toBe(403);
+
+    const started = await impersonate(adminSid);
+    expect(started.status).toBe(201);
+    const token = sessionCookieOf(started);
+    assert(token !== undefined && token !== "", "the impersonation's session is the cookie");
+    // The token reaches the browser in the cookie only, never the body (#581).
+    expect(await started.clone().text()).not.toContain(token);
+    const document = await jsonBody(
+      started,
+      Schema.Struct({
+        data: Schema.Struct({
+          id: Schema.String,
+          relationships: Schema.Struct({
+            user: Schema.Struct({ data: Schema.Struct({ id: Schema.String }) }),
+            impersonator: Schema.Struct({ data: Schema.Struct({ id: Schema.String }) }),
+          }),
+        }),
+        included: Schema.Array(UserResource),
+      }),
+    );
+    // Named by the stored id, never the token itself.
+    expect(document.data.id).toBe(hashToken(token));
+    expect(document.data.relationships.user.data.id).toBe("u");
+    expect(document.data.relationships.impersonator.data.id).toBe("admin");
+    expect(document.included[0]?.id).toBe("u");
+
+    // A session that is not an impersonation has none to end, and only
+    // `current` names one.
+    expect(
+      (await fx.handler(apiReq("DELETE", "/impersonations/current", undefined, adminSid))).status,
+    ).toBe(404);
+    expect(
+      (await fx.handler(apiReq("DELETE", `/impersonations/${document.data.id}`, undefined, token)))
+        .status,
+    ).toBe(404);
+
+    const ended = await fx.handler(apiReq("DELETE", "/impersonations/current", undefined, token));
+    expect(ended.status).toBe(204);
+    expect(sessionCookieOf(ended)).toBe("");
+    expect((await fx.handler(req("GET", "/sessions/current", token))).status).toBe(401);
+    // The administrator's own session is untouched.
+    expect((await fx.handler(req("GET", "/sessions/current", adminSid))).status).toBe(200);
+  });
+});
+
+/** An `api-keys` resource, read for what the API-key tests check. */
+const ApiKeyResource = Schema.Struct({
+  id: Schema.String,
+  attributes: Schema.Struct({ name: Schema.String, enabled: Schema.Boolean }),
+  relationships: Schema.Struct({
+    user: Schema.Struct({ data: Schema.Struct({ id: Schema.String }) }),
+  }),
+});
+
 describe("HTTP api-key endpoints", () => {
+  const createKey = { data: { type: "api-keys", attributes: { name: "CI" } } };
+
   it("rejects minting a key over a machine (bearer) credential, and allows it over the session cookie", async () => {
     const fx = makeFixture();
     fx.seedUser("u", "u@test.com");
     const sid = fx.makeSession("u");
 
     // Same valid, unexpired session token — but presented as a bearer
-    // credential rather than the cookie. `apiKeyCreate` requires an
-    // interactive session, so this is a 403, not a 401: the caller is
-    // authenticated, just not with a credential class allowed to mint.
-    const deniedOverBearer = await fx.handler(jsonReqBearer("/api-keys", { name: "CI" }, sid));
+    // credential rather than the cookie. Minting requires an interactive
+    // session, so this is a 403, not a 401: the caller is authenticated, just
+    // not with a credential class allowed to mint.
+    const deniedOverBearer = await fx.handler(apiReqBearer("/api-keys", createKey, sid));
     expect(deniedOverBearer.status).toBe(403);
 
-    const allowedOverCookie = await fx.handler(jsonReq("/api-keys", { name: "CI" }, sid));
-    expect(allowedOverCookie.status).toBe(200);
+    const allowedOverCookie = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
+    expect(allowedOverCookie.status).toBe(201);
   });
 
-  it("creates, lists, updates, and deletes keys", async () => {
+  it("creates, lists, updates, and deletes keys, the plaintext only at creation", async () => {
     const fx = makeFixture();
     fx.seedUser("u", "u@test.com");
+    fx.seedUser("other", "other@test.com");
     const sid = fx.makeSession("u");
+    const otherSid = fx.makeSession("other");
 
-    const created = await fx.handler(jsonReq("/api-keys", { name: "CI" }, sid));
-    expect(created.status).toBe(200);
+    const created = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
+    expect(created.status).toBe(201);
     const body = await jsonBody(
       created,
-      Schema.Struct({
-        key: Schema.String,
-        apiKey: Schema.Struct({ id: Schema.String, name: Schema.String }),
-      }),
+      Schema.Struct({ data: ApiKeyResource, meta: Schema.Struct({ key: Schema.String }) }),
     );
-    expect(P.isString(body.key)).toBe(true);
-    expect(body.apiKey.name).toBe("CI");
-    const keyId = body.apiKey.id;
+    expect(body.meta.key.length).toBeGreaterThan(0);
+    expect(body.data.attributes.name).toBe("CI");
+    expect(body.data.relationships.user.data.id).toBe("u");
+    const keyId = body.data.id;
 
-    const list = await fx.handler(req("GET", "/api-keys", sid));
-    expect((await jsonBody(list, ListBody)).length).toBe(1);
+    const list = await fx.handler(apiReq("GET", "/api-keys", undefined, sid));
+    const listed = await list.text();
+    // The plaintext never comes back after creation.
+    expect(listed).not.toContain(body.meta.key);
+    expect(
+      Schema.decodeSync(
+        Schema.fromJsonString(Schema.Struct({ data: Schema.Array(ApiKeyResource) })),
+      )(listed).data.length,
+    ).toBe(1);
 
-    const updated = await fx.handler(req("PATCH", `/api-keys/${keyId}`, sid, { enabled: false }));
-    expect((await jsonBody(updated, Schema.Struct({ enabled: Schema.Boolean }))).enabled).toBe(
-      false,
-    );
+    const patch = (sessionId: string) =>
+      fx.handler(
+        apiReq(
+          "PATCH",
+          `/api-keys/${keyId}`,
+          { data: { type: "api-keys", id: keyId, attributes: { enabled: false } } },
+          sessionId,
+        ),
+      );
+    // Another user's key is refused like an unknown one.
+    expect((await patch(otherSid)).status).toBe(400);
+    const updated = await patch(sid);
+    expect(
+      (await jsonBody(updated, Schema.Struct({ data: ApiKeyResource }))).data.attributes.enabled,
+    ).toBe(false);
 
-    const deleted = await fx.handler(req("DELETE", `/api-keys/${keyId}`, sid));
+    const deleted = await fx.handler(apiReq("DELETE", `/api-keys/${keyId}`, undefined, sid));
     expect(deleted.status).toBe(204);
-    const empty = await fx.handler(req("GET", "/api-keys", sid));
-    expect((await jsonBody(empty, ListBody)).length).toBe(0);
+    const empty = await fx.handler(apiReq("GET", "/api-keys", undefined, sid));
+    expect((await jsonBody(empty, collectionBody({}))).data.length).toBe(0);
   });
 });
 
@@ -1289,13 +1471,27 @@ describe("HTTP JWT endpoints", () => {
     fx.seedUser("u", "u@test.com");
     const sid = fx.makeSession("u");
 
-    const tokenRes = await fx.handler(req("GET", "/token", sid));
-    expect(tokenRes.status).toBe(200);
-    const { token } = await jsonBody(tokenRes, Schema.Struct({ token: Schema.String }));
+    // Minting a JWT is a write: `GET /token` is gone.
+    expect((await fx.handler(req("GET", "/token", sid))).status).toBe(404);
+    expect((await fx.handler(apiReq("POST", "/tokens"))).status).toBe(401);
+
+    const tokenRes = await fx.handler(apiReq("POST", "/tokens", undefined, sid));
+    expect(tokenRes.status).toBe(201);
+    const document = await jsonBody(
+      tokenRes,
+      resourceBody({ token: Schema.String, expiresAt: Schema.Finite }),
+    );
+    const { token } = document.data.attributes;
+    // The resource is named by the token's digest, never the token.
+    expect(document.data.id).toBe(hashToken(token));
+    expect(document.data.attributes.expiresAt).toBeGreaterThan(0);
 
     const jwksRes = await fx.handler(req("GET", "/jwks"));
     expect(jwksRes.status).toBe(200);
-    const { keys } = Schema.decodeUnknownSync(Jwks)(await jwksRes.json());
+    // RFC 7517 JSON, served as `application/json`, never a JSON:API document.
+    const { keys } = Schema.decodeUnknownSync(Jwks)(
+      await expectSpecJson(jwksRes, "application/json", ["keys"]),
+    );
     expect(keys.length).toBe(1);
 
     // Verify the ES256 signature against the published JWK.

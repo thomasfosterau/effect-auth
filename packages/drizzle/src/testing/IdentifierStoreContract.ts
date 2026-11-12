@@ -98,6 +98,34 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.crossType).toBeNull();
     });
 
+    it("keeps values that differ only by case or accent distinct (#602)", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const bob = yield* store.create(emailFor(USER.ada, "bob@example.com"));
+          return {
+            bob,
+            // An IDN look-alike, a case variant and a full-width variant.
+            accented: yield* store.getByValue("email", "bob@exämple.com"),
+            cased: yield* store.getByValue("email", "BOB@example.com"),
+            fullWidth: yield* store.getByValue("email", "ｂｏｂ@example.com"),
+            // The look-alike is a free value another user can claim.
+            claimed: yield* Auth.claimIdentifier(store, emailFor(USER.grace, "bob@exämple.com")),
+            ownerOfBob: yield* store.getByValue("email", "bob@example.com"),
+            ownerOfLookAlike: yield* store.getByValue("email", "bob@exämple.com"),
+          };
+        }),
+      );
+
+      expect(result.accented).toBeNull();
+      expect(result.cased).toBeNull();
+      expect(result.fullWidth).toBeNull();
+      expect(result.claimed.userId).toBe(USER.grace);
+      expect(result.ownerOfBob?.userId).toBe(USER.ada);
+      expect(result.ownerOfLookAlike?.userId).toBe(USER.grace);
+      expect(result.ownerOfLookAlike?.value).toBe("bob@exämple.com");
+    });
+
     it("refuses a claimed (type, value) with AuthError, which claimIdentifier reports as taken", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {

@@ -90,14 +90,17 @@ const makeWorld = (type: IdentifierType, value: string) => {
       Effect.sync(() => {
         sessionsFor.push(userId);
         return {
-          id: `s-${userId}`,
-          userId,
-          expiresAt: DateTime.toDateUtc(
-            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
-          ),
-          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-          lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-          attributes: {},
+          session: {
+            id: `s-${userId}`,
+            userId,
+            expiresAt: DateTime.toDateUtc(
+              DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+            ),
+            createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+            attributes: {},
+          },
+          token: `token-${userId}`,
         };
       }),
     validateSession: () => Effect.die("unused"),

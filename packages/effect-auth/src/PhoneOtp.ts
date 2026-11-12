@@ -20,6 +20,8 @@ import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
   IdentifierStore,
+  findIdentifierOwner,
+  lookupIdentifier,
   makeIdentifier,
   refusalAuthError,
 } from "./Identifier.ts";
@@ -34,7 +36,7 @@ import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
-import { type HookError } from "./Hooks.ts";
+import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 
@@ -173,12 +175,14 @@ export interface PhoneOtpSignInOptions {
 export interface PhoneOtpAuthResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
  * Sign-in and phone-number verification by SMS one-time code. Codes are stored hashed, with an attempt limit.
  *
- * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore` and `SessionService`.
+ * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
  */
 export class PhoneOtpService extends Context.Service<
   PhoneOtpService,
@@ -266,6 +270,7 @@ export const make = (
   | PhoneOtpUserStore
   | IdentifierStore
   | UserStore
+  | Hooks
   | SessionService
   | SecureRandom.SecureRandom
 > =>
@@ -280,6 +285,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
@@ -384,7 +390,7 @@ export const make = (
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
         const deliver = hidesAccount(purpose)
-          ? (yield* identifiers.getByValue("phone", phoneNumber)) !== null
+          ? (yield* lookupIdentifier(identifiers, "phone", phoneNumber)) !== null
           : true;
 
         // Resend cooldown: reject if an outstanding OTP was created within
@@ -444,13 +450,22 @@ export const make = (
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
 
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "phone",
+          phoneNumber,
+          () => new PhoneOtpError({ message: "Account is unavailable" }),
+        );
+        yield* hooks.beforeAuthenticate({
+          method: "phone-otp",
+          identifier: { type: "phone", value: phoneNumber },
+          userId: owner?.id,
+        });
+
         yield* verifyOtp(phoneNumber, otp, "sign-in");
 
-        const identifier = yield* identifiers.getByValue("phone", phoneNumber);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          return yield* new PhoneOtpError({ message: "Account is unavailable" });
-        }
+        let user = owner;
         if (!user) {
           if (disableSignUp) {
             return yield* new PhoneOtpError({ message: "Sign-up is disabled" });
@@ -476,9 +491,12 @@ export const make = (
           yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
         }
 
-        const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
+        const { session, token } = yield* sessionManager.createSession(
+          user.id,
+          options?.sessionAttributes,
+        );
 
-        return { user, session } satisfies PhoneOtpAuthResult;
+        return { user, session, token } satisfies PhoneOtpAuthResult;
       }),
 
       verifyPhoneNumber: Effect.fn("PhoneOtpService.verifyPhoneNumber")(function* (
@@ -491,7 +509,7 @@ export const make = (
         yield* verifyOtp(phoneNumber, otp, "phone-verification");
 
         // Attach (or verify) the phone identifier for this user.
-        const existing = yield* identifiers.getByValue("phone", phoneNumber);
+        const existing = yield* lookupIdentifier(identifiers, "phone", phoneNumber);
         if (existing !== null && existing.userId !== userId) {
           return yield* new PhoneOtpError({ message: "This phone number is already in use" });
         }

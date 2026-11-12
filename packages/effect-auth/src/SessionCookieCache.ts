@@ -2,15 +2,17 @@
  * Signed session-data cookie cache.
  *
  * better-auth's `session.cookieCache` stores a short-lived HMAC-signed copy of
- * the session + user in a cookie so `GET /session` (and other authenticated
+ * the session + user in a cookie so `GET /sessions/current` (and other authenticated
  * requests) can be served without hitting the session store on every request.
  *
  * The cookie value is `base64url(payload) . base64url(HMAC-SHA256(base64url
  * payload))`, where the payload is versioned for forward compatibility and
  * carries the session, user, a cache expiry (`now + maxAge`), the app's cache
- * epoch ({@link SessionCacheConfig.version}) and the primary session id
- * (`sid`) — binding the cache entry to a specific primary session cookie so
- * identity cannot bleed across account switches. With
+ * epoch ({@link SessionCacheConfig.version}) and the primary session's stored
+ * id (`sid`, the digest of the session cookie's token) — binding the cache
+ * entry to a specific primary session cookie so identity cannot bleed across
+ * account switches. Neither `sid` nor the session's `id` is the token itself.
+ * With
  * {@link SessionCacheConfig.encrypt} the payload is AES-256-GCM encrypted
  * before it is signed.
  *
@@ -192,6 +194,8 @@ const decodePayloadJson = Schema.decodeUnknownOption(Schema.fromJsonString(Seria
  * Serialize + sign a `SessionWithUser` into the cache cookie value. Returns
  * `undefined`, and nothing should be cached, when the user holds one of the
  * `gateAttributes` (default {@link DEFAULT_SERVER_ONLY_ATTRIBUTES}).
+ * `primarySessionId` is the primary session's stored id (the digest of its
+ * token), as {@link decodeSessionCacheCookie} is given it.
  */
 export const encodeSessionCacheCookie = (
   value: Types.SessionWithUser,

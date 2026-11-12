@@ -64,8 +64,8 @@ import * as Auth from "@thomasfosterau/effect-auth";
 
 const program = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
-  const session = yield* sessions.createSession(userId);
-  return yield* sessions.validateSession(session.id);
+  const { token } = yield* sessions.createSession(userId);
+  return yield* sessions.validateSession(token);
 });
 
 const layer = Auth.SessionService.layer(sessionConfig).pipe(
@@ -250,7 +250,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ## HTTP protocol
 
-- `HttpApi.ts` defines the full contract with `effect/http-api`. The converted groups are JSON:API resources over effect-jsonapi (`sessions`, `users`, `identifiers`, `second-factor-challenges`, `otp-challenges`, `email-verifications`, `password-resets`, `google-one-tap-nonces`, `email-changes`, `account-deletions`, `multi-factor-enrollments`, `backup-code-sets`, `device-sessions`, `organizations`, `organization-members`, `invitations`, `organization-domains`, `organization-roles`, `teams`, `team-members`; #205); the rest are still one `auth` group of kebab-case paths (`/admin/users/list`) with camelCase operationIds. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/http-api`. Every group this library designs is a JSON:API resource group over effect-jsonapi (`sessions`, `users`, `identifiers`, `second-factor-challenges`, `otp-challenges`, `email-verifications`, `password-resets`, `google-one-tap-nonces`, `email-changes`, `account-deletions`, `multi-factor-enrollments`, `backup-code-sets`, `device-sessions`, `organizations`, `organization-members`, `invitations`, `organization-domains`, `organization-roles`, `teams`, `team-members`, `admin-users`, `user-bans`, `impersonations`, `api-keys`, `oauth-clients`, `sso-providers`, `sso-authorizations`, `tokens`, `device-authorizations`; #205). The `auth` group is the RFC tier ([ADR-0024](adr/0024-json-api-http-tier.md)): it keeps the externally specified endpoints in the wire formats their specifications fix (RFC 8628 `/device/code` and `/device/token`, the OIDC / SAML SSO callbacks and SP metadata, the JWKS, and the OIDC provider's OAuth 2.0 / OIDC / RFC 7591 / RFC 8414 endpoints), with camelCase operationIds; SCIM is its own group under `/scim/v2`. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.
@@ -266,6 +266,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 ### Session Security
 
 - 160-bit cryptographically secure session IDs; active + idle timeouts; automatic renewal; whole-user invalidation; optional signed session-data cookie with a short TTL.
+- The raw session token reaches the client only in the `HttpOnly` session cookie and, in opt-in bearer mode, the `set-auth-token` response header. Every session the services answer (`Session.id`) and every response body names a session by its stored id, the token's SHA-256 digest, which is not a credential (#581). `SessionService.createSession` returns `{ session, token }`, and each sign-in result carries `token` beside `session`; nothing overloads `Session.id` with the token, so a session record is safe to log, cache, broadcast between tabs or serialize into a server-rendered page.
 
 ### Token & Challenge Security
 
@@ -285,7 +286,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### What the library provides, and what the application must
 
-If you mount the included HTTP API, cookie flags (`HttpOnly`, `Secure`, `SameSite`), trusted-origin CSRF checks, rate limiting (`RateLimiter`) and account lockout (`AccountLockoutPlugin`) are provided. If you use only the headless core, they are yours to implement. Either way the application provides secure store implementations (parameterised queries, encrypted connections) and serves over HTTPS.
+If you mount the included HTTP API, cookie flags (`HttpOnly`, `Secure`, `SameSite`), trusted-origin CSRF checks and per-address rate limits on every sensitive endpoint (`ipRateLimit`, `defaultEndpointRules`) are on by default. The rate limits need a `RateLimiter` in `services` and a client address source (`trustedProxy`, or `allowMissingClientIp: true`), and `Http.make` refuses to start without them unless it is given `ipRateLimit: false` (#583). The rules match the endpoint the router matched, so no spelling of a path escapes them (#582). Account lockout (`AccountLockoutPlugin`), the per-address plugin limits (`IPRateLimitPlugin`), captcha and the passwordless send cooldowns (`resendCooldown`) are opt-in: compose them when you want them. If you use only the headless core, all of it is yours to implement. Either way the application provides secure store implementations (parameterised queries, encrypted connections) and serves over HTTPS.
 
 Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` or `TWO_FACTOR_ENCRYPT_SECRET` unset to keep it off. A variable that is set but empty fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError`, rather than silently storing the data unencrypted. A whitespace-only value counts as empty. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) reads as unset.
 

@@ -1,5 +1,30 @@
 # Account linking policy
 
+> **Amended (#588).** The policy service, the `SignInResolution` union and the option names below
+> were never built. What ships is `OAuthService.signInWithCallback` with auto-linking **on** by
+> default, for verified matches only:
+>
+> - A provider identity seen for the first time whose email matches an existing email identifier is
+>   linked to that identifier's user only when the provider reports `email_verified: true`, the
+>   local identifier is verified, and auto-linking applies to the provider:
+>   `autoLinkByVerifiedEmail` (default `true`, env `OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL`) or a
+>   `trustedProviders` entry (default `[]`), which auto-links that provider even with
+>   `autoLinkByVerifiedEmail: false`. A trusted provider gets no exemption from either verified
+>   check.
+> - Every other match (an unverified provider email, an unverified local address, auto-linking off
+>   for the provider, a dangling identifier) fails with `EmailInUseError` (a conflict). Nothing is
+>   linked, no session is minted and the existing account is left as it is. OAuth refuses where
+>   magic link, email OTP, Google One Tap and SSO run the first-proof cleanup (`FirstProof.ts`,
+>   #440); it never clears a password or revokes sessions.
+> - Known consequence: the real holder of an address that someone signed up with unverified cannot
+>   use OAuth sign-in until that account is removed or the address is proven another way (the
+>   verification link, a magic link or an email OTP, which run the first-proof cleanup).
+> - `linkAccount` (a signed-in user linking a provider) refuses an email other than the user's
+>   unless `allowDifferentEmails` is set; `unlinkAccount` refuses to remove the last credential
+>   unless `allowUnlinkingAll` is passed.
+>
+> The text below is the original proposal, left as written.
+
 effect-auth ships an `AccountLinkingPolicy` service that resolves what `handleCallback` does when
 an OAuth sign-in matches an existing User by email. The toolkit's defaults are deliberately
 conservative — the security cost of getting linking wrong (account takeover via a provider that

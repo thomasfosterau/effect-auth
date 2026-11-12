@@ -24,7 +24,7 @@ The practical consequences are worth internalising before you start:
 | `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                                         |
 | `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth/sql`, `-drizzle`, `-alchemy-cloudflare` / `-alchemy-postgres`, or your own |
 | `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`                   |
-| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP                |
+| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(token)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP             |
 | `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration)            |
 | `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                                    |
 | `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`              |
@@ -55,18 +55,23 @@ const services = Layer.mergeAll(
   Auth.Password.PasswordHasher.layer(),
   Auth.UserService.layer(),
   Auth.Hooks.Default,
+  // The per-address limits Http.makeAsync applies by default count here; the
+  // counters live in the same database (`auth_rate_limits`).
+  Auth.RateLimiter.layer(),
 ).pipe(Layer.provideMerge(stores));
 
 const { handler } = await Http.makeAsync({
   services,
   prefix: "/api/auth",
   trustedOrigins: ["https://app.example.com"],
+  // The visitor's address, which the rate limits key on (here, behind Cloudflare).
+  trustedProxy: Auth.ClientIP.cloudflare,
 });
 ```
 
 `Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
 
-`services` connects to the database while it builds, so the example uses `Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter`, for example), so the app fails to start. `Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
+`services` connects to the database while it builds, so the example uses `Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter` or client address source, which the per-address limits on every sensitive endpoint need unless you pass `ipRateLimit: false`), so the app fails to start. `Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
 
 The set of services `Http.makeAsync` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
 
@@ -129,18 +134,18 @@ Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiF
 
 ### Admin
 
-`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/*`. Pair it with `BannedUserPlugin` so a ban takes effect on the next request rather than at session expiry.
+`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/users` (list with `filter[email]` and `page[offset]` / `page[limit]`, `PATCH` a `role`, `DELETE` a user or `/admin/users/:id/sessions`), `/user-bans` (ban, lift) and `/impersonations` (start, `DELETE /impersonations/current` to end). Pair it with `BannedUserPlugin` so a ban takes effect on the next request rather than at session expiry.
 
 ### API keys
 
-`Auth.ApiKeyService` (`create`, `verify`, `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys*`. Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
+`Auth.ApiKeyService` (`create`, `verify`, `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys` and `/api-keys/:id` (the plaintext only in the create's `meta.key`). Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
 
 ### Enterprise SSO (as a relying party) and the OIDC provider
 
 Two separate features, as in Better Auth:
 
-- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso/register`, `POST /sign-in/sso`, `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
-- **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*`, `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
+- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso-providers` (registration, admin-gated), `POST /sso-authorizations` (start a sign-in), `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
+- **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*` (client administration is `/oauth-clients`, admin-gated), `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
 
 SCIM provisioning (`Auth.ScimService`) has no Better Auth counterpart; [`scim.md`](./scim.md) covers it.
 

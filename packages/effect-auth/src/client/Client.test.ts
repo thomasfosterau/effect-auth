@@ -1,8 +1,11 @@
 import { assert, describe, it, expect, vi } from "vite-plus/test";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
+import { hashToken } from "../TokenHash.ts";
 
 const EMAIL = "alice@client.test";
 const PW = "password-123";
@@ -48,6 +51,44 @@ describe("createAuthClient", () => {
     expect(session?.user.email).toBe(EMAIL);
 
     await client.signOut();
+    expect(await client.getSession()).toBeNull();
+  });
+
+  it("never sees the session token: every body names the session by its digest (#581)", async () => {
+    const server = makeServerFixture();
+    const tokens: string[] = [];
+    const bodies: string[] = [];
+    const base = makeCookieJarFetch(server.handler);
+    const client = createAuthClient({
+      baseUrl: "http://client.test",
+      fetch: async (input, init?) => {
+        const response = await base(input, init);
+        tokens.push(
+          ...Arr.getSomes(
+            Arr.map(response.headers.getSetCookie(), (line) =>
+              Option.fromNullishOr(/^conduit_session=([^;]+)/.exec(line)?.[1]),
+            ),
+          ),
+        );
+        bodies.push(await response.clone().text());
+        return response;
+      },
+    });
+
+    await client.signUp({ email: EMAIL, password: PW });
+    await client.signOut();
+    await client.signIn({ email: EMAIL, password: PW });
+    const current = await client.getSession();
+    const listed = await client.listSessions();
+
+    expect(tokens).toHaveLength(2);
+    expect(bodies.filter((body) => tokens.some((token) => body.includes(token)))).toEqual([]);
+    const token = tokens.at(-1) ?? "";
+    expect(current?.session.id).toBe(hashToken(token));
+    expect(listed.map((session) => session.id)).toEqual([current?.session.id]);
+
+    // The id the client holds signs the current session out.
+    await client.revokeSession(current?.session.id ?? "");
     expect(await client.getSession()).toBeNull();
   });
 
@@ -162,7 +203,7 @@ describe("createAuthClient", () => {
 });
 
 describe("JSON response detection", () => {
-  // `GET /token` answers plain JSON, so it probes the response handling
+  // `GET /jwks` answers plain JSON (RFC 7517), so it probes the response handling
   // every non-JSON:API endpoint shares.
   /** A client whose every request answers with `response`. */
   const clientReturning = (response: () => Response) =>
@@ -175,7 +216,7 @@ describe("JSON response detection", () => {
     const client = clientReturning(() =>
       respond(toJson([{ id: "s1" }]), "application/json; charset=utf-8"),
     );
-    expect(await client.jwtToken()).toEqual([{ id: "s1" }]);
+    expect(await client.jwks()).toEqual([{ id: "s1" }]);
   });
 
   it("reads the server's message from a `+json` suffix media type", async () => {
@@ -186,14 +227,14 @@ describe("JSON response detection", () => {
       }),
     );
 
-    const error = await rejectionOf(client.jwtToken(), AuthClientError);
+    const error = await rejectionOf(client.jwks(), AuthClientError);
     assert.instanceOf(error, AuthClientError);
     expect(error.message).toBe("Session expired");
   });
 
   it("does not parse a non-JSON body", async () => {
     const client = clientReturning(() => respond("<html>ok</html>", "text/html"));
-    expect(await client.jwtToken()).toBeUndefined();
+    expect(await client.jwks()).toBeUndefined();
   });
 
   it("matches the media type, not a substring of the header", async () => {
@@ -206,7 +247,7 @@ describe("JSON response detection", () => {
       }),
     );
 
-    const error = await rejectionOf(client.jwtToken(), AuthClientError);
+    const error = await rejectionOf(client.jwks(), AuthClientError);
     assert.instanceOf(error, AuthClientError);
     expect(error.message).toBe("Bad Request");
   });
@@ -217,7 +258,7 @@ describe("JSON response detection", () => {
       response.headers.delete("content-type");
       return response;
     });
-    expect(await client.jwtToken()).toBeUndefined();
+    expect(await client.jwks()).toBeUndefined();
   });
 });
 

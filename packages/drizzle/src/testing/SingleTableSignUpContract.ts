@@ -65,12 +65,15 @@ const sessions: typeof Auth.SessionService.Service = {
     Effect.sync(() => {
       const now = DateTime.toDateUtc(DateTime.nowUnsafe());
       return {
-        id: `s-${userId}`,
-        userId,
-        expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
-        createdAt: now,
-        lastActivityAt: now,
-        attributes: {},
+        session: {
+          id: `s-${userId}`,
+          userId,
+          expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 3_600_000)),
+          createdAt: now,
+          lastActivityAt: now,
+          attributes: {},
+        },
+        token: `token-${userId}`,
       };
     }),
   validateSession: () => Effect.die("unused"),

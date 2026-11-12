@@ -55,6 +55,7 @@ export {
   type MemoryStores,
   type MemoryUserTable,
   layer as memoryStores,
+  memoryApiKeyStore,
   memoryEmailPasswordStore,
   memoryJwtKeyStore,
   memoryMultiFactorStore,
@@ -70,3 +71,10 @@ export {
   memoryUserStore,
   memoryUserTable,
 } from "./MemoryStores.ts";
+export {
+  type ApiKeyServiceLayerOptions,
+  type SessionServiceLayerOptions,
+  apiKeyServiceLayer,
+  defaultSessionConfig,
+  sessionServiceLayer,
+} from "./ServiceLayers.ts";

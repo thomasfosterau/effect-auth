@@ -65,6 +65,7 @@ import {
 import * as OidcProvider from "./OidcProvider.ts";
 import { ClientAddressConfigError, RateLimiterConfigError } from "./Errors.ts";
 import type * as Types from "./Types.ts";
+import { expectSpecJson, JSON_API_MEDIA_TYPE, mediaTypeOf } from "./testing/WireFormat.ts";
 
 const ISSUER = "http://idp.test/api/auth";
 
@@ -904,6 +905,13 @@ const REGISTRATION_ADDRESS_ERROR =
   /Dynamic client registration \(POST \/register\) is rate limited per client address/;
 
 /**
+ * The handler options of {@link makeHttpFixture}: the registration limit is the
+ * one under test, and `Http.make`'s per-endpoint IP limit (on by default, #583)
+ * is not.
+ */
+const WITHOUT_IP_LIMIT = { cookie: { secure: false }, ipRateLimit: false } as const;
+
+/**
  * A web handler wired with the OIDC provider endpoints over in-memory stores.
  * Pass `dynamicRegistration` to mount the RFC 7591/7592 endpoints.
  */
@@ -1127,12 +1135,11 @@ const makeHttpFixture = (
     servicesWithRateLimiter: withOidcLimiter,
     handler: HttpServer.make({
       services: limited ? withOidcLimiter : withOidc,
-      cookie: { secure: false },
+      ...WITHOUT_IP_LIMIT,
       ...(addressSource !== undefined && { trustedProxy: addressSource }),
       ...(options.allowMissingClientIp === true && { allowMissingClientIp: true }),
     }).handler,
-    handlerWithoutOidc: HttpServer.make({ services: withoutOidc, cookie: { secure: false } })
-      .handler,
+    handlerWithoutOidc: HttpServer.make({ services: withoutOidc, ...WITHOUT_IP_LIMIT }).handler,
   };
 };
 
@@ -1173,11 +1180,41 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 /** A JSON object's own fields, read one by one. */
 const JsonFields = Schema.Record(Schema.String, Schema.Json);
 const MessageBody = Schema.Struct({ message: Schema.String });
-const ClientIdBody = Schema.Struct({ client: Schema.Struct({ clientId: Schema.String }) });
+/** What `POST /oauth-clients` answers: the client, its secret (if any) in `meta`. */
 const CreatedClientBody = Schema.Struct({
-  client: Schema.Struct({ clientId: Schema.String }),
-  clientSecret: Schema.String,
+  data: Schema.Struct({ id: Schema.String }),
+  meta: Schema.optionalKey(Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) })),
 });
+
+/** The client id and (for a confidential client) the secret a registration answered. */
+const registeredClient = async (
+  response: Response,
+): Promise<{ readonly client: { readonly clientId: string }; readonly clientSecret: string }> => {
+  const { data, meta } = await jsonBody(response, CreatedClientBody);
+  return { client: { clientId: data.id }, clientSecret: meta?.clientSecret ?? "" };
+};
+
+/** A JSON:API request to `path` with `body`, as `sessionId` when given. */
+const apiRequest = (
+  method: string,
+  path: string,
+  body: Schema.Json | undefined,
+  sessionId?: string,
+): Request =>
+  new Request(`http://idp.test${path}`, {
+    method,
+    headers: {
+      ...FIXTURE_CLIENT_HEADERS,
+      ...(body !== undefined && { "content-type": "application/vnd.api+json" }),
+      ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+    },
+    ...(body !== undefined && { body: encodeJson(body) }),
+  });
+
+/** `POST /oauth-clients` with the client's `attributes`, as `sessionId` when given. */
+const registerClientRequest = (attributes: Schema.Json, sessionId?: string): Request =>
+  apiRequest("POST", "/oauth-clients", { data: { type: "oauth-clients", attributes } }, sessionId);
+
 const RefreshTokenBody = Schema.Struct({ refresh_token: Schema.String });
 
 const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
@@ -1265,8 +1302,7 @@ describe("HTTP OIDC provider endpoints", () => {
 
     // 1. Register a client (admin-gated; non-admins are rejected).
     const denied = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"] },
         fx.makeSession(fx.seedUser("pleb@idp.test")),
       ),
@@ -1274,14 +1310,13 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(denied.status).toBe(403);
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    expect(registered.status).toBe(200);
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    expect(registered.status).toBe(201);
+    const { client, clientSecret } = await registeredClient(registered);
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
@@ -1428,9 +1463,9 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("bob@idp.test"));
 
     const registered = await fx.handler(
-      post("/oauth2/register", { name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
+      registerClientRequest({ name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const authorizeQuery = {
       response_type: "code",
@@ -1518,13 +1553,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("carol@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorizeOnce = async () => {
@@ -1591,13 +1625,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("dave@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const authorize = await fx.handler(
       get(
@@ -1642,7 +1675,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(doc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
     expect(doc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
     expect(doc["jwks_uri"]).toBe(`${ISSUER}/.well-known/jwks.json`);
-    expect(doc["registration_endpoint"]).toBe(`${ISSUER}/oauth2/register`);
+    expect(doc["registration_endpoint"]).toBeUndefined();
     expect(doc["end_session_endpoint"]).toBe(`${ISSUER}/oauth2/logout`);
     expect(doc["code_challenge_methods_supported"]).toEqual(["S256"]);
   });
@@ -1663,13 +1696,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("reuse@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1753,13 +1785,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("expire@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1818,13 +1849,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("scope@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1892,13 +1922,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client } = await jsonBody(registered, ClientIdBody);
+    const { client } = await registeredClient(registered);
 
     const res = await fx.handler(
       get("/oauth2/authorize", {
@@ -1923,13 +1952,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("login@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client } = await jsonBody(registered, ClientIdBody);
+    const { client } = await registeredClient(registered);
 
     const res = await fx.handler(
       get(
@@ -2267,7 +2295,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     ]);
     // The OAuth document carries no OIDC-only members.
     expect(baseDoc["claims_supported"]).toBeUndefined();
-    expect(baseDoc["registration_endpoint"]).toBe(`${ISSUER}/oauth2/register`);
+    expect(baseDoc["registration_endpoint"]).toBeUndefined();
 
     // With DCR on, both documents advertise the RFC 7591 endpoint.
     const withDCR = makeHttpFixture({ dynamicRegistration: {} });
@@ -2288,6 +2316,136 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     expect(
       (await withoutDCR.handlerWithoutOidc(get("/.well-known/oauth-authorization-server"))).status,
     ).toBe(404);
+  });
+});
+
+describe("HTTP OIDC provider: the RFC tier keeps its wire format (#205)", () => {
+  const REDIRECT = "https://rp.test/cb";
+
+  it("answers OAuth 2.0 / OIDC, RFC 7591 / 7592 and RFC 8414 as their specifications fix", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {} });
+    const userId = fx.seedUser("wire@idp.test");
+    const userSid = fx.makeSession(userId);
+
+    // RFC 8414 and OIDC discovery: plain JSON metadata, naming the RFC 7591
+    // endpoint (registration is on) and never the JSON:API client registry.
+    const documents = await Promise.all(
+      ["/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"].map(
+        async (path) =>
+          expectSpecJson(await fx.handler(get(path)), "application/json", [
+            "issuer",
+            "authorization_endpoint",
+            "token_endpoint",
+            "jwks_uri",
+            "registration_endpoint",
+          ]),
+      ),
+    );
+    expect(documents.map((metadata) => metadata["registration_endpoint"])).toEqual([
+      `${ISSUER}/register`,
+      `${ISSUER}/register`,
+    ]);
+    expect(
+      documents
+        .map((metadata) => encodeJson(metadata))
+        .filter((text) => text.includes("oauth-clients")),
+    ).toEqual([]);
+
+    // RFC 7517: the key set.
+    await expectSpecJson(await fx.handler(get("/.well-known/jwks.json")), "application/json", [
+      "keys",
+    ]);
+
+    // RFC 7591: a plain JSON request answered by plain JSON metadata (`201`).
+    const registered = await fx.handler(
+      post("/register", { redirect_uris: [REDIRECT], client_name: "Wire RP" }),
+    );
+    expect(registered.status).toBe(201);
+    const client = Schema.decodeUnknownSync(RegistrationResponse)(
+      await expectSpecJson(registered, "application/json", ["client_id", "redirect_uris"]),
+    );
+    const rat = client.registration_access_token;
+    assert(rat !== undefined, "registration returns an access token");
+    // Its refusals are RFC 7591 `{ error, error_description }` bodies.
+    const refused = await fx.handler(post("/register", { redirect_uris: ["not a url"] }));
+    expect(refused.status).toBe(400);
+    await expectSpecJson(refused, "application/json", ["error", "error_description"]);
+
+    // RFC 7592: read, replace and delete the registration with its token.
+    const read = await fx.handler(get(`/register/${client.client_id}`, {}, { bearer: rat }));
+    expect(read.status).toBe(200);
+    await expectSpecJson(read, "application/json", ["client_id"]);
+    const replaced = await fx.handler(
+      jsonRequest(
+        "PUT",
+        `/register/${client.client_id}`,
+        { client_id: client.client_id, redirect_uris: [REDIRECT], client_name: "Wire RP 2" },
+        rat,
+      ),
+    );
+    expect(replaced.status).toBe(200);
+    await expectSpecJson(replaced, "application/json", ["client_id", "client_name"]);
+
+    // OAuth 2.0: the authorization endpoint answers a redirect, no document.
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.client_id,
+          redirect_uri: REDIRECT,
+          scope: "openid",
+          state: "s",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    expect(authorize.status).toBe(302);
+    expect(mediaTypeOf(authorize)).not.toBe(JSON_API_MEDIA_TYPE);
+    // Registered without skipConsent, so the consent page decides; its decision
+    // answers plain JSON naming where to send the browser.
+    const consentCode = searchParam(locationOf(authorize), "consent_code");
+    const consent = await fx.handler(
+      post("/oauth2/consent", { consentCode, accept: true }, userSid),
+    );
+    expect(consent.status).toBe(200);
+    const { redirectTo } = Schema.decodeUnknownSync(Schema.Struct({ redirectTo: Schema.String }))(
+      await expectSpecJson(consent, "application/json", ["redirectTo"]),
+    );
+    const code = searchParam(new URL(redirectTo), "code");
+
+    // The token endpoint takes RFC 6749's form encoding and answers plain JSON.
+    const token = await fx.handler(
+      new Request("http://idp.test/oauth2/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: client.client_id,
+          ...(client.client_secret !== undefined && { client_secret: client.client_secret }),
+        }).toString(),
+      }),
+    );
+    expect(token.status).toBe(200);
+    const tokens = await expectSpecJson(token, "application/json", ["access_token", "token_type"]);
+    const accessToken = Schema.decodeUnknownSync(Schema.String)(tokens["access_token"]);
+
+    // UserInfo: the claims as a plain JSON object.
+    const userinfo = await expectSpecJson(
+      await fx.handler(get("/oauth2/userinfo", {}, { bearer: accessToken })),
+      "application/json",
+      ["sub"],
+    );
+    expect(userinfo["sub"]).toBe(userId);
+
+    // RFC 7592 delete answers `204` with no body at all.
+    const deleted = await fx.handler(
+      jsonRequest("DELETE", `/register/${client.client_id}`, undefined, rat),
+    );
+    expect(deleted.status).toBe(204);
+    expect(await deleted.text()).toBe("");
   });
 });
 
@@ -2353,6 +2511,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     const constructed = HttpServer.makeAsync({
       services: fx.servicesWithRateLimiter,
       cookie: { secure: false },
+      ipRateLimit: false,
     });
     await expect(constructed).rejects.toThrow(ClientAddressConfigError);
     await expect(constructed).rejects.toThrow(REGISTRATION_ADDRESS_ERROR);
@@ -2419,25 +2578,37 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     expect([...fx.rateLimitKeys]).toEqual([]);
   });
 });
-describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () => {
-  const patch = (path: string, body: Schema.Json, sessionId?: string): Request =>
-    new Request(`http://idp.test${path}`, {
-      method: "PATCH",
-      headers: {
-        ...FIXTURE_CLIENT_HEADERS,
-        "content-type": "application/json",
-        ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
-      },
-      body: encodeJson(body),
-    });
+
+/** `PATCH /oauth-clients/:id` with `attributes`. */
+const patch = (clientId: string, attributes: Schema.Json, sessionId?: string): Request =>
+  apiRequest(
+    "PATCH",
+    `/oauth-clients/${clientId}`,
+    { data: { type: "oauth-clients", id: clientId, attributes } },
+    sessionId,
+  );
+
+describe("HTTP OIDC client administration: /oauth-clients", () => {
+  /** One `oauth-clients` resource, read for what these tests check. */
+  const ClientResource = Schema.Struct({
+    id: Schema.String,
+    attributes: Schema.Struct({
+      name: Schema.String,
+      redirectUris: Schema.Array(Schema.String),
+      clientType: Schema.Literals(["web", "native"]),
+      skipConsent: Schema.Boolean,
+      disabled: Schema.Boolean,
+    }),
+  });
+
+  const ClientDocument = Schema.Struct({ data: ClientResource });
 
   const registerClient = async (fx: ReturnType<typeof makeHttpFixture>, adminSid: string) => {
     const registered = await fx.handler(
-      post("/oauth2/register", { name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
+      registerClientRequest({ name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
     );
-    expect(registered.status).toBe(200);
-    // SAFETY: a 200 from /oauth2/register carries the registered client.
-    const { client } = await jsonBody(registered, ClientIdBody);
+    expect(registered.status).toBe(201);
+    const { client } = await registeredClient(registered);
     return client.clientId;
   };
 
@@ -2448,7 +2619,7 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
 
     const res = await fx.handler(
       patch(
-        `/oauth2/clients/${clientId}`,
+        clientId,
         {
           name: "Renamed RP",
           redirectUris: ["https://rp.test/other"],
@@ -2460,46 +2631,38 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
       ),
     );
     expect(res.status).toBe(200);
-    // SAFETY: a 200 from the update endpoint carries the client view.
-    const body = await jsonBody(
-      res,
-      Schema.Struct({
-        clientId: Schema.String,
-        name: Schema.String,
-        redirectUris: Schema.Array(Schema.String),
-        skipConsent: Schema.Boolean,
-        disabled: Schema.Boolean,
-      }),
-    );
-    expect(body).toMatchObject({
-      clientId,
-      name: "Renamed RP",
-      redirectUris: ["https://rp.test/other"],
-      skipConsent: true,
-      disabled: true,
+    const { data } = await jsonBody(res, ClientDocument);
+    expect(data).toMatchObject({
+      id: clientId,
+      attributes: {
+        name: "Renamed RP",
+        redirectUris: ["https://rp.test/other"],
+        clientType: "web",
+        skipConsent: true,
+        disabled: true,
+      },
     });
   });
 
-  it("keeps the client's fields when the payload is empty", async () => {
+  it("keeps the client's fields when the update names none", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
     const clientId = await registerClient(fx, adminSid);
 
-    const res = await fx.handler(patch(`/oauth2/clients/${clientId}`, {}, adminSid));
+    const res = await fx.handler(patch(clientId, {}, adminSid));
     expect(res.status).toBe(200);
-    // SAFETY: a 200 from the update endpoint carries the client view.
-    const body = await jsonBody(
-      res,
-      Schema.Struct({ name: Schema.String, redirectUris: Schema.Array(Schema.String) }),
-    );
-    expect(body).toMatchObject({ name: "RP", redirectUris: ["https://rp.test/cb"] });
+    const { data } = await jsonBody(res, ClientDocument);
+    expect(data.attributes).toMatchObject({ name: "RP", redirectUris: ["https://rp.test/cb"] });
   });
 
   it("answers 400 for an unknown client", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
-    const res = await fx.handler(patch("/oauth2/clients/nope", { name: "x" }, adminSid));
-    expect(res.status).toBe(400);
+    expect((await fx.handler(patch("nope", { name: "x" }, adminSid))).status).toBe(400);
+    const deleted = await fx.handler(
+      apiRequest("DELETE", "/oauth-clients/nope", undefined, adminSid),
+    );
+    expect(deleted.status).toBe(400);
   });
 
   it("refuses a non-admin with 403 and an anonymous caller with 401", async () => {
@@ -2508,11 +2671,42 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
     const clientId = await registerClient(fx, adminSid);
     const userSid = fx.makeSession(fx.seedUser("pleb@idp.test"));
 
-    const forbidden = await fx.handler(
-      patch(`/oauth2/clients/${clientId}`, { name: "x" }, userSid),
+    expect((await fx.handler(patch(clientId, { name: "x" }, userSid))).status).toBe(403);
+    expect((await fx.handler(patch(clientId, { name: "x" }))).status).toBe(401);
+    const listed = await fx.handler(apiRequest("GET", "/oauth-clients", undefined, userSid));
+    expect(listed.status).toBe(403);
+  });
+
+  it("lists and deletes clients, a public client registering without a secret", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const native = await fx.handler(
+      registerClientRequest(
+        { name: "CLI", redirectUris: ["http://127.0.0.1/cb"], clientType: "native" },
+        adminSid,
+      ),
     );
-    expect(forbidden.status).toBe(403);
-    const anonymous = await fx.handler(patch(`/oauth2/clients/${clientId}`, { name: "x" }));
-    expect(anonymous.status).toBe(401);
+    expect(native.status).toBe(201);
+    const created = await jsonBody(
+      native,
+      Schema.Struct({
+        data: ClientResource,
+        meta: Schema.optionalKey(
+          Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) }),
+        ),
+      }),
+    );
+    expect(created.data.attributes.clientType).toBe("native");
+    expect(created.meta?.clientSecret).toBeUndefined();
+
+    const listed = await fx.handler(apiRequest("GET", "/oauth-clients", undefined, adminSid));
+    expect(listed.status).toBe(200);
+    const list = await jsonBody(listed, Schema.Struct({ data: Schema.Array(ClientResource) }));
+    expect(list.data.map((client) => client.id)).toContain(created.data.id);
+
+    const deleted = await fx.handler(
+      apiRequest("DELETE", `/oauth-clients/${created.data.id}`, undefined, adminSid),
+    );
+    expect(deleted.status).toBe(204);
   });
 });

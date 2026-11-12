@@ -33,11 +33,11 @@ in any combination, and none of them is privileged:
 - authenticate a JSON:API service, using the included HTTP API, which is itself JSON:API;
 - authenticate an application built on legation, with or without the included HTTP API.
 
-That the included HTTP API is JSON:API is a settled decision about its wire format, not a claim that
-every endpoint has been converted: the conversion of the non-RFC endpoints is in progress, and the
-tier whose wire format another specification mandates (the RFC 8628 device grant, the OAuth/OIDC
-token, authorization and `userinfo` endpoints, RFC 8414 metadata, RFC 7591/7592 registration, JWKS,
-SCIM) stays as those specifications require.
+That the included HTTP API is JSON:API is a settled decision about its wire format
+([ADR-0024](./adr/0024-json-api-http-tier.md)): every endpoint effect-auth designs is a JSON:API
+resource operation, and the tier whose wire format another specification mandates (the RFC 8628
+device grant, the OAuth/OIDC token, authorization and `userinfo` endpoints, RFC 8414 metadata, RFC
+7591/7592 registration, JWKS, the SSO bindings, SCIM) stays as those specifications require.
 
 Mechanically, "not required" means that importing the package root must not pull the HTTP tier — or,
 through it, effect-jsonapi — into a consumer's module graph. A consumer who wants `SessionService`

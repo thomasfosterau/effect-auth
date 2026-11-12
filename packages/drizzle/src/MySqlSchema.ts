@@ -17,6 +17,15 @@
  *   does not accept a literal `DEFAULT` on a `JSON` column. Every insert this
  *   package performs writes the bag explicitly, so nothing depends on it.
  * - Booleans are `boolean()`, i.e. `tinyint` `0`/`1`.
+ * - Identifier values compare byte for byte: `identifiers.value` is
+ *   `varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin` ({@link binaryVarchar}),
+ *   because MySQL's default collation (`utf8mb4_0900_ai_ci` on MySQL 8) is
+ *   case- and accent-insensitive: under it a lookup of `bob@exämple.com` finds
+ *   `bob@example.com`'s row, so a reset or sign-in for one address resolves the
+ *   other's account (#602). PostgreSQL and SQLite compare bytes already. An
+ *   application's own column that holds identifier values (the single-table
+ *   store's `users.email`, or a table mapped through `defineSchema`) needs the
+ *   same collation.
  *
  * ### Support status
  *
@@ -31,6 +40,7 @@
 
 import {
   boolean,
+  customType,
   datetime,
   index,
   json,
@@ -48,6 +58,48 @@ import type { TableNames } from "./Schema.ts";
 
 /** Long enough for a SHA-256 hex digest, a UUID, an email or a URL-ish handle. */
 const KEY_LENGTH = 255;
+
+/**
+ * The collation identifier values are stored and compared under: binary, so
+ * two values are equal only when their bytes are (#602). `utf8mb4_bin` rather
+ * than MySQL 8's `utf8mb4_0900_bin` because MariaDB and MySQL 5.7 have it too.
+ * It is a `PAD SPACE` collation, so trailing spaces still compare equal; core
+ * trims the emails and usernames it stores and treats a returned identifier
+ * whose value differs from the one it asked for as a miss, so that never
+ * resolves another account.
+ */
+export const identifierCollation = "utf8mb4_bin";
+
+/**
+ * A `varchar` column under {@link identifierCollation}, for a column that holds
+ * identifier values: `identifiers.value` here, and an application's own column
+ * the stores look identifiers up in (the single-table store's `users.email`, or
+ * the value column of a table mapped through `defineSchema`). drizzle-kit
+ * emits its SQL type as written:
+ * `varchar(<length>) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`.
+ *
+ * A custom type because drizzle-orm 0.4x's `varchar` has no `collate`; on
+ * drizzle-orm 1.0, `varchar(name, { length }).collate("utf8mb4_bin")` declares
+ * the same column.
+ *
+ * @example
+ * ```ts
+ * const users = mysqlTable("users", {
+ *   id: varchar("id", { length: 255 }).primaryKey(),
+ *   email: MySql.binaryVarchar("email", { length: 255 }).unique(),
+ *   emailVerified: boolean("email_verified").notNull().default(false),
+ * });
+ * ```
+ */
+export const binaryVarchar = customType<{
+  data: string;
+  driverData: string;
+  config: { readonly length: number };
+  configRequired: true;
+}>({
+  dataType: (config) =>
+    `varchar(${config.length}) CHARACTER SET utf8mb4 COLLATE ${identifierCollation}`,
+});
 
 const sessionColumns = () => ({
   /** SHA-256 hex digest of the bearer token — never the raw token itself. */
@@ -73,7 +125,7 @@ const identifierColumns = () => ({
   id: varchar("id", { length: KEY_LENGTH }).primaryKey(),
   userId: varchar("user_id", { length: KEY_LENGTH }).notNull(),
   type: varchar("type", { length: 32 }).$type<Auth.IdentifierType>().notNull(),
-  value: varchar("value", { length: KEY_LENGTH }).notNull(),
+  value: binaryVarchar("value", { length: KEY_LENGTH }).notNull(),
   verified: boolean("verified").notNull().default(false),
   verifiedAt: datetime("verified_at", { mode: "date", fsp: 3 }),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
@@ -139,6 +191,11 @@ export type IdentifierRow = Tables["identifiers"]["$inferSelect"];
  * `CREATE INDEX IF NOT EXISTS`, so the indexes are declared inside their
  * `CREATE TABLE IF NOT EXISTS`, which keeps the whole script replayable on
  * every deploy.
+ *
+ * `identifiers.value` is declared under {@link identifierCollation}. Being
+ * `IF NOT EXISTS`, the script never changes a table that already exists: an
+ * identifiers table created before #602 keeps the server's default collation
+ * until {@link collationMigrationStatements} has run once.
  */
 export const migrationStatements = (names?: Partial<TableNames>): ReadonlyArray<string> => {
   const t = resolveTableNames(names);
@@ -165,13 +222,39 @@ export const migrationStatements = (names?: Partial<TableNames>): ReadonlyArray<
   id VARCHAR(255) NOT NULL PRIMARY KEY,
   user_id VARCHAR(255) NOT NULL,
   type VARCHAR(32) NOT NULL,
-  value VARCHAR(255) NOT NULL,
+  value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   verified TINYINT NOT NULL DEFAULT 0,
   verified_at DATETIME(3),
   created_at DATETIME(3) NOT NULL,
   UNIQUE KEY ${t.identifiers}_type_value_key (type, value),
   KEY ${t.identifiers}_user_id_idx (user_id)
 )`,
+  ];
+};
+
+/**
+ * The one-off migration for an identifiers table created before #602, whose
+ * `value` column has the server's default collation: it converts the column to
+ * {@link identifierCollation}. Running it again changes nothing, but each run
+ * rebuilds the table, so it is not part of {@link migrationStatements}.
+ *
+ * The old case- and accent-insensitive unique key refused any two values that
+ * compared equal under it, so no two existing rows collide under the binary
+ * collation and the conversion cannot fail on them.
+ *
+ * @example
+ * ```ts
+ * for (const statement of MySql.collationMigrationStatements()) {
+ *   await db.execute(sql.raw(statement));
+ * }
+ * ```
+ */
+export const collationMigrationStatements = (
+  names?: Partial<TableNames>,
+): ReadonlyArray<string> => {
+  const t = resolveTableNames(names);
+  return [
+    `ALTER TABLE ${t.identifiers} MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL`,
   ];
 };
 

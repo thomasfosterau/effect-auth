@@ -109,22 +109,22 @@ The Svelte package ships six headless form components out of the box: `SignInFor
 
 ## 5. Endpoint coverage
 
-Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from the `@thomasfosterau/effect-auth/http` subpath (`import type * as Http from "@thomasfosterau/effect-auth/http"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing.
+Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from the `@thomasfosterau/effect-auth/http` subpath (`import type * as Http from "@thomasfosterau/effect-auth/http"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing. The endpoint each one calls is in the core README's [endpoint reference](../../packages/effect-auth/README.md#http-endpoint-reference); a client from before the JSON:API conversion is mapped onto the current methods in the [migration guide](./jsonapi-migration.md).
 
 **Core** — `signUp`, `signIn`, `signOut`, `getSession`, `sendVerificationEmail`, `verifyEmail`, `passwordResetRequest`, `passwordResetConfirm`, `changePassword`, `updateUser`, `listSessions`, `revokeSession`, `revokeOtherSessions`.
 
-**Identifiers** — the login handles (email / username / phone) behind an account. Deleting the last one is refused by the server (`400`), so an account is never orphaned.
+**Identifiers** — the login handles (email / username / phone) behind an account. Deleting the last one is refused by the server (`403`), so an account is never orphaned.
 
 ```ts
 const handles = await client.identifiers.list();
 await client.identifiers.delete(handles[0].id);
 ```
 
-**Alternative sign-in** — `signInUsername`, `signInAnonymous` (guest accounts), `magicLink.{send,verify}`, `emailOtp.{send,signIn}`, `phoneOtp.{send,signIn}`, `googleOneTap.{nonce,signIn}`, `sso.{register,signIn,callback}`.
+**Alternative sign-in** — `signInUsername`, `signInAnonymous` (guest accounts), `magicLink.{send,verify}`, `emailOtp.{send,signIn}`, `phoneOtp.{send,signIn}`, `googleOneTap.{nonce,signIn}`, `sso.{register,signIn,callback}` (`register` is `POST /sso-providers`, `signIn` `POST /sso-authorizations`; the callback keeps the OIDC binding's format).
 
 SAML's two endpoints are deliberately absent: the assertion consumer service (`POST /sso/saml/acs/:providerId`) is a form POST the IdP makes through the browser, and SP metadata (`GET /sso/saml/metadata/:providerId`) is an XML document an IdP admin imports by URL. Neither is a call JavaScript makes.
 
-**Device authorization (RFC 8628)** — `device.code()` and `device.token()` on the input-constrained device, `device.approve()` / `device.deny()` on the verification page the signed-in user opens:
+**Device authorization (RFC 8628)** — `device.code()` and `device.token()` on the input-constrained device (RFC 8628's own wire format), `device.approve()` / `device.deny()` on the verification page the signed-in user opens (`POST /device-authorizations/decisions`, the user code in the body; approving needs the session, denying does not):
 
 ```ts
 const { deviceCode, userCode, verificationUri, interval } = await client.device.code();
@@ -178,15 +178,15 @@ verified.verificationState; // "verified" | "failed" — retry a failed check
 await client.organization.setActive({ organizationId: org.id }); // recorded on the session
 ```
 
-Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier` (claim the domain with `verificationStrategy: "manual"` instead).
+Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier`. An organization proves a domain only through DNS; manual attestation is the operator's, after checking ownership out of band, through the `isAdmin`-gated `client.admin.attestDomain({ organizationId, domain })` (#598).
 
-**API keys** — `apiKeys.{create,list,update,delete}`. The plaintext key comes back exactly once, from `create`.
+**API keys** — `apiKeys.{create,list,update,delete}` over `/api-keys`. The plaintext key comes back exactly once, from `create` (the server sends it in the create's `meta.key`). Creating one needs the session cookie: over a bearer credential it is `403`.
 
-**JWT** — `jwtToken()` mints a signed token for the current session; `jwks()` serves the keys that verify it.
+**JWT** — `jwtToken()` mints a signed token for the current session (`POST /tokens`, so the trusted-origin check covers it); `jwks()` serves the keys that verify it.
 
-**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches.
+**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}` over `/admin/users`, `/user-bans` and `/impersonations`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `unbanUser` resolves with nothing (the lifted ban is a `204`). `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches; `stopImpersonating` answers `404` on a session that is not an impersonation.
 
-**OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` (admin-gated) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
+**OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` over `/oauth-clients` (admin-gated; a confidential client's secret comes back once, from `registerClient`) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
 
 ## 6. Continuing a second-factor challenge
 
@@ -237,7 +237,8 @@ The install context gives a plugin `request` (raw call) and `mutating` (call, th
 The client's `fetch` option is the whole seam: point it at your auth handler in-process and the suite needs no network, no ports and no mock of the protocol.
 
 ```ts
-const { handler } = Http.make({ services, cookie: { secure: false } });
+// One in-process client has no address, so the per-address limits are off.
+const { handler } = Http.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
 const client = createAuthClient({
   baseUrl: "http://app.test",
@@ -250,4 +251,4 @@ await client.signUp({ email, password });
 expect((await client.getSession())?.user.email).toBe(email);
 ```
 
-The package's own suite does exactly this: `src/testing/fixture.ts` builds the real handler over in-memory stores (`makeServerFixture({ features, organization, multiSession })`) and pairs it with `makeCookieJarFetch`. It is test-only — excluded from the published build — so copy the ~30-line pattern rather than importing it. For groups whose server module is disproportionate to stand up (API keys, admin, …), a recording `fetch` that asserts method/path/body is enough.
+`@thomasfosterau/effect-auth/client/testing` packages exactly this: `makeServerFixture({ features, organization, multiSession })` builds the real handler over in-memory stores, and `makeCookieJarFetch(handler)` is the cookie-jar `fetch`. It imports the core and `effect` at runtime, so keep it to tests. For groups whose server module is disproportionate to stand up (API keys, admin, …), a recording `fetch` that asserts method/path/body is enough.

@@ -26,3 +26,4 @@
 - `PATCH /organizations/:id` now applies `jitProvisioning` (the old endpoint accepted and dropped it).
 - `Http.UpdateMemberRolePayload` is `{ role }` (no `userId`).
 - `./client`: `organization.updateMemberRole(memberId, { role })`, `removeMember(memberId)`, `deactivateMember(memberId)` and `reactivateMember(memberId)` take the membership's own `id` (from `get(…).members` or `addMember`) instead of `(organizationId, userId)`. `multiSession.setActive` / `revoke` take the `session.id` that `multiSession.list()` answers, now the stored id. The other organization and multi-session methods keep their arguments and results and call the new endpoints.
+- Every old endpoint, store-contract, client and status-code change of the conversion is in [the migration guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/jsonapi-migration.md).

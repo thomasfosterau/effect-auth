@@ -120,6 +120,8 @@ export interface DeviceBeginResult {
 export interface DevicePollResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
@@ -330,10 +332,10 @@ const make = (
 
         // User is resolved through the session manager so this flow needs no
         // direct user-store dependency (it isn't part of `AuthServices`).
-        const session = yield* sessionManager.createSession(claimed.userId);
-        const { user } = yield* sessionManager.validateSession(session.id);
+        const { session, token } = yield* sessionManager.createSession(claimed.userId);
+        const { user } = yield* sessionManager.validateSession(token);
 
-        return { user, session };
+        return { user, session, token };
       }),
 
       approve: Effect.fn("DeviceAuthorizationService.approve")((userCode: string, userId: string) =>

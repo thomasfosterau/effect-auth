@@ -21,7 +21,7 @@ import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { generateOtp } from "../email/EmailOtp.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
-import { type HookError } from "../Hooks.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
@@ -111,12 +111,14 @@ export interface OtpSecondFactorVerifyOptions {
 export interface OtpSecondFactorVerifyResult {
   readonly userId: string;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
  * An email or SMS one-time code as the second factor: issues a challenge after the password step and completes sign-in when the code matches.
  *
- * Requires `OtpSecondFactorStore` and `SessionService`.
+ * Requires `OtpSecondFactorStore`, `SessionService` and `Hooks`.
  */
 export class OtpSecondFactorService extends Context.Service<
   OtpSecondFactorService,
@@ -157,7 +159,7 @@ export const make = (
 ): Effect.Effect<
   typeof OtpSecondFactorService.Service,
   never,
-  OtpSecondFactorStore | SessionService | SecureRandom.SecureRandom
+  OtpSecondFactorStore | SessionService | Hooks | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -166,6 +168,7 @@ export const make = (
 
     const store = yield* OtpSecondFactorStore;
     const sessionManager = yield* SessionService;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
 
     const invalidOtp = () =>
@@ -224,6 +227,13 @@ export const make = (
           return yield* new OtpSecondFactorError({ message: "OTP has expired" });
         }
 
+        // Counted per user across challenges by the lockout plugin (#592).
+        yield* hooks.beforeAuthenticate({
+          method: "second-factor",
+          identifier: { type: "user", value: record.userId },
+          userId: record.userId,
+        });
+
         if (record.attempts >= maxAttempts) {
           yield* store.delete(pendingToken);
           return yield* new OtpSecondFactorError({ message: "Too many attempts" });
@@ -242,7 +252,7 @@ export const make = (
         // Consume the pending challenge (one-time use)
         yield* store.delete(pendingToken);
 
-        const session = yield* sessionManager.createSession(
+        const { session, token } = yield* sessionManager.createSession(
           record.userId,
           options?.sessionAttributes,
         );
@@ -250,6 +260,7 @@ export const make = (
         return {
           userId: record.userId,
           session,
+          token,
         } satisfies OtpSecondFactorVerifyResult;
       }),
     };

@@ -2,7 +2,11 @@
  * IP-keyed rate limiting plugin.
  *
  * Applies per-operation rate limits keyed by the resolved client IP (from the
- * {@link ClientIP} service).
+ * {@link ClientIP} service): every first-factor authentication attempt
+ * (`beforeAuthenticate`: email and password, username, email and phone OTP,
+ * magic link) draws on one `signin` bucket per address, second-factor
+ * redemptions on a `second-factor` bucket, and sign-up and password-reset
+ * requests on their own.
  *
  * **A request with no client address is refused.** When the {@link ClientIP}
  * service is absent (a hook run outside an HTTP request, for example a direct
@@ -10,7 +14,8 @@
  * no address, the hook fails with a {@link RateLimitError} (`429` under the HTTP
  * layer). Such a request is never let through unlimited and never counted under
  * a bucket shared with other callers (#389). With this plugin installed, every
- * sign-in, sign-up and password-reset request therefore needs an address.
+ * authentication attempt, sign-up and password-reset request therefore needs
+ * an address.
  *
  * **`Http.make` needs an address source for it.** A Web `Request` carries no
  * socket address, so under `Http.make` the address comes only from
@@ -46,16 +51,19 @@
  *   .pipe(Layer.provide(RateLimiter.layer()))
  *   .pipe(Layer.provide(rateLimitStore))
  *
- * const signIn = { email: "ada@example.com", password: "correct horse" }
+ * const signIn = {
+ *   method: "email-password",
+ *   identifier: { type: "email", value: "ada@example.com" },
+ * } as const
  *
  * const program = Effect.gen(function* () {
  *   const hooks = yield* Hooks
  *   // Every sign-in from one address draws on the same budget. Spend the whole
  *   // preset budget, then the next attempt is refused.
  *   for (let i = 0; i < RateLimitPresets.login.maxRequests; i++) {
- *     yield* hooks.beforeSignIn(signIn)
+ *     yield* hooks.beforeAuthenticate(signIn)
  *   }
- *   const refused = yield* Effect.result(hooks.beforeSignIn(signIn))
+ *   const refused = yield* Effect.result(hooks.beforeAuthenticate(signIn))
  *   assert.ok(Result.isFailure(refused))
  * }).pipe(
  *   Effect.provide(layer),
@@ -70,8 +78,8 @@
 import { Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import { ClientIP } from "../ClientIP.ts";
-import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
-import { Hooks, makePlugin } from "../Hooks.ts";
+import type { SignUpInput } from "../email/EmailPassword.ts";
+import { type AuthenticateAttempt, Hooks, makePlugin } from "../Hooks.ts";
 import { recordClientAddressKeyed } from "../HooksClientAddress.ts";
 import { RateLimitError } from "../Errors.ts";
 import {
@@ -90,8 +98,16 @@ import {
  * corresponding {@link RateLimitPresets} default.
  */
 export interface IPRateLimitPluginConfig {
-  /** IP-keyed rate limit for sign-in. Default: {@link RateLimitPresets.login}. */
+  /**
+   * IP-keyed rate limit for first-factor authentication attempts, every
+   * method sharing one bucket. Default: {@link RateLimitPresets.login}.
+   */
   readonly signIn?: RateLimitConfig;
+  /**
+   * IP-keyed rate limit for second-factor redemptions. Default:
+   * {@link RateLimitPresets.totpVerification}.
+   */
+  readonly secondFactor?: RateLimitConfig | undefined;
   /** IP-keyed rate limit for sign-up. Default: {@link RateLimitPresets.registration}. */
   readonly signUp?: RateLimitConfig;
   /** IP-keyed rate limit for password-reset requests. Default: {@link RateLimitPresets.passwordReset}. */
@@ -131,8 +147,11 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
         });
 
       return {
-        beforeSignIn: (input: SignInInput) =>
-          check("signin", config?.signIn ?? RateLimitPresets.login).pipe(Effect.as(input)),
+        beforeAuthenticate: (attempt: AuthenticateAttempt) =>
+          (attempt.method === "second-factor"
+            ? check("second-factor", config?.secondFactor ?? RateLimitPresets.totpVerification)
+            : check("signin", config?.signIn ?? RateLimitPresets.login)
+          ).pipe(Effect.as(attempt)),
 
         beforeSignUp: (input: SignUpInput) =>
           check("signup", config?.signUp ?? RateLimitPresets.registration).pipe(Effect.as(input)),
@@ -149,7 +168,7 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
 /**
  * Hook-level IP rate limiter.
  *
- * Hooks `beforeSignIn`, `beforeSignUp`, and `beforeRequestPasswordReset`.
+ * Hooks `beforeAuthenticate`, `beforeSignUp`, and `beforeRequestPasswordReset`.
  * Keys are `ip:<operation>:<ip>` so they are separate from the per-email keys
  * used by {@link RateLimitPlugin}.
  *

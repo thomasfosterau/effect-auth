@@ -470,7 +470,11 @@ const member = (fact: SetFact): Predicate => ({
 const equalsAtom = (name: string, kind: AttributeKind, value: Entity.AttributeValue): Expr => {
   const atom = (scalar: Scalar): Expr => ({ _tag: "Eq", attribute: name, value: scalar });
   if (!P.isString(kind)) {
-    return P.isObject(value) && Entity.isEntityValue(value) && value.__entity.type === kind.entity
+    // An empty id names no entity, so it equals no row (#661), as in the kernel.
+    return P.isObject(value) &&
+      Entity.isEntityValue(value) &&
+      value.__entity.type === kind.entity &&
+      Entity.namesEntity(value.__entity)
       ? atom(text(value.__entity.id))
       : false;
   }
@@ -695,8 +699,13 @@ const partial = (env: Env, condition: Condition.Condition): Partial => {
   });
 };
 
-/** The resource a compile stands in for the unbound row: never in the slice. */
-const placeholder = (binding: Binding): Entity.EntityRef => Entity.ref(binding.resourceType, "");
+/**
+ * The resource a compile stands in for the unbound row: never in the slice,
+ * and its id is never read (a resource `eq` scope or a read of the resource
+ * reference itself is unsupported), but it must name an entity, or the kernel
+ * refuses the request (#661).
+ */
+const placeholder = (binding: Binding): Entity.EntityRef => Entity.ref(binding.resourceType, "row");
 
 /** Whether a policy's principal and action scopes apply, decided by the kernel itself. */
 const scopesApply = (env: Env, policy: Policy.DeclarativePolicy): boolean =>
@@ -741,6 +750,9 @@ const policyOutcomes = (env: Env, policy: Policy.DeclarativePolicy): Partial => 
  * When some applicable policy reads the row in a way a {@link Predicate} can't
  * express, the result is `Inexact` with the reasons, never an approximation.
  *
+ * A principal or action with an empty id names no entity: the kernel refuses
+ * every row for it (`"invalid-request"`), so the scope is {@link deny} (#661).
+ *
  * @since 0.1.0
  * @category compilation
  */
@@ -749,6 +761,9 @@ export const compile = (
   binding: Binding,
   request: ScopeRequest,
 ): Compiled => {
+  if (!Entity.namesEntity(request.principal) || !Entity.namesEntity(request.action)) {
+    return { _tag: "Exact", scope: deny };
+  }
   const env: Env = {
     binding,
     request: Policy.request({

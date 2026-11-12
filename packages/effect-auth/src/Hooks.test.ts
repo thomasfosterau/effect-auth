@@ -317,7 +317,13 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
         return yield* Effect.forEach(
           Arr.range(1, 6),
           () =>
-            Effect.result(hooks.beforeSignIn(signIn("rate@example.com"))).pipe(
+            Effect.result(
+              hooks.beforeAuthenticate({
+                method: "username",
+                identifier: { type: "username", value: "rate" },
+                userId: "u-rate",
+              }),
+            ).pipe(
               Effect.map(
                 Result.match({
                   onSuccess: (): string => "ok",

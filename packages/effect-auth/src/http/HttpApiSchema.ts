@@ -277,6 +277,8 @@ export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
 export const UsernameSignInPayload = Schema.Struct({
   username: Schema.String,
   password: Schema.String,
+  /** Optional captcha token consumed by the `CaptchaPlugin`. */
+  captchaToken: Schema.optional(Schema.String),
   /**
    * When `false`, the response sets a browser-session cookie. See
    * `SignInPayload.rememberMe` for details.
@@ -394,8 +396,12 @@ export type SamlSsoProviderView = typeof SamlSsoProviderView.Type;
 export const SsoProviderView = Schema.Union([OidcSsoProviderView, SamlSsoProviderView]);
 export type SsoProviderView = typeof SsoProviderView.Type;
 
-/** Request body for registering an **OIDC** SSO connection (admin-gated). */
-export const SsoRegisterOidcPayload = Schema.Struct({
+/**
+ * The attributes of a `POST /sso-providers` registering an **OIDC**
+ * connection (admin-gated). The organization is not one of them: the document
+ * names it as the `organization` relationship (#642).
+ */
+export const SsoRegisterOidcAttributes = Schema.Struct({
   /** Optional for backwards compatibility: OIDC is the default protocol. */
   protocol: Schema.optional(Schema.Literal("oidc")),
   issuer: Schema.String,
@@ -410,12 +416,11 @@ export const SsoRegisterOidcPayload = Schema.Struct({
   jwksEndpoint: Schema.optional(Schema.String),
   scopes: Schema.optional(Schema.Array(Schema.String)),
   usePKCE: Schema.optional(Schema.Boolean),
-  organizationId: Schema.optional(Schema.String),
 });
-export type SsoRegisterOidcPayload = typeof SsoRegisterOidcPayload.Type;
+export type SsoRegisterOidcAttributes = typeof SsoRegisterOidcAttributes.Type;
 
-/** Request body for registering a **SAML 2.0** SSO connection (admin-gated). */
-export const SsoRegisterSamlPayload = Schema.Struct({
+/** The attributes of a `POST /sso-providers` registering a **SAML 2.0** connection (admin-gated). */
+export const SsoRegisterSamlAttributes = Schema.Struct({
   protocol: Schema.Literal("saml"),
   domain: Schema.String,
   entityId: Schema.String,
@@ -427,6 +432,23 @@ export const SsoRegisterSamlPayload = Schema.Struct({
   wantAssertionsSigned: Schema.optional(Schema.Boolean),
   wantAuthnResponseSigned: Schema.optional(Schema.Boolean),
   forceAuthn: Schema.optional(Schema.Boolean),
+});
+export type SsoRegisterSamlAttributes = typeof SsoRegisterSamlAttributes.Type;
+
+/**
+ * Request body for registering an **OIDC** SSO connection, as the typed client
+ * takes it: the attributes plus the optional `organizationId`, which the
+ * client sends as the `organization` relationship.
+ */
+export const SsoRegisterOidcPayload = Schema.Struct({
+  ...SsoRegisterOidcAttributes.fields,
+  organizationId: Schema.optional(Schema.String),
+});
+export type SsoRegisterOidcPayload = typeof SsoRegisterOidcPayload.Type;
+
+/** Request body for registering a **SAML 2.0** SSO connection, as the typed client takes it. */
+export const SsoRegisterSamlPayload = Schema.Struct({
+  ...SsoRegisterSamlAttributes.fields,
   organizationId: Schema.optional(Schema.String),
 });
 export type SsoRegisterSamlPayload = typeof SsoRegisterSamlPayload.Type;
@@ -438,6 +460,13 @@ export type SsoRegisterSamlPayload = typeof SsoRegisterSamlPayload.Type;
  */
 export const SsoRegisterPayload = Schema.Union([SsoRegisterOidcPayload, SsoRegisterSamlPayload]);
 export type SsoRegisterPayload = typeof SsoRegisterPayload.Type;
+
+/** The attributes of `POST /sso-providers`, discriminated on `protocol` like the payload. */
+export const SsoRegisterAttributes = Schema.Union([
+  SsoRegisterOidcAttributes,
+  SsoRegisterSamlAttributes,
+]);
+export type SsoRegisterAttributes = typeof SsoRegisterAttributes.Type;
 
 /** Request body for starting an SSO sign-in (any one of the fields). */
 export const SsoSignInPayload = Schema.Struct({
@@ -684,12 +713,26 @@ export type OrganizationDomainView = typeof OrganizationDomainView.Type;
 export const OrganizationDomainListView = Schema.Array(OrganizationDomainView);
 export type OrganizationDomainListView = typeof OrganizationDomainListView.Type;
 
-/** Request body for claiming a domain (strategy defaults to `"dns"`). */
+/**
+ * Request body for claiming a domain. An organization proves a claim through
+ * DNS only: `verificationStrategy` may be omitted or `"dns"`, and `"manual"`
+ * is refused (`400`), since manual attestation is the operator's (#598).
+ */
 export const AddOrganizationDomainPayload = Schema.Struct({
   domain: Schema.String,
-  verificationStrategy: Schema.optional(Schema.Literals(["dns", "manual"])),
+  verificationStrategy: Schema.optional(Schema.Literal("dns")),
 });
 export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.Type;
+
+/**
+ * The operator's attestation that `organizationId` controls `domain`
+ * (`POST /admin/organization-domains`, `isAdmin`-gated, #598).
+ */
+export const AdminAttestDomainPayload = Schema.Struct({
+  organizationId: Schema.String,
+  domain: Schema.String,
+});
+export type AdminAttestDomainPayload = typeof AdminAttestDomainPayload.Type;
 
 /** Request body for setting the session's active organization (null clears it). */
 export const SetActiveOrganizationPayload = Schema.Struct({

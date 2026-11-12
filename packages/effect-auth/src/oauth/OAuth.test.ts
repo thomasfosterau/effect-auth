@@ -3,9 +3,15 @@ import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
-import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
+import {
+  AuthError,
+  EmailInUseError,
+  OAuthLastCredentialError,
+  OAuthEmailMismatchError,
+} from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
 import {
   IdentifierStore,
@@ -1189,6 +1195,14 @@ describe("OAuthService unlinkAccount guard", () => {
 // trustedProviders, updateUserInfoOnLink)
 // ---------------------------------------------------------------------------
 
+/** An OAuth sign-in refused over a claimed email (#588): a conflict on the address, nothing linked or minted, the address as it was. */
+const refusedClaim = (localVerified: boolean) => ({
+  failure: expect.objectContaining({ _tag: "EmailInUseError", email: "user@example.com" }),
+  accounts: 0,
+  minted: [],
+  address: { userId: "user-existing", verified: localVerified },
+});
+
 describe("OAuthService linking controls", () => {
   const makeTestProvider = (name: string) =>
     OAuth.provider(
@@ -1219,10 +1233,12 @@ describe("OAuthService linking controls", () => {
       delete: () => Effect.void,
     });
 
-  const makeAccountLayer = (existing?: OAuthAccount) => {
-    const stored = MutableHashMap.fromIterable<string, OAuthAccount>(
+  const makeAccountLayer = (
+    existing?: OAuthAccount,
+    stored = MutableHashMap.fromIterable<string, OAuthAccount>(
       existing ? [[`${existing.provider}:${existing.providerId}`, existing]] : [],
-    );
+    ),
+  ) => {
     return Layer.succeed(OAuthAccountStore, {
       create: (a) =>
         Effect.sync(() => {
@@ -1306,7 +1322,7 @@ describe("OAuthService linking controls", () => {
       get: (id) => Effect.succeed(users.find((u) => u.id === id) ?? null),
     });
 
-  const makeSessionLayer = (userId: string) => {
+  const makeSessionLayer = (userId: string, minted: Array<string> = []) => {
     const session: Types.Session = {
       id: "sess-test",
       userId,
@@ -1317,7 +1333,7 @@ describe("OAuthService linking controls", () => {
     };
     const user: Types.User = makeUser({ id: userId });
     return Layer.succeed(SessionService, {
-      createSession: () => Effect.succeed(session),
+      createSession: (id) => Effect.sync(() => (minted.push(id), { session, token: "token-test" })),
       validateSession: () => Effect.succeed({ session, user }),
       invalidateSession: () => Effect.void,
       invalidateUserSessions: () => Effect.void,
@@ -1435,69 +1451,154 @@ describe("OAuthService linking controls", () => {
     expect(account.provider).toBe("github");
   });
 
-  it("trustedProviders: trusted provider auto-links without email_verified in signInWithCallback", async () => {
+  /**
+   * Run `signInWithCallback` for a provider identity that is new, against one
+   * existing user holding `user@example.com` (verified or not), and report what
+   * the flow wrote: the accounts it created, the sessions it minted and the
+   * address afterwards (#588).
+   */
+  const signInOverClaimedEmail = async (
+    options: OAuth.OAuthServiceOptions,
+    claim: { readonly localVerified: boolean; readonly providerVerified: boolean },
+  ) => {
     const existingUser = makeUser({ id: "user-existing" });
-    // The existing account's email identifier is itself unverified.
     const identifiers = makeIdentifiers({
       userId: existingUser.id,
       email: "user@example.com",
-      verified: false,
+      verified: claim.localVerified,
     });
+    const accounts = MutableHashMap.empty<string, OAuthAccount>();
+    const minted: Array<string> = [];
     const service = await Effect.runPromise(
-      OAuth.make({ github: makeTestProvider("github") }, { trustedProviders: ["github"] }).pipe(
+      OAuth.make({ github: makeTestProvider("github") }, options).pipe(
         Effect.provide(
           Layer.mergeAll(
-            makeStateLayer(makeState("github", "trust-state")),
-            makeAccountLayer(),
+            makeStateLayer(makeState("github", "claimed-state")),
+            makeAccountLayer(undefined, accounts),
             makeUserLayer(existingUser),
             identifiers.layer,
             makeCoreUserLayer(existingUser),
-            makeSessionLayer(existingUser.id),
+            makeSessionLayer(existingUser.id, minted),
             PlatformCrypto.layer,
           ),
         ),
       ),
     );
-
     const result = await withProviderFetch(
-      mockUserInfo({ email: "user@example.com", id: "gh-trusted", email_verified: false }),
-      () => Effect.runPromise(service.signInWithCallback("trust-state", "code-trust")),
+      mockUserInfo({
+        email: "user@example.com",
+        id: "gh-claimed",
+        email_verified: claim.providerVerified,
+      }),
+      () =>
+        Effect.runPromise(
+          Effect.result(service.signInWithCallback("claimed-state", "code-claimed")),
+        ),
+    );
+    const address = await Effect.runPromise(
+      identifiers.store.getByValue("email", "user@example.com"),
+    );
+    return { result, existingUser, accounts: MutableHashMap.size(accounts), minted, address };
+  };
+  type ClaimedEmailOutcome = Awaited<ReturnType<typeof signInOverClaimedEmail>>;
+
+  /** What a sign-in left behind: the error it failed with and the writes it made. */
+  const aftermath = ({ result, accounts, minted, address }: ClaimedEmailOutcome) => ({
+    failure: Result.isFailure(result) ? result.failure : null,
+    accounts,
+    minted,
+    address: address === null ? null : { userId: address.userId, verified: address.verified },
+  });
+
+  it("auto-links a provider-verified email to a verified local address by default", async () => {
+    const outcome = await signInOverClaimedEmail(
+      {},
+      { localVerified: true, providerVerified: true },
     );
 
-    expect(result.isNewUser).toBe(false);
-    expect(result.user.id).toBe(existingUser.id);
+    assert(Result.isSuccess(outcome.result));
+    expect(outcome.result.success.isNewUser).toBe(false);
+    expect(outcome.result.success.user.id).toBe(outcome.existingUser.id);
+    expect(outcome.accounts).toBe(1);
+    expect(outcome.minted).toEqual([outcome.existingUser.id]);
+    expect(outcome.result.success.token).toBe("token-test");
+  });
+
+  it("refuses to auto-link a provider-verified email to an unverified local address (#588)", async () => {
+    // The squatter signed up with the victim's address and a password; the
+    // victim's provider verified it. Linking would hand the victim's sign-in
+    // to the squatter's account, password and sessions intact.
+    expect(
+      aftermath(await signInOverClaimedEmail({}, { localVerified: false, providerVerified: true })),
+    ).toEqual(refusedClaim(false));
+  });
+
+  it("trustedProviders: refuses to link an unverified provider email to a verified local address (#588)", async () => {
+    expect(
+      aftermath(
+        await signInOverClaimedEmail(
+          { trustedProviders: ["github"] },
+          { localVerified: true, providerVerified: false },
+        ),
+      ),
+    ).toEqual(refusedClaim(true));
+  });
+
+  it("trustedProviders: refuses to link an unverified provider email to an unverified local address (#588)", async () => {
+    expect(
+      aftermath(
+        await signInOverClaimedEmail(
+          { trustedProviders: ["github"] },
+          { localVerified: false, providerVerified: false },
+        ),
+      ),
+    ).toEqual(refusedClaim(false));
+  });
+
+  it("trustedProviders: refuses a verified match on an unverified local address with auto-link off (#588)", async () => {
+    expect(
+      aftermath(
+        await signInOverClaimedEmail(
+          { autoLinkByVerifiedEmail: false, trustedProviders: ["github"] },
+          { localVerified: false, providerVerified: true },
+        ),
+      ),
+    ).toEqual(refusedClaim(false));
+  });
+
+  it("trustedProviders: a trusted provider auto-links a verified match with auto-link off", async () => {
+    const outcome = await signInOverClaimedEmail(
+      { autoLinkByVerifiedEmail: false, trustedProviders: ["github"] },
+      { localVerified: true, providerVerified: true },
+    );
+
+    assert(Result.isSuccess(outcome.result));
+    expect(outcome.result.success.user.id).toBe(outcome.existingUser.id);
+    expect(outcome.accounts).toBe(1);
+  });
+
+  it("autoLinkByVerifiedEmail: false refuses a verified match from an untrusted provider with a conflict", async () => {
+    expect(
+      aftermath(
+        await signInOverClaimedEmail(
+          { autoLinkByVerifiedEmail: false },
+          { localVerified: true, providerVerified: true },
+        ),
+      ),
+    ).toEqual(refusedClaim(true));
   });
 
   it("trustedProviders: untrusted provider refuses a claimed email without email_verified", async () => {
-    const existingUser = makeUser({ id: "existing-id" });
-    const identifiers = makeIdentifiers({ userId: existingUser.id, email: "user@example.com" });
-
-    const service = await Effect.runPromise(
-      OAuth.make({ github: makeTestProvider("github") }, { trustedProviders: [] }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            makeStateLayer(makeState("github", "untrust-state")),
-            makeAccountLayer(),
-            makeUserLayer(existingUser),
-            identifiers.layer,
-            makeCoreUserLayer(existingUser),
-            makeSessionLayer(existingUser.id),
-            PlatformCrypto.layer,
-          ),
+    // Without email_verified the flow must not auto-link, and it must not
+    // double-claim the email either.
+    expect(
+      aftermath(
+        await signInOverClaimedEmail(
+          { trustedProviders: [] },
+          { localVerified: true, providerVerified: false },
         ),
       ),
-    );
-
-    const err = await withProviderFetch(
-      mockUserInfo({ email: "user@example.com", id: "gh-untrusted", email_verified: false }),
-      () =>
-        Effect.runPromise(Effect.flip(service.signInWithCallback("untrust-state", "code-untrust"))),
-    );
-
-    // Without a trusted provider and without email_verified, the flow must not
-    // auto-link — and it must not double-claim the email either.
-    assert.instanceOf(err, AuthError);
-    expect(err.message).toMatch(/already associated/i);
+    ).toEqual(refusedClaim(true));
   });
 
   it("trustedProviders: unclaimed unverified email creates a new user with an unverified identifier", async () => {
@@ -1647,7 +1748,7 @@ describe("OAuthService linking controls", () => {
       () => Effect.runPromise(Effect.flip(service.signInWithCallback("owner-state", "code-owner"))),
     );
 
-    assert.instanceOf(err, AuthError);
+    assert.instanceOf(err, EmailInUseError);
     expect(err.message).toMatch(/already associated/i);
     // No account linked to the owner, and the owner's address is still unverified.
     expect(MutableHashMap.size(accounts)).toBe(0);

@@ -41,25 +41,6 @@ const sessionStore = (): typeof SessionStore.Service => {
   };
 };
 
-const apiKeyStore = (): typeof ApiKey.ApiKeyStore.Service => {
-  const keys = MutableHashMap.empty<string, ApiKey.ApiKey>();
-  return {
-    create: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
-    get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(keys, id))),
-    getByHash: (hash) =>
-      Effect.sync(
-        () =>
-          Arr.fromIterable(MutableHashMap.values(keys)).find((key) => key.keyHash === hash) ?? null,
-      ),
-    update: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
-    delete: (id) => Effect.sync(() => void MutableHashMap.remove(keys, id)),
-    listByUserId: (userId) =>
-      Effect.sync(() =>
-        Arr.fromIterable(MutableHashMap.values(keys)).filter((key) => key.userId === userId),
-      ),
-  };
-};
-
 const users = MutableHashMap.empty<string, Types.User>();
 const userStore: typeof UserStore.Service = {
   get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
@@ -80,7 +61,9 @@ const register = <E, R>(
 
 register(Testing.sessionStoreConformance(), () => Layer.succeed(SessionStore, sessionStore()));
 register(Testing.userStoreConformance({ seedUser }), () => Layer.succeed(UserStore, userStore));
-register(Testing.apiKeyStoreConformance(), () => Layer.succeed(ApiKey.ApiKeyStore, apiKeyStore()));
+register(Testing.apiKeyStoreConformance(), () =>
+  Layer.succeed(ApiKey.ApiKeyStore, Testing.memoryApiKeyStore()),
+);
 register(Testing.identifierStoreConformance(), () =>
   IdentifierStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
 );
@@ -183,7 +166,7 @@ describe("a broken store fails its suite", () => {
 
   it("an ApiKeyStore whose getByHash misses fails", async () => {
     const failed = await failures(Testing.apiKeyStoreConformance(), () => {
-      const inner = apiKeyStore();
+      const inner = Testing.memoryApiKeyStore();
       return Layer.succeed(ApiKey.ApiKeyStore, { ...inner, getByHash: () => Effect.succeed(null) });
     });
     expect(failed.map((failure) => failure.name)).toEqual([

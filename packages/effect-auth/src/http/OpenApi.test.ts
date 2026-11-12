@@ -1,7 +1,9 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import { Layer, Order, Struct } from "effect";
+import { HashSet, Layer, Order, Struct } from "effect";
 import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import type { OpenApi } from "effect/http-api";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
@@ -68,8 +70,7 @@ const EXPECTED_PATHS = [
   "/device-sessions/{id}",
   "/device/code",
   "/device/token",
-  "/device/approve",
-  "/device/deny",
+  "/device-authorizations/decisions",
   "/organizations",
   "/organizations/active",
   "/organizations/{id}",
@@ -84,30 +85,29 @@ const EXPECTED_PATHS = [
   "/organization-members/{id}/teams",
   "/organization-domains/{id}",
   "/organization-domains/{id}/verifications",
+  "/admin/organization-domains",
   "/organization-roles/{id}",
   "/teams/{id}",
   "/teams/{id}/members",
   "/team-members/{id}",
-  "/admin/users/list",
-  "/admin/users/set-role",
-  "/admin/users/ban",
-  "/admin/users/unban",
-  "/admin/users/remove",
-  "/admin/users/revoke-sessions",
-  "/admin/impersonate",
-  "/admin/stop-impersonating",
+  "/admin/users",
+  "/admin/users/{id}",
+  "/admin/users/{id}/sessions",
+  "/user-bans",
+  "/user-bans/{id}",
+  "/impersonations",
+  "/impersonations/{id}",
   "/api-keys",
-  "/api-keys/{keyId}",
-  "/sso/register",
-  "/sign-in/sso",
+  "/api-keys/{id}",
+  "/sso-providers",
+  "/sso-authorizations",
   "/sso/callback",
   "/sso/saml/acs/{providerId}",
   "/sso/saml/metadata/{providerId}",
-  "/token",
   "/jwks",
-  "/oauth2/register",
-  "/oauth2/clients",
-  "/oauth2/clients/{clientId}",
+  "/tokens",
+  "/oauth-clients",
+  "/oauth-clients/{id}",
   "/oauth2/authorize",
   "/oauth2/consent",
   "/oauth2/token",
@@ -126,6 +126,80 @@ const EXPECTED_PATHS = [
   "/scim/v2/ResourceTypes",
   "/scim/v2/Schemas",
 ];
+
+const JSON_API = "application/vnd.api+json";
+
+/**
+ * The endpoints whose wire format another specification fixes (the `auth` and
+ * `scim` groups): RFC 8628, the SSO bindings, RFC 7517, OAuth 2.0 / OIDC,
+ * RFC 7591 / 7592, RFC 8414 and SCIM 2.0.
+ */
+const RFC_TIER_PATHS = [
+  "/device/code",
+  "/device/token",
+  "/sso/callback",
+  "/sso/saml/acs/{providerId}",
+  "/sso/saml/metadata/{providerId}",
+  "/jwks",
+  "/oauth2/authorize",
+  "/oauth2/consent",
+  "/oauth2/token",
+  "/oauth2/userinfo",
+  "/register",
+  "/register/{clientId}",
+  "/.well-known/openid-configuration",
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/jwks.json",
+  "/scim/v2/Users",
+  "/scim/v2/Users/{id}",
+  "/scim/v2/Groups",
+  "/scim/v2/Groups/{id}",
+  "/scim/v2/ServiceProviderConfig",
+  "/scim/v2/ResourceTypes",
+  "/scim/v2/Schemas",
+];
+
+/** The groups that make up the RFC tier. */
+const RFC_TIER_TAGS = HashSet.make("auth", "scim");
+
+/** Whether an operation belongs to the RFC tier. */
+const isRfc = (operation: OpenApi.OpenAPISpecOperation) =>
+  operation.tags.some((tag) => HashSet.has(RFC_TIER_TAGS, tag));
+
+const METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+/** One media type an operation declares, for a request body or a response. */
+interface DeclaredMediaType {
+  readonly path: string;
+  readonly method: string;
+  readonly mediaType: string;
+}
+
+/** Every media type an operation declares, request bodies and responses alike. */
+const declaredMediaTypes = (
+  path: string,
+  method: string,
+  operation: OpenApi.OpenAPISpecOperation,
+): ReadonlyArray<DeclaredMediaType> =>
+  [
+    ...Struct.keys(operation.requestBody?.content ?? {}),
+    ...R.values(operation.responses).flatMap((response) => Struct.keys(response.content ?? {})),
+  ].map((mediaType) => ({ path, method, mediaType }));
+
+/** The declared media types of the document, split into the RFC tier and the rest. */
+const mediaTypesByTier = (spec: OpenApi.OpenAPISpec) => {
+  const operations = R.toEntries(spec.paths).flatMap(([path, item]) =>
+    METHODS.flatMap((method) => {
+      const operation = item[method];
+      return operation === undefined ? [] : [{ path, method, operation }];
+    }),
+  );
+  const flatten = (rfc: boolean) =>
+    operations
+      .filter(({ operation }) => isRfc(operation) === rfc)
+      .flatMap(({ path, method, operation }) => declaredMediaTypes(path, method, operation));
+  return { jsonApi: flatten(false), rfc: flatten(true) };
+};
 
 describe("getOpenApiSpec", () => {
   it("is a valid OpenAPI 3.1 document with metadata", () => {
@@ -191,6 +265,41 @@ describe("getOpenApiSpec", () => {
     ]);
   });
 
+  it("documents minting a JWT and a key as creates, never as reads", () => {
+    const { paths } = getOpenApiSpec();
+    expect(paths["/tokens"]?.get).toBeUndefined();
+    expect(Struct.keys(paths["/tokens"]?.post?.responses ?? {})).toContain("201");
+    expect(Struct.keys(paths["/api-keys"]?.post?.responses ?? {})).toContain("201");
+    // Device approval carries the user code in the body: no path names it.
+    expect(Struct.keys(paths).filter((path) => path.startsWith("/device-authorizations"))).toEqual([
+      "/device-authorizations/decisions",
+    ]);
+  });
+
+  it("declares JSON:API on every resource group and never on the RFC tier (#205)", () => {
+    const tiers = mediaTypesByTier(getOpenApiSpec());
+    // The RFC tier is exactly the endpoints another specification fixes.
+    expect(Arr.sort(Arr.dedupe(tiers.rfc.map(({ path }) => path)), Order.String)).toEqual(
+      Arr.sort(RFC_TIER_PATHS, Order.String),
+    );
+    // Every body a resource group takes or answers is a JSON:API document.
+    const notJsonApi = tiers.jsonApi.filter(({ mediaType }) => mediaType !== JSON_API);
+    expect(notJsonApi).toEqual([]);
+    expect(tiers.jsonApi.length).toBeGreaterThan(0);
+    // And no RFC endpoint declares one, in a request or a response.
+    expect(tiers.rfc.filter(({ mediaType }) => mediaType === JSON_API)).toEqual([]);
+    const rfcTypes = Arr.dedupe(tiers.rfc.map(({ mediaType }) => mediaType));
+    expect(Arr.sort(rfcTypes, Order.String)).toEqual([
+      "application/json",
+      "application/samlmetadata+xml",
+      "application/scim+json",
+      "application/x-www-form-urlencoded",
+    ]);
+    // SCIM speaks `application/scim+json` throughout.
+    const scim = tiers.rfc.filter(({ path }) => path.startsWith("/scim/v2/"));
+    expect(Arr.dedupe(scim.map(({ mediaType }) => mediaType))).toEqual(["application/scim+json"]);
+  });
+
   it("documents a 409 only where a create can conflict", () => {
     const { paths } = getOpenApiSpec();
     // Defining a role an organization already defines is a conflict; creating
@@ -216,6 +325,7 @@ describe("HttpServer.make docs routes", () => {
       services: stubServices(),
       prefix: "/api/auth",
       docs: true,
+      ipRateLimit: false,
     });
     onTestFinished(dispose);
     const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));
@@ -234,7 +344,11 @@ describe("HttpServer.make docs routes", () => {
   });
 
   it("serves docs at the root when no prefix is configured", async () => {
-    const { handler, dispose } = HttpServer.make({ services: stubServices(), docs: true });
+    const { handler, dispose } = HttpServer.make({
+      services: stubServices(),
+      docs: true,
+      ipRateLimit: false,
+    });
     onTestFinished(dispose);
     const res = await handler(new Request("http://test/openapi.json"));
     expect(res.status).toBe(200);
@@ -244,6 +358,7 @@ describe("HttpServer.make docs routes", () => {
     const { handler, dispose } = HttpServer.make({
       services: stubServices(),
       prefix: "/api/auth",
+      ipRateLimit: false,
     });
     onTestFinished(dispose);
     const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));

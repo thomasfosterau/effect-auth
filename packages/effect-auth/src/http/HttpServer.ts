@@ -52,7 +52,7 @@ import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
-import { IdentifierStore, type Identifier } from "../Identifier.ts";
+import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
@@ -80,8 +80,20 @@ import {
   type OrgRole,
   type OrganizationDomain,
 } from "../Organization.ts";
-import { AdminService, isAdmin } from "../Admin.ts";
-import { ApiKeyService, type ApiKey } from "../ApiKey.ts";
+import {
+  type AdminError,
+  AdminService,
+  type BanUserOptions,
+  isAdmin,
+  type ListUsersQuery,
+} from "../Admin.ts";
+import {
+  ApiKeyService,
+  type ApiKey,
+  type ApiKeyCreateOptions,
+  type ApiKeyError,
+  type ApiKeyUpdate,
+} from "../ApiKey.ts";
 import { type CredentialClass } from "../Authorizer.ts";
 import { JwtService } from "../Jwt.ts";
 import {
@@ -90,8 +102,17 @@ import {
   type OidcClientMetadata,
   type OidcProviderError,
   type OidcRegistrationError,
+  type RegisterOidcClientInput,
+  type UpdateOidcClientInput,
 } from "../OidcProvider.ts";
-import { SsoService, type SsoProvider } from "../Sso.ts";
+import {
+  type RegisterProviderInput,
+  type RegisterSamlProviderInput,
+  SsoService,
+  type SsoError,
+  type SsoProvider,
+  type SsoSignInSelector,
+} from "../Sso.ts";
 import {
   ScimService,
   type ScimError,
@@ -209,6 +230,9 @@ export interface CookieConfig {
    * Issue the raw session token in a `set-auth-token` response header on
    * every session-issuing endpoint (sign-in, sign-up, magic-link verify,
    * OTP verify, OAuth callback, …) in addition to the normal `Set-Cookie`.
+   *
+   * Whatever the mode, no response body carries the token: every session
+   * resource is named by its stored id, the token's digest (#581).
    *
    * - `false` (default): sessions are issued only via httpOnly cookies.
    *   The httpOnly flag prevents client-side JavaScript from reading the
@@ -603,34 +627,45 @@ const orgRoleResource = (r: OrgRole): R.OrganizationRole =>
   });
 
 /**
- * Encode an SSO connection for the wire, one arm of the `protocol` union at a
- * time. Neither arm carries a secret: the OIDC arm drops `clientSecret`, and
- * both drop the registrar's `userId`.
+ * The fields of a SAML connection that its registration and its stored record
+ * share, each optional one left out when absent.
  */
-const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView =>
+const samlConnection = <Algorithm extends string>(p: {
+  readonly domain: string;
+  readonly entityId: string;
+  readonly ssoUrl: string;
+  readonly idpCertificates: ReadonlyArray<string>;
+  readonly spEntityId: string;
+  readonly acsUrl: string;
+  readonly signatureAlgorithms?: ReadonlyArray<Algorithm> | undefined;
+  readonly wantAssertionsSigned?: boolean | undefined;
+  readonly wantAuthnResponseSigned?: boolean | undefined;
+  readonly forceAuthn?: boolean | undefined;
+}) => ({
+  protocol: "saml" as const,
+  domain: p.domain,
+  entityId: p.entityId,
+  ssoUrl: p.ssoUrl,
+  idpCertificates: p.idpCertificates,
+  spEntityId: p.spEntityId,
+  acsUrl: p.acsUrl,
+  ...(p.signatureAlgorithms !== undefined && { signatureAlgorithms: p.signatureAlgorithms }),
+  ...(p.wantAssertionsSigned !== undefined && { wantAssertionsSigned: p.wantAssertionsSigned }),
+  ...(p.wantAuthnResponseSigned !== undefined && {
+    wantAuthnResponseSigned: p.wantAuthnResponseSigned,
+  }),
+  ...(p.forceAuthn !== undefined && { forceAuthn: p.forceAuthn }),
+});
+
+/**
+ * The attributes of an SSO connection's `sso-providers` resource, one arm of
+ * the `protocol` union at a time. Neither arm carries a secret: the OIDC arm
+ * drops `clientSecret`, and both drop the registrar's `userId`.
+ */
+const ssoProviderAttributes = (p: SsoProvider): R.SsoProvider["attributes"] =>
   p.protocol === "saml"
-    ? {
-        id: p.id,
-        domain: p.domain,
-        protocol: p.protocol,
-        entityId: p.entityId,
-        ssoUrl: p.ssoUrl,
-        idpCertificates: p.idpCertificates,
-        spEntityId: p.spEntityId,
-        acsUrl: p.acsUrl,
-        ...(p.signatureAlgorithms !== undefined && { signatureAlgorithms: p.signatureAlgorithms }),
-        ...(p.wantAssertionsSigned !== undefined && {
-          wantAssertionsSigned: p.wantAssertionsSigned,
-        }),
-        ...(p.wantAuthnResponseSigned !== undefined && {
-          wantAuthnResponseSigned: p.wantAuthnResponseSigned,
-        }),
-        ...(p.forceAuthn !== undefined && { forceAuthn: p.forceAuthn }),
-        ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
-        createdAt: p.createdAt,
-      }
+    ? { ...samlConnection(p), createdAt: p.createdAt }
     : {
-        id: p.id,
         issuer: p.issuer,
         domain: p.domain,
         protocol: p.protocol,
@@ -641,21 +676,43 @@ const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView =>
         ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
         ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
         scopes: p.scopes,
-        ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
         createdAt: p.createdAt,
       };
 
-const encodeOidcClient = (c: OidcClient): S.OidcClientView => ({
-  clientId: c.clientId,
-  name: c.name,
-  redirectUris: c.redirectUris,
-  type: c.type,
-  skipConsent: c.skipConsent,
-  disabled: c.disabled,
-  metadata: c.metadata,
-  createdAt: c.createdAt,
-  updatedAt: c.updatedAt,
-});
+/** The `sso-providers` resource of a connection, its `organizationId` as a relationship. */
+const ssoProviderResource = (provider: SsoProvider): R.SsoProvider =>
+  R.SsoProvider.make({
+    id: provider.id,
+    attributes: ssoProviderAttributes(provider),
+    relationships: {
+      organization: {
+        data:
+          provider.organizationId === undefined
+            ? null
+            : R.Organization.ref(provider.organizationId),
+      },
+    },
+  });
+
+/**
+ * The `oauth-clients` resource of a registered client: never the secret's
+ * hash, the registration metadata or the registrar. JSON:API reserves `type`,
+ * so the client's own type travels as `clientType`.
+ */
+const oauthClientResource = (c: OidcClient): R.OAuthClient =>
+  R.OAuthClient.make({
+    id: c.clientId,
+    attributes: {
+      name: c.name,
+      redirectUris: c.redirectUris,
+      clientType: c.type,
+      skipConsent: c.skipConsent,
+      disabled: c.disabled,
+      metadata: c.metadata,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    },
+  });
 
 /**
  * Encode a client as an RFC 7591 §3.2.1 client information response. The
@@ -755,22 +812,29 @@ const registrationMetadata = (payload: S.OidcRegistrationPayload): OidcClientMet
   ...(payload.scope !== undefined && { scope: payload.scope }),
 });
 
-const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
-  id: k.id,
-  ...(k.name !== undefined && { name: k.name }),
-  ...(k.prefix !== undefined && { prefix: k.prefix }),
-  start: k.start,
-  userId: k.userId,
-  enabled: k.enabled,
-  ...(k.expiresAt !== undefined && { expiresAt: k.expiresAt }),
-  ...(k.lastUsedAt !== undefined && { lastUsedAt: k.lastUsedAt }),
-  ...(k.permissions !== undefined && { permissions: k.permissions }),
-  metadata: k.metadata,
-  ...(k.remaining !== undefined && { remaining: k.remaining }),
-  ...(k.rateLimit !== undefined && { rateLimit: k.rateLimit }),
-  createdAt: k.createdAt,
-  updatedAt: k.updatedAt,
-});
+/**
+ * The `api-keys` resource of a stored key, its owner as `user`: never the
+ * key's hash or its refill bookkeeping.
+ */
+const apiKeyResource = (k: ApiKey): R.ApiKey =>
+  R.ApiKey.make({
+    id: k.id,
+    attributes: {
+      ...(k.name !== undefined && { name: k.name }),
+      ...(k.prefix !== undefined && { prefix: k.prefix }),
+      start: k.start,
+      enabled: k.enabled,
+      ...(k.expiresAt !== undefined && { expiresAt: k.expiresAt }),
+      ...(k.lastUsedAt !== undefined && { lastUsedAt: k.lastUsedAt }),
+      ...(k.permissions !== undefined && { permissions: k.permissions }),
+      metadata: k.metadata,
+      ...(k.remaining !== undefined && { remaining: k.remaining }),
+      ...(k.rateLimit !== undefined && { rateLimit: k.rateLimit }),
+      createdAt: k.createdAt,
+      updatedAt: k.updatedAt,
+    },
+    relationships: { user: { data: R.User.ref(k.userId) } },
+  });
 
 /**
  * Log the real error server-side and return a generic 500 body so internal
@@ -975,7 +1039,7 @@ const servicesConfigError = (
 
   if (Option.isSome(Context.getOption(services, RateLimiter))) return undefined;
   const configured: Array<string> = [];
-  if (options.ipRateLimit !== undefined) configured.push("ipRateLimit");
+  if (options.ipRateLimit !== false) configured.push("ipRateLimit (on by default)");
   if (Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled) {
     configured.push("the dynamic client registration limit (POST /register)");
   }
@@ -988,7 +1052,7 @@ const servicesConfigError = (
     message:
       `${configured.join(", ")} configured with no RateLimiter in services, so the limit could not run. ` +
       "Compose RateLimiter.layer() with its RateLimitStore into services, or remove the limit " +
-      "(for the device user-code limit, DeviceAuthorizationConfig.allowMissingRateLimiter: true).",
+      "(ipRateLimit: false; for the device user-code limit, DeviceAuthorizationConfig.allowMissingRateLimiter: true).",
   });
 };
 
@@ -1215,7 +1279,11 @@ const userIdentifiers = (
       );
   });
 
-/** The `sessions` resource of a stored session. */
+/**
+ * The `sessions` resource of a session. Its `id` is the stored id, the digest
+ * of the token; every `Types.Session` the services answer carries that id, so
+ * no response body ever holds the token itself (#581).
+ */
 const sessionResource = (session: Types.Session): R.Session =>
   R.Session.make({
     id: session.id,
@@ -1537,6 +1605,8 @@ const hookFailures = {
 interface SignInOutcome {
   readonly user: Types.User;
   readonly session?: Types.Session | undefined;
+  /** The raw token of `session`: only ever set as a cookie or the bearer header. */
+  readonly token?: string | undefined;
   readonly needsEmailVerification: boolean;
   readonly secondFactor?: { readonly token: string; readonly expiresAt: number } | undefined;
   readonly rememberMe?: boolean | undefined;
@@ -1555,16 +1625,17 @@ type Pending = typeof PendingDocument.Type;
 /**
  * Attach a new session to the response a JSON:API handler is about to send:
  * the cookies and, in bearer mode, the `set-auth-token` header, as
- * {@link withSessionCookie} does for a JSON body.
+ * {@link withSessionCookie} does for a JSON body. Those headers are the only
+ * places the token goes; the body names the session by its stored id.
  */
 const issueSession = (
-  session: Types.Session,
+  issued: Types.IssuedSession,
   cfg: ResolvedCookieConfig,
-  method: string,
+  method: string | undefined,
   rememberMe: boolean | undefined,
 ): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
   HttpEffect.appendPreResponseHandler((request, response) =>
-    decorateSessionResponse(response, session, cfg, method, rememberMe).pipe(
+    decorateSessionResponse(response, issued, cfg, method, rememberMe).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, request),
     ),
   );
@@ -1599,9 +1670,10 @@ const answerSignIn = (
 > =>
   Effect.gen(function* () {
     const meta = { needsEmailVerification: outcome.needsEmailVerification };
-    if (outcome.session !== undefined) {
-      yield* issueSession(outcome.session, cfg, outcome.method, outcome.rememberMe);
-      return yield* signedIn({ ...outcome, session: outcome.session });
+    const { session, token } = outcome;
+    if (session !== undefined && token !== undefined) {
+      yield* issueSession({ session, token }, cfg, outcome.method, outcome.rememberMe);
+      return yield* signedIn({ ...outcome, session });
     }
     if (outcome.secondFactor !== undefined) {
       return {
@@ -1650,7 +1722,11 @@ const signInWithPassword = (
 
 /** Sign in with a username and password. */
 const signInWithUsername = (
-  credential: { readonly username: string; readonly password: string },
+  credential: {
+    readonly username: string;
+    readonly password: string;
+    readonly captchaToken?: string | undefined;
+  },
   rememberMe: boolean | undefined,
 ) =>
   Effect.gen(function* () {
@@ -1659,6 +1735,7 @@ const signInWithUsername = (
       .signIn({
         username: credential.username,
         password: credential.password,
+        captchaToken: credential.captchaToken,
         ...(rememberMe !== undefined && { rememberMe }),
       })
       .pipe(
@@ -1685,7 +1762,7 @@ const invalidCode = (e: { readonly message: string }) =>
 /** The outcome of a passwordless sign-in, which never awaits a verification. */
 const passwordless =
   (method: string) =>
-  (result: { readonly user: Types.User; readonly session: Types.Session }): SignInOutcome => ({
+  (result: { readonly user: Types.User } & Types.IssuedSession): SignInOutcome => ({
     ...result,
     needsEmailVerification: false,
     method,
@@ -1802,9 +1879,10 @@ const verifySecondFactor = (
     return {
       user,
       session: result.session,
+      token: result.token,
       needsEmailVerification: false,
       method: "multi-factor",
-    } satisfies SignInOutcome;
+    } satisfies SignInOutcome & Types.IssuedSession;
   });
 
 /**
@@ -1865,7 +1943,7 @@ export const secondFactorChallengesGroupLayer = (
         payload.data.attributes,
       ).pipe(
         Effect.flatMap((outcome) =>
-          Effect.flatMap(issueSession(outcome.session, cfg, outcome.method, undefined), () =>
+          Effect.flatMap(issueSession(outcome, cfg, outcome.method, undefined), () =>
             signedIn(outcome),
           ),
         ),
@@ -1936,13 +2014,13 @@ export const emailVerificationsGroupLayer = (
           const identifiers = yield* IdentifierStore;
           const verification = yield* EmailVerificationService;
           const email = payload.data.attributes.email.trim().toLowerCase();
-          const identifier = yield* identifiers
-            .getByValue("email", email)
-            .pipe(Effect.catch(internalServerError));
+          const identifier = yield* lookupIdentifier(identifiers, "email", email).pipe(
+            Effect.catch(internalServerError),
+          );
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified.
           if (identifier !== null && !identifier.verified) {
-            yield* verification.resendVerification(identifier.userId, email).pipe(
+            yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
               Effect.catchTags({
                 AuthError: (e) => internalServerError(e),
                 EmailVerificationError: (e) => internalServerError(e),
@@ -1967,9 +2045,10 @@ export const emailVerificationsGroupLayer = (
               }),
             );
           // `201` with the session when verification signs the user in.
-          if (result.session === undefined) return yield* Effect.void;
-          yield* issueSession(result.session, cfg, "email-password", undefined);
-          return yield* signedIn({ ...result, session: result.session, method: "email-password" });
+          const { session, token } = result;
+          if (session === undefined || token === undefined) return yield* Effect.void;
+          yield* issueSession({ session, token }, cfg, "email-password", undefined);
+          return yield* signedIn({ ...result, session, method: "email-password" });
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -2357,11 +2436,9 @@ export const deviceSessionsGroupLayer = (
           return Handlers.collection(
             valid.map(({ session }) =>
               R.DeviceSession.make({
-                // `validateSession` answers the session under its token; the
-                // wire names it by the stored id, its hash.
-                id: hashToken(session.id),
+                id: session.id,
                 attributes: {
-                  active: session.id === active,
+                  active: active !== undefined && session.id === hashToken(active),
                   expiresAt: session.expiresAt,
                   createdAt: session.createdAt,
                   lastActivityAt: session.lastActivityAt,
@@ -2584,13 +2661,11 @@ export const organizationsGroupLayer = (
         ),
       )
       .handle("addDomain", ({ params, payload, request }) =>
-        asOrganizationActor(request, cfg, (org, actorId) => {
-          const { domain, verificationStrategy } = payload.data.attributes;
-          return org.addDomain(actorId, params.id, {
-            domain,
-            ...(verificationStrategy !== undefined && { verificationStrategy }),
-          });
-        }).pipe(
+        // The payload admits only the `dns` strategy (#598), so the domain is
+        // all there is to pass on.
+        asOrganizationActor(request, cfg, (org, actorId) =>
+          org.addDomain(actorId, params.id, { domain: payload.data.attributes.domain }),
+        ).pipe(
           Effect.map((domain) => Handlers.data(domainResource(domain))),
           JsonApiErrors.mapHttpErrors,
         ),
@@ -2706,7 +2781,8 @@ export const organizationMembersGroupLayer = (
 
 /**
  * Layer implementing the `organization-domains` group: one domain claim, by
- * id (see `organizationDomainsGroup` in `HttpApi.ts`).
+ * id, and the operator's attestation (see `organizationDomainsGroup` in
+ * `HttpApi.ts`).
  */
 export const organizationDomainsGroupLayer = (
   config?: CookieConfig,
@@ -2730,6 +2806,21 @@ export const organizationDomainsGroupLayer = (
             org.verifyDomain(actorId, domain.organizationId, domain.id),
           );
           return Handlers.data(domainResource(verified));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // The operator's attestation (#598): gated on `isAdmin`, never on an
+      // organization permission, like SSO connection registration.
+      .handle("attest", ({ payload, request }) =>
+        Effect.gen(function* () {
+          yield* requireAdminCaller(request, cfg);
+          const org = yield* resolveOrganization;
+          const attested = yield* refusedBadRequest(
+            org.service.attestDomain(
+              payload.data.relationships.organization.data.id,
+              payload.data.attributes.domain,
+            ),
+          );
+          return Handlers.data(domainResource(attested));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -2893,6 +2984,585 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
   );
 };
 
+// -----------------------------------------------------------------------------
+// Admin, impersonation, API keys, OAuth clients, SSO, JWTs and device approval
+// (#205, slice 5)
+// -----------------------------------------------------------------------------
+
+// The service inputs below leave an optional key out rather than set it to
+// `undefined` (`exactOptionalPropertyTypes`), so each is built field by field.
+
+/** `GET /admin/users`' query as the admin service's listing query. */
+const listUsersQuery = (query: {
+  readonly page?: { readonly offset?: number; readonly limit?: number } | undefined;
+  readonly filter?: { readonly email?: string } | undefined;
+}): ListUsersQuery => ({
+  ...(query.page?.limit !== undefined && { limit: query.page.limit }),
+  ...(query.page?.offset !== undefined && { offset: query.page.offset }),
+  ...(query.filter?.email !== undefined && { searchEmail: query.filter.email }),
+});
+
+/** A ban's `reason` and `expiresIn`, as the admin service's ban options. */
+const banOptions = (attributes: {
+  readonly reason?: string | undefined;
+  readonly expiresIn?: number | undefined;
+}): BanUserOptions => ({
+  ...(attributes.reason !== undefined && { reason: attributes.reason }),
+  ...(attributes.expiresIn !== undefined && { expiresIn: attributes.expiresIn }),
+});
+
+/** The settings an API key's create and update share: its name, grants and limits. */
+const apiKeySettings = (a: S.ApiKeyUpdatePayload) => ({
+  ...(a.name !== undefined && { name: a.name }),
+  ...(a.permissions !== undefined && { permissions: a.permissions }),
+  ...(a.metadata !== undefined && { metadata: a.metadata }),
+  ...(a.remaining !== undefined && { remaining: a.remaining }),
+  ...(a.rateLimit !== undefined && { rateLimit: a.rateLimit }),
+});
+
+/** The settings of `POST /api-keys`, as the API-key service's create options. */
+const apiKeyCreateOptions = (a: S.ApiKeyCreatePayload): ApiKeyCreateOptions => ({
+  ...apiKeySettings(a),
+  ...(a.prefix !== undefined && { prefix: a.prefix }),
+  ...(a.expiresIn !== undefined && { expiresIn: a.expiresIn }),
+});
+
+/** The attributes of `PATCH /api-keys/:id`, as the API-key service's update. */
+const apiKeyUpdate = (a: S.ApiKeyUpdatePayload): ApiKeyUpdate => ({
+  ...apiKeySettings(a),
+  ...(a.enabled !== undefined && { enabled: a.enabled }),
+  ...(a.expiresAt !== undefined && { expiresAt: a.expiresAt }),
+});
+
+/** The attributes of `POST /oauth-clients`, as the provider's registration input. */
+const oauthClientInput = (a: {
+  readonly name: string;
+  readonly redirectUris: ReadonlyArray<string>;
+  readonly clientType?: "web" | "native" | undefined;
+  readonly skipConsent?: boolean | undefined;
+  readonly metadata?: Types.Attributes | undefined;
+}): RegisterOidcClientInput => ({
+  name: a.name,
+  redirectUris: a.redirectUris,
+  ...(a.clientType !== undefined && { type: a.clientType }),
+  ...(a.skipConsent !== undefined && { skipConsent: a.skipConsent }),
+  ...(a.metadata !== undefined && { metadata: a.metadata }),
+});
+
+/** The attributes of `PATCH /oauth-clients/:id`, as the provider's client update. */
+const oauthClientUpdate = (a: S.OidcClientUpdatePayload): UpdateOidcClientInput => ({
+  ...(a.name !== undefined && { name: a.name }),
+  ...(a.redirectUris !== undefined && { redirectUris: a.redirectUris }),
+  ...(a.skipConsent !== undefined && { skipConsent: a.skipConsent }),
+  ...(a.disabled !== undefined && { disabled: a.disabled }),
+  ...(a.metadata !== undefined && { metadata: a.metadata }),
+});
+
+/** A SAML registration document's attributes, as the SSO service's input. */
+const samlRegistration = (
+  p: S.SsoRegisterSamlAttributes,
+  organizationId: string | undefined,
+): RegisterSamlProviderInput => ({
+  ...samlConnection(p),
+  ...(organizationId !== undefined && { organizationId }),
+});
+
+/** An OIDC registration document's attributes, as the SSO service's input. */
+const oidcRegistration = (
+  p: S.SsoRegisterOidcAttributes,
+  organizationId: string | undefined,
+): RegisterProviderInput => ({
+  issuer: p.issuer,
+  domain: p.domain,
+  clientId: p.clientId,
+  clientSecret: p.clientSecret,
+  redirectUri: p.redirectUri,
+  ...(p.discover !== undefined && { discover: p.discover }),
+  ...(p.authorizationEndpoint !== undefined && {
+    authorizationEndpoint: p.authorizationEndpoint,
+  }),
+  ...(p.tokenEndpoint !== undefined && { tokenEndpoint: p.tokenEndpoint }),
+  ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
+  ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
+  ...(p.scopes !== undefined && { scopes: p.scopes }),
+  ...(p.usePKCE !== undefined && { usePKCE: p.usePKCE }),
+  ...(organizationId !== undefined && { organizationId }),
+});
+
+/** A sign-in document's selector (`email`, `domain` or `providerId`), as the SSO service's. */
+const ssoSelector = (p: S.SsoSignInPayload): SsoSignInSelector => ({
+  ...(p.email !== undefined && { email: p.email }),
+  ...(p.domain !== undefined && { domain: p.domain }),
+  ...(p.providerId !== undefined && { providerId: p.providerId }),
+});
+
+/**
+ * An admin call's failures as the client sees them: a refusal (`isAdmin`
+ * fails, or the target is protected) is `403`, an unknown user `400`, a store
+ * failure `500`.
+ */
+const asAdmin = <A, R>(
+  self: Effect.Effect<A, AdminError | UserNotFoundError | AuthError, R>,
+): Effect.Effect<A, S.Forbidden | S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(self, adminFailures);
+
+/** The `catchTags` cases of {@link asAdmin}. */
+const adminFailures = {
+  AdminError: (e: AdminError) => Effect.fail(new S.Forbidden({ message: e.message })),
+  UserNotFoundError: (e: UserNotFoundError) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  AuthError: (e: AuthError) => internalServerError(e),
+};
+
+/**
+ * The signed-in actor and the admin service: `401` without a session, `404`
+ * when admin is not enabled.
+ */
+const adminActor = (request: HttpServerRequest.HttpServerRequest, cfg: ResolvedCookieConfig) =>
+  Effect.gen(function* () {
+    const resolved = yield* requireSession(request, cfg);
+    const admin = yield* resolveAdmin;
+    return { admin: admin.service, actor: resolved.user };
+  });
+
+/**
+ * The signed-in caller, when `isAdmin` holds for them under the default admin
+ * configuration (what the OAuth-client and SSO-connection endpoints gate on):
+ * `401` without a session, `403` otherwise.
+ */
+const requireAdminCaller = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+) =>
+  Effect.gen(function* () {
+    const resolved = yield* requireSession(request, cfg);
+    if (!isAdmin(resolved.user)) {
+      return yield* new S.Forbidden({ message: "Admin privileges required" });
+    }
+    return resolved.user;
+  });
+
+/**
+ * A bodiless admin call on the user the URL's `:id` names (a removal, a
+ * revocation, a lifted ban), as the signed-in actor: `204` once it is done.
+ */
+const adminAction =
+  (
+    cfg: ResolvedCookieConfig,
+    act: (
+      admin: typeof AdminService.Service,
+      actor: Types.User,
+      userId: string,
+    ) => Effect.Effect<unknown, AdminError | UserNotFoundError | AuthError>,
+  ) =>
+  ({
+    params,
+    request,
+  }: {
+    readonly params: { readonly id: string };
+    readonly request: HttpServerRequest.HttpServerRequest;
+  }) =>
+    Effect.gen(function* () {
+      const { admin, actor } = yield* adminActor(request, cfg);
+      yield* asAdmin(act(admin, actor, params.id));
+    }).pipe(JsonApiErrors.mapHttpErrors);
+
+/**
+ * Layer implementing the `admin-users` group: user administration (see
+ * `adminUsersGroup` in `HttpApi.ts`).
+ */
+export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "admin-users", (handlers) =>
+    handlers
+      .handle("list", ({ query, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const result = yield* asAdmin(admin.listUsers(actor, listUsersQuery(query)));
+          const users = yield* Effect.forEach(result.users, loadUserResource, { concurrency: 1 });
+          return Handlers.collection(users, { meta: { total: result.total } });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const user = yield* asAdmin(
+            admin.setRole(actor, params.id, payload.data.attributes.role),
+          );
+          return Handlers.data(yield* loadUserResource(user));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle(
+        "delete",
+        adminAction(cfg, (admin, actor, id) => admin.removeUser(actor, id)),
+      )
+      .handle(
+        "deleteSessions",
+        adminAction(cfg, (admin, actor, id) => admin.revokeUserSessions(actor, id)),
+      ),
+  );
+};
+
+/** The `user-bans` resource of a banned user: the ban fields of its `attributes`. */
+const userBanResource = (user: Types.User): R.UserBan => {
+  const reason = user.attributes["banReason"];
+  const expiresAt = user.attributes["banExpires"];
+  return R.UserBan.make({
+    id: user.id,
+    attributes: {
+      reason: P.isString(reason) ? reason : "",
+      ...(P.isNumber(expiresAt) && { expiresAt }),
+    },
+    relationships: { user: { data: R.User.ref(user.id) } },
+  });
+};
+
+/**
+ * Layer implementing the `user-bans` group: ban and unban users (see
+ * `userBansGroup` in `HttpApi.ts`).
+ */
+export const userBansGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "user-bans", (handlers) =>
+    handlers
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const banned = yield* asAdmin(
+            admin.banUser(
+              actor,
+              payload.data.relationships.user.data.id,
+              banOptions(payload.data.attributes ?? {}),
+            ),
+          );
+          return Handlers.data(userBanResource(banned), {
+            included: [yield* loadUserResource(banned)],
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle(
+        "delete",
+        adminAction(cfg, (admin, actor, id) => admin.unbanUser(actor, id)),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `impersonations` group: start and end an
+ * administrator's impersonation of a user (see `impersonationsGroup` in
+ * `HttpApi.ts`).
+ */
+export const impersonationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "impersonations", (handlers) =>
+    handlers
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          const issued = yield* Effect.catchTags(
+            admin.impersonateUser(actor, payload.data.relationships.user.data.id),
+            { ...hookFailures, ...adminFailures },
+          );
+          const { session } = issued;
+          const userService = yield* UserService;
+          const user = yield* userService
+            .getUser(session.userId)
+            .pipe(Effect.catch(internalServerError));
+          // The session cookie becomes the impersonation's session.
+          yield* issueSession(issued, cfg, undefined, undefined);
+          return Handlers.data(
+            R.Impersonation.make({
+              id: session.id,
+              attributes: { expiresAt: session.expiresAt, createdAt: session.createdAt },
+              relationships: {
+                user: { data: R.User.ref(session.userId) },
+                impersonator: { data: R.User.ref(actor.id) },
+              },
+            }),
+            { included: [yield* loadUserResource(user)] },
+          );
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          yield* resolveAdmin; // 404 when admin is not enabled
+          if (params.id !== CURRENT) {
+            return yield* new S.NotFound({ message: "Impersonation not found" });
+          }
+          const { resolved, token } = yield* resolveSession(request, cfg);
+          if (!P.isString(resolved.session.attributes["impersonatedBy"])) {
+            return yield* new S.NotFound({ message: "This session is not an impersonation" });
+          }
+          const sessionManager = yield* SessionService;
+          yield* storeFailure(sessionManager.invalidateSession(token));
+          return yield* clearSessionCookies(request, cfg, token);
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** An API-key call's failures: a refusal (or a key the caller does not own) is `400`. */
+const asApiKeyOwner = <A, R>(
+  self: Effect.Effect<A, ApiKeyError | AuthError, R>,
+): Effect.Effect<A, S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(self, {
+    ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Layer implementing the `api-keys` group: the signed-in user's API keys (see
+ * `apiKeysGroup` in `HttpApi.ts`).
+ */
+export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  /** The caller's id and the API-key service: `401` without a session, `404` when off. */
+  const owner = (request: HttpServerRequest.HttpServerRequest) =>
+    Effect.gen(function* () {
+      const resolved = yield* requireSession(request, cfg);
+      const apiKey = yield* resolveApiKey;
+      return { apiKey: apiKey.service, userId: resolved.user.id };
+    });
+
+  return HttpApiBuilder.group(AuthApi, "api-keys", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const { apiKey, userId } = yield* owner(request);
+          const keys = yield* storeFailure(apiKey.list(userId));
+          return Handlers.collection(keys.map(apiKeyResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          // A key is never minted from a machine credential (a bearer token,
+          // another key): only from the interactive session cookie.
+          yield* requireInteractiveCredential(request);
+          const apiKey = yield* resolveApiKey;
+          const result = yield* asApiKeyOwner(
+            apiKey.service.create(resolved.user.id, apiKeyCreateOptions(payload.data.attributes)),
+          );
+          // The plaintext key is shown this once, in `meta`.
+          return Handlers.data(apiKeyResource(result.apiKey), { meta: { key: result.key } });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { apiKey, userId } = yield* owner(request);
+          const updated = yield* asApiKeyOwner(
+            apiKey.update(userId, params.id, apiKeyUpdate(payload.data.attributes ?? {})),
+          );
+          return Handlers.data(apiKeyResource(updated));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { apiKey, userId } = yield* owner(request);
+          yield* asApiKeyOwner(apiKey.delete(userId, params.id));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/**
+ * Layer implementing the `oauth-clients` group: the OIDC provider's client
+ * registry, for administrators (see `oauthClientsGroup` in `HttpApi.ts`).
+ */
+export const oauthClientsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  /** The administrator's id and the provider: `401`, `403`, or `404` when it is off. */
+  const administrator = (request: HttpServerRequest.HttpServerRequest) =>
+    Effect.gen(function* () {
+      const user = yield* requireAdminCaller(request, cfg);
+      const oidc = yield* resolveOidcProvider;
+      return { oidc: oidc.service, userId: user.id };
+    });
+
+  return HttpApiBuilder.group(AuthApi, "oauth-clients", (handlers) =>
+    handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          const { oidc } = yield* administrator(request);
+          const clients = yield* storeFailure(oidc.listClients());
+          return Handlers.collection(clients.map(oauthClientResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("create", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const { oidc, userId } = yield* administrator(request);
+          const result = yield* oidcProviderFailures(
+            oidc.registerClient(oauthClientInput(payload.data.attributes), userId),
+          );
+          // A confidential client's secret is shown this once, in `meta`.
+          return Handlers.data(oauthClientResource(result.client), {
+            meta: result.clientSecret === undefined ? {} : { clientSecret: result.clientSecret },
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("update", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const { oidc } = yield* administrator(request);
+          const updated = yield* oidcProviderFailures(
+            oidc.updateClient(params.id, oauthClientUpdate(payload.data.attributes ?? {})),
+          );
+          return Handlers.data(oauthClientResource(updated));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { oidc } = yield* administrator(request);
+          yield* oidcProviderFailures(oidc.deleteClient(params.id));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      ),
+  );
+};
+
+/** An SSO call's failures: a refusal is `400`, a store failure `500`. */
+const asSsoRequest = <A, R>(
+  self: Effect.Effect<A, SsoError | AuthError, R>,
+): Effect.Effect<A, S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(self, {
+    SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Layer implementing the `sso-providers` group: register an enterprise SSO
+ * connection (see `ssoProvidersGroup` in `HttpApi.ts`).
+ */
+export const ssoProvidersGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "sso-providers", (handlers) =>
+    handlers.handle("create", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const user = yield* requireAdminCaller(request, cfg);
+        const sso = yield* resolveSso;
+        // The attributes are a union discriminated on `protocol`; without one
+        // they are an OIDC registration.
+        const attributes = payload.data.attributes;
+        const organizationId = payload.data.relationships?.organization?.data?.id;
+        const provider =
+          attributes.protocol === "saml"
+            ? yield* asSsoRequest(
+                sso.service.registerSamlProvider(
+                  user.id,
+                  samlRegistration(attributes, organizationId),
+                ),
+              )
+            : yield* asSsoRequest(
+                sso.service.registerProvider(user.id, oidcRegistration(attributes, organizationId)),
+              );
+        return Handlers.data(ssoProviderResource(provider));
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
+/**
+ * Layer implementing the `sso-authorizations` group: start an SSO sign-in
+ * (see `ssoAuthorizationsGroup` in `HttpApi.ts`).
+ */
+export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
+  AuthApi,
+  "sso-authorizations",
+  (handlers) =>
+    handlers.handle("create", ({ payload }) =>
+      Effect.gen(function* () {
+        const sso = yield* resolveSso;
+        const result = yield* asSsoRequest(
+          sso.service.signIn(ssoSelector(payload.data.attributes)),
+        );
+        return Handlers.data(
+          R.SsoAuthorization.make({ id: result.state, attributes: { url: result.url } }),
+        );
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+);
+
+/**
+ * Layer implementing the `tokens` group: sign a JWT for the signed-in user
+ * (see `tokensGroup` in `HttpApi.ts`).
+ */
+export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "tokens", (handlers) =>
+    handlers.handle("create", ({ request }) =>
+      Effect.gen(function* () {
+        const resolved = yield* requireSession(request, cfg);
+        const jwt = yield* resolveJwt;
+        const { token, expiresAt } = yield* storeFailure(jwt.service.sign(resolved.user));
+        // A token is not stored: its id is its digest, never the token itself.
+        return Handlers.data(
+          R.Token.make({ id: hashToken(token), attributes: { token, expiresAt } }),
+        );
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
+/**
+ * Settle a device authorization: done, or an unknown or settled code as
+ * `400`, a store failure as `500`.
+ */
+const deviceDecision = <R>(
+  decision: Effect.Effect<void, DeviceCodeError | AuthError, R>,
+): Effect.Effect<void, S.BadRequest | S.InternalServerError, R> =>
+  Effect.catchTags(decision, {
+    DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+    AuthError: (e) => internalServerError(e),
+  });
+
+/**
+ * Layer implementing the `device-authorizations` group: the verification
+ * page's approval or denial of a device's user code (see
+ * `deviceAuthorizationsGroup` in `HttpApi.ts`).
+ */
+export const deviceAuthorizationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "device-authorizations", (handlers) =>
+    handlers.handle("decide", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const { userCode, decision } = payload.data.attributes;
+        // Approving grants the device the caller's session, so it needs one;
+        // denying needs none.
+        const approver =
+          decision === "approved" ? (yield* requireSession(request, cfg)).user.id : undefined;
+        const device = yield* resolveDevice;
+        // Rate-limit user_code attempts per RFC 8628 §5.2: user codes are ~39
+        // bits, so without a per-code limit pending codes could be enumerated
+        // (approve) or griefed at scale (deny, which is unauthenticated).
+        yield* applyUserCodeRateLimit(userCode, device.service);
+        return yield* deviceDecision(
+          approver === undefined
+            ? device.service.deny(userCode)
+            : device.service.approve(userCode, approver),
+        );
+      }).pipe(JsonApiErrors.mapHttpErrors),
+    ),
+  );
+};
+
 /**
  * Every group of the {@link AuthApi} contract, with the JSON:API protocol
  * middleware its resource groups declare: what `HttpApiBuilder.layer(AuthApi)`
@@ -2926,27 +3596,21 @@ export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionCo
     organizationRolesGroupLayer(config, multiSession),
     teamsGroupLayer(config, multiSession),
     teamMembersGroupLayer(config, multiSession),
+    adminUsersGroupLayer(config, multiSession),
+    userBansGroupLayer(config, multiSession),
+    impersonationsGroupLayer(config, multiSession),
+    apiKeysGroupLayer(config, multiSession),
+    oauthClientsGroupLayer(config, multiSession),
+    ssoProvidersGroupLayer(config, multiSession),
+    ssoAuthorizationsGroupLayer,
+    tokensGroupLayer(config, multiSession),
+    deviceAuthorizationsGroupLayer(config, multiSession),
     scimGroupLayer(),
   ).pipe(
     // The protocol middleware the JSON:API endpoints declare: content
     // negotiation, schema errors as error documents, and the create's
     // `Location` header.
     Layer.provideMerge(JsonApiMiddleware.layer),
-  );
-
-/**
- * Answer a device-code approval or denial: `{ status: true }`, an unknown or
- * settled code as `400`, a store failure as `500`.
- */
-const deviceDecision = <R>(
-  decision: Effect.Effect<void, DeviceCodeError | AuthError, R>,
-): Effect.Effect<S.StatusResponse, S.BadRequest | S.InternalServerError, R> =>
-  decision.pipe(
-    Effect.catchTags({
-      DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-      AuthError: (e) => internalServerError(e),
-    }),
-    Effect.as({ status: true }),
   );
 
 /** Layer implementing the `auth` group handlers. */
@@ -3012,361 +3676,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg, "device");
-        }),
-      )
-      .handle("deviceApprove", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const device = yield* resolveDevice;
-          // Rate-limit user_code attempts per RFC 8628 §5.2 to prevent
-          // enumeration of pending codes (approve is session-gated, but
-          // still benefits from per-code throttling).
-          yield* applyUserCodeRateLimit(payload.userCode, device.service);
-          return yield* deviceDecision(device.service.approve(payload.userCode, resolved.user.id));
-        }),
-      )
-      .handle("deviceDeny", ({ payload }) =>
-        Effect.gen(function* () {
-          const device = yield* resolveDevice;
-          // Rate-limit unauthenticated deny attempts per RFC 8628 §5.2.
-          // User codes are ~39 bits; without throttling an attacker can grief
-          // pending codes at scale.
-          yield* applyUserCodeRateLimit(payload.userCode, device.service);
-          return yield* deviceDecision(device.service.deny(payload.userCode));
-        }),
-      )
-      // --- Admin ------------------------------------------------------------
-      .handle("adminListUsers", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const result = yield* admin.service
-            .listUsers(resolved.user, {
-              ...(payload.limit !== undefined && { limit: payload.limit }),
-              ...(payload.offset !== undefined && { offset: payload.offset }),
-              ...(payload.searchEmail !== undefined && { searchEmail: payload.searchEmail }),
-            })
-            .pipe(
-              Effect.catchTags({
-                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          const users = yield* Effect.forEach(result.users, encodeUserView, { concurrency: 1 });
-          return { users, total: result.total };
-        }),
-      )
-      .handle("adminSetRole", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const user = yield* admin.service
-            .setRole(resolved.user, payload.userId, payload.role)
-            .pipe(
-              Effect.catchTags({
-                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return yield* encodeUserView(user);
-        }),
-      )
-      .handle("adminBanUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const user = yield* admin.service
-            .banUser(resolved.user, payload.userId, {
-              ...(payload.reason !== undefined && { reason: payload.reason }),
-              ...(payload.expiresIn !== undefined && { expiresIn: payload.expiresIn }),
-            })
-            .pipe(
-              Effect.catchTags({
-                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return yield* encodeUserView(user);
-        }),
-      )
-      .handle("adminUnbanUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const user = yield* admin.service.unbanUser(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return yield* encodeUserView(user);
-        }),
-      )
-      .handle("adminRemoveUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          yield* admin.service.removeUser(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-        }),
-      )
-      .handle("adminRevokeSessions", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          yield* admin.service.revokeUserSessions(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { status: true };
-        }),
-      )
-      .handle("adminImpersonate", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const admin = yield* resolveAdmin;
-          const userService = yield* UserService;
-          const session = yield* admin.service.impersonateUser(resolved.user, payload.userId).pipe(
-            Effect.catchTags({
-              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-            }),
-          );
-          const user = yield* userService
-            .getUser(session.userId)
-            .pipe(Effect.catch(internalServerError));
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, session, cfg);
-        }),
-      )
-      .handle("adminStopImpersonating", ({ request }) =>
-        Effect.gen(function* () {
-          yield* resolveAdmin; // 404 when admin is not enabled
-          const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionService;
-          yield* sessionManager
-            .invalidateSession(resolved.session.id)
-            .pipe(Effect.catch(internalServerError));
-          return yield* HttpServerResponse.json({ status: true }).pipe(
-            Effect.flatMap((response) =>
-              HttpServerResponse.setCookie(response, cfg.name, "", clearCookieOptions(cfg)),
-            ),
-            Effect.flatMap((response) =>
-              cfg.cache !== undefined
-                ? HttpServerResponse.setCookie(
-                    response,
-                    dataCookieName(cfg),
-                    "",
-                    clearCookieOptions(cfg),
-                  )
-                : Effect.succeed(response),
-            ),
-            Effect.orDie,
-          );
-        }),
-      )
-      // --- API keys ---------------------------------------------------------
-      .handle("apiKeyCreate", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          yield* requireInteractiveCredential(request);
-          const apiKey = yield* resolveApiKey;
-          const result = yield* apiKey.service
-            .create(resolved.user.id, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.prefix !== undefined && { prefix: payload.prefix }),
-              ...(payload.expiresIn !== undefined && { expiresIn: payload.expiresIn }),
-              ...(payload.permissions !== undefined && { permissions: payload.permissions }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-              ...(payload.remaining !== undefined && { remaining: payload.remaining }),
-              ...(payload.rateLimit !== undefined && { rateLimit: payload.rateLimit }),
-            })
-            .pipe(
-              Effect.catchTags({
-                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return { key: result.key, apiKey: encodeApiKey(result.apiKey) };
-        }),
-      )
-      .handle("apiKeyList", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveApiKey;
-          const keys = yield* apiKey.service.list(resolved.user.id).pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return keys.map(encodeApiKey);
-        }),
-      )
-      .handle("apiKeyUpdate", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveApiKey;
-          const updated = yield* apiKey.service
-            .update(resolved.user.id, params.keyId, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.enabled !== undefined && { enabled: payload.enabled }),
-              ...(payload.expiresAt !== undefined && { expiresAt: payload.expiresAt }),
-              ...(payload.permissions !== undefined && { permissions: payload.permissions }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-              ...(payload.remaining !== undefined && { remaining: payload.remaining }),
-              ...(payload.rateLimit !== undefined && { rateLimit: payload.rateLimit }),
-            })
-            .pipe(
-              Effect.catchTags({
-                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeApiKey(updated);
-        }),
-      )
-      .handle("apiKeyDelete", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveApiKey;
-          yield* apiKey.service.delete(resolved.user.id, params.keyId).pipe(
-            Effect.catchTags({
-              ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-        }),
-      )
-      // --- Enterprise SSO ---------------------------------------------------
-      .handle("ssoRegister", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const sso = yield* resolveSso;
-          // The payload is a union discriminated on `protocol`; a body without
-          // one is an OIDC registration (what every pre-SAML client sends).
-          if (payload.protocol === "saml") {
-            const samlProvider = yield* sso.service
-              .registerSamlProvider(resolved.user.id, {
-                protocol: "saml",
-                domain: payload.domain,
-                entityId: payload.entityId,
-                ssoUrl: payload.ssoUrl,
-                idpCertificates: payload.idpCertificates,
-                spEntityId: payload.spEntityId,
-                acsUrl: payload.acsUrl,
-                ...(payload.signatureAlgorithms !== undefined && {
-                  signatureAlgorithms: payload.signatureAlgorithms,
-                }),
-                ...(payload.wantAssertionsSigned !== undefined && {
-                  wantAssertionsSigned: payload.wantAssertionsSigned,
-                }),
-                ...(payload.wantAuthnResponseSigned !== undefined && {
-                  wantAuthnResponseSigned: payload.wantAuthnResponseSigned,
-                }),
-                ...(payload.forceAuthn !== undefined && { forceAuthn: payload.forceAuthn }),
-                ...(payload.organizationId !== undefined && {
-                  organizationId: payload.organizationId,
-                }),
-              })
-              .pipe(
-                Effect.catchTags({
-                  SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                  AuthError: (e) => internalServerError(e),
-                }),
-              );
-            return encodeSsoProvider(samlProvider);
-          }
-          const provider = yield* sso.service
-            .registerProvider(resolved.user.id, {
-              issuer: payload.issuer,
-              domain: payload.domain,
-              clientId: payload.clientId,
-              clientSecret: payload.clientSecret,
-              redirectUri: payload.redirectUri,
-              ...(payload.discover !== undefined && { discover: payload.discover }),
-              ...(payload.authorizationEndpoint !== undefined && {
-                authorizationEndpoint: payload.authorizationEndpoint,
-              }),
-              ...(payload.tokenEndpoint !== undefined && {
-                tokenEndpoint: payload.tokenEndpoint,
-              }),
-              ...(payload.userInfoEndpoint !== undefined && {
-                userInfoEndpoint: payload.userInfoEndpoint,
-              }),
-              ...(payload.jwksEndpoint !== undefined && { jwksEndpoint: payload.jwksEndpoint }),
-              ...(payload.scopes !== undefined && { scopes: payload.scopes }),
-              ...(payload.usePKCE !== undefined && { usePKCE: payload.usePKCE }),
-              ...(payload.organizationId !== undefined && {
-                organizationId: payload.organizationId,
-              }),
-            })
-            .pipe(
-              Effect.catchTags({
-                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return encodeSsoProvider(provider);
-        }),
-      )
-      .handle("signInSso", ({ payload }) =>
-        Effect.gen(function* () {
-          const sso = yield* resolveSso;
-          const result = yield* sso.service
-            .signIn({
-              ...(payload.email !== undefined && { email: payload.email }),
-              ...(payload.domain !== undefined && { domain: payload.domain }),
-              ...(payload.providerId !== undefined && { providerId: payload.providerId }),
-            })
-            .pipe(
-              Effect.catchTags({
-                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-              }),
-            );
-          return { url: result.url, state: result.state };
+          return yield* withSessionCookie(body, result, cfg, "device");
         }),
       )
       .handle("ssoCallback", ({ payload }) =>
@@ -3407,7 +3717,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg, "sso");
+          return yield* withSessionCookie(body, result, cfg, "sso");
         }),
       )
       // SAML assertion consumer service. The IdP form-POSTs here through the
@@ -3453,7 +3763,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg, "sso");
+          return yield* withSessionCookie(body, result, cfg, "sso");
         }),
       )
       .handle("samlMetadata", ({ params }) =>
@@ -3467,93 +3777,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
         }),
       )
-      // --- JWT --------------------------------------------------------------
-      .handle("jwtToken", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          const jwt = yield* resolveJwt;
-          const result = yield* jwt.service.sign(resolved.user).pipe(
-            Effect.catchTags({
-              JwtError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return { token: result.token, expiresAt: result.expiresAt };
-        }),
-      )
       .handle("jwtJwks", () => jwksDocument())
       // --- OIDC provider ------------------------------------------------------
-      .handle("oidcRegisterClient", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          const result = yield* oidc.service
-            .registerClient(
-              {
-                name: payload.name,
-                redirectUris: payload.redirectUris,
-                ...(payload.type !== undefined && { type: payload.type }),
-                ...(payload.skipConsent !== undefined && { skipConsent: payload.skipConsent }),
-                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-              },
-              resolved.user.id,
-            )
-            .pipe(oidcProviderFailures);
-          return {
-            client: encodeOidcClient(result.client),
-            ...(result.clientSecret !== undefined && { clientSecret: result.clientSecret }),
-          };
-        }),
-      )
-      .handle("oidcListClients", ({ request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          const clients = yield* oidc.service.listClients().pipe(
-            Effect.catchTags({
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          return clients.map(encodeOidcClient);
-        }),
-      )
-      .handle("oidcUpdateClient", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          const updated = yield* oidc.service
-            .updateClient(params.clientId, {
-              ...(payload.name !== undefined && { name: payload.name }),
-              ...(payload.redirectUris !== undefined && {
-                redirectUris: payload.redirectUris,
-              }),
-              ...(payload.skipConsent !== undefined && { skipConsent: payload.skipConsent }),
-              ...(payload.disabled !== undefined && { disabled: payload.disabled }),
-              ...(payload.metadata !== undefined && { metadata: payload.metadata }),
-            })
-            .pipe(oidcProviderFailures);
-          return encodeOidcClient(updated);
-        }),
-      )
-      .handle("oidcDeleteClient", ({ params, request }) =>
-        Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          if (!isAdmin(resolved.user)) {
-            return yield* new S.Forbidden({ message: "Admin privileges required" });
-          }
-          const oidc = yield* resolveOidcProvider;
-          return yield* oidc.service.deleteClient(params.clientId).pipe(oidcProviderFailures);
-        }),
-      )
       .handle("oidcAuthorize", ({ query, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
@@ -4262,45 +4487,44 @@ export const scimGroupLayer = () =>
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
-/** Resolve and validate the request's session or fail with 401. */
 /**
- * Resolve the authenticated session, preferring the signed cache cookie (no
- * store read) when the cache is enabled and the cookie is valid; otherwise
- * validating against the session store. `cacheHit` lets callers decide whether
- * to (re)issue the cache cookie.
+ * Resolve the authenticated session or fail with 401, preferring the signed
+ * cache cookie (no store read) when the cache is enabled and the cookie is
+ * valid; otherwise validating against the session store. `cacheHit` lets
+ * callers decide whether to (re)issue the cache cookie; `token` is the raw
+ * token the request presented, for the calls that need the credential itself
+ * (signing it out). The resolved session carries only its stored id.
  */
 const resolveSession = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
 ): Effect.Effect<
-  { readonly resolved: Types.SessionWithUser; readonly cacheHit: boolean },
+  {
+    readonly resolved: Types.SessionWithUser;
+    readonly cacheHit: boolean;
+    readonly token: string;
+  },
   S.Unauthorized,
   SessionService | Hooks
 > =>
   Effect.gen(function* () {
-    if (cfg.cache !== undefined) {
-      const primaryId = sessionIdFromRequest(request, cfg);
-      if (primaryId !== undefined) {
-        const cached = request.cookies[dataCookieName(cfg)];
-        if (cached !== undefined) {
-          const gate = yield* sessionCacheGateAttributes;
-          const resolved = decodeSessionCacheCookie(
-            cached,
-            cfg.cache,
-            yield* Clock.currentTimeMillis,
-            primaryId,
-            gate,
-          );
-          if (resolved !== null) return { resolved, cacheHit: true };
-        }
-      }
-    }
-    const sessionId = sessionIdFromRequest(request, cfg);
-    if (sessionId === undefined) {
+    const token = sessionIdFromRequest(request, cfg);
+    if (token === undefined) {
       return yield* new S.Unauthorized({ message: "Not authenticated" });
     }
+    const cached = cfg.cache === undefined ? undefined : request.cookies[dataCookieName(cfg)];
+    if (cfg.cache !== undefined && cached !== undefined) {
+      const resolved = decodeSessionCacheCookie(
+        cached,
+        cfg.cache,
+        yield* Clock.currentTimeMillis,
+        hashToken(token),
+        yield* sessionCacheGateAttributes,
+      );
+      if (resolved !== null) return { resolved, cacheHit: true, token };
+    }
     const sessionManager = yield* SessionService;
-    const resolved = yield* sessionManager.validateSession(sessionId).pipe(
+    const resolved = yield* sessionManager.validateSession(token).pipe(
       Effect.catchTag("UserBannedError", (e) =>
         resolveMessage(e.code, e.message).pipe(
           Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
@@ -4308,7 +4532,7 @@ const resolveSession = (
       ),
       Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
     );
-    return { resolved, cacheHit: false };
+    return { resolved, cacheHit: false, token };
   });
 
 const requireSession = (
@@ -4333,9 +4557,9 @@ const requireInteractiveCredential = (
     : Effect.fail(new S.Forbidden({ message: "This operation requires an interactive session" }));
 
 /**
- * Attach the session cookie to a JSON `AuthSuccess` response when a session is
- * present. When the last-login-method hint is enabled and `method` is given,
- * also (re)writes the non-httpOnly `${name}_last_method` cookie.
+ * Attach a new session to a JSON `AuthSuccess` response (whose body names no
+ * session at all). When the last-login-method hint is enabled and `method` is
+ * given, also (re)writes the non-httpOnly `${name}_last_method` cookie.
  *
  * When `rememberMe` is `false`, a browser-session cookie is emitted (no
  * `Max-Age`/`Expires`) so the cookie is cleared when the browser closes.
@@ -4344,25 +4568,25 @@ const requireInteractiveCredential = (
  */
 const withSessionCookie = (
   body: S.AuthSuccess,
-  session: Types.Session | undefined,
+  issued: Types.IssuedSession,
   cfg: ResolvedCookieConfig,
   method?: string,
   rememberMe?: boolean,
 ) =>
   Effect.gen(function* () {
     const json = yield* HttpServerResponse.json(body);
-    if (session === undefined) return json;
-    return yield* decorateSessionResponse(json, session, cfg, method, rememberMe);
+    return yield* decorateSessionResponse(json, issued, cfg, method, rememberMe);
   }).pipe(Effect.orDie);
 
 /**
  * Carry a new session on `response`: the session cookie (a browser-session one
  * when `rememberMe` is `false`), the device's multi-session list, the
  * last-login-method hint and, in bearer mode, the `set-auth-token` header.
+ * These headers are the only places the raw token is written (#581).
  */
 const decorateSessionResponse = (
   json: HttpServerResponse.HttpServerResponse,
-  session: Types.Session,
+  { session, token }: Types.IssuedSession,
   cfg: ResolvedCookieConfig,
   method?: string,
   rememberMe?: boolean,
@@ -4372,13 +4596,13 @@ const decorateSessionResponse = (
       rememberMe === false
         ? sessionOnlyCookieOptions(cfg)
         : sessionCookieOptions(cfg, session.expiresAt);
-    let response = yield* HttpServerResponse.setCookie(json, cfg.name, session.id, cookieOpts);
+    let response = yield* HttpServerResponse.setCookie(json, cfg.name, token, cookieOpts);
     // Multi-session: append the new session to the device's session list (the
     // primary cookie remains the active session), capped to `maximumSessions`.
     if (cfg.multiSession !== undefined) {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const existing = readDeviceSessionIds(request, cfg).filter((id) => id !== session.id);
-      const ids = [...existing, session.id].slice(-cfg.multiSession.maximumSessions);
+      const existing = readDeviceSessionIds(request, cfg).filter((id) => id !== token);
+      const ids = [...existing, token].slice(-cfg.multiSession.maximumSessions);
       response = yield* HttpServerResponse.setCookie(
         response,
         multiCookieName(cfg),
@@ -4407,7 +4631,7 @@ const decorateSessionResponse = (
         emitBearer = request.headers["x-use-bearer"] === "1";
       }
       if (emitBearer) {
-        response = HttpServerResponse.setHeader(response, "set-auth-token", session.id);
+        response = HttpServerResponse.setHeader(response, BEARER_TOKEN_HEADER, token);
       }
     }
     return response;
@@ -4433,12 +4657,22 @@ const PlatformLayer = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer)
 
 /**
  * A single per-endpoint IP rate-limit rule.
- * `path` is matched against the request pathname (exact string or regex).
+ *
+ * `path` names an endpoint by its path template, as the OpenAPI document
+ * writes it (`"/sessions"`, `"/sso/saml/acs/{providerId}"`; the router's
+ * `:providerId` form is accepted too), or is a `RegExp` tested against that
+ * template. The rule is checked once the router has matched the request to an
+ * endpoint, against the endpoint it matched, never against the raw request
+ * path: the router is case-insensitive and ignores trailing and duplicate
+ * slashes and percent-encoding, so `/Sessions/`, `//sessions` and
+ * `/%73essions` all reach `POST /sessions` and all count under its rule
+ * (#582). Paths are relative to the mount `prefix`, as the endpoints are.
+ *
  * `methods` limits the rule to specific HTTP methods (default: all methods).
  *
- * Each rule counts in one bucket per client address, whatever path matched it:
- * a regex rule shares its bucket across every path it matches, so a caller
- * cannot reset its count by varying the path.
+ * Each rule counts in one bucket per client address, whatever endpoint matched
+ * it: a regex rule shares its bucket across every endpoint it matches, so a
+ * caller cannot reset its count by varying the path.
  */
 export interface EndpointRateLimitRule {
   readonly path: string | RegExp;
@@ -4463,86 +4697,187 @@ export interface HttpIPRateLimitConfig {
   readonly rules?: ReadonlyArray<EndpointRateLimitRule>;
 }
 
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+
+/** A `POST` rule for `path`: `maxRequests` per `windowMs`, then a `blockDurationMs` block. */
+const postRule = (
+  path: string,
+  maxRequests: number,
+  windowMs: number,
+  blockDurationMs: number,
+): EndpointRateLimitRule => ({ path, methods: ["POST"], maxRequests, windowMs, blockDurationMs });
+
 /**
- * Sane default IP rate-limit rules applied to sensitive auth endpoints.
+ * Sane default IP rate-limit rules applied to sensitive auth endpoints: every
+ * unauthenticated endpoint that sends a message, writes a row, makes an
+ * outbound call or verifies a secret, and the authenticated ones that hash a
+ * password or check a second factor (#583). `Http.make` applies them unless
+ * it is given `ipRateLimit: false` or rules of its own.
  *
- * | Endpoint(s)                                        | Limit  | Window | Block  |
- * |----------------------------------------------------|--------|--------|--------|
- * | `POST /sessions` (every sign-in method)            | 10 req | 15 min | 30 min |
- * | `POST /users` (sign-up)                            | 5 req  | 1 hr   | 24 hr  |
- * | `POST /otp-challenges` (email / SMS code, link)    | 5 req  | 10 min | 30 min |
- * | `POST /password-resets`                            | 5 req  | 1 hr   | 2 hr   |
- * | `POST /second-factor-challenges/verifications`     | 10 req | 5 min  | 30 min |
- * | `POST /register` (dynamic client registration)     | 10 req | 1 hr   | 1 hr   |
+ * | Endpoint(s)                                                    | Limit   | Window | Block  |
+ * |----------------------------------------------------------------|---------|--------|--------|
+ * | `POST /sessions` (every sign-in method)                        | 10 req  | 15 min | 30 min |
+ * | `POST /users` (sign-up)                                        | 5 req   | 1 hr   | 24 hr  |
+ * | `POST /otp-challenges` (email / SMS code, link)                | 5 req   | 10 min | 30 min |
+ * | `POST /password-resets`                                        | 5 req   | 1 hr   | 2 hr   |
+ * | `POST /email-verifications`                                    | 5 req   | 1 hr   | 2 hr   |
+ * | `POST /password-resets/redemptions`                            | 10 req  | 15 min | 30 min |
+ * | `POST /email-verifications/redemptions`                        | 10 req  | 15 min | 30 min |
+ * | `POST /second-factor-challenges/verifications`                 | 10 req  | 5 min  | 30 min |
+ * | `PATCH /users/me/password` (change password)                   | 10 req  | 15 min | 30 min |
+ * | `POST`, `PATCH`, `DELETE /multi-factor-enrollments[/current]`  | 10 req  | 15 min | 30 min |
+ * | `POST /backup-code-sets` (regenerate backup codes)             | 10 req  | 15 min | 30 min |
+ * | `POST /google-one-tap-nonces`                                  | 20 req  | 10 min | 30 min |
+ * | `POST /device/code`                                            | 10 req  | 10 min | 30 min |
+ * | `POST /device/token` (polling)                                 | 300 req | 15 min | 15 min |
+ * | `POST /device-authorizations/decisions` (approve, deny)        | 20 req  | 10 min | 30 min |
+ * | `POST /sso-authorizations` (SSO sign-in)                       | 20 req  | 10 min | 30 min |
+ * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
+ * | `POST /oauth2/token`                                           | 60 req  | 1 min  | 5 min  |
+ * | `POST /register` (dynamic client registration)                 | 10 req  | 1 hr   | 1 hr   |
+ *
+ * Endpoints named on one row share one bucket.
  */
 export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
+  postRule("/sessions", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/users", 5, HOUR_MS, 24 * HOUR_MS),
+  postRule("/otp-challenges", 5, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/password-resets", 5, HOUR_MS, 2 * HOUR_MS),
+  postRule("/email-verifications", 5, HOUR_MS, 2 * HOUR_MS),
+  postRule("/password-resets/redemptions", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/email-verifications/redemptions", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/second-factor-challenges/verifications", 10, 5 * MINUTE_MS, 30 * MINUTE_MS),
+  // The authenticated endpoints that hash a password or check a second factor.
   {
-    path: "/sessions",
-    methods: ["POST"],
+    path: "/users/me/password",
+    methods: ["PATCH"],
     maxRequests: 10,
-    windowMs: 15 * 60 * 1000,
-    blockDurationMs: 30 * 60 * 1000,
+    windowMs: 15 * MINUTE_MS,
+    blockDurationMs: 30 * MINUTE_MS,
   },
   {
-    path: "/users",
-    methods: ["POST"],
-    maxRequests: 5,
-    windowMs: 60 * 60 * 1000,
-    blockDurationMs: 24 * 60 * 60 * 1000,
-  },
-  {
-    path: "/otp-challenges",
-    methods: ["POST"],
-    maxRequests: 5,
-    windowMs: 10 * 60 * 1000,
-    blockDurationMs: 30 * 60 * 1000,
-  },
-  {
-    path: "/password-resets",
-    methods: ["POST"],
-    maxRequests: 5,
-    windowMs: 60 * 60 * 1000,
-    blockDurationMs: 2 * 60 * 60 * 1000,
-  },
-  {
-    path: "/second-factor-challenges/verifications",
-    methods: ["POST"],
+    path: /^\/multi-factor-enrollments(\/current)?$/,
+    methods: ["POST", "PATCH", "DELETE"],
     maxRequests: 10,
-    windowMs: 5 * 60 * 1000,
-    blockDurationMs: 30 * 60 * 1000,
+    windowMs: 15 * MINUTE_MS,
+    blockDurationMs: 30 * MINUTE_MS,
   },
+  postRule("/backup-code-sets", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  // Unauthenticated endpoints that write a store row or call out.
+  postRule("/google-one-tap-nonces", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/device/code", 10, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  // A device polls every few seconds until the user decides.
+  postRule("/device/token", 300, 15 * MINUTE_MS, 15 * MINUTE_MS),
+  postRule("/device-authorizations/decisions", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/sso-authorizations", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  {
+    path: /^\/sso\/(callback|saml\/acs\/\{providerId\})$/,
+    methods: ["POST"],
+    maxRequests: 20,
+    windowMs: 10 * MINUTE_MS,
+    blockDurationMs: 30 * MINUTE_MS,
+  },
+  postRule("/oauth2/token", 60, MINUTE_MS, 5 * MINUTE_MS),
   // RFC 7591 dynamic client registration is open to anonymous callers.
-  {
-    path: "/register",
-    methods: ["POST"],
-    maxRequests: 10,
-    windowMs: 60 * 60 * 1000,
-    blockDurationMs: 60 * 60 * 1000,
-  },
+  postRule("/register", 10, HOUR_MS, HOUR_MS),
 ];
+
+/**
+ * A path template as the OpenAPI document writes it: the router's `:name`
+ * parameters (with any regex constraint or `?`) become `{name}`.
+ */
+const openApiTemplate = (path: string): string =>
+  path.replaceAll(/:(\w+)(?:\([^)]*\))?\??/g, "{$1}");
 
 const matchesEndpointRule = (
   rule: EndpointRateLimitRule,
-  pathname: string,
+  template: string,
   method: string,
 ): boolean => {
-  if (rule.methods !== undefined && !rule.methods.includes(method.toUpperCase())) return false;
-  return P.isString(rule.path) ? rule.path === pathname : rule.path.test(pathname);
+  if (rule.methods !== undefined && !rule.methods.includes(method)) return false;
+  return P.isString(rule.path) ? openApiTemplate(rule.path) === template : rule.path.test(template);
 };
 
 /**
  * The rate-limit bucket a rule counts in: its path. A pattern rule keeps one
- * bucket for every path it matches, so varying the path (an id in it, say)
+ * bucket for every endpoint it matches, so varying the path (an id in it, say)
  * never earns a caller a fresh bucket.
  */
 const ruleKey = (rule: EndpointRateLimitRule): string =>
-  P.isString(rule.path) ? rule.path : `pattern:${rule.path.source}`;
+  P.isString(rule.path) ? openApiTemplate(rule.path) : `pattern:${rule.path.source}`;
 
 const findEndpointRule = (
   rules: ReadonlyArray<EndpointRateLimitRule>,
-  pathname: string,
+  template: string,
   method: string,
-): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
+): EndpointRateLimitRule | undefined =>
+  rules.find((rule) => matchesEndpointRule(rule, template, method));
+
+/** The 429 a request to a limited endpoint gets when no `RateLimiter` is in scope. */
+const noRateLimiterResponse = (): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
+  Effect.logError(
+    "[effect-auth] ipRateLimit is configured with no RateLimiter in services; the request is refused",
+  ).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ message: NO_RATE_LIMITER }, { status: 429 })));
+
+/**
+ * Count one request under `rule` for the caller's address, and answer the
+ * refusal, or `undefined` when the request may proceed. The startup check
+ * refuses the limit without a `RateLimiter`, so that refusal is a backstop:
+ * the limit never runs as a silent no-op (#389). With no address there is no
+ * key (#358): the request is refused rather than skipped or counted under a
+ * bucket that other callers share.
+ */
+const consumeEndpointLimit = (
+  rule: EndpointRateLimitRule,
+): Effect.Effect<HttpServerResponse.HttpServerResponse | undefined> =>
+  Effect.gen(function* () {
+    const limiter = yield* Effect.serviceOption(RateLimiter);
+    if (Option.isNone(limiter)) return yield* noRateLimiterResponse();
+    const clientIp = yield* Effect.serviceOption(ClientIP);
+    const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
+    if (ip === undefined) {
+      return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
+    }
+    const denied = yield* limiter.value
+      .consumeToken(`ip:${ruleKey(rule)}:${ip}`, {
+        maxRequests: rule.maxRequests,
+        windowMs: rule.windowMs,
+        ...(rule.blockDurationMs !== undefined && { blockDurationMs: rule.blockDurationMs }),
+      })
+      .pipe(
+        Effect.as(null),
+        Effect.catchTags({
+          RateLimitError: (e) => Effect.succeed(e),
+          AuthError: () => Effect.succeed(null),
+        }),
+      );
+    return denied === null ? undefined : tooManyRequests(denied.retryAfter);
+  });
+
+/**
+ * The per-endpoint IP limit, as router middleware on every auth route. It runs
+ * once the router has matched the request, before the endpoint decodes the
+ * request or runs any auth logic, and finds its rule by the matched endpoint's
+ * path template and method, so no spelling of the path escapes it (#582).
+ */
+const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>) =>
+  HttpRouter.middleware((effect) =>
+    Effect.gen(function* () {
+      const { route } = yield* HttpRouter.RouteContext;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const method = route.method === "*" ? request.method.toUpperCase() : route.method;
+      const rule = findEndpointRule(rules, openApiTemplate(route.path), method);
+      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule);
+      return refused ?? (yield* effect);
+    }),
+  ).layer;
+
+/** The rules `ipRateLimit` puts in force: none for `false`, else its own or the defaults. */
+const endpointRules = (
+  ipRateLimit: HttpIPRateLimitConfig | false | undefined,
+): ReadonlyArray<EndpointRateLimitRule> =>
+  ipRateLimit === false ? [] : (ipRateLimit?.rules ?? defaultEndpointRules);
 
 // The class lives in Errors.ts; its TSDoc says when each check raises it.
 export { ClientAddressConfigError } from "../Errors.ts";
@@ -4586,9 +4921,6 @@ export interface AuthWebHandlerOptions {
    * as seen by the application. When deployed behind a reverse proxy you MUST
    * configure {@link trustedProxy} (from issue #81 / `ClientIP`) so the proxy
    * forwards the correct `Host` and the origin comparison is accurate.
-   *
-   * Note: `GET /token` (JWT issuance) is treated as state-changing and
-   * therefore also subject to this check.
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
   /**
@@ -4635,7 +4967,10 @@ export interface AuthWebHandlerOptions {
    */
   readonly trustedProxy?: TrustedProxyConfig | undefined;
   /**
-   * Enable IP-keyed rate limiting at the HTTP boundary, before handlers run.
+   * IP-keyed rate limiting at the HTTP boundary, before handlers run. **On by
+   * default** (#583): omitted or `{}`, the built-in
+   * {@link defaultEndpointRules} apply; `{ rules: [...] }` replaces them with a
+   * custom rule set; `false` turns the limit off, and is the only way to.
    *
    * Requires `RateLimiter` in the `services` layer (compose it with its
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
@@ -4647,24 +4982,25 @@ export interface AuthWebHandlerOptions {
    * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
    *
    * **Client address required**: the limiter keys each request by its client
-   * address, so `make` throws {@link ClientAddressConfigError} when this is set
-   * with neither {@link trustedProxy} nor {@link allowMissingClientIp}. A Web
-   * `Request` has no socket address to fall back on.
+   * address, so `make` throws {@link ClientAddressConfigError} unless this is
+   * `false` or {@link trustedProxy} or {@link allowMissingClientIp} is set. A
+   * Web `Request` has no socket address to fall back on.
+   *
+   * Each rule is matched against the endpoint the router matched, by its path
+   * template and method, so no spelling of a path (case, trailing or duplicate
+   * slashes, percent-encoding) escapes its limit (#582).
    *
    * A request to a rate-limited endpoint that resolves no address is refused
    * with `429` and is not counted. It is never let through unlimited and never
    * counted under a bucket shared with other callers. Requests to endpoints
    * with no rule are unaffected.
-   *
-   * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
-   * `{ rules: [...] }` for a custom rule set.
    */
-  readonly ipRateLimit?: HttpIPRateLimitConfig | undefined;
+  readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
   /**
    * Accept that a request may have no resolvable client address, so
-   * {@link ipRateLimit}, or an `IPRateLimitPlugin` in the `services` `Hooks`,
-   * can be configured without {@link trustedProxy}. Default `false`; without it
-   * `make` throws `ClientAddressConfigError` for either.
+   * {@link ipRateLimit} (on unless it is `false`), or an `IPRateLimitPlugin` in
+   * the `services` `Hooks`, can run without {@link trustedProxy}. Default
+   * `false`; without it `make` throws `ClientAddressConfigError` for either.
    *
    * This opts out of the build-time check only. The limits still run: a request
    * with no address that reaches a rate-limited endpoint, or an
@@ -4745,24 +5081,13 @@ const referenceResponse = (): Response =>
 /**
  * CSRF guard for the web handler.
  *
- * Returns `true` when the request may proceed.
- *
- * @param inner - The path relative to the mount prefix (e.g. `/sessions`), or
- *   `null` when the request is outside the prefix.  Used to detect `GET /token`
- *   which issues a JWT and must be treated as state-changing.
+ * Returns `true` when the request may proceed. Every state-changing request is
+ * checked; a read (`GET`, `HEAD`, `OPTIONS`) mints nothing (a JWT is
+ * `POST /tokens`), so it passes.
  */
-const isTrustedRequest = (
-  request: Request,
-  trustedOrigins: ReadonlyArray<string>,
-  inner: string | null,
-): boolean => {
+const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string>): boolean => {
   const method = request.method.toUpperCase();
-
-  // GET /token issues a signed JWT — treat as state-changing so it is subject
-  // to the same origin check as POST requests.
-  const isStateSafe =
-    (method === "GET" || method === "HEAD" || method === "OPTIONS") && inner !== "/token";
-  if (isStateSafe) return true;
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
 
   const origin = request.headers.get("origin");
 
@@ -4810,14 +5135,15 @@ export interface AuthWebHandler {
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined =>
-  options.ipRateLimit !== undefined &&
+  options.ipRateLimit !== false &&
   options.trustedProxy === undefined &&
   options.allowMissingClientIp !== true
     ? new ClientAddressConfigError({
         message:
-          "ipRateLimit needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
+          "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-          "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
+          "set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused, " +
+          "or set ipRateLimit: false to serve without the limit.",
       })
     : undefined;
 
@@ -4895,7 +5221,10 @@ const serve = (
   services: Layer.Layer<AuthServices, ClientAddressConfigError | RateLimiterConfigError>,
   release: Effect.Effect<void>,
 ): AuthWebHandler => {
+  // The IP limit is router middleware on every auth route, so it sees the
+  // endpoint the router matched rather than the raw path (#582).
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
+    Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
     Layer.provide(groupLayers(options.cookie, options.multiSession)),
     Layer.provide(PlatformLayer),
   );
@@ -4904,8 +5233,6 @@ const serve = (
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
   const appLayer = apiLayer.pipe(Layer.provideMerge(services));
-
-  const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
 
   const web = HttpRouter.toWebHandler(appLayer, {
     // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
@@ -4916,46 +5243,8 @@ const serve = (
       Effect.gen(function* () {
         const req = yield* HttpServerRequest.HttpServerRequest;
         const ip = resolveClientIP(req, options.trustedProxy);
-
-        // Per-endpoint IP rate limiting (requires RateLimiter in services;
-        // it resolves its own RateLimitStore at Layer-construction time)
-        if (options.ipRateLimit !== undefined) {
-          const url = new URL(req.url, "http://localhost");
-          const rule = findEndpointRule(ipRateRules, url.pathname, req.method);
-          if (rule !== undefined) {
-            const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
-            // The startup check refuses ipRateLimit without a RateLimiter, so this
-            // refusal is a backstop: the limit never runs as a silent no-op (#389).
-            if (Option.isNone(rateLimiterOpt)) {
-              yield* Effect.logError(
-                "[effect-auth] ipRateLimit is configured with no RateLimiter in services; the request is refused",
-              );
-              return HttpServerResponse.jsonUnsafe({ message: NO_RATE_LIMITER }, { status: 429 });
-            }
-            // No address, no key (#358): refuse rather than skip the limit or
-            // count the request under a bucket that other callers share.
-            if (ip === undefined) {
-              return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
-            }
-            const limitConfig: RateLimitConfig = {
-              maxRequests: rule.maxRequests,
-              windowMs: rule.windowMs,
-              ...(rule.blockDurationMs !== undefined && {
-                blockDurationMs: rule.blockDurationMs,
-              }),
-            };
-            const denied = yield* rateLimiterOpt.value
-              .consumeToken(`ip:${ruleKey(rule)}:${ip}`, limitConfig)
-              .pipe(
-                Effect.as(null),
-                Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
-                Effect.catchTag("AuthError", () => Effect.succeed(null)),
-              );
-            if (denied !== null) return tooManyRequests(denied.retryAfter);
-          }
-        }
-
-        // Provide the resolved ClientIP to all downstream effects (hooks, handlers)
+        // Provide the resolved ClientIP to all downstream effects (the IP
+        // limit, hooks, handlers).
         return yield* effect.pipe(Effect.provideService(ClientIP, { ip }));
       }) as Effect.Effect<HttpServerResponse.HttpServerResponse>,
   });
@@ -4984,7 +5273,7 @@ const serve = (
       return Promise.resolve(Response.json({ message: "Not Found" }, { status: 404 }));
     }
 
-    if (!isTrustedRequest(request, trustedOrigins, inner)) {
+    if (!isTrustedRequest(request, trustedOrigins)) {
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
 
@@ -5100,13 +5389,14 @@ const tooManyRequests = (
  * build. It throws, so the app fails to start, when the configuration cannot be
  * served as written:
  *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, or dynamic client registration enabled in the
- *   `services`' `OidcProviderService`, with neither `trustedProxy` nor
+ * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
+ *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
+ *   dynamic client registration enabled in the `services`'
+ *   `OidcProviderService`, with neither `trustedProxy` nor
  *   `allowMissingClientIp: true`.
- * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
- *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
- *   no `RateLimiter` in `services`.
+ * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
+ *   client registration or a `DeviceAuthorizationService` (without
+ *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
  * - Any failure of the `services` build itself: the failure's error, or for a
  *   defect the defect itself, as `Effect.runSync` throws.
  * - {@link ServicesBuildPendingError}, only with `strict: true`: the build had
@@ -5207,13 +5497,14 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * so `services` is built once, and `dispose` releases it. The promise rejects,
  * so the app fails to start, with the error `make` would throw:
  *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, or dynamic client registration enabled in the
- *   `services`' `OidcProviderService`, with neither `trustedProxy` nor
+ * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
+ *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
+ *   dynamic client registration enabled in the `services`'
+ *   `OidcProviderService`, with neither `trustedProxy` nor
  *   `allowMissingClientIp: true`.
- * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
- *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
- *   no `RateLimiter` in `services`.
+ * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
+ *   client registration or a `DeviceAuthorizationService` (without
+ *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
  * - Any failure of the `services` build itself: the failure's error, or for a
  *   defect the defect itself, as `Effect.runPromise` rejects.
  *
