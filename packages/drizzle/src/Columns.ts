@@ -93,6 +93,8 @@ import {
   type AnyColumn,
   type Column,
   type GetColumnData,
+  type InferInsertModel,
+  type InferSelectModel,
   type Table,
 } from "drizzle-orm";
 import type * as Auth from "@thomasfosterau/effect-auth";
@@ -105,16 +107,16 @@ import type { Tables } from "./Schema.ts";
 /**
  * The keys of `TTable` naming a column a `SELECT` reads back as `TValue`.
  *
- * This is the whole type-level mechanism: `$inferSelect` is drizzle's own
+ * This is the whole type-level mechanism: `InferSelectModel` is drizzle's own
  * record of what each column yields — nullability, `$type` overrides and all —
  * so filtering its keys by assignability to `TValue` is exactly "which of this
  * table's columns can stand in for the one the store needs". A table with no
  * such column resolves to `never`, and the mapping will not type-check.
  */
 export type ColumnKey<TTable extends Table, TValue> = {
-  [K in keyof TTable["$inferSelect"]]-?: TTable["$inferSelect"][K] extends TValue ? K : never;
-}[keyof TTable["$inferSelect"]] &
-  keyof TTable["$inferInsert"] &
+  [K in keyof InferSelectModel<TTable>]-?: InferSelectModel<TTable>[K] extends TValue ? K : never;
+}[keyof InferSelectModel<TTable>] &
+  keyof InferInsertModel<TTable> &
   keyof TTable &
   string;
 
@@ -412,7 +414,7 @@ export const resolveSchema = (input: SchemaInput): AuthSchema =>
 export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
   schema: TableSchema<TColumns>,
   values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K]> }>,
-): Table["$inferInsert"] => {
+): InferInsertModel<Table> => {
   const names: Readonly<Record<string, string | undefined>> = schema.names;
   return R.mapKeys(
     R.filter(values, (_value, field) => names[field] !== undefined),

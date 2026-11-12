@@ -32,7 +32,7 @@
  * MySQL is supported at the type level and by the shared store implementation,
  * but is **not** covered by an integration suite: the test environment has no
  * MySQL server. `MySql.test.ts` pins the table definitions, the emitted DDL and
- * the fact that a `MySqlDatabase` handle satisfies `databaseLayer`; the query
+ * the fact that a `MySqlAsyncDatabase` handle satisfies `databaseLayer`; the query
  * behaviour itself is covered by the PostgreSQL (PGlite) and SQLite
  * (better-sqlite3) suites, which exercise the very same store code through the
  * very same seam.
@@ -81,9 +81,9 @@ export const identifierCollation = "utf8mb4_bin";
  * emits its SQL type as written:
  * `varchar(<length>) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`.
  *
- * A custom type because drizzle-orm 0.4x's `varchar` has no `collate`; on
- * drizzle-orm 1.0, `varchar(name, { length }).collate("utf8mb4_bin")` declares
- * the same column.
+ * A custom type (it predates drizzle-orm 1.0's `collate`, and drizzle-kit reads
+ * the collation off the SQL type); `varchar(name, { length }).collate("utf8mb4_bin")`
+ * declares the same column.
  *
  * @example
  * ```ts

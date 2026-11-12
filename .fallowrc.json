@@ -21,7 +21,6 @@
     "packages/svelte/scripts/postbuild.mjs",
     "packages/svelte/svelte.config.js",
     "**/vite.config.ts",
-    "packages/drizzle/vite.drizzle-1.config.ts",
     "vite.tasks.ts"
   ],
   "framework": [
