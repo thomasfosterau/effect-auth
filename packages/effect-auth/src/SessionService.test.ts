@@ -1,7 +1,13 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { Hooks, makePlugin, type SessionRef } from "./Hooks.ts";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
+import type { SecureRandom } from "effect/crypto";
+import { AuthError } from "./Errors.ts";
+import { composePlugins, Hooks, makePlugin, type PluginImpls, type SessionRef } from "./Hooks.ts";
+import { AuditPlugin } from "./plugins/Audit.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
@@ -532,5 +538,166 @@ describe("SessionService", () => {
     expect(results.result2._tag).toBe("Failure");
     // User2 session should still be valid
     expect(results.result3.user.id).toBe("user2");
+  });
+});
+const runWithHooks = <A, E>(
+  program: Effect.Effect<A, E, SessionStore | UserStore | Hooks | SecureRandom.SecureRandom>,
+  hooks: Layer.Layer<Hooks>,
+) =>
+  Effect.runPromise(
+    Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+      Effect.provide(Layer.merge(hooks, PlatformCrypto.layer)),
+    ),
+  );
+
+const denyHook = () => Effect.fail(new AuthError({ message: "denied by plugin" }));
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+// #669: the session input hooks see the stored id (the token's digest), never
+// the raw token, and are observe-or-deny: what they return is not read back.
+describe("session input hooks (#669)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+  });
+
+  it("beforeValidateSession sees hashToken(token), never the token", async () => {
+    const seen: Array<string> = [];
+    const hooks = makePlugin({
+      beforeValidateSession: (ref: SessionRef) =>
+        Effect.sync(() => (seen.push(ref.sessionId), ref)),
+    }).pipe(Layer.provide(Hooks.Default));
+
+    const { token, validated } = await runWithHooks(
+      Effect.gen(function* () {
+        const manager = yield* make(sessionConfig);
+        const issued = yield* manager.createSession("user1");
+        const answered = yield* manager.validateSession(issued.token);
+        return { token: issued.token, validated: answered };
+      }),
+      hooks,
+    );
+
+    expect(seen).toEqual([hashToken(token)]);
+    expect(seen).not.toContain(token);
+    expect(validated.session.id).toBe(hashToken(token));
+  });
+
+  it("beforeSignOut sees hashToken(token), never the token", async () => {
+    const seen: Array<string> = [];
+    const hooks = makePlugin({
+      beforeSignOut: (ref: SessionRef) => Effect.sync(() => (seen.push(ref.sessionId), ref)),
+    }).pipe(Layer.provide(Hooks.Default));
+
+    const token = await runWithHooks(
+      Effect.gen(function* () {
+        const manager = yield* make(sessionConfig);
+        const issued = yield* manager.createSession("user1");
+        yield* manager.invalidateSession(issued.token);
+        return issued.token;
+      }),
+      hooks,
+    );
+
+    expect(seen).toEqual([hashToken(token)]);
+    expect(seen).not.toContain(token);
+    expect(MutableHashMap.has(mockSessionStore.sessions, hashToken(token))).toBe(false);
+  });
+
+  it("a denying beforeValidateSession refuses validation", async () => {
+    const hooks = makePlugin({ beforeValidateSession: denyHook }).pipe(
+      Layer.provide(Hooks.Default),
+    );
+
+    const result = await runWithHooks(
+      Effect.gen(function* () {
+        const manager = yield* make(sessionConfig);
+        const issued = yield* manager.createSession("user1");
+        return yield* Effect.result(manager.validateSession(issued.token));
+      }),
+      hooks,
+    );
+
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AuthError");
+    expect(result.failure.message).toBe("denied by plugin");
+  });
+
+  it("a denying beforeSignOut refuses sign-out and keeps the session", async () => {
+    const hooks = makePlugin({ beforeSignOut: denyHook }).pipe(Layer.provide(Hooks.Default));
+
+    const { token, result } = await runWithHooks(
+      Effect.gen(function* () {
+        const manager = yield* make(sessionConfig);
+        const issued = yield* manager.createSession("user1");
+        const outcome = yield* Effect.result(manager.invalidateSession(issued.token));
+        return { token: issued.token, result: outcome };
+      }),
+      hooks,
+    );
+
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AuthError");
+    expect(MutableHashMap.has(mockSessionStore.sessions, hashToken(token))).toBe(true);
+  });
+
+  it("a hook cannot redirect validation or sign-out to another session", async () => {
+    let target = "";
+    const redirect = () => Effect.succeed({ sessionId: target });
+    const hooks = makePlugin({
+      beforeValidateSession: redirect,
+      beforeSignOut: redirect,
+    }).pipe(Layer.provide(Hooks.Default));
+
+    const { first, second, validated } = await runWithHooks(
+      Effect.gen(function* () {
+        const manager = yield* make(sessionConfig);
+        const mine = yield* manager.createSession("user1");
+        const theirs = yield* manager.createSession("user2");
+        // Point the hooks at the other session, by token and by stored id.
+        target = theirs.token;
+        const answered = yield* manager.validateSession(mine.token);
+        target = theirs.session.id;
+        yield* manager.invalidateSession(mine.token);
+        return { first: mine, second: theirs, validated: answered };
+      }),
+      hooks,
+    );
+
+    // The presented token decides: the hook's return value is not read back.
+    expect(validated.user.id).toBe("user1");
+    expect(validated.session.id).toBe(first.session.id);
+    expect(MutableHashMap.has(mockSessionStore.sessions, first.session.id)).toBe(false);
+    expect(MutableHashMap.has(mockSessionStore.sessions, second.session.id)).toBe(true);
+  });
+
+  it("no plugin observes the session token through any hook", async () => {
+    const observed: Array<string> = [];
+    const record = <V>(value: V) => Effect.sync(() => (observed.push(encodeJson(value)), value));
+    // A spy on every hook point, stacked over the built-in AuditPlugin.
+    const Spy = makePlugin(
+      Effect.gen(function* () {
+        const inner = yield* Hooks;
+        const impls: PluginImpls = R.fromEntries(Arr.map(R.keys(inner), (key) => [key, record]));
+        return impls;
+      }),
+    );
+    const hooks = composePlugins([AuditPlugin, Spy]).pipe(Layer.provide(Hooks.Default));
+
+    const token = await runWithHooks(
+      Effect.gen(function* () {
+        const manager = yield* make(sessionConfig);
+        const issued = yield* manager.createSession("user1");
+        yield* manager.validateSession(issued.token);
+        yield* manager.invalidateSession(issued.token);
+        return issued.token;
+      }),
+      hooks,
+    );
+
+    // before/afterCreateSession, before/afterValidateSession, before/afterSignOut.
+    expect(observed.length).toBe(6);
+    expect(observed.filter((value) => value.includes(token))).toEqual([]);
+    expect(observed.some((value) => value.includes(hashToken(token)))).toBe(true);
   });
 });

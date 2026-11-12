@@ -70,12 +70,11 @@ export const make = (
 
       validateSession: Effect.fn("SessionService.validateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          const { sessionId: rawToken } = yield* hooks.beforeValidateSession({
-            sessionId: rawSessionId,
-          });
-
-          // Look up the session by its token hash; never expose the raw token to the store.
-          const tokenHash = hashToken(rawToken);
+          // Look up the session by its token hash; never expose the raw token
+          // to the store or to a hook (#669). The hook observes or denies:
+          // what it returns is not read back, so it cannot redirect the lookup.
+          const tokenHash = hashToken(rawSessionId);
+          yield* hooks.beforeValidateSession({ sessionId: tokenHash });
           const session = yield* sessionStore.get(tokenHash);
           if (session === null) {
             return yield* new Errors.SessionNotFoundError({
@@ -166,10 +165,11 @@ export const make = (
 
       invalidateSession: Effect.fn("SessionService.invalidateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          const { sessionId: rawToken } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
-          const storedId = hashToken(rawToken);
+          // Every hook gets the stored id, so none can record the credential
+          // (#669); `beforeSignOut` observes or denies, and is not read back.
+          const storedId = hashToken(rawSessionId);
+          yield* hooks.beforeSignOut({ sessionId: storedId });
           yield* sessionStore.delete(storedId);
-          // Observers get the stored id, so an audit log never records a credential.
           yield* hooks.afterSignOut({ sessionId: storedId });
         }).pipe(
           Effect.withSpan(Obs.spanNames.signOut),
@@ -251,7 +251,8 @@ export class SessionService extends Context.Service<
     /**
      * Validate the session a raw token names and return it with the user. The
      * session answers under its stored id (the token's digest), never the
-     * token.
+     * token. `beforeValidateSession` observes the stored id, never the token,
+     * and can only deny: its return value is not read back (#669).
      */
     readonly validateSession: (
       token: string,
@@ -264,8 +265,10 @@ export class SessionService extends Context.Service<
     >;
 
     /**
-     * Invalidate the session a raw token names. The sign-out hooks run;
-     * `afterSignOut` observes the stored id, never the token.
+     * Invalidate the session a raw token names. The sign-out hooks run and
+     * observe the stored id, never the token (#581, #669); `beforeSignOut`
+     * can deny the sign-out but not redirect it, since its return value is
+     * not read back.
      */
     readonly invalidateSession: (
       token: string,
@@ -288,8 +291,7 @@ export class SessionService extends Context.Service<
      * as `listSessions` reports it), so a client can revoke a session it can
      * see but whose token it never held. Returns `false`, deleting nothing,
      * when the user holds no session with that id. Like
-     * `revokeOtherSessions`, it runs no sign-out hook: those receive the raw
-     * token, which a revocation by id does not have.
+     * `revokeOtherSessions`, it runs no sign-out hook.
      */
     readonly revokeSessionById: (
       userId: string,

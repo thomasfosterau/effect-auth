@@ -71,10 +71,16 @@ export type HookError =
   | Errors.PwnedPasswordError;
 
 /**
- * A reference to a session, used by sign-out / validation hooks. The `before*`
- * transforms see the token the client presented (they run before it is
- * looked up); `afterSignOut` sees the session's stored id, its digest, so an
- * observer that logs it never records a credential (#581).
+ * A reference to a session, used by the sign-out and validation hooks
+ * (`beforeValidateSession`, `beforeSignOut`, `afterSignOut`). `sessionId` is
+ * always the session's stored id, the SHA-256 digest of the token
+ * (`hashToken`), never the token the client presented, so no hook can read
+ * or log a credential (#581, #669).
+ *
+ * `beforeValidateSession` and `beforeSignOut` are observe-or-deny: a plugin
+ * inspects the stored id and fails to refuse the operation, and the services
+ * read nothing back, so a hook cannot redirect a lookup or a sign-out to
+ * another session.
  */
 export interface SessionRef {
   readonly sessionId: string;
@@ -418,6 +424,12 @@ export class Hooks extends Context.Service<
     readonly afterSignOut: Tap<SessionRef>;
     readonly beforeCreateSession: Transform<CreateSessionArgs>;
     readonly afterCreateSession: Tap<Types.Session>;
+    /**
+     * Fired by `SessionService.validateSession` before the lookup, with the
+     * stored id (the token's digest), never the token; see
+     * {@link SessionRef}. Failing refuses the validation; the return value
+     * is not read back.
+     */
     readonly beforeValidateSession: Transform<SessionRef>;
     readonly afterValidateSession: Tap<Types.SessionWithUser>;
     readonly beforeRequestPasswordReset: Transform<EmailRef>;
