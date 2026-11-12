@@ -196,7 +196,7 @@ bound client instead.
 
 - `layer(db): Layer<AuthStores, never, RuntimeContext>` — every `@thomasfosterau/effect-auth/sql` store over the client `Cloudflare.D1.QueryDatabase(database)` binds (`AuthStores` is that store set).
 - `migrate(db): Effect<void, AuthError, RuntimeContext>` — the `/sql` DDL through that client.
-- `purgeExpired(db): Effect<PurgeExpiredResult, AuthError, RuntimeContext>` — `/sql`'s `purgeExpired` through that client: deletes the expired magic-link and email-OTP rows. Nothing else deletes them, so call it from a cron trigger's `scheduled` handler.
+- `purgeExpired(db): Effect<PurgeExpiredResult, AuthError, RuntimeContext>` — `/sql`'s `purgeExpired` through that client: deletes the expired magic-link and email-OTP rows and the rate-limit rows whose window and block have both passed. Nothing else deletes them, so call it from a cron trigger's `scheduled` handler.
 - `AuthSchema(id, database)` — the Alchemy Action (input `AuthSchemaInput`, output `AuthSchemaAttributes`), type `AUTH_SCHEMA_TYPE` (`effect-auth::D1AuthSchema`). It needs a `Cloudflare.D1.QueryDatabase` (`Cloudflare.D1.QueryDatabaseLocal` on deploy).
 - `authTableNames` — the tables the schema owns, derived from `/sql`'s DDL (`Sql.authTableNames`).
 - `D1Client` — `make({ db })` / `layer({ db })`: a `SqlClient` over a `QueryDatabaseClient`, needing the event's `RuntimeContext`.

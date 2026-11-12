@@ -903,8 +903,8 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 1 });
-      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 1, rateLimits: 0 });
+      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
       expect(result.stale).toBeNull();
       expect(result.live?.token).toBe("live");
       expect(result.staleOtp).toBeNull();
@@ -932,7 +932,37 @@ const storeContract = (engine: StoreEngine): void => {
           return yield* Sql.purgeExpired;
         }).pipe(Effect.provide(TestClock.layer())),
       );
-      expect(result).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(result).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+    });
+
+    it("purgeExpired deletes rate-limit rows whose window and block have both passed, and keeps open or blocked ones (#686)", async () => {
+      const now = 1_000_000;
+      const entries: ReadonlyArray<Auth.RateLimitEntry> = [
+        { key: "purge-stale", count: 3, resetAt: now - 60_000 },
+        { key: "purge-stale-block", count: 9, resetAt: now - 60_000, blockedUntil: now - 1 },
+        { key: "purge-edge", count: 1, resetAt: now, blockedUntil: now },
+        { key: "purge-open", count: 2, resetAt: now + 1 },
+        { key: "purge-blocked", count: 9, resetAt: now - 60_000, blockedUntil: now + 1 },
+      ];
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          yield* Effect.forEach(entries, (entry) => store.set(entry.key, entry, 60), {
+            concurrency: 1,
+            discard: true,
+          });
+          const purged = yield* Sql.purgeExpired;
+          const again = yield* Sql.purgeExpired;
+          const left = yield* Effect.forEach(entries, (entry) => store.get(entry.key), {
+            concurrency: 1,
+          });
+          return { purged, again, left };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 3 });
+      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result.left).toEqual([null, null, null, entries[3], entries[4]]);
     });
 
     it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {

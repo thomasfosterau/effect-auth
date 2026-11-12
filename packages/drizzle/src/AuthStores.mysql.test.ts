@@ -8,6 +8,7 @@
 
 import { drizzle } from "drizzle-orm/mysql-proxy";
 import { Effect, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -46,6 +47,19 @@ describe("MySQL / RateLimitStore", () => {
       "select `key`, `count`, `reset_at`, `blocked_until` from `effect_auth_rate_limits` where `effect_auth_rate_limits`.`key` = ? limit ?",
     ]);
     expect(proxy.sent.every((statement) => !statement.sql.includes("returning"))).toBe(true);
+  });
+
+  it("purgeExpired is one DELETE of the rows whose window and block have both passed (#686)", async () => {
+    const proxy = recording([]);
+    await Effect.runPromise(
+      RateLimitStore.purgeExpired(tables).pipe(
+        Effect.provide(Layer.merge(databaseLayer(proxy.db), TestClock.layer())),
+      ),
+    );
+    expect(proxy.sent.map((statement) => statement.sql)).toEqual([
+      "delete from `effect_auth_rate_limits` where (`effect_auth_rate_limits`.`reset_at` <= ? and (`effect_auth_rate_limits`.`blocked_until` is null or `effect_auth_rate_limits`.`blocked_until` <= ?))",
+    ]);
+    expect(proxy.sent[0]?.params).toHaveLength(2);
   });
 });
 

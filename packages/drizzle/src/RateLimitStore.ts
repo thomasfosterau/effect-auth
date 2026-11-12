@@ -21,13 +21,13 @@
  *   can only make it read higher, which refuses a request rather than letting
  *   one through.
  * - `ttl` is not stored: an expired window is re-opened by the next
- *   `increment`, and the rows of keys never seen again stay until the
- *   application deletes them (`reset_at` and `blocked_until` both in the past).
+ *   `increment`, and the rows of keys never seen again stay until
+ *   {@link purgeExpired} deletes them (#686).
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
  */
 
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -142,3 +142,36 @@ export const layer = (
   tables: Tables = defaultTables,
 ): Layer.Layer<Auth.RateLimitStore, never, DrizzleDatabase> =>
   Layer.effect(Auth.RateLimitStore, make(tables));
+
+/**
+ * Delete the rate-limit rows whose window and block have both passed, in one
+ * `DELETE` over the ambient {@link DrizzleDatabase} (#686).
+ *
+ * The table holds one row per key, IP and identifier ever counted, and no
+ * store call deletes the row of a key that is never seen again, so without a
+ * purge it grows by one row per distinct caller. A row goes once its
+ * `reset_at` is not after now and its `blocked_until` is unset or not after
+ * now: the limiter then treats the key as one it has never seen, so the next
+ * request opens a fresh window either way. A row still inside its window or
+ * still blocked stays. Schedule it from the host (a cron trigger, a timer on a
+ * long-lived server); now is read from the `Clock`.
+ */
+export const purgeExpired = (
+  tables: Tables = defaultTables,
+): Effect.Effect<void, Auth.AuthError, DrizzleDatabase> =>
+  Effect.gen(function* () {
+    const query = makeQuery(yield* DrizzleDatabase);
+    const table = tables.rateLimits;
+    const now = yield* DateTime.nowAsDate;
+    yield* query("rateLimit.purgeExpired", (db) =>
+      db
+        .delete(table)
+        .where(
+          and(
+            lte(table.resetAt, now),
+            or(isNull(table.blockedUntil), lte(table.blockedUntil, now)),
+          ),
+        )
+        .execute(),
+    );
+  });

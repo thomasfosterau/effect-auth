@@ -15,7 +15,7 @@
  *
  * - `SessionStore` / `UserStore` / `IdentifierStore` — the store modules.
  * - `EmailPasswordStore` (`layer`, `passwordResetUserLayer`), `ApiKeyStore`,
- *   `RateLimitStore` and `TokenStore` (`emailVerificationLayer`,
+ *   `RateLimitStore` (`purgeExpired` deletes its spent rows) and `TokenStore` (`emailVerificationLayer`,
  *   `passwordResetLayer`, `layer` for both) — the stores beyond sign-in.
  * - `SingleTableIdentifierStore` — the opt-in `IdentifierStore` whose email
  *   identifier is the application's own `users` row (one per user).

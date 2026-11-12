@@ -98,7 +98,8 @@ export const migrate = (
   Sql.migrate.pipe(Effect.provide(clientLayer(source, options)));
 
 /**
- * Delete the expired magic-link and email-OTP rows, through
+ * Delete the expired magic-link and email-OTP rows, and the rate-limit rows
+ * whose window and block have both passed, through
  * `@thomasfosterau/effect-auth/sql`'s `purgeExpired`. Schedule it from a cron trigger.
  */
 export const purgeExpired = (
