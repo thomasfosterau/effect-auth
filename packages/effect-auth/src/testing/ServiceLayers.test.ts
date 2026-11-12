@@ -5,6 +5,8 @@ import { SessionService } from "../SessionService.ts";
 import * as Testing from "./index.ts";
 
 const ada = Testing.fixtureUser({ name: "Ada" });
+/** The owner of the keys the `apiKeyServiceLayer` cases mint. */
+const keyOwner = { ...Testing.fixtureUser({ name: "Key owner" }), id: "user-1" };
 
 describe("sessionServiceLayer", () => {
   it("round-trips create, validate and revoke", async () => {
@@ -63,7 +65,9 @@ describe("apiKeyServiceLayer", () => {
       yield* apiKeys.delete("user-1", created.apiKey.id);
       expect((yield* apiKeys.verify(created.key)).valid).toBe(false);
     });
-    await Effect.runPromise(program().pipe(Effect.provide(Testing.apiKeyServiceLayer())));
+    await Effect.runPromise(
+      program().pipe(Effect.provide(Testing.apiKeyServiceLayer({ users: [keyOwner] }))),
+    );
   });
 
   it("a disabled key fails verify", async () => {
@@ -73,7 +77,9 @@ describe("apiKeyServiceLayer", () => {
       yield* apiKeys.update("user-1", created.apiKey.id, { enabled: false });
       expect((yield* apiKeys.verify(created.key)).valid).toBe(false);
     });
-    await Effect.runPromise(program().pipe(Effect.provide(Testing.apiKeyServiceLayer())));
+    await Effect.runPromise(
+      program().pipe(Effect.provide(Testing.apiKeyServiceLayer({ users: [keyOwner] }))),
+    );
   });
 
   it("seeds keys and applies config", async () => {
@@ -88,6 +94,7 @@ describe("apiKeyServiceLayer", () => {
       program().pipe(
         Effect.provide(
           Testing.apiKeyServiceLayer({
+            users: [keyOwner],
             config: { defaultPrefix: "test_" },
             keys: [
               {
@@ -107,12 +114,30 @@ describe("apiKeyServiceLayer", () => {
     );
   });
 
+  it("a key whose owner the UserStore does not find fails verify (#601)", async () => {
+    const program = Effect.fn("orphanedKey")(function* () {
+      const apiKeys = yield* ApiKeyService;
+      const created = yield* apiKeys.create("no-such-user");
+      expect(yield* apiKeys.verify(created.key)).toEqual({
+        valid: false,
+        error: "Invalid API key",
+        reason: "invalid",
+      });
+      expect((yield* apiKeys.verifyWithRateLimit(created.key)).valid).toBe(false);
+    });
+    await Effect.runPromise(
+      program().pipe(Effect.provide(Testing.apiKeyServiceLayer({ users: [keyOwner] }))),
+    );
+  });
+
   it("provides a RateLimitStore for verifyWithRateLimit", async () => {
     const program = Effect.fn("rateLimited")(function* () {
       const apiKeys = yield* ApiKeyService;
       const created = yield* apiKeys.create("user-1", {});
       expect((yield* apiKeys.verifyWithRateLimit(created.key)).valid).toBe(true);
     });
-    await Effect.runPromise(program().pipe(Effect.provide(Testing.apiKeyServiceLayer())));
+    await Effect.runPromise(
+      program().pipe(Effect.provide(Testing.apiKeyServiceLayer({ users: [keyOwner] }))),
+    );
   });
 });

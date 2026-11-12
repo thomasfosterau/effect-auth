@@ -325,6 +325,13 @@ const makeFixture = (admin?: AdminConfig) => {
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((k) => k.userId === userId),
       ),
+    deleteByUserId: (userId: string) =>
+      Effect.sync(() => {
+        Arr.forEach(
+          Arr.filter(Arr.fromIterable(MutableHashMap.values(apiKeys)), (k) => k.userId === userId),
+          (k) => void MutableHashMap.remove(apiKeys, k.id),
+        );
+      }),
   };
 
   const jwtKeyStore = {
@@ -1994,6 +2001,8 @@ describe("HTTP api-key endpoints", () => {
 
     const allowedOverCookie = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
     expect(allowedOverCookie.status).toBe(201);
+    // The answer carries the raw key: never stored by a cache (#628).
+    expect(allowedOverCookie.headers.get("cache-control")).toBe("no-store");
   });
 
   it("creates, lists, updates, and deletes keys, the plaintext only at creation", async () => {
@@ -2066,6 +2075,7 @@ describe("HTTP JWT endpoints", () => {
 
     const tokenRes = await fx.handler(apiReq("POST", "/tokens", undefined, sid));
     expect(tokenRes.status).toBe(201);
+    expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const document = await jsonBody(
       tokenRes,
       resourceBody({ token: Schema.String, expiresAt: Schema.Finite }),

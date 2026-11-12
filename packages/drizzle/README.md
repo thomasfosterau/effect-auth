@@ -867,13 +867,20 @@ store each).
   returns the user it was given; an update of a missing user writes nothing.
   Promoted attributes go to their columns (`NULL` when the user no longer has
   one) and the rest replace the bag; attributes a table with no mapped bag
-  cannot hold fail with `AuthError`. `delete` removes the user row only.
-  These are the semantics of core's `/sql` `UserServiceStore`.
+  cannot hold fail with `AuthError`. `delete` removes the user row only:
+  core's account deletion (`AdminService.removeUser`, the confirmed
+  `AccountManagementService` deletion) deletes the user's credentials,
+  sessions and identifiers through their stores first. These are the semantics
+  of core's `/sql` `UserServiceStore` (which also drops its own
+  `auth_user_roles` rows, a table this package does not have).
 - **`ApiKeyStore`** keeps `keyHash`, the SHA-256 digest `ApiKeyService`
   computes (unique index), never the key. Optional fields absent from a key are
   `NULL` and read back absent; instants are timestamps in the table and epoch
   milliseconds in the record. The contract has no atomic "use": `verify` reads
   the key and writes its decremented `remaining` back with `update`.
+  `deleteByUserId` deletes every key of one user in one `DELETE`; core calls
+  it when it deletes the user (#601), and `verify` refuses a key whose owner
+  `UserStore` no longer finds.
 - **`RateLimitStore`**'s `increment` never reads, modifies and writes. It runs
   an `UPDATE` that re-opens the key's window when it has expired, then an
   upsert that adds one (inserting a count of `1` for a new key): concurrent

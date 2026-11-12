@@ -13,14 +13,17 @@
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
 import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { SecureRandom } from "effect/crypto";
+import { AccountDeletion } from "./AccountDeletion.ts";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
+import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { normalizeEmail } from "./utils.ts";
 import {
   anyEmail,
@@ -103,9 +106,9 @@ export interface AccountManagementConfig {
     readonly newEmail: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
-   * Optional app-data cleanup run just before the user record is deleted (the
-   * user still exists at this point so related rows can be resolved). A failure
-   * here aborts the deletion.
+   * Optional app-data cleanup run before anything of the user's is deleted
+   * (the user, its credentials and its identifiers all still exist, so related
+   * rows can be resolved). A failure here aborts the deletion.
    */
   readonly beforeDelete?: (user: Types.User) => Effect.Effect<void, Errors.AuthError>;
   /**
@@ -123,7 +126,7 @@ export interface EmailChangeResult {
 /**
  * Self-service account changes: a verification-gated email change and account deletion, each confirmed by a single-use token.
  *
- * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`.
+ * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`; account deletion also clears the user-keyed credential stores present where the layer is built (#601).
  */
 export class AccountManagementService extends Context.Service<
   AccountManagementService,
@@ -177,7 +180,18 @@ export class AccountManagementService extends Context.Service<
       Errors.AuthError | Errors.UserNotFoundError
     >;
 
-    /** Confirm deletion by token: runs cleanup, revokes sessions, deletes user. */
+    /**
+     * Confirm deletion by token: runs `beforeDelete`, then deletes the user
+     * and everything the account holds (#601): every credential and token in
+     * the user-keyed stores present where this layer is built (OAuth links,
+     * passkeys, API keys, the multi-factor enrolment, trusted devices, OIDC
+     * provider tokens and consents, password-reset and email-verification
+     * tokens, this store's pending tokens), then the sessions, then the
+     * identifiers, and the user row last. A failure part-way leaves the user
+     * row (and whatever was not yet removed); the token is gone by then, so
+     * the user requests deletion again. Wrap the call in the stores' shared
+     * transaction, where they have one, to make it atomic.
+     */
     readonly confirmAccountDeletion: (
       token: string,
     ) => Effect.Effect<
@@ -214,6 +228,13 @@ const make = (
     const store = yield* AccountManagementStore;
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
+    const purgeServices = {
+      ...(yield* userPurgeStores),
+      accountTokens: store,
+      identifiers,
+      revokeSessions: sessions.invalidateUserSessions,
+      deleteUser: users.delete,
+    };
 
     const generateToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
@@ -447,15 +468,78 @@ const make = (
             yield* config.beforeDelete(user);
           }
 
-          // Revoke sessions, then delete the user and the token.
-          yield* sessions.invalidateUserSessions(user.id);
-          yield* identifiers.deleteByUser(user.id);
-          yield* users.delete(user.id);
-          yield* store.delete(token);
-          yield* store.deleteByUserId(user.id);
+          // Credentials and tokens (this one included), sessions, identifiers,
+          // and the user row last (#601).
+          yield* purgeUser(purgeServices, user.id);
 
           return { userId: user.id };
         },
       ),
     };
   });
+
+/**
+ * Provides {@link AccountDeletion}: the purge every account deletion runs
+ * (#601), over the stores present where it is built. It deletes the user's
+ * credentials and tokens from every user-keyed store in the context (OAuth
+ * links, passkeys, API keys, the multi-factor enrolment, trusted devices,
+ * OIDC-provider tokens and consents, password-reset, email-verification and
+ * account-management tokens), the unspent magic links and one-time codes
+ * sent to the user's addresses, then the sessions, then the identifiers, and
+ * the user row last. `UserService.deleteUser` delegates to it.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
+ *
+ * const ada = Testing.fixtureUser({ name: "Ada" })
+ *
+ * const program = Effect.gen(function* () {
+ *   yield* (yield* Auth.UserServiceStore).update(ada)
+ *   const { key } = yield* (yield* Auth.ApiKeyService).create(ada.id)
+ *   yield* (yield* Auth.UserService).deleteUser(ada.id)
+ *   assert.equal(yield* (yield* Auth.UserServiceStore).get(ada.id), null)
+ *   assert.deepEqual(yield* (yield* Auth.ApiKeyStore).listByUserId(ada.id), [])
+ *   assert.equal((yield* (yield* Auth.ApiKeyService).verify(key)).valid, false)
+ * })
+ *
+ * const sessions = Auth.SessionService.layer(Testing.defaultSessionConfig).pipe(
+ *   Layer.provideMerge(Layer.merge(Testing.memoryStores, Auth.Hooks.Default)),
+ * )
+ * const services = Layer.mergeAll(
+ *   Auth.UserService.layer(),
+ *   Auth.ApiKeyService.layer().pipe(Layer.provideMerge(Auth.RateLimiter.layer())),
+ * ).pipe(Layer.provideMerge(Auth.accountDeletionLayer), Layer.provideMerge(sessions))
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(services)))
+ * ```
+ *
+ * @since 0.5.0
+ * @category layers
+ */
+export const accountDeletionLayer: Layer.Layer<
+  AccountDeletion,
+  never,
+  UserServiceStore | IdentifierStore | SessionService
+> = Layer.effect(
+  AccountDeletion,
+  Effect.gen(function* () {
+    const users = yield* UserServiceStore;
+    const sessions = yield* SessionService;
+    const purgeServices = {
+      ...(yield* userPurgeStores),
+      accountTokens: Option.getOrUndefined(yield* Effect.serviceOption(AccountManagementStore)),
+      identifiers: yield* IdentifierStore,
+      revokeSessions: sessions.invalidateUserSessions,
+      deleteUser: users.delete,
+    };
+    return {
+      deleteUser: Effect.fn("AccountDeletion.deleteUser")((userId: string) =>
+        purgeUser(purgeServices, userId),
+      ),
+    };
+  }),
+);

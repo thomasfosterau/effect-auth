@@ -262,6 +262,74 @@ describe("RemoteSession session reads", () => {
   });
 });
 
+/** What a {@link trackedBody} whose cancel fails throws. */
+class CancelFailed extends Error {}
+
+/**
+ * A body that never ends, recording whether it was cancelled; with
+ * `cancelFails`, its cancel throws, so `body.cancel()` rejects.
+ */
+const trackedBody = (
+  cancelFails: boolean,
+): { readonly stream: ReadableStream<Uint8Array>; readonly cancelled: () => boolean } => {
+  let cancelled = false;
+  return {
+    stream: new ReadableStream<Uint8Array>({
+      cancel: () => {
+        cancelled = true;
+        if (cancelFails) throw new CancelFailed("cancel failed");
+      },
+    }),
+    cancelled: () => cancelled,
+  };
+};
+
+describe("RemoteSession cancels every response body it does not read", () => {
+  const reads = [
+    ["read", (client: RemoteSession.RemoteSessionClient) => client.read],
+    [
+      "readApiKey",
+      (client: RemoteSession.RemoteSessionClient) => {
+        assert(client.readApiKey !== undefined, "make builds readApiKey");
+        return client.readApiKey;
+      },
+    ],
+  ] as const;
+
+  describe.each(reads)("%s", (_name, readOf) => {
+    it.each([false, true])(
+      "a 401 is anonymous, its body cancelled (the cancel fails: %s)",
+      async (cancelFails) => {
+        const body = trackedBody(cancelFails);
+        const { fetcher } = spy(() => new Response(body.stream, { status: 401 }));
+        const read = readOf(RemoteSession.make({ fetcher }));
+
+        const result = await Effect.runPromise(
+          read(inbound({ "x-api-key": "key", ...withSession })),
+        );
+        expect(Option.isNone(result.session)).toBe(true);
+        expect(body.cancelled()).toBe(true);
+      },
+    );
+
+    it.each([false, true])(
+      "a non-200 is a RemoteSessionError, its body cancelled (the cancel fails: %s)",
+      async (cancelFails) => {
+        const body = trackedBody(cancelFails);
+        const { fetcher } = spy(() => new Response(body.stream, { status: 503 }));
+        const read = readOf(RemoteSession.make({ fetcher }));
+
+        const error = await Effect.runPromise(
+          Effect.flip(read(inbound({ "x-api-key": "key", ...withSession }))),
+        );
+        expect(error._tag).toBe("RemoteSessionError");
+        expect(error.status).toBe(503);
+        expect(body.cancelled()).toBe(true);
+      },
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The edge, end to end
 // ---------------------------------------------------------------------------
@@ -324,7 +392,26 @@ describe("RemoteSession.resolveAtEdge", () => {
   });
 
   it("a machine caller is not cookieless, so its key still resolves", async () => {
-    const { calls, fetcher } = spy(() => okSession());
+    // What `GET /api-keys/current` answers: the key, its user included (#730).
+    const keyDocument = {
+      data: {
+        type: "api-keys",
+        id: "key-1",
+        attributes: {
+          start: "abcdef",
+          enabled: true,
+          metadata: {},
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+        relationships: { user: { data: { type: "users", id: "user-42" } } },
+      },
+      included: sessionDocument().included,
+    };
+    const { calls, fetcher } = spy(
+      () =>
+        new Response(toJson(keyDocument), { status: 200, headers: { "content-type": JSON_API } }),
+    );
     const client = RemoteSession.make({ fetcher });
 
     const result = await Effect.runPromise(
@@ -332,9 +419,12 @@ describe("RemoteSession.resolveAtEdge", () => {
     );
 
     expect(result.outcome).toBe("resolved");
+    expect(result.user?.id).toBe("user-42");
+    expect(result.apiKey?.id).toBe("key-1");
     expect(calls).toHaveLength(1);
     const call = calls[0];
     assert(call !== undefined);
+    expect(call.url).toBe("https://auth.internal/api/auth/api-keys/current");
     expect(call.headers["x-api-key"]).toBe("key_live_1");
     // And it is carried as a machine credential, so the policy kernel sees the
     // same class the HTTP middleware would have provided.
@@ -558,6 +648,82 @@ describe("RemoteSession relay", () => {
     expect(RemoteSession.relayResponse(signInResponse(), none).headers.getSetCookie()).toHaveLength(
       2,
     );
+  });
+});
+
+/** Relay `upstream` to a caller sending `headers`. */
+const relayed = (upstream: Response, headers: Record<string, string> = {}) =>
+  RemoteSession.relayResponse(
+    upstream,
+    SessionResolution.detectCredential(SessionResolution.fromRequest(inbound(headers))),
+  );
+
+/** A sign-out answer clearing the session cookie, under `cacheControl` if given. */
+const clearing = (cacheControl?: string) =>
+  new Response(null, {
+    status: 204,
+    headers: {
+      ...(cacheControl !== undefined && { "cache-control": cacheControl }),
+      "set-cookie": "__Host-conduit_session=; Path=/; Max-Age=0; HttpOnly; Secure",
+    },
+  });
+
+describe("a relayed response carrying Set-Cookie is no-store (#628)", () => {
+  it("marks a relayed session cookie no-store, first sign-in and cookie-bearing alike", () => {
+    expect(relayed(signInResponse()).headers.get("cache-control")).toBe("no-store");
+    expect(relayed(signInResponse(), withSession).headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("marks a relayed cookie-clearing sign-out no-store", () => {
+    const response = relayed(clearing());
+    expect(response.status).toBe(204);
+    expect(response.headers.getSetCookie()).toHaveLength(1);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("appends no-store to an upstream Cache-Control that lacks it, keeping its directives", () => {
+    expect(relayed(clearing("private, max-age=60")).headers.get("cache-control")).toBe(
+      "private, max-age=60, no-store",
+    );
+  });
+
+  it("keeps an upstream Cache-Control that already has no-store", () => {
+    expect(relayed(clearing("private, No-Store")).headers.get("cache-control")).toBe(
+      "private, No-Store",
+    );
+  });
+
+  it.each([
+    ["an API key", { "x-api-key": "key_live_1" }],
+    ["a bearer token", { authorization: "Bearer token" }],
+  ])("marks a response whose Set-Cookie it strips for %s no-store", (_name, headers) => {
+    const response = relayed(clearing("public, max-age=60"), headers);
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60, no-store");
+  });
+
+  it("leaves a response without Set-Cookie as it is", () => {
+    const upstream = new Response("{}", { headers: { "cache-control": "max-age=60" } });
+    expect(relayed(upstream)).toBe(upstream);
+  });
+
+  it("a session read over relay carries no-store with its refreshed cookie", async () => {
+    const refreshed = "__Host-conduit_session_data=fresh; Path=/; HttpOnly";
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+    const request = new Request("https://app.example.com/auth/sessions/current", {
+      headers: withSession,
+    });
+    const response = await Effect.runPromise(client.relay(request, "/sessions/current"));
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("withSetCookie marks the outgoing response no-store when it replays a cookie", () => {
+    const response = RemoteSession.withSetCookie(
+      new Response("{}", { headers: { "cache-control": "private" } }),
+      ["__Host-conduit_session_data=; Path=/; Max-Age=0"],
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 });
 

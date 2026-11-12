@@ -6,8 +6,8 @@
  * without a database.
  *
  * Each `memoryXStore` returns a plain implementation of one contract over
- * `MutableHashMap`s that live as long as the value. The three user-writing contracts
- * (`UserStore`, `EmailPasswordStore`, `OAuthUserStore`) and
+ * `MutableHashMap`s that live as long as the value. The user contracts
+ * (`UserStore`, `UserServiceStore`, `EmailPasswordStore`, `OAuthUserStore`) and
  * `OAuthAccountStore.hasPassword` share one {@link MemoryUserTable}, so a user
  * created through one is read through the others. {@link layer} provides every
  * store at once over fresh state, along with the core's `KeyValueStore`-backed
@@ -25,6 +25,7 @@ import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";
+import { type AccountToken, AccountManagementStore } from "../AccountManagement.ts";
 import { type ApiKey, ApiKeyStore } from "../ApiKey.ts";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
@@ -33,6 +34,7 @@ import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword
 import * as Errors from "../Errors.ts";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { MultiFactorStore, type MultiFactorRecord } from "../multifactor/MultiFactor.ts";
+import { CredentialStore, type WebAuthnCredential } from "../multifactor/WebAuthn.ts";
 import {
   OtpSecondFactorStore,
   type OtpSecondFactorRecord,
@@ -57,6 +59,7 @@ import { type PhoneOtpPurpose, type PhoneOtpRecord, PhoneOtpStore } from "../Pho
 import { SessionStore } from "../SessionStore.ts";
 import { TrustedDeviceStore, type TrustedDeviceRecord } from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
+import { UserServiceStore } from "../User.ts";
 import { type CreateUserResult, UserStore } from "../UserStore.ts";
 
 /** Removes every entry whose value matches `predicate`. */
@@ -123,6 +126,26 @@ export const memoryUserStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof UserStore.Service => ({
   get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.users, userId))),
+});
+
+/**
+ * `UserServiceStore` over a {@link MemoryUserTable}: `delete` removes the
+ * user row and its password hash, and nothing else, as the contract says;
+ * the services that delete an account purge the rest first (#601).
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const memoryUserServiceStore = (
+  table: MemoryUserTable = memoryUserTable(),
+): typeof UserServiceStore.Service => ({
+  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.users, userId))),
+  update: (user) => Effect.sync(() => (MutableHashMap.set(table.users, user.id, user), user)),
+  delete: (userId) =>
+    Effect.sync(() => {
+      MutableHashMap.remove(table.users, userId);
+      MutableHashMap.remove(table.passwordHashes, userId);
+    }),
 });
 
 /**
@@ -236,6 +259,63 @@ export const memoryApiKeyStore = (
     Effect.sync(() =>
       Arr.filter(Arr.fromIterable(MutableHashMap.values(keys)), (key) => key.userId === userId),
     ),
+  deleteByUserId: (userId) =>
+    Effect.sync(() => {
+      removeWhere(keys, (key) => key.userId === userId);
+    }),
+});
+
+/**
+ * WebAuthn `CredentialStore` (passkeys) over a `MutableHashMap` keyed by the
+ * credential id, which is also the raw credential id `getByCredentialId`
+ * reads.
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const memoryCredentialStore = (
+  credentials: MutableHashMap.MutableHashMap<string, WebAuthnCredential> = MutableHashMap.empty(),
+): typeof CredentialStore.Service => ({
+  create: (credential) =>
+    Effect.sync(() => (MutableHashMap.set(credentials, credential.id, credential), credential)),
+  get: (credentialId) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(credentials, credentialId))),
+  getByCredentialId: (credentialId) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(credentials, credentialId))),
+  update: (credential) =>
+    Effect.sync(() => (MutableHashMap.set(credentials, credential.id, credential), credential)),
+  delete: (credentialId) =>
+    Effect.sync(() => void MutableHashMap.remove(credentials, credentialId)),
+  listByUserId: (userId) =>
+    Effect.sync(() =>
+      Arr.filter(
+        Arr.fromIterable(MutableHashMap.values(credentials)),
+        (credential) => credential.userId === userId,
+      ),
+    ),
+  deleteByUserId: (userId) =>
+    Effect.sync(() => {
+      removeWhere(credentials, (credential) => credential.userId === userId);
+    }),
+});
+
+/**
+ * `AccountManagementStore` (pending email-change and account-deletion
+ * tokens) over a `MutableHashMap` keyed by the token.
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const memoryAccountManagementStore = (
+  tokens: MutableHashMap.MutableHashMap<string, AccountToken> = MutableHashMap.empty(),
+): typeof AccountManagementStore.Service => ({
+  create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.token, token), token)),
+  get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+  delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
+  deleteByUserId: (userId) =>
+    Effect.sync(() => {
+      removeWhere(tokens, (token) => token.userId === userId);
+    }),
 });
 
 /**
@@ -444,6 +524,10 @@ export const memoryOAuthAccountStore = (
       }),
     delete: (provider, providerId) =>
       Effect.sync(() => void MutableHashMap.remove(accounts, accountKey(provider, providerId))),
+    deleteByUserId: (userId) =>
+      Effect.sync(() => {
+        removeWhere(accounts, (account) => account.userId === userId);
+      }),
     hasPassword: (userId) => Effect.sync(() => MutableHashMap.has(table.passwordHashes, userId)),
   };
 };
@@ -532,6 +616,10 @@ export const memoryOidcConsentStore = (
       ),
     delete: (userId, clientId) =>
       Effect.sync(() => void MutableHashMap.remove(consents, key(userId, clientId))),
+    deleteByUserId: (userId) =>
+      Effect.sync(() => {
+        removeWhere(consents, (consent) => consent.userId === userId);
+      }),
   };
 };
 
@@ -547,6 +635,7 @@ export const memoryOidcConsentStore = (
  */
 export type MemoryStores =
   | UserStore
+  | UserServiceStore
   | EmailPasswordStore
   | OAuthUserStore
   | OAuthAccountStore
@@ -554,6 +643,8 @@ export type MemoryStores =
   | ApiKeyStore
   | IdentifierStore
   | MultiFactorStore
+  | CredentialStore
+  | AccountManagementStore
   | TrustedDeviceStore
   | OtpSecondFactorStore
   | JwtKeyStore
@@ -600,6 +691,7 @@ export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(
     const table = memoryUserTable();
     return Layer.mergeAll(
       Layer.succeed(UserStore, memoryUserStore(table)),
+      Layer.succeed(UserServiceStore, memoryUserServiceStore(table)),
       Layer.succeed(EmailPasswordStore, memoryEmailPasswordStore(table)),
       Layer.succeed(OAuthUserStore, memoryOAuthUserStore(table)),
       Layer.succeed(OAuthAccountStore, memoryOAuthAccountStore(table)),
@@ -607,6 +699,8 @@ export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(
       Layer.succeed(ApiKeyStore, memoryApiKeyStore()),
       Layer.succeed(IdentifierStore, memoryIdentifierStore()),
       Layer.succeed(MultiFactorStore, memoryMultiFactorStore()),
+      Layer.succeed(CredentialStore, memoryCredentialStore()),
+      Layer.succeed(AccountManagementStore, memoryAccountManagementStore()),
       Layer.succeed(TrustedDeviceStore, memoryTrustedDeviceStore()),
       Layer.succeed(OtpSecondFactorStore, memoryOtpSecondFactorStore()),
       Layer.succeed(JwtKeyStore, memoryJwtKeyStore()),

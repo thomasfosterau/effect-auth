@@ -53,20 +53,40 @@
  *
  * @module testing
  */
-import { Data, DateTime, Effect, Exit, Order } from "effect";
+import { type Context, Data, DateTime, Effect, Exit, Order } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import { type AccountToken, AccountManagementStore } from "../AccountManagement.ts";
 import * as ApiKey from "../ApiKey.ts";
+import { type EmailVerification, EmailVerificationStore } from "../email/EmailVerification.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "../email/EmailOtp.ts";
 import { type PhoneOtpPurpose, type PhoneOtpRecord, PhoneOtpStore } from "../PhoneOtp.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
 import type { CodeRecord, CodeStore } from "../OtpCode.ts";
-import { type PendingMultiFactor, PendingMultiFactorStore } from "../multifactor/MultiFactor.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "../multifactor/WebAuthn.ts";
+import {
+  type MultiFactorRecord,
+  MultiFactorStore,
+  type PendingMultiFactor,
+  PendingMultiFactorStore,
+} from "../multifactor/MultiFactor.ts";
+import {
+  ChallengeStore,
+  CredentialStore,
+  type WebAuthnChallenge,
+  type WebAuthnCredential,
+} from "../multifactor/WebAuthn.ts";
+import { type OAuthAccount, OAuthAccountStore } from "../oauth/OAuthAccount.ts";
+import {
+  type OidcConsent,
+  OidcConsentStore,
+  type OidcToken,
+  OidcTokenStore,
+} from "../OidcProvider.ts";
+import { type PasswordResetToken, PasswordResetStore } from "../password/PasswordReset.ts";
 import {
   type Member,
   type OrgRole,
@@ -76,6 +96,7 @@ import {
   type TeamMember,
 } from "../Organization.ts";
 import { SessionStore } from "../SessionStore.ts";
+import { type TrustedDeviceRecord, TrustedDeviceStore } from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 
@@ -847,7 +868,7 @@ const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
 /**
  * The `ApiKeyStore` contract: keys round-trip with every optional field, read
  * by id and by hash, misses are `null`, `update` writes, and the per-user list
- * is that user's keys only.
+ * and the per-user delete (#601) touch that user's keys only.
  *
  * @since 0.1.0
  * @category suites
@@ -948,6 +969,13 @@ export const apiKeyStoreConformance = <E = never, R = never>(
           );
         }),
     },
+    perUserDeleteCase(ApiKey.ApiKeyStore, {
+      records: "keys",
+      make: (userId: string) => makeApiKey(userId),
+      write: (store, key) => store.create(key),
+      read: (store, key) => store.get(key.id),
+      purge: (store, userId) => store.deleteByUserId(userId),
+    }),
   ]);
 
 // ---------------------------------------------------------------------------
@@ -1579,4 +1607,289 @@ export const phoneOtpStoreConformance = <E = never, R = never>(
     purposes: ["sign-in", "phone-verification"],
     newAddress: () => `+${uuid()}`,
     makeRecord: (phoneNumber, purpose) => ({ phoneNumber, purpose, ...codeFields() }),
+  });
+// ---------------------------------------------------------------------------
+// Per-user deletes (#601)
+// ---------------------------------------------------------------------------
+
+/** How a per-user-delete case writes, reads and deletes one contract's records. */
+interface PerUserDelete<S, A> {
+  /** The records, plural, as the case name says them ("keys"). */
+  readonly records: string;
+  /** The per-user delete's name ("deleteByUserId"). */
+  readonly method?: string | undefined;
+  readonly make: (userId: string) => A;
+  readonly write: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
+  /** Read `record` back: the record while it is stored, `null` once it is gone. */
+  readonly read: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
+  readonly purge: (store: S, userId: string) => Effect.Effect<void, Errors.AuthError>;
+}
+
+/**
+ * The case every user-keyed credential store's contract shares: the per-user
+ * delete removes that user's records only, and is a no-op for a user with
+ * none. Deleting a user calls it before the user row goes (#601).
+ */
+const perUserDeleteCase = <I, S, A, E, R>(store: Context.Key<I, S>, spec: PerUserDelete<S, A>) => ({
+  name: `${spec.method ?? "deleteByUserId"} removes that user's ${spec.records} only, and is a no-op for a user with none`,
+  run: (newUser: () => Effect.Effect<string, E, R>) =>
+    Effect.gen(function* () {
+      const service = yield* store;
+      const userId = yield* newUser();
+      const otherId = yield* newUser();
+      const mine = [spec.make(userId), spec.make(userId)];
+      const theirs = spec.make(otherId);
+      yield* Effect.forEach([...mine, theirs], (record) => spec.write(service, record), {
+        concurrency: 1,
+        discard: true,
+      });
+      yield* spec.purge(service, userId);
+      yield* spec.purge(service, uuid());
+      yield* Effect.forEach(
+        mine,
+        (record) =>
+          Effect.flatMap(spec.read(service, record), (found) =>
+            expectEqual(`a deleted user's ${spec.records}`, found, null),
+          ),
+        { concurrency: 1, discard: true },
+      );
+      yield* expectEqual(
+        `the other user's ${spec.records}`,
+        yield* spec.read(service, theirs),
+        theirs,
+      );
+    }),
+});
+
+/** A suite of one contract's per-user-delete case. */
+const perUserDeleteSuite = <I, S, A, E, R>(
+  contract: string,
+  options: ConformanceOptions<E, R> | undefined,
+  store: Context.Key<I, S>,
+  spec: PerUserDelete<S, A>,
+): ConformanceSuite<E, R | I> =>
+  suite<E, R, I>(contract, options, [perUserDeleteCase<I, S, A, E, R>(store, spec)]);
+
+const makeOAuthAccount = (userId: string): OAuthAccount => ({
+  id: uuid(),
+  userId,
+  provider: "github",
+  providerId: uuid(),
+  accessToken: digest(),
+  refreshToken: digest(),
+  createdAt: at().getTime(),
+  updatedAt: at().getTime(),
+});
+
+/**
+ * The `OAuthAccountStore` per-user delete (#601): `deleteByUserId` removes
+ * every provider link of that user, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const oauthAccountStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | OAuthAccountStore> =>
+  perUserDeleteSuite("OAuthAccountStore", options, OAuthAccountStore, {
+    records: "provider links",
+    make: makeOAuthAccount,
+    write: (store, account) => store.create(account),
+    read: (store, account) => store.get(account.provider, account.providerId),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+const makePasskey = (userId: string): WebAuthnCredential => ({
+  id: digest(),
+  userId,
+  publicKey: new TextEncoder().encode(uuid()),
+  algorithm: -7,
+  counter: 0,
+  createdAt: at().getTime(),
+});
+
+/**
+ * The WebAuthn `CredentialStore` per-user delete (#601): `deleteByUserId`
+ * removes every passkey of that user, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const credentialStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | CredentialStore> =>
+  perUserDeleteSuite("CredentialStore", options, CredentialStore, {
+    records: "passkeys",
+    make: makePasskey,
+    write: (store, passkey) => store.create(passkey),
+    read: (store, passkey) => store.get(passkey.id),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+/**
+ * The `MultiFactorStore` per-user delete (#601): the record is keyed by user
+ * id, so `delete(userId)` removes that user's enrolment, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const multiFactorStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | MultiFactorStore> =>
+  perUserDeleteSuite("MultiFactorStore", options, MultiFactorStore, {
+    records: "enrolment",
+    method: "delete",
+    make: (userId): MultiFactorRecord => ({
+      userId,
+      secret: "JBSWY3DPEHPK3PXP",
+      backupCodes: [digest(), digest()],
+      verified: true,
+      createdAt: at().getTime(),
+    }),
+    write: (store, record) => store.upsert(record),
+    read: (store, record) => store.get(record.userId),
+    purge: (store, userId) => store.delete(userId),
+  });
+
+/**
+ * The `TrustedDeviceStore` per-user delete (#601): `deleteByUserId` removes
+ * every trusted device of that user, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const trustedDeviceStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | TrustedDeviceStore> =>
+  perUserDeleteSuite("TrustedDeviceStore", options, TrustedDeviceStore, {
+    records: "trusted devices",
+    make: (userId): TrustedDeviceRecord => ({
+      tokenHash: digest(),
+      userId,
+      createdAt: at().getTime(),
+      expiresAt: at(30 * 24 * 60 * 60 * 1000).getTime(),
+    }),
+    write: (store, record) => store.upsert(record),
+    read: (store, record) => store.getByTokenHash(record.tokenHash),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+/**
+ * The `OidcTokenStore` per-user delete (#601, #704): `deleteByUserId` removes
+ * every access and refresh token issued to that user, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const oidcTokenStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | OidcTokenStore> =>
+  perUserDeleteSuite("OidcTokenStore", options, OidcTokenStore, {
+    records: "tokens",
+    make: (userId): OidcToken => ({
+      tokenHash: digest(),
+      kind: "refresh",
+      clientId: "conformance-client",
+      userId,
+      scopes: ["openid"],
+      expiresAt: at(60 * 60 * 1000).getTime(),
+      createdAt: at().getTime(),
+    }),
+    write: (store, token) => store.create(token),
+    read: (store, token) => store.get(token.tokenHash),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+/**
+ * The `OidcConsentStore` per-user delete (#601): `deleteByUserId` removes the
+ * consents that user granted, for every client, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const oidcConsentStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | OidcConsentStore> =>
+  perUserDeleteSuite("OidcConsentStore", options, OidcConsentStore, {
+    records: "consents",
+    make: (userId): OidcConsent => ({
+      userId,
+      clientId: uuid(),
+      scopes: ["openid", "email"],
+      createdAt: at().getTime(),
+      updatedAt: at().getTime(),
+    }),
+    write: (store, consent) => store.upsert(consent),
+    read: (store, consent) => store.get(consent.userId, consent.clientId),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+/** A pending token of the email-verification / password-reset shape. */
+const makeUserToken = (userId: string) => ({
+  token: digest(),
+  userId,
+  email: `${uuid()}@example.com`,
+  createdAt: at().getTime(),
+  expiresAt: at(60 * 60 * 1000).getTime(),
+});
+
+/**
+ * The `EmailVerificationStore` per-user delete (#601): `deleteByUserId`
+ * removes that user's pending verifications, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const emailVerificationStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | EmailVerificationStore> =>
+  perUserDeleteSuite("EmailVerificationStore", options, EmailVerificationStore, {
+    records: "verifications",
+    make: (userId): EmailVerification => makeUserToken(userId),
+    write: (store, verification) => store.create(verification),
+    read: (store, verification) => store.get(verification.token),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+/**
+ * The `PasswordResetStore` per-user delete (#601): `deleteByUserId` removes
+ * that user's pending resets, and only theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const passwordResetStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | PasswordResetStore> =>
+  perUserDeleteSuite("PasswordResetStore", options, PasswordResetStore, {
+    records: "resets",
+    make: (userId): PasswordResetToken => makeUserToken(userId),
+    write: (store, reset) => store.create(reset),
+    read: (store, reset) => store.get(reset.token),
+    purge: (store, userId) => store.deleteByUserId(userId),
+  });
+
+/**
+ * The `AccountManagementStore` per-user delete (#601): `deleteByUserId`
+ * removes that user's pending email-change and deletion tokens, and only
+ * theirs.
+ *
+ * @since 0.5.0
+ * @category suites
+ */
+export const accountManagementStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | AccountManagementStore> =>
+  perUserDeleteSuite("AccountManagementStore", options, AccountManagementStore, {
+    records: "account tokens",
+    make: (userId): AccountToken => ({
+      token: digest(),
+      userId,
+      purpose: "delete-account",
+      createdAt: at().getTime(),
+      expiresAt: at(60 * 60 * 1000).getTime(),
+    }),
+    write: (store, token) => store.create(token),
+    read: (store, token) => store.get(token.token),
+    purge: (store, userId) => store.deleteByUserId(userId),
   });

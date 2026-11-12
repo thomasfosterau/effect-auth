@@ -571,9 +571,21 @@ export interface ResolveWithOptions<A, E, R> {
   readonly resolve: Effect.Effect<A, E, R>;
   /** Where the session lives inside that payload. */
   readonly session: (value: A) => Option.Option<Types.SessionWithUser>;
+  /**
+   * Whether the payload names a caller, for the outcome (`resolved` or
+   * `anonymous`). Defaults to "`session` found one". A payload that carries a
+   * principal without a session (an API key's user, #730) says so here.
+   */
+  readonly resolved?: ((value: A) => boolean) | undefined;
   /** The payload to report when resolution is skipped or degrades. */
   readonly empty: A;
 }
+
+/** The outcome of a resolution that ran: `resolved` when the payload names a caller. */
+const outcomeOf = <A, E, R>(options: ResolveWithOptions<A, E, R>, value: A): AuthOutcome =>
+  (options.resolved ?? ((v: A) => Option.isSome(options.session(v))))(value)
+    ? "resolved"
+    : "anonymous";
 
 /** Options for {@link resolveWithFailOpen}. */
 export interface ResolveWithFailOpenOptions<A, E, R> extends ResolveWithOptions<A, E, R> {
@@ -608,7 +620,7 @@ export const resolveWith = <A, E, R>(
       return { value: options.empty, outcome: "skipped" as const };
     }
     const value = yield* options.resolve.pipe(Effect.tapCause(() => report("degraded")));
-    const outcome: AuthOutcome = Option.isSome(options.session(value)) ? "resolved" : "anonymous";
+    const outcome = outcomeOf(options, value);
     yield* report(outcome);
     return { value, outcome };
   }).pipe(Effect.withSpan(Observability.spanNames.resolveSession));
@@ -630,9 +642,7 @@ export const resolveWithFailOpen = <A, E, R>(
     }
     return yield* options.resolve.pipe(
       Effect.flatMap((value) => {
-        const outcome: AuthOutcome = Option.isSome(options.session(value))
-          ? "resolved"
-          : "anonymous";
+        const outcome = outcomeOf(options, value);
         return Effect.as(report(outcome), { value, outcome });
       }),
       // Catches defects as well as failures: an unreachable binding often

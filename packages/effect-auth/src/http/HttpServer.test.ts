@@ -2226,6 +2226,8 @@ describe("multi-factor", () => {
     // `202`: the challenge to redeem, and no user until it is redeemed.
     expect(gated.status).toBe(202);
     expect(gated.headers.get("set-cookie")).toBeNull();
+    // The challenge's id redeems the second factor (#628).
+    expect(gated.headers.get("cache-control")).toBe("no-store");
     const gatedBody = await authBody(
       gated,
       Schema.Struct({
@@ -3095,6 +3097,94 @@ const requireSetCookie = (res: Response, name: string): string => {
   return value;
 };
 
+/** The `Cache-Control` a response carries, `null` without one. */
+const cacheControl = (res: Response) => res.headers.get("cache-control");
+
+describe("every response carrying Set-Cookie is no-store (#628)", () => {
+  it("a sign-up and a sign-in that set the session cookie", async () => {
+    const handler = handlerFor();
+    const up = await handler(authRequest("sign-up", { email: "ns@test.com", password: PW }));
+    expect(up.headers.getSetCookie().length).toBeGreaterThan(0);
+    expect(cacheControl(up)).toBe("no-store");
+
+    const signedIn = await handler(authRequest("password", { email: "ns@test.com", password: PW }));
+    expect(signedIn.headers.getSetCookie().length).toBeGreaterThan(0);
+    expect(cacheControl(signedIn)).toBe("no-store");
+  });
+
+  it("a sign-out that clears the cookies", async () => {
+    const handler = handlerFor(makeFixture(), {
+      cache: { secret: "cache-secret-cache-secret-1234567" },
+    });
+    const sid = await signUp(handler, "ns@test.com");
+    const out = await handler(deleteRequest("/sessions/current", asCookie(sid)));
+    expect(out.status).toBe(204);
+    expect(out.headers.getSetCookie().length).toBeGreaterThan(0);
+    expect(cacheControl(out)).toBe("no-store");
+  });
+
+  it("a GET /sessions/current that refreshes the cache cookie", async () => {
+    const handler = handlerFor(makeFixture(), {
+      cache: { secret: "cache-secret-cache-secret-1234567" },
+    });
+    const sid = await signUp(handler, "ns@test.com");
+    const res = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
+    expect(res.status).toBe(200);
+    assert(
+      dataCookieFromSetCookie(res.headers.get("set-cookie")) !== null,
+      "issues the data cookie",
+    );
+    expect(cacheControl(res)).toBe("no-store");
+  });
+
+  it("a device token response, already no-store, keeps one directive", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const issued = await handler(jsonRequest("/device/code", {}));
+    // The device code is the secret the device polls with.
+    expect(cacheControl(issued)).toBe("no-store");
+    const code = await jsonBody(
+      issued,
+      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
+    );
+    // A malformed poll's 400 never reaches the handler, and is no-store too.
+    const malformed = await handler(jsonRequest("/device/token", {}));
+    expect(malformed.status).toBe(400);
+    expect(cacheControl(malformed)).toBe("no-store");
+    const sid = await signUp(handler, "ns@test.com");
+    await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
+    const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    expect(token.status).toBe(200);
+    expect(token.headers.get("set-cookie")).toContain("conduit_session=");
+    expect(cacheControl(token)).toBe("no-store");
+  });
+
+  it("credential bodies without a cookie: the current session over bearer, the MFA secret", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const sid = await signUp(handler, "ns@test.com");
+
+    const current = await handler(getRequest(CURRENT_SESSION, { authorization: `Bearer ${sid}` }));
+    expect(current.status).toBe(200);
+    expect(current.headers.getSetCookie()).toStrictEqual([]);
+    expect(cacheControl(current)).toBe("no-store");
+
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
+    expect(enable.status).toBe(201);
+    expect(cacheControl(enable)).toBe("no-store");
+
+    const codes = await handler(
+      authRequest("regenerate-backup-codes", { password: PW }, asCookie(sid)),
+    );
+    expect(cacheControl(codes)).toBe("no-store");
+  });
+
+  it("leaves a response with neither a cookie nor a credential alone", async () => {
+    const handler = handlerFor();
+    const res = await handler(authRequest("send-magic-link", { email: "ns@test.com" }));
+    expect(res.status).toBe(404);
+    expect(cacheControl(res)).toBeNull();
+  });
+});
+
 describe("HTTP multi-session", () => {
   it("accumulates sessions, lists, switches active, and revokes", async () => {
     const handler = handlerFor(makeFixture(), { multiSession: { maximumSessions: 5 } });
@@ -3935,6 +4025,7 @@ const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, m
   ["POST", "/sso/saml/acs/acme", 20],
   ["POST", "/oauth2/token", 60],
   ["POST", "/register", 10],
+  ["GET", "/api-keys/current", 300],
 ];
 
 /**

@@ -108,6 +108,7 @@ export {
   type ApiKeyCreateOptions,
   type ApiKeyCreateResult,
   type ApiKeyVerifyResult,
+  type ApiKeyRefusal,
   type ApiKeyUpdate,
   ApiKeyService,
   hashApiKey,
@@ -251,7 +252,9 @@ export {
   type AccountManagementConfig,
   type EmailChangeResult,
   AccountManagementService,
+  accountDeletionLayer,
 } from "./AccountManagement.ts";
+export { AccountDeletion } from "./AccountDeletion.ts";
 export {
   type DeviceAuthorizationStatus,
   type DeviceAuthorizationRecord,

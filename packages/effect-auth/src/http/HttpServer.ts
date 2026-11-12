@@ -45,6 +45,7 @@ import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import { isRecipientSendCapped } from "../RecipientSendLimit.ts";
+import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
 import * as S from "./HttpApiSchema.ts";
 import * as JsonApiErrors from "./JsonApiErrors.ts";
 import * as R from "./Resources.ts";
@@ -99,6 +100,7 @@ import {
   type ApiKeyUpdate,
 } from "../ApiKey.ts";
 import { type CredentialClass } from "../Authorizer.ts";
+import { extractApiKey, fromHeaders } from "../SessionResolution.ts";
 import { JwtService } from "../Jwt.ts";
 import {
   OidcProviderService,
@@ -268,6 +270,14 @@ export interface CookieConfig {
    * header from cross-origin responses.
    */
   readonly bearerMode?: boolean | "always" | "opt-in";
+  /**
+   * The header names `GET /api-keys/current` reads a machine API key from, the
+   * first non-empty one winning. Default `["x-api-key"]`. A key is never read
+   * from the URL or the query. This is `SessionResolution.CredentialConfig`'s
+   * `apiKeyHeaders`: pass the same value to `RemoteSession.make`'s
+   * `credentials` so the edge and the auth service agree on where the key is.
+   */
+  readonly apiKeyHeaders?: ReadonlyArray<string> | undefined;
 }
 
 /** Multiple concurrent accounts per client (device-scoped session list). */
@@ -289,6 +299,7 @@ export interface ResolvedCookieConfig {
   readonly multiSession: { readonly maximumSessions: number } | undefined;
   readonly lastLoginMethod: { readonly maxAge: number } | undefined;
   readonly bearerMode: "always" | "opt-in" | false;
+  readonly apiKeyHeaders: ReadonlyArray<string> | undefined;
 }
 
 /**
@@ -323,6 +334,7 @@ export const resolveCookieConfig = (
               30 * 24 * 60 * 60 * 1000,
           },
     bearerMode: bm === true || bm === "always" ? "always" : bm === "opt-in" ? "opt-in" : false,
+    apiKeyHeaders: config?.apiKeyHeaders,
   };
 };
 
@@ -1297,8 +1309,31 @@ const runSynchronously = <A, E>(effect: Effect.Effect<A, E>): SynchronousRun<A, 
 // -----------------------------------------------------------------------------
 
 /**
+ * `response` with `no-store` merged into its `Cache-Control` (#628): kept as
+ * it is when it already has `no-store`, else with `no-store` appended.
+ */
+const withNoStore = (
+  response: HttpServerResponse.HttpServerResponse,
+): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.setHeader(
+    response,
+    "cache-control",
+    mergeNoStore(response.headers["cache-control"]),
+  );
+
+/**
+ * Mark the response a handler is about to send `no-store`, whatever it turns
+ * out to be: for the bodies that hand a credential over (#628).
+ */
+const noStore: Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(withNoStore(response)),
+  );
+
+/**
  * Set a cookie on the response a JSON:API handler is about to send, so the
- * handler can still answer with its typed document.
+ * handler can still answer with its typed document. The response is marked
+ * `no-store` with it (#628), so a shared cache never replays the cookie.
  */
 const setResponseCookie = (
   name: string,
@@ -1306,7 +1341,10 @@ const setResponseCookie = (
   options: Parameters<typeof HttpServerResponse.setCookie>[3],
 ): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
   HttpEffect.appendPreResponseHandler((_request, response) =>
-    HttpServerResponse.setCookie(response, name, value, options).pipe(Effect.orDie),
+    HttpServerResponse.setCookie(response, name, value, options).pipe(
+      Effect.map(withNoStore),
+      Effect.orDie,
+    ),
   );
 
 /** The `users` resource of a user, its `email` fields derived from `identifiers`. */
@@ -1440,6 +1478,7 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
       .handle("get", ({ params, query, request }) =>
         Effect.gen(function* () {
           const { resolved, cacheHit } = yield* resolveSession(request, cfg);
+          yield* noStore;
           const withUser = query.include?.includes("user") === true;
           if (params.id !== CURRENT && params.id !== resolved.session.id) {
             const sessionManager = yield* SessionService;
@@ -1757,6 +1796,8 @@ const answerSignIn = (
       return yield* signedIn({ ...outcome, session });
     }
     if (outcome.secondFactor !== undefined) {
+      // The challenge's id is the token that redeems the second factor (#628).
+      yield* noStore;
       return {
         data: R.SecondFactorChallenge.make({
           id: outcome.secondFactor.token,
@@ -2183,6 +2224,9 @@ export const googleOneTapNoncesGroupLayer = () =>
     handlers.handle("create", () =>
       Effect.gen(function* () {
         const oneTap = yield* resolveGoogleOneTap;
+        // The single-use nonce is this caller's alone: a cached answer would
+        // hand it to the next caller (#628).
+        yield* noStore;
         const nonce = yield* oneTap.service.createNonce().pipe(
           Effect.catchTags({
             GoogleOneTapError: (e) => internalServerError(e),
@@ -2302,6 +2346,8 @@ export const multiFactorEnrollmentsGroupLayer = (
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const multiFactor = yield* resolveMultiFactor;
+          // The answer carries the TOTP secret and backup codes (#628).
+          yield* noStore;
           const enrolled = yield* multiFactor.service
             .enable(resolved.user.id, payload.data.attributes.password)
             .pipe(
@@ -2365,6 +2411,8 @@ export const backupCodeSetsGroupLayer = (
   return HttpApiBuilder.group(AuthApi, "backup-code-sets", (handlers) =>
     handlers.handle("create", ({ payload, request }) =>
       Effect.gen(function* () {
+        // The answer carries the new backup codes (#628).
+        yield* noStore;
         const resolved = yield* requireSession(request, cfg);
         const multiFactor = yield* resolveMultiFactor;
         const backupCodes = yield* multiFactor.service
@@ -3466,7 +3514,84 @@ const asApiKeyOwner = <A, R>(
   });
 
 /**
- * Layer implementing the `api-keys` group: the signed-in user's API keys (see
+ * The one message every API key that does not resolve is answered with
+ * (#730): unknown, disabled, expired, exhausted, missing or ownerless alike,
+ * so the answer never tells them apart. The reason goes to the server log.
+ */
+const API_KEY_REFUSED = "Invalid API key";
+
+/**
+ * Refuse a key resolution with the identical `401`, logging only why (never
+ * the key, which no log line or error ever carries).
+ */
+const refuseApiKey = (reason: string): Effect.Effect<never, S.Unauthorized> =>
+  Effect.logInfo("[effect-auth] API key refused").pipe(
+    Effect.annotateLogs({ reason }),
+    Effect.andThen(Effect.fail(new S.Unauthorized({ message: API_KEY_REFUSED }))),
+  );
+
+/** Set `name: value` on whatever response the handler ends up sending, error or not. */
+const setResponseHeader = (
+  name: string,
+  value: string,
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeader(response, name, value)),
+  );
+
+/**
+ * The `429` of a real key over its own `rateLimit`, with `Retry-After` in
+ * whole seconds (rounded up) when the limiter said how long.
+ */
+const apiKeyRateLimited = (
+  retryAfter: Duration.Duration | undefined,
+): Effect.Effect<never, S.TooManyRequests, HttpServerRequest.HttpServerRequest> =>
+  Effect.gen(function* () {
+    if (retryAfter !== undefined) {
+      yield* setResponseHeader("retry-after", String(Math.ceil(Duration.toSeconds(retryAfter))));
+    }
+    return yield* new S.TooManyRequests({ message: "Too many requests" });
+  });
+
+/**
+ * `GET /api-keys/current` (#730): the key the request carries in an API-key
+ * header, verified with `verifyWithRateLimit` (no required permissions, so
+ * the app checks those through the policy kernel), and the user it acts as.
+ * The session cookie and bearer token are never read here, so a key always
+ * wins over them. `404` before anything is read when API keys are off.
+ */
+const resolveCurrentApiKey = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+) =>
+  Effect.gen(function* () {
+    yield* setResponseHeader("cache-control", "no-store");
+    const apiKey = yield* resolveApiKey; // 404 when API keys are not enabled
+    const presented = extractApiKey(fromHeaders(request.headers), {
+      ...(cfg.apiKeyHeaders !== undefined && { apiKeyHeaders: cfg.apiKeyHeaders }),
+    });
+    if (presented === undefined) return yield* refuseApiKey("no API key header");
+    const result = yield* storeFailure(apiKey.service.verifyWithRateLimit(presented));
+    if (result.reason === "rate-limited") return yield* apiKeyRateLimited(result.retryAfter);
+    if (!result.valid || result.apiKey === undefined) {
+      return yield* refuseApiKey(result.error ?? "API key refused");
+    }
+    const key = result.apiKey;
+    const userService = yield* UserService;
+    const user = yield* userService.getUser(key.userId).pipe(
+      Effect.catchTags({
+        // Owner existence, ban and SCIM deactivation are decided in `verify`, before
+        // the limit and the spend (#755); this covers a delete racing the read.
+        UserNotFoundError: () => refuseApiKey("API key owner not found"),
+        AuthError: (e) => internalServerError(e),
+      }),
+    );
+    return Handlers.data(apiKeyResource(key), { included: [yield* loadUserResource(user)] });
+  });
+
+/**
+ * Layer implementing the `api-keys` group: the signed-in user's API keys, and
+ * `GET /api-keys/current`, the resolution of a presented key (see
  * `apiKeysGroup` in `HttpApi.ts`).
  */
 export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
@@ -3482,6 +3607,9 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
 
   return HttpApiBuilder.group(AuthApi, "api-keys", (handlers) =>
     handlers
+      .handle("current", ({ request }) =>
+        resolveCurrentApiKey(request, cfg).pipe(JsonApiErrors.mapHttpErrors),
+      )
       .handle("list", ({ request }) =>
         Effect.gen(function* () {
           const { apiKey, userId } = yield* owner(request);
@@ -3496,6 +3624,8 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
           // another key): only from the interactive session cookie.
           yield* requireInteractiveCredential(request);
           const apiKey = yield* resolveApiKey;
+          // The answer carries the raw key, shown this once (#628).
+          yield* noStore;
           const result = yield* asApiKeyOwner(
             apiKey.service.create(resolved.user.id, apiKeyCreateOptions(payload.data.attributes)),
           );
@@ -3551,6 +3681,8 @@ export const oauthClientsGroupLayer = (
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const { oidc, userId } = yield* administrator(request);
+          // The answer may carry the client secret, shown this once (#628).
+          yield* noStore;
           const result = yield* oidcProviderFailures(
             oidc.registerClient(oauthClientInput(payload.data.attributes), userId),
           );
@@ -3634,6 +3766,9 @@ export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
     handlers.handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const sso = yield* resolveSso;
+        // The single-use callback state is this caller's alone: a cached
+        // answer would hand it to the next caller (#628).
+        yield* noStore;
         const result = yield* asSsoRequest(
           sso.service.signIn(ssoSelector(payload.data.attributes)),
         );
@@ -3656,6 +3791,7 @@ export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSess
       Effect.gen(function* () {
         const resolved = yield* requireSession(request, cfg);
         const jwt = yield* resolveJwt;
+        yield* noStore;
         const { token, expiresAt } = yield* storeFailure(jwt.service.sign(resolved.user));
         // A token is not stored: its id is its digest, never the token itself.
         return Handlers.data(
@@ -3777,6 +3913,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("deviceCode", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
+          // RFC 8628 §3.2: the answer carries the device code, the secret
+          // the device polls with (#628).
+          yield* noStore;
           return yield* device.service
             .begin({
               ...(payload.clientId !== undefined && { clientId: payload.clientId }),
@@ -3792,6 +3931,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("deviceToken", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
+          // A token response (RFC 8628 §3.5, RFC 6749 §5.1): never cached.
+          yield* noStore;
           const result = yield* device.service.poll(payload.deviceCode).pipe(
             Effect.catchTags({
               // RFC 8628 poll errors -> 400 with the error code as message.
@@ -3992,6 +4133,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcConsent", ({ payload, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
+          // The redirect carries the authorization code (#628).
+          yield* noStore;
           const resolved = yield* requireSession(request, cfg);
           const result = yield* oidc.service
             .consent(resolved.user.id, payload.consentCode, payload.accept)
@@ -4002,6 +4145,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcToken", ({ payload, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
+          // RFC 6749 §5.1: a token response is `no-store`.
+          yield* noStore;
           // Client authentication: a Basic Authorization header takes
           // precedence over body credentials (RFC 6749 §2.3.1).
           let clientId = payload.client_id;
@@ -4058,6 +4203,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcUserInfo", ({ request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
+          yield* noStore;
           const auth = request.headers["authorization"];
           const token =
             auth !== undefined && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
@@ -4083,6 +4229,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             });
           }
           yield* applyRegistrationRateLimit(dcr.rateLimit);
+          // RFC 7591 §3.2.1: the answer carries the client secret.
+          yield* noStore;
           const initialAccessToken = bearerToken(request);
           const result = yield* oidc.service
             .registerDynamicClient(registrationMetadata(payload), {
@@ -4737,7 +4885,8 @@ const withSessionCookie = (
  * Carry a new session on `response`: the session cookie (a browser-session one
  * when `rememberMe` is `false`), the device's multi-session list, the
  * last-login-method hint and, in bearer mode, the `set-auth-token` header.
- * These headers are the only places the raw token is written (#581).
+ * These headers are the only places the raw token is written (#581). The
+ * response is marked `no-store` (#628).
  */
 const decorateSessionResponse = (
   json: HttpServerResponse.HttpServerResponse,
@@ -4789,7 +4938,7 @@ const decorateSessionResponse = (
         response = HttpServerResponse.setHeader(response, BEARER_TOKEN_HEADER, token);
       }
     }
-    return response;
+    return withNoStore(response);
   }).pipe(Effect.orDie);
 
 // -----------------------------------------------------------------------------
@@ -4891,6 +5040,7 @@ const postRule = (
  * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
  * | `POST /oauth2/token`                                           | 60 req  | 1 min  | 5 min  |
  * | `POST /register` (dynamic client registration)                 | 10 req  | 1 hr   | 1 hr   |
+ * | `GET /api-keys/current` (API-key resolution, #730)             | 300 req | 1 min  | 5 min  |
  *
  * Endpoints named on one row share one bucket.
  */
@@ -4936,6 +5086,17 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   postRule("/oauth2/token", 60, MINUTE_MS, 5 * MINUTE_MS),
   // RFC 7591 dynamic client registration is open to anonymous callers.
   postRule("/register", 10, HOUR_MS, HOUR_MS),
+  // Verifies a secret on every call; a machine caller resolves its key per
+  // request, so the window is short and generous. Like every rule it counts
+  // each request before the handler runs, refused and resolved alike, and a
+  // request it refuses never reaches the key (no use spent).
+  {
+    path: "/api-keys/current",
+    methods: ["GET"],
+    maxRequests: 300,
+    windowMs: MINUTE_MS,
+    blockDurationMs: 5 * MINUTE_MS,
+  },
 ];
 
 /**
@@ -5027,6 +5188,24 @@ const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>) =>
       return refused ?? (yield* effect);
     }),
   ).layer;
+
+/** The token endpoints, by path template: RFC 6749 §5.1 / §5.2 and RFC 8628 §3.5. */
+const TOKEN_ENDPOINTS: ReadonlyArray<string> = ["/oauth2/token", "/device/token"];
+
+/**
+ * A token endpoint's every answer is `no-store`, an error included (RFC 6749
+ * §5.2), as router middleware: it marks the response once the router has
+ * matched the endpoint and before the endpoint decodes its payload, so the
+ * `400` for a malformed request carries it too, which the handlers' own
+ * `noStore` never sees.
+ */
+const tokenEndpointsNoStore = HttpRouter.middleware((effect) =>
+  Effect.gen(function* () {
+    const { route } = yield* HttpRouter.RouteContext;
+    if (Arr.contains(TOKEN_ENDPOINTS, openApiTemplate(route.path))) yield* noStore;
+    return yield* effect;
+  }),
+).layer;
 
 /** The rules `ipRateLimit` puts in force: none for `false`, else its own or the defaults. */
 const endpointRules = (
@@ -5404,6 +5583,7 @@ const serve = (
   // endpoint the router matched rather than the raw path (#582).
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
+    Layer.provide(tokenEndpointsNoStore),
     Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
     Layer.provide(PlatformLayer),
   );
@@ -5472,11 +5652,14 @@ const serve = (
       if (inner === "/reference") return Promise.resolve(referenceResponse());
     }
 
+    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`
+    // (#628); the cookie writers above mark theirs, and this holds the rule
+    // for the whole handler.
     if (inner !== null && prefix !== "") {
       url.pathname = inner || "/";
-      return web.handler(new Request(url, request), context);
+      return web.handler(new Request(url, request), context).then(noStoreWithSetCookie);
     }
-    return web.handler(request, context);
+    return web.handler(request, context).then(noStoreWithSetCookie);
   };
   const dispose = (): Promise<void> => web.dispose().then(() => Effect.runPromise(release));
   return { handler, dispose };

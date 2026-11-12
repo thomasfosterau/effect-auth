@@ -108,13 +108,18 @@ const bundleWorker = async (): Promise<string> => {
 };
 
 const workerService = (name: DateName): string =>
-  `(name = "${name}", worker = (modules = [(name = "worker.js", esModule = embed "worker.js")], compatibilityDate = "${DATES[name]}", compatibilityFlags = ["nodejs_compat"], globalOutbound = "net"))`;
+  `(name = "${name}", worker = (modules = [(name = "worker.js", esModule = embed "worker.js")], compatibilityDate = "${DATES[name]}", compatibilityFlags = ["nodejs_compat"], globalOutbound = "origin"))`;
 
-const CONFIG = `using Workerd = import "/workerd/workerd.capnp";
+/**
+ * The config, given the origin's port. Every outbound `fetch` goes to the
+ * origin's external service, whatever its URL, so no request can reach the
+ * internet.
+ */
+const config = (originPort: number): string => `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     ${DATE_NAMES.map(workerService).join(",\n    ")},
-    (name = "net", network = (allow = ["public", "private", "local"])),
+    (name = "origin", external = (address = "127.0.0.1:${originPort}", http = ())),
   ],
   sockets = [
     ${DATE_NAMES.map((name) => `(name = "${name}", address = "127.0.0.1:0", http = (), service = "${name}")`).join(",\n    ")},
@@ -163,7 +168,7 @@ beforeAll(async () => {
 
   workDir = await mkdtemp(join(tmpdir(), "effect-auth-resend-workerd-"));
   await writeFile(join(workDir, "worker.js"), await bundleWorker());
-  await writeFile(join(workDir, "config.capnp"), CONFIG);
+  await writeFile(join(workDir, "config.capnp"), config(address.port));
 
   const child = spawn(workerd.default, ["serve", "config.capnp", "--control-fd=3"], {
     cwd: workDir,

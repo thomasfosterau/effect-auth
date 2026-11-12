@@ -116,6 +116,13 @@ const makeOidcStores = () => {
       Effect.sync(() => (MutableHashMap.set(consents, `${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) =>
       Effect.sync(() => void MutableHashMap.remove(consents, `${userId}:${clientId}`)),
+    deleteByUserId: (userId) =>
+      Effect.sync(() => {
+        Arr.forEach(
+          Arr.filter(Arr.fromIterable(MutableHashMap.values(consents)), (c) => c.userId === userId),
+          (c) => void MutableHashMap.remove(consents, `${c.userId}:${c.clientId}`),
+        );
+      }),
   };
   const jwtKeyStore: typeof JwtKeyStore.Service = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
@@ -1324,6 +1331,8 @@ describe("HTTP OIDC provider endpoints", () => {
       ),
     );
     expect(registered.status).toBe(201);
+    // The answer carries the client secret (#628).
+    expect(registered.headers.get("cache-control")).toBe("no-store");
     const { client, clientSecret } = await registeredClient(registered);
     expect(clientSecret).toBeTruthy();
 
@@ -1364,6 +1373,8 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
+    // RFC 6749 §5.1: a token response is never stored by a cache (#628).
+    expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const tokens = await jsonBody(
       tokenRes,
       Schema.Struct({
@@ -1391,10 +1402,28 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(replay.status).toBe(400);
+    // RFC 6749 §5.2: an error response is no-store too, not only a 200.
+    expect(replay.headers.get("cache-control")).toBe("no-store");
+    const wrongClient = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://rp.test/cb",
+        client_id: client.clientId,
+        client_secret: "not-the-secret",
+      }),
+    );
+    expect(wrongClient.status).toBe(401);
+    expect(wrongClient.headers.get("cache-control")).toBe("no-store");
+    const malformed = await fx.handler(post("/oauth2/token", { code }));
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get("cache-control")).toBe("no-store");
 
     // 4. Verify the id_token against the published JWKS.
     const jwksRes = await fx.handler(get("/.well-known/jwks.json"));
     expect(jwksRes.status).toBe(200);
+    // The public key set stays cacheable.
+    expect(jwksRes.headers.get("cache-control")).toBeNull();
     const jwks = await jsonBody(jwksRes, Schema.Struct({ keys: Schema.Array(Schema.Json) }));
     expect(jwks.keys.length).toBeGreaterThan(0);
 
@@ -1416,6 +1445,7 @@ describe("HTTP OIDC provider endpoints", () => {
     // 5. UserInfo with the bearer access token.
     const userinfo = await fx.handler(get("/oauth2/userinfo", {}, { bearer: tokens.access_token }));
     expect(userinfo.status).toBe(200);
+    expect(userinfo.headers.get("cache-control")).toBe("no-store");
     const info = await jsonBody(userinfo, JsonFields);
     expect(info["sub"]).toBe(userId);
     expect(info["email"]).toBe("alice@idp.test");
@@ -1506,6 +1536,7 @@ describe("HTTP OIDC provider endpoints", () => {
       post("/oauth2/consent", { consentCode, accept: false }, userSid),
     );
     expect(deniedConsent.status).toBe(200);
+    expect(deniedConsent.headers.get("cache-control")).toBe("no-store");
     const deniedRedirect = new URL(
       (await jsonBody(deniedConsent, Schema.Struct({ redirectTo: Schema.String }))).redirectTo,
     );
@@ -1527,6 +1558,8 @@ describe("HTTP OIDC provider endpoints", () => {
       post("/oauth2/consent", { consentCode: consentCode2, accept: true }, userSid),
     );
     expect(accepted.status).toBe(200);
+    // The redirect carries the authorization code (#628).
+    expect(accepted.headers.get("cache-control")).toBe("no-store");
     const acceptedRedirect = new URL(
       (await jsonBody(accepted, Schema.Struct({ redirectTo: Schema.String }))).redirectTo,
     );
@@ -2028,6 +2061,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(registered.status).toBe(201);
+    expect(registered.headers.get("cache-control")).toBe("no-store");
     const client = await jsonBody(registered, RegistrationResponse);
     expect(client.client_id).toBeTruthy();
     expect(client.client_secret).toBeUndefined();
@@ -2073,6 +2107,8 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
+    // RFC 6749 §5.1: a token response is never stored by a cache (#628).
+    expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const tokens = await jsonBody(
       tokenRes,
       Schema.Struct({
