@@ -624,7 +624,9 @@ semantics adopted on merit and, at most, an interop serialization (door-open
 - **Semantics:** default deny; forbid overrides permit; order-independent;
   the `Decision` carries determining policies + per-policy outcomes.
   **Fail-closed both ways** (deliberate Cedar deviation): an erroring permit
-  cannot grant, an erroring forbid denies; errors land in the trace.
+  cannot grant, an erroring forbid denies; errors land in the trace. A
+  request naming an entity with an empty id is denied outright
+  (`"invalid-request"`), and an empty-id reference equals nothing (#661).
 - **Entities everywhere:** principals, resources, actions and roles are typed
   entities in one hierarchy, so RBAC (`principal in Role::"admin"`), ReBAC
   and action groups are the same data check. The declared `Model` doubles as
