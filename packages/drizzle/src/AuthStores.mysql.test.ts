@@ -62,6 +62,39 @@ describe("MySQL / RateLimitStore", () => {
     ]);
     expect(proxy.sent[0]?.params).toHaveLength(2);
   });
+
+  it("purgeExpired with a limit rechecks expiry outside the derived table it picks keys through (#729)", async () => {
+    const proxy = recording([]);
+    await Effect.runPromise(
+      RateLimitStore.purgeExpired(tables, { limit: 500 }).pipe(
+        Effect.provide(Layer.merge(databaseLayer(proxy.db), TestClock.layer())),
+      ),
+    );
+    expect(proxy.sent.map((statement) => normalizeSql(statement.sql))).toEqual([
+      "delete from `effect_auth_rate_limits` where (`effect_auth_rate_limits`.`reset_at` <= ? and (`effect_auth_rate_limits`.`blocked_until` is null or `effect_auth_rate_limits`.`blocked_until` <= ?)) and `effect_auth_rate_limits`.`key` in (select `key` from (select `effect_auth_rate_limits`.`key` from `effect_auth_rate_limits` where (`effect_auth_rate_limits`.`reset_at` <= ? and (`effect_auth_rate_limits`.`blocked_until` is null or `effect_auth_rate_limits`.`blocked_until` <= ?)) limit 500) as `spent`)",
+    ]);
+    // The outer predicate rechecks expiry, so a row a concurrent increment
+    // refreshed after the subquery picked it survives (#729).
+    expect(proxy.sent[0]?.params).toHaveLength(4);
+  });
+
+  it("purgeExpired refuses a limit that is not a positive integer, before any statement", async () => {
+    const proxy = recording([]);
+    const errors = await Effect.runPromise(
+      Effect.forEach(
+        [0, -1, 2.5],
+        (limit) =>
+          Effect.flip(
+            RateLimitStore.purgeExpired(tables, { limit }).pipe(
+              Effect.provide(Layer.merge(databaseLayer(proxy.db), TestClock.layer())),
+            ),
+          ),
+        { concurrency: 1 },
+      ),
+    );
+    expect(errors.map((error) => error._tag)).toEqual(["AuthError", "AuthError", "AuthError"]);
+    expect(proxy.sent).toEqual([]);
+  });
 });
 
 describe("MySQL / TokenStore", () => {
