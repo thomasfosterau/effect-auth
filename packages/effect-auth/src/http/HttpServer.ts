@@ -45,6 +45,7 @@ import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import { isRecipientSendCapped } from "../RecipientSendLimit.ts";
+import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
 import * as S from "./HttpApiSchema.ts";
 import * as JsonApiErrors from "./JsonApiErrors.ts";
 import * as R from "./Resources.ts";
@@ -1297,8 +1298,31 @@ const runSynchronously = <A, E>(effect: Effect.Effect<A, E>): SynchronousRun<A, 
 // -----------------------------------------------------------------------------
 
 /**
+ * `response` with `no-store` merged into its `Cache-Control` (#628): kept as
+ * it is when it already has `no-store`, else with `no-store` appended.
+ */
+const withNoStore = (
+  response: HttpServerResponse.HttpServerResponse,
+): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.setHeader(
+    response,
+    "cache-control",
+    mergeNoStore(response.headers["cache-control"]),
+  );
+
+/**
+ * Mark the response a handler is about to send `no-store`, whatever it turns
+ * out to be: for the bodies that hand a credential over (#628).
+ */
+const noStore: Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(withNoStore(response)),
+  );
+
+/**
  * Set a cookie on the response a JSON:API handler is about to send, so the
- * handler can still answer with its typed document.
+ * handler can still answer with its typed document. The response is marked
+ * `no-store` with it (#628), so a shared cache never replays the cookie.
  */
 const setResponseCookie = (
   name: string,
@@ -1306,7 +1330,10 @@ const setResponseCookie = (
   options: Parameters<typeof HttpServerResponse.setCookie>[3],
 ): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
   HttpEffect.appendPreResponseHandler((_request, response) =>
-    HttpServerResponse.setCookie(response, name, value, options).pipe(Effect.orDie),
+    HttpServerResponse.setCookie(response, name, value, options).pipe(
+      Effect.map(withNoStore),
+      Effect.orDie,
+    ),
   );
 
 /** The `users` resource of a user, its `email` fields derived from `identifiers`. */
@@ -1440,6 +1467,7 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
       .handle("get", ({ params, query, request }) =>
         Effect.gen(function* () {
           const { resolved, cacheHit } = yield* resolveSession(request, cfg);
+          yield* noStore;
           const withUser = query.include?.includes("user") === true;
           if (params.id !== CURRENT && params.id !== resolved.session.id) {
             const sessionManager = yield* SessionService;
@@ -2302,6 +2330,8 @@ export const multiFactorEnrollmentsGroupLayer = (
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const multiFactor = yield* resolveMultiFactor;
+          // The answer carries the TOTP secret and backup codes (#628).
+          yield* noStore;
           const enrolled = yield* multiFactor.service
             .enable(resolved.user.id, payload.data.attributes.password)
             .pipe(
@@ -2365,6 +2395,8 @@ export const backupCodeSetsGroupLayer = (
   return HttpApiBuilder.group(AuthApi, "backup-code-sets", (handlers) =>
     handlers.handle("create", ({ payload, request }) =>
       Effect.gen(function* () {
+        // The answer carries the new backup codes (#628).
+        yield* noStore;
         const resolved = yield* requireSession(request, cfg);
         const multiFactor = yield* resolveMultiFactor;
         const backupCodes = yield* multiFactor.service
@@ -3496,6 +3528,8 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
           // another key): only from the interactive session cookie.
           yield* requireInteractiveCredential(request);
           const apiKey = yield* resolveApiKey;
+          // The answer carries the raw key, shown this once (#628).
+          yield* noStore;
           const result = yield* asApiKeyOwner(
             apiKey.service.create(resolved.user.id, apiKeyCreateOptions(payload.data.attributes)),
           );
@@ -3551,6 +3585,8 @@ export const oauthClientsGroupLayer = (
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const { oidc, userId } = yield* administrator(request);
+          // The answer may carry the client secret, shown this once (#628).
+          yield* noStore;
           const result = yield* oidcProviderFailures(
             oidc.registerClient(oauthClientInput(payload.data.attributes), userId),
           );
@@ -3656,6 +3692,7 @@ export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSess
       Effect.gen(function* () {
         const resolved = yield* requireSession(request, cfg);
         const jwt = yield* resolveJwt;
+        yield* noStore;
         const { token, expiresAt } = yield* storeFailure(jwt.service.sign(resolved.user));
         // A token is not stored: its id is its digest, never the token itself.
         return Handlers.data(
@@ -3792,6 +3829,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("deviceToken", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
+          // A token response (RFC 8628 §3.5, RFC 6749 §5.1): never cached.
+          yield* noStore;
           const result = yield* device.service.poll(payload.deviceCode).pipe(
             Effect.catchTags({
               // RFC 8628 poll errors -> 400 with the error code as message.
@@ -4002,6 +4041,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcToken", ({ payload, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
+          // RFC 6749 §5.1: a token response is `no-store`.
+          yield* noStore;
           // Client authentication: a Basic Authorization header takes
           // precedence over body credentials (RFC 6749 §2.3.1).
           let clientId = payload.client_id;
@@ -4058,6 +4099,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcUserInfo", ({ request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
+          yield* noStore;
           const auth = request.headers["authorization"];
           const token =
             auth !== undefined && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
@@ -4083,6 +4125,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             });
           }
           yield* applyRegistrationRateLimit(dcr.rateLimit);
+          // RFC 7591 §3.2.1: the answer carries the client secret.
+          yield* noStore;
           const initialAccessToken = bearerToken(request);
           const result = yield* oidc.service
             .registerDynamicClient(registrationMetadata(payload), {
@@ -4737,7 +4781,8 @@ const withSessionCookie = (
  * Carry a new session on `response`: the session cookie (a browser-session one
  * when `rememberMe` is `false`), the device's multi-session list, the
  * last-login-method hint and, in bearer mode, the `set-auth-token` header.
- * These headers are the only places the raw token is written (#581).
+ * These headers are the only places the raw token is written (#581). The
+ * response is marked `no-store` (#628).
  */
 const decorateSessionResponse = (
   json: HttpServerResponse.HttpServerResponse,
@@ -4789,7 +4834,7 @@ const decorateSessionResponse = (
         response = HttpServerResponse.setHeader(response, BEARER_TOKEN_HEADER, token);
       }
     }
-    return response;
+    return withNoStore(response);
   }).pipe(Effect.orDie);
 
 // -----------------------------------------------------------------------------
@@ -5472,11 +5517,14 @@ const serve = (
       if (inner === "/reference") return Promise.resolve(referenceResponse());
     }
 
+    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`
+    // (#628); the cookie writers above mark theirs, and this holds the rule
+    // for the whole handler.
     if (inner !== null && prefix !== "") {
       url.pathname = inner || "/";
-      return web.handler(new Request(url, request), context);
+      return web.handler(new Request(url, request), context).then(noStoreWithSetCookie);
     }
-    return web.handler(request, context);
+    return web.handler(request, context).then(noStoreWithSetCookie);
   };
   const dispose = (): Promise<void> => web.dispose().then(() => Effect.runPromise(release));
   return { handler, dispose };
