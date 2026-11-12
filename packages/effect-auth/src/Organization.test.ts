@@ -44,6 +44,7 @@ import type { AuthError } from "./Errors.ts";
 import { hashToken } from "./TokenHash.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { SessionService } from "./SessionService.ts";
+import { type ApiKey, ApiKeyStore } from "./ApiKey.ts";
 
 const organizations = MutableHashMap.empty<string, Organization>();
 const members = MutableHashMap.empty<string, Member>();
@@ -327,15 +328,35 @@ const answer = (invitation: Invitation) => ({
   token: tokenFor(invitation.id),
 });
 
-/** A fresh `SessionService` over {@link accountUsers}, and the {@link userTable} passwords. */
+/** API keys, so a test can see a first proof remove the invitee's (#694). */
+const apiKeyRecords = MutableHashMap.empty<string, ApiKey>();
+
+/** The invitee's API key, minted before the address was proved. */
+const seedInviteeKey = () =>
+  MutableHashMap.set(apiKeyRecords, "invitee-key", {
+    id: "invitee-key",
+    start: "abcdef",
+    keyHash: "invitee-key-hash",
+    userId: "invitee-user",
+    enabled: true,
+    metadata: {},
+    createdAt: 0,
+    updatedAt: 0,
+  });
+
+/**
+ * A fresh `SessionService` over {@link accountUsers}, the {@link userTable}
+ * passwords and the {@link apiKeyRecords}.
+ */
 const proofLayer = () =>
-  Layer.merge(
+  Layer.mergeAll(
     Layer.succeed(EmailPasswordStore, Testing.memoryEmailPasswordStore(userTable)),
+    Layer.succeed(ApiKeyStore, Testing.memoryApiKeyStore(apiKeyRecords)),
     Testing.sessionServiceLayer({ users: accountUsers }),
   );
 
 /** What every service under test is built over, besides the stores in `context`. */
-type ProofServices = EmailPasswordStore | SessionService;
+type ProofServices = EmailPasswordStore | ApiKeyStore | SessionService;
 
 /** The stores every run's context holds. */
 type BaseServices = OrganizationStore | IdentifierStore | SecureRandom.SecureRandom;
@@ -2227,6 +2248,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
   });
 
   it("treats the token as the first proof of an unverified address", async () => {
+    seedInviteeKey();
     const result = await withInvitation(false, (service, invitation, [current, other]) =>
       Effect.gen(function* () {
         const member = yield* service.acceptInvitation("invitee-user", {
@@ -2243,6 +2265,8 @@ describe("OrganizationService - invitation tokens (#586)", () => {
     // account: the password is gone, and only the accepting session survives.
     expect(MutableHashMap.has(userTable.passwordHashes, "invitee-user")).toBe(false);
     expect(result.sessions).toEqual([true, false]);
+    // So are the credentials it held, such as an API key (#694).
+    expect(MutableHashMap.has(apiKeyRecords, "invitee-key")).toBe(false);
   });
 
   it("revokes every session of an unverified address accepted without a current session", async () => {
@@ -2257,6 +2281,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
   });
 
   it("leaves a verified address's password and sessions alone", async () => {
+    seedInviteeKey();
     const result = await withInvitation(true, (service, invitation, issued) =>
       Effect.gen(function* () {
         yield* service.acceptInvitation("invitee-user", answer(invitation));
@@ -2266,6 +2291,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
 
     expect(result).toEqual([true, true]);
     expect(MutableHashMap.has(userTable.passwordHashes, "invitee-user")).toBe(true);
+    expect(MutableHashMap.has(apiKeyRecords, "invitee-key")).toBe(true);
   });
 
   it("refuses to invite when no sendInvitationEmail would carry the token", async () => {

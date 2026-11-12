@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
+import { ApiKeyStore } from "./ApiKey.ts";
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -319,7 +320,7 @@ describe("GoogleOneTapService", () => {
     });
   });
 
-  it("clears a squatter's password and sessions when Google proves the address (#440)", async () => {
+  it("clears a squatter's password, sessions and credentials when Google proves the address (#440, #694)", async () => {
     const { layer, users, identifiers, nonceStore, passwordHashes, sessionsCleared } = makeStores();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
@@ -342,7 +343,27 @@ describe("GoogleOneTapService", () => {
     );
     MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
 
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    // The squatter also minted an API key, which the first proof removes (#694).
+    const apiKeys = memoryApiKeyStore();
+    await Effect.runPromise(
+      apiKeys.create({
+        id: "squatter-key",
+        start: "abcdef",
+        keyHash: "squatter-key-hash",
+        userId: "user-squat",
+        enabled: true,
+        metadata: {},
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    );
+
+    const service = await Effect.runPromise(
+      Effect.provide(
+        GoogleOneTap.make(config).pipe(Effect.provideService(ApiKeyStore, apiKeys)),
+        layer,
+      ),
+    );
     const nonce = "squat-nonce";
     await Effect.runPromise(
       nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
@@ -359,6 +380,7 @@ describe("GoogleOneTapService", () => {
     expect(MutableHashMap.has(passwordHashes, "user-squat")).toBe(false);
     expect(sessionsCleared).toEqual(["user-squat"]);
     const identifier = await Effect.runPromise(identifiers.getByValue("email", "alice@gmail.test"));
+    expect(await Effect.runPromise(apiKeys.listByUserId("user-squat"))).toEqual([]);
     expect(identifier?.verified).toBe(true);
   });
 

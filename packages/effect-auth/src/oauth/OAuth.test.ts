@@ -8,6 +8,9 @@ import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
 import { KeyValueStore } from "effect/persistence";
 import { oauthStateStoreKV } from "../KeyValueStores.ts";
+import { ApiKeyStore } from "../ApiKey.ts";
+import { MultiFactorStore } from "../multifactor/MultiFactor.ts";
+import { TrustedDeviceStore } from "../TrustedDevice.ts";
 import {
   AuthError,
   EmailInUseError,
@@ -2330,5 +2333,85 @@ describe("OAuthService first proof over the real services (#671)", () => {
     assert(Result.isFailure(outcome.squatterSession));
     assert(Result.isFailure(outcome.squatterPassword));
     expect(outcome.squatterPassword.failure).toMatchObject({ _tag: "InvalidCredentialsError" });
+  });
+
+  it("the address's holder signing in with a provider also removes the squatter's other links, API keys, multi-factor enrolment and trusted devices, and keeps the link made now (#694)", async () => {
+    const outcome = await withFetch(
+      (url) =>
+        url.includes("/token")
+          ? json({ access_token: "at", token_type: "bearer" })
+          : json({ id: "gh-victim", email: "victim@example.com", email_verified: true }),
+      () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const emailPassword = yield* EmailPasswordService;
+            const oauth = yield* OAuth.OAuthService;
+            const accounts = yield* OAuthAccountStore;
+            const apiKeys = yield* ApiKeyStore;
+            const multiFactor = yield* MultiFactorStore;
+            const trustedDevices = yield* TrustedDeviceStore;
+
+            // The squatter signs up with the victim's address, links a
+            // provider that reports the email unverified, mints an API key,
+            // enrols a second factor and trusts a device.
+            const { user } = yield* emailPassword.signUp({
+              email: "victim@example.com",
+              password: "squatter password 123",
+            });
+            yield* accounts.create({
+              id: "squatter-link",
+              userId: user.id,
+              provider: "gitlab",
+              providerId: "gl-squatter",
+              accessToken: "squatter-access",
+              createdAt: 0,
+              updatedAt: 0,
+            });
+            yield* apiKeys.create({
+              id: "squatter-key",
+              start: "abcdef",
+              keyHash: "squatter-key-hash",
+              userId: user.id,
+              enabled: true,
+              metadata: {},
+              createdAt: 0,
+              updatedAt: 0,
+            });
+            yield* multiFactor.upsert({
+              userId: user.id,
+              secret: "JBSWY3DPEHPK3PXP",
+              backupCodes: ["backup-code-hash"],
+              verified: true,
+              createdAt: 0,
+            });
+            yield* trustedDevices.upsert({
+              tokenHash: "squatter-device",
+              userId: user.id,
+              createdAt: 0,
+              expiresAt: Number.MAX_SAFE_INTEGER,
+            });
+
+            // The victim signs in with a provider that verified the address.
+            const { state } = yield* oauth.generateAuthorizationUrl("github");
+            const victim = yield* oauth.signInWithCallback(state, "code");
+
+            return {
+              squatterId: user.id,
+              victim,
+              links: (yield* accounts.getByUserId(user.id)).map((account) => account.providerId),
+              apiKeys: yield* apiKeys.listByUserId(user.id),
+              multiFactor: yield* multiFactor.get(user.id),
+              trustedDevice: yield* trustedDevices.getByTokenHash("squatter-device"),
+            };
+          }).pipe(Effect.provide(services)),
+        ),
+    );
+
+    expect(outcome.victim.user.id).toBe(outcome.squatterId);
+    // Only the link the victim made now is left.
+    expect(outcome.links).toEqual(["gh-victim"]);
+    expect(outcome.apiKeys).toEqual([]);
+    expect(outcome.multiFactor).toBeNull();
+    expect(outcome.trustedDevice).toBeNull();
   });
 });

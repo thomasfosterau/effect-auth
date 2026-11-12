@@ -17,6 +17,7 @@ import {
   EmailVerificationService,
 } from "./email/EmailVerification.ts";
 import { SessionService } from "./SessionService.ts";
+import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import {
   DEFAULT_SERVER_ONLY_ATTRIBUTES,
   UserService,
@@ -221,6 +222,11 @@ export const make = (
     const verification = yield* EmailVerificationService;
     const userService = yield* UserService;
     const sessionManager = yield* SessionService;
+    const firstProof = yield* firstProofServices({
+      identifiers,
+      passwords: { clearPasswordHash: emailPassword.clearPassword },
+      sessions: sessionManager,
+    });
     const detached = yield* makeDetachedSend;
     const serverOnly = userService.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
 
@@ -393,19 +399,14 @@ export const make = (
           });
         }
 
-        // The address's first proof (#425). Until now no one had shown they
-        // own it, so the password and sessions on the account may be those of
-        // someone who signed up with it first. Clear both before marking the
-        // address verified, so the verifier is left the only one holding the
-        // account; a failure here leaves the token valid for retry, and a
-        // retry clears again.
-        if (!identifier.verified) {
-          yield* emailPassword.clearPassword(identifier.userId);
-          yield* sessionManager.invalidateUserSessions(identifier.userId);
-        }
-
-        // FIX 4: durable state change BEFORE burning the token.
-        yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
+        // The address's first proof (#425, #694). Until now no one had shown
+        // they own it, so the password, the other credentials and the
+        // sessions on the account may be those of someone who signed up with
+        // it first. `proveAddress` removes them all before marking the address
+        // verified, so the verifier is left the only one holding the account;
+        // a failure here leaves the token valid for retry, and a retry clears
+        // again. FIX 4: durable state change BEFORE burning the token.
+        yield* proveAddress(firstProof, identifier);
         const verifiedUser = yield* userService.getUser(verificationRecord.userId);
 
         // burnToken deletes the token and fires the afterVerifyEmail hook.

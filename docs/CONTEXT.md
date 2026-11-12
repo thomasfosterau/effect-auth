@@ -145,9 +145,9 @@ Its email link carries a secret token, stored only as its digest (#586): present
 the proof of the address, so acceptance (and rejection) takes the token plus a signed-in User who
 owns the invited email as an Identifier, verified or not, and creates the `Member` row. For an
 unverified Identifier the token is the address's first proof, so it clears the account's
-password and its other sessions, as a magic link does. A User whose matching Identifier is
-already verified may answer by id alone, without the token (#673): the verified address is the
-proof. A resend mints a new token.
+password, its other credentials and its other sessions, as a magic link does. A User whose
+matching Identifier is already verified may answer by id alone, without the token (#673): the
+verified address is the proof. A resend mints a new token.
 _Avoid_: treating the invitation id as a bearer secret — knowing it accepts nothing; the token
 does, or a verified matching address, and only for a User who owns the invited email.
 

@@ -55,7 +55,7 @@ import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { proveAddress } from "./FirstProof.ts";
+import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -1280,7 +1280,8 @@ export class OrganizationService extends Context.Service<
    *
    * Requires `OrganizationStore`, `IdentifierStore`, `EmailPasswordStore` and
    * `SessionService`: accepting an invitation is a first proof of the invited
-   * address, which clears an unproven account's password and sessions (#586).
+   * address, which clears an unproven account's password, credentials and
+   * sessions (#586, #694).
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
@@ -1339,6 +1340,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const passwords = yield* EmailPasswordStore;
     const sessions = yield* SessionService;
+    const firstProof = yield* firstProofServices({ identifiers, passwords, sessions });
     const crypto = yield* SecureRandom.SecureRandom;
 
     /**
@@ -1995,12 +1997,10 @@ export const make = (
         // it is the first proof, so it goes through proveAddress (#440): the
         // password an unproven sign-up set is cleared and every session but
         // the prover's is revoked before the address counts as verified.
+        // An answer without the token arrives only from a verified
+        // identifier (#673), so it never reaches proveAddress.
         if (!identifier.verified) {
-          yield* proveAddress(
-            { identifiers, passwords, sessions },
-            identifier,
-            input.currentSessionId,
-          );
+          yield* proveAddress(firstProof, identifier, input.currentSessionId);
         }
 
         const member = yield* createMembership(invitation.organizationId, userId, invitation.role);
