@@ -63,8 +63,30 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 ): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
 // The response bodies several tests read.
-const IdBody = Schema.Struct({ id: Schema.String });
-const SignInBody = Schema.Struct({ url: Schema.String, state: Schema.String });
+/** An `sso-providers` resource: its id, and its attributes field by field. */
+const ProviderDocument = Schema.Struct({
+  data: Schema.Struct({ id: Schema.String, attributes: Schema.JsonObject }),
+});
+
+/** A registered connection's attributes. */
+const providerAttributes = async (response: Response) =>
+  (await jsonBody(response, ProviderDocument)).data.attributes;
+
+/** A registered connection's id. */
+const providerIdOf = async (response: Response) =>
+  (await jsonBody(response, ProviderDocument)).data.id;
+
+/** The IdP URL and round-trip state a started sign-in (`sso-authorizations`) answers. */
+const signInUrl = async (response: Response) => {
+  const { data } = await jsonBody(
+    response,
+    Schema.Struct({
+      data: Schema.Struct({ id: Schema.String, attributes: Schema.Struct({ url: Schema.String }) }),
+    }),
+  );
+  return { url: data.attributes.url, state: data.id };
+};
+
 const UserEmailBody = Schema.Struct({ user: Schema.Struct({ email: Schema.String }) });
 
 /** Swap `globalThis.fetch` for a route handler while `thunk` runs. */
@@ -1181,6 +1203,25 @@ const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
     body: encodeJson(body),
   });
 
+/** A JSON:API create of a `type` resource with `attributes`, at `path`. */
+const create =
+  (path: string, type: string) =>
+  (attributes: Schema.Json, sessionId?: string): Request =>
+    new Request(`http://test${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/vnd.api+json",
+        ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+      },
+      body: encodeJson({ data: { type, attributes } }),
+    });
+
+/** `POST /sso-providers`: register a connection. */
+const registerProvider = create("/sso-providers", "sso-providers");
+
+/** `POST /sso-authorizations`: start an SSO sign-in. */
+const startSignIn = create("/sso-authorizations", "sso-authorizations");
+
 const REGISTER_BODY = {
   issuer: "https://idp.acme.test",
   domain: "acme.test",
@@ -1199,20 +1240,20 @@ describe("HTTP SSO endpoints", () => {
 
     // Non-admin cannot register.
     const nonAdminSid = fx.makeSession(fx.seedUser("user@acme.test"));
-    const denied = await fx.handler(post("/sso/register", REGISTER_BODY, nonAdminSid));
+    const denied = await fx.handler(registerProvider(REGISTER_BODY, nonAdminSid));
     expect(denied.status).toBe(403);
 
     // Admin registers the connection (secret is never echoed back).
-    const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
-    expect(registered.status).toBe(200);
-    const provider = await jsonBody(registered, Schema.JsonObject);
+    const registered = await fx.handler(registerProvider(REGISTER_BODY, adminSid));
+    expect(registered.status).toBe(201);
+    const provider = await providerAttributes(registered);
     expect(provider["domain"]).toBe("acme.test");
     expect(provider).not.toHaveProperty("clientSecret");
 
     // Anonymous sign-in resolves the IdP URL by email domain.
-    const signIn = await fx.handler(post("/sign-in/sso", { email: "worker@acme.test" }));
-    expect(signIn.status).toBe(200);
-    const { url, state } = await jsonBody(signIn, SignInBody);
+    const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    expect(signIn.status).toBe(201);
+    const { url, state } = await signInUrl(signIn);
     expect(new URL(url).origin).toBe("https://idp.acme.test");
 
     // Callback provisions the user and sets a session cookie.
@@ -1235,7 +1276,7 @@ describe("HTTP SSO endpoints", () => {
 
   it("returns 404 when SSO is not configured", async () => {
     const fx = makeHttpFixture();
-    const res = await fx.handlerWithoutSso(post("/sign-in/sso", { email: "a@b.test" }));
+    const res = await fx.handlerWithoutSso(startSignIn({ email: "a@b.test" }));
     expect(res.status).toBe(404);
   });
 });
@@ -1265,9 +1306,9 @@ describe("HTTP SSO endpoints — SAML", () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
-    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    expect(registered.status).toBe(200);
-    const provider = await jsonBody(registered, Schema.JsonObject);
+    const registered = await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid));
+    expect(registered.status).toBe(201);
+    const provider = await providerAttributes(registered);
     expect(provider["protocol"]).toBe("saml");
     expect(provider["entityId"]).toBe(SAML_IDP);
     expect(provider["idpCertificates"]).toEqual(SAML_REGISTER_BODY.idpCertificates);
@@ -1282,9 +1323,9 @@ describe("HTTP SSO endpoints — SAML", () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
-    const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
-    expect(registered.status).toBe(200);
-    const provider = await jsonBody(registered, Schema.JsonObject);
+    const registered = await fx.handler(registerProvider(REGISTER_BODY, adminSid));
+    expect(registered.status).toBe(201);
+    const provider = await providerAttributes(registered);
     expect(provider["protocol"]).toBe("oidc");
     expect(provider["issuer"]).toBe("https://idp.acme.test");
     expect(provider).not.toHaveProperty("clientSecret");
@@ -1297,26 +1338,28 @@ describe("HTTP SSO endpoints — SAML", () => {
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
     const res = await fx.handler(
-      post("/sso/register", { ...SAML_REGISTER_BODY, idpCertificates: [] }, adminSid),
+      registerProvider({ ...SAML_REGISTER_BODY, idpCertificates: [] }, adminSid),
     );
     expect(res.status).toBe(400);
-    expect((await jsonBody(res, Schema.Struct({ message: Schema.String }))).message).toMatch(
-      /idpCertificates/,
+    const { errors } = await jsonBody(
+      res,
+      Schema.Struct({ errors: Schema.Array(Schema.Struct({ detail: Schema.String })) }),
     );
+    expect(errors[0]?.detail).toMatch(/idpCertificates/);
   });
 
   it("completes the ACS form POST and issues a session cookie", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
-    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    const { id: providerId } = await jsonBody(registered, IdBody);
+    const registered = await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid));
+    const providerId = await providerIdOf(registered);
 
     // Start the flow so the AuthnRequest id is banked, exactly as a browser
     // redirect would.
-    const signIn = await fx.handler(post("/sign-in/sso", { email: "worker@acme.test" }));
-    expect(signIn.status).toBe(200);
-    const { state } = await jsonBody(signIn, SignInBody);
+    const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    expect(signIn.status).toBe(201);
+    const { state } = await signInUrl(signIn);
     const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
 
     const acs = await fx.handler(
@@ -1333,8 +1376,8 @@ describe("HTTP SSO endpoints — SAML", () => {
   it("answers 400 when the ACS response cannot be trusted", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
-    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    const { id: providerId } = await jsonBody(registered, IdBody);
+    const registered = await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid));
+    const providerId = await providerIdOf(registered);
 
     // No AuthnRequest was ever issued, so there is nothing to spend.
     const res = await fx.handler(
@@ -1347,8 +1390,8 @@ describe("HTTP SSO endpoints — SAML", () => {
   it("serves SP metadata as XML", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
-    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
-    const { id: providerId } = await jsonBody(registered, IdBody);
+    const registered = await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid));
+    const providerId = await providerIdOf(registered);
 
     const res = await fx.handler(
       new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),
@@ -1361,8 +1404,8 @@ describe("HTTP SSO endpoints — SAML", () => {
   it("answers 400 for metadata on an OIDC connection", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
-    const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
-    const { id: providerId } = await jsonBody(registered, IdBody);
+    const registered = await fx.handler(registerProvider(REGISTER_BODY, adminSid));
+    const providerId = await providerIdOf(registered);
 
     const res = await fx.handler(
       new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),

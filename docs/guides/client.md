@@ -120,11 +120,11 @@ const handles = await client.identifiers.list();
 await client.identifiers.delete(handles[0].id);
 ```
 
-**Alternative sign-in** — `signInUsername`, `signInAnonymous` (guest accounts), `magicLink.{send,verify}`, `emailOtp.{send,signIn}`, `phoneOtp.{send,signIn}`, `googleOneTap.{nonce,signIn}`, `sso.{register,signIn,callback}`.
+**Alternative sign-in** — `signInUsername`, `signInAnonymous` (guest accounts), `magicLink.{send,verify}`, `emailOtp.{send,signIn}`, `phoneOtp.{send,signIn}`, `googleOneTap.{nonce,signIn}`, `sso.{register,signIn,callback}` (`register` is `POST /sso-providers`, `signIn` `POST /sso-authorizations`; the callback keeps the OIDC binding's format).
 
 SAML's two endpoints are deliberately absent: the assertion consumer service (`POST /sso/saml/acs/:providerId`) is a form POST the IdP makes through the browser, and SP metadata (`GET /sso/saml/metadata/:providerId`) is an XML document an IdP admin imports by URL. Neither is a call JavaScript makes.
 
-**Device authorization (RFC 8628)** — `device.code()` and `device.token()` on the input-constrained device, `device.approve()` / `device.deny()` on the verification page the signed-in user opens:
+**Device authorization (RFC 8628)** — `device.code()` and `device.token()` on the input-constrained device (RFC 8628's own wire format), `device.approve()` / `device.deny()` on the verification page the signed-in user opens (`POST /device-authorizations/decisions`, the user code in the body; approving needs the session, denying does not):
 
 ```ts
 const { deviceCode, userCode, verificationUri, interval } = await client.device.code();
@@ -180,13 +180,13 @@ await client.organization.setActive({ organizationId: org.id }); // recorded on 
 
 Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier` (claim the domain with `verificationStrategy: "manual"` instead).
 
-**API keys** — `apiKeys.{create,list,update,delete}`. The plaintext key comes back exactly once, from `create`.
+**API keys** — `apiKeys.{create,list,update,delete}` over `/api-keys`. The plaintext key comes back exactly once, from `create` (the server sends it in the create's `meta.key`). Creating one needs the session cookie: over a bearer credential it is `403`.
 
-**JWT** — `jwtToken()` mints a signed token for the current session; `jwks()` serves the keys that verify it.
+**JWT** — `jwtToken()` mints a signed token for the current session (`POST /tokens`, so the trusted-origin check covers it); `jwks()` serves the keys that verify it.
 
-**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches.
+**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}` over `/admin/users`, `/user-bans` and `/impersonations`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `unbanUser` resolves with nothing (the lifted ban is a `204`). `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches; `stopImpersonating` answers `404` on a session that is not an impersonation.
 
-**OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` (admin-gated) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
+**OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` over `/oauth-clients` (admin-gated; a confidential client's secret comes back once, from `registerClient`) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
 
 ## 6. Continuing a second-factor challenge
 

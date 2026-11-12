@@ -656,78 +656,301 @@ describe("organizations", () => {
 // Wiring-only groups (recording fetch)
 // -----------------------------------------------------------------------------
 
-describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
-  it("maps API-key calls onto /api-keys", async () => {
-    const { calls, fetch } = recordingFetch({ key: "sk_live", apiKey: { id: "k1" } });
-    const client = createAuthClient({ baseUrl: BASE, fetch });
+/**
+ * A `fetch` that records the calls it saw and answers each with the JSON:API
+ * document `answers` holds for its `"METHOD /path"`, or `204` when none.
+ */
+const routedFetch = (answers: Readonly<Record<string, Schema.Json>>) => {
+  const calls: Array<{ method: string; path: string; search: string; body: unknown }> = [];
+  const fetchImpl: typeof globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    calls.push({
+      method: request.method,
+      path: url.pathname,
+      search: decodeURIComponent(url.search),
+      body: request.body === null ? undefined : await request.json(),
+    });
+    const answer = answers[`${request.method} ${url.pathname}`];
+    return answer === undefined
+      ? new Response(null, { status: 204 })
+      : new Response(toJson(answer), {
+          status: 200,
+          headers: { "content-type": "application/vnd.api+json" },
+        });
+  };
+  return { calls, fetch: fetchImpl };
+};
 
-    await client.apiKeys.create({ name: "CI" });
-    await client.apiKeys.list();
-    await client.apiKeys.update("k 1", { enabled: false });
+/** A `users` resource object as the server answers it. */
+const userResource = (id: string, email: string) => ({
+  type: "users",
+  id,
+  attributes: { email, createdAt: 1, updatedAt: 1, attributes: {} },
+});
+
+/** A to-one relationship naming `type` `id`, as a document carries it. */
+const linkTo = (type: string, id: string) => ({ data: { type, id } });
+
+describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
+  const apiKey = {
+    type: "api-keys",
+    id: "k 1",
+    attributes: {
+      name: "CI",
+      start: "sk_l",
+      enabled: false,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 2,
+    },
+    relationships: { user: linkTo("users", "u1") },
+  };
+
+  it("maps API-key calls onto /api-keys, the plaintext from the create's meta", async () => {
+    const { calls, fetch } = routedFetch({
+      "POST /api-keys": { data: apiKey, meta: { key: "sk_live" } },
+      "GET /api-keys": { data: [apiKey] },
+      "PATCH /api-keys/k%201": { data: apiKey },
+    });
+    const client = createAuthClient({ baseUrl: BASE, fetch });
+    const view = {
+      id: "k 1",
+      userId: "u1",
+      name: "CI",
+      start: "sk_l",
+      enabled: false,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    expect(await client.apiKeys.create({ name: "CI" })).toEqual({ key: "sk_live", apiKey: view });
+    expect(await client.apiKeys.list()).toEqual([view]);
+    expect(await client.apiKeys.update("k 1", { enabled: false })).toEqual(view);
     await client.apiKeys.delete("k 1");
 
-    expect(calls).toEqual([
-      { method: "POST", path: "/api-keys", body: { name: "CI" } },
+    expect(calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      {
+        method: "POST",
+        path: "/api-keys",
+        body: { data: { type: "api-keys", attributes: { name: "CI" } } },
+      },
       { method: "GET", path: "/api-keys", body: undefined },
-      { method: "PATCH", path: "/api-keys/k%201", body: { enabled: false } },
+      {
+        method: "PATCH",
+        path: "/api-keys/k%201",
+        body: { data: { type: "api-keys", id: "k 1", attributes: { enabled: false } } },
+      },
       { method: "DELETE", path: "/api-keys/k%201", body: undefined },
     ]);
   });
 
-  it("maps JWT calls onto /token and /jwks", async () => {
-    const { calls, fetch } = recordingFetch({ keys: [] });
+  it("maps JWT calls onto POST /tokens and /jwks", async () => {
+    const { calls, fetch } = routedFetch({
+      "POST /tokens": {
+        data: { type: "tokens", id: "digest", attributes: { token: "a.b.c", expiresAt: 5 } },
+      },
+      "GET /jwks": { keys: [] },
+    });
     const client = createAuthClient({ baseUrl: BASE, fetch });
 
-    await client.jwtToken();
+    expect(await client.jwtToken()).toEqual({ token: "a.b.c", expiresAt: 5 });
     await client.jwks();
 
-    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(["GET /token", "GET /jwks"]);
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "POST /tokens",
+      "GET /jwks",
+    ]);
   });
 
-  it("maps admin calls onto /admin/*", async () => {
-    const { calls, fetch } = recordingFetch({ users: [], total: 0 });
+  it("maps admin calls onto /admin/users, /user-bans and /impersonations", async () => {
+    const user = userResource("u1", "u1@client.test");
+    const { calls, fetch } = routedFetch({
+      "GET /admin/users": { data: [user], meta: { total: 7 } },
+      "PATCH /admin/users/u1": { data: user },
+      "POST /user-bans": {
+        data: {
+          type: "user-bans",
+          id: "u1",
+          attributes: { reason: "spam" },
+          relationships: { user: linkTo("users", "u1") },
+        },
+        included: [user],
+      },
+      "POST /impersonations": {
+        data: {
+          type: "impersonations",
+          id: "hash",
+          attributes: { expiresAt: 2, createdAt: 1 },
+          relationships: { user: linkTo("users", "u1"), impersonator: linkTo("users", "a1") },
+        },
+        included: [user],
+      },
+    });
     const client = createAuthClient({ baseUrl: BASE, fetch });
+    const view = {
+      id: "u1",
+      email: "u1@client.test",
+      createdAt: 1,
+      updatedAt: 1,
+      attributes: {},
+    };
 
-    await client.admin.listUsers({ limit: 10 });
-    await client.admin.setRole({ userId: "u1", role: "admin" });
-    await client.admin.banUser({ userId: "u1", reason: "spam" });
+    expect(await client.admin.listUsers({})).toEqual({ users: [view], total: 7 });
+    await client.admin.listUsers({ limit: 10, offset: 20, searchEmail: "u1" });
+    expect(await client.admin.setRole({ userId: "u1", role: "admin" })).toEqual(view);
+    expect(await client.admin.banUser({ userId: "u1", reason: "spam" })).toEqual(view);
     await client.admin.unbanUser({ userId: "u1" });
-    await client.admin.revokeSessions({ userId: "u1" });
+    expect(await client.admin.revokeSessions({ userId: "u1" })).toEqual({ status: true });
     await client.admin.removeUser({ userId: "u1" });
-    await client.admin.impersonate({ userId: "u1" });
-    await client.admin.stopImpersonating();
+    expect(await client.admin.impersonate({ userId: "u1" })).toEqual({
+      user: view,
+      needsEmailVerification: false,
+    });
+    expect(await client.admin.stopImpersonating()).toEqual({ status: true });
 
-    expect(calls.map((call) => call.path)).toEqual([
-      "/admin/users/list",
-      "/admin/users/set-role",
-      "/admin/users/ban",
-      "/admin/users/unban",
-      "/admin/users/revoke-sessions",
-      "/admin/users/remove",
-      "/admin/impersonate",
-      "/admin/stop-impersonating",
+    expect(calls.map((call) => `${call.method} ${call.path}${call.search}`)).toEqual([
+      "GET /admin/users",
+      "GET /admin/users?filter[email]=u1&page[offset]=20&page[limit]=10",
+      "PATCH /admin/users/u1",
+      "POST /user-bans",
+      "DELETE /user-bans/u1",
+      "DELETE /admin/users/u1/sessions",
+      "DELETE /admin/users/u1",
+      "POST /impersonations",
+      "DELETE /impersonations/current",
     ]);
-    expect(calls.every((call) => call.method === "POST")).toBe(true);
+    expect(calls[3]?.body).toEqual({
+      data: {
+        type: "user-bans",
+        attributes: { reason: "spam" },
+        relationships: { user: linkTo("users", "u1") },
+      },
+    });
+  });
+
+  it("rejects an answer that does not include the user it names", async () => {
+    const { fetch } = routedFetch({
+      "POST /user-bans": { data: { type: "user-bans", id: "u1", attributes: {} } },
+    });
+    const client = createAuthClient({ baseUrl: BASE, fetch });
+    const error = await rejectionOf(client.admin.banUser({ userId: "u1" }), AuthClientError);
+    expect(error.message).toMatch(/user-bans document did not include its user/);
   });
 
   it("maps SSO and OIDC client management onto their endpoints", async () => {
-    const { calls, fetch } = recordingFetch({ url: "https://idp.test/authorize" });
+    const client1 = {
+      type: "oauth-clients",
+      id: "c1",
+      attributes: {
+        name: "App",
+        redirectUris: ["https://app.test/cb"],
+        clientType: "web",
+        skipConsent: false,
+        disabled: false,
+        metadata: {},
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    };
+    const clientView = {
+      clientId: "c1",
+      name: "App",
+      redirectUris: ["https://app.test/cb"],
+      type: "web",
+      skipConsent: false,
+      disabled: false,
+      metadata: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const { calls, fetch } = routedFetch({
+      "POST /sso-providers": {
+        data: {
+          type: "sso-providers",
+          id: "p1",
+          attributes: { protocol: "saml", domain: "corp.test", createdAt: 1 },
+          relationships: { organization: linkTo("organizations", "o1") },
+        },
+      },
+      "POST /sso-authorizations": {
+        data: {
+          type: "sso-authorizations",
+          id: "xyz",
+          attributes: { url: "https://idp.test/authorize" },
+        },
+      },
+      "POST /oauth-clients": { data: client1, meta: { clientSecret: "s3cret" } },
+      "GET /oauth-clients": { data: [client1] },
+      "PATCH /oauth-clients/c1": { data: client1 },
+    });
     const client = createAuthClient({ baseUrl: BASE, fetch });
 
-    await client.sso.signIn({ email: "user@corp.test" });
+    const registered = await client.sso.register({
+      protocol: "saml",
+      domain: "corp.test",
+      entityId: "idp",
+      ssoUrl: "https://idp.test/sso",
+      idpCertificates: [],
+      spEntityId: "sp",
+      acsUrl: "https://app.test/acs",
+    });
+    expect(registered).toMatchObject({ id: "p1", protocol: "saml", organizationId: "o1" });
+    expect(await client.sso.signIn({ email: "user@corp.test" })).toEqual({
+      url: "https://idp.test/authorize",
+      state: "xyz",
+    });
     await client.sso.callback({ code: "abc", state: "xyz" });
-    await client.oidc.listClients();
-    await client.oidc.updateClient("c1", { name: "App" });
+    expect(
+      await client.oidc.registerClient({
+        name: "App",
+        redirectUris: ["https://app.test/cb"],
+        type: "web",
+      }),
+    ).toEqual({ client: clientView, clientSecret: "s3cret" });
+    expect(await client.oidc.listClients()).toEqual([clientView]);
+    expect(await client.oidc.updateClient("c1", { name: "App" })).toEqual(clientView);
     await client.oidc.deleteClient("c1");
     await client.oidc.consent({ consentCode: "code", accept: true });
 
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
-      "POST /sign-in/sso",
+      "POST /sso-providers",
+      "POST /sso-authorizations",
       "POST /sso/callback",
-      "GET /oauth2/clients",
-      "PATCH /oauth2/clients/c1",
-      "DELETE /oauth2/clients/c1",
+      "POST /oauth-clients",
+      "GET /oauth-clients",
+      "PATCH /oauth-clients/c1",
+      "DELETE /oauth-clients/c1",
       "POST /oauth2/consent",
     ]);
+    // JSON:API reserves `type`: the client's own type travels as `clientType`.
+    expect(calls[3]?.body).toEqual({
+      data: {
+        type: "oauth-clients",
+        attributes: { name: "App", redirectUris: ["https://app.test/cb"], clientType: "web" },
+      },
+    });
+  });
+
+  it("maps device approval and denial onto POST /device-authorizations/decisions", async () => {
+    const { calls, fetch } = routedFetch({});
+    const client = createAuthClient({ baseUrl: BASE, fetch });
+
+    expect(await client.device.approve({ userCode: "ABCD-EFGH" })).toEqual({ status: true });
+    expect(await client.device.deny({ userCode: "ABCD-EFGH" })).toEqual({ status: true });
+
+    expect(calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual(
+      ["approved", "denied"].map((decision) => ({
+        method: "POST",
+        path: "/device-authorizations/decisions",
+        body: {
+          data: {
+            type: "device-authorization-decisions",
+            attributes: { userCode: "ABCD-EFGH", decision },
+          },
+        },
+      })),
+    );
   });
 });
