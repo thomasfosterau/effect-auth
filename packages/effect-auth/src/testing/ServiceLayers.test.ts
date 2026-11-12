@@ -121,6 +121,7 @@ describe("apiKeyServiceLayer", () => {
       expect(yield* apiKeys.verify(created.key)).toEqual({
         valid: false,
         error: "Invalid API key",
+        reason: "invalid",
       });
       expect((yield* apiKeys.verifyWithRateLimit(created.key)).valid).toBe(false);
     });

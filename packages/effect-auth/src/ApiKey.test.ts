@@ -158,8 +158,12 @@ describe("ApiKeyService", () => {
       }),
     );
     expect(result.before.valid).toBe(true);
-    expect(result.verify).toEqual({ valid: false, error: "Invalid API key" });
-    expect(result.verifyWithRateLimit).toEqual({ valid: false, error: "Invalid API key" });
+    expect(result.verify).toEqual({ valid: false, error: "Invalid API key", reason: "invalid" });
+    expect(result.verifyWithRateLimit).toEqual({
+      valid: false,
+      error: "Invalid API key",
+      reason: "invalid",
+    });
     // Read-only: the key row is left as it was, unused.
     expect(result.stored.lastUsedAt).toBe(result.before.apiKey?.lastUsedAt);
   });

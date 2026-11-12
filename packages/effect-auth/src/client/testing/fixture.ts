@@ -497,12 +497,14 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
 
   // API keys over an in-memory store, with the RateLimiter their per-key
-  // `rateLimit` runs on (#730).
+  // `rateLimit` runs on (#730), and the UserStore that `verify` reads the key's
+  // owner from (#601).
   const apiKeyRecords = MutableHashMap.empty<string, Auth.ApiKey>();
   const apiKeyLayer = Auth.ApiKeyService.layer().pipe(
     Layer.provide(
-      Layer.merge(
+      Layer.mergeAll(
         Layer.succeed(Auth.ApiKeyStore, memoryApiKeyStore(apiKeyRecords)),
+        Layer.succeed(Auth.UserStore)(userStore),
         rateLimiterLayer,
       ),
     ),
