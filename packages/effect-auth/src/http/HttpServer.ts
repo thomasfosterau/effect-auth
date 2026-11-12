@@ -18,6 +18,7 @@ import {
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
@@ -68,7 +69,7 @@ import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
-import { UserService } from "../User.ts";
+import { onlyAttributes, UserService } from "../User.ts";
 import {
   OrganizationError,
   OrganizationService,
@@ -438,13 +439,48 @@ export const credentialClassFromRequest = (
 // Handlers
 // -----------------------------------------------------------------------------
 
-const signUpInput = (payload: S.SignUpPayload) => ({
-  email: payload.email,
-  password: payload.password,
-  ...(payload.name !== undefined && { name: payload.name }),
-  ...(payload.attributes !== undefined && { attributes: payload.attributes }),
-  ...(payload.captchaToken !== undefined && { captchaToken: payload.captchaToken }),
-});
+/**
+ * The most the attributes a sign-up keeps (after the
+ * {@link AuthWebHandlerOptions.signUpAttributes} allow-list) may take, as JSON
+ * text in UTF-8: 4096 bytes (#580). A sign-up whose kept attributes are larger
+ * is refused with `400`; keys the allow-list drops never count.
+ *
+ * @since 0.1.0
+ * @category constants
+ */
+export const SIGN_UP_ATTRIBUTES_MAX_BYTES = 4096;
+
+const encodeJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+const utf8 = new TextEncoder();
+
+/**
+ * The sign-up input for a `POST /users` payload: of its `attributes`, only the
+ * keys `allowed` names, and those within {@link SIGN_UP_ATTRIBUTES_MAX_BYTES}
+ * (#580). Any other key is dropped without an error, so the answer does not
+ * tell a caller which keys the server guards. The services strip the
+ * server-only, ban and SCIM keys again, whatever `allowed` names.
+ */
+const signUpInput = (payload: S.SignUpPayload, allowed: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const attributes =
+      payload.attributes === undefined ? undefined : onlyAttributes(payload.attributes, allowed);
+    if (
+      attributes !== undefined &&
+      utf8.encode(encodeJsonText(attributes)).length > SIGN_UP_ATTRIBUTES_MAX_BYTES
+    ) {
+      return yield* new S.BadRequest({
+        message: `Sign-up attributes must be at most ${SIGN_UP_ATTRIBUTES_MAX_BYTES} bytes as JSON`,
+        code: "INVALID_INPUT",
+      });
+    }
+    return {
+      email: payload.email,
+      password: payload.password,
+      ...(payload.name !== undefined && { name: payload.name }),
+      ...(attributes !== undefined && { attributes }),
+      ...(payload.captchaToken !== undefined && { captchaToken: payload.captchaToken }),
+    };
+  });
 
 // -----------------------------------------------------------------------------
 // Optional feature resolution
@@ -1502,8 +1538,13 @@ export const identifiersGroupLayer = (config?: CookieConfig, multiSession?: Mult
  * Layer implementing the `users` group: the signed-in user's own profile
  * (see `usersGroup` in `HttpApi.ts`).
  */
-export const usersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+export const usersGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+  signUpAttributes?: ReadonlyArray<string>,
+) => {
   const cfg = resolveCookieConfig(config, multiSession);
+  const allowedSignUpAttributes = signUpAttributes ?? [];
 
   return HttpApiBuilder.group(AuthApi, "users", (handlers) =>
     handlers
@@ -1534,7 +1575,7 @@ export const usersGroupLayer = (config?: CookieConfig, multiSession?: MultiSessi
       // Sign up: `201` with the new session, or `202` when none was issued
       // (always, under `antiEnumeration`, so a held address answers alike).
       .handle("create", ({ payload }) =>
-        signUpWith(payload.data.attributes).pipe(
+        signUpWith(payload.data.attributes, allowedSignUpAttributes).pipe(
           Effect.flatMap((outcome) => answerSignIn(outcome, cfg)),
           JsonApiErrors.mapHttpErrors,
         ),
@@ -1902,10 +1943,11 @@ const signUpUserResource = (user: Types.User, email: string): R.User => {
 };
 
 /** Sign up with an email address and password. */
-const signUpWith = (payload: S.SignUpPayload) =>
+const signUpWith = (payload: S.SignUpPayload, allowedAttributes: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const lifecycle = yield* AuthLifecycleService;
-    const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
+    const input = yield* signUpInput(payload, allowedAttributes);
+    const result = yield* lifecycle.signUp(input).pipe(
       Effect.catchTags({
         AuthError: (e) => internalServerError(e),
         EmailInUseError: (e) => Effect.fail(new S.Conflict({ message: e.message, code: e.code })),
@@ -3569,16 +3611,22 @@ export const deviceAuthorizationsGroupLayer = (
  * needs to build. `make` and `makeAsync` use it; compose it yourself to serve
  * the contract from your own `HttpApiBuilder` (the SCIM group is always
  * mounted and answers `404` until `ScimService` is provided).
+ * `signUpAttributes` is {@link AuthWebHandlerOptions.signUpAttributes}: the
+ * attribute keys `POST /users` accepts (default none).
  *
  * @since 0.1.0
  * @category layers
  */
-export const groupLayers = (config?: CookieConfig, multiSession?: MultiSessionConfig) =>
+export const groupLayers = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+  signUpAttributes?: ReadonlyArray<string>,
+) =>
   Layer.mergeAll(
     authGroupLayer(config, multiSession),
     sessionsGroupLayer(config, multiSession),
     identifiersGroupLayer(config, multiSession),
-    usersGroupLayer(config, multiSession),
+    usersGroupLayer(config, multiSession, signUpAttributes),
     secondFactorChallengesGroupLayer(config, multiSession),
     otpChallengesGroupLayer(),
     emailVerificationsGroupLayer(config, multiSession),
@@ -4901,6 +4949,23 @@ export interface AuthWebHandlerOptions {
    */
   readonly multiSession?: MultiSessionConfig;
   /**
+   * The keys of `attributes` a sign-up (`POST /users`) may set on the new
+   * user. Default `[]`: a sign-up stores no attribute its caller sent (#580).
+   * A key not named here is dropped without an error, so existing clients
+   * that send one keep signing up, and the answer does not tell a caller
+   * which keys the server guards. The new user's attributes in the answer
+   * show what was kept.
+   *
+   * List only keys that carry no authority. Whatever this names,
+   * `EmailPasswordService.signUp` and `AuthLifecycleService.signUp` never
+   * store the configured `UserServiceConfig.serverOnlyAttributes` (default
+   * `["role"]`) or `SIGN_UP_PROTECTED_ATTRIBUTES` (the ban, SCIM and anonymous-user
+   * keys) from a sign-up. The kept attributes may take at most
+   * {@link SIGN_UP_ATTRIBUTES_MAX_BYTES} as JSON; a larger bag is refused
+   * with `400`.
+   */
+  readonly signUpAttributes?: ReadonlyArray<string> | undefined;
+  /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
    */
@@ -4956,7 +5021,10 @@ export interface AuthWebHandlerOptions {
    * trust assumption in full.
    *
    * `Http.make` serves Web `Request`s, which never carry a socket address, so
-   * with this option set the address comes only from the forwarded data. When
+   * with this option set the address comes only from the forwarded data. Under
+   * `{ hopCount: n }` the client is the `n`-th `X-Forwarded-For` entry from the
+   * right (the entry the outermost trusted proxy wrote), never one the client
+   * sent ahead of it, and only an IP literal is ever taken. When
    * that data is absent or unusable, the request has no client address:
    * `ClientIP` carries `undefined`, and a request that reaches a rate-limited
    * endpoint (see {@link ipRateLimit}) or an `IPRateLimitPlugin` hook is refused
@@ -5222,7 +5290,7 @@ const serve = (
   // endpoint the router matched rather than the raw path (#582).
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
-    Layer.provide(groupLayers(options.cookie, options.multiSession)),
+    Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
     Layer.provide(PlatformLayer),
   );
   // The handlers' service requirements are tracked as phantom

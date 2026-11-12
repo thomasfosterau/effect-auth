@@ -28,15 +28,31 @@ class InvalidHeaderNameError extends Data.TaggedError("InvalidHeaderNameError")<
  * Trust forwarded-IP headers from a fixed number of proxy hops.
  *
  * `hopCount: 1` trusts the single reverse proxy in front of the app and
- * selects the last `X-Forwarded-For` entry as the client IP.
+ * selects the last `X-Forwarded-For` entry as the client IP, whether or not the
+ * request has a socket address.
+ *
+ * - **With a socket address** (Node, Bun), the socket peer is the nearest
+ *   trusted proxy: the client is the entry `hopCount` positions from the right
+ *   of `[...xffValues, remoteAddress]`.
+ * - **Without one** (a Web `Request`, which is what `Http.make` handles), the
+ *   last `hopCount` header entries are the ones the trusted proxies wrote: the
+ *   client is the `hopCount`-th entry from the right of the header, and
+ *   `hopCount: 0` resolves no address.
+ *
+ * The selected entry, and every entry a trusted proxy wrote to its right, must
+ * be one IPv4 or IPv6 literal; otherwise the request resolves no address.
+ * Entries to the left of the selected one are client-controlled and ignored, so
+ * prepending values never changes the result. A `hopCount` that is not a
+ * non-negative integer resolves no address.
  */
 export interface TrustedProxyHopCount {
   /** Header to read. Defaults to `"x-forwarded-for"`. */
   readonly header?: string;
   /**
-   * Number of proxy hops to trust (counting from the socket end).
-   * The client IP is the entry N positions from the right of the extended
-   * `[...xffValues, remoteAddress]` chain.
+   * Number of trusted proxies in front of the app. With a socket address the
+   * client IP is the entry N positions from the right of the extended
+   * `[...xffValues, remoteAddress]` chain; without one, it is the Nth header
+   * entry from the right.
    */
   readonly hopCount: number;
   readonly trustedProxyCidrs?: never;
@@ -46,8 +62,11 @@ export interface TrustedProxyHopCount {
 /**
  * Trust forwarded-IP headers from proxies whose IPs fall within known CIDRs.
  *
- * Entries in the XFF chain are walked right-to-left; the first IP that is
- * *not* in a trusted CIDR is returned as the client IP.
+ * Entries in the XFF chain (and the socket address, when there is one, as its
+ * rightmost entry) are walked right-to-left; the first IP that is *not* in a
+ * trusted CIDR is returned as the client IP. When that entry is not one IPv4 or
+ * IPv6 literal, or every entry is a trusted proxy, the request resolves no
+ * address.
  */
 export interface TrustedProxyCidrs {
   /** Header to read. Defaults to `"x-forwarded-for"`. */
@@ -410,9 +429,15 @@ export interface IPResolvableRequest {
  *
  * With a `TrustedProxyConfig`:
  * - `hopCount` — select the IP that is `hopCount` positions from the right of
- *   the extended `[...xffValues, remoteAddress]` chain.
+ *   the extended `[...xffValues, remoteAddress]` chain, or, with no socket
+ *   address, the `hopCount`-th header entry from the right. See
+ *   {@link TrustedProxyHopCount}.
  * - `trustedProxyCidrs` — walk right-to-left and skip IPs that fall in a
  *   trusted CIDR; return the first untrusted IP.
+ *
+ * In both header-chain forms a header entry is used only when it is one IPv4 or
+ * IPv6 literal (IPv6 canonicalised as RFC 5952, IPv4-mapped IPv6 as dotted
+ * IPv4); a selected or trusted entry that is not one resolves `undefined`.
  * - `trustedHeader` — read only that header, and take it only when it is a
  *   single IP literal; otherwise return the socket address. See
  *   {@link TrustedHeaderConfig}.
@@ -433,41 +458,75 @@ export const resolveClientIP = (
   if (config.trustedHeader !== undefined) {
     // Exactly one header, read on its own. Only a single well-formed address is
     // taken; anything else falls back to the socket address.
-    const name = config.trustedHeader.toLowerCase();
-    const raw = Object.hasOwn(req.headers, name) ? req.headers[name] : undefined;
-    const fromHeader = P.isString(raw) ? parseIpLiteral(raw) : undefined;
-    return fromHeader ?? remoteIp;
+    const raw = ownHeader(req, config.trustedHeader);
+    return (P.isString(raw) ? parseIpLiteral(raw) : undefined) ?? remoteIp;
   }
 
-  const headerName = (config.header ?? "x-forwarded-for").toLowerCase();
-  const rawHeader = Object.hasOwn(req.headers, headerName) ? req.headers[headerName] : undefined;
-  if (rawHeader === undefined || rawHeader === "") return remoteIp;
-
-  const xffEntries = rawHeader
-    .split(",")
-    .map((s) => normalizeIp(s.trim()))
-    .filter(Str.isNonEmpty);
-
+  const xffEntries = forwardedEntries(ownHeader(req, config.header ?? "x-forwarded-for"));
   if (Arr.isReadonlyArrayEmpty(xffEntries)) return remoteIp;
 
-  // Extended chain: leftmost = original client, rightmost = socket peer
-  const chain = remoteIp !== undefined ? [...xffEntries, remoteIp] : xffEntries;
+  // Extended chain: leftmost = original client, rightmost = the nearest hop.
+  // A Web `Request` has no socket address, so then the chain ends with the
+  // header's last entry: the address the nearest trusted proxy saw.
+  const chain: ReadonlyArray<string | undefined> =
+    remoteIp !== undefined ? [...xffEntries, remoteIp] : xffEntries;
 
-  if (config.hopCount !== undefined) {
-    const clientIdx = chain.length - 1 - config.hopCount;
-    if (clientIdx < 0 || clientIdx >= chain.length) return undefined;
-    return chain[clientIdx];
-  }
+  return config.hopCount !== undefined
+    ? selectByHopCount(chain, config.hopCount, remoteIp !== undefined)
+    : selectByCidrs(chain, config.trustedProxyCidrs);
+};
 
-  // trustedProxyCidrs: walk right-to-left, skip trusted proxies
-  // Every IP in the chain belonging to a trusted proxy is indeterminate (undefined).
-  return Option.getOrUndefined(
+/** The request's own value for header `name` (case-insensitive), never an inherited key. */
+const ownHeader = (req: IPResolvableRequest, name: string): string | undefined => {
+  const key = name.toLowerCase();
+  return Object.hasOwn(req.headers, key) ? req.headers[key] : undefined;
+};
+
+/**
+ * The non-empty entries of a forwarded-address list, each parsed as one IP
+ * literal. Anything else (a hostname, a port, `garbage`) is `undefined`, so it
+ * can never become a rate-limit key (#584).
+ */
+const forwardedEntries = (raw: string | undefined): ReadonlyArray<string | undefined> =>
+  raw === undefined
+    ? []
+    : Arr.map(Arr.filter(Arr.map(raw.split(","), Str.trim), Str.isNonEmpty), parseIpLiteral);
+
+/**
+ * The client under `hopCount`. With a socket address the socket peer is the
+ * nearest trusted proxy and the last chain entry; without one, the chain's last
+ * `hopCount` entries are the ones the trusted proxies wrote. The selected entry
+ * and every entry a trusted proxy wrote after it must be an address; one that
+ * is not means the chain is not what the config says.
+ */
+const selectByHopCount = (
+  chain: ReadonlyArray<string | undefined>,
+  hopCount: number,
+  hasSocket: boolean,
+): string | undefined => {
+  if (!Number.isSafeInteger(hopCount) || hopCount < 0) return undefined;
+  const clientIdx = chain.length - hopCount - (hasSocket ? 1 : 0);
+  if (clientIdx < 0 || clientIdx >= chain.length) return undefined;
+  return Arr.every(Arr.drop(chain, clientIdx), P.isNotUndefined) ? chain[clientIdx] : undefined;
+};
+
+/**
+ * The client under `trustedProxyCidrs`: walk right-to-left, skipping trusted
+ * proxies. The first entry that is not a trusted proxy is the client; when it
+ * is not an IP literal, or every entry is a trusted proxy, the client is
+ * indeterminate.
+ */
+const selectByCidrs = (
+  chain: ReadonlyArray<string | undefined>,
+  cidrs: ReadonlyArray<string>,
+): string | undefined =>
+  Option.getOrUndefined(
     Arr.findLast(
       chain,
-      (candidate) => !config.trustedProxyCidrs.some((cidr) => cidrContains(cidr, candidate)),
+      (candidate) =>
+        candidate === undefined || !cidrs.some((cidr) => cidrContains(cidr, candidate)),
     ),
   );
-};
 
 // ---------------------------------------------------------------------------
 // Layer
@@ -494,10 +553,13 @@ export const resolveClientIP = (
  * // For custom usage:
  * const myLayer = Layer.mergeAll(services, clientIPLayer({ hopCount: 1 }))
  *
- * // One trusted proxy in front of the app: it appended the client address to
- * // X-Forwarded-For, and its own address is the socket peer.
+ * // One trusted proxy in front of the app appended the client address to
+ * // X-Forwarded-For. A Web Request has no socket address, so the header's last
+ * // entry is the client; the entry before it came from the client and is ignored.
  * const request = HttpServerRequest.fromWeb(
- *   new Request("http://localhost/", { headers: { "x-forwarded-for": "203.0.113.7, 10.0.0.1" } }),
+ *   new Request("http://localhost/", {
+ *     headers: { "x-forwarded-for": "198.51.100.1, 203.0.113.7" },
+ *   }),
  * )
  *
  * const program = Effect.gen(function* () {

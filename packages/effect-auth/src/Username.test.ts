@@ -180,6 +180,21 @@ describe("UsernameService", () => {
     expect(result.session).toBeDefined();
   });
 
+  it("never stores a role, a ban or a SCIM key from the sign-up's attributes (#580)", async () => {
+    const result = await run((svc) =>
+      svc.signUp({
+        username: "mallory",
+        email: "mallory@example.com",
+        password: "password-123",
+        attributes: { role: "admin", banned: false, scimExternalId: "idp-1", plan: "pro" },
+      }),
+    );
+    expect(result.user.attributes).toEqual({ plan: "pro" });
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(usersById, result.user.id))?.attributes,
+    ).toEqual({ plan: "pro" });
+  });
+
   it("rejects a duplicate username (case-insensitive)", async () => {
     await run((svc) =>
       svc.signUp({ username: "bob", email: "bob@example.com", password: "password-123" }),
