@@ -1781,7 +1781,7 @@ describe("OrganizationService - domains", () => {
     expect(result.removeUnknown._tag).toBe("Failure");
   });
 
-  it("keeps a domain unique across organizations, pending claims included", async () => {
+  it("refuses a second claim by the same organization only, revealing no other tenant's claim (#598)", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
@@ -1794,19 +1794,86 @@ describe("OrganizationService - domains", () => {
         const sameOrganization = yield* Effect.result(
           service.addDomain("owner-1", acme.id, { domain: "shared.test" }),
         );
-        const otherOrganization = yield* Effect.result(
-          service.addDomain("owner-2", globex.id, { domain: "SHARED.test" }),
-        );
+        // Another tenant's pending claim neither blocks this one nor shows.
+        const otherOrganization = yield* service.addDomain("owner-2", globex.id, {
+          domain: "SHARED.test",
+        });
+        const acmeDomains = yield* service.listDomains("owner-1", acme.id);
         const globexDomains = yield* service.listDomains("owner-2", globex.id);
 
-        return { first, sameOrganization, otherOrganization, globexDomains };
+        return { first, sameOrganization, otherOrganization, acmeDomains, globexDomains };
       }),
     );
 
     expect(result.first.verificationState).toBe("pending");
-    expect(result.sameOrganization._tag).toBe("Failure");
-    expect(result.otherOrganization._tag).toBe("Failure");
-    expect(result.globexDomains).toEqual([]);
+    assert(Result.isFailure(result.sameOrganization));
+    expect(result.sameOrganization.failure.message).toBe(
+      "This organization has already claimed that domain",
+    );
+    expect(result.otherOrganization.domain).toBe("shared.test");
+    expect(result.otherOrganization.verificationState).toBe("pending");
+    // Each claim carries its own token: one tenant's record proves nothing for another.
+    expect(result.otherOrganization.verificationToken).not.toBe(result.first.verificationToken);
+    expect(result.acmeDomains.map((domain) => domain.id)).toEqual([result.first.id]);
+    expect(result.globexDomains.map((domain) => domain.id)).toEqual([result.otherOrganization.id]);
+  });
+
+  it("lets only the organization that proves DNS control verify a domain several claim (#598)", async () => {
+    const claims = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const squatter = yield* service.createOrganization("owner-1", {
+          name: "Squatter",
+          slug: "squatter",
+        });
+        const owner = yield* service.createOrganization("owner-2", {
+          name: "Owner",
+          slug: "owner",
+        });
+        const squat = yield* service.addDomain("owner-1", squatter.id, { domain: "acme.test" });
+        const real = yield* service.addDomain("owner-2", owner.id, { domain: "acme.test" });
+        return { squatter, owner, squat, real };
+      }),
+    );
+    const realToken = claims.real.verificationToken;
+    const squatToken = claims.squat.verificationToken;
+    assert(realToken !== undefined && squatToken !== undefined);
+
+    // The squatter cannot verify with the real owner's record...
+    const squatCheck = await runServiceWithVerifier(
+      {},
+      stubDomainVerifier([{ domain: "acme.test", token: realToken }]),
+      (service) => service.verifyDomain("owner-1", claims.squatter.id, claims.squat.id),
+    );
+    expect(squatCheck.verificationState).toBe("failed");
+
+    // ...and its pending claim does not stop the real owner from verifying.
+    const realCheck = await runServiceWithVerifier(
+      {},
+      stubDomainVerifier([{ domain: "acme.test", token: realToken }]),
+      (service) => service.verifyDomain("owner-2", claims.owner.id, claims.real.id),
+    );
+    expect(realCheck.verificationState).toBe("verified");
+
+    // A later DNS proof elsewhere cannot take a second verified claim on the domain.
+    const second = await runServiceWithVerifier(
+      {},
+      stubDomainVerifier([{ domain: "acme.test", token: squatToken }]),
+      (service) =>
+        Effect.result(service.verifyDomain("owner-1", claims.squatter.id, claims.squat.id)),
+    );
+    assert(Result.isFailure(second));
+    expect(second.failure.message).toBe("That domain is already verified for another organization");
+    const jit = await runService({}, (service) =>
+      service.updateOrganization("owner-2", claims.owner.id, { jitProvisioning: true }).pipe(
+        Effect.andThen(
+          service.updateOrganization("owner-1", claims.squatter.id, {
+            jitProvisioning: true,
+          }),
+        ),
+        Effect.andThen(service.provisionJitMembership("user-1", "new@acme.test")),
+      ),
+    );
+    expect(jit?.organizationId).toBe(claims.owner.id);
   });
 
   it("releases the organization's domain claims when it is deleted", async () => {
@@ -1894,32 +1961,128 @@ describe("OrganizationService - domains", () => {
     expect(verified.again.verifiedAt).toBe(verified.first.verifiedAt);
   });
 
-  it("verifies a manual claim on the actor's permission alone", async () => {
+  it("never lets an organization owner self-attest a domain (#598)", async () => {
+    // What an untyped caller (or a caller built against the old input) sends.
+    const manualRequest = { domain: "victim.test", verificationStrategy: "manual" };
     const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Attacker",
+          slug: "attacker",
+        });
+        yield* service.updateOrganization("owner-1", organization.id, { jitProvisioning: true });
+
+        // The requested strategy is ignored: the claim is a DNS claim.
+        const claim = yield* service.addDomain("owner-1", organization.id, manualRequest);
+        // `domain:manage` is not the proof: with no DNS check there is no verification.
+        const verify = yield* Effect.result(
+          service.verifyDomain("owner-1", organization.id, claim.id),
+        );
+        const stored = yield* service.getDomainById(claim.id);
+        const jit = yield* service.provisionJitMembership("victim-1", "ceo@victim.test");
+        return { claim, verify, stored, jit };
+      }),
+    );
+
+    expect(result.claim.verificationStrategy).toBe("dns");
+    expect(result.claim.verificationToken).toBeTypeOf("string");
+    assert(Result.isFailure(result.verify));
+    expect(result.verify.failure.message).toBe(
+      "DNS domain verification is not available: provide a DomainVerifier layer",
+    );
+    expect(result.stored?.verificationState).toBe("pending");
+    expect(result.jit).toBeNull();
+  });
+
+  it("refuses to verify a manual claim on the organization's own say-so (#598)", async () => {
+    const result = await runServiceWithVerifier({}, stubDomainVerifier([]), (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
           name: "Acme",
           slug: "acme",
         });
-        yield* service.addMember("owner-1", organization.id, "member-1", "member");
-
-        const claim = yield* service.addDomain("owner-1", organization.id, {
+        // A pending manual claim stored before #598.
+        const legacy: OrganizationDomain = {
+          id: "dom-legacy",
+          organizationId: organization.id,
           domain: "acme.test",
+          verificationState: "pending",
           verificationStrategy: "manual",
-        });
-        const byMember = yield* Effect.result(
-          service.verifyDomain("member-1", organization.id, claim.id),
+          createdAt: 1,
+        };
+        MutableHashMap.set(domainRecords, legacy.id, legacy);
+
+        const verify = yield* Effect.result(
+          service.verifyDomain("owner-1", organization.id, legacy.id),
         );
-        const verified = yield* service.verifyDomain("owner-1", organization.id, claim.id);
-        return { claim, byMember, verified };
+        const stored = yield* service.getDomainById(legacy.id);
+        return { verify, stored };
       }),
     );
 
-    // Nothing to publish, so no token is minted.
-    expect(result.claim.verificationToken).toBeUndefined();
-    expect(result.byMember._tag).toBe("Failure");
-    expect(result.verified.verificationState).toBe("verified");
-    expect(result.verified.verifiedAt).toBeTypeOf("number");
+    assert(Result.isFailure(result.verify));
+    expect(result.verify.failure._tag).toBe("OrganizationError");
+    expect(result.stored?.verificationState).toBe("pending");
+  });
+
+  it("lets the operator attest a domain server-side, creating or attesting the claim (#598)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const pending = yield* service.addDomain("owner-1", acme.id, { domain: "acme.test" });
+
+        // An existing pending DNS claim is attested in place.
+        const attested = yield* service.attestDomain(acme.id, " ACME.test ");
+        const again = yield* service.attestDomain(acme.id, "acme.test");
+        // With no claim yet, the attestation creates one.
+        const created = yield* service.attestDomain(acme.id, "acme-corp.test");
+        const listed = yield* service.listDomains("owner-1", acme.id);
+        return { pending, attested, again, created, listed };
+      }),
+    );
+
+    expect(result.attested).toMatchObject({
+      id: result.pending.id,
+      domain: "acme.test",
+      verificationState: "verified",
+      verificationStrategy: "manual",
+      createdAt: result.pending.createdAt,
+    });
+    expect(result.attested.verificationToken).toBeUndefined();
+    expect(result.attested.verifiedAt).toBeTypeOf("number");
+    // Idempotent: a verified claim is answered unchanged.
+    expect(result.again).toStrictEqual(result.attested);
+    expect(result.created).toMatchObject({
+      domain: "acme-corp.test",
+      verificationState: "verified",
+      verificationStrategy: "manual",
+    });
+    expect(result.listed).toHaveLength(2);
+  });
+
+  it("refuses an attestation for an unknown organization, a bad domain or another tenant's verified domain", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const globex = yield* service.createOrganization("owner-2", {
+          name: "Globex",
+          slug: "globex",
+        });
+        yield* service.attestDomain(acme.id, "acme.test");
+
+        const unknown = yield* Effect.result(service.attestDomain("org-nope", "x.test"));
+        const invalid = yield* Effect.result(service.attestDomain(acme.id, "not-a-domain"));
+        const taken = yield* Effect.result(service.attestDomain(globex.id, "acme.test"));
+        return { unknown, invalid, taken };
+      }),
+    );
+
+    expect(result.unknown._tag).toBe("Failure");
+    expect(result.invalid._tag).toBe("Failure");
+    assert(Result.isFailure(result.taken));
+    expect(result.taken.failure.message).toBe(
+      "That domain is already verified for another organization",
+    );
   });
 
   it("refuses domain operations when no OrganizationDomainStore is wired", async () => {
@@ -1933,14 +2096,16 @@ describe("OrganizationService - domains", () => {
         const add = yield* Effect.result(
           service.addDomain("owner-1", organization.id, { domain: "acme.test" }),
         );
+        const attest = yield* Effect.result(service.attestDomain(organization.id, "acme.test"));
         // JIT is a no-op rather than a failure: it runs on a sign-in path.
         const jit = yield* service.provisionJitMembership("user-1", "user@acme.test");
-        return { list, add, jit };
+        return { list, add, attest, jit };
       }),
     );
 
     expect(result.list._tag).toBe("Failure");
     expect(result.add._tag).toBe("Failure");
+    expect(result.attest._tag).toBe("Failure");
     expect(result.jit).toBeNull();
   });
 });
@@ -1948,18 +2113,14 @@ describe("OrganizationService - domains", () => {
 describe("OrganizationService - JIT provisioning", () => {
   beforeEach(resetStores);
 
-  /** An organization with a verified domain, JIT off until a test turns it on. */
+  /** An organization with an operator-attested domain, JIT off until a test turns it on. */
   const withVerifiedDomain = (service: typeof OrganizationService.Service) =>
     Effect.gen(function* () {
       const organization = yield* service.createOrganization("owner-1", {
         name: "Acme",
         slug: "acme",
       });
-      const claim = yield* service.addDomain("owner-1", organization.id, {
-        domain: "acme.test",
-        verificationStrategy: "manual",
-      });
-      yield* service.verifyDomain("owner-1", organization.id, claim.id);
+      yield* service.attestDomain(organization.id, "acme.test");
       return organization;
     });
 
@@ -2004,10 +2165,7 @@ describe("OrganizationService - JIT provisioning", () => {
           name: "Acme",
           slug: "acme",
         });
-        yield* service.addDomain("owner-1", organization.id, {
-          domain: "acme.test",
-          verificationStrategy: "manual",
-        });
+        yield* service.addDomain("owner-1", organization.id, { domain: "acme.test" });
         yield* service.updateOrganization("owner-1", organization.id, { jitProvisioning: true });
 
         const pending = yield* service.provisionJitMembership("user-1", "new@acme.test");
@@ -2018,6 +2176,38 @@ describe("OrganizationService - JIT provisioning", () => {
 
     expect(result.pending).toBeNull();
     expect(result.members.members).toHaveLength(1);
+  });
+
+  it("follows a DNS-verified claim, and not another tenant's pending claim on it (#598)", async () => {
+    const claims = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const squatter = yield* service.createOrganization("owner-2", {
+          name: "Squatter",
+          slug: "squatter",
+        });
+        yield* service.addDomain("owner-2", squatter.id, { domain: "acme.test" });
+        yield* service.updateOrganization("owner-2", squatter.id, { jitProvisioning: true });
+        const beforeProof = yield* service.provisionJitMembership("user-0", "a@acme.test");
+
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const claim = yield* service.addDomain("owner-1", acme.id, { domain: "acme.test" });
+        yield* service.updateOrganization("owner-1", acme.id, { jitProvisioning: true });
+        return { acme, claim, beforeProof };
+      }),
+    );
+    expect(claims.beforeProof).toBeNull();
+    const token = claims.claim.verificationToken;
+    assert(token !== undefined);
+
+    const provisioned = await runServiceWithVerifier(
+      {},
+      stubDomainVerifier([{ domain: "acme.test", token }]),
+      (service) =>
+        service
+          .verifyDomain("owner-1", claims.acme.id, claims.claim.id)
+          .pipe(Effect.andThen(service.provisionJitMembership("user-1", "new@acme.test"))),
+    );
+    expect(provisioned?.organizationId).toBe(claims.acme.id);
   });
 });
 

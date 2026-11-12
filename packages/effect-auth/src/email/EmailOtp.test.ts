@@ -43,6 +43,8 @@ import {
   zeroCrypto,
 } from "../testing/Passwordless.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
+import { authenticateGate } from "../testing/AuthenticateGate.ts";
+import type { AuthenticateAttempt } from "../Hooks.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -364,6 +366,69 @@ describe("EmailOtpService", () => {
     expect(result.user.id).toBe("user-known");
     expect(MutableHashMap.size(users)).toBe(1);
     expect(result.session.userId).toBe("user-known");
+  });
+
+  it("runs beforeAuthenticate with the resolved user before the code is checked (#592)", async () => {
+    const testContext = await makeTestContext();
+    addUser({
+      id: "user-gated",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-gated", "gated@example.com", true);
+    const seen: Array<AuthenticateAttempt> = [];
+
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+          yield* service.send("gated@example.com", "sign-in");
+          return yield* Effect.flip(service.signIn("gated@example.com", recorded(sentOtps).otp));
+        }),
+        testContext,
+      ).pipe(Effect.provide(authenticateGate(seen, true))),
+    );
+
+    expect(refused).toBeInstanceOf(Errors.RateLimitError);
+    expect(seen).toEqual([
+      {
+        method: "email-otp",
+        identifier: { type: "email", value: "gated@example.com" },
+        userId: "user-gated",
+      },
+    ]);
+    // Refused before the code was checked: the code is neither spent nor counted.
+    const record = Option.getOrUndefined(
+      MutableHashMap.get(otpRecords, recordKey("gated@example.com", "sign-in")),
+    );
+    expect(record?.attempts).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+  });
+
+  it("counts no failure against the email when beforeAuthenticate refuses a wrong code (#590, #592)", async () => {
+    const testContext = await makeTestContext();
+    const seen: Array<AuthenticateAttempt> = [];
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+          yield* service.send("gated@example.com", "sign-in");
+          yield* Effect.flip(service.signIn("gated@example.com", wrongCode));
+        }),
+        testContext,
+      ).pipe(Effect.provide(authenticateGate(seen, true))),
+    );
+
+    // The hook refused before the code was checked: no attempt, no failure budget.
+    expect(seen).toHaveLength(1);
+    expect(
+      Option.getOrUndefined(
+        MutableHashMap.get(otpRecords, recordKey("gated@example.com", "sign-in")),
+      )?.attempts,
+    ).toBe(0);
+    expect(MutableHashMap.size(otpFailures)).toBe(0);
   });
 
   it("clears a squatter's password and sessions on the address's first proof (#440)", async () => {
@@ -999,6 +1064,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       | UserStore
       | SessionService
       | EmailPasswordStore
+      | Hooks
       | SecureRandom.SecureRandom
     >,
   ) =>
@@ -1195,6 +1261,7 @@ const runInContext = <A, E>(
     | SessionService
     | EmailPasswordStore
     | SecureRandom.SecureRandom
+    | Hooks
   >,
 ) =>
   makeTestContext().then((context) =>

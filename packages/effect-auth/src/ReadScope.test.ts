@@ -50,7 +50,8 @@ type CorpusRow = {
 };
 
 const users = ["u-admin", "u-moderator", "u-member", "u-other", "u-stranger"] as const;
-const corpus: ReadonlyArray<CorpusRow> = Arr.flatMap([...users, null], (owner) =>
+// `""` is an owner column holding the empty string, which no principal owns (#661).
+const corpus: ReadonlyArray<CorpusRow> = Arr.flatMap([...users, "", null], (owner) =>
   Arr.flatMap(["public", "followers", "group", "private", "unknown", null], (visibility) =>
     Arr.flatMap([false, true, null], (draft) =>
       Arr.flatMap([false, true, null], (unapproved) =>
@@ -75,6 +76,8 @@ const viewers: ReadonlyArray<AppUser | null> = [
   { id: "u-other", role: "contributor" },
   // A role off the ladder: the role policy errors for this principal.
   { id: "u-stranger", role: "guest" },
+  // An empty id names no principal (#661): refused, even at the top rung.
+  { id: "", role: "admin" },
 ];
 
 /** Who follows whom: `u-other` follows `u-member` and `u-admin`. */

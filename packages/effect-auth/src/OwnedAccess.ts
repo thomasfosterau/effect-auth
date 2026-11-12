@@ -581,7 +581,7 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
 
   const decide = (viewer: Option.Option<User>, row: OwnedRow, facts: RelationFacts): boolean => {
     const principal = Option.isSome(viewer) ? guards.principal(viewer.value) : anonymousPrincipal;
-    const resource = Entity.entity(Entity.ref(ownedType, ""), {
+    const resource = Entity.entity(Entity.ref(ownedType, "row"), {
       attributes: {
         // Always the guards' principal type — never the anonymous principal's,
         // which could otherwise equal a row owned by an id that happens to

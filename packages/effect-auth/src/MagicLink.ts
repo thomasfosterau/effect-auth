@@ -11,7 +11,7 @@
 import { Clock, Context, DateTime, Duration, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "./Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -19,7 +19,7 @@ import {
   UserStore,
 } from "./UserStore.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
-import { type HookError } from "./Hooks.ts";
+import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
@@ -133,7 +133,7 @@ export interface MagicLinkResult {
 /**
  * Magic link service.
  *
- * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `SecureRandom`.
+ * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks` and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -203,6 +203,7 @@ export const make = (
   | UserStore
   | SessionService
   | EmailPasswordStore
+  | Hooks
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -215,6 +216,7 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
@@ -230,7 +232,7 @@ export const make = (
         // succeed without sending anything. When sign-up is enabled the link
         // is always sent (the user is created at verify time).
         const deliver = disableSignUp
-          ? (yield* identifiers.getByValue("email", email)) !== null
+          ? (yield* lookupIdentifier(identifiers, "email", email)) !== null
           : true;
 
         // Resend cooldown: reject if an outstanding token was created within
@@ -316,16 +318,25 @@ export const make = (
           });
         }
 
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "email",
+          magicLink.email,
+          () => new Errors.MagicLinkError({ message: "Account is unavailable" }),
+        );
+        // The gate runs before the token is spent, so a refused attempt
+        // leaves the link usable once the refusal lifts.
+        yield* hooks.beforeAuthenticate({
+          method: "magic-link",
+          identifier: { type: "email", value: magicLink.email },
+          userId: owner?.id,
+        });
+
         // Consume the token (one-time use)
         yield* store.delete(tokenHash);
 
-        const identifier = yield* identifiers.getByValue("email", magicLink.email);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          // Dangling identifier (owner row is gone) — fail rather than
-          // silently creating a second claimant.
-          return yield* new Errors.MagicLinkError({ message: "Account is unavailable" });
-        }
+        let user = owner;
         if (!user) {
           if (disableSignUp) {
             return yield* new Errors.MagicLinkError({

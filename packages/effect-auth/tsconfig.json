@@ -10,6 +10,7 @@
     "node_modules",
     "dist",
     "**/*.test.ts",
+    "src/testing/LooseCollation.ts",
     "src/testing/Passwordless.ts",
     "src/testing/WireFormat.ts",
     "src/sql/testing"

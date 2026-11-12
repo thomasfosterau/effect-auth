@@ -167,14 +167,16 @@ export const make = (
           "email",
           normalizedEmail,
         );
-        const user = resolved?.user ?? null;
 
         // Do not reveal whether the user exists to reduce email enumeration risk.
         // The after-hook fires uniformly (existence is not signalled to plugins).
-        if (!user) {
+        if (resolved === null) {
           yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
           return;
         }
+        // The token is bound to the identifier's owner, so it goes only to the
+        // identifier's own address, never to the one the caller typed (#602).
+        const { user, identifier } = resolved;
 
         yield* resetStore.deleteByUserId(user.id);
 
@@ -183,7 +185,7 @@ export const make = (
           // Store the hash — the raw token is delivered to the user via sendResetPassword.
           token: hashToken(rawToken),
           userId: user.id,
-          email: normalizedEmail,
+          email: identifier.value,
           createdAt: yield* Clock.currentTimeMillis,
           expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
         };
@@ -193,7 +195,7 @@ export const make = (
         // Only a known address gets a link, so an inline send would answer it
         // later, and fail it when the vendor does, than an unknown one: the
         // send goes off the response path (#196).
-        yield* detached("password-reset", config.sendResetPassword(normalizedEmail, rawToken));
+        yield* detached("password-reset", config.sendResetPassword(identifier.value, rawToken));
 
         yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
       }),

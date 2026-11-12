@@ -162,6 +162,18 @@ requires being a Member of the Team's Organization. Explicit per node: being on 
 does _not_ implicitly add you to its sub-Teams.
 _Avoid_: implying that parent-team membership cascades to children.
 
+**Domain claim**:
+An Organization's claim to an email domain (`Organization.ts`'s `OrganizationDomain`), `pending`,
+`verified` or `failed`. Only a verified claim carries authority (JIT provisioning). A tenant
+verifies its claim only through DNS (a TXT record with the claim's server-minted token, checked
+by the app's `DomainVerifier`). **Operator attestation** is the other route: the application
+operator checks ownership out of band and calls `OrganizationService.attestDomain` (or the
+platform-admin `POST /admin/organization-domains`), which leaves the claim verified with the
+`manual` strategy (#598). Several Organizations may hold pending claims on one domain; at most
+one claim per domain is verified.
+_Avoid_: "manual verification" for anything an Organization member does — holding
+`domain:manage` proves nothing about a domain.
+
 ### Role and permission terms
 
 **Organization role**:

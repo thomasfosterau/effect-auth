@@ -37,7 +37,7 @@ import { type HookError } from "../Hooks.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
-import { IdentifierStore } from "../Identifier.ts";
+import { IdentifierStore, lookupIdentifier } from "../Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -1215,7 +1215,7 @@ export const make = (
      */
     const autoLinkTarget = (providerName: string, email: string, emailVerified: boolean) =>
       Effect.gen(function* () {
-        const existing = yield* identifiers.getByValue("email", email);
+        const existing = yield* lookupIdentifier(identifiers, "email", email);
         if (existing === null) return null;
         const mayLink =
           emailVerified &&

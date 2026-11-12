@@ -523,7 +523,7 @@ describe("SsoService", () => {
     const fx = jitFixture({
       domainStore: {
         ...memoryOrganizationDomainStore(),
-        getByDomain: () => Effect.fail(new AuthError({ message: "domain store is down" })),
+        getVerifiedByDomain: () => Effect.fail(new AuthError({ message: "domain store is down" })),
       },
     });
     fx.seedOrganization("org-jit", { jitProvisioning: true });

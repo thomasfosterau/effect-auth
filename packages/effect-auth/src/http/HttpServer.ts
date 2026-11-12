@@ -52,7 +52,7 @@ import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
-import { IdentifierStore, type Identifier } from "../Identifier.ts";
+import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
@@ -1711,7 +1711,11 @@ const signInWithPassword = (
 
 /** Sign in with a username and password. */
 const signInWithUsername = (
-  credential: { readonly username: string; readonly password: string },
+  credential: {
+    readonly username: string;
+    readonly password: string;
+    readonly captchaToken?: string | undefined;
+  },
   rememberMe: boolean | undefined,
 ) =>
   Effect.gen(function* () {
@@ -1720,6 +1724,7 @@ const signInWithUsername = (
       .signIn({
         username: credential.username,
         password: credential.password,
+        captchaToken: credential.captchaToken,
         ...(rememberMe !== undefined && { rememberMe }),
       })
       .pipe(
@@ -1997,13 +2002,13 @@ export const emailVerificationsGroupLayer = (
           const identifiers = yield* IdentifierStore;
           const verification = yield* EmailVerificationService;
           const email = payload.data.attributes.email.trim().toLowerCase();
-          const identifier = yield* identifiers
-            .getByValue("email", email)
-            .pipe(Effect.catch(internalServerError));
+          const identifier = yield* lookupIdentifier(identifiers, "email", email).pipe(
+            Effect.catch(internalServerError),
+          );
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified.
           if (identifier !== null && !identifier.verified) {
-            yield* verification.resendVerification(identifier.userId, email).pipe(
+            yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
               Effect.catchTags({
                 AuthError: (e) => internalServerError(e),
                 EmailVerificationError: (e) => internalServerError(e),
@@ -2645,13 +2650,11 @@ export const organizationsGroupLayer = (
         ),
       )
       .handle("addDomain", ({ params, payload, request }) =>
-        asOrganizationActor(request, cfg, (org, actorId) => {
-          const { domain, verificationStrategy } = payload.data.attributes;
-          return org.addDomain(actorId, params.id, {
-            domain,
-            ...(verificationStrategy !== undefined && { verificationStrategy }),
-          });
-        }).pipe(
+        // The payload admits only the `dns` strategy (#598), so the domain is
+        // all there is to pass on.
+        asOrganizationActor(request, cfg, (org, actorId) =>
+          org.addDomain(actorId, params.id, { domain: payload.data.attributes.domain }),
+        ).pipe(
           Effect.map((domain) => Handlers.data(domainResource(domain))),
           JsonApiErrors.mapHttpErrors,
         ),
@@ -2767,7 +2770,8 @@ export const organizationMembersGroupLayer = (
 
 /**
  * Layer implementing the `organization-domains` group: one domain claim, by
- * id (see `organizationDomainsGroup` in `HttpApi.ts`).
+ * id, and the operator's attestation (see `organizationDomainsGroup` in
+ * `HttpApi.ts`).
  */
 export const organizationDomainsGroupLayer = (
   config?: CookieConfig,
@@ -2791,6 +2795,21 @@ export const organizationDomainsGroupLayer = (
             org.verifyDomain(actorId, domain.organizationId, domain.id),
           );
           return Handlers.data(domainResource(verified));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // The operator's attestation (#598): gated on `isAdmin`, never on an
+      // organization permission, like SSO connection registration.
+      .handle("attest", ({ payload, request }) =>
+        Effect.gen(function* () {
+          yield* requireAdminCaller(request, cfg);
+          const org = yield* resolveOrganization;
+          const attested = yield* refusedBadRequest(
+            org.service.attestDomain(
+              payload.data.relationships.organization.data.id,
+              payload.data.attributes.domain,
+            ),
+          );
+          return Handlers.data(domainResource(attested));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );

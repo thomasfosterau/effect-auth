@@ -285,7 +285,7 @@ describe("the JSON:API resources", () => {
       sorted(["id", "permissions"]),
     );
     expect(sorted(R.keys(Resources.OrganizationDomain.createInput.fields))).toStrictEqual(
-      sorted(["domain", "verificationStrategy"]),
+      sorted(["domain"]),
     );
   });
 

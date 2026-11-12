@@ -632,9 +632,9 @@ export interface AuthClient {
     /** Email domains the organization has claimed, and their verification state. */
     readonly listDomains: (organizationId: string) => Promise<Http.OrganizationDomainListView>;
     /**
-     * Claim a domain. The `dns` strategy (the default) answers with the
-     * `verificationToken` to publish as a TXT record; `manual` is attested by
-     * an admin calling {@link verifyDomain}.
+     * Claim a domain, always proved through DNS: the answer carries the
+     * `verificationToken` to publish as a TXT record. Only the operator
+     * attests a domain manually ({@link AuthClient.admin.attestDomain}).
      */
     readonly addDomain: (
       organizationId: string,
@@ -643,8 +643,8 @@ export interface AuthClient {
     /** Release a claim; `domainId` is the claim's own `id`. */
     readonly removeDomain: (domainId: string) => Promise<void>;
     /**
-     * Run the verification check. A DNS claim whose record is not published
-     * yet comes back in state `"failed"` - retry once it is.
+     * Run the DNS check. A claim whose record is not published yet comes back
+     * in state `"failed"` - retry once it is.
      */
     readonly verifyDomain: (domainId: string) => Promise<Http.OrganizationDomainView>;
 
@@ -706,6 +706,14 @@ export interface AuthClient {
     /** Assume another user's identity — swaps the session cookie. */
     readonly impersonate: (payload: Http.AdminUserActionPayload) => Promise<Http.AuthSuccess>;
     readonly stopImpersonating: () => Promise<Http.StatusResponse>;
+    /**
+     * Attest, as the operator and after checking ownership out of band, that
+     * an organization controls a domain (`POST /admin/organization-domains`);
+     * resolves with its claim, `verified` with the `manual` strategy.
+     */
+    readonly attestDomain: (
+      payload: Http.AdminAttestDomainPayload,
+    ) => Promise<Http.OrganizationDomainView>;
   };
 
   /** Enterprise SSO (this server as an OIDC/SAML relying party). */
@@ -1002,8 +1010,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         await jsonApi<void>("DELETE", "/sessions/current");
       }),
     signInAnonymous: () => signInWith({ method: "anonymous" }),
-    signInUsername: ({ username, password, rememberMe }) =>
-      signInWith({ method: "username", username, password }, rememberMe),
+    signInUsername: ({ username, password, captchaToken, rememberMe }) =>
+      signInWith(
+        {
+          method: "username",
+          username,
+          password,
+          ...(captchaToken !== undefined && { captchaToken }),
+        },
+        rememberMe,
+      ),
     getSession,
     sendVerificationEmail: ({ email }) =>
       jsonApi<void>("POST", "/email-verifications", {
@@ -1372,6 +1388,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         mutating(() =>
           jsonApi<void>("DELETE", "/impersonations/current").then(() => ({ status: true })),
         ),
+      attestDomain: ({ organizationId, domain }) =>
+        jsonApi<DataDocument<WireDomain>>("POST", "/admin/organization-domains", {
+          data: {
+            type: "organization-domains",
+            attributes: { domain },
+            relationships: {
+              organization: { data: { type: "organizations", id: organizationId } },
+            },
+          },
+        }).then((document) => organizationOwned(document.data)),
     },
 
     sso: {

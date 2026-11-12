@@ -28,6 +28,10 @@ import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
 import { observable } from "./testing/Passwordless.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+import { authenticateGate } from "./testing/AuthenticateGate.ts";
+import { RateLimitError } from "./Errors.ts";
+import type { AuthenticateAttempt } from "./Hooks.ts";
+import { looseCollationIdentifierStore } from "./testing/LooseCollation.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -443,6 +447,73 @@ describe("MagicLinkService", () => {
     // The verified link proves ownership: the previously unverified email
     // identifier is promoted to verified.
     expect(findEmailIdentifier("known@example.com")?.verified).toBe(true);
+  });
+
+  it("never signs a look-alike address into the account a loose store matches it to (#602)", async () => {
+    const testContext = await makeTestContext();
+    addUser({
+      id: "user-bob",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-bob", "bob@example.com", true);
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          // The attacker holds `exämple.com`; a case- and accent-insensitive
+          // store answers its lookups with Bob's record.
+          yield* service.send("bob@exämple.com");
+          return yield* service.verify(recorded(sentLinks).token);
+        }).pipe(
+          Effect.provideService(IdentifierStore, looseCollationIdentifierStore(identifierRecords)),
+        ),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(sentLinks.map((sent) => sent.email)).toEqual(["bob@exämple.com"]);
+    // The link signs in a new account for the look-alike, never Bob's.
+    expect(result.user.id).not.toBe("user-bob");
+    expect(findEmailIdentifier("bob@exämple.com")?.userId).toBe(result.user.id);
+    expect(findEmailIdentifier("bob@example.com")?.userId).toBe("user-bob");
+  });
+
+  it("runs beforeAuthenticate with the resolved user before the link is spent (#592)", async () => {
+    const testContext = await makeTestContext();
+    addUser({
+      id: "user-gated",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-gated", "gated@example.com", true);
+    const seen: Array<AuthenticateAttempt> = [];
+
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("gated@example.com");
+          return yield* Effect.flip(service.verify(recorded(sentLinks).token));
+        }),
+        testContext,
+      ).pipe(Effect.provide(authenticateGate(seen, true))),
+    );
+
+    expect(refused).toBeInstanceOf(RateLimitError);
+    expect(seen).toEqual([
+      {
+        method: "magic-link",
+        identifier: { type: "email", value: "gated@example.com" },
+        userId: "user-gated",
+      },
+    ]);
+    // Refused before the link was spent: it still works once the gate opens.
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("clears a squatter's password and sessions on the address's first proof (#440)", async () => {
