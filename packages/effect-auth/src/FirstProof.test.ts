@@ -102,6 +102,13 @@ const memoryPasskeyStore = (
     Effect.sync(() =>
       Arr.fromIterable(MutableHashMap.values(passkeys)).filter((p) => p.userId === userId),
     ),
+  deleteByUserId: (userId) =>
+    Effect.sync(() => {
+      Arr.forEach(
+        Arr.filter(Arr.fromIterable(MutableHashMap.values(passkeys)), (p) => p.userId === userId),
+        (p) => void MutableHashMap.remove(passkeys, p.id),
+      );
+    }),
 });
 
 /**

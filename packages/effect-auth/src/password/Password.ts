@@ -168,6 +168,9 @@ export const multiAlgorithmVerifier = (
   };
 };
 
+// Imported, never the global: `nodejs_compat` sets no `Buffer` global on
+// Workers dated before 2024-09-23 (#748).
+import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 
 // Anti-DoS: reject inputs longer than this before running any KDF.

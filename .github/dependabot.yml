@@ -28,8 +28,10 @@
 # - `typescript` majors: it is the TS6 alias (`npm:@typescript/typescript6`)
 #   that every JS-API consumer `require`s; Dependabot proposes TS7 there, which
 #   breaks them (AGENTS.md, "TypeScript is split 6/7").
-# - `drizzle-orm-effect`: the commit-suffixed drizzle 1.0 prerelease is pinned
-#   to what the applications run; it moves with them, not with npm's `latest`.
+# - `drizzle-orm`: pinned to drizzle 1.0's tagged release candidate, which
+#   effect-auth-drizzle's declarations are built on; npm's `latest` is still
+#   the 0.4x line, which the package no longer supports (#735). Moved by hand,
+#   with `drizzleApplicationsPin` in scripts/check-dist.ts.
 #
 # Moved by hand, because Dependabot cannot (AGENTS.md lists them too):
 # - the npm-alias catalog entries: `vite` (`npm:@voidzero-dev/vite-plus-core`,
@@ -102,7 +104,7 @@ updates:
     ignore:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "drizzle-orm-effect"
+      - dependency-name: "drizzle-orm"
         update-types:
           [
             "version-update:semver-major",

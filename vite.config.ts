@@ -246,13 +246,16 @@ export default defineConfig({
         },
       },
       {
-        // Direct `node:crypto` use is corralled in these three modules.
+        // Direct `node:crypto` use is corralled in these three modules. They
+        // import `Buffer` from `node:buffer` where they need it, so the
+        // global stays banned here too: `nodejs_compat` sets no `Buffer`
+        // global on Workers dated before 2024-09-23 (#748).
         files: [
           "packages/effect-auth/src/password/Password.ts",
           "packages/effect-auth/src/TokenHash.ts",
           "packages/effect-auth/src/Cipher.ts",
         ],
-        rules: { "effect/avoid-node-imports": "off", "eslint/no-restricted-globals": "off" },
+        rules: { "effect/avoid-node-imports": "off" },
       },
       {
         // Decoders, guards and sinks over untrusted input take `unknown`: that

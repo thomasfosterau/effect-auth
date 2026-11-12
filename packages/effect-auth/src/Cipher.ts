@@ -9,8 +9,13 @@
  * @module cipher
  */
 
+// Imported, never the global: `nodejs_compat` sets no `Buffer` global on
+// Workers dated before 2024-09-23 (#748).
+import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { Effect, Result } from "effect";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { AuthError } from "./Errors.ts";
 import * as Types from "./Types.ts";
@@ -209,7 +214,14 @@ export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null =>
 /** Signing/verification algorithms supported for compact JWS tokens. */
 export type JwsAlgorithm = "ES256" | "EdDSA" | "RS256";
 
-const decodeJwk = Schema.decodeUnknownSync(Types.JsonObject);
+/**
+ * An exported JWK whose members are JSON or `undefined`. From compatibility
+ * date 2025-12-03 on, workerd's `KeyObject.export({ format: "jwk" })` carries
+ * every absent member (`use`, `alg`, `d`, …) as `undefined` (#748).
+ */
+const decodeExportedJwk = Schema.decodeUnknownSync(
+  Schema.Record(Schema.String, Schema.UndefinedOr(Schema.Json)),
+);
 
 /**
  * Generate a fresh ES256 (P-256) or EdDSA (Ed25519) signing key pair. The
@@ -224,9 +236,13 @@ export const generateJwsKeyPair = (
       : crypto.generateKeyPairSync("ed25519");
 
   return {
-    // A JWK is JSON by construction; the decode turns node's open-ended
-    // `JsonWebKey` into the JSON object type without a cast.
-    publicKeyJwk: decodeJwk(publicKey.export({ format: "jwk" })),
+    // A JWK is JSON by construction, but for workerd's `undefined` members,
+    // which are dropped; the decode turns node's open-ended `JsonWebKey` into
+    // the JSON object type without a cast.
+    publicKeyJwk: R.filter(
+      decodeExportedJwk(publicKey.export({ format: "jwk" })),
+      P.isNotUndefined,
+    ),
     privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
@@ -235,22 +251,26 @@ export const generateJwsKeyPair = (
  * Sign `data` with a PKCS#8 PEM private key. ES256 signatures are emitted in
  * raw JOSE `r || s` form via `dsaEncoding: "ieee-p1363"` (Node defaults to
  * DER, which JWS does not accept); EdDSA signs with a null digest.
+ *
+ * The ES256 options carry the PEM itself, never a `KeyObject`: workerd's
+ * `node:crypto` rejects `{ key: KeyObject, dsaEncoding }` with
+ * `ERR_INVALID_ARG_TYPE` on every compatibility date, and accepts a PEM or
+ * JWK key input there (#748). `Workerd.test.ts` pins both forms.
  */
 export const signJws = (
   algorithm: "ES256" | "EdDSA",
   data: Uint8Array,
   privateKeyPem: string,
-): Uint8Array => {
-  const key = crypto.createPrivateKey(privateKeyPem);
-  return algorithm === "EdDSA"
-    ? crypto.sign(null, data, key)
-    : crypto.sign("sha256", data, { key, dsaEncoding: "ieee-p1363" });
-};
+): Uint8Array =>
+  algorithm === "EdDSA"
+    ? crypto.sign(null, data, crypto.createPrivateKey(privateKeyPem))
+    : crypto.sign("sha256", data, { key: privateKeyPem, dsaEncoding: "ieee-p1363" });
 
 /**
  * Verify `signature` over `data` against a public JWK. ES256 uses the raw
- * JOSE `r || s` encoding (`dsaEncoding: "ieee-p1363"`); EdDSA verifies with a
- * null digest; RS256 is plain RSASSA-PKCS1-v1_5 over SHA-256.
+ * JOSE `r || s` encoding (`dsaEncoding: "ieee-p1363"`), with the JWK as a
+ * `{ key, format: "jwk" }` input for the reason {@link signJws} gives; EdDSA
+ * verifies with a null digest; RS256 is plain RSASSA-PKCS1-v1_5 over SHA-256.
  */
 export const verifyJws = (
   algorithm: JwsAlgorithm,
@@ -263,7 +283,12 @@ export const verifyJws = (
   const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
   if (algorithm === "RS256") return crypto.verify("sha256", data, key, signature);
   if (algorithm === "ES256")
-    return crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, signature);
+    return crypto.verify(
+      "sha256",
+      data,
+      { key: jwk, format: "jwk", dsaEncoding: "ieee-p1363" },
+      signature,
+    );
   return crypto.verify(null, data, key, signature);
 };
 

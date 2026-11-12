@@ -85,6 +85,13 @@ const mockCredentialStore = {
       );
       return credentials;
     }),
+
+  deleteByUserId: (userId: string) =>
+    Effect.sync(() => {
+      Array.from(MutableHashMap.values(mockCredentialStore.credentials))
+        .filter((c) => c.userId === userId)
+        .forEach((c) => void MutableHashMap.remove(mockCredentialStore.credentials, c.id));
+    }),
 };
 
 const config: WebAuthnConfig = {

@@ -41,6 +41,12 @@ export class OAuthAccountStore extends Context.Service<
     readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
     readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
     /**
+     * Delete every provider link `userId` holds (their provider tokens with
+     * them); a no-op when they hold none. Deleting a user calls it before the
+     * user row goes (#601), and the first proof of an address calls it too.
+     */
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
+    /**
      * Optional: report whether the user has a password hash set. Consulted by
      * {@link OAuthService.unlinkAccount}'s last-credential lockout guard to
      * decide whether the account being unlinked is the user's only sign-in

@@ -320,13 +320,19 @@ export const makeUserStore: Effect.Effect<
 // UserServiceStore
 // ---------------------------------------------------------------------------
 
-/** `Auth.UserServiceStore` over the `auth_users` table; requires `SqlClient`. */
+/**
+ * `Auth.UserServiceStore` over the `auth_users` table; requires `SqlClient`.
+ * `delete` removes the user's `auth_user_roles` rows with the user row, in
+ * one transaction: the roles are this subpath's own data about the user, and
+ * no core store owns them (#601).
+ */
 export const makeUserServiceStore: Effect.Effect<
   typeof Auth.UserServiceStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
+  const tx = makeTx(sql);
   return {
     get: (userId) => users.findById(userId, "userService.get"),
     update: (user) =>
@@ -335,7 +341,13 @@ export const makeUserServiceStore: Effect.Effect<
         sql`UPDATE auth_users SET name = ${user.name ?? null}, image = ${user.image ?? null}, attributes = ${encodeAttributes(user.attributes)}, updated_at = ${dateToMs(user.updatedAt)} WHERE id = ${user.id}`,
       ).pipe(Effect.as(user)),
     delete: (userId) =>
-      asVoid("userService.delete", sql`DELETE FROM auth_users WHERE id = ${userId}`),
+      tx(
+        "userService.delete",
+        Effect.andThen(
+          asVoid("userService.delete", sql`DELETE FROM auth_user_roles WHERE user_id = ${userId}`),
+          asVoid("userService.delete", sql`DELETE FROM auth_users WHERE id = ${userId}`),
+        ),
+      ),
   } satisfies typeof Auth.UserServiceStore.Service;
 });
 
@@ -733,6 +745,11 @@ export const makeCredentialStore: Effect.Effect<
           Effect.forEach(rows, (row) => rowToCredential(row), { concurrency: 1 }),
         ),
       ),
+    deleteByUserId: (userId) =>
+      asVoid(
+        "credential.deleteByUserId",
+        sql`DELETE FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
+      ),
   } satisfies typeof Auth.MultiFactor.CredentialStore.Service;
 });
 
@@ -881,6 +898,11 @@ export const makeOAuthAccountStore: Effect.Effect<
       asVoid(
         "oauthAccount.delete",
         sql`DELETE FROM auth_oauth_accounts WHERE provider = ${provider} AND provider_id = ${providerId}`,
+      ),
+    deleteByUserId: (userId) =>
+      asVoid(
+        "oauthAccount.deleteByUserId",
+        sql`DELETE FROM auth_oauth_accounts WHERE user_id = ${userId}`,
       ),
     // Backed by auth_users.password_hash — enables the last-credential
     // unlinking guard without a separate store.
@@ -1778,6 +1800,8 @@ export const makeApiKeyStore: Effect.Effect<
           Effect.forEach(rows, (row) => rowToApiKey(row), { concurrency: 1 }),
         ),
       ),
+    deleteByUserId: (userId) =>
+      asVoid("apiKey.deleteByUserId", sql`DELETE FROM auth_api_keys WHERE user_id = ${userId}`),
   } satisfies typeof Auth.ApiKeyStore.Service;
 });
 

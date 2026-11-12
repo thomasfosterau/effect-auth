@@ -14,31 +14,32 @@ OpenTelemetry-compatible backend (Jaeger, Honeycomb, Datadog, etc.) when a
 
 ### Span names
 
-| Span name                           | Operation                            |
-| ----------------------------------- | ------------------------------------ |
-| `effect-auth.sign-up`               | User registration                    |
-| `effect-auth.sign-in`               | Credential sign-in                   |
-| `effect-auth.sign-out`              | Session invalidation                 |
-| `effect-auth.create-session`        | New session creation                 |
-| `effect-auth.validate-session`      | Session token validation             |
-| `effect-auth.resolve-session`       | Session resolution at an app edge    |
-| `effect-auth.remote-session.read`   | Session read over a remote transport |
-| `effect-auth.remote-session.relay`  | Credential relay to a remote service |
-| `effect-auth.oauth.authorize`       | OAuth authorization URL generation   |
-| `effect-auth.oauth.callback`        | OAuth callback / token exchange      |
-| `effect-auth.oauth.refresh`         | OAuth access-token refresh           |
-| `effect-auth.token.sign`            | JWT signing                          |
-| `effect-auth.token.verify`          | JWT verification                     |
-| `effect-auth.password.hash`         | Password hashing (PBKDF2 / scrypt)   |
-| `effect-auth.password.verify`       | Password verification                |
-| `effect-auth.2fa.challenge`         | Multi-factor challenge creation      |
-| `effect-auth.2fa.verify`            | Multi-factor code verification       |
-| `effect-auth.webauthn.register`     | WebAuthn registration verification   |
-| `effect-auth.webauthn.authenticate` | WebAuthn authentication verification |
-| `effect-auth.oidc.authorize`        | OIDC authorization endpoint          |
-| `effect-auth.oidc.consent`          | OIDC consent endpoint                |
-| `effect-auth.oidc.token`            | OIDC token endpoint                  |
-| `effect-auth.oidc.userinfo`         | OIDC userinfo endpoint               |
+| Span name                                 | Operation                                         |
+| ----------------------------------------- | ------------------------------------------------- |
+| `effect-auth.sign-up`                     | User registration                                 |
+| `effect-auth.sign-in`                     | Credential sign-in                                |
+| `effect-auth.sign-out`                    | Session invalidation                              |
+| `effect-auth.create-session`              | New session creation                              |
+| `effect-auth.validate-session`            | Session token validation                          |
+| `effect-auth.resolve-session`             | Session resolution at an app edge                 |
+| `effect-auth.remote-session.read`         | Session read over a remote transport              |
+| `effect-auth.remote-session.relay`        | Credential relay to a remote service              |
+| `effect-auth.remote-session.api-key-read` | API-key resolution over a remote transport (#730) |
+| `effect-auth.oauth.authorize`             | OAuth authorization URL generation                |
+| `effect-auth.oauth.callback`              | OAuth callback / token exchange                   |
+| `effect-auth.oauth.refresh`               | OAuth access-token refresh                        |
+| `effect-auth.token.sign`                  | JWT signing                                       |
+| `effect-auth.token.verify`                | JWT verification                                  |
+| `effect-auth.password.hash`               | Password hashing (PBKDF2 / scrypt)                |
+| `effect-auth.password.verify`             | Password verification                             |
+| `effect-auth.2fa.challenge`               | Multi-factor challenge creation                   |
+| `effect-auth.2fa.verify`                  | Multi-factor code verification                    |
+| `effect-auth.webauthn.register`           | WebAuthn registration verification                |
+| `effect-auth.webauthn.authenticate`       | WebAuthn authentication verification              |
+| `effect-auth.oidc.authorize`              | OIDC authorization endpoint                       |
+| `effect-auth.oidc.consent`                | OIDC consent endpoint                             |
+| `effect-auth.oidc.token`                  | OIDC token endpoint                               |
+| `effect-auth.oidc.userinfo`               | OIDC userinfo endpoint                            |
 
 ### Span attributes
 

@@ -1,6 +1,7 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
+import { AccountDeletion } from "./AccountDeletion.ts";
 import { UserServiceStore } from "./User.ts";
 import * as User from "./User.ts";
 import {
@@ -178,7 +179,15 @@ describe("UserService", () => {
     expect(result?.verifiedAt).toBeInstanceOf(Date);
   });
 
-  it("should delete user", async () => {
+  it("deleteUser deletes the account through AccountDeletion (#601)", async () => {
+    const deleted: Array<string> = [];
+    const deletion = Context.make(AccountDeletion, {
+      deleteUser: (userId) =>
+        Effect.sync(() => {
+          deleted.push(userId);
+          MutableHashMap.remove(users, userId);
+        }),
+    });
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -186,14 +195,29 @@ describe("UserService", () => {
           yield* service.deleteUser("user-1");
           return yield* Effect.result(service.getUser("user-1"));
         }),
+        Context.merge(makeTestContext(), deletion),
+      ),
+    );
+
+    expect(deleted).toEqual(["user-1"]);
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("UserNotFoundError");
+  });
+
+  it("deleteUser without AccountDeletion fails and deletes nothing, not even the row (#601)", async () => {
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make();
+          const failure = yield* Effect.flip(service.deleteUser("user-1"));
+          return { failure, user: yield* service.getUser("user-1") };
+        }),
         makeTestContext(),
       ),
     );
 
-    expect(result._tag).toBe("Failure");
-
-    assert(Result.isFailure(result));
-
-    expect(result.failure._tag).toBe("UserNotFoundError");
+    expect(result.failure._tag).toBe("AuthError");
+    expect(result.failure.message).toContain("accountDeletionLayer");
+    expect(result.user.id).toBe("user-1");
   });
 });

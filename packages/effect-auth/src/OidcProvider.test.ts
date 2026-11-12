@@ -116,6 +116,13 @@ const makeOidcStores = () => {
       Effect.sync(() => (MutableHashMap.set(consents, `${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) =>
       Effect.sync(() => void MutableHashMap.remove(consents, `${userId}:${clientId}`)),
+    deleteByUserId: (userId) =>
+      Effect.sync(() => {
+        Arr.forEach(
+          Arr.filter(Arr.fromIterable(MutableHashMap.values(consents)), (c) => c.userId === userId),
+          (c) => void MutableHashMap.remove(consents, `${c.userId}:${c.clientId}`),
+        );
+      }),
   };
   const jwtKeyStore: typeof JwtKeyStore.Service = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
@@ -1364,6 +1371,8 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
+    // RFC 6749 §5.1: a token response is never stored by a cache (#628).
+    expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const tokens = await jsonBody(
       tokenRes,
       Schema.Struct({
@@ -1395,6 +1404,8 @@ describe("HTTP OIDC provider endpoints", () => {
     // 4. Verify the id_token against the published JWKS.
     const jwksRes = await fx.handler(get("/.well-known/jwks.json"));
     expect(jwksRes.status).toBe(200);
+    // The public key set stays cacheable.
+    expect(jwksRes.headers.get("cache-control")).toBeNull();
     const jwks = await jsonBody(jwksRes, Schema.Struct({ keys: Schema.Array(Schema.Json) }));
     expect(jwks.keys.length).toBeGreaterThan(0);
 
@@ -2073,6 +2084,8 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
+    // RFC 6749 §5.1: a token response is never stored by a cache (#628).
+    expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const tokens = await jsonBody(
       tokenRes,
       Schema.Struct({

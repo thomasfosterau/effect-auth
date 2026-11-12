@@ -350,6 +350,12 @@ describe("D1-backed effect-auth storage: conformance", () => {
       Testing.emailOtpStoreConformance(),
       Testing.pendingMultiFactorStoreConformance({ seedUser }),
       Testing.challengeStoreConformance(),
+      // The per-user deletes core's account deletion calls (#601).
+      Testing.oauthAccountStoreConformance({ seedUser }),
+      Testing.credentialStoreConformance({ seedUser }),
+      Testing.multiFactorStoreConformance({ seedUser }),
+      Testing.emailVerificationStoreConformance({ seedUser }),
+      Testing.passwordResetStoreConformance({ seedUser }),
     ],
     (suite) => {
       describe(suite.contract, () => {

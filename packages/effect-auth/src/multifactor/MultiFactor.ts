@@ -76,6 +76,12 @@ export class MultiFactorStore extends Context.Service<
     readonly upsert: (
       record: MultiFactorRecord,
     ) => Effect.Effect<MultiFactorRecord, Errors.AuthError>;
+    /**
+     * Delete `userId`'s enrolment (secret and backup codes); a no-op when
+     * they have none. The record is keyed by user id, so this is the store's
+     * per-user delete: deleting a user calls it before the user row goes
+     * (#601), and the first proof of an address calls it too.
+     */
     readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/MultiFactorStore") {}
