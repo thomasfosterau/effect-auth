@@ -11,7 +11,13 @@ import {
   type ApiKeyConfig,
 } from "./ApiKey.ts";
 import * as ApiKey from "./ApiKey.ts";
-import { memoryApiKeyStore } from "./testing/index.ts";
+import {
+  fixtureUser,
+  memoryApiKeyStore,
+  memoryUserStore,
+  memoryUserTable,
+} from "./testing/index.ts";
+import { UserStore } from "./UserStore.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
 import * as RateLimit from "./RateLimit.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -54,7 +60,15 @@ const rateLimitStore = {
     }),
 };
 
-const storeContext = Context.make(ApiKeyStore, apiKeyStore);
+// The keys' owners: a key verifies only while its owner exists (#601).
+const users = memoryUserTable();
+MutableHashMap.set(users.users, "user-1", { ...fixtureUser(), id: "user-1" });
+MutableHashMap.set(users.users, "user-2", { ...fixtureUser(), id: "user-2" });
+
+const storeContext = Context.merge(
+  Context.make(ApiKeyStore, apiKeyStore),
+  Context.make(UserStore, memoryUserStore(users)),
+);
 
 const makeRateLimitContext = async () => {
   const rateLimiter = await Effect.runPromise(
@@ -78,7 +92,7 @@ const makeRateLimitContext = async () => {
 const runService = async <A, E>(
   program: (
     service: typeof ApiKeyService.Service,
-  ) => Effect.Effect<A, E, ApiKeyStore | RateLimiter>,
+  ) => Effect.Effect<A, E, ApiKeyStore | RateLimiter | RateLimitStore | UserStore>,
   config?: ApiKeyConfig,
 ): Promise<A> => {
   const testContext = await makeRateLimitContext();
@@ -125,6 +139,29 @@ describe("ApiKeyService", () => {
     expect(result.verified.valid).toBe(true);
     expect(result.verified.apiKey?.id).toBe(result.created.apiKey.id);
     expect(result.verified.apiKey?.lastUsedAt).toBeDefined();
+  });
+
+  it("rejects a key whose owner no longer exists, on both verify paths (#601)", async () => {
+    const result = await runService((service) =>
+      Effect.gen(function* () {
+        MutableHashMap.set(users.users, "user-gone", { ...fixtureUser(), id: "user-gone" });
+        const created = yield* service.create("user-gone");
+        const before = yield* service.verify(created.key);
+        // The user row goes without the purge (a raw `UserServiceStore.delete`).
+        MutableHashMap.remove(users.users, "user-gone");
+        return {
+          before,
+          verify: yield* service.verify(created.key),
+          verifyWithRateLimit: yield* service.verifyWithRateLimit(created.key),
+          stored: yield* service.get(created.apiKey.id),
+        };
+      }),
+    );
+    expect(result.before.valid).toBe(true);
+    expect(result.verify).toEqual({ valid: false, error: "Invalid API key" });
+    expect(result.verifyWithRateLimit).toEqual({ valid: false, error: "Invalid API key" });
+    // Read-only: the key row is left as it was, unused.
+    expect(result.stored.lastUsedAt).toBe(result.before.apiKey?.lastUsedAt);
   });
 
   it("should reject unknown keys", async () => {

@@ -282,6 +282,12 @@ export class CredentialStore extends Context.Service<
     listByUserId: (
       userId: string,
     ) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
+    /**
+     * Delete every credential `userId` registered; a no-op when they hold
+     * none. Deleting a user calls it before the user row goes (#601), and the
+     * first proof of an address calls it too.
+     */
+    deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/CredentialStore") {}
 

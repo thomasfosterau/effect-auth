@@ -116,6 +116,13 @@ const makeOidcStores = () => {
       Effect.sync(() => (MutableHashMap.set(consents, `${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) =>
       Effect.sync(() => void MutableHashMap.remove(consents, `${userId}:${clientId}`)),
+    deleteByUserId: (userId) =>
+      Effect.sync(() => {
+        Arr.forEach(
+          Arr.filter(Arr.fromIterable(MutableHashMap.values(consents)), (c) => c.userId === userId),
+          (c) => void MutableHashMap.remove(consents, `${c.userId}:${c.clientId}`),
+        );
+      }),
   };
   const jwtKeyStore: typeof JwtKeyStore.Service = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),

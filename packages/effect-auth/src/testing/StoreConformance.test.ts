@@ -12,6 +12,7 @@ import * as ApiKey from "../ApiKey.ts";
 import * as Errors from "../Errors.ts";
 import { type Identifier, IdentifierStore } from "../Identifier.ts";
 import { IdentifierStoreKV } from "../KeyValueStores.ts";
+import { OAuthAccountStore } from "../oauth/OAuthAccount.ts";
 import { PhoneOtpStore } from "../PhoneOtp.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
@@ -173,6 +174,36 @@ describe("a broken store fails its suite", () => {
     expect(failed.map((failure) => failure.name)).toEqual([
       "create returns the key, and get and getByHash read it back with every field",
     ]);
+  });
+
+  it("an ApiKeyStore whose deleteByUserId keeps the keys, or deletes everyone's, fails the #601 case", async () => {
+    const perUser =
+      "deleteByUserId removes that user's keys only, and is a no-op for a user with none";
+    const keeping = await failures(Testing.apiKeyStoreConformance(), () =>
+      Layer.succeed(ApiKey.ApiKeyStore, {
+        ...Testing.memoryApiKeyStore(),
+        deleteByUserId: () => Effect.void,
+      }),
+    );
+    expect(keeping.map((failure) => failure.name)).toEqual([perUser]);
+    const sweeping = await failures(Testing.apiKeyStoreConformance(), () => {
+      const keys = MutableHashMap.empty<string, ApiKey.ApiKey>();
+      return Layer.succeed(ApiKey.ApiKeyStore, {
+        ...Testing.memoryApiKeyStore(keys),
+        deleteByUserId: () => Effect.sync(() => MutableHashMap.clear(keys)),
+      });
+    });
+    expect(sweeping.map((failure) => failure.name)).toEqual([perUser]);
+  });
+
+  it("an OAuthAccountStore whose deleteByUserId is a no-op fails its suite (#601)", async () => {
+    const failed = await failures(Testing.oauthAccountStoreConformance(), () =>
+      Layer.succeed(OAuthAccountStore, {
+        ...Testing.memoryOAuthAccountStore(),
+        deleteByUserId: () => Effect.void,
+      }),
+    );
+    expect(failed).toHaveLength(1);
   });
 
   it("a PhoneOtpStore whose upsert resets the failure budget fails the #590 case", async () => {

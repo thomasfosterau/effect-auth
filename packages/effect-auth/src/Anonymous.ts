@@ -17,10 +17,14 @@
  * callback migrates any data, then the anonymous user is deleted.
  */
 import { Context, Effect, Layer, MutableHashSet } from "effect";
+import * as Option from "effect/Option";
+import { AccountManagementStore } from "./AccountManagement.ts";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
+import { IdentifierStore } from "./Identifier.ts";
 import { SessionService } from "./SessionService.ts";
 import { type HookError } from "./Hooks.ts";
+import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 
 /**
  * Persistence for anonymous users. The implementer generates an id and sets
@@ -72,8 +76,11 @@ export class AnonymousService extends Context.Service<
 
     /**
      * Link an anonymous identity to a real account: run the `linkAccount`
-     * callback (app data migration), invalidate all anonymous user sessions,
-     * then delete the anonymous user.
+     * callback (app data migration), then delete the anonymous user and
+     * whatever it still holds (#601): the credentials and tokens in the
+     * user-keyed stores present where this layer is built, its sessions, any
+     * identifiers (when an `IdentifierStore` is present), and the user row
+     * last.
      *
      * Rejects with `InvalidInputError` if `anonymousUser` is not an anonymous
      * user or if `anonymousUser.id === newUser.id`. Idempotent: a second call
@@ -102,6 +109,13 @@ const make = (
   Effect.gen(function* () {
     const store = yield* AnonymousUserStore;
     const sessionManager = yield* SessionService;
+    const purgeServices = {
+      ...(yield* userPurgeStores),
+      accountTokens: Option.getOrUndefined(yield* Effect.serviceOption(AccountManagementStore)),
+      identifiers: Option.getOrUndefined(yield* Effect.serviceOption(IdentifierStore)),
+      revokeSessions: sessionManager.invalidateUserSessions,
+      deleteUser: store.deleteUser,
+    };
 
     // Tracks IDs currently being linked (single-flight) and already linked
     // (idempotency). Both are needed: inFlight prevents concurrent races;
@@ -149,8 +163,7 @@ const make = (
             yield* config.linkAccount({ anonymousUser, newUser });
           }
 
-          yield* sessionManager.invalidateUserSessions(anonymousUser.id);
-          yield* store.deleteUser(anonymousUser.id);
+          yield* purgeUser(purgeServices, anonymousUser.id);
 
           MutableHashSet.add(done, anonymousUser.id);
         }).pipe(
