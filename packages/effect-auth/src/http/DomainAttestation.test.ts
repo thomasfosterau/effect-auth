@@ -1,10 +1,12 @@
 /**
  * Domain claims over HTTP (#598): an organization proves a domain through DNS
- * only, and manual attestation is the operator's, at the `isAdmin`-gated
- * `POST /admin/organization-domains`. Runs the real `Http.make` handler of the
- * `./client/testing` fixture.
+ * only, and manual attestation is the operator's, at the admin-gated
+ * `POST /admin/organization-domains`, as is the release of any claim at
+ * `DELETE /admin/organization-domains/:id` (#680). Runs the real `Http.make`
+ * handler of the `./client/testing` fixture.
  */
 import { MutableHashMap, MutableHashSet } from "effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { AuthClientError, createAuthClient } from "../client/Client.ts";
@@ -24,6 +26,20 @@ const withServer = () => {
 };
 
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** A bodiless JSON:API delete through a browser's cookie jar. */
+const del = (fetch: typeof globalThis.fetch, path: string) =>
+  fetch(`${BASE}${path}`, { method: "DELETE", headers: { accept: "application/vnd.api+json" } });
+
+/** The status a client call was refused with. */
+const refusal = (call: Promise<unknown>) =>
+  call.then(
+    () => assert.fail("expected a refusal"),
+    (cause: unknown) => {
+      assert.instanceOf(cause, AuthClientError);
+      return cause.status;
+    },
+  );
 
 /** A JSON:API write through a browser's cookie jar. */
 const post = (fetch: typeof globalThis.fetch, path: string, body: Schema.Json) =>
@@ -162,6 +178,102 @@ describe("HTTP domain claims (#598)", () => {
     );
     expect(anonymous.status).toBe(401);
     expect(MutableHashMap.size(server.domainRecords)).toBe(0);
+  });
+
+  it("records the attesting admin on the claim, as its attester (#680)", async () => {
+    const { server, browser } = withServer();
+    const owner = await signUp(server, browser, "owner@acme.test");
+    const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
+    const pending = await owner.client.organization.addDomain(org.id, { domain: "acme.test" });
+    expect(pending.attestedBy).toBeUndefined();
+
+    const operator = await signUp(server, browser, "ops@platform.test", true);
+    const current = await operator.client.getSession();
+    assert(current !== null, "the operator is signed in");
+    const { user } = current;
+    const attested = await operator.client.admin.attestDomain({
+      organizationId: org.id,
+      domain: "acme.test",
+    });
+    expect(attested.attestedBy).toBe(user.id);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(server.domainRecords, pending.id)),
+    ).toMatchObject({
+      attestedBy: user.id,
+    });
+    // The organization reads who attested its claim; a DNS claim names no one.
+    const listed = await owner.client.organization.listDomains(org.id);
+    expect(listed).toEqual([expect.objectContaining({ id: pending.id, attestedBy: user.id })]);
+    const dns = await owner.client.organization.addDomain(org.id, { domain: "acme-corp.test" });
+    MutableHashSet.add(server.publishedDnsDomains, "acme-corp.test");
+    const proved = await owner.client.organization.verifyDomain(dns.id);
+    expect(proved.verificationState).toBe("verified");
+    expect("attestedBy" in proved).toBe(false);
+  });
+
+  it("lets a platform admin release any organization's claim, settling a dispute (#680)", async () => {
+    const { server, browser } = withServer();
+    const first = await signUp(server, browser, "owner@first.test");
+    const firstOrg = await first.client.organization.create({ name: "First", slug: "first" });
+    const second = await signUp(server, browser, "owner@second.test");
+    const secondOrg = await second.client.organization.create({ name: "Second", slug: "second" });
+    const operator = await signUp(server, browser, "ops@platform.test", true);
+
+    const held = await operator.client.admin.attestDomain({
+      organizationId: firstOrg.id,
+      domain: "acme.test",
+    });
+    const blocked = await post(
+      operator.fetch,
+      "/admin/organization-domains",
+      attestation(secondOrg.id, "acme.test"),
+    );
+    expect(blocked.status).toBe(400);
+
+    await operator.client.admin.releaseDomain(held.id);
+    expect(await first.client.organization.listDomains(firstOrg.id)).toEqual([]);
+    const handedOver = await operator.client.admin.attestDomain({
+      organizationId: secondOrg.id,
+      domain: "acme.test",
+    });
+    expect(handedOver).toMatchObject({
+      organizationId: secondOrg.id,
+      verificationState: "verified",
+    });
+
+    // A pending claim is released the same way, through the raw endpoint.
+    const pending = await first.client.organization.addDomain(firstOrg.id, {
+      domain: "first.test",
+    });
+    expect((await del(operator.fetch, `/admin/organization-domains/${pending.id}`)).status).toBe(
+      204,
+    );
+    expect(MutableHashMap.has(server.domainRecords, pending.id)).toBe(false);
+    // An id that names no claim, or one already released, is a 404.
+    expect((await del(operator.fetch, `/admin/organization-domains/${pending.id}`)).status).toBe(
+      404,
+    );
+    expect(await refusal(operator.client.admin.releaseDomain("nope"))).toBe(404);
+  });
+
+  it("refuses the release endpoint to anyone but a platform admin (#680)", async () => {
+    const { server, browser } = withServer();
+    const owner = await signUp(server, browser, "owner@acme.test");
+    const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
+    const claim = await owner.client.organization.addDomain(org.id, { domain: "acme.test" });
+
+    // The organization's owner holds `domain:manage`, and is still refused:
+    // its own release is `DELETE /organization-domains/:id`.
+    expect(await refusal(owner.client.admin.releaseDomain(claim.id))).toBe(403);
+    // A non-admin is refused before the id is looked up, so an unknown id
+    // answers the same.
+    expect(await refusal(owner.client.admin.releaseDomain("nope"))).toBe(403);
+    const anonymous = await del(
+      makeCookieJarFetch(server.handler),
+      `/admin/organization-domains/${claim.id}`,
+    );
+    expect(anonymous.status).toBe(401);
+    expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(true);
   });
 
   it("verifies a tenant's claim only through its published DNS record", async () => {

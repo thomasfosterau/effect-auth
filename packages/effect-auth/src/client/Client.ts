@@ -220,7 +220,8 @@ type WireMember = Omit<Http.MemberView, "id" | "organizationId" | "userId">;
 
 type WireInvitation = Omit<Http.InvitationView, "id" | "organizationId" | "inviterId">;
 
-type WireDomain = Omit<Http.OrganizationDomainView, "id" | "organizationId">;
+/** A claim's attributes: its `attestedBy` travels as the `attester` relationship. */
+type WireDomain = Omit<Http.OrganizationDomainView, "id" | "organizationId" | "attestedBy">;
 
 type WireOrgRole = Omit<Http.OrgRoleView, "id" | "organizationId">;
 
@@ -312,6 +313,15 @@ const organizationOwned = <A>(
   organizationId: related(resource, "organization"),
   ...resource.attributes,
 });
+
+/** A domain claim, its `attester` relationship (when it links anyone) as `attestedBy`. */
+const domainView = (resource: WireResource<WireDomain>): Http.OrganizationDomainView => {
+  const attestedBy = resource.relationships?.["attester"]?.data?.id;
+  return {
+    ...organizationOwned(resource),
+    ...(attestedBy !== undefined && { attestedBy }),
+  };
+};
 
 const teamMemberView = (resource: WireResource<WireTeamMember>): Http.TeamMemberView => ({
   id: resource.id,
@@ -709,11 +719,18 @@ export interface AuthClient {
     /**
      * Attest, as the operator and after checking ownership out of band, that
      * an organization controls a domain (`POST /admin/organization-domains`);
-     * resolves with its claim, `verified` with the `manual` strategy.
+     * resolves with its claim, `verified` with the `manual` strategy and the
+     * signed-in admin as its `attestedBy`.
      */
     readonly attestDomain: (
       payload: Http.AdminAttestDomainPayload,
     ) => Promise<Http.OrganizationDomainView>;
+    /**
+     * Release, as the operator, any organization's claim on a domain, whatever
+     * its state (`DELETE /admin/organization-domains/:id`, #680): `domainId`
+     * is the claim's own `id`. Resolves once it is gone.
+     */
+    readonly releaseDomain: (domainId: string) => Promise<void>;
   };
 
   /** Enterprise SSO (this server as an OIDC/SAML relying party). */
@@ -1267,16 +1284,24 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           `/invitations/${encodeURIComponent(invitationId)}/deliveries`,
         ).then((document) => invitationView(document.data)),
 
-      listDomains: (organizationId) => listOwned<WireDomain>(organizationId, "domains"),
+      listDomains: (organizationId) =>
+        jsonApi<CollectionDocument<WireDomain>>(
+          "GET",
+          `/organizations/${encodeURIComponent(organizationId)}/domains`,
+        ).then((document) => document.data.map(domainView)),
       addDomain: (organizationId, attributes) =>
-        createOwned<WireDomain>(organizationId, "domains", "organization-domains", attributes),
+        jsonApi<DataDocument<WireDomain>>(
+          "POST",
+          `/organizations/${encodeURIComponent(organizationId)}/domains`,
+          { data: { type: "organization-domains", attributes } },
+        ).then((document) => domainView(document.data)),
       removeDomain: (domainId) =>
         jsonApi<void>("DELETE", `/organization-domains/${encodeURIComponent(domainId)}`),
       verifyDomain: (domainId) =>
         jsonApi<DataDocument<WireDomain>>(
           "POST",
           `/organization-domains/${encodeURIComponent(domainId)}/verifications`,
-        ).then((document) => organizationOwned(document.data)),
+        ).then((document) => domainView(document.data)),
 
       createRole: (organizationId, attributes) =>
         createOwned<WireOrgRole>(organizationId, "roles", "organization-roles", attributes),
@@ -1397,7 +1422,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
               organization: { data: { type: "organizations", id: organizationId } },
             },
           },
-        }).then((document) => organizationOwned(document.data)),
+        }).then((document) => domainView(document.data)),
+      releaseDomain: (domainId) =>
+        jsonApi<void>("DELETE", `/admin/organization-domains/${encodeURIComponent(domainId)}`),
     },
 
     sso: {
