@@ -119,12 +119,17 @@ for easier debugging; otherwise the message carries the excerpt. The auth
 token is never included in any error, even when the response echoes the token
 or the Basic credentials back (either is replaced with `[redacted]`).
 
-Every request is sent with `redirect: "error"`, so a 3xx fails the send
-without a second request and the credentials in `Authorization` never reach
-whatever `Location` names. An injected `fetch` receives the same option and
-should honour it. Each request also carries the `AbortSignal` of the
-surrounding fiber, so interrupting the send (an `Effect.timeout`, say) cancels
-the request. See
+Redirects are never followed. Every request is sent with `redirect: "manual"`
+(workerd's `fetch` rejects `"error"` on every request, so `"manual"` is the one
+value that works on Workers, Node and browsers alike), and any 3xx response,
+any status-0 response and any `"opaqueredirect"` fails the send as an
+`AuthError` whose `cause` is only `{ status }`. The redirect's body is
+cancelled unread and its `Location` is never read, so the credentials in
+`Authorization` never reach whatever it names and there is no second request.
+An injected `fetch` receives the same options. Each request also carries the
+`AbortSignal` of the surrounding fiber, so interrupting the send (an
+`Effect.timeout`, say) cancels the request, and an error body whose stream
+fails mid-read is an `AuthError` too, never a defect. See
 [issue #606](https://github.com/thomasfosterau/effect-auth/issues/606).
 
 ## API

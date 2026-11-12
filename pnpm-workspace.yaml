@@ -126,6 +126,12 @@ catalog:
   vite-plus: 1.5.1
   vite: npm:@voidzero-dev/vite-plus-core@1.5.1
   vitest: 5.1.0
+  # Cloudflare's runtime, for the vendor adapters' `Workerd.test.ts` (#606),
+  # which send from inside a real workerd. The same exact release alchemy's
+  # `@alchemy.run/cloudflare-runtime` resolves. `allowBuilds` keeps its
+  # postinstall off: the binary comes from the per-platform optional
+  # `@cloudflare/workerd-*` package, which needs no build step.
+  workerd: 1.20261026.1
   xml-crypto: ^6.4.0
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the

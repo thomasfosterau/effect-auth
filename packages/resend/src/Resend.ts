@@ -9,7 +9,7 @@
  *
  * @module resend/resend
  */
-import { Config, Data, Effect, Layer, Match, Redacted } from "effect";
+import { Config, Effect, Layer, Match, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -100,11 +100,6 @@ export interface ResendEmailSenderConfig {
 
 const DEFAULT_BASE_URL = "https://api.resend.com";
 
-/** Reading a non-2xx response's body failed; raised as a defect. */
-class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
-  readonly cause: unknown;
-}> {}
-
 /** The JSON body of Resend's `POST /emails`. */
 const ResendPayloadJson = Schema.fromJsonString(
   Schema.Struct({
@@ -167,13 +162,17 @@ const pastLimit =
 const readErrorBody = (
   response: Response,
   secrets: ReadonlyArray<string>,
-): Effect.Effect<string> => {
+): Effect.Effect<string, AuthError> => {
   const body = response.body;
   if (body === null) return Effect.succeed("");
   const longest = Math.max(0, ...secrets.map((secret) => secret.length));
   return Stream.fromReadableStream({
     evaluate: () => body,
-    onError: (cause) => new ResponseBodyError({ cause }),
+    onError: (cause) =>
+      new AuthError({
+        message: `Failed to read the Resend API's error response (status ${response.status})`,
+        cause,
+      }),
   }).pipe(
     Stream.decodeText,
     Stream.scan(
@@ -189,9 +188,53 @@ const readErrorBody = (
         longest,
       ),
     ),
-    Effect.orDie,
   );
 };
+
+// ---------------------------------------------------------------------------
+// Redirects
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a `redirect: "manual"` response is a redirect. workerd and Node
+ * return the real 3xx (`type: "default"`); a browser returns an
+ * `"opaqueredirect"` with status 0. The status decides, and the opaque type
+ * only adds to it.
+ */
+const isRedirect = (response: Response): boolean =>
+  (response.status >= 300 && response.status <= 399) ||
+  response.status === 0 ||
+  response.type === "opaqueredirect";
+
+/** Cancel a body without reading it; a body that fails to cancel is dropped all the same. */
+const discardBody = (response: Response): Effect.Effect<void> => {
+  const body = response.body;
+  return body === null
+    ? Effect.void
+    : Effect.ignore(
+        Effect.tryPromise({
+          try: () => body.cancel(),
+          catch: (cause) =>
+            new AuthError({ message: "Failed to discard a redirect's body", cause }),
+        }),
+      );
+};
+
+/**
+ * Fail a redirect as an {@link AuthError} carrying only its status. Its body is
+ * cancelled unread, and its `Location` is never read, so nothing the redirect
+ * names reaches the error or a second request.
+ */
+const rejectRedirect = (response: Response): Effect.Effect<never, AuthError> =>
+  Effect.andThen(
+    discardBody(response),
+    Effect.fail(
+      new AuthError({
+        message: `Resend API responded with a redirect (status ${response.status}), which is not followed`,
+        cause: { status: response.status },
+      }),
+    ),
+  );
 
 // ---------------------------------------------------------------------------
 // Sender
@@ -203,7 +246,9 @@ const readErrorBody = (
  * {@link AuthError}; a non-2xx one's `cause` carries the response `status` and
  * a `body` excerpt of at most {@link MAX_ERROR_BODY_CHARS} characters. The API
  * key is never included, even when the response echoes it. Redirects are
- * never followed (`redirect: "error"`), so the key goes to `baseUrl` only.
+ * never followed: the request is sent with `redirect: "manual"` (workerd
+ * rejects `"error"`), and any 3xx, status 0 or opaque redirect fails with
+ * only its status, so the key goes to `baseUrl` only.
  *
  * @example
  * ```ts
@@ -237,7 +282,7 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
         try: (signal) =>
           doFetch(`${baseUrl}/emails`, {
             method: "POST",
-            redirect: "error",
+            redirect: "manual",
             signal,
             headers: {
               Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
@@ -248,6 +293,7 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
         catch: (cause) => new AuthError({ message: "Failed to reach Resend API", cause }),
       });
 
+      if (isRedirect(response)) return yield* rejectRedirect(response);
       if (!response.ok) {
         const body = yield* readErrorBody(response, [Redacted.value(config.apiKey)]);
         return yield* new AuthError({

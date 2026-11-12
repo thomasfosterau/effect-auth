@@ -10,7 +10,7 @@
  *
  * @module twilio/twilio
  */
-import { Data, Effect, Formatter, Layer, Match, Redacted } from "effect";
+import { Effect, Formatter, Layer, Match, Redacted } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -68,11 +68,6 @@ export interface TwilioSmsSenderConfig {
 
 const DEFAULT_BASE_URL = "https://api.twilio.com";
 
-/** Reading a non-2xx response's body failed; raised as a defect. */
-class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
-  readonly cause: unknown;
-}> {}
-
 /**
  * The most characters of a non-2xx response body an {@link AuthError} keeps
  * (#606), in its `cause` and in its message. A longer body is cut here and
@@ -120,14 +115,18 @@ const readPast =
 const errorBodyExcerpt = (
   response: Response,
   secrets: ReadonlyArray<string>,
-): Effect.Effect<string> => {
+): Effect.Effect<string, AuthError> => {
   const stream = response.body;
   if (stream === null) return Effect.succeed("");
   const longest = Math.max(0, ...secrets.map((secret) => secret.length));
   return Stream.runLast(
     Stream.fromReadableStream({
       evaluate: () => stream,
-      onError: (cause) => new ResponseBodyError({ cause }),
+      onError: (cause) =>
+        new AuthError({
+          message: `Failed to read the Twilio API's error response (status ${response.status})`,
+          cause,
+        }),
     }).pipe(
       Stream.decodeText,
       Stream.scan(
@@ -144,9 +143,46 @@ const errorBodyExcerpt = (
         longest,
       ),
     ),
-    Effect.orDie,
   );
 };
+
+/**
+ * Whether a `redirect: "manual"` response is a redirect. workerd and Node
+ * return the real 3xx (`type: "default"`); a browser returns an
+ * `"opaqueredirect"` with status 0. The status decides; the opaque type only
+ * adds to it.
+ */
+const isRedirect = (response: Response): boolean =>
+  (response.status >= 300 && response.status <= 399) ||
+  response.status === 0 ||
+  response.type === "opaqueredirect";
+
+/** Cancel a redirect's body unread; one that fails to cancel is dropped all the same. */
+const cancelBody = (response: Response): Effect.Effect<void> => {
+  const stream = response.body;
+  if (stream === null) return Effect.void;
+  return Effect.tryPromise({
+    try: () => stream.cancel(),
+    catch: (cause) => new AuthError({ message: "Failed to cancel a redirect's body", cause }),
+  }).pipe(Effect.ignore);
+};
+
+/**
+ * A redirect as an {@link AuthError} with only its status: the body is
+ * cancelled unread and `Location` is never read, so nothing it names reaches
+ * the error or a second request.
+ */
+const redirectFailure = (response: Response): Effect.Effect<never, AuthError> =>
+  cancelBody(response).pipe(
+    Effect.andThen(
+      Effect.fail(
+        new AuthError({
+          message: `Twilio API responded with a redirect (status ${response.status}), which is not followed`,
+          cause: { status: response.status },
+        }),
+      ),
+    ),
+  );
 
 /**
  * Twilio's `{ code, message }` error body. The fields are any JSON value, so
@@ -194,8 +230,9 @@ const describeTwilioError = (status: number, bodyText: string): string =>
  * a `body` excerpt of at most {@link MAX_ERROR_BODY_CHARS} characters, and its
  * message Twilio's own error `code`/`message` when the body parses. The auth
  * token is never included, even when the response echoes it. Redirects are
- * never followed (`redirect: "error"`), so the credentials go to `baseUrl`
- * only.
+ * never followed: the request is sent with `redirect: "manual"` (workerd
+ * rejects `"error"`), and any 3xx, status 0 or opaque redirect fails with
+ * only its status, so the credentials go to `baseUrl` only.
  *
  * @example
  * ```ts
@@ -225,7 +262,7 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
         try: (signal) =>
           doFetch(`${baseUrl}/2010-04-01/Accounts/${config.accountSid}/Messages.json`, {
             method: "POST",
-            redirect: "error",
+            redirect: "manual",
             signal,
             headers: {
               Authorization: `Basic ${basic}`,
@@ -236,6 +273,7 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
         catch: (cause) => new AuthError({ message: "Failed to reach Twilio API", cause }),
       });
 
+      if (isRedirect(response)) return yield* redirectFailure(response);
       if (!response.ok) {
         const bodyText = yield* errorBodyExcerpt(response, [authToken, basic]);
         return yield* new AuthError({
