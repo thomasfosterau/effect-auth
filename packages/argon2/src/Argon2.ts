@@ -66,6 +66,58 @@ const parsePositiveInt = (value: string | undefined): number => {
   return parsed > 0 ? parsed : Number.NaN;
 };
 
+/**
+ * The longest stored hash `verify` copies into the kernel. The longest PHC
+ * string the kernel can verify is about 210 characters: the header with
+ * ten-digit `m`, `t` and `p`, a 48-byte salt (64 base64 characters) and a
+ * 64-byte digest (86), the crate's maxima. 512 leaves room for any honest
+ * hash and keeps a multi-megabyte stored value from being copied into linear
+ * memory, which would grow it for the isolate's life (#752).
+ */
+const MAX_STORED_HASH_LENGTH = 512;
+
+/** The cost parameters a stored PHC string must carry, each exactly once. */
+const COST_NAMES: ReadonlyArray<string> = ["m", "t", "p"];
+
+/**
+ * Parse the `m=..,t=..,p=..` segment, in any order. A parameter that is not
+ * `name=value`, an unknown or repeated name (`m=4294967295,m=256` must not
+ * read as either), a missing cost, or a value that is not a positive decimal
+ * integer is refused with the reason.
+ */
+const parseCosts = (
+  parameters: string,
+): { readonly costs: Argon2Profile } | { readonly refused: string } => {
+  const pairs = Arr.map(parameters.split(","), (parameter) => {
+    const [name, value, ...rest] = parameter.split("=");
+    return { parameter, name, value, extra: Arr.isReadonlyArrayNonEmpty(rest) };
+  });
+  const malformed = Arr.findFirst(
+    pairs,
+    ({ name, value, extra }) => name === undefined || value === undefined || extra,
+  );
+  if (Option.isSome(malformed)) {
+    return { refused: `malformed parameter "${malformed.value.parameter}"` };
+  }
+  const names = Arr.map(pairs, ({ name }) => name);
+  const unexpected = Arr.findFirst(names, (name) => !Arr.contains(COST_NAMES, name));
+  if (Option.isSome(unexpected)) return { refused: `unknown parameter "${unexpected.value}"` };
+  if (Arr.dedupe(names).length !== names.length) {
+    return { refused: `repeated parameter in "${parameters}"` };
+  }
+  const costs: Record<string, number> = R.fromEntries(
+    Arr.map(pairs, ({ name, value }): readonly [string, number] => [name, parsePositiveInt(value)]),
+  );
+  const profile = {
+    memoryCost: costs["m"] ?? Number.NaN,
+    timeCost: costs["t"] ?? Number.NaN,
+    parallelism: costs["p"] ?? Number.NaN,
+  };
+  return Arr.every([profile.memoryCost, profile.timeCost, profile.parallelism], Number.isFinite)
+    ? { costs: profile }
+    : { refused: `malformed parameters "${parameters}"` };
+};
+
 const overCeiling = (detail: string): Effect.Effect<never, HashingError> =>
   Effect.fail(new HashingError({ message: `Argon2 hash exceeds the verify ceiling: ${detail}` }));
 
@@ -84,10 +136,15 @@ const overCeiling = (detail: string): Effect.Effect<never, HashingError> =>
  * KiB in linear memory, which never shrinks, so a stored hash with a huge `m`
  * would leave the isolate holding it (on Workers, past its 128 MiB, killing
  * it); a huge `t` or `p` would spin. Such a hash is refused here, before the
- * kernel is entered.
+ * kernel is entered. So is a stored string over `MAX_STORED_HASH_LENGTH`,
+ * before anything is copied into linear memory, and one whose parameters
+ * repeat or add a name (so the ceiling reads the costs the kernel would).
  */
 const checkHash = (hash: string, limits: Argon2VerifyLimits): Effect.Effect<void, HashingError> =>
   Effect.suspend(() => {
+    if (hash.length > MAX_STORED_HASH_LENGTH) {
+      return invalidHash(`longer than ${MAX_STORED_HASH_LENGTH} characters`);
+    }
     const segments = hash.split("$");
     // "$argon2id$v=19$m=..,t=..,p=..$salt$digest" splits into a leading empty
     // segment plus five fields.
@@ -105,33 +162,9 @@ const checkHash = (hash: string, limits: Argon2VerifyLimits): Effect.Effect<void
       return invalidHash(`unsupported version "${version}" (only v=19 is supported)`);
     }
 
-    const pairs = Arr.map(parameters.split(","), (parameter) => {
-      const [name, value] = parameter.split("=");
-      return { parameter, name, value };
-    });
-    const malformed = Arr.findFirst(
-      pairs,
-      ({ name, value }) => name === undefined || value === undefined,
-    );
-    if (Option.isSome(malformed)) {
-      return invalidHash(`malformed parameter "${malformed.value.parameter}"`);
-    }
-    const costs: Record<string, number> = R.fromEntries(
-      Arr.map(pairs, ({ name, value }): readonly [string, number] => [
-        name,
-        parsePositiveInt(value),
-      ]),
-    );
-    const memoryCost = costs["m"] ?? Number.NaN;
-    const timeCost = costs["t"] ?? Number.NaN;
-    const parallelism = costs["p"] ?? Number.NaN;
-    if (
-      !Number.isFinite(memoryCost) ||
-      !Number.isFinite(timeCost) ||
-      !Number.isFinite(parallelism)
-    ) {
-      return invalidHash(`malformed parameters "${parameters}"`);
-    }
+    const parsed = parseCosts(parameters);
+    if ("refused" in parsed) return invalidHash(parsed.refused);
+    const { memoryCost, timeCost, parallelism } = parsed.costs;
     if (memoryCost > limits.maxMemoryKiB) {
       return overCeiling(`m=${memoryCost} is over maxMemoryKiB=${limits.maxMemoryKiB}`);
     }
@@ -147,26 +180,37 @@ const checkHash = (hash: string, limits: Argon2VerifyLimits): Effect.Effect<void
 const isPositiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 
 /**
- * Refuse a configuration whose verify limits are not positive integers, or
- * whose hashing costs exceed them: such a hasher would write hashes its own
- * `verify` refuses, locking out every user it signs up.
+ * Refuse a configuration whose costs or verify limits are not positive
+ * integers (a `NaN` cost would slip past every `>` check), or whose hashing
+ * costs exceed the limits: such a hasher would write hashes its own `verify`
+ * refuses, locking out every user it signs up.
  */
 const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits): void => {
+  const invalid = Arr.findFirst(
+    [
+      ["memoryCost", costs.memoryCost],
+      ["timeCost", costs.timeCost],
+      ["parallelism", costs.parallelism],
+      ["maxMemoryKiB", limits.maxMemoryKiB],
+      ["maxIterations", limits.maxIterations],
+      ["maxParallelism", limits.maxParallelism],
+    ] as const,
+    ([, value]) => !isPositiveInteger(value),
+  );
+  if (Option.isSome(invalid)) {
+    const [name, value] = invalid.value;
+    throw new RangeError(`Argon2 ${name} must be a positive integer, got ${value}`);
+  }
   const checks = [
     ["memoryCost", costs.memoryCost, "maxMemoryKiB", limits.maxMemoryKiB],
     ["timeCost", costs.timeCost, "maxIterations", limits.maxIterations],
     ["parallelism", costs.parallelism, "maxParallelism", limits.maxParallelism],
   ] as const;
-  const problem = Arr.findFirst(
-    checks,
-    ([, value, , max]) => !isPositiveInteger(max) || value > max,
-  );
-  if (Option.isNone(problem)) return;
-  const [cost, value, limit, max] = problem.value;
+  const over = Arr.findFirst(checks, ([, value, , max]) => value > max);
+  if (Option.isNone(over)) return;
+  const [cost, value, limit, max] = over.value;
   throw new RangeError(
-    isPositiveInteger(max)
-      ? `Argon2 ${cost}=${value} is over ${limit}=${max}: its hashes would not verify`
-      : `Argon2 ${limit} must be a positive integer, got ${max}`,
+    `Argon2 ${cost}=${value} is over ${limit}=${max}: its hashes would not verify`,
   );
 };
 

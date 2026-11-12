@@ -6,7 +6,7 @@
  * The kernel's `verifyArgon2` is wrapped in a spy that still runs the real
  * kernel, so each test can say whether verify reached it.
  */
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { assert, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Effect } from "effect";
 import * as Arr from "effect/Array";
 import { Password } from "@thomasfosterau/effect-auth";
@@ -201,15 +201,82 @@ describe("a configured verify ceiling", () => {
   });
 
   it.each(
-    Arr.flatMap(["maxMemoryKiB", "maxIterations", "maxParallelism"] as const, (limit) =>
-      Arr.map(
-        [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY],
-        (value) => [limit, value] as const,
-      ),
+    Arr.flatMap(
+      [
+        "memoryCost",
+        "timeCost",
+        "parallelism",
+        "maxMemoryKiB",
+        "maxIterations",
+        "maxParallelism",
+      ] as const,
+      (limit) =>
+        Arr.map(
+          [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY],
+          (value) => [limit, value] as const,
+        ),
     ),
   )("refuses %s = %s at construction", (limit, value) => {
     expect(() => Argon2.argon2Hasher({ [limit]: value })).toThrow(
       new RangeError(`Argon2 ${limit} must be a positive integer, got ${value}`),
     );
+  });
+});
+
+/** A stored hash with `parameters` as its cost segment; its salt and digest are a fixture's. */
+const withParameters = (parameters: string): string =>
+  `$argon2id$v=19$${parameters}$MDEyMzQ1Njc4OWFiY2RlZg$gy5SuVm5Z7Vw7keB9se9p87QGcomaseB/S2U1OhTsM0`;
+
+describe("a stored hash the ceiling cannot read is refused before the kernel", () => {
+  it.each([
+    ["a repeated m (last-wins would read 256)", "m=4294967295,m=256,t=2,p=1", /repeated parameter/],
+    ["a repeated t", "m=256,t=2,t=1,p=1", /repeated parameter/],
+    ["an unknown parameter", "m=256,t=2,p=1,x=1", /unknown parameter "x"/],
+    ["a keyid parameter", "m=256,t=2,p=1,keyid=abc", /unknown parameter "keyid"/],
+    ["a parameter with two '='", "m=256=1,t=2,p=1", /malformed parameter "m=256=1"/],
+    ["m=+1", "m=+1,t=2,p=1", /malformed parameters/],
+    ["m=1e3", "m=1e3,t=2,p=1", /malformed parameters/],
+    ["hex m", "m=0x100,t=2,p=1", /malformed parameters/],
+    ["m=131072abc", "m=131072abc,t=2,p=1", /malformed parameters/],
+    ["a leading space", "m= 256,t=2,p=1", /malformed parameters/],
+    ["a trailing space", "m=256 ,t=2,p=1", /malformed parameters/],
+    ["m=0", "m=0,t=2,p=1", /malformed parameters/],
+    ["t=0", "m=256,t=0,p=1", /malformed parameters/],
+    ["a missing p", "m=256,t=2", /malformed parameters/],
+    ["an empty value", "m=,t=2,p=1", /malformed parameters/],
+  ])("%s", async (_, parameters, message) => {
+    const error = await run(
+      Effect.flip(Argon2.argon2Hasher().verify("x", withParameters(parameters))),
+    );
+    expect(error._tag).toBe("HashingError");
+    expect(error.message).toMatch(/^Invalid Argon2 hash: /);
+    expect(error.message).toMatch(message);
+    expect(kernel).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stored hash over 512 characters without copying it into the kernel", async () => {
+    const hasher = Argon2.argon2Hasher();
+    const fixture = hashWasmFixtures[0];
+    assert(fixture !== undefined, "a hash-wasm fixture exists");
+    const padded = (length: number) => `${fixture.hash}${"A".repeat(length - fixture.hash.length)}`;
+
+    const cases = [padded(513), padded(4 * 1024 * 1024)];
+    const messages = await run(
+      Effect.forEach(
+        cases,
+        (hash) => Effect.map(Effect.flip(hasher.verify(fixture.password, hash)), (e) => e.message),
+        { concurrency: 1 },
+      ),
+    );
+    expect(messages).toEqual(
+      Arr.map(cases, () => "Invalid Argon2 hash: longer than 512 characters"),
+    );
+    expect(kernel).not.toHaveBeenCalled();
+
+    // At 512 the string reaches the kernel, which reports the padded digest as
+    // unverifiable: the cap is on length only.
+    const error = await run(Effect.flip(hasher.verify(fixture.password, padded(512))));
+    expect(error.message).toMatch(/cannot be recomputed/);
+    expect(kernel).toHaveBeenCalledOnce();
   });
 });

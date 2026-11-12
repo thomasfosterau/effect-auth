@@ -38,8 +38,8 @@ export interface Argon2VerifyLimits {
  *
  * Unset cost fields fall back to {@link defaultProfile}, unset limits to
  * {@link defaultVerifyLimits}. The hasher throws a `RangeError` when it is
- * built with costs over its own ceiling, since it would write hashes it then
- * refuses to verify.
+ * built with a cost or limit that is not a positive integer, or with costs over
+ * its own ceiling, since it would write hashes it then refuses to verify.
  */
 export interface Argon2Options {
   /** Memory cost in KiB. Default `19456` (19 MiB). */
