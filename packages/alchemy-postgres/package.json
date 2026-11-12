@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-alchemy-postgres",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Alchemy v2 AuthSchema resource and Postgres (Hyperdrive or URL) storage wiring for effect-auth.",
   "keywords": [
     "alchemy",
