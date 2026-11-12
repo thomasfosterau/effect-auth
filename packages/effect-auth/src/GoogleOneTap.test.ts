@@ -149,14 +149,17 @@ const makeStores = () => {
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
-        id: `s-${userId}`,
-        userId,
-        expiresAt: DateTime.toDateUtc(
-          DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
-        ),
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
+        session: {
+          id: `s-${userId}`,
+          userId,
+          expiresAt: DateTime.toDateUtc(
+            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+          ),
+          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          attributes: {},
+        },
+        token: `token-${userId}`,
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -528,10 +531,12 @@ const makeHttpFixture = () => {
     handler: HttpServer.make({
       services: Layer.mergeAll(base, oneTapLayer),
       cookie: { secure: false, lastLoginMethod: true },
+      ipRateLimit: false,
     }).handler,
     handlerWithoutOneTap: HttpServer.make({
       services: base,
       cookie: { secure: false },
+      ipRateLimit: false,
     }).handler,
     nonceStore,
   };

@@ -257,8 +257,8 @@ export const make = (
  * // Redeem a token from a sign-in link: the session cookie is set on the response.
  * const redeem = (rawToken: string, response: Headers) =>
  *   Effect.gen(function* () {
- *     const { session, subject } = yield* redeemOneTimeTokenForSession(rawToken)
- *     response.append("set-cookie", `session=${session.id}; Path=/; HttpOnly; Secure`)
+ *     const { token, subject } = yield* redeemOneTimeTokenForSession(rawToken)
+ *     response.append("set-cookie", `session=${token}; Path=/; HttpOnly; Secure`)
  *     return subject
  *   })
  *
@@ -292,6 +292,8 @@ export const redeemOneTimeTokenForSession = (
   {
     readonly subject: string;
     readonly session: Types.Session;
+    /** The raw session token, the credential the client presents; `session.id` is its digest. */
+    readonly token: string;
     readonly metadata?: Types.JsonObject;
   },
   Errors.OneTimeTokenError | Errors.AuthError | HookError,
@@ -301,6 +303,9 @@ export const redeemOneTimeTokenForSession = (
     const service = yield* OneTimeTokenService;
     const sessionService = yield* SessionService;
     const result = yield* service.verify(rawToken);
-    const session = yield* sessionService.createSession(result.subject, options?.sessionAttributes);
-    return { ...result, session };
+    const { session, token } = yield* sessionService.createSession(
+      result.subject,
+      options?.sessionAttributes,
+    );
+    return { ...result, session, token };
   });

@@ -97,7 +97,7 @@ describe("static service layers", () => {
       Effect.gen(function* () {
         const manager = yield* Auth.SessionService;
         const session = yield* manager.createSession(user.id);
-        const validated = yield* manager.validateSession(session.id);
+        const validated = yield* manager.validateSession(session.token);
         return validated;
       }).pipe(Effect.provide(layer)),
     );

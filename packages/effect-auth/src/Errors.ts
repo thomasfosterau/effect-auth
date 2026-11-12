@@ -580,8 +580,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  *
  * Raised at build time, before any request:
  *
- * - `Http.make` throws it synchronously when `ipRateLimit` is configured with no
- *   `trustedProxy` and no `allowMissingClientIp: true` (#358), and when the
+ * - `Http.make` throws it synchronously when `ipRateLimit` (on unless it is
+ *   `false`, #583) has no `trustedProxy` and no `allowMissingClientIp: true`
+ *   (#358), and when the
  *   `Hooks` in `services` include `IPRateLimitPlugin` with neither of them
  *   (#389), and when the `services` include an `OidcProviderService` with
  *   dynamic client registration enabled and there is neither of them (#388,
@@ -599,7 +600,8 @@ export class ClientAddressConfigError extends Data.TaggedError("ClientAddressCon
 
 /**
  * A rate limit is configured with no `RateLimiter` in `services`, so it could not
- * run (#389). The limits are `Http.make`'s `ipRateLimit`, the dynamic client
+ * run (#389). The limits are `Http.make`'s `ipRateLimit` (on unless it is
+ * `false`, #583), the dynamic client
  * registration limit (`POST /register`) and the device user-code limit on
  * approve/deny, which counts as configured whenever a
  * `DeviceAuthorizationService` is in `services` unless it was built with

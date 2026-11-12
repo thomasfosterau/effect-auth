@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
+import { assert, describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
+import * as Schema from "effect/Schema";
 import type * as Http from "../http/index.ts";
+import { hashToken } from "../TokenHash.ts";
 import { AtomRegistry } from "effect/reactivity";
 import { createAuthClient } from "./Client.ts";
 import { makeSessionAtoms } from "./SessionAtoms.ts";
@@ -13,6 +15,8 @@ import * as Option from "effect/Option";
 const isSessionRead = (input: RequestInfo | URL, init?: RequestInit): boolean =>
   new URL(input instanceof Request ? input.url : input).pathname === "/sessions/current" &&
   (init?.method ?? "GET") === "GET";
+
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const EMAIL = "alice@refresh.test";
 const PW = "password-123";
@@ -196,6 +200,42 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     unsubB();
     registryA.dispose();
     registryB.dispose();
+  });
+
+  it("broadcasts a session named by its digest, never the cookie's token (#581)", async () => {
+    const server = makeServerFixture();
+    const tokens: string[] = [];
+    const base = makeCookieJarFetch(server.handler);
+    const client = createAuthClient({
+      baseUrl: "http://cross.test",
+      fetch: async (input, init?) => {
+        const response = await base(input, init);
+        Arr.forEach(response.headers.getSetCookie(), (line) => {
+          const token = /^conduit_session=([^;]+)/.exec(line)?.[1];
+          if (token !== undefined) tokens.push(token);
+        });
+        return response;
+      },
+    });
+    const atoms = makeSessionAtoms(client, { refresh: { crossTab: "no-token" } });
+    const posted: Array<Http.SessionWithUserView | null> = [];
+    const post = vi
+      .spyOn(FakeBroadcastChannel.prototype, "postMessage")
+      .mockImplementation((message) => void posted.push(message.data));
+    const registry = AtomRegistry.make();
+    const unmount = registry.mount(atoms.result);
+
+    await client.signUp({ email: EMAIL, password: PW });
+    const [token] = tokens;
+    expect(token).toBeDefined();
+    const session = Arr.findFirst(posted, (message) => message !== null);
+    assert(Option.isSome(session), "the sign-in was broadcast");
+    expect(session.value.session.id).toBe(hashToken(token ?? ""));
+    expect(toJson(posted)).not.toContain(token);
+
+    post.mockRestore();
+    unmount();
+    registry.dispose();
   });
 
   it("takes a peer's session without a request, and does not echo it", async () => {

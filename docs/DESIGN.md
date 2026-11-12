@@ -33,7 +33,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // Canonical: the service name IS the export; layers are statics on it.
 const app = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
-  const session = yield* sessions.createSession(userId);
+  const { session, token } = yield* sessions.createSession(userId);
 }).pipe(
   Effect.provide(Auth.SessionService.layer({ sessionExpiresIn })),
   Effect.provide(Auth.Email.EmailPasswordService.layer()),

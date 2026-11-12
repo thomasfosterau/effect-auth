@@ -1356,9 +1356,9 @@ const storeContract = (engine: StoreEngine): void => {
         const user = yield* makeUser("manager@example.com");
         const manager = yield* Auth.SessionService;
         const session = yield* manager.createSession(user.id, { ip: "127.0.0.1" });
-        const validated = yield* manager.validateSession(session.id);
-        yield* manager.invalidateSession(session.id);
-        const invalidated = yield* Effect.flip(manager.validateSession(session.id));
+        const validated = yield* manager.validateSession(session.token);
+        yield* manager.invalidateSession(session.token);
+        const invalidated = yield* Effect.flip(manager.validateSession(session.token));
         return { user, session, validated, invalidated };
       }).pipe(
         Effect.provide(

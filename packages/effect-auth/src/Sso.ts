@@ -208,6 +208,8 @@ export interface RegisterSamlProviderInput {
 export interface SsoSignInResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
   readonly isNewUser: boolean;
   readonly provider: SsoProvider;
 }
@@ -577,8 +579,8 @@ export const make = (
         ),
       );
 
-      const session = yield* sessionManager.createSession(user.id);
-      return { user, session, isNewUser, provider } satisfies SsoSignInResult;
+      const { session, token } = yield* sessionManager.createSession(user.id);
+      return { user, session, token, isNewUser, provider } satisfies SsoSignInResult;
     });
 
     /**

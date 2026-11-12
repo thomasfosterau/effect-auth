@@ -2,7 +2,7 @@
 
 The server side of [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) in a SvelteKit app:
 
-- `handle`: the `handle` hook. It resolves the session once, before any `load`, puts it on `event.locals.auth`, and forces `Cache-Control: private, no-store` on pages rendered for a signed-in viewer.
+- `handle`: the `handle` hook. It resolves the session once, before any `load`, puts it on `event.locals.auth` (the session named by its stored id, the token's digest: no credential, so `locals.auth` is safe to return from a `load`), and forces `Cache-Control: private, no-store` on pages rendered for a signed-in viewer.
 - `credentialAction`: the form action for sign-in, sign-up and the other credential flows. It relays the auth handler's `Set-Cookie`, redirects only to a validated target, returns a `pending` result when no session was issued yet (a second factor, or email verification), and reports wrong credentials, throttling and service faults as distinct failures.
 - `credentialForm` and `credentialCommand`: the same credential flows as SvelteKit remote functions (`form()` and `command()` from `$app/server`).
 
