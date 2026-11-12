@@ -881,6 +881,9 @@ store each).
   `Drizzle.RateLimitStore.purgeExpired(tables)` (a cron trigger, a timer) to
   delete, in one `DELETE`, the rows whose `reset_at` and `blocked_until` have
   both passed. A row inside its window or still blocked stays.
+  `purgeExpired(tables, { limit })` caps the rows one call deletes (#729),
+  through a derived table that MySQL accepts in `IN`; it returns no count, so
+  a cron with a CPU budget runs a fixed number of calls per tick.
 - **`TokenStore`** holds email-verification and password-reset tokens in one
   `effect_auth_tokens` table, by `purpose`. `token` is the SHA-256 digest the
   services compute; every read and delete is scoped to the store's purpose, so
