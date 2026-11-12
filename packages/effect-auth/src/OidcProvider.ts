@@ -182,6 +182,13 @@ export class OidcTokenStore extends Context.Service<
     readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
     readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
     readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
+    /**
+     * Delete every access and refresh token issued to `userId`, for every
+     * client. The first proof of the user's email address calls it (#704), so
+     * an earlier, unproven holder of the address keeps no OIDC-provider access.
+     * No-ops silently when the user holds none.
+     */
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
     /** Optional: list all tokens belonging to a rotation family. Used for reuse-detection revocation. */
     readonly listByFamily?: (
       familyId: string,

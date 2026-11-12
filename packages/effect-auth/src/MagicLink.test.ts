@@ -531,7 +531,7 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("clears a squatter's password, sessions and credentials on the address's first proof (#440, #694)", async () => {
+  it("clears a squatter's password, sessions and credentials on the address's first proof (#440, #694, #704)", async () => {
     const testContext = await makeTestContext();
 
     // A squatter signed up with the address and a password they know, and
@@ -545,6 +545,15 @@ describe("MagicLinkService", () => {
     addEmailIdentifier("user-squat", "victim@example.com", false);
     MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+    // The squatter added a phone number they never proved, which would let
+    // them sign in by phone code; the first proof removes it (#704).
+    const squatterPhone = makeIdentifier({
+      userId: "user-squat",
+      type: "phone",
+      value: "+15550000001",
+      now,
+    });
+    MutableHashMap.set(identifierRecords, squatterPhone.id, squatterPhone);
     MutableHashMap.set(sessions, "squatter-session", {
       id: "squatter-session",
       userId: "user-squat",
@@ -589,6 +598,7 @@ describe("MagicLinkService", () => {
       Arr.fromIterable(MutableHashMap.values(sessions)).map((session) => session.userId),
     ).toEqual(["user-squat"]);
     expect(await Effect.runPromise(apiKeys.listByUserId("user-squat"))).toEqual([]);
+    expect(MutableHashMap.has(identifierRecords, squatterPhone.id)).toBe(false);
     expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
   });
 

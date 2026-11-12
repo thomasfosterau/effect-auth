@@ -374,7 +374,7 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 | ------------------ | ----------------------- | ---------------------------------------------------------------------- | --------------------- |
 | `OidcClientStore`  | `Auth.OidcClientStore`  | Registered OIDC clients — static and dynamically registered (RFC 7591) | `OidcProviderService` |
 | `OidcCodeStore`    | `Auth.OidcCodeStore`    | Authorization codes and pending-consent artifacts                      | `OidcProviderService` |
-| `OidcTokenStore`   | `Auth.OidcTokenStore`   | Issued access/refresh tokens, refresh-family metadata                  | `OidcProviderService` |
+| `OidcTokenStore`   | `Auth.OidcTokenStore`   | Issued access/refresh tokens, refresh-family metadata, per-user revoke | `OidcProviderService` |
 | `OidcConsentStore` | `Auth.OidcConsentStore` | Recorded user consent per client                                       | `OidcProviderService` |
 
 **API keys, devices, admin, orgs**
