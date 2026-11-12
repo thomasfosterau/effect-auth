@@ -186,6 +186,8 @@ export interface Team {
  * team's organization.
  */
 export interface TeamMember {
+  /** The membership's own id; the HTTP tier addresses it as `/team-members/:id`. */
+  readonly id: string;
   readonly teamId: string;
   readonly userId: string;
   /** Epoch milliseconds */
@@ -205,6 +207,11 @@ export interface TeamMember {
  * be redefined this way - see {@link OrganizationService.upsertOrgRole}.
  */
 export interface OrgRole {
+  /**
+   * The definition's own id, kept when the role is redefined; the HTTP tier
+   * addresses it as `/organization-roles/:id`.
+   */
+  readonly id: string;
   readonly organizationId: string;
   /** Role name, as it appears on a {@link Member} */
   readonly role: string;
@@ -481,10 +488,16 @@ export class OrganizationStore extends Context.Service<
       organizationId: string,
     ) => Effect.Effect<ReadonlyArray<Team>, Errors.AuthError>;
 
-    readonly addTeamMember: (
-      teamId: string,
-      userId: string,
-    ) => Effect.Effect<TeamMember, Errors.AuthError>;
+    /** Persist a new team membership, its id chosen by the caller. */
+    readonly addTeamMember: (teamMember: TeamMember) => Effect.Effect<TeamMember, Errors.AuthError>;
+    /**
+     * The team membership whose {@link TeamMember.id} is `teamMemberId`, in
+     * whatever team it belongs to; `null` when there is none. The HTTP tier
+     * addresses a team membership by this id (`/team-members/:id`).
+     */
+    readonly getTeamMemberById: (
+      teamMemberId: string,
+    ) => Effect.Effect<TeamMember | null, Errors.AuthError>;
     /** Remove a team membership. A no-op when the user is not in the team. */
     readonly removeTeamMember: (
       teamId: string,
@@ -501,13 +514,21 @@ export class OrganizationStore extends Context.Service<
 
     /**
      * Create or replace a custom role definition, keyed by
-     * `(organizationId, role)`.
+     * `(organizationId, role)`. A replacement carries the stored
+     * {@link OrgRole.id} (the service reads it first), so the id of a
+     * definition never changes.
      */
     readonly upsertOrgRole: (orgRole: OrgRole) => Effect.Effect<OrgRole, Errors.AuthError>;
     readonly getOrgRole: (
       organizationId: string,
       role: string,
     ) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+    /**
+     * The role definition whose {@link OrgRole.id} is `orgRoleId`, in whatever
+     * organization it belongs to; `null` when there is none. The HTTP tier
+     * addresses a definition by this id (`/organization-roles/:id`).
+     */
+    readonly getOrgRoleById: (orgRoleId: string) => Effect.Effect<OrgRole | null, Errors.AuthError>;
     readonly listOrgRoles: (
       organizationId: string,
     ) => Effect.Effect<ReadonlyArray<OrgRole>, Errors.AuthError>;
@@ -700,6 +721,33 @@ export class OrganizationService extends Context.Service<
      * `removeMember`, ...) decides whether the actor may act on it.
      */
     readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
+
+    /**
+     * The team membership with this id; `null` when there is none. No
+     * permission is checked, as for {@link getMemberById}: the operation
+     * applied to it (`removeTeamMember`) decides.
+     */
+    readonly getTeamMemberById: (
+      teamMemberId: string,
+    ) => Effect.Effect<TeamMember | null, Errors.AuthError>;
+
+    /**
+     * The custom role definition with this id; `null` when there is none. No
+     * permission is checked, as for {@link getMemberById}: the operation
+     * applied to it (`upsertOrgRole`, `deleteOrgRole`) decides.
+     */
+    readonly getOrgRoleById: (orgRoleId: string) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+
+    /**
+     * The domain claim with this id; `null` when there is none. No permission
+     * is checked, as for {@link getMemberById}: the operation applied to it
+     * (`removeDomain`, `verifyDomain`) decides. Fails with an
+     * `OrganizationError` when no {@link OrganizationDomainStore} is
+     * configured.
+     */
+    readonly getDomainById: (
+      domainId: string,
+    ) => Effect.Effect<OrganizationDomain | null, OrganizationError | Errors.AuthError>;
 
     /**
      * List the organizations a user belongs to.
@@ -1107,7 +1155,7 @@ export const make = (
     const domainStoreOption = yield* Effect.serviceOption(OrganizationDomainStore);
     const domainVerifierOption = yield* Effect.serviceOption(DomainVerifier);
 
-    /** Generate a random identifier for organizations, members, and invitations. */
+    /** Generate a random identifier for the module's records. */
     const generateId = (): Effect.Effect<string> =>
       crypto.randomBytes(16).pipe(Effect.map(Hex.encode));
 
@@ -1469,6 +1517,23 @@ export const make = (
 
       getMemberById: Effect.fn("OrganizationService.getMemberById")(function* (memberId: string) {
         return yield* store.getMemberById(memberId);
+      }),
+
+      getTeamMemberById: Effect.fn("OrganizationService.getTeamMemberById")(function* (
+        teamMemberId: string,
+      ) {
+        return yield* store.getTeamMemberById(teamMemberId);
+      }),
+
+      getOrgRoleById: Effect.fn("OrganizationService.getOrgRoleById")(function* (
+        orgRoleId: string,
+      ) {
+        return yield* store.getOrgRoleById(orgRoleId);
+      }),
+
+      getDomainById: Effect.fn("OrganizationService.getDomainById")(function* (domainId: string) {
+        const domainStore = yield* requireDomainStore();
+        return yield* domainStore.getById(domainId);
       }),
 
       listOrganizations: Effect.fn("OrganizationService.listOrganizations")(function* (
@@ -1849,7 +1914,12 @@ export const make = (
           return yield* new OrganizationError({ message: "User is already a member of this team" });
         }
 
-        return yield* store.addTeamMember(teamId, memberUserId);
+        return yield* store.addTeamMember({
+          id: yield* generateId(),
+          teamId,
+          userId: memberUserId,
+          createdAt: yield* Clock.currentTimeMillis,
+        });
       }),
 
       removeTeamMember: Effect.fn("OrganizationService.removeTeamMember")(function* (
@@ -2023,6 +2093,7 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
         const existing = yield* store.getOrgRole(organizationId, input.role);
         return yield* store.upsertOrgRole({
+          id: existing?.id ?? (yield* generateId()),
           organizationId,
           role: input.role,
           permissions: input.permissions,

@@ -225,16 +225,14 @@ const organizationStore = {
       ),
     ),
 
-  addTeamMember: (teamId: string, userId: string) =>
+  addTeamMember: (teamMember: TeamMember) =>
     Effect.sync(() => {
-      const teamMember: TeamMember = {
-        teamId,
-        userId,
-        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-      };
       teamMembers.push(teamMember);
       return teamMember;
     }),
+
+  getTeamMemberById: (teamMemberId: string) =>
+    Effect.sync(() => teamMembers.find((teamMember) => teamMember.id === teamMemberId) ?? null),
 
   removeTeamMember: (teamId: string, userId: string) =>
     Effect.sync(() => {
@@ -265,6 +263,13 @@ const organizationStore = {
   getOrgRole: (organizationId: string, role: string) =>
     Effect.sync(() =>
       Option.getOrNull(MutableHashMap.get(orgRoles, orgRoleKey(organizationId, role))),
+    ),
+
+  getOrgRoleById: (orgRoleId: string) =>
+    Effect.sync(
+      () =>
+        Array.from(MutableHashMap.values(orgRoles)).find((orgRole) => orgRole.id === orgRoleId) ??
+        null,
     ),
 
   listOrgRoles: (organizationId: string) =>
@@ -894,8 +899,9 @@ describe("OrganizationService", () => {
         );
 
         const renamed = yield* service.updateTeam("owner-1", design.id, { name: "Design Ops" });
+        const byId = yield* service.getTeamMemberById(added.id);
 
-        return { engineering, design, added, listed, teamMembership, forMember, renamed };
+        return { engineering, design, added, listed, teamMembership, forMember, renamed, byId };
       }),
     );
 
@@ -911,6 +917,9 @@ describe("OrganizationService", () => {
     ).toEqual(["Design", "Engineering"]);
     expect(result.teamMembership).toHaveLength(1);
     expect(result.teamMembership[0].userId).toBe("member-1");
+    // The service mints the team membership's id; the store reads it back.
+    expect(result.teamMembership[0].id).toBe(result.added.id);
+    expect(result.byId).toEqual(result.added);
     expect(result.forMember.map((team) => team.id)).toEqual([result.engineering.id]);
     expect(result.renamed.name).toBe("Design Ops");
     expect(result.renamed.updatedAt).toBeGreaterThanOrEqual(result.design.createdAt);
@@ -1402,6 +1411,8 @@ describe("OrganizationService", () => {
       }),
     );
 
+    // A redefinition keeps the definition's id and creation time.
+    expect(result.second.id).toBe(result.first.id);
     expect(result.second.createdAt).toBe(result.first.createdAt);
     expect(result.second.updatedAt).toBeGreaterThanOrEqual(result.first.updatedAt);
     expect(result.listed).toHaveLength(1);
@@ -2030,15 +2041,20 @@ describe("OrganizationStore conformance", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("fails a store whose getMemberById misses", async () => {
-    const forgetful = { ...organizationStore, getMemberById: () => Effect.succeed(null) };
-    const exits = await Promise.all(
-      suite.cases.map((testCase) =>
-        Effect.runPromiseExit(
-          testCase.run.pipe(Effect.provideService(OrganizationStore, forgetful)),
+  it.each(["getMemberById", "getTeamMemberById", "getOrgRoleById"] as const)(
+    "fails a store whose %s misses, in every case that reads it",
+    async (lookup) => {
+      const forgetful = { ...organizationStore, [lookup]: () => Effect.succeed(null) };
+      const reading = suite.cases.filter((testCase) => testCase.name.includes(lookup));
+      expect(reading.length).toBeGreaterThan(0);
+      const exits = await Promise.all(
+        reading.map((testCase) =>
+          Effect.runPromiseExit(
+            testCase.run.pipe(Effect.provideService(OrganizationStore, forgetful)),
+          ),
         ),
-      ),
-    );
-    expect(exits.filter(Exit.isFailure)).toHaveLength(suite.cases.length);
-  });
+      );
+      expect(exits.filter(Exit.isFailure)).toHaveLength(reading.length);
+    },
+  );
 });

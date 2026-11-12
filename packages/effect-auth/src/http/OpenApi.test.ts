@@ -1,4 +1,4 @@
-import { describe, it, expect, onTestFinished } from "vite-plus/test";
+import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
 import { Array as Arr, Layer, Order, Schema, Struct } from "effect";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
@@ -76,16 +76,16 @@ const EXPECTED_PATHS = [
   "/organization-members/{id}",
   "/invitations/{id}",
   "/invitations/{id}/deliveries",
-  "/organization/{organizationId}/domains",
-  "/organization/{organizationId}/domains/{domainId}",
-  "/organization/{organizationId}/domains/{domainId}/verify",
-  "/organization/{organizationId}/roles",
-  "/organization/{organizationId}/roles/{role}",
-  "/organization/{organizationId}/teams",
-  "/organization/{organizationId}/members/{userId}/teams",
-  "/teams/{teamId}",
-  "/teams/{teamId}/members",
-  "/teams/{teamId}/members/{userId}",
+  "/organizations/{id}/domains",
+  "/organizations/{id}/roles",
+  "/organizations/{id}/teams",
+  "/organization-members/{id}/teams",
+  "/organization-domains/{id}",
+  "/organization-domains/{id}/verifications",
+  "/organization-roles/{id}",
+  "/teams/{id}",
+  "/teams/{id}/members",
+  "/team-members/{id}",
   "/admin/users/list",
   "/admin/users/set-role",
   "/admin/users/ban",
@@ -187,6 +187,18 @@ describe("getOpenApiSpec", () => {
       "415",
       "500",
     ]);
+  });
+
+  it("documents a 409 only where a create can conflict", () => {
+    const { paths } = getOpenApiSpec();
+    // Defining a role an organization already defines is a conflict; creating
+    // a team never is.
+    const roles = paths["/organizations/{id}/roles"]?.post?.responses;
+    const teams = paths["/organizations/{id}/teams"]?.post?.responses;
+    assert.isDefined(roles);
+    assert.isDefined(teams);
+    expect(Struct.keys(roles)).toContain("409");
+    expect(Struct.keys(teams)).not.toContain("409");
   });
 });
 

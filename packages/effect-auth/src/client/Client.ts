@@ -219,6 +219,14 @@ type WireMember = Omit<Http.MemberView, "id" | "organizationId" | "userId">;
 
 type WireInvitation = Omit<Http.InvitationView, "id" | "organizationId" | "inviterId">;
 
+type WireDomain = Omit<Http.OrganizationDomainView, "id" | "organizationId">;
+
+type WireOrgRole = Omit<Http.OrgRoleView, "id" | "organizationId">;
+
+type WireTeam = Omit<Http.TeamView, "id" | "organizationId">;
+
+type WireTeamMember = Omit<Http.TeamMemberView, "id" | "teamId" | "userId">;
+
 interface DataDocument<A> {
   readonly data: WireResource<A>;
   readonly included?: ReadonlyArray<WireResource<WireUser>>;
@@ -280,6 +288,22 @@ const invitationView = (resource: WireResource<WireInvitation>): Http.Invitation
   id: resource.id,
   organizationId: related(resource, "organization"),
   inviterId: related(resource, "inviter"),
+  ...resource.attributes,
+});
+
+/** A resource that belongs to one organization, with its `organizationId` back in place. */
+const organizationOwned = <A>(
+  resource: WireResource<A>,
+): A & { readonly id: string; readonly organizationId: string } => ({
+  id: resource.id,
+  organizationId: related(resource, "organization"),
+  ...resource.attributes,
+});
+
+const teamMemberView = (resource: WireResource<WireTeamMember>): Http.TeamMemberView => ({
+  id: resource.id,
+  teamId: related(resource, "team"),
+  userId: related(resource, "user"),
   ...resource.attributes,
 });
 
@@ -565,34 +589,37 @@ export interface AuthClient {
       organizationId: string,
       payload: Http.AddOrganizationDomainPayload,
     ) => Promise<Http.OrganizationDomainView>;
-    readonly removeDomain: (organizationId: string, domainId: string) => Promise<void>;
+    /** Release a claim; `domainId` is the claim's own `id`. */
+    readonly removeDomain: (domainId: string) => Promise<void>;
     /**
      * Run the verification check. A DNS claim whose record is not published
      * yet comes back in state `"failed"` - retry once it is.
      */
-    readonly verifyDomain: (
-      organizationId: string,
-      domainId: string,
-    ) => Promise<Http.OrganizationDomainView>;
+    readonly verifyDomain: (domainId: string) => Promise<Http.OrganizationDomainView>;
 
-    /** Define (or redefine) a role's permissions for one organization. */
-    readonly upsertRole: (
+    /**
+     * Define a role for one organization. A role it already defines is
+     * refused with `409`: change it with {@link updateRole}.
+     */
+    readonly createRole: (
       organizationId: string,
-      role: string,
-      payload: Http.UpsertOrgRolePayload,
+      payload: Http.CreateOrgRolePayload,
     ) => Promise<Http.OrgRoleView>;
     readonly listRoles: (organizationId: string) => Promise<Http.OrgRoleListView>;
-    readonly deleteRole: (organizationId: string, role: string) => Promise<void>;
+    /** Replace a role definition's permissions; `roleId` is the definition's own `id`. */
+    readonly updateRole: (
+      roleId: string,
+      payload: Http.UpsertOrgRolePayload,
+    ) => Promise<Http.OrgRoleView>;
+    readonly deleteRole: (roleId: string) => Promise<void>;
 
     readonly createTeam: (
       organizationId: string,
       payload: Http.CreateTeamPayload,
     ) => Promise<Http.TeamView>;
     readonly listTeams: (organizationId: string) => Promise<Http.TeamListView>;
-    readonly listTeamsForMember: (
-      organizationId: string,
-      userId: string,
-    ) => Promise<Http.TeamListView>;
+    /** The teams a membership's user belongs to; `memberId` is the membership's own `id`. */
+    readonly listTeamsForMember: (memberId: string) => Promise<Http.TeamListView>;
     readonly updateTeam: (
       teamId: string,
       payload: Http.UpdateTeamPayload,
@@ -603,7 +630,8 @@ export interface AuthClient {
       payload: Http.AddTeamMemberPayload,
     ) => Promise<Http.TeamMemberView>;
     readonly listTeamMembers: (teamId: string) => Promise<Http.TeamMemberListView>;
-    readonly removeTeamMember: (teamId: string, userId: string) => Promise<void>;
+    /** Remove a team membership; `teamMemberId` is its own `id` (from `addTeamMember` or `listTeamMembers`). */
+    readonly removeTeamMember: (teamMemberId: string) => Promise<void>;
   };
 
   /** API keys owned by the signed-in user. 404 when unconfigured. */
@@ -803,6 +831,26 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       `/organization-members/${encodeURIComponent(memberId)}`,
       { data: { type: "organization-members", id: memberId, attributes } },
     ).then((document) => memberView(document.data));
+
+  /** `GET /organizations/:id/<collection>`: an organization's domains, roles or teams. */
+  const listOwned = <A>(organizationId: string, collection: string) =>
+    jsonApi<CollectionDocument<A>>(
+      "GET",
+      `/organizations/${encodeURIComponent(organizationId)}/${collection}`,
+    ).then((document) => document.data.map(organizationOwned));
+
+  /** `POST /organizations/:id/<collection>`: create one `type` resource from `attributes`. */
+  const createOwned = <A>(
+    organizationId: string,
+    collection: string,
+    type: string,
+    attributes: object,
+  ) =>
+    jsonApi<DataDocument<A>>(
+      "POST",
+      `/organizations/${encodeURIComponent(organizationId)}/${collection}`,
+      { data: { type, attributes } },
+    ).then((document) => organizationOwned(document.data));
 
   /** `PATCH /invitations/:id`: move an invitation to `status`. */
   const transitionInvitation = (
@@ -1140,77 +1188,60 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           `/invitations/${encodeURIComponent(invitationId)}/deliveries`,
         ).then((document) => invitationView(document.data)),
 
-      listDomains: (organizationId) =>
-        request<Http.OrganizationDomainListView>(
-          "GET",
-          `/organization/${encodeURIComponent(organizationId)}/domains`,
-        ),
-      addDomain: (organizationId, payload) =>
-        request<Http.OrganizationDomainView>(
+      listDomains: (organizationId) => listOwned<WireDomain>(organizationId, "domains"),
+      addDomain: (organizationId, attributes) =>
+        createOwned<WireDomain>(organizationId, "domains", "organization-domains", attributes),
+      removeDomain: (domainId) =>
+        jsonApi<void>("DELETE", `/organization-domains/${encodeURIComponent(domainId)}`),
+      verifyDomain: (domainId) =>
+        jsonApi<DataDocument<WireDomain>>(
           "POST",
-          `/organization/${encodeURIComponent(organizationId)}/domains`,
-          payload,
-        ),
-      removeDomain: (organizationId, domainId) =>
-        request<void>(
-          "DELETE",
-          `/organization/${encodeURIComponent(organizationId)}/domains/${encodeURIComponent(domainId)}`,
-        ),
-      verifyDomain: (organizationId, domainId) =>
-        request<Http.OrganizationDomainView>(
-          "POST",
-          `/organization/${encodeURIComponent(organizationId)}/domains/${encodeURIComponent(domainId)}/verify`,
-        ),
+          `/organization-domains/${encodeURIComponent(domainId)}/verifications`,
+        ).then((document) => organizationOwned(document.data)),
 
-      upsertRole: (organizationId, role, payload) =>
-        request<Http.OrgRoleView>(
-          "PUT",
-          `/organization/${encodeURIComponent(organizationId)}/roles/${encodeURIComponent(role)}`,
-          payload,
-        ),
-      listRoles: (organizationId) =>
-        request<Http.OrgRoleListView>(
-          "GET",
-          `/organization/${encodeURIComponent(organizationId)}/roles`,
-        ),
-      deleteRole: (organizationId, role) =>
-        request<void>(
-          "DELETE",
-          `/organization/${encodeURIComponent(organizationId)}/roles/${encodeURIComponent(role)}`,
-        ),
+      createRole: (organizationId, attributes) =>
+        createOwned<WireOrgRole>(organizationId, "roles", "organization-roles", attributes),
+      listRoles: (organizationId) => listOwned<WireOrgRole>(organizationId, "roles"),
+      updateRole: (roleId, attributes) =>
+        jsonApi<DataDocument<WireOrgRole>>(
+          "PATCH",
+          `/organization-roles/${encodeURIComponent(roleId)}`,
+          { data: { type: "organization-roles", id: roleId, attributes } },
+        ).then((document) => organizationOwned(document.data)),
+      deleteRole: (roleId) =>
+        jsonApi<void>("DELETE", `/organization-roles/${encodeURIComponent(roleId)}`),
 
-      createTeam: (organizationId, payload) =>
-        request<Http.TeamView>(
-          "POST",
-          `/organization/${encodeURIComponent(organizationId)}/teams`,
-          payload,
-        ),
-      listTeams: (organizationId) =>
-        request<Http.TeamListView>(
+      createTeam: (organizationId, attributes) =>
+        createOwned<WireTeam>(organizationId, "teams", "teams", attributes),
+      listTeams: (organizationId) => listOwned<WireTeam>(organizationId, "teams"),
+      listTeamsForMember: (memberId) =>
+        jsonApi<CollectionDocument<WireTeam>>(
           "GET",
-          `/organization/${encodeURIComponent(organizationId)}/teams`,
-        ),
-      listTeamsForMember: (organizationId, userId) =>
-        request<Http.TeamListView>(
-          "GET",
-          `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/teams`,
-        ),
-      updateTeam: (teamId, payload) =>
-        request<Http.TeamView>("PATCH", `/teams/${encodeURIComponent(teamId)}`, payload),
-      deleteTeam: (teamId) => request<void>("DELETE", `/teams/${encodeURIComponent(teamId)}`),
-      addTeamMember: (teamId, payload) =>
-        request<Http.TeamMemberView>(
+          `/organization-members/${encodeURIComponent(memberId)}/teams`,
+        ).then((document) => document.data.map(organizationOwned)),
+      updateTeam: (teamId, attributes) =>
+        jsonApi<DataDocument<WireTeam>>("PATCH", `/teams/${encodeURIComponent(teamId)}`, {
+          data: { type: "teams", id: teamId, attributes },
+        }).then((document) => organizationOwned(document.data)),
+      deleteTeam: (teamId) => jsonApi<void>("DELETE", `/teams/${encodeURIComponent(teamId)}`),
+      addTeamMember: (teamId, { userId }) =>
+        jsonApi<DataDocument<WireTeamMember>>(
           "POST",
           `/teams/${encodeURIComponent(teamId)}/members`,
-          payload,
-        ),
+          {
+            data: {
+              type: "team-members",
+              relationships: { user: { data: { type: "users", id: userId } } },
+            },
+          },
+        ).then((document) => teamMemberView(document.data)),
       listTeamMembers: (teamId) =>
-        request<Http.TeamMemberListView>("GET", `/teams/${encodeURIComponent(teamId)}/members`),
-      removeTeamMember: (teamId, userId) =>
-        request<void>(
-          "DELETE",
-          `/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
-        ),
+        jsonApi<CollectionDocument<WireTeamMember>>(
+          "GET",
+          `/teams/${encodeURIComponent(teamId)}/members`,
+        ).then((document) => document.data.map(teamMemberView)),
+      removeTeamMember: (teamMemberId) =>
+        jsonApi<void>("DELETE", `/team-members/${encodeURIComponent(teamMemberId)}`),
     },
 
     apiKeys: {

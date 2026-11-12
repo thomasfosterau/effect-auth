@@ -931,7 +931,12 @@ export const make = (
         }
         const existing = yield* orgs.listTeamMembers(teamId);
         if (!existing.some((entry) => entry.userId === userId)) {
-          yield* orgs.addTeamMember(teamId, userId);
+          yield* orgs.addTeamMember({
+            id: yield* randomId(),
+            teamId,
+            userId,
+            createdAt: yield* Clock.currentTimeMillis,
+          });
         }
         return yield* Effect.void;
       });

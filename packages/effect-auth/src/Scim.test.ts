@@ -192,16 +192,8 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
           (t) => t.organizationId === organizationId,
         ),
       ),
-    addTeamMember: (teamId: string, userId: string) =>
-      Effect.sync(() => {
-        const teamMember: TeamMember = {
-          teamId,
-          userId,
-          createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-        };
-        teamMembers.push(teamMember);
-        return teamMember;
-      }),
+    addTeamMember: (teamMember: TeamMember) =>
+      Effect.sync(() => (teamMembers.push(teamMember), teamMember)),
     removeTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
         const i = teamMembers.findIndex((m) => m.teamId === teamId && m.userId === userId);
@@ -230,6 +222,8 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     listTeamsForMember: unused,
     upsertOrgRole: unused,
     getOrgRole: unused,
+    getOrgRoleById: unused,
+    getTeamMemberById: unused,
     listOrgRoles: unused,
     deleteOrgRole: unused,
   };

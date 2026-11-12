@@ -235,16 +235,10 @@ const makeFixture = () => {
           (t) => t.organizationId === organizationId,
         ),
       ),
-    addTeamMember: (teamId: string, userId: string) =>
-      Effect.sync(() => {
-        const teamMember: TeamMember = {
-          teamId,
-          userId,
-          createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-        };
-        teamMembers.push(teamMember);
-        return teamMember;
-      }),
+    addTeamMember: (teamMember: TeamMember) =>
+      Effect.sync(() => (teamMembers.push(teamMember), teamMember)),
+    getTeamMemberById: (teamMemberId: string) =>
+      Effect.succeed(teamMembers.find((m) => m.id === teamMemberId) ?? null),
     removeTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
         const i = teamMembers.findIndex((m) => m.teamId === teamId && m.userId === userId);
@@ -263,6 +257,10 @@ const makeFixture = () => {
       Effect.sync(() => (MutableHashMap.set(orgRoles, `${r.organizationId} ${r.role}`, r), r)),
     getOrgRole: (organizationId: string, role: string) =>
       Effect.succeed(Option.getOrNull(MutableHashMap.get(orgRoles, `${organizationId} ${role}`))),
+    getOrgRoleById: (orgRoleId: string) =>
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(orgRoles)).find((r) => r.id === orgRoleId) ?? null,
+      ),
     listOrgRoles: (organizationId: string) =>
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(orgRoles)).filter(
@@ -430,10 +428,7 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
 ): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
-// The response bodies several tests read.
-const IdBody = Schema.Struct({ id: Schema.String });
-const IdListBody = Schema.Array(IdBody);
-const NameBody = Schema.Struct({ name: Schema.String });
+// A response body several tests read.
 /** A JSON array, read for its length. */
 const ListBody = Schema.Array(Schema.Unknown);
 
@@ -551,6 +546,61 @@ const MemberBody = resourceBody({
   status: Schema.String,
   previousRole: Schema.optionalKey(Schema.String),
 });
+
+/** A linkage to one resource, as a relationship's `data`. */
+const Linkage = Schema.Struct({ data: Schema.Struct({ type: Schema.String, id: Schema.String }) });
+
+/** One resource read for its id alone. */
+const IdData = Schema.Struct({ data: Schema.Struct({ id: Schema.String }) });
+
+/** A team, a role or a domain: its attributes, and the organization it belongs to. */
+const OwnedBody = Schema.Struct({
+  data: Schema.Struct({
+    id: Schema.String,
+    attributes: Schema.Struct({ name: Schema.optionalKey(Schema.String) }),
+    relationships: Schema.Struct({ organization: Linkage }),
+  }),
+});
+
+/** A `team-members` resource: its team and user. */
+const TeamMemberBody = Schema.Struct({
+  data: Schema.Struct({
+    id: Schema.String,
+    relationships: Schema.Struct({ team: Linkage, user: Linkage }),
+  }),
+});
+
+/** `POST /organizations/:id/teams` as `sessionId`. */
+const createTeamRequest = (organizationId: string, name: string, sessionId: string) =>
+  apiReq(
+    "POST",
+    `/organizations/${organizationId}/teams`,
+    { data: { type: "teams", attributes: { name } } },
+    sessionId,
+  );
+
+/** `POST /organizations/:id/roles` as `sessionId`. */
+const createRoleRequest = (
+  organizationId: string,
+  role: string,
+  permissions: ReadonlyArray<string>,
+  sessionId: string,
+) =>
+  apiReq(
+    "POST",
+    `/organizations/${organizationId}/roles`,
+    { data: { type: "organization-roles", attributes: { role, permissions: [...permissions] } } },
+    sessionId,
+  );
+
+/** `PATCH /organization-roles/:id` with `attributes`, as `sessionId`. */
+const patchRole = (roleId: string, attributes: Schema.Json, sessionId: string) =>
+  apiReq(
+    "PATCH",
+    `/organization-roles/${roleId}`,
+    { data: { type: "organization-roles", id: roleId, attributes } },
+    sessionId,
+  );
 
 describe("HTTP organization endpoints", () => {
   it("runs a full organization lifecycle", async () => {
@@ -868,62 +918,99 @@ describe("HTTP organization endpoints", () => {
     const memberSid = fx.makeSession("member");
 
     const org = await createOrganization(fx, ownerSid);
-    await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid));
+    const membership = (
+      await jsonBody(
+        await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid)),
+        MemberBody,
+      )
+    ).data;
 
     // Create.
-    const teamRes = await fx.handler(
-      jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, ownerSid),
-    );
-    expect(teamRes.status).toBe(200);
-    const team = await jsonBody(
-      teamRes,
-      Schema.Struct({ id: Schema.String, name: Schema.String, organizationId: Schema.String }),
-    );
-    expect(team.name).toBe("Engineering");
-    expect(team.organizationId).toBe(org.id);
+    const teamRes = await fx.handler(createTeamRequest(org.id, "Engineering", ownerSid));
+    expect(teamRes.status).toBe(201);
+    expect(teamRes.headers.get("content-type")).toContain("application/vnd.api+json");
+    const team = (await jsonBody(teamRes, OwnedBody)).data;
+    expect(team.attributes.name).toBe("Engineering");
+    expect(team.relationships.organization.data.id).toBe(org.id);
 
     // Any organization member may list.
-    const listed = await fx.handler(req("GET", `/organization/${org.id}/teams`, memberSid));
-    expect((await jsonBody(listed, IdListBody)).map((t) => t.id)).toEqual([team.id]);
-
-    // Add + list team members.
-    const added = await fx.handler(
-      jsonReq(`/teams/${team.id}/members`, { userId: "member" }, ownerSid),
+    const listed = await fx.handler(
+      apiReq("GET", `/organizations/${org.id}/teams`, undefined, memberSid),
     );
-    expect(added.status).toBe(200);
-    expect(await added.json()).toMatchObject({
-      teamId: team.id,
-      userId: "member",
+    expect((await jsonBody(listed, collectionBody({}))).data.map((t) => t.id)).toEqual([team.id]);
+
+    // Add + list team members: each membership has its own id.
+    const added = await fx.handler(
+      apiReq(
+        "POST",
+        `/teams/${team.id}/members`,
+        {
+          data: {
+            type: "team-members",
+            relationships: { user: { data: { type: "users", id: "member" } } },
+          },
+        },
+        ownerSid,
+      ),
+    );
+    expect(added.status).toBe(201);
+    const teamMember = (await jsonBody(added, TeamMemberBody)).data;
+    expect(teamMember.relationships).toEqual({
+      team: { data: { type: "teams", id: team.id } },
+      user: { data: { type: "users", id: "member" } },
     });
 
-    const teamMembersRes = await fx.handler(req("GET", `/teams/${team.id}/members`, memberSid));
-    expect(
-      (await jsonBody(teamMembersRes, Schema.Array(Schema.Struct({ userId: Schema.String })))).map(
-        (m) => m.userId,
-      ),
-    ).toEqual(["member"]);
-
-    const forMember = await fx.handler(
-      req("GET", `/organization/${org.id}/members/member/teams`, memberSid),
+    const teamMembersRes = await fx.handler(
+      apiReq("GET", `/teams/${team.id}/members`, undefined, memberSid),
     );
-    expect((await jsonBody(forMember, IdListBody)).map((t) => t.id)).toEqual([team.id]);
+    expect((await jsonBody(teamMembersRes, collectionBody({}))).data.map((m) => m.id)).toEqual([
+      teamMember.id,
+    ]);
+
+    // The member's teams, by the membership's id.
+    const forMember = await fx.handler(
+      apiReq("GET", `/organization-members/${membership.id}/teams`, undefined, memberSid),
+    );
+    expect((await jsonBody(forMember, collectionBody({}))).data.map((t) => t.id)).toEqual([
+      team.id,
+    ]);
+    expect(
+      (await fx.handler(apiReq("GET", "/organization-members/nope/teams", undefined, memberSid)))
+        .status,
+    ).toBe(404);
 
     // Rename.
     const renamed = await fx.handler(
-      req("PATCH", `/teams/${team.id}`, ownerSid, { name: "Platform" }),
+      apiReq(
+        "PATCH",
+        `/teams/${team.id}`,
+        { data: { type: "teams", id: team.id, attributes: { name: "Platform" } } },
+        ownerSid,
+      ),
     );
-    expect((await jsonBody(renamed, NameBody)).name).toBe("Platform");
+    expect(
+      (await jsonBody(renamed, resourceBody({ name: Schema.String }))).data.attributes,
+    ).toEqual({ name: "Platform" });
 
-    // Remove the team member, then the team.
-    const removed = await fx.handler(req("DELETE", `/teams/${team.id}/members/member`, ownerSid));
+    // Remove the team member by its id, then the team.
+    expect(
+      (await fx.handler(apiReq("DELETE", "/team-members/nope", undefined, ownerSid))).status,
+    ).toBe(404);
+    const removed = await fx.handler(
+      apiReq("DELETE", `/team-members/${teamMember.id}`, undefined, ownerSid),
+    );
     expect(removed.status).toBe(204);
-    const emptied = await fx.handler(req("GET", `/teams/${team.id}/members`, ownerSid));
-    expect((await jsonBody(emptied, ListBody)).length).toBe(0);
+    const emptied = await fx.handler(
+      apiReq("GET", `/teams/${team.id}/members`, undefined, ownerSid),
+    );
+    expect((await jsonBody(emptied, collectionBody({}))).data).toHaveLength(0);
 
-    const deleted = await fx.handler(req("DELETE", `/teams/${team.id}`, ownerSid));
+    const deleted = await fx.handler(apiReq("DELETE", `/teams/${team.id}`, undefined, ownerSid));
     expect(deleted.status).toBe(204);
-    const afterDelete = await fx.handler(req("GET", `/organization/${org.id}/teams`, ownerSid));
-    expect((await jsonBody(afterDelete, ListBody)).length).toBe(0);
+    const afterDelete = await fx.handler(
+      apiReq("GET", `/organizations/${org.id}/teams`, undefined, ownerSid),
+    );
+    expect((await jsonBody(afterDelete, collectionBody({}))).data).toHaveLength(0);
   });
 
   it("manages custom organization roles", async () => {
@@ -937,42 +1024,55 @@ describe("HTTP organization endpoints", () => {
     await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid));
 
     // Define a custom `member` role that may create teams.
-    const upserted = await fx.handler(
-      req("PUT", `/organization/${org.id}/roles/member`, ownerSid, {
-        permissions: ["team:create"],
-      }),
+    const created = await fx.handler(
+      createRoleRequest(org.id, "member", ["team:create"], ownerSid),
     );
-    expect(upserted.status).toBe(200);
-    expect(await upserted.json()).toMatchObject({
-      organizationId: org.id,
-      role: "member",
-      permissions: ["team:create"],
-    });
+    expect(created.status).toBe(201);
+    const role = (await jsonBody(created, OwnedBody)).data;
+    expect(role.relationships.organization.data.id).toBe(org.id);
+    expect(
+      (
+        await jsonBody(
+          await fx.handler(createRoleRequest(org.id, "member", ["*:*"], ownerSid)),
+          Schema.Struct({ errors: Schema.Array(Schema.Struct({ status: Schema.String })) }),
+        )
+      ).errors[0]?.status,
+    ).toBe("409");
 
     // Any member may list the definitions...
-    const listed = await fx.handler(req("GET", `/organization/${org.id}/roles`, memberSid));
+    const listed = await fx.handler(
+      apiReq("GET", `/organizations/${org.id}/roles`, undefined, memberSid),
+    );
     expect(listed.status).toBe(200);
     expect(
-      (await jsonBody(listed, Schema.Array(Schema.Struct({ role: Schema.String })))).map(
-        (r) => r.role,
-      ),
-    ).toEqual(["member"]);
+      (await jsonBody(listed, collectionBody({ role: Schema.String }))).data.map((r) => [
+        r.id,
+        r.attributes.role,
+      ]),
+    ).toEqual([[role.id, "member"]]);
 
     // ...and the new permission is live for that member.
-    const teamRes = await fx.handler(
-      jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, memberSid),
+    expect((await fx.handler(createTeamRequest(org.id, "Engineering", memberSid))).status).toBe(
+      201,
     );
-    expect(teamRes.status).toBe(200);
+
+    // Changing the permissions keeps the definition's id.
+    const updated = await fx.handler(patchRole(role.id, { permissions: [] }, ownerSid));
+    expect(
+      (await jsonBody(updated, resourceBody({ permissions: Schema.Array(Schema.String) }))).data,
+    ).toEqual({ id: role.id, attributes: { permissions: [] } });
+    expect((await fx.handler(createTeamRequest(org.id, "Design", memberSid))).status).toBe(403);
 
     // Deleting the definition restores the static (permission-less) role.
     const deleted = await fx.handler(
-      req("DELETE", `/organization/${org.id}/roles/member`, ownerSid),
+      apiReq("DELETE", `/organization-roles/${role.id}`, undefined, ownerSid),
     );
     expect(deleted.status).toBe(204);
-    const afterDelete = await fx.handler(
-      jsonReq(`/organization/${org.id}/teams`, { name: "Rogue" }, memberSid),
-    );
-    expect(afterDelete.status).toBe(403);
+    expect(
+      (await fx.handler(apiReq("DELETE", `/organization-roles/${role.id}`, undefined, ownerSid)))
+        .status,
+    ).toBe(404);
+    expect((await fx.handler(createTeamRequest(org.id, "Rogue", memberSid))).status).toBe(403);
   });
 
   it("returns 403 for role management without role:manage and for the owner role", async () => {
@@ -986,27 +1086,35 @@ describe("HTTP organization endpoints", () => {
     await fx.handler(addMemberRequest(org.id, "admin", "admin", ownerSid));
 
     // `role:manage` is owner-only by default.
-    const adminUpsert = await fx.handler(
-      req("PUT", `/organization/${org.id}/roles/auditor`, adminSid, {
-        permissions: ["team:create"],
-      }),
-    );
-    expect(adminUpsert.status).toBe(403);
-    const adminDelete = await fx.handler(
-      req("DELETE", `/organization/${org.id}/roles/auditor`, adminSid),
-    );
-    expect(adminDelete.status).toBe(403);
+    expect(
+      (await fx.handler(createRoleRequest(org.id, "auditor", ["team:create"], adminSid))).status,
+    ).toBe(403);
+    const auditor = (
+      await jsonBody(
+        await fx.handler(createRoleRequest(org.id, "auditor", [], ownerSid)),
+        OwnedBody,
+      )
+    ).data;
+    expect(
+      (await fx.handler(patchRole(auditor.id, { permissions: ["*:*"] }, adminSid))).status,
+    ).toBe(403);
+    expect((await fx.handler(patchRole(auditor.id, {}, adminSid))).status).toBe(403);
+    expect(
+      (await fx.handler(apiReq("DELETE", `/organization-roles/${auditor.id}`, undefined, adminSid)))
+        .status,
+    ).toBe(403);
 
     // The owner role is protected even for the owner.
-    const ownerRoleUpsert = await fx.handler(
-      req("PUT", `/organization/${org.id}/roles/owner`, ownerSid, { permissions: ["*:*"] }),
+    expect((await fx.handler(createRoleRequest(org.id, "owner", ["*:*"], ownerSid))).status).toBe(
+      403,
     );
-    expect(ownerRoleUpsert.status).toBe(403);
 
     // Non-members cannot even list.
     fx.seedUser("stranger", "stranger@test.com");
     const strangerSid = fx.makeSession("stranger");
-    const strangerList = await fx.handler(req("GET", `/organization/${org.id}/roles`, strangerSid));
+    const strangerList = await fx.handler(
+      apiReq("GET", `/organizations/${org.id}/roles`, undefined, strangerSid),
+    );
     expect(strangerList.status).toBe(403);
   });
 
@@ -1020,23 +1128,61 @@ describe("HTTP organization endpoints", () => {
     const org = await createOrganization(fx, ownerSid);
     await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid));
 
-    const denied = await fx.handler(
-      jsonReq(`/organization/${org.id}/teams`, { name: "Rogue" }, memberSid),
-    );
-    expect(denied.status).toBe(403);
+    expect((await fx.handler(createTeamRequest(org.id, "Rogue", memberSid))).status).toBe(403);
 
-    const teamRes = await fx.handler(
-      jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, ownerSid),
-    );
-    const team = await jsonBody(teamRes, IdBody);
+    const team = (
+      await jsonBody(await fx.handler(createTeamRequest(org.id, "Engineering", ownerSid)), IdData)
+    ).data;
 
     const deniedAdd = await fx.handler(
-      jsonReq(`/teams/${team.id}/members`, { userId: "member" }, memberSid),
+      apiReq(
+        "POST",
+        `/teams/${team.id}/members`,
+        {
+          data: {
+            type: "team-members",
+            relationships: { user: { data: { type: "users", id: "member" } } },
+          },
+        },
+        memberSid,
+      ),
     );
     expect(deniedAdd.status).toBe(403);
 
-    const deniedDelete = await fx.handler(req("DELETE", `/teams/${team.id}`, memberSid));
+    const deniedDelete = await fx.handler(
+      apiReq("DELETE", `/teams/${team.id}`, undefined, memberSid),
+    );
     expect(deniedDelete.status).toBe(403);
+  });
+
+  it("refuses domain requests when no OrganizationDomainStore is wired", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const org = await createOrganization(fx, ownerSid);
+
+    // This fixture wires no OrganizationDomainStore: every domain request is
+    // refused like any other, and an id cannot be resolved either.
+    const claim = await fx.handler(
+      apiReq(
+        "POST",
+        `/organizations/${org.id}/domains`,
+        { data: { type: "organization-domains", attributes: { domain: "acme.test" } } },
+        ownerSid,
+      ),
+    );
+    expect(claim.status).toBe(403);
+    expect(
+      (
+        await fx.handler(
+          apiReq("POST", "/organization-domains/nope/verifications", undefined, ownerSid),
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await fx.handler(apiReq("DELETE", "/organization-domains/nope", undefined, ownerSid)))
+        .status,
+    ).toBe(403);
   });
 });
 
