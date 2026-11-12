@@ -143,9 +143,12 @@ const makeHarness = (
       }),
     delete: (userId) =>
       Effect.orDie(
-        Effect.tryPromise(async () => {
-          MutableHashMap.remove(userMap, userId);
-          await deleteRow(userId);
+        Effect.tryPromise({
+          try: async () => {
+            MutableHashMap.remove(userMap, userId);
+            await deleteRow(userId);
+          },
+          catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
         }),
       ),
   };
@@ -249,12 +252,14 @@ describe("single-table IdentifierStore: email change", () => {
           ...store,
           replace: (from, to) =>
             Effect.orDie(
-              Effect.tryPromise(() =>
-                drizzle({ client })
-                  .update(appUsers)
-                  .set({ email: NEW, emailVerified: true })
-                  .where(eq(appUsers.userId, USER.grace)),
-              ),
+              Effect.tryPromise({
+                try: () =>
+                  drizzle({ client })
+                    .update(appUsers)
+                    .set({ email: NEW, emailVerified: true })
+                    .where(eq(appUsers.userId, USER.grace)),
+                catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+              }),
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
       );
@@ -280,12 +285,14 @@ describe("single-table IdentifierStore: email change", () => {
           ...store,
           replace: (from, to) =>
             Effect.orDie(
-              Effect.tryPromise(() =>
-                drizzle({ client })
-                  .update(appUsers)
-                  .set({ email: NEW, emailVerified: false })
-                  .where(eq(appUsers.userId, USER.ada)),
-              ),
+              Effect.tryPromise({
+                try: () =>
+                  drizzle({ client })
+                    .update(appUsers)
+                    .set({ email: NEW, emailVerified: false })
+                    .where(eq(appUsers.userId, USER.ada)),
+                catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+              }),
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
       );
@@ -341,12 +348,14 @@ describe("single-table IdentifierStore: email change", () => {
         ...store,
         replace: (from, to) =>
           Effect.orDie(
-            Effect.tryPromise(() =>
-              drizzle({ client })
-                .update(strictUsers)
-                .set({ email: NEW })
-                .where(eq(strictUsers.userId, USER.grace)),
-            ),
+            Effect.tryPromise({
+              try: () =>
+                drizzle({ client })
+                  .update(strictUsers)
+                  .set({ email: NEW })
+                  .where(eq(strictUsers.userId, USER.grace)),
+              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+            }),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
@@ -367,12 +376,14 @@ describe("single-table IdentifierStore: email change", () => {
         ...store,
         replace: (from, to) =>
           Effect.orDie(
-            Effect.tryPromise(() =>
-              drizzle({ client })
-                .update(strictUsers)
-                .set({ email: NEW, emailVerified: false })
-                .where(eq(strictUsers.userId, USER.ada)),
-            ),
+            Effect.tryPromise({
+              try: () =>
+                drizzle({ client })
+                  .update(strictUsers)
+                  .set({ email: NEW, emailVerified: false })
+                  .where(eq(strictUsers.userId, USER.ada)),
+              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+            }),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));

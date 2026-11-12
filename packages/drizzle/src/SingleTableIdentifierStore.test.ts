@@ -256,11 +256,13 @@ conformance(
   "single-table PostgreSQL",
   Testing.identifierStoreConformance({
     seedUser: (user) =>
-      Effect.tryPromise(() =>
-        drizzle({ client })
-          .insert(appUsers)
-          .values({ userId: user.id, createdAt: user.createdAt, updatedAt: user.updatedAt }),
-      ).pipe(Effect.orDie),
+      Effect.tryPromise({
+        try: () =>
+          drizzle({ client })
+            .insert(appUsers)
+            .values({ userId: user.id, createdAt: user.createdAt, updatedAt: user.updatedAt }),
+        catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+      }).pipe(Effect.orDie),
   }),
   (effect) => runWith(usersMapping, () => effect),
 );

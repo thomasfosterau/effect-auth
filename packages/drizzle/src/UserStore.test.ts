@@ -55,22 +55,25 @@ const seedUser = (
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
   Effect.orDie(
-    Effect.tryPromise(async () => {
-      const id = row.id ?? "user-1";
-      await db
-        .insert(tables.users)
-        .values({
-          id,
-          name: null,
-          image: null,
-          passwordHash: null,
-          attributes: {},
-          createdAt: at(0),
-          updatedAt: at(0),
-          ...row,
-        })
-        .execute();
-      return id;
+    Effect.tryPromise({
+      try: async () => {
+        const id = row.id ?? "user-1";
+        await db
+          .insert(tables.users)
+          .values({
+            id,
+            name: null,
+            image: null,
+            passwordHash: null,
+            attributes: {},
+            createdAt: at(0),
+            updatedAt: at(0),
+            ...row,
+          })
+          .execute();
+        return id;
+      },
+      catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
     }),
   );
 
@@ -123,20 +126,22 @@ conformance(
   "PostgreSQL",
   Testing.userStoreConformance({
     seedUser: (user) =>
-      Effect.tryPromise(() =>
-        drizzle({ client })
-          .insert(tables.users)
-          .values({
-            id: user.id,
-            name: user.name ?? null,
-            image: user.image ?? null,
-            passwordHash: null,
-            attributes: user.attributes,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt,
-          })
-          .execute(),
-      ).pipe(Effect.orDie),
+      Effect.tryPromise({
+        try: () =>
+          drizzle({ client })
+            .insert(tables.users)
+            .values({
+              id: user.id,
+              name: user.name ?? null,
+              image: user.image ?? null,
+              passwordHash: null,
+              attributes: user.attributes,
+              createdAt: user.createdAt,
+              updatedAt: user.updatedAt,
+            })
+            .execute(),
+        catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+      }).pipe(Effect.orDie),
   }),
   (effect) => runWithDatabase(() => effect),
 );
