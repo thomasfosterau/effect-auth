@@ -1121,9 +1121,10 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     };
     const signUpTwice = (testStore: typeof EmailPasswordStore.Service) =>
       Effect.gen(function* () {
-        const testContext = yield* Effect.tryPromise(() => makeTestContext(testStore)).pipe(
-          Effect.orDie,
-        );
+        const testContext = yield* Effect.tryPromise({
+          try: () => makeTestContext(testStore),
+          catch: (cause) => new Errors.AuthError({ message: "test setup failed", cause }),
+        }).pipe(Effect.orDie);
         const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
           Effect.provide(testContext),
         );
@@ -1210,9 +1211,10 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
       };
       const signUp = (testStore: typeof EmailPasswordStore.Service, email: string) =>
         Effect.gen(function* () {
-          const testContext = yield* Effect.tryPromise(() =>
-            makeTestContext(testStore, spyHasher),
-          ).pipe(Effect.orDie);
+          const testContext = yield* Effect.tryPromise({
+            try: () => makeTestContext(testStore, spyHasher),
+            catch: (cause) => new Errors.AuthError({ message: "test setup failed", cause }),
+          }).pipe(Effect.orDie);
           const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
             Effect.provide(testContext),
           );

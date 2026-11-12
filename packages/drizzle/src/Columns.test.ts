@@ -290,9 +290,11 @@ describe("stores over an application's own schema", () => {
         // The columns the stores know nothing about kept their defaults, which
         // is what makes an insert of "only the mapped columns" safe.
         const rows = yield* Effect.orDie(
-          Effect.tryPromise(() =>
-            db.select().from(appSessions).where(eq(appSessions.digest, "digest-1")).execute(),
-          ),
+          Effect.tryPromise({
+            try: () =>
+              db.select().from(appSessions).where(eq(appSessions.digest, "digest-1")).execute(),
+            catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+          }),
         );
 
         yield* store.delete("digest-1");

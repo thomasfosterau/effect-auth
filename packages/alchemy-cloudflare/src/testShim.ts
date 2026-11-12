@@ -19,6 +19,7 @@ import {
 } from "@alchemy.run/cloudflare/D1/QueryDatabase";
 import { RuntimeContext } from "alchemy/RuntimeContext";
 import Database from "better-sqlite3";
+import * as Auth from "@thomasfosterau/effect-auth";
 import { Effect, Layer } from "effect";
 
 interface RawStatement {
@@ -93,7 +94,10 @@ export const clientOver = (binding: Effect.Effect<RawD1>): QueryDatabaseClient =
   // A rejected call is a defect, as in the provider's own client.
   const call = <A>(promise: (database: Effect.Success<typeof raw>) => Promise<A>) =>
     Effect.flatMap(raw, (database) =>
-      Effect.tryPromise(() => promise(database)).pipe(Effect.orDie),
+      Effect.tryPromise({
+        try: () => promise(database),
+        catch: (cause) => new Auth.AuthError({ message: "D1 call failed", cause }),
+      }).pipe(Effect.orDie),
     );
   return {
     raw,

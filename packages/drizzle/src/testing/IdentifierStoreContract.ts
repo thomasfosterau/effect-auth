@@ -571,7 +571,10 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           yield* store.create(emailFor(USER.ada, "ada@example.com", true));
           yield* store.delete(USER.ada);
           const cleared = yield* Effect.orDie(
-            Effect.tryPromise(() => harness.readUserRow(USER.ada)),
+            Effect.tryPromise({
+              try: () => harness.readUserRow(USER.ada),
+              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+            }),
           );
           const afterDelete = yield* store.getByValue("email", "ada@example.com");
           const adaListed = yield* store.listByUser(USER.ada);
@@ -857,7 +860,10 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
             }),
           );
           const storedVerifiedAt = yield* Effect.orDie(
-            Effect.tryPromise(() => harness.readVerifiedAt(USER.ada)),
+            Effect.tryPromise({
+              try: () => harness.readVerifiedAt(USER.ada),
+              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+            }),
           );
           assert(verified !== null, "the verified replace succeeds");
           const unverified = yield* store.replace(

@@ -132,12 +132,14 @@ const databaseFollowers = () =>
   isFollowerLayer({
     isFollower: (followerId, ownerId) =>
       Effect.orDie(
-        Effect.tryPromise(() =>
-          db
-            .select({ ownerId: follows.ownerId })
-            .from(follows)
-            .where(eq(follows.followerId, followerId)),
-        ),
+        Effect.tryPromise({
+          try: () =>
+            db
+              .select({ ownerId: follows.ownerId })
+              .from(follows)
+              .where(eq(follows.followerId, followerId)),
+          catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+        }),
       ).pipe(Effect.map((rows) => rows.some((row) => row.ownerId === ownerId))),
     followingQuery: (followerId) =>
       db.select({ id: follows.ownerId }).from(follows).where(eq(follows.followerId, followerId)),

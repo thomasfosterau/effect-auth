@@ -120,22 +120,25 @@ const seedUser = (
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
   Effect.orDie(
-    Effect.tryPromise(async () => {
-      const id = row.id ?? "user-1";
-      await db
-        .insert(tables.users)
-        .values({
-          id,
-          name: null,
-          image: null,
-          passwordHash: null,
-          attributes: {},
-          createdAt: at(0),
-          updatedAt: at(0),
-          ...row,
-        })
-        .execute();
-      return id;
+    Effect.tryPromise({
+      try: async () => {
+        const id = row.id ?? "user-1";
+        await db
+          .insert(tables.users)
+          .values({
+            id,
+            name: null,
+            image: null,
+            passwordHash: null,
+            attributes: {},
+            createdAt: at(0),
+            updatedAt: at(0),
+            ...row,
+          })
+          .execute();
+        return id;
+      },
+      catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
     }),
   );
 
@@ -153,12 +156,17 @@ describe("Schema", () => {
         yield* identifiers.create(identifier());
 
         const present = yield* Effect.orDie(
-          Effect.tryPromise(async () => {
-            const rows = await db.execute(
-              `SELECT table_name FROM information_schema.tables
+          Effect.tryPromise({
+            try: async () => {
+              const rows = await db.execute(
+                `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
-            );
-            return Schema.decodeUnknownSync(TableNameRows)(rows.rows).map((row) => row.table_name);
+              );
+              return Schema.decodeUnknownSync(TableNameRows)(rows.rows).map(
+                (row) => row.table_name,
+              );
+            },
+            catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
           }),
         );
 

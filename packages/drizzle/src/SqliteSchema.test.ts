@@ -160,22 +160,25 @@ const seedUser = (
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
   Effect.orDie(
-    Effect.tryPromise(async () => {
-      const id = row.id ?? "user-1";
-      await db
-        .insert(activeTables.users)
-        .values({
-          id,
-          name: null,
-          image: null,
-          passwordHash: null,
-          attributes: {},
-          createdAt: at(0),
-          updatedAt: at(0),
-          ...row,
-        })
-        .execute();
-      return id;
+    Effect.tryPromise({
+      try: async () => {
+        const id = row.id ?? "user-1";
+        await db
+          .insert(activeTables.users)
+          .values({
+            id,
+            name: null,
+            image: null,
+            passwordHash: null,
+            attributes: {},
+            createdAt: at(0),
+            updatedAt: at(0),
+            ...row,
+          })
+          .execute();
+        return id;
+      },
+      catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
     }),
   );
 
