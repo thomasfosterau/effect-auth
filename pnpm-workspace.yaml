@@ -29,10 +29,10 @@ catalog:
   # the Effect-monorepo docgen (runs on `effect` and `@effect/platform-node`,
   # which the `effect` override keeps on the singleton); it reads the existing
   # docgen.json.
-  "@effect/docgen": ^4.1.3
+  "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.5
-  "@effect/sql-pg": 4.1.3
-  "@effect/sql-pglite": 4.1.3
+  "@effect/sql-pg": 4.1.4
+  "@effect/sql-pglite": 4.1.4
   # Effect Language Service as a native (TypeScript-Go) binary: the TS7 side of
   # the 6/7 split (see `typescript` below). `effect-tsgo patch --typescript`
   # (the root `prepare` script) overwrites the native `tsc` binary with an
@@ -71,7 +71,7 @@ catalog:
   # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
   # peer of effect-auth, needed only by that subpath. 0.22 (#723) needs
   # `effect ^4.1.0`, which the peers catalog already floors.
-  "@thomasfosterau/effect-jsonapi": ^0.22.0
+  "@thomasfosterau/effect-jsonapi": ^0.22.1
   "@types/node": ^26.6.6
   "@types/pg": ^8.15.0
   # Types for `semver` in `scripts/check-dist.ts` (checked by `vp run check:scripts`).
@@ -87,7 +87,7 @@ catalog:
   # release.
   "@alchemy.run/cloudflare": 2.0.0-beta.85
   alchemy: 2.0.0-beta.85
-  better-sqlite3: ^13.0.3
+  better-sqlite3: ^13.1.1
   # The drizzle 1.0 line, at its tagged release candidate (npm's `rc` tag,
   # which ships the Effect drivers, `drizzle-orm/effect-postgres` and friends).
   # `packages/drizzle` builds its declarations against it; the 0.4x line is
@@ -97,7 +97,7 @@ catalog:
   # both. `scripts/check-dist.ts` (`drizzleApplicationsPin`) type-checks a
   # consumer on the applications' build as well; move that pin with them.
   drizzle-orm: 1.0.0-rc.5
-  effect: 4.1.3
+  effect: 4.1.4
   # Dead-code, duplication and complexity audit: the PreToolUse fallow gate
   # (.claude/hooks/fallow-gate.sh) and `fallow audit` (AGENTS.md, Verification).
   # Config in .fallowrc.json.
@@ -134,7 +134,7 @@ catalog:
   # `@alchemy.run/cloudflare-runtime` resolves. `allowBuilds` keeps its
   # postinstall off: the binary comes from the per-platform optional
   # `@cloudflare/workerd-*` package, which needs no build step.
-  workerd: 1.20261026.1
+  workerd: 1.20261110.1
   xml-crypto: ^6.4.0
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
@@ -149,7 +149,7 @@ catalogs:
     # 0.x minors break, so the peer range is the minor line: 0.22 since #723
     # (its negotiation error codes are underscored, `not_acceptable` /
     # `unsupported_media_type`).
-    "@thomasfosterau/effect-jsonapi": ^0.22.0
+    "@thomasfosterau/effect-jsonapi": ^0.22.1
     # The optional peer of effect-auth's `./saml` subpath, at the same
     # CVE-fixed floor as the catalog pin above.
     "@node-saml/node-saml": ^5.2.0
