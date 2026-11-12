@@ -142,7 +142,7 @@ describe("CaptchaPlugin", () => {
       client,
       (hooks) => hooks.beforeAuthenticate(signIn()),
     );
-    expect(result.identifier.value).toBe("u@example.com");
+    expect(result.identifier?.value).toBe("u@example.com");
   });
 
   it("sends secret and token in the POST body, not the URL query string", async () => {

@@ -458,17 +458,21 @@ export const make = (
      * verification (see verifyTotp/verifyBackupCode). An unknown token fails
      * with `invalidCode`, the method's wrong-code message, because a
      * challenge deleted at the attempt cap is unknown from then on and must
-     * answer as a wrong code does.
+     * answer as a wrong code does. An unknown or expired token names no
+     * user, so it fires the gate unkeyed before failing, for the per-IP
+     * limit (#678).
      */
     const resolvePending = (pendingToken: string, invalidCode: string) =>
       Effect.gen(function* () {
         const pending = yield* pendingStore.get(pendingToken);
         if (!pending) {
+          yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* new MultiFactorError({ message: invalidCode });
         }
 
         if ((yield* Clock.currentTimeMillis) > pending.expiresAt) {
           yield* pendingStore.delete(pendingToken);
+          yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* new MultiFactorError({
             message: "Two-factor challenge token has expired",
           });

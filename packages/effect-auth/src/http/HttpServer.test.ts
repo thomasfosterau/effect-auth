@@ -61,7 +61,7 @@ import {
 } from "../password/PasswordReset.ts";
 import { UserServiceStore, UserService } from "../User.ts";
 import { hashToken } from "../TokenHash.ts";
-import { composePlugins, Hooks } from "../Hooks.ts";
+import { composePlugins, Hooks, makePlugin } from "../Hooks.ts";
 import {
   IdentifierStore,
   makeIdentifier,
@@ -112,6 +112,7 @@ import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import {
+  CaptchaError,
   ClientAddressConfigError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
@@ -2065,6 +2066,33 @@ describe("magic link", () => {
     const handler = handlerFor(makeFixture(), { features: true });
     const res = await handler(authRequest("magic-link", { token: "nope" }));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /otp-challenges hands its captchaToken to beforeSendCode (#678)", () => {
+  /** Hooks whose send gate admits only the captcha token `"ok"`, as a captcha would. */
+  const captchaHooks = makePlugin({
+    beforeSendCode: (attempt) =>
+      attempt.captchaToken === "ok"
+        ? Effect.succeed(attempt)
+        : Effect.fail(new CaptchaError({ message: "Captcha verification failed" })),
+  }).pipe(Layer.provide(Hooks.Default));
+
+  it.each([
+    { flow: "send-magic-link", fields: { email: "cap@example.com" } },
+    { flow: "send-email-otp", fields: { email: "cap@example.com", purpose: "sign-in" } },
+    { flow: "send-phone-otp", fields: { phoneNumber: "+15550100", purpose: "sign-in" } },
+  ] as const)("$flow answers 400 without a token and 202 with one", async ({ flow, fields }) => {
+    const fixture = makeFixture({ hooks: captchaHooks });
+    const handler = handlerFor(fixture, { features: true });
+    const sent = () =>
+      fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length;
+
+    expect((await handler(authRequest(flow, fields))).status).toBe(400);
+    expect((await handler(authRequest(flow, { ...fields, captchaToken: "bad" }))).status).toBe(400);
+    expect(sent()).toBe(0);
+    expect((await handler(authRequest(flow, { ...fields, captchaToken: "ok" }))).status).toBe(202);
+    expect(sent()).toBe(1);
   });
 });
 

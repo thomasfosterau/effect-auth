@@ -1,12 +1,25 @@
 /**
  * Account lockout plugin (transform hook with short-circuit).
  *
- * Guards `beforeAuthenticate`, which every credential-verifying flow fires
- * (email and password, username, email and phone OTP, magic link, and
- * second-factor redemption). Each attempt is counted before the credential
- * is checked, and once `maxAttempts` attempts have been counted without a
- * session being issued, the account is locked for `lockoutDurationMs`:
- * `beforeAuthenticate` fails fast with `AccountLockedError` while locked.
+ * Guards `beforeAuthenticate`, which every credential-verifying flow fires.
+ * Each password, username, passkey and second-factor attempt is counted
+ * before the credential is checked, and once `maxAttempts` attempts have been
+ * counted without a session being issued, the account is locked for
+ * `lockoutDurationMs`: `beforeAuthenticate` fails fast with
+ * `AccountLockedError` while locked.
+ *
+ * - **Possession proofs are exempt** (#678). A one-time code by email or SMS
+ *   and a magic link (`isPossessionMethod`) are neither refused by the lock
+ *   nor counted toward it, so knowing a handle is not enough to block the
+ *   owner's passwordless recovery. Their guesses stay bounded without it: a
+ *   code accepts `maxAttempts` wrong guesses (default 3), the address's
+ *   wrong codes put its sends into a backoff no resend resets (#590), a
+ *   magic-link token is 256 random bits and an unknown one is an unkeyed
+ *   attempt `IPRateLimitPlugin` counts, and `RateLimitPlugin` /
+ *   `IPRateLimitPlugin` count every attempt. A session one of them issues
+ *   clears the lock like any other the user earned.
+ * - **Unkeyed attempts pass** (an unknown challenge or token names no
+ *   account): there is nothing to count them under.
  *
  * - **Keyed on the account.** The counter is keyed on the resolved user
  *   (`lockout:user:<id>`), so every handle of one account (its email, its
@@ -14,9 +27,11 @@
  *   is keyed on the handle itself (`lockout:email:<address>`, ...), so an
  *   unknown handle locks after the same number of attempts a known one does
  *   (see `authenticationSubject`).
- * - **Cleared only when a session is issued** (`afterCreateSession`), never by
- *   a correct password that only earned a second-factor challenge: an
- *   attacker who has the password cannot reset the count by signing in again.
+ * - **Cleared only when the user earns a session** (`afterCreateSession`),
+ *   never by a correct password that only earned a second-factor challenge
+ *   (an attacker who has the password cannot reset the count by signing in
+ *   again), and never by an admin impersonation (`isImpersonationSession`,
+ *   #678), which the user did not earn.
  * - **Second factor has its own per-user count** (`lockout:second-factor:
  *   user:<id>`, `maxSecondFactorAttempts`), independent of the challenge
  *   tokens: each challenge caps its own wrong codes, but the user's count
@@ -36,9 +51,9 @@
  * Because the counter is keyed on the target account and increments before
  * credentials are checked, anyone who knows a victim's email or username can
  * submit `maxAttempts` wrong passwords and lock that account for
- * `lockoutDurationMs`, repeatably, and the lock refuses every method of
- * that account (a magic link or a one-time code included) until it lapses.
- * That is inherent to account-keyed lockout (the same tradeoff OWASP
+ * `lockoutDurationMs`, repeatably, and the lock refuses the password,
+ * passkey and second-factor methods of that account until it lapses (a magic
+ * link or a one-time code still signs the owner in). That is inherent to account-keyed lockout (the same tradeoff OWASP
  * documents). Mitigations, in order of preference:
  *
  * - Stack {@link ../plugins/IPRateLimit.ts | IPRateLimitPlugin} alongside this
@@ -62,8 +77,13 @@
 import { Clock, Context, Duration, Effect, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
-import { type AuthenticateAttempt, authenticationSubject, makePlugin } from "../Hooks.ts";
-import type * as Types from "../Types.ts";
+import {
+  type AuthenticateAttempt,
+  authenticationSubject,
+  isPossessionMethod,
+  makePlugin,
+} from "../Hooks.ts";
+import * as Types from "../Types.ts";
 
 /** Per-identifier lockout state. `lockedUntil` is epoch-ms when present. */
 export interface AccountLockoutRecord {
@@ -207,8 +227,14 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
   const firstFactorKey = (subject: string) => `${keyPrefix}${subject}`;
   const secondFactorKey = (subject: string) => `${keyPrefix}second-factor:${subject}`;
 
-  const counterFor = (attempt: AuthenticateAttempt): Counter => {
+  /**
+   * The counter an attempt draws on, or `null` for one the lock does not
+   * cover: a possession proof (a one-time code or a magic link, #678) or an
+   * unkeyed attempt, which names no account.
+   */
+  const counterFor = (attempt: AuthenticateAttempt): Counter | null => {
     const subject = authenticationSubject(attempt);
+    if (subject === undefined || isPossessionMethod(attempt.method)) return null;
     return attempt.method === "second-factor"
       ? {
           key: secondFactorKey(subject),
@@ -244,6 +270,7 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
         beforeAuthenticate: (attempt: AuthenticateAttempt) =>
           Effect.gen(function* () {
             const counter = counterFor(attempt);
+            if (counter === null) return attempt;
             const now = yield* Clock.currentTimeMillis;
 
             const existing = yield* guarded(store.get(counter.key), null);
@@ -271,10 +298,12 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
             return attempt;
           }),
 
-        // Only an issued session clears the counts: a correct password that
-        // earned a second-factor challenge leaves them standing (#592).
+        // Only a session the user earned clears the counts: a correct
+        // password that earned a second-factor challenge leaves them
+        // standing (#592), and so does an admin impersonation (#678).
         afterCreateSession: (session: Types.Session) =>
           Effect.gen(function* () {
+            if (Types.isImpersonationSession(session)) return session;
             const subject = `user:${session.userId}`;
             yield* store.delete(firstFactorKey(subject));
             yield* store.delete(secondFactorKey(subject));
