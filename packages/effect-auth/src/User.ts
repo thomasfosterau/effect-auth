@@ -145,6 +145,18 @@ export class UserService extends Context.Service<
       updates: UpdateUserInput,
     ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
+    /**
+     * Delete the user row, and only the row: `UserServiceStore.delete`. It
+     * does not touch the user's sessions, identifiers or credentials, so it
+     * is not how an account is deleted. Delete an account with
+     * `AccountManagementService.confirmAccountDeletion` or
+     * `AdminService.removeUser`, which purge everything the account holds
+     * before the row (#601). `UserService` stays below the flows that hold
+     * credentials (the credential stores' modules import this one), so it
+     * cannot reach their stores itself; an API key whose owner was deleted
+     * here fails `ApiKeyService.verify`, and a session fails
+     * `validateSession`, but their rows stay until removed.
+     */
     readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 
     /**

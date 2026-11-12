@@ -19,34 +19,22 @@
  * @internal
  */
 import { DateTime, Effect } from "effect";
-import * as Option from "effect/Option";
-import { ApiKeyStore } from "./ApiKey.ts";
 import type * as Errors from "./Errors.ts";
 import type { Identifier, IdentifierStore } from "./Identifier.ts";
 import type { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
-import { CredentialStore } from "./multifactor/WebAuthn.ts";
-import { OAuthAccountStore } from "./oauth/OAuthAccount.ts";
-import { OidcTokenStore } from "./OidcProvider.ts";
 import type { SessionService } from "./SessionService.ts";
-import { TrustedDeviceStore } from "./TrustedDevice.ts";
+import { deleteCredentials, type UserCredentialStores, userCredentialStores } from "./UserPurge.ts";
 
 /**
- * The credential stores {@link proveAddress} sweeps on a first proof. Each is
- * optional: an app without passkeys provides no `CredentialStore`, and its
- * absence means the account cannot hold that kind of credential.
+ * The credential stores {@link proveAddress} sweeps on a first proof, each
+ * through its per-user delete (`UserPurge.ts`, which deleting a user shares).
+ * Each is optional: an app without passkeys provides no `CredentialStore`,
+ * and its absence means the account cannot hold that kind of credential.
  */
-export interface FirstProofCredentials {
-  readonly oauthAccounts?:
-    | Pick<typeof OAuthAccountStore.Service, "getByUserId" | "delete">
-    | undefined;
-  readonly passkeys?: Pick<typeof CredentialStore.Service, "listByUserId" | "delete"> | undefined;
-  readonly apiKeys?: Pick<typeof ApiKeyStore.Service, "listByUserId" | "delete"> | undefined;
-  readonly multiFactor?: Pick<typeof MultiFactorStore.Service, "delete"> | undefined;
-  readonly trustedDevices?: Pick<typeof TrustedDeviceStore.Service, "deleteByUserId"> | undefined;
-  /** The access and refresh tokens the core's OIDC provider issued (#704). */
-  readonly oidcTokens?: Pick<typeof OidcTokenStore.Service, "deleteByUserId"> | undefined;
-}
+export type FirstProofCredentials = Pick<
+  UserCredentialStores,
+  "oauthAccounts" | "passkeys" | "apiKeys" | "multiFactor" | "trustedDevices" | "oidcTokens"
+>;
 
 /** The services {@link proveAddress} writes through, resolved by the caller. */
 export interface FirstProofServices extends FirstProofCredentials {
@@ -58,29 +46,6 @@ export interface FirstProofServices extends FirstProofCredentials {
   >;
 }
 
-/** The credential stores present in the context, each `undefined` when absent. */
-const firstProofCredentials: Effect.Effect<FirstProofCredentials> = Effect.map(
-  Effect.all(
-    {
-      oauthAccounts: Effect.serviceOption(OAuthAccountStore),
-      passkeys: Effect.serviceOption(CredentialStore),
-      apiKeys: Effect.serviceOption(ApiKeyStore),
-      multiFactor: Effect.serviceOption(MultiFactorStore),
-      trustedDevices: Effect.serviceOption(TrustedDeviceStore),
-      oidcTokens: Effect.serviceOption(OidcTokenStore),
-    },
-    { concurrency: 1 },
-  ),
-  (found) => ({
-    oauthAccounts: Option.getOrUndefined(found.oauthAccounts),
-    passkeys: Option.getOrUndefined(found.passkeys),
-    apiKeys: Option.getOrUndefined(found.apiKeys),
-    multiFactor: Option.getOrUndefined(found.multiFactor),
-    trustedDevices: Option.getOrUndefined(found.trustedDevices),
-    oidcTokens: Option.getOrUndefined(found.oidcTokens),
-  }),
-);
-
 /**
  * The {@link FirstProofServices} over the caller's `base` services and the
  * credential stores present in the context. A caller resolves it where it
@@ -90,13 +55,15 @@ const firstProofCredentials: Effect.Effect<FirstProofCredentials> = Effect.map(
 export const firstProofServices = (
   base: Omit<FirstProofServices, keyof FirstProofCredentials>,
 ): Effect.Effect<FirstProofServices> =>
-  Effect.map(firstProofCredentials, (credentials) => ({ ...base, ...credentials }));
-
-/** Run `sweep` over `store` when the app provides it. */
-const ifPresent = <S>(
-  store: S | undefined,
-  sweep: (store: S) => Effect.Effect<void, Errors.AuthError>,
-): Effect.Effect<void, Errors.AuthError> => (store === undefined ? Effect.void : sweep(store));
+  Effect.map(userCredentialStores, (stores) => ({
+    ...base,
+    oauthAccounts: stores.oauthAccounts,
+    passkeys: stores.passkeys,
+    apiKeys: stores.apiKeys,
+    multiFactor: stores.multiFactor,
+    trustedDevices: stores.trustedDevices,
+    oidcTokens: stores.oidcTokens,
+  }));
 
 /**
  * Remove the phone identifiers `userId` never verified (#704): whoever added
@@ -116,34 +83,16 @@ const removeUnverifiedPhones = (
 
 /** Remove every credential `userId` holds other than its password, phone identifiers and sessions. */
 const removeCredentials = (credentials: FirstProofCredentials, userId: string) =>
-  Effect.all(
-    [
-      ifPresent(credentials.oauthAccounts, (store) =>
-        Effect.flatMap(store.getByUserId(userId), (links) =>
-          Effect.forEach(links, (link) => store.delete(link.provider, link.providerId), {
-            concurrency: 1,
-            discard: true,
-          }),
-        ),
-      ),
-      ifPresent(credentials.passkeys, (store) =>
-        Effect.flatMap(store.listByUserId(userId), (passkeys) =>
-          Effect.forEach(passkeys, (passkey) => store.delete(passkey.id), {
-            concurrency: 1,
-            discard: true,
-          }),
-        ),
-      ),
-      ifPresent(credentials.apiKeys, (store) =>
-        Effect.flatMap(store.listByUserId(userId), (keys) =>
-          Effect.forEach(keys, (key) => store.delete(key.id), { concurrency: 1, discard: true }),
-        ),
-      ),
-      ifPresent(credentials.multiFactor, (store) => store.delete(userId)),
-      ifPresent(credentials.trustedDevices, (store) => store.deleteByUserId(userId)),
-      ifPresent(credentials.oidcTokens, (store) => store.deleteByUserId(userId)),
-    ],
-    { concurrency: 1, discard: true },
+  deleteCredentials(
+    {
+      oauthAccounts: credentials.oauthAccounts,
+      passkeys: credentials.passkeys,
+      apiKeys: credentials.apiKeys,
+      multiFactor: credentials.multiFactor,
+      trustedDevices: credentials.trustedDevices,
+      oidcTokens: credentials.oidcTokens,
+    },
+    userId,
   );
 
 /**

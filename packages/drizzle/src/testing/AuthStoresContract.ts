@@ -3,8 +3,8 @@
  * `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the two token stores —
  * as one suite each dialect's file runs against a real engine (#675, #728).
  *
- * `ApiKeyStore` runs the core's published conformance suite. The others have
- * none, so their cases here are written from the contracts' documented
+ * `ApiKeyStore` runs the core's published conformance suite, and the two
+ * token stores its per-user-delete suites (#601). The others have none, so their cases here are written from the contracts' documented
  * semantics (`EmailPasswordStore`, `UserServiceStore` as core's `/sql` store
  * implements it, `RateLimitStore.increment`, `EmailVerificationStore`,
  * `PasswordResetStore`); the email-password cases end with a real sign-up and
@@ -579,6 +579,9 @@ const tokenCases = (label: string, run: Run): void => {
 /** Register every case, `label` naming the engine and driver. */
 export const authStoresContract = (label: string, run: Run): void => {
   conformance(`${label}: ApiKeyStore`, Testing.apiKeyStoreConformance(), run);
+  // The per-user deletes core's account deletion calls (#601).
+  conformance(`${label}: EmailVerificationStore`, Testing.emailVerificationStoreConformance(), run);
+  conformance(`${label}: PasswordResetStore`, Testing.passwordResetStoreConformance(), run);
   emailPasswordCases(label, run);
   userServiceCases(label, run);
   rateLimitCases(label, run);
