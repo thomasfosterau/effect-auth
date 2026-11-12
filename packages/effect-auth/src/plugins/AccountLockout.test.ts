@@ -19,7 +19,7 @@ const byEmail = (email: string, userId?: string): AuthenticateAttempt => ({
   userId,
 });
 
-const session = (userId: string): Types.Session => {
+const session = (userId: string, attributes: Types.Attributes = {}): Types.Session => {
   const now = DateTime.toDateUtc(DateTime.nowUnsafe());
   return {
     id: "raw-token",
@@ -27,7 +27,7 @@ const session = (userId: string): Types.Session => {
     expiresAt: now,
     createdAt: now,
     lastActivityAt: now,
-    attributes: {},
+    attributes,
   };
 };
 
@@ -37,7 +37,7 @@ interface Harness {
   readonly attemptResult: (
     attempt: AuthenticateAttempt,
   ) => Promise<AuthenticateAttempt | HookError>;
-  readonly sessionIssued: (userId: string) => Promise<Types.Session>;
+  readonly sessionIssued: (userId: string, attributes?: Types.Attributes) => Promise<Types.Session>;
   readonly failures: (key: string) => number | undefined;
 }
 
@@ -66,7 +66,8 @@ const makeHarness = (
     attempt: (attempt) => drive((hooks) => hooks.beforeAuthenticate(attempt)),
     attemptResult: (attempt) =>
       drive((hooks) => Effect.catch(hooks.beforeAuthenticate(attempt), (e) => Effect.succeed(e))),
-    sessionIssued: (userId) => drive((hooks) => hooks.afterCreateSession(session(userId))),
+    sessionIssued: (userId, attributes) =>
+      drive((hooks) => hooks.afterCreateSession(session(userId, attributes))),
     failures: (key) => Option.getOrUndefined(MutableHashMap.get(records, key))?.failures,
   };
 };
@@ -128,19 +129,91 @@ describe("AccountLockoutPlugin", () => {
       userId: "u1",
     });
     await h.attempt({
-      method: "phone-otp",
-      identifier: { type: "phone", value: "+1555" },
+      method: "username",
+      identifier: { type: "username", value: "ada" },
       userId: "u1",
     });
     expect(h.failures("lockout:user:u1")).toBe(3);
 
     // Switching handles buys no fresh attempts.
     const blocked = await h.attemptResult({
-      method: "magic-link",
-      identifier: { type: "email", value: "user@example.com" },
+      method: "username",
+      identifier: { type: "username", value: "ada" },
       userId: "u1",
     });
     expect(blocked).toBeInstanceOf(AccountLockedError);
+  });
+
+  it("neither counts nor refuses a passkey attempt, even on a locked account (#698)", async () => {
+    const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
+    const passkey: AuthenticateAttempt = {
+      method: "passkey",
+      identifier: { type: "user", value: "u1" },
+      userId: "u1",
+    };
+    const attempts = Array.from({ length: 5 }, () => passkey);
+    expect(await Promise.all(attempts.map((attempt) => h.attemptResult(attempt)))).toEqual(
+      attempts,
+    );
+    expect(h.failures("lockout:user:u1")).toBeUndefined();
+
+    // Lock the account with passwords; a passkey still gets through.
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt(byEmail("user@example.com", "u1"));
+    expect(await h.attemptResult(byEmail("user@example.com", "u1"))).toBeInstanceOf(
+      AccountLockedError,
+    );
+    expect(await h.attemptResult(passkey)).toEqual(passkey);
+  });
+
+  it("neither counts nor refuses a possession proof (one-time code, magic link) (#678)", async () => {
+    const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
+    const proofs: ReadonlyArray<AuthenticateAttempt> = [
+      {
+        method: "email-otp",
+        identifier: { type: "email", value: "user@example.com" },
+        userId: "u1",
+      },
+      { method: "phone-otp", identifier: { type: "phone", value: "+15550100" }, userId: "u1" },
+      {
+        method: "magic-link",
+        identifier: { type: "email", value: "user@example.com" },
+        userId: "u1",
+      },
+    ];
+    // Not counted: a run of them never locks the account.
+    await Promise.all([...proofs, ...proofs].map((proof) => h.attempt(proof)));
+    expect(h.failures("lockout:user:u1")).toBeUndefined();
+
+    // Not refused: with the account locked by password attempts, each still passes.
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt(byEmail("user@example.com", "u1"));
+    expect(await h.attemptResult(byEmail("user@example.com", "u1"))).toBeInstanceOf(
+      AccountLockedError,
+    );
+    expect(await Promise.all(proofs.map((proof) => h.attemptResult(proof)))).toEqual(proofs);
+    // ...and the lock on the password methods stands.
+    expect(h.failures("lockout:user:u1")).toBe(2);
+  });
+
+  it("lets an unkeyed attempt through without counting it (#678)", async () => {
+    const h = makeHarness({ maxAttempts: 1, lockoutDurationMs: 60_000 });
+    const unkeyed: AuthenticateAttempt = { method: "second-factor" };
+    expect(await h.attemptResult(unkeyed)).toEqual(unkeyed);
+    expect(await h.attemptResult({ method: "passkey" })).toEqual({ method: "passkey" });
+    expect(MutableHashMap.size(h.records)).toBe(0);
+  });
+
+  it("an impersonation session leaves the target's counts standing (#678)", async () => {
+    const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.sessionIssued("u1", { impersonatedBy: "admin-1" });
+    expect(h.failures("lockout:user:u1")).toBe(2);
+
+    // A session the user earned clears them.
+    await h.sessionIssued("u1");
+    expect(h.failures("lockout:user:u1")).toBeUndefined();
   });
 
   it("resets the counts only when a session is issued for the user", async () => {

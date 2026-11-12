@@ -1,5 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Clock, Context, Data, Effect, MutableHashMap, Order } from "effect";
+import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order } from "effect";
+import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
+import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -108,16 +110,27 @@ const platformDigest = Effect.runSync(
   ),
 );
 
-const dependencies = Context.merge(
+/** The `Hooks` a layer builds, as a value to put in a `Context`. */
+const hooksOf = (layer: Layer.Layer<Hooks>): typeof Hooks.Service =>
+  Effect.runSync(Effect.provide(Hooks, layer));
+
+/** The stores and crypto every test uses, with `hooks` (no plugins by default). */
+const dependenciesWith = (hooks: typeof Hooks.Service) =>
   Context.merge(
-    Context.make(ChallengeStore, mockChallengeStore),
-    Context.make(CredentialStore, mockCredentialStore),
-  ),
-  Context.merge(
-    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-    Context.make(Digest.Digest, platformDigest),
-  ),
-);
+    Context.merge(
+      Context.make(ChallengeStore, mockChallengeStore),
+      Context.make(CredentialStore, mockCredentialStore),
+    ),
+    Context.merge(
+      Context.merge(
+        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        Context.make(Digest.Digest, platformDigest),
+      ),
+      Context.make(Hooks, hooks),
+    ),
+  );
+
+const dependencies = dependenciesWith(hooksOf(Hooks.Default));
 
 describe("WebAuthn Service", () => {
   beforeEach(() => {
@@ -1461,5 +1474,111 @@ describe("WebAuthn registration stores the attested credential (#591)", () => {
     assert.instanceOf(err, WebAuthnVerificationError);
     expect(err.message).toBe("Invalid credential public key");
     expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
+  });
+});
+
+/** A test-setup promise; a rejection is a defect. */
+const setUp = <A>(promise: () => Promise<A>) =>
+  Effect.tryPromise({ try: promise, catch: (cause) => new SignAssertionError({ cause }) }).pipe(
+    Effect.orDie,
+  );
+
+describe("passkey sign-in runs beforeAuthenticate (#678)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
+  });
+
+  /** Register an ES256 passkey for the test user, then sign an assertion for a fresh challenge. */
+  const registerAndAssert = Effect.fn("registerAndAssert")(function* (
+    service: typeof WebAuthn.WebAuthnService.Service,
+  ) {
+    const { privateKey, cose } = yield* setUp(() => buildKey(-7));
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = yield* setUp(() => attestationObject(cose, credentialId));
+    const rpIdHash = yield* setUp(getRpIdHash);
+    const reg = yield* service.generateRegistrationChallenge(testUser);
+    yield* service.verifyRegistration(testUser.id, reg.challenge, {
+      credentialId,
+      attestationObject: attestationObj,
+      clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+    });
+    const auth = yield* service.generateAuthenticationChallenge(testUser.id);
+    const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
+    const clientData = clientDataJSON("webauthn.get", auth.challenge);
+    const signature = yield* setUp(() =>
+      signAssertion(-7, privateKey, authenticatorData, clientData),
+    );
+    return {
+      challenge: auth.challenge,
+      response: { credentialId, authenticatorData, clientDataJSON: clientData, signature },
+    };
+  });
+
+  it("runs the gate for the credential's user before the signature is checked", async () => {
+    const seen: Array<AuthenticateAttempt> = [];
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* WebAuthn.make(config);
+          const { challenge, response } = yield* registerAndAssert(service);
+          return yield* Effect.flip(service.verifyAuthentication(challenge, response));
+        }),
+        dependenciesWith(hooksOf(authenticateGate(seen, true))),
+      ),
+    );
+    expect(refused._tag).toBe("RateLimitError");
+    expect(seen).toEqual([
+      {
+        method: "passkey",
+        identifier: { type: "user", value: testUser.id },
+        userId: testUser.id,
+      },
+    ]);
+    // Refused before anything was spent: the counter is unchanged and the
+    // authentication challenge is still stored.
+    const [credential] = MutableHashMap.values(mockCredentialStore.credentials);
+    expect(credential?.counter).toBe(0);
+    expect(MutableHashMap.size(mockChallengeStore.challenges)).toBe(1);
+  });
+
+  it("signs in through a gate that lets the attempt through", async () => {
+    const seen: Array<AuthenticateAttempt> = [];
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* WebAuthn.make(config);
+          const { challenge, response } = yield* registerAndAssert(service);
+          return yield* service.verifyAuthentication(challenge, response);
+        }),
+        dependenciesWith(hooksOf(authenticateGate(seen, false))),
+      ),
+    );
+    expect(result.credential.userId).toBe(testUser.id);
+    expect(seen.map((attempt) => attempt.method)).toEqual(["passkey"]);
+  });
+
+  it("runs the gate unkeyed for an unknown challenge", async () => {
+    const seen: Array<AuthenticateAttempt> = [];
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* WebAuthn.make(config);
+          return yield* Effect.flip(
+            service.verifyAuthentication(new Uint8Array(32), {
+              credentialId: new Uint8Array(20),
+              authenticatorData: new Uint8Array(37),
+              clientDataJSON: new Uint8Array(0),
+              signature: new Uint8Array(0),
+            }),
+          );
+        }),
+        dependenciesWith(hooksOf(authenticateGate(seen, true))),
+      ),
+    );
+    // The gate's refusal wins over the not-found answer, so the per-IP limit
+    // can stop a caller guessing challenges.
+    expect(refused._tag).toBe("RateLimitError");
+    expect(seen).toEqual([{ method: "passkey" }]);
   });
 });

@@ -6,7 +6,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
-import { Hooks } from "../Hooks.ts";
+import { Hooks, makePlugin, type SendCodeAttempt } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
   type EmailOtpCreateUserInput,
@@ -404,6 +404,102 @@ describe("EmailOtpService", () => {
     );
     expect(record?.attempts).toBe(0);
     expect(MutableHashMap.size(sessions)).toBe(0);
+  });
+
+  it.each(["forget-password", "email-verification"] as const)(
+    "check runs beforeAuthenticate for %s before the code is checked (#678)",
+    async (purpose) => {
+      const testContext = await makeTestContext();
+      addUser({
+        id: "user-checked",
+        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        attributes: {},
+      });
+      addEmailIdentifier("user-checked", "checked@example.com", true);
+      const seen: Array<AuthenticateAttempt> = [];
+
+      const refused = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+            yield* service.send("checked@example.com", purpose);
+            return yield* Effect.flip(
+              service.check("checked@example.com", recorded(sentOtps).otp, purpose),
+            );
+          }),
+          testContext,
+        ).pipe(Effect.provide(authenticateGate(seen, true))),
+      );
+
+      expect(refused).toBeInstanceOf(Errors.RateLimitError);
+      expect(seen).toEqual([
+        {
+          method: "email-otp",
+          identifier: { type: "email", value: "checked@example.com" },
+          userId: "user-checked",
+        },
+      ]);
+      // Refused before the code was checked: it is neither spent nor counted.
+      const record = Option.getOrUndefined(
+        MutableHashMap.get(otpRecords, recordKey("checked@example.com", purpose)),
+      );
+      expect(record?.attempts).toBe(0);
+    },
+  );
+
+  it("check keys an address with no account on the address alone (#678)", async () => {
+    const testContext = await makeTestContext();
+    const seen: Array<AuthenticateAttempt> = [];
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+          yield* Effect.flip(service.check("nobody@example.com", "123456", "forget-password"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(authenticateGate(seen, false))),
+    );
+
+    expect(seen).toEqual([
+      {
+        method: "email-otp",
+        identifier: { type: "email", value: "nobody@example.com" },
+        userId: undefined,
+      },
+    ]);
+  });
+
+  it("send runs beforeSendCode with the captcha token before anything is stored (#678)", async () => {
+    const testContext = await makeTestContext();
+    const attempts: Array<SendCodeAttempt> = [];
+    const refusing = makePlugin({
+      beforeSendCode: (attempt) =>
+        Effect.suspend(() => {
+          attempts.push(attempt);
+          return Effect.fail(new Errors.CaptchaError({ message: "no" }));
+        }),
+    }).pipe(Layer.provide(Hooks.Default), Layer.merge(inlineDeliveryScheduler));
+
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+          return yield* Effect.flip(
+            service.send(" Sent@Example.com ", "sign-in", { captchaToken: "tok" }),
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(refusing)),
+    );
+
+    expect(refused).toBeInstanceOf(Errors.CaptchaError);
+    expect(attempts).toEqual([
+      { method: "email-otp", purpose: "sign-in", address: "sent@example.com", captchaToken: "tok" },
+    ]);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
+    expect(sentOtps).toEqual([]);
   });
 
   it("counts no failure against the email when beforeAuthenticate refuses a wrong code (#590, #592)", async () => {

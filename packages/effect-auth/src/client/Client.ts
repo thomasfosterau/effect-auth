@@ -496,24 +496,34 @@ export interface AuthClient {
     readonly revoke: (payload: Http.MultiSessionActionPayload) => Promise<Http.StatusResponse>;
   };
 
+  /** Magic links. `send` takes the captcha token the captcha plugin checks (#678). */
   readonly magicLink: {
-    readonly send: (payload: { email: string }) => Promise<Http.StatusResponse>;
+    readonly send: (payload: {
+      email: string;
+      captchaToken?: string | undefined;
+    }) => Promise<Http.StatusResponse>;
     readonly verify: (payload: { token: string }) => Promise<AuthResult>;
   };
 
+  /** Email one-time passcodes. `send` takes the captcha token the captcha plugin checks (#678). */
   readonly emailOtp: {
     readonly send: (payload: {
       email: string;
       purpose: Http.EmailOtpPurpose;
+      captchaToken?: string | undefined;
     }) => Promise<Http.StatusResponse>;
     readonly signIn: (payload: { email: string; otp: string }) => Promise<AuthResult>;
   };
 
-  /** SMS one-time passcodes. 404 when unconfigured. */
+  /**
+   * SMS one-time passcodes. 404 when unconfigured. `send` takes the captcha
+   * token the captcha plugin checks (#678).
+   */
   readonly phoneOtp: {
     readonly send: (payload: {
       phoneNumber: string;
       purpose: Http.PhoneOtpPurpose;
+      captchaToken?: string | undefined;
     }) => Promise<Http.StatusResponse>;
     readonly signIn: (payload: { phoneNumber: string; otp: string }) => Promise<AuthResult>;
   };
@@ -632,11 +642,18 @@ export interface AuthClient {
       payload: Http.InviteMemberPayload,
     ) => Promise<Http.InvitationView>;
     readonly listInvitations: (organizationId: string) => Promise<Http.InvitationListView>;
-    /** Accept an invitation addressed to the signed-in user's email. */
-    readonly acceptInvitation: (invitationId: string) => Promise<Http.MemberView>;
-    readonly rejectInvitation: (invitationId: string) => Promise<Http.InvitationView>;
+    /**
+     * Accept an invitation addressed to the signed-in user's email, with the
+     * secret `token` the invitation email's link carried.
+     */
+    readonly acceptInvitation: (invitationId: string, token: string) => Promise<Http.MemberView>;
+    /** Decline an invitation, with the secret `token` its email carried. */
+    readonly rejectInvitation: (
+      invitationId: string,
+      token: string,
+    ) => Promise<Http.InvitationView>;
     readonly cancelInvitation: (invitationId: string) => Promise<Http.InvitationView>;
-    /** Re-send a pending invitation: same id, fresh expiry, delivered again. */
+    /** Re-send a pending invitation: same id, a fresh token and expiry, delivered again. */
     readonly resendInvitation: (invitationId: string) => Promise<Http.InvitationView>;
 
     /** Email domains the organization has claimed, and their verification state. */
@@ -925,15 +942,22 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       { data: { type, attributes } },
     ).then((document) => organizationOwned(document.data));
 
-  /** `PATCH /invitations/:id`: move an invitation to `status`. */
+  /** `PATCH /invitations/:id`: move an invitation to `status`, the invitee presenting its `token`. */
   const transitionInvitation = (
     invitationId: string,
     status: Exclude<Http.InvitationView["status"], "pending">,
+    token?: string,
   ): Promise<InvitationTransitionDocument> =>
     jsonApi<InvitationTransitionDocument>(
       "PATCH",
       `/invitations/${encodeURIComponent(invitationId)}`,
-      { data: { type: "invitations", id: invitationId, attributes: { status } } },
+      {
+        data: {
+          type: "invitations",
+          id: invitationId,
+          attributes: token === undefined ? { status } : { status, token },
+        },
+      },
     );
 
   /**
@@ -1134,17 +1158,34 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     magicLink: {
-      send: ({ email }) => sendChallenge({ channel: "magic-link", email }),
+      send: ({ email, captchaToken }) =>
+        sendChallenge({
+          channel: "magic-link",
+          email,
+          ...(captchaToken !== undefined && { captchaToken }),
+        }),
       verify: ({ token }) => signInWith({ method: "magic-link", token }),
     },
 
     emailOtp: {
-      send: ({ email, purpose }) => sendChallenge({ channel: "email", email, purpose }),
+      send: ({ email, purpose, captchaToken }) =>
+        sendChallenge({
+          channel: "email",
+          email,
+          purpose,
+          ...(captchaToken !== undefined && { captchaToken }),
+        }),
       signIn: ({ email, otp }) => signInWith({ method: "email-otp", email, otp }),
     },
 
     phoneOtp: {
-      send: ({ phoneNumber, purpose }) => sendChallenge({ channel: "phone", phoneNumber, purpose }),
+      send: ({ phoneNumber, purpose, captchaToken }) =>
+        sendChallenge({
+          channel: "phone",
+          phoneNumber,
+          purpose,
+          ...(captchaToken !== undefined && { captchaToken }),
+        }),
       signIn: ({ phoneNumber, otp }) => signInWith({ method: "phone-otp", phoneNumber, otp }),
     },
 
@@ -1262,16 +1303,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           "GET",
           `/organizations/${encodeURIComponent(organizationId)}/invitations`,
         ).then((document) => document.data.map(invitationView)),
-      acceptInvitation: async (invitationId) => {
-        const document = await transitionInvitation(invitationId, "accepted");
+      acceptInvitation: async (invitationId, token) => {
+        const document = await transitionInvitation(invitationId, "accepted", token);
         const member = document.meta?.membership;
         if (member === undefined) {
           throw new AuthClientError(0, "The accepted invitation did not include its membership");
         }
         return memberView(member);
       },
-      rejectInvitation: (invitationId) =>
-        transitionInvitation(invitationId, "rejected").then((document) =>
+      rejectInvitation: (invitationId, token) =>
+        transitionInvitation(invitationId, "rejected", token).then((document) =>
           invitationView(document.data),
         ),
       cancelInvitation: (invitationId) =>

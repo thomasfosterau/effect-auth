@@ -24,6 +24,7 @@
     class: className = undefined,
     classes: classOverrides = undefined,
     labels: labelOverrides = undefined,
+    captchaToken = undefined,
   }: EmailOtpFormProps = $props();
 
   const client = resolveAuthClient(() => clientProp);
@@ -42,7 +43,7 @@
 
   const handleRequest = (event: SubmitEvent): void => {
     event.preventDefault();
-    void request.run(() => client.emailOtp.send({ email, purpose }), {
+    void request.run(() => client.emailOtp.send({ email, purpose, captchaToken: captchaToken?.() }), {
       fallback: labels.sendError,
       onSuccess: () => {
         sent = true;

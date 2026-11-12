@@ -108,7 +108,7 @@ The two `before*` session hooks are observe-or-deny. A plugin refuses the valida
 - **OAuth 2.0 social login:** 20 provider presets (Google, GitHub, Discord, Microsoft, Apple, and more) plus custom providers, PKCE, and a complete sign-in flow with verified-email account linking.
 - **Enterprise:** OIDC and SAML SSO with per-organization connections and JIT provisioning (the SAML XML verification is the Node-only [`/saml` subpath](#saml-saml)), SCIM 2.0, and an OIDC provider with RFC 7591 dynamic client registration for MCP clients.
 - **Account management:** verification-gated email change and self-service account deletion (single-use tokens, session revocation, a `beforeDelete` cleanup hook).
-- **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role, verified email domains with opt-in JIT provisioning; admin ban and impersonation.
+- **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role (no member grants a role, or acts on a member, beyond the permissions their own role carries), verified email domains with opt-in JIT provisioning; admin ban and impersonation.
 - **API keys and JWT:** hashed API keys with permissions and quotas; ES256 / EdDSA JWTs with JWKS.
 - **Authorization:** one policy kernel (`Policy`, `Entity`, `Condition`, `Authorizer`) with RBAC as authoring sugar, schema-embedded field guards (`protectedField`), zero-IO guards and role ladders.
 - **Abuse protection:** rate limiting with presets and an optional `effect/persistence` backend (`rateLimiterPersistenceLayer`), per-IP limits, account lockout (`AccountLockoutPlugin`), captcha (Turnstile, reCAPTCHA, hCaptcha).
@@ -472,6 +472,8 @@ const WebAuthnLive = Auth.MultiFactor.WebAuthnService.layer({
     Layer.mergeAll(
       Layer.succeed(Auth.MultiFactor.ChallengeStore)(challengeStore),
       Layer.succeed(Auth.MultiFactor.CredentialStore)(credentialStore),
+      // Passkey sign-in fires `beforeAuthenticate`; no plugins here.
+      Auth.Hooks.Default,
     ),
   ),
 );
@@ -543,8 +545,9 @@ const providers = {
 };
 
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
-// OAuthUserStore, IdentifierStore, UserStore and SessionService; a storage
-// adapter such as @thomasfosterau/effect-auth/sql provides the stores.
+// OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
+// unproven sign-up's password, #671) and SessionService; a storage adapter
+// such as @thomasfosterau/effect-auth/sql provides the stores.
 const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
@@ -559,9 +562,10 @@ const begin = Effect.gen(function* () {
 
 // Step 2: the provider redirects back with `code` and `state`. This resolves or
 // creates the user, links the account and issues a session. A first sign-in
-// whose email matches an existing user auto-links only when both the provider
-// and this application verified the address; otherwise it fails with
-// `EmailInUseError` (#588).
+// whose email matches an existing user auto-links only when the provider
+// verified the address (#588); an unverified local address is proven first,
+// clearing the earlier sign-up's password and sessions (#671). Otherwise it
+// fails with `EmailInUseError`.
 const callback = (state: string, code: string) =>
   Effect.gen(function* () {
     const oauth = yield* Auth.OAuth.OAuthService;
@@ -586,7 +590,7 @@ export { OAuthLive, begin, callback, link, refresh };
 
 **The callback `state` is single-use** (#685). `handleCallback`, `signInWithCallback`, `linkAccount` and the OIDC SSO callback (`SsoService.handleCallback`, `POST /sso/callback`) spend it with `OAuthStateStore.consume`, an atomic get-and-delete, before they exchange the code. A replayed callback fails with `OAuthStateNotFoundError` (an `SsoError` for SSO, `400` over HTTP), whether the first use succeeded or failed, and of two concurrent callbacks carrying the same state only one gets past it. A store you write yourself must implement `consume` as one atomic operation (`DELETE … RETURNING`, a compare-and-swap, Redis `GETDEL`); `/sql`'s store is one `DELETE … RETURNING`. `OAuthStateStoreKV` serializes `consume` within its process only, since a `KeyValueStore` has no get-and-delete: behind several instances sharing one backend, use `/sql` or a store with a native atomic consume. The SAML `RelayState` is single-use the same way: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends.
 
-Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true`, the local email identifier is verified, and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match fails with `EmailInUseError` and changes nothing. An unverified local address may have been claimed by someone who signed up with it and a password, so its real holder proves it first (the verification link, a magic link or an email OTP, which clear the earlier sign-up's password and sessions) and then signs in with the provider.
+Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true` and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match (an unverified provider email, auto-linking off for the provider) fails with `EmailInUseError` and changes nothing. When the local email identifier is still unverified, someone may have signed up with the address and a password before its holder did, so the provider's verification is the address's first proof, as in Google One Tap and SSO (#440, #671): the account's password is cleared and its sessions revoked, the address is marked verified, and then the provider is linked and the holder's session issued. A provider that does not report the email verified never takes over an address.
 
 ## Email verification
 
@@ -825,13 +829,14 @@ import { FetchHttpClient } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Reject compromised passwords (k-anonymity range query) and require a captcha
-// token on sign-up and sign-in. Array order is execution order.
+// token on sign-up, password sign-in and every code or link send. Array order
+// is execution order.
 const plugins = Auth.composePlugins([
   Auth.Password.HaveIBeenPwnedPlugin({ threshold: 1 }),
   Auth.Plugins.CaptchaPlugin({
     provider: "cloudflare-turnstile",
     secretKey: Redacted.make(process.env["TURNSTILE_SECRET"] ?? ""),
-    endpoints: ["signUp", "signIn"],
+    endpoints: ["signUp", "signIn", "sendCode"], // the default
   }),
 ]);
 
@@ -842,17 +847,31 @@ export const HooksLive = plugins.pipe(
 );
 ```
 
-The captcha token is read from the optional `captchaToken` field on the sign-up input and on the email and username sign-in inputs (and the `SignUpPayload` HTTP schema and the `password` and `username` sign-in credentials). Have I Been Pwned fails open on API errors by default (`failClosed: false`).
+The captcha token is read from the optional `captchaToken` field on the sign-up input, on the email and username sign-in inputs, and on the send options of `EmailOtpService.send`, `PhoneOtpService.send` and `MagicLinkService.send` (over HTTP: the `SignUpPayload` schema, the `password` and `username` sign-in credentials, and the `POST /otp-challenges` attributes; in the client, `magicLink.send`, `emailOtp.send` and `phoneOtp.send`). Have I Been Pwned fails open on API errors by default (`failClosed: false`).
 
 ### The `beforeAuthenticate` hook
 
-Every flow that verifies a credential fires `beforeAuthenticate` before it checks the credential and before it spends or creates anything: email and password, username and password, email OTP, phone OTP, magic link, and second-factor redemption (TOTP, backup code, OTP second factor). Its input is `{ method, identifier: { type, value }, userId?, captchaToken? }`: the method (`AuthenticationMethod`), the handle the attempt names (normalized; a second-factor redemption names its challenge's user, `type: "user"`), the user the handle resolves to when one does, and the captcha token for the two password methods. A plugin denies the attempt by failing. The flows read nothing back; `beforeSignIn` stays the place to rewrite an email and password sign-in's input (`NormalizeEmailPlugin`).
+Every flow that verifies a credential fires `beforeAuthenticate` before it checks the credential and before it spends or creates anything: email and password, username and password, email OTP (sign-in, and `EmailOtpService.check` for every purpose), phone OTP, magic link, passkey (`WebAuthnService.verifyAuthentication`, which now needs `Hooks`), and second-factor redemption (TOTP, backup code, OTP second factor). Its input is `{ method, identifier?: { type, value }, userId?, captchaToken? }`: the method (`AuthenticationMethod`), the handle the attempt names (normalized; a second-factor redemption names its challenge's user and a passkey its credential's, `type: "user"`), the user the handle resolves to when one does, and the captcha token for the two password methods. A plugin denies the attempt by failing. The flows read nothing back; `beforeSignIn` stays the place to rewrite an email and password sign-in's input (`NormalizeEmailPlugin`).
+
+An attempt that names no account is **unkeyed** (#678): an unknown or expired second-factor challenge, magic-link token or passkey challenge, or an unknown passkey credential, fires the hook with no `identifier` and no `userId`, then fails. `authenticationSubject` answers `undefined` for it, so the per-account plugins let it through, while `IPRateLimitPlugin` draws it from the address's bucket like any other attempt, so guessing tokens spends the guesser's budget.
 
 `AccountLockoutPlugin`, `CaptchaPlugin`, `RateLimitPlugin` and `IPRateLimitPlugin` guard it:
 
-- **`AccountLockoutPlugin`** counts every attempt per account (`authenticationSubject`: `user:<id>` for a resolved handle, so an account's email, username and phone share one count, else the handle itself, so an unknown handle locks like a known one) and locks after `maxAttempts` for `lockoutDurationMs`. The counts clear only when a session is issued for the user (`afterCreateSession`), never on a correct password that earned only a second-factor challenge. Second-factor redemptions have a per-user count of their own (`maxSecondFactorAttempts`, default 5) that runs across challenges, so fresh challenges buy no fresh guesses; only someone past the first factor can drive it. A lock refuses every method of the account until it lapses, so anyone who knows a handle can lock the account for `lockoutDurationMs`: pair it with `IPRateLimitPlugin` or a captcha.
-- **`CaptchaPlugin`** with the `"signIn"` endpoint verifies the token on the two password methods; the code, link and second-factor flows carry no token.
+- **`AccountLockoutPlugin`** counts every password and second-factor attempt per account (`authenticationSubject`: `user:<id>` for a resolved handle, so an account's email, username and phone share one count, else the handle itself, so an unknown handle locks like a known one) and locks after `maxAttempts` for `lockoutDurationMs`. The counts clear only when the user earns a session (`afterCreateSession`): never on a correct password that earned only a second-factor challenge, and never on an admin impersonation (`isImpersonationSession`). Second-factor redemptions have a per-user count of their own (`maxSecondFactorAttempts`, default 5) that runs across challenges, so fresh challenges buy no fresh guesses; only someone past the first factor can drive it. Anyone who knows a handle can lock the password methods for `lockoutDurationMs`: pair it with `IPRateLimitPlugin` or a captcha.
+- **Magic link and one-time codes are exempt from the lock** (#678, `isPossessionMethod`): an email or phone OTP and a magic link are neither refused by it nor counted toward it, so a locked-out owner can still recover by proving they hold the address, and a session that proof earns clears the lock. The exemption opens no brute-force path: a code accepts `maxAttempts` wrong guesses, the address's wrong codes put its sends into the backoff below, which no resend resets, a magic-link token is 256 random bits and an unknown one is an unkeyed attempt the per-IP limit counts, and `RateLimitPlugin` and `IPRateLimitPlugin` count every attempt.
+- **Passkeys are exempt from the lock too** (#698): a WebAuthn assertion is a signature nobody can guess, and a credential id is not secret, so counting passkey attempts would let anyone who holds one lock the account. Passkey verification still counts against `IPRateLimitPlugin` and `RateLimitPlugin`.
+- **`CaptchaPlugin`** with the `"signIn"` endpoint verifies the token on the two password methods; verifying a code or a link, a passkey and a second factor carry no token.
 - **`RateLimitPlugin`** draws first-factor attempts from one bucket per account (`RateLimitPresets.login`) and second-factor redemptions from another (`RateLimitPresets.totpVerification`).
+
+### The `beforeSendCode` hook
+
+Every send of a one-time code or a magic link (`EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send`) fires `beforeSendCode` with `{ method, purpose, address, captchaToken? }` before it looks the address up, stores or sends anything, so it answers alike for an address with and without an account (#678). A plugin refuses the send by failing; over HTTP `POST /otp-challenges` answers `400` for a `CaptchaError`. `CaptchaPlugin`'s `"sendCode"` endpoint (on by default) guards it: a send is the step that costs money, so it is where the captcha guards the passwordless flows.
+
+### One-time code guessing
+
+Email and phone OTP sign-in (`EmailOtpService`, `PhoneOtpService`) bound the wrong codes an address accepts across resends, not only per code (#590). `maxAttempts` (default 3) limits one code; every wrong code is also counted against the address and purpose in the store's failure budget, which a resend, an expiry or the attempt limit never resets. Once the count reaches `backoff.freeFailures` (default 5), `send` answers `ResendTooSoonError` (`429` with `Retry-After` over HTTP) until `backoff.baseDelay` (default one minute), doubled for each further wrong code and capped at `backoff.maxDelay` (default one day), has passed since the latest one. A successful verification resets the count.
+
+There is no lockout: once the delay has passed a send goes through, so an attacker can slow an address's owner down but never lock them out. Under the defaults, an attacker gets 18 guesses at a six-digit code in the first day and 3 a day after that. `resendCooldown` (default 60 s; `0` turns it off) still spaces sends of an outstanding code. The magic link (`MagicLinkConfig.resendCooldown`) and the email-verification resend have the same 60 s default (#682). Both apply alike to an address with and without an account, so neither reveals which addresses are registered. The code length stays 6 digits by default (`otpLength`).
 
 ## Sign-up attributes
 
@@ -869,12 +888,6 @@ const { handler } = Http.make({
 ```
 
 A key the list doesn't name is dropped without an error, so a client that sends one still signs up, and the answer doesn't tell a caller which keys the server guards; the user in a `201` shows what was kept. Naming a server-only, ban or SCIM key here has no effect. The kept attributes may take at most `Http.SIGN_UP_ATTRIBUTES_MAX_BYTES` (4096) bytes as UTF-8 JSON; a larger bag is refused with `400`. Dropped keys don't count, and the whole request body stays under `maxBodySize` (default 64 KiB). `groupLayers(cookie, multiSession, signUpAttributes)` takes the same list when you compose the contract yourself.
-
-### One-time code guessing
-
-Email and phone OTP sign-in (`EmailOtpService`, `PhoneOtpService`) bound the wrong codes an address accepts across resends, not only per code (#590). `maxAttempts` (default 3) limits one code; every wrong code is also counted against the address and purpose in the store's failure budget, which a resend, an expiry or the attempt limit never resets. Once the count reaches `backoff.freeFailures` (default 5), `send` answers `ResendTooSoonError` (`429` with `Retry-After` over HTTP) until `backoff.baseDelay` (default one minute), doubled for each further wrong code and capped at `backoff.maxDelay` (default one day), has passed since the latest one. A successful verification resets the count.
-
-There is no lockout: once the delay has passed a send goes through, so an attacker can slow an address's owner down but never lock them out. Under the defaults, an attacker gets 18 guesses at a six-digit code in the first day and 3 a day after that. `resendCooldown` (default 60 s; `0` turns it off) still spaces sends of an outstanding code. The magic link (`MagicLinkConfig.resendCooldown`) and the email-verification resend have the same 60 s default (#682). Both apply alike to an address with and without an account, so neither reveals which addresses are registered. The code length stays 6 digits by default (`otpLength`).
 
 ## Expired codes and links
 
@@ -987,7 +1000,7 @@ No response body carries a session token (#581). Every `sessions`, `device-sessi
 | `POST /sessions`                                                                       | Sign in: a `sessions` document whose write-only `credential` attribute names the method (`password`, `username`, `email-otp`, `phone-otp`, `magic-link`, `anonymous`, `google-one-tap`). `201` with the session, its user in `included`; `202` with a `second-factor-challenges` resource, or with only `meta.needsEmailVerification` when the address must be verified first |
 | `POST /second-factor-challenges/verifications`                                         | Redeem a second-factor challenge, named in the body, with a `totp` or `backup-code`; `201` with the session                                                                                                                                                                                                                                                                   |
 | `POST /users`                                                                          | Sign up: `201` with the session when one is issued, else `202` with only `meta.needsEmailVerification`. Under `antiEnumeration` a fresh address and a held one both get the same `202`; only the `attributes` keys `signUpAttributes` allows are kept ([Sign-up attributes](#sign-up-attributes))                                                                             |
-| `POST /otp-challenges`                                                                 | Send an email or SMS code, or a magic link (`channel`: `email`, `phone`, `magic-link`); `202` whether or not the account exists                                                                                                                                                                                                                                               |
+| `POST /otp-challenges`                                                                 | Send an email or SMS code, or a magic link (`channel`: `email`, `phone`, `magic-link`); `202` whether or not the account exists; `captchaToken` for the captcha plugin (`400` when refused)                                                                                                                                                                                   |
 | `POST /email-verifications` · `POST /email-verifications/redemptions`                  | (Re)send a verification link (`202`); verify with its token, `201` with the session when verification signs in, else `204`                                                                                                                                                                                                                                                    |
 | `POST /password-resets` · `POST /password-resets/redemptions`                          | Request a reset link (`202`); set the new password with its token (`204`)                                                                                                                                                                                                                                                                                                     |
 | `POST /google-one-tap-nonces`                                                          | A One Tap nonce, as the resource's id                                                                                                                                                                                                                                                                                                                                         |
@@ -1005,7 +1018,7 @@ No response body carries a session token (#581). Every `sessions`, `device-sessi
 | `GET` · `POST /organizations/:id/members`                                              | Its `organization-members`; add one, the user as the `user` relationship (`201`)                                                                                                                                                                                                                                                                                              |
 | `PATCH` · `DELETE /organization-members/:id`                                           | One membership by its stored id: `role`, and `status` (`inactive` deactivates, `active` reactivates); remove it (`204`)                                                                                                                                                                                                                                                       |
 | `GET` · `POST /organizations/:id/invitations`                                          | Its invitations; invite by `email` and `role` (`201`)                                                                                                                                                                                                                                                                                                                         |
-| `PATCH /invitations/:id` · `POST /invitations/:id/deliveries`                          | Move the `status` to `accepted` (the new membership in `meta.membership`), `rejected` or `canceled`; send it again with a fresh expiry (`202`)                                                                                                                                                                                                                                |
+| `PATCH /invitations/:id` · `POST /invitations/:id/deliveries`                          | Move the `status` to `accepted` (the new membership in `meta.membership`) or `rejected`, with the invitation email's secret as the `token` attribute, or `canceled`; send it again with a fresh token and expiry (`202`)                                                                                                                                                      |
 | `GET` · `POST /organizations/:id/domains`                                              | Its `organization-domains` (any member); claim one by `domain`, always a `dns` claim answering the `verificationToken` to publish (`201`, `domain:manage`); `verificationStrategy: "manual"` answers `400` (#598). Another organization's claim on the domain is never revealed                                                                                               |
 | `DELETE /organization-domains/:id` · `POST /organization-domains/:id/verifications`    | Release a claim (`204`); run its DNS check, `200` with the claim `verified` or `failed`; `domain:manage` is never the proof, and a domain verified for another organization is refused                                                                                                                                                                                        |
 | `GET` · `POST /organizations/:id/roles`                                                | Its custom `organization-roles` (any member); define one by `role` and `permissions` (`201`, `role:manage`), `409` when the organization already defines it                                                                                                                                                                                                                   |
@@ -1189,7 +1202,7 @@ await client.signUp({ email: "ada@example.com", password: "correct horse battery
 console.log(server.sessions.size); // 1
 ```
 
-`makeServerFixture(options?)` serves with the per-address IP limit off (`ipRateLimit: false`), since its one client has no address, and mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`), for assertions.
+`makeServerFixture(options?)` serves with the per-address IP limit off (`ipRateLimit: false`), since its one client has no address, and mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`, `sentInvitations` with each invitation's token), for assertions.
 
 ### API
 

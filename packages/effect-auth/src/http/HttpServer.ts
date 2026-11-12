@@ -139,7 +139,7 @@ import {
   type ResolvedSessionCache,
   type SessionCacheConfig,
 } from "../SessionCookieCache.ts";
-import type * as Types from "../Types.ts";
+import * as Types from "../Types.ts";
 
 /**
  * The services the auth handlers require. Your `services` layer must provide
@@ -2040,35 +2040,40 @@ export const otpChallengesGroupLayer = () =>
         const challenge = payload.data.attributes;
         const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
           Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
+        // The send gate (`beforeSendCode`, the captcha, #678).
+        const options = { captchaToken: challenge.captchaToken };
         return yield* Match.value(challenge).pipe(
           Match.discriminatorsExhaustive("channel")({
             email: ({ email, purpose }) =>
               Effect.flatMap(resolveEmailOtp, ({ service }) =>
-                service.send(email, purpose).pipe(
+                service.send(email, purpose, options).pipe(
                   Effect.catchTags({
                     AuthError: (e) => internalServerError(e),
                     EmailOtpError: (e) => internalServerError(e),
                     ResendTooSoonError: resendTooSoon,
+                    ...hookFailures,
                   }),
                 ),
               ),
             phone: ({ phoneNumber, purpose }) =>
               Effect.flatMap(resolvePhoneOtp, ({ service }) =>
-                service.send(phoneNumber, purpose).pipe(
+                service.send(phoneNumber, purpose, options).pipe(
                   Effect.catchTags({
                     PhoneOtpError: (e) => internalServerError(e),
                     AuthError: (e) => internalServerError(e),
                     ResendTooSoonError: resendTooSoon,
+                    ...hookFailures,
                   }),
                 ),
               ),
             "magic-link": ({ email }) =>
               Effect.flatMap(resolveMagicLink, ({ service }) =>
-                service.send(email).pipe(
+                service.send(email, options).pipe(
                   Effect.catchTags({
                     AuthError: (e) => internalServerError(e),
                     MagicLinkError: (e) => internalServerError(e),
                     ResendTooSoonError: resendTooSoon,
+                    ...hookFailures,
                   }),
                 ),
               ),
@@ -3040,10 +3045,18 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
     handlers
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const { org, actorId } = yield* actor(request);
-          const status = payload.data.attributes?.status;
+          const { org, actorId, resolved } = yield* actor(request);
+          const { status, token } = payload.data.attributes ?? {};
+          if ((status === "accepted" || status === "rejected") && token === undefined) {
+            return yield* new S.BadRequest({
+              message: "Answering an invitation takes the token its email carried",
+            });
+          }
+          const answer = { invitationId: params.id, token: token ?? "" };
           if (status === "accepted") {
-            const member = yield* refusedBadRequest(org.acceptInvitation(actorId, params.id));
+            const member = yield* refusedBadRequest(
+              org.acceptInvitation(actorId, { ...answer, currentSessionId: resolved.session.id }),
+            );
             const invitations = yield* storeFailure(org.listInvitations(member.organizationId));
             const accepted = Arr.findFirst(
               invitations,
@@ -3057,7 +3070,7 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
             });
           }
           if (status === "rejected") {
-            const rejected = yield* refusedBadRequest(org.rejectInvitation(actorId, params.id));
+            const rejected = yield* refusedBadRequest(org.rejectInvitation(actorId, answer));
             return Handlers.data(invitationResource(rejected));
           }
           if (status === "canceled") {
@@ -3399,7 +3412,7 @@ export const impersonationsGroupLayer = (
             return yield* new S.NotFound({ message: "Impersonation not found" });
           }
           const { resolved, token } = yield* resolveSession(request, cfg);
-          if (!P.isString(resolved.session.attributes["impersonatedBy"])) {
+          if (!Types.isImpersonationSession(resolved.session)) {
             return yield* new S.NotFound({ message: "This session is not an impersonation" });
           }
           const sessionManager = yield* SessionService;

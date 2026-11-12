@@ -112,8 +112,10 @@ export interface VerifyEmailArgs {
 /**
  * The credential-verifying flows that fire the `beforeAuthenticate` hook:
  * password sign-in by email (`"email-password"`) or by username
- * (`"username"`), one-time-code sign-in by email (`"email-otp"`) or SMS
- * (`"phone-otp"`), magic-link sign-in (`"magic-link"`), and the redemption
+ * (`"username"`), one-time-code verification by email (`"email-otp"`:
+ * sign-in, and `EmailOtpService.check` for every purpose) or SMS
+ * (`"phone-otp"`), magic-link sign-in (`"magic-link"`), passkey sign-in
+ * (`"passkey"`: `WebAuthnService.verifyAuthentication`), and the redemption
  * of a second-factor challenge (`"second-factor"`: TOTP, a backup code, or
  * the OTP second factor).
  */
@@ -123,13 +125,41 @@ export type AuthenticationMethod =
   | "email-otp"
   | "phone-otp"
   | "magic-link"
+  | "passkey"
   | "second-factor";
+
+/**
+ * The methods that prove possession of an address with a secret sent to it:
+ * a one-time code by email or SMS, and a magic link (#678). Their sends fire
+ * `beforeSendCode`, and `AccountLockoutPlugin` exempts them from its account
+ * lock: their guesses stay bounded by the per-code attempt limit, the
+ * per-address failure backoff (#590) and the rate limits, and a lock that
+ * refused them would let anyone who knows a handle block the owner's
+ * recovery.
+ */
+export type PossessionMethod = "email-otp" | "phone-otp" | "magic-link";
+
+/**
+ * Whether `method` is a {@link PossessionMethod}.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { isPossessionMethod } from "@thomasfosterau/effect-auth"
+ *
+ * assert.equal(isPossessionMethod("magic-link"), true)
+ * assert.equal(isPossessionMethod("email-password"), false)
+ * ```
+ */
+export const isPossessionMethod = (method: AuthenticationMethod): method is PossessionMethod =>
+  method === "email-otp" || method === "phone-otp" || method === "magic-link";
 
 /**
  * The handle an authentication attempt names: a login identifier (`email`,
  * `username`, `phone`, normalized as the identifier store keys it), or, for a
- * second-factor redemption, which names no handle, the challenge's user
- * (`type: "user"`, `value` the user id).
+ * second-factor redemption or a passkey, which name no handle, the user the
+ * challenge or the credential belongs to (`type: "user"`, `value` the user
+ * id).
  */
 export interface AuthenticationIdentifier {
   readonly type: IdentifierType | "user";
@@ -143,13 +173,24 @@ export interface AuthenticationIdentifier {
  * anything is consumed or created. A plugin denies the attempt by failing
  * (`AccountLockedError`, `RateLimitError`, `CaptchaError`, ...).
  *
+ * An attempt that names no account is **unkeyed** (#678): an unknown or
+ * expired second-factor challenge, magic-link token or passkey challenge, or
+ * an unknown passkey credential, fails before the flow can tell whose it is,
+ * so the flow fires the hook with neither `identifier` nor `userId`, then
+ * fails. A per-account plugin lets an unkeyed attempt through
+ * ({@link authenticationSubject} answers `undefined`); `IPRateLimitPlugin`
+ * counts it like any other.
+ *
  * The flows read nothing back from it: it is a gate, not a rewrite. Input
  * rewriting stays on `beforeSignIn`, for email and password.
  */
 export interface AuthenticateAttempt {
   readonly method: AuthenticationMethod;
-  /** The handle the attempt names, normalized. */
-  readonly identifier: AuthenticationIdentifier;
+  /**
+   * The handle the attempt names, normalized. Absent for an unkeyed attempt,
+   * which names no account.
+   */
+  readonly identifier?: AuthenticationIdentifier | undefined;
   /**
    * The user the handle resolves to, when one does. Absent for a handle no
    * account holds, so a plugin that keys on it falls back to `identifier`
@@ -169,7 +210,8 @@ export interface AuthenticateAttempt {
  * `user:<id>` when the handle resolved to a user, so every handle of one
  * account (email, username, phone) shares one count, else `<type>:<value>`
  * for the handle itself, so a handle no account holds is counted the way a
- * known one is.
+ * known one is. `undefined` for an unkeyed attempt, which names no account:
+ * a per-account plugin lets it through.
  *
  * @example
  * ```ts
@@ -188,12 +230,44 @@ export interface AuthenticateAttempt {
  *   identifier: { type: "email", value: "nobody@example.com" },
  * })
  * assert.equal(unknown, "email:nobody@example.com")
+ *
+ * // An unknown second-factor challenge names no account.
+ * assert.equal(authenticationSubject({ method: "second-factor" }), undefined)
  * ```
  */
-export const authenticationSubject = (attempt: AuthenticateAttempt): string =>
-  attempt.userId === undefined
-    ? `${attempt.identifier.type}:${attempt.identifier.value}`
-    : `user:${attempt.userId}`;
+export const authenticationSubject = (attempt: AuthenticateAttempt): string | undefined => {
+  if (attempt.userId !== undefined) return `user:${attempt.userId}`;
+  return attempt.identifier === undefined
+    ? undefined
+    : `${attempt.identifier.type}:${attempt.identifier.value}`;
+};
+
+/**
+ * Named arguments for the `beforeSendCode` hook: one request to send a
+ * one-time code or a magic link (#678), fired by `EmailOtpService.send`,
+ * `PhoneOtpService.send` and `MagicLinkService.send` before the address is
+ * looked up and before anything is stored or sent. A plugin refuses the send
+ * by failing (`CaptchaPlugin` with `CaptchaError`); the flows read nothing
+ * back from it.
+ *
+ * It names no user: a send answers alike for an address with and without an
+ * account, so the hook runs before the flow looks the address up.
+ */
+export interface SendCodeAttempt {
+  readonly method: PossessionMethod;
+  /** The code's purpose (`"sign-in"`, `"forget-password"`, ...); a magic link's is `"sign-in"`. */
+  readonly purpose: string;
+  /** Where the code goes, normalized: an email address or an E.164 phone number. */
+  readonly address: string;
+  /** The captcha token the caller sent, if any. */
+  readonly captchaToken?: string | undefined;
+}
+
+/** Options the send flows (`EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send`) take. */
+export interface SendCodeOptions {
+  /** A captcha token, handed to the `beforeSendCode` hook (`CaptchaPlugin` verifies it). */
+  readonly captchaToken?: string | undefined;
+}
 
 /** A reference to an email address, used by password-reset hooks. */
 export interface EmailRef {
@@ -262,6 +336,7 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   beforeSignIn: identity,
   afterSignIn: identity,
   beforeAuthenticate: identity,
+  beforeSendCode: identity,
   beforeSignOut: identity,
   afterSignOut: identity,
   beforeCreateSession: identity,
@@ -335,9 +410,16 @@ export class Hooks extends Context.Service<
      * handle to a user (where one exists) and before it checks the
      * credential; see {@link AuthenticateAttempt}. Failing denies the
      * attempt. `AccountLockoutPlugin`, `CaptchaPlugin`, `RateLimitPlugin` and
-     * `IPRateLimitPlugin` guard it.
+     * `IPRateLimitPlugin` guard it. An attempt that names no account fires
+     * it unkeyed, with no `identifier`.
      */
     readonly beforeAuthenticate: Transform<AuthenticateAttempt>;
+    /**
+     * Fired by every one-time-code and magic-link send before it looks the
+     * address up; see {@link SendCodeAttempt}. Failing refuses the send.
+     * `CaptchaPlugin` guards it.
+     */
+    readonly beforeSendCode: Transform<SendCodeAttempt>;
     readonly beforeSignOut: Transform<SessionRef>;
     readonly afterSignOut: Tap<SessionRef>;
     readonly beforeCreateSession: Transform<CreateSessionArgs>;
@@ -472,6 +554,7 @@ const wrapHooks = (
       impls.beforeAuthenticate,
       false,
     ),
+    beforeSendCode: wrapHook("beforeSendCode", inner.beforeSendCode, impls.beforeSendCode, false),
     beforeSignOut: wrapHook("beforeSignOut", inner.beforeSignOut, impls.beforeSignOut, false),
     afterSignOut: wrapHook("afterSignOut", inner.afterSignOut, impls.afterSignOut, isolateTaps),
     beforeCreateSession: wrapHook(

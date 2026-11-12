@@ -176,7 +176,8 @@ export type SecondFactorVerificationDocument = typeof SecondFactorVerificationDo
 
 /**
  * The body of `POST /otp-challenges`: which channel to send a one-time code or
- * link through, and to whom.
+ * link through, and to whom, with an optional `captchaToken` for the captcha
+ * plugin's `"sendCode"` endpoint (#678).
  */
 export const OtpChallengeDocument = writeDocument(
   "otp-challenges",
@@ -185,13 +186,19 @@ export const OtpChallengeDocument = writeDocument(
       channel: Schema.Literal("email"),
       email: Schema.String,
       purpose: S.EmailOtpPurpose,
+      captchaToken: Schema.optional(Schema.String),
     }),
     Schema.Struct({
       channel: Schema.Literal("phone"),
       phoneNumber: Schema.String,
       purpose: S.PhoneOtpPurpose,
+      captchaToken: Schema.optional(Schema.String),
     }),
-    Schema.Struct({ channel: Schema.Literal("magic-link"), email: Schema.String }),
+    Schema.Struct({
+      channel: Schema.Literal("magic-link"),
+      email: Schema.String,
+      captchaToken: Schema.optional(Schema.String),
+    }),
   ]),
 );
 export type OtpChallengeDocument = typeof OtpChallengeDocument.Type;
@@ -334,14 +341,22 @@ export const secondFactorChallengesGroup = Group.make(
 
 /**
  * `otp-challenges`: send a one-time code (`email`, `phone`) or a magic link.
- * Answers `202` whether or not the address or number has an account.
+ * Answers `202` whether or not the address or number has an account; `400`
+ * when a `beforeSendCode` plugin refuses the send (a captcha that does not
+ * verify).
  */
 export const otpChallengesGroup = Group.make(
   "otp-challenges",
   HttpApiEndpoint.post("create", "/otp-challenges", {
     payload: jsonApiPayload(OtpChallengeDocument),
     success: Accepted,
-    error: [E.NotFound.wire, E.TooManyRequests.wire, E.InternalServerError.wire],
+    error: [
+      E.BadRequest.wire,
+      E.Forbidden.wire,
+      E.NotFound.wire,
+      E.TooManyRequests.wire,
+      E.InternalServerError.wire,
+    ],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -997,7 +1012,8 @@ export const organizationMembersGroup = Group.make(
  * `invitations`: one invitation, by id.
  *
  * - `PATCH /invitations/:id` with a `status`: `accepted` or `rejected` by the
- *   invitee (an acceptance includes the new membership), `canceled` by a member
+ *   invitee, with the invitation email's secret as the `token` attribute
+ *   (an acceptance includes the new membership), `canceled` by a member
  *   holding `invitation:cancel`. A refused acceptance or rejection answers
  *   `400`, a refused cancellation `403`.
  * - `POST /invitations/:id/deliveries`: send a pending invitation again, with

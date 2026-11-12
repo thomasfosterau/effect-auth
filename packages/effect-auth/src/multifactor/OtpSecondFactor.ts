@@ -213,17 +213,17 @@ export const make = (
         otp: string,
         options?: OtpSecondFactorVerifyOptions,
       ) {
-        if (!pendingToken || !otp) {
-          return yield* invalidOtp();
-        }
-
-        const record = yield* store.get(pendingToken);
+        const record = pendingToken && otp ? yield* store.get(pendingToken) : null;
         if (!record) {
+          // Unkeyed: the challenge names no user, but the per-IP limit still
+          // counts the attempt (#678).
+          yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* invalidOtp();
         }
 
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(pendingToken);
+          yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* new OtpSecondFactorError({ message: "OTP has expired" });
         }
 

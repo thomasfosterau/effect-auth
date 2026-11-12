@@ -4,9 +4,16 @@
  * Applies per-operation rate limits keyed by the resolved client IP (from the
  * {@link ClientIP} service): every first-factor authentication attempt
  * (`beforeAuthenticate`: email and password, username, email and phone OTP,
- * magic link) draws on one `signin` bucket per address, second-factor
+ * magic link, passkey) draws on one `signin` bucket per address, second-factor
  * redemptions on a `second-factor` bucket, and sign-up and password-reset
  * requests on their own.
+ *
+ * **Unkeyed attempts count too** (#678). An unknown or expired second-factor
+ * challenge, magic-link token or passkey challenge names no account, so the
+ * per-account plugins let it through; the flow still fires
+ * `beforeAuthenticate` for it, and this plugin draws it from the same bucket
+ * as a keyed attempt of that method, so guessing tokens costs the guesser's
+ * address its budget.
  *
  * **A request with no client address is refused.** When the {@link ClientIP}
  * service is absent (a hook run outside an HTTP request, for example a direct

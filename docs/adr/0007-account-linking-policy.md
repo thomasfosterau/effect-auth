@@ -19,6 +19,15 @@
 > - Known consequence: the real holder of an address that someone signed up with unverified cannot
 >   use OAuth sign-in until that account is removed or the address is proven another way (the
 >   verification link, a magic link or an email OTP, which run the first-proof cleanup).
+> - **Amended again (#671).** The refusal of an unverified local address above is withdrawn: one
+>   first-proof policy (#440) now holds for OAuth, Google One Tap and SSO JIT alike. A
+>   provider-verified email that matches an unverified local address proves that address:
+>   `signInWithCallback` runs `proveAddress` (clearing the account's password and revoking its
+>   sessions, then marking the address verified), links the provider identity and mints the
+>   prover's session. It still requires the provider's `email_verified: true` and
+>   `autoLinkByVerifiedEmail` or a `trustedProviders` entry; without them the match fails with
+>   `EmailInUseError` as before, and an unverified provider email never links or takes over. The
+>   known consequence above no longer applies.
 > - `linkAccount` (a signed-in user linking a provider) refuses an email other than the user's
 >   unless `allowDifferentEmails` is set; `unlinkAccount` refuses to remove the last credential
 >   unless `allowUnlinkingAll` is passed.

@@ -22,7 +22,9 @@ import { RateLimitPresets, RateLimitStore, RateLimiter } from "../RateLimit.ts";
  * (every method but `"second-factor"`) share one bucket per account under
  * {@link RateLimitPresets.login} (`signin:<subject>`), and second-factor
  * redemptions draw on a bucket of their own under
- * {@link RateLimitPresets.totpVerification} (`second-factor:<subject>`).
+ * {@link RateLimitPresets.totpVerification} (`second-factor:<subject>`). An
+ * unkeyed attempt (an unknown challenge or token, which names no account)
+ * passes: `IPRateLimitPlugin` is what counts it.
  *
  * `Layer<Hooks, never, Hooks | RateLimiterTag | RateLimitStoreTag>` - the
  * limiter and its store are acquired when the layer is built.
@@ -33,17 +35,18 @@ export const RateLimitPlugin = makePlugin(
     const store = yield* RateLimitStore;
 
     return {
-      beforeAuthenticate: (attempt: AuthenticateAttempt) =>
-        (attempt.method === "second-factor"
-          ? rateLimiter.consumeToken(
-              `second-factor:${authenticationSubject(attempt)}`,
-              RateLimitPresets.totpVerification,
-            )
-          : rateLimiter.consumeToken(
-              `signin:${authenticationSubject(attempt)}`,
-              RateLimitPresets.login,
-            )
-        ).pipe(Effect.provideService(RateLimitStore, store), Effect.as(attempt)),
+      beforeAuthenticate: (attempt: AuthenticateAttempt) => {
+        const subject = authenticationSubject(attempt);
+        if (subject === undefined) return Effect.succeed(attempt);
+        return (
+          attempt.method === "second-factor"
+            ? rateLimiter.consumeToken(
+                `second-factor:${subject}`,
+                RateLimitPresets.totpVerification,
+              )
+            : rateLimiter.consumeToken(`signin:${subject}`, RateLimitPresets.login)
+        ).pipe(Effect.provideService(RateLimitStore, store), Effect.as(attempt));
+      },
     };
   }),
 );

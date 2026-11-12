@@ -20,7 +20,7 @@ import {
 } from "../UserStore.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { deliverCode } from "../CodeDelivery.ts";
-import { Hooks, type HookError } from "../Hooks.ts";
+import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
 import * as OtpCode from "../OtpCode.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
@@ -251,11 +251,18 @@ export class EmailOtpService extends Context.Service<
      * The marker record makes the cooldown apply to an email with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown email.
+     *
+     * The `beforeSendCode` hook runs first, before the address is looked up,
+     * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
      */
     readonly send: (
       email: string,
       purpose: EmailOtpPurpose,
-    ) => Effect.Effect<void, Errors.AuthError | EmailOtpError | Errors.ResendTooSoonError>;
+      options?: SendCodeOptions,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | EmailOtpError | Errors.ResendTooSoonError | HookError
+    >;
 
     /**
      * Verify a `"sign-in"` OTP and create a session. Users created here are
@@ -286,12 +293,16 @@ export class EmailOtpService extends Context.Service<
      * `"Invalid or expired OTP"`, as `signIn` does. Otherwise an expired code
      * answers `"OTP has expired"` and the attempt limit answers
      * `"Too many attempts"`.
+     *
+     * Like `signIn`, it fires `beforeAuthenticate` (method `"email-otp"`,
+     * keyed on the email and the user holding it, if any) before the code is
+     * checked, for every purpose (#678).
      */
     readonly check: (
       email: string,
       otp: string,
       purpose: EmailOtpPurpose,
-    ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError>;
+    ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError | HookError>;
   }
 >()("@effect-auth/EmailOtpService") {
   /**
@@ -379,11 +390,21 @@ export const make = (
       send: Effect.fn("EmailOtpService.send")(function* (
         rawEmail: string,
         purpose: EmailOtpPurpose,
+        options?: SendCodeOptions,
       ) {
         const email = normalizeEmail(rawEmail);
         if (!email) {
           return yield* Effect.void;
         }
+
+        // The send gate (captcha, #678) runs before the address is looked
+        // up, so it answers alike for every address.
+        yield* hooks.beforeSendCode({
+          method: "email-otp",
+          purpose,
+          address: email,
+          captchaToken: options?.captchaToken,
+        });
 
         // Do not reveal whether the user exists to reduce email enumeration
         // risk: succeed without sending for sign-in when sign-up is disabled
@@ -488,6 +509,15 @@ export const make = (
         purpose: EmailOtpPurpose,
       ) {
         const email = normalizeEmail(rawEmail);
+
+        // The same gate `signIn` runs (#678). One identifier lookup for an
+        // email with and without an account alike.
+        const identifier = yield* lookupIdentifier(identifiers, "email", email);
+        yield* hooks.beforeAuthenticate({
+          method: "email-otp",
+          identifier: { type: "email", value: email },
+          userId: identifier?.userId,
+        });
 
         yield* verifyOtp(email, otp, purpose);
 

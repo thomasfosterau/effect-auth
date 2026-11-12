@@ -143,8 +143,9 @@ const session = await client.device.token({ deviceCode }); // 400 until decided
 ```ts
 const org = await client.organization.create({ name: "Acme", slug: "acme" });
 await client.organization.invite(org.id, { email: "new@acme.test", role: "member" });
-await client.organization.acceptInvitation(invitationId); // as the invitee
-await client.organization.resendInvitation(invitationId); // same id, fresh expiry
+// As the invitee, with the token the invitation email's link carried:
+await client.organization.acceptInvitation(invitationId, token);
+await client.organization.resendInvitation(invitationId); // same id, fresh token and expiry
 
 const team = await client.organization.createTeam(org.id, { name: "Engineering" });
 const teamMember = await client.organization.addTeamMember(team.id, { userId });
