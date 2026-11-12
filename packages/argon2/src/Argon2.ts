@@ -1,19 +1,23 @@
 /**
- * Argon2id password hasher backed by pure WebAssembly
- * ([`hash-wasm`](https://github.com/Daninet/hash-wasm), MIT).
+ * Argon2id password hasher backed by WebAssembly: the RustCrypto `argon2`
+ * crate as built by
+ * [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2)
+ * (MIT), compiled once at module scope.
  *
- * This is the package's default backend: it has no native module and no
- * `node:` imports, so it runs unchanged on Node, Bun, Deno, and edge runtimes
- * such as Cloudflare Workers. Randomness comes from the platform Web Crypto
- * API (`globalThis.crypto`), the same source core effect-auth's
- * `PlatformCrypto` layer uses.
+ * It has no native module and no `node:` imports, and it generates no wasm
+ * code after startup, so it runs unchanged on Node, Bun, Deno, and edge
+ * runtimes such as Cloudflare Workers, which refuse wasm compilation inside a
+ * request (#744). Randomness comes from the platform Web Crypto API
+ * (`globalThis.crypto`), the same source core effect-auth's `PlatformCrypto`
+ * layer uses.
  *
  * Emitted hashes are standard PHC strings
  * (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`) and `verify` parses the cost
  * parameters, salt and digest length out of the *stored* hash rather than
- * assuming the configured ones — so hashes written by `@node-rs/argon2`, by an
- * older configuration of this package, or by any other Argon2 implementation
- * keep verifying after a parameter change.
+ * assuming the configured ones — so hashes written by `hash-wasm` (this
+ * package's backend through 0.1.x), by `@node-rs/argon2`, by an older
+ * configuration of this package, or by any other Argon2 implementation keep
+ * verifying after a parameter change.
  *
  * @module argon2/argon2
  */
@@ -21,11 +25,9 @@ import { Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
-import { argon2d, argon2i, argon2id } from "hash-wasm";
 import { HashingError, Password } from "@thomasfosterau/effect-auth";
 import {
   ARGON2ID,
-  HASH_LENGTH,
   SALT_LENGTH,
   isWithinMaxLength,
   requireHashablePassword,
@@ -34,49 +36,20 @@ import {
   resolveOptions,
   type Argon2Options,
 } from "./Common.ts";
+import { hashArgon2id, verifyArgon2 } from "./Wasm.ts";
 
 const { PasswordHasher } = Password;
 type HashedPassword = Password.HashedPassword;
 type PasswordHasherService = typeof Password.PasswordHasher.Service;
 
 /** The three Argon2 variants `verify` accepts in a stored PHC string. */
-const variants = { argon2d, argon2i, argon2id };
-
-type Variant = keyof typeof variants;
-
-const isVariant = (value: string): value is Variant => value in variants;
+const variants: ReadonlyArray<string> = ["argon2d", "argon2i", "argon2id"];
 
 /**
  * Salt bytes from the platform Web Crypto API — available on Node ≥ 20, Bun,
  * Deno and Workers alike, which `node:crypto.randomBytes` is not.
  */
 const randomSalt = (): Uint8Array => globalThis.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-
-const decodeBase64 = (value: string): Uint8Array => {
-  // PHC uses the standard base64 alphabet with the padding stripped; `atob`
-  // tolerates the missing padding and is available on every target runtime.
-  const binary = atob(value);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-};
-
-/** Constant-time comparison; `node:crypto.timingSafeEqual` is not portable to Workers. */
-const timingSafeEqual = (a: Uint8Array, b: Uint8Array): boolean => {
-  if (a.length !== b.length) return false;
-  // Every byte is visited regardless of where the first mismatch is; the
-  // lengths are equal, so `b[index]` is always defined.
-  const difference = a.reduce((acc, byte, index) => acc | (byte ^ (b[index] ?? 0)), 0);
-  return difference === 0;
-};
-
-/** The parameters recovered from a stored PHC string. */
-interface ParsedHash {
-  readonly variant: Variant;
-  readonly memoryCost: number;
-  readonly timeCost: number;
-  readonly parallelism: number;
-  readonly salt: Uint8Array;
-  readonly digest: Uint8Array;
-}
 
 const invalidHash = (detail: string): Effect.Effect<never, HashingError> =>
   Effect.fail(new HashingError({ message: `Invalid Argon2 hash: ${detail}` }));
@@ -88,14 +61,17 @@ const parsePositiveInt = (value: string | undefined): number => {
 };
 
 /**
- * Parse a PHC string into the parameters needed to recompute its digest.
+ * Check a stored PHC string's header before handing it to the kernel.
  *
  * Deliberately tolerant about the order of the `m`/`t`/`p` parameters (the PHC
  * spec does not fix it) and about which Argon2 variant produced the hash, but
  * strict about everything else: a hash we cannot recompute must surface as a
- * `HashingError` rather than a silent `false`.
+ * `HashingError` rather than a silent `false`. The kernel would also verify
+ * Argon2 `v=16`; this check keeps refusing it, as earlier releases did. The
+ * salt and digest are left to the kernel, which reports a malformed or
+ * out-of-range one as unverifiable.
  */
-const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
+const checkHash = (hash: string): Effect.Effect<void, HashingError> =>
   Effect.suspend(() => {
     const segments = hash.split("$");
     // "$argon2id$v=19$m=..,t=..,p=..$salt$digest" splits into a leading empty
@@ -105,9 +81,9 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
     }
     // The length check above guarantees all six segments exist, so the
     // defaults are never used.
-    const [, variant = "", version = "", parameters = "", salt = "", digest = ""] = segments;
+    const [, variant = "", version = "", parameters = ""] = segments;
 
-    if (!isVariant(variant)) {
+    if (!Arr.contains(variants, variant)) {
       return invalidHash(`unsupported variant "${variant}"`);
     }
     if (version !== "v=19") {
@@ -141,19 +117,7 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
     ) {
       return invalidHash(`malformed parameters "${parameters}"`);
     }
-
-    return Effect.try({
-      try: (): ParsedHash => ({
-        variant,
-        memoryCost,
-        timeCost,
-        parallelism,
-        salt: decodeBase64(salt),
-        digest: decodeBase64(digest),
-      }),
-      catch: (cause) =>
-        new HashingError({ message: "Invalid Argon2 hash: malformed base64", cause }),
-    });
+    return Effect.void;
   });
 
 /**
@@ -172,7 +136,7 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
  * ```
  */
 export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => {
-  const { memoryCost, parallelism, timeCost } = resolveOptions(options);
+  const costs = resolveOptions(options);
 
   return {
     algorithm: ARGON2ID,
@@ -182,20 +146,10 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
     })(function* (password: string) {
       yield* requireHashablePassword(password);
 
-      const phc = yield* Effect.tryPromise({
-        try: () =>
-          argon2id({
-            password,
-            salt: randomSalt(),
-            iterations: timeCost,
-            parallelism,
-            memorySize: memoryCost,
-            hashLength: HASH_LENGTH,
-            outputType: "encoded" as const,
-          }),
-        catch: (cause) =>
-          new HashingError({ message: "Failed to hash password with Argon2id", cause }),
-      });
+      const phc = yield* Effect.mapError(
+        Effect.suspend(() => Effect.fromResult(hashArgon2id(password, randomSalt(), costs))),
+        (cause) => new HashingError({ message: "Failed to hash password with Argon2id", cause }),
+      );
 
       return { hash: phc, algorithm: ARGON2ID } satisfies HashedPassword;
     }),
@@ -211,27 +165,17 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
 
       // Cost parameters come from the stored hash, never from `options`, so
       // hashes written under a different configuration still verify.
-      const parsed = yield* parseHash(hash);
+      yield* checkHash(hash);
 
-      const computed = yield* Effect.tryPromise({
-        try: () =>
-          variants[parsed.variant]({
-            password,
-            salt: parsed.salt,
-            iterations: parsed.timeCost,
-            parallelism: parsed.parallelism,
-            memorySize: parsed.memoryCost,
-            hashLength: parsed.digest.length,
-            outputType: "binary" as const,
-          }),
-        catch: (cause) =>
-          new HashingError({
-            message: "Failed to verify password against Argon2 hash",
-            cause,
-          }),
-      });
-
-      return timingSafeEqual(computed, parsed.digest);
+      const verdict = yield* Effect.mapError(
+        Effect.suspend(() => Effect.fromResult(verifyArgon2(password, hash))),
+        (cause) =>
+          new HashingError({ message: "Failed to verify password against Argon2 hash", cause }),
+      );
+      if (verdict === "unverifiable") {
+        return yield* invalidHash("its costs, salt or digest cannot be recomputed");
+      }
+      return verdict === "match";
     }),
   };
 };

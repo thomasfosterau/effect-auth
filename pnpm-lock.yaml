@@ -45,6 +45,9 @@ catalogs:
     '@testing-library/svelte':
       specifier: ^5.4.2
       version: 5.4.2
+    '@thomasfosterau/argon2':
+      specifier: 0.1.1
+      version: 0.1.1
     '@thomasfosterau/effect-jsonapi':
       specifier: ^0.22.0
       version: 0.22.0
@@ -78,9 +81,6 @@ catalogs:
     fallow:
       specifier: 3.42.0
       version: 3.42.0
-    hash-wasm:
-      specifier: ^4.13.0
-      version: 4.13.0
     jsdom:
       specifier: ^31.0.0
       version: 31.0.0
@@ -244,10 +244,10 @@ importers:
       '@thomasfosterau/effect-auth':
         specifier: workspace:^
         version: link:../effect-auth
-      hash-wasm:
-        specifier: 'catalog:'
-        version: 4.13.0
     devDependencies:
+      '@thomasfosterau/argon2':
+        specifier: 'catalog:'
+        version: 0.1.1
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
@@ -257,6 +257,12 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
+      vite:
+        specifier: 'catalog:'
+        version: '@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1)'
+      workerd:
+        specifier: 'catalog:'
+        version: 1.20261026.1
 
   packages/drizzle:
     dependencies:
@@ -1769,6 +1775,10 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
+  '@thomasfosterau/argon2@0.1.1':
+    resolution: {integrity: sha512-HBH0XtYGsuCTC2TI8N34X/Y0AvksrfHcp2tXDDFKG09FrnRDbl1O6zNbI4bPbYVOVEVGTvPEMCBz+r1oS0/8Jg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+
   '@thomasfosterau/effect-ext@0.2.0':
     resolution: {integrity: sha512-T1EukW6BJDub7EMdii65Qisy1uDMwAkbso6s2gQQD9MbUC8jGycJppsL4McRdnjgboEu5yVxirzr2pobkh9qFw==}
     engines: {node: '>=22.18'}
@@ -2746,9 +2756,6 @@ packages:
   gulp-header@1.8.12:
     resolution: {integrity: sha512-lh9HLdb53sC7XIZOYzTXM4lFuXElv3EVkSDhsd7DoJBj7hm+Ni7D3qYbb+Rr8DuM8nRanBvkVO9d7askreXGnQ==}
     deprecated: Removed event-stream from gulp-header
-
-  hash-wasm@4.13.0:
-    resolution: {integrity: sha512-GrWl7wsV46fKIXQZB5ebskLZLAmKL6d9RS0fspCxDeQyjoNu1AfTJTMLPOJyfzaQm0ldFiwFN21/w+sE/kgEFQ==}
 
   html-encoding-sniffer@7.0.0:
     resolution: {integrity: sha512-UikN5yr7xsCDAq87Or5or0PAlD3HJJOKVzM05az588WnpDJ4Ux7a2A53Qi6gofGg2/EtvF/H4hCi/TXfCW4Y6w==}
@@ -4674,6 +4681,8 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.2
 
+  '@thomasfosterau/argon2@0.1.1': {}
+
   '@thomasfosterau/effect-ext@0.2.0(@effect/platform-node@4.1.3(effect@4.1.3)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.22.0(@effect/platform-node@4.1.3(effect@4.1.3)(redis@6.3.0))(effect@4.1.3))(effect@4.1.3)':
     dependencies:
       effect: 4.1.3
@@ -5383,8 +5392,6 @@ snapshots:
       concat-with-sourcemaps: 1.1.0
       lodash.template: 4.18.1
       through2: 2.0.5
-
-  hash-wasm@4.13.0: {}
 
   html-encoding-sniffer@7.0.0:
     dependencies:

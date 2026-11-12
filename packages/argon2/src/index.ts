@@ -5,10 +5,12 @@
  * Argon2id — OWASP's first-choice password hashing algorithm — needs a KDF the
  * platform does not provide, so it lives in its own package.
  *
- * This package is **pure WebAssembly**
- * ([`hash-wasm`](https://github.com/Daninet/hash-wasm)): no native module, no
- * `node:` imports, so the same code runs on Node, Bun, Deno and edge runtimes
- * such as Cloudflare Workers. Default cost parameters follow OWASP's
+ * This package is **WebAssembly**: the RustCrypto `argon2` crate as built by
+ * [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2),
+ * compiled once at module scope. No native module, no `node:` imports and no
+ * wasm compilation inside a request, so the same code runs on Node, Bun, Deno
+ * and edge runtimes such as Cloudflare Workers (compatibility date 2025-06-01
+ * or later, or `allow_eval_during_startup`). Default cost parameters follow OWASP's
  * *low-memory* Argon2id profile (m = 19 MiB, t = 2, p = 1) so they fit inside a
  * Workers isolate; {@link serverProfile} (m = 64 MiB, t = 3, p = 1) is
  * available for plain-Node deployments.

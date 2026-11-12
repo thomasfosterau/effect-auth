@@ -41,13 +41,15 @@
     "access": "public"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth": "workspace:^",
-    "hash-wasm": "catalog:"
+    "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@thomasfosterau/argon2": "catalog:",
     "@types/node": "catalog:",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "workerd": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:peers"

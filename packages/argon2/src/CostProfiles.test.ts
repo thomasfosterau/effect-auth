@@ -1,25 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
-import { argon2id, type IArgon2Options } from "hash-wasm";
 import { Effect } from "effect";
+import * as Result from "effect/Result";
 import { Password } from "@thomasfosterau/effect-auth";
 import * as Argon2 from "./index.ts";
+import { hashArgon2id, type KernelCosts, type KernelError } from "./Wasm.ts";
 
 // Pins the costs the hasher hands the KDF for the default and server profiles
-// without running a 19 MiB or 64 MiB derivation: `argon2id` is replaced by a
-// stub that records its options and answers at once. The round-trip tests in
-// `index.test.ts` run the real KDF at a cheap explicit cost, so neither file
-// depends on how fast the machine is (#270).
-vi.mock("hash-wasm", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("hash-wasm")>();
+// without running a 19 MiB or 64 MiB derivation: the kernel's `hashArgon2id`
+// is replaced by a stub that records its arguments and answers at once. The
+// round-trip tests in `index.test.ts` run the real KDF at a cheap explicit
+// cost, so neither file depends on how fast the machine is (#270).
+vi.mock("./Wasm.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./Wasm.ts")>();
   return {
     ...actual,
-    argon2id: vi.fn<(options: IArgon2Options) => Promise<string>>(
-      async () => "$argon2id$v=19$m=1,t=1,p=1$c2FsdA$aGFzaA",
-    ),
+    hashArgon2id: vi.fn<
+      (password: string, salt: Uint8Array, costs: KernelCosts) => Result.Result<string, KernelError>
+    >(() => Result.succeed("$argon2id$v=19$m=1,t=1,p=1$c2FsdA$aGFzaA")),
   };
 });
 
-const kdf = vi.mocked(argon2id);
+const kdf = vi.mocked(hashArgon2id);
 
 beforeEach(() => {
   kdf.mockClear();
@@ -27,13 +28,10 @@ beforeEach(() => {
 
 const expectCosts = (costs: Argon2.Argon2Profile) => {
   expect(kdf).toHaveBeenCalledOnce();
-  expect(kdf.mock.calls[0]?.[0]).toMatchObject({
-    memorySize: costs.memoryCost,
-    iterations: costs.timeCost,
-    parallelism: costs.parallelism,
-    hashLength: 32,
-    outputType: "encoded",
-  });
+  const [password, salt, handed] = kdf.mock.calls[0] ?? [];
+  expect(password).toBeTypeOf("string");
+  expect(salt).toHaveLength(Argon2.SALT_LENGTH);
+  expect(handed).toEqual(costs);
 };
 
 describe("cost profiles reach the KDF", () => {
@@ -58,5 +56,13 @@ describe("cost profiles reach the KDF", () => {
       ),
     );
     expectCosts({ memoryCost: 19456, timeCost: 2, parallelism: 1 });
+  });
+
+  it("draws a fresh salt for every hash", async () => {
+    const hasher = Argon2.argon2Hasher();
+    await Effect.runPromise(hasher.hash("same"));
+    await Effect.runPromise(hasher.hash("same"));
+    const [first, second] = kdf.mock.calls.map(([, salt]) => salt);
+    expect(first).not.toEqual(second);
   });
 });
