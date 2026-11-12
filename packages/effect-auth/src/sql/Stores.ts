@@ -1179,11 +1179,14 @@ export interface PurgeExpiredResult {
   readonly magicLinks: number;
   /** Rows deleted from `auth_email_otps`. */
   readonly emailOtps: number;
+  /** Rows deleted from `auth_rate_limits`: their window and block have both passed (#686). */
+  readonly rateLimits: number;
 }
 
 /**
- * Delete the magic-link and email-OTP rows whose `expires_at` has passed;
- * requires `SqlClient`.
+ * Delete the magic-link and email-OTP rows whose `expires_at` has passed, and
+ * the rate-limit rows whose window and block have both passed; requires
+ * `SqlClient`.
  *
  * No store deletes these rows on its own: a record nobody redeems stays until
  * a later send for the same address replaces it, and the sends that hide
@@ -1191,8 +1194,15 @@ export interface PurgeExpiredResult {
  * host (a cron trigger on Workers, a timer on a long-lived server) so the
  * tables stay bounded. An expired row is already refused by the services, so a
  * purge changes no outcome; it only reclaims the space: a row whose
- * `expires_at` equals the current time is still accepted, so it stays. Expiry
- * is read from the `Clock`.
+ * `expires_at` equals the current time is still accepted, so it stays.
+ *
+ * A rate-limit row is one per key, IP and identifier ever counted, so
+ * `auth_rate_limits` grows the same way (#686). The purge deletes a row once
+ * its `reset_at` is not after now and its `blocked_until` is unset or not after
+ * now: the limiter then treats the key exactly as one it has never seen, so the
+ * next request opens a fresh window either way. A row inside its window or
+ * still blocked stays. Each table is one `DELETE`. Expiry is read from the
+ * `Clock`.
  */
 export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> =
   SqlClient.SqlClient.use((sql) =>
@@ -1212,13 +1222,20 @@ export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, Sql
                 email: string;
               }>`DELETE FROM auth_email_otps WHERE expires_at < ${now} RETURNING email`,
             ),
+            rateLimits: allRows(
+              "purgeExpired.rateLimits",
+              sql<{
+                key: string;
+              }>`DELETE FROM auth_rate_limits WHERE reset_at <= ${now} AND (blocked_until IS NULL OR blocked_until <= ${now}) RETURNING key`,
+            ),
           },
           { concurrency: 1 },
         ),
       ),
-      Effect.map(({ magicLinks, emailOtps }) => ({
+      Effect.map(({ magicLinks, emailOtps, rateLimits }) => ({
         magicLinks: magicLinks.length,
         emailOtps: emailOtps.length,
+        rateLimits: rateLimits.length,
       })),
     ),
   );

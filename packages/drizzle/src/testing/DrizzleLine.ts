@@ -24,13 +24,13 @@ import { DateTime } from "effect";
 /**
  * Drop the parentheses drizzle 1.0 puts around each comparison (`=`, `<=`, `is null`,
  * `is not null`) inside a conjunction, nested ones included, so 1.0's
- * `((a = ?) and (b = ?))` reads as 0.4x's `(a = ? and b = ?)`.
+ * `((a = ?) and (b = ?))` reads as 0.4x's `(a = ? and b = ?)`, and the extra
+ * pair it puts around a nested `or(...)` operand, so `((a or b))` reads `(a or b)`.
  */
 export const normalizeSql = (sql: string): string => {
-  const unwrapped = sql.replaceAll(
-    /\(((?:[`"]\w+[`"]\.)?[`"]\w+[`"] (?:<?= (?:\?|\$\d+)|is (?:not )?null))\)/g,
-    "$1",
-  );
+  const unwrapped = sql
+    .replaceAll(/\(((?:[`"]\w+[`"]\.)?[`"]\w+[`"] (?:<?= (?:\?|\$\d+)|is (?:not )?null))\)/g, "$1")
+    .replaceAll(/\(\(([^()]*)\)\)/g, "($1)");
   return unwrapped === sql ? sql : normalizeSql(unwrapped);
 };
 

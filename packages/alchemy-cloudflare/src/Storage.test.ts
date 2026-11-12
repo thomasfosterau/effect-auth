@@ -128,7 +128,7 @@ describe("D1-backed effect-auth storage", () => {
         return yield* purgeExpired(database);
       }),
     );
-    expect(result).toEqual({ magicLinks: 1, emailOtps: 0 });
+    expect(result).toEqual({ magicLinks: 1, emailOtps: 0, rateLimits: 0 });
   });
 
   /**

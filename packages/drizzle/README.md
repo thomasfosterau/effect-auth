@@ -864,8 +864,10 @@ store each).
   callers get distinct counts. PostgreSQL and SQLite return the count from the
   upsert (`RETURNING`); MySQL reads it back after `ON DUPLICATE KEY UPDATE`,
   which can only read a later count, never an earlier one. `ttl` is not
-  stored: delete rows whose `reset_at` and `blocked_until` are past, on your own
-  schedule, if keys churn.
+  stored, so the table keeps one row per key ever counted: schedule
+  `Drizzle.RateLimitStore.purgeExpired(tables)` (a cron trigger, a timer) to
+  delete, in one `DELETE`, the rows whose `reset_at` and `blocked_until` have
+  both passed. A row inside its window or still blocked stays.
 - **`TokenStore`** holds email-verification and password-reset tokens in one
   `effect_auth_tokens` table, by `purpose`. `token` is the SHA-256 digest the
   services compute; every read and delete is scoped to the store's purpose, so
