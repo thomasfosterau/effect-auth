@@ -43,7 +43,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth": "workspace:*"
+    "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
     "@effect/sql-pg": "catalog:",
@@ -60,14 +60,8 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@types/pg": "catalog:peers",
     "drizzle-orm": "catalog:drizzle-peers",
     "effect": "catalog:peers"
-  },
-  "peerDependenciesMeta": {
-    "@types/pg": {
-      "optional": true
-    }
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

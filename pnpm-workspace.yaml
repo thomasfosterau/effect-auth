@@ -138,7 +138,6 @@ catalogs:
   peers:
     # 0.x minors break, so the peer range is the minor line.
     "@thomasfosterau/effect-jsonapi": ^0.21.0
-    "@types/pg": ^8.15.0
     # The optional peer of effect-auth's `./saml` subpath, at the same
     # CVE-fixed floor as the catalog pin above.
     "@node-saml/node-saml": ^5.2.0
@@ -155,8 +154,10 @@ catalogs:
   # rejects the `1.0.0-rc.5` the applications run (#544). Both lines are
   # tested: the suite runs on the catalog's 0.4x `drizzle-orm` and again on
   # `drizzle-orm-effect` (the 1.0.0-rc.5 build), `vite.drizzle-1.config.ts`.
+  # Bounded to the tested lines (#635): 0.x minors break, so a new drizzle
+  # minor joins the range only once CI has run against it.
   drizzle-peers:
-    drizzle-orm: ">=0.44.0 || >=1.0.0-rc.5"
+    drizzle-orm: ">=0.44.0 <0.46.0 || >=1.0.0-rc.5 <2"
   # The two Alchemy packages' peers (effect-auth-alchemy-cloudflare and
   # effect-auth-alchemy-postgres), kept apart from the programme floor in
   # `peers` (today the `effect` floors are equal): `alchemy` (beta.85) itself
