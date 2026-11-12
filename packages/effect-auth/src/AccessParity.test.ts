@@ -88,9 +88,8 @@ const answer = (mode: SeamMode, graph: boolean): boolean =>
 const atViewPrivate = (viewer: AppUser): boolean =>
   viewer.role === "moderator" || viewer.role === "admin";
 
-const label = (
-  parts: Readonly<Record<string, string | boolean | symbol | null | undefined>>,
-): string => Arr.map(Rec.toEntries(parts), ([key, value]) => `${key}=${String(value)}`).join(" ");
+const label = (parts: Readonly<Record<string, string | boolean | null | undefined>>): string =>
+  Arr.map(Rec.toEntries(parts), ([key, value]) => `${key}=${String(value)}`).join(" ");
 
 // ---------------------------------------------------------------------------
 // Spy seams
@@ -671,8 +670,9 @@ describe("read scope: both readScopes for every viewer and seam presence", () =>
 // ---------------------------------------------------------------------------
 
 describe("serveability: publiclyServeable(OwnedAccess.serveableAxes)", () => {
-  const ABSENT = Symbol("absent");
-  type Value = string | boolean | null | undefined | typeof ABSENT;
+  /** The attribute is left out of the representation (no wire value is this string). */
+  const ABSENT = "<absent>";
+  type Value = string | boolean | null | undefined;
   const visibilities: ReadonlyArray<Value> = [
     ABSENT,
     undefined,
