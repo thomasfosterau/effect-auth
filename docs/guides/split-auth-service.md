@@ -146,6 +146,31 @@ decrements and `lastUsedAt` moves, once per request you resolve. A key with
 `rateLimit` applies too: over it, the auth service answers `429` with `Retry-After`, which
 reaches you as a `RemoteSessionError` with `status: 429`.
 
+A disabled, expired or exhausted key is refused with the same `401` even when it is
+also over its own limit: every other check runs before the per-key limit, so only a key
+that would otherwise resolve ever sees `429`.
+
+The endpoint is also under the per-address limit in `defaultEndpointRules`: 300
+requests a minute per client address, then a 5-minute block. It counts every request
+before the key is read, refused and resolved alike, and a request it refuses (`429`)
+spends no use of the key. Behind a service binding every request arrives from your
+edge, so the address is the one your `trustedProxy` reads from the forwarded headers
+(`cf-connecting-ip`, which the relay forwards). Override it with a rule ahead of the
+defaults (the first match wins):
+
+```ts
+Http.make({
+  services,
+  trustedProxy: ClientIP.cloudflare,
+  ipRateLimit: {
+    rules: [
+      { path: "/api-keys/current", methods: ["GET"], maxRequests: 1_200, windowMs: 60_000 },
+      ...Http.defaultEndpointRules,
+    ],
+  },
+});
+```
+
 The endpoint checks no permissions; check the key's `permissions` through the policy
 kernel. Configure the header once and pass it to both sides: `cookie.apiKeyHeaders` on the
 auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`.

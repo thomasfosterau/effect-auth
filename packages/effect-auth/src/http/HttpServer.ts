@@ -5029,7 +5029,9 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   // RFC 7591 dynamic client registration is open to anonymous callers.
   postRule("/register", 10, HOUR_MS, HOUR_MS),
   // Verifies a secret on every call; a machine caller resolves its key per
-  // request, so the window is short and generous.
+  // request, so the window is short and generous. Like every rule it counts
+  // each request before the handler runs, refused and resolved alike, and a
+  // request it refuses never reaches the key (no use spent).
   {
     path: "/api-keys/current",
     methods: ["GET"],

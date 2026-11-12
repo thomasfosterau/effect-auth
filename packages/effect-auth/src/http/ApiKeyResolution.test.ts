@@ -214,6 +214,32 @@ describe("GET /api-keys/current (#730)", () => {
     expect(others).toEqual([unknown, unknown, unknown, unknown]);
   });
 
+  it("answers a disabled, expired or exhausted key over its own limit with the identical 401, not 429", async () => {
+    // A revoked-but-real key must not be told apart from an unknown one by
+    // its per-key bucket: every other refusal is decided before the limit.
+    const { handler } = server();
+    const token = await signUp(handler, "ada@example.com");
+    const rateLimit = { maxRequests: 1, windowMs: 60_000 };
+    const disabled = await createKey(handler, token, { rateLimit });
+    const expired = await createKey(handler, token, { rateLimit });
+    const exhausted = await createKey(handler, token, { rateLimit, remaining: 1 });
+    // Spend each key's one request in its window, so each bucket is full.
+    const first = await inSequence(
+      [disabled, expired, exhausted],
+      async ({ key }) => (await current(handler, { "x-api-key": key })).status,
+    );
+    expect(first).toEqual([200, 200, 200]);
+    await updateKey(handler, token, disabled.id, { enabled: false });
+    await updateKey(handler, token, expired.id, { expiresAt: 1 });
+
+    const unknown = await refusalShape(await current(handler, { "x-api-key": "ak_not-a-key" }));
+    const overLimit = await inSequence([disabled, expired, exhausted], async ({ key }) =>
+      refusalShape(await current(handler, { "x-api-key": key })),
+    );
+    expect(overLimit).toEqual([unknown, unknown, unknown]);
+    expect(unknown.body).toBe(REFUSED_BODY);
+  });
+
   it("never writes the key to a log line or an error body, and logs why it refused", async () => {
     const { handler, logs } = server();
     const token = await signUp(handler, "ada@example.com");
