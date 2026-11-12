@@ -1173,11 +1173,41 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 /** A JSON object's own fields, read one by one. */
 const JsonFields = Schema.Record(Schema.String, Schema.Json);
 const MessageBody = Schema.Struct({ message: Schema.String });
-const ClientIdBody = Schema.Struct({ client: Schema.Struct({ clientId: Schema.String }) });
+/** What `POST /oauth-clients` answers: the client, its secret (if any) in `meta`. */
 const CreatedClientBody = Schema.Struct({
-  client: Schema.Struct({ clientId: Schema.String }),
-  clientSecret: Schema.String,
+  data: Schema.Struct({ id: Schema.String }),
+  meta: Schema.optionalKey(Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) })),
 });
+
+/** The client id and (for a confidential client) the secret a registration answered. */
+const registeredClient = async (
+  response: Response,
+): Promise<{ readonly client: { readonly clientId: string }; readonly clientSecret: string }> => {
+  const { data, meta } = await jsonBody(response, CreatedClientBody);
+  return { client: { clientId: data.id }, clientSecret: meta?.clientSecret ?? "" };
+};
+
+/** A JSON:API request to `path` with `body`, as `sessionId` when given. */
+const apiRequest = (
+  method: string,
+  path: string,
+  body: Schema.Json | undefined,
+  sessionId?: string,
+): Request =>
+  new Request(`http://idp.test${path}`, {
+    method,
+    headers: {
+      ...FIXTURE_CLIENT_HEADERS,
+      ...(body !== undefined && { "content-type": "application/vnd.api+json" }),
+      ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+    },
+    ...(body !== undefined && { body: encodeJson(body) }),
+  });
+
+/** `POST /oauth-clients` with the client's `attributes`, as `sessionId` when given. */
+const registerClientRequest = (attributes: Schema.Json, sessionId?: string): Request =>
+  apiRequest("POST", "/oauth-clients", { data: { type: "oauth-clients", attributes } }, sessionId);
+
 const RefreshTokenBody = Schema.Struct({ refresh_token: Schema.String });
 
 const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
@@ -1265,8 +1295,7 @@ describe("HTTP OIDC provider endpoints", () => {
 
     // 1. Register a client (admin-gated; non-admins are rejected).
     const denied = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"] },
         fx.makeSession(fx.seedUser("pleb@idp.test")),
       ),
@@ -1274,14 +1303,13 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(denied.status).toBe(403);
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    expect(registered.status).toBe(200);
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    expect(registered.status).toBe(201);
+    const { client, clientSecret } = await registeredClient(registered);
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
@@ -1428,9 +1456,9 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("bob@idp.test"));
 
     const registered = await fx.handler(
-      post("/oauth2/register", { name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
+      registerClientRequest({ name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const authorizeQuery = {
       response_type: "code",
@@ -1518,13 +1546,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("carol@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorizeOnce = async () => {
@@ -1591,13 +1618,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("dave@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const authorize = await fx.handler(
       get(
@@ -1642,7 +1668,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(doc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
     expect(doc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
     expect(doc["jwks_uri"]).toBe(`${ISSUER}/.well-known/jwks.json`);
-    expect(doc["registration_endpoint"]).toBe(`${ISSUER}/oauth2/register`);
+    expect(doc["registration_endpoint"]).toBeUndefined();
     expect(doc["end_session_endpoint"]).toBe(`${ISSUER}/oauth2/logout`);
     expect(doc["code_challenge_methods_supported"]).toEqual(["S256"]);
   });
@@ -1663,13 +1689,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("reuse@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1753,13 +1778,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("expire@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1818,13 +1842,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("scope@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client, clientSecret } = await jsonBody(registered, CreatedClientBody);
+    const { client, clientSecret } = await registeredClient(registered);
 
     const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
@@ -1892,13 +1915,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client } = await jsonBody(registered, ClientIdBody);
+    const { client } = await registeredClient(registered);
 
     const res = await fx.handler(
       get("/oauth2/authorize", {
@@ -1923,13 +1945,12 @@ describe("HTTP OIDC provider endpoints", () => {
     const userSid = fx.makeSession(fx.seedUser("login@idp.test"));
 
     const registered = await fx.handler(
-      post(
-        "/oauth2/register",
+      registerClientRequest(
         { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
         adminSid,
       ),
     );
-    const { client } = await jsonBody(registered, ClientIdBody);
+    const { client } = await registeredClient(registered);
 
     const res = await fx.handler(
       get(
@@ -2267,7 +2288,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     ]);
     // The OAuth document carries no OIDC-only members.
     expect(baseDoc["claims_supported"]).toBeUndefined();
-    expect(baseDoc["registration_endpoint"]).toBe(`${ISSUER}/oauth2/register`);
+    expect(baseDoc["registration_endpoint"]).toBeUndefined();
 
     // With DCR on, both documents advertise the RFC 7591 endpoint.
     const withDCR = makeHttpFixture({ dynamicRegistration: {} });
@@ -2419,25 +2440,37 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     expect([...fx.rateLimitKeys]).toEqual([]);
   });
 });
-describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () => {
-  const patch = (path: string, body: Schema.Json, sessionId?: string): Request =>
-    new Request(`http://idp.test${path}`, {
-      method: "PATCH",
-      headers: {
-        ...FIXTURE_CLIENT_HEADERS,
-        "content-type": "application/json",
-        ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
-      },
-      body: encodeJson(body),
-    });
+
+/** `PATCH /oauth-clients/:id` with `attributes`. */
+const patch = (clientId: string, attributes: Schema.Json, sessionId?: string): Request =>
+  apiRequest(
+    "PATCH",
+    `/oauth-clients/${clientId}`,
+    { data: { type: "oauth-clients", id: clientId, attributes } },
+    sessionId,
+  );
+
+describe("HTTP OIDC client administration: /oauth-clients", () => {
+  /** One `oauth-clients` resource, read for what these tests check. */
+  const ClientResource = Schema.Struct({
+    id: Schema.String,
+    attributes: Schema.Struct({
+      name: Schema.String,
+      redirectUris: Schema.Array(Schema.String),
+      clientType: Schema.Literals(["web", "native"]),
+      skipConsent: Schema.Boolean,
+      disabled: Schema.Boolean,
+    }),
+  });
+
+  const ClientDocument = Schema.Struct({ data: ClientResource });
 
   const registerClient = async (fx: ReturnType<typeof makeHttpFixture>, adminSid: string) => {
     const registered = await fx.handler(
-      post("/oauth2/register", { name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
+      registerClientRequest({ name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
     );
-    expect(registered.status).toBe(200);
-    // SAFETY: a 200 from /oauth2/register carries the registered client.
-    const { client } = await jsonBody(registered, ClientIdBody);
+    expect(registered.status).toBe(201);
+    const { client } = await registeredClient(registered);
     return client.clientId;
   };
 
@@ -2448,7 +2481,7 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
 
     const res = await fx.handler(
       patch(
-        `/oauth2/clients/${clientId}`,
+        clientId,
         {
           name: "Renamed RP",
           redirectUris: ["https://rp.test/other"],
@@ -2460,46 +2493,38 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
       ),
     );
     expect(res.status).toBe(200);
-    // SAFETY: a 200 from the update endpoint carries the client view.
-    const body = await jsonBody(
-      res,
-      Schema.Struct({
-        clientId: Schema.String,
-        name: Schema.String,
-        redirectUris: Schema.Array(Schema.String),
-        skipConsent: Schema.Boolean,
-        disabled: Schema.Boolean,
-      }),
-    );
-    expect(body).toMatchObject({
-      clientId,
-      name: "Renamed RP",
-      redirectUris: ["https://rp.test/other"],
-      skipConsent: true,
-      disabled: true,
+    const { data } = await jsonBody(res, ClientDocument);
+    expect(data).toMatchObject({
+      id: clientId,
+      attributes: {
+        name: "Renamed RP",
+        redirectUris: ["https://rp.test/other"],
+        clientType: "web",
+        skipConsent: true,
+        disabled: true,
+      },
     });
   });
 
-  it("keeps the client's fields when the payload is empty", async () => {
+  it("keeps the client's fields when the update names none", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
     const clientId = await registerClient(fx, adminSid);
 
-    const res = await fx.handler(patch(`/oauth2/clients/${clientId}`, {}, adminSid));
+    const res = await fx.handler(patch(clientId, {}, adminSid));
     expect(res.status).toBe(200);
-    // SAFETY: a 200 from the update endpoint carries the client view.
-    const body = await jsonBody(
-      res,
-      Schema.Struct({ name: Schema.String, redirectUris: Schema.Array(Schema.String) }),
-    );
-    expect(body).toMatchObject({ name: "RP", redirectUris: ["https://rp.test/cb"] });
+    const { data } = await jsonBody(res, ClientDocument);
+    expect(data.attributes).toMatchObject({ name: "RP", redirectUris: ["https://rp.test/cb"] });
   });
 
   it("answers 400 for an unknown client", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
-    const res = await fx.handler(patch("/oauth2/clients/nope", { name: "x" }, adminSid));
-    expect(res.status).toBe(400);
+    expect((await fx.handler(patch("nope", { name: "x" }, adminSid))).status).toBe(400);
+    const deleted = await fx.handler(
+      apiRequest("DELETE", "/oauth-clients/nope", undefined, adminSid),
+    );
+    expect(deleted.status).toBe(400);
   });
 
   it("refuses a non-admin with 403 and an anonymous caller with 401", async () => {
@@ -2508,11 +2533,42 @@ describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () 
     const clientId = await registerClient(fx, adminSid);
     const userSid = fx.makeSession(fx.seedUser("pleb@idp.test"));
 
-    const forbidden = await fx.handler(
-      patch(`/oauth2/clients/${clientId}`, { name: "x" }, userSid),
+    expect((await fx.handler(patch(clientId, { name: "x" }, userSid))).status).toBe(403);
+    expect((await fx.handler(patch(clientId, { name: "x" }))).status).toBe(401);
+    const listed = await fx.handler(apiRequest("GET", "/oauth-clients", undefined, userSid));
+    expect(listed.status).toBe(403);
+  });
+
+  it("lists and deletes clients, a public client registering without a secret", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const native = await fx.handler(
+      registerClientRequest(
+        { name: "CLI", redirectUris: ["http://127.0.0.1/cb"], clientType: "native" },
+        adminSid,
+      ),
     );
-    expect(forbidden.status).toBe(403);
-    const anonymous = await fx.handler(patch(`/oauth2/clients/${clientId}`, { name: "x" }));
-    expect(anonymous.status).toBe(401);
+    expect(native.status).toBe(201);
+    const created = await jsonBody(
+      native,
+      Schema.Struct({
+        data: ClientResource,
+        meta: Schema.optionalKey(
+          Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) }),
+        ),
+      }),
+    );
+    expect(created.data.attributes.clientType).toBe("native");
+    expect(created.meta?.clientSecret).toBeUndefined();
+
+    const listed = await fx.handler(apiRequest("GET", "/oauth-clients", undefined, adminSid));
+    expect(listed.status).toBe(200);
+    const list = await jsonBody(listed, Schema.Struct({ data: Schema.Array(ClientResource) }));
+    expect(list.data.map((client) => client.id)).toContain(created.data.id);
+
+    const deleted = await fx.handler(
+      apiRequest("DELETE", `/oauth-clients/${created.data.id}`, undefined, adminSid),
+    );
+    expect(deleted.status).toBe(204);
   });
 });

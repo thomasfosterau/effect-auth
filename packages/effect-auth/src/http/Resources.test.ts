@@ -13,6 +13,9 @@ import type {
   Team,
   TeamMember,
 } from "../Organization.ts";
+import type { ApiKey } from "../ApiKey.ts";
+import type { OidcClient } from "../OidcProvider.ts";
+import type { OidcSsoProvider, SamlSsoProvider } from "../Sso.ts";
 import { Session, User } from "../Types.ts";
 import * as Resources from "./Resources.ts";
 
@@ -22,19 +25,21 @@ const sorted = (keys: Iterable<string>): ReadonlyArray<string> =>
 
 /**
  * The fields a resource carries, named as the store-facing record names them:
- * its declared attributes (renamed where JSON:API reserves the name), its id,
- * and each to-one relationship as the foreign key it stands for.
+ * its declared attributes (renamed where JSON:API reserves the name), its id
+ * (as `id` names it in the record), and each to-one relationship as the
+ * foreign key it stands for.
  */
 const storeFacingKeys = (
   resource: Resource.Any,
   options: {
+    readonly id?: string;
     readonly renamed?: Readonly<Record<string, string>>;
     readonly foreignKeys?: Readonly<Record<string, string>>;
     readonly derived?: ReadonlyArray<string>;
   } = {},
 ): ReadonlyArray<string> =>
   sorted([
-    "id",
+    options.id ?? "id",
     ...R.keys(Resource.declaredAttributes(resource))
       .filter((key) => !(options.derived ?? []).includes(key))
       .map((key) => options.renamed?.[key] ?? key),
@@ -110,6 +115,86 @@ const teamMemberKeys = {
   userId: true,
   createdAt: true,
 } satisfies Record<keyof TeamMember, true>;
+
+// For the records below, `true` is a field the resource carries and `false` one
+// it withholds from the wire (a secret's hash, internal bookkeeping), as the
+// views before the resources withheld them.
+const apiKeyKeys = {
+  id: true,
+  name: true,
+  prefix: true,
+  start: true,
+  keyHash: false,
+  userId: true,
+  enabled: true,
+  expiresAt: true,
+  lastUsedAt: true,
+  permissions: true,
+  metadata: true,
+  remaining: true,
+  refillAmount: false,
+  refillInterval: false,
+  refillMax: false,
+  lastRefillAt: false,
+  rateLimit: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Record<keyof ApiKey, boolean>;
+
+const oidcClientKeys = {
+  clientId: true,
+  clientSecretHash: false,
+  name: true,
+  redirectUris: true,
+  type: true,
+  skipConsent: true,
+  disabled: true,
+  metadata: true,
+  userId: false,
+  createdAt: true,
+  updatedAt: true,
+  registrationAccessTokenHash: false,
+  tokenEndpointAuthMethod: false,
+  grantTypes: false,
+  responseTypes: false,
+  scope: false,
+  dynamicallyRegistered: false,
+} satisfies Record<keyof OidcClient, boolean>;
+
+const ssoProviderKeys = {
+  // Both arms.
+  id: true,
+  domain: true,
+  protocol: true,
+  organizationId: true,
+  userId: false,
+  createdAt: true,
+  // OIDC.
+  issuer: true,
+  clientId: true,
+  clientSecret: false,
+  redirectUri: true,
+  authorizationEndpoint: true,
+  tokenEndpoint: true,
+  userInfoEndpoint: true,
+  jwksEndpoint: true,
+  scopes: true,
+  usePKCE: false,
+  // SAML.
+  entityId: true,
+  ssoUrl: true,
+  idpCertificates: true,
+  spEntityId: true,
+  acsUrl: true,
+  signatureAlgorithms: true,
+  wantAssertionsSigned: true,
+  wantAuthnResponseSigned: true,
+  forceAuthn: true,
+} satisfies Record<keyof OidcSsoProvider | keyof SamlSsoProvider, boolean>;
+
+/** The fields of a key set the resource carries. */
+const carried = (keys: Readonly<Record<string, boolean>>): ReadonlyArray<string> =>
+  sorted(R.keys(R.filter(keys, (isCarried) => isCarried)));
 
 // One declaration per entity (#205): each resource is the wire projection of
 // a store-facing schema, so a field added to one and not the other fails here.
@@ -218,5 +303,55 @@ describe("the JSON:API resources", () => {
     expect(sorted(R.keys(Resources.User.updateInput.fields))).toStrictEqual(
       sorted(["id", "name", "image"]),
     );
+  });
+
+  it("api-keys carry ApiKey but its hash and refill bookkeeping, userId as the user relationship", () => {
+    expect(storeFacingKeys(Resources.ApiKey, { foreignKeys: { user: "userId" } })).toStrictEqual(
+      carried(apiKeyKeys),
+    );
+  });
+
+  it("oauth-clients carry OidcClient but its secrets and registration metadata, type as clientType", () => {
+    expect(
+      storeFacingKeys(Resources.OAuthClient, { id: "clientId", renamed: { clientType: "type" } }),
+    ).toStrictEqual(carried(oidcClientKeys));
+  });
+
+  it("sso-providers carry both SsoProvider arms but the secret, organizationId as a relationship", () => {
+    expect(
+      storeFacingKeys(Resources.SsoProvider, { foreignKeys: { organization: "organizationId" } }),
+    ).toStrictEqual(carried(ssoProviderKeys));
+  });
+
+  it("accepts writes to an API key's and an OAuth client's settings, never their secrets", () => {
+    expect(sorted(R.keys(Resources.ApiKey.updateInput.fields))).toStrictEqual(
+      sorted([
+        "id",
+        "name",
+        "enabled",
+        "expiresAt",
+        "permissions",
+        "metadata",
+        "remaining",
+        "rateLimit",
+      ]),
+    );
+    expect(sorted(R.keys(Resources.OAuthClient.createInput.fields))).toStrictEqual(
+      sorted(["name", "redirectUris", "clientType", "skipConsent", "metadata"]),
+    );
+    expect(sorted(R.keys(Resources.OAuthClient.updateInput.fields))).toStrictEqual(
+      sorted(["id", "name", "redirectUris", "skipConsent", "disabled", "metadata"]),
+    );
+  });
+
+  it("accepts no write to a ban, an impersonation, an SSO connection, a sign-in or a token", () => {
+    const updatable = [
+      Resources.UserBan,
+      Resources.Impersonation,
+      Resources.SsoProvider,
+      Resources.SsoAuthorization,
+      Resources.Token,
+    ].map((resource) => R.keys(resource.updateInput.fields));
+    expect(updatable).toStrictEqual([["id"], ["id"], ["id"], ["id"], ["id"]]);
   });
 });

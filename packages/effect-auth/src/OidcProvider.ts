@@ -1200,18 +1200,19 @@ export const make = (
      * The RFC 8414 core: the fields an OAuth 2.0 client (an MCP client, say)
      * needs, shared verbatim by the OIDC discovery document.
      *
-     * `registration_endpoint` points at the RFC 7591 endpoint once dynamic
-     * registration is enabled, and otherwise at the admin-gated
-     * `/oauth2/register` — which is all this provider offers to advertise.
+     * `registration_endpoint` (optional in RFC 8414) is advertised only once
+     * dynamic registration is enabled, pointing at the RFC 7591 endpoint.
+     * Without it there is no endpoint an OAuth client can register at: client
+     * administration (`/oauth-clients`) is admin-gated JSON:API, not RFC 7591.
      */
     const authorizationServerMetadata = (): Record<string, string | ReadonlyArray<string>> => ({
       issuer: config.issuer,
       authorization_endpoint: `${config.issuer}/oauth2/authorize`,
       token_endpoint: `${config.issuer}/oauth2/token`,
       jwks_uri: `${config.issuer}/.well-known/jwks.json`,
-      registration_endpoint: dynamicRegistration.enabled
-        ? `${config.issuer}/register`
-        : `${config.issuer}/oauth2/register`,
+      ...(dynamicRegistration.enabled && {
+        registration_endpoint: `${config.issuer}/register`,
+      }),
       scopes_supported: [...allowedScopes],
       response_types_supported: ["code"],
       response_modes_supported: ["query"],

@@ -180,7 +180,8 @@ interface WireResource<A> {
   readonly id: string;
   readonly attributes: A;
   readonly relationships?: {
-    readonly [name: string]: { readonly data: ResourceLinkage } | undefined;
+    // `null` is an optional to-one relationship that links to nothing.
+    readonly [name: string]: { readonly data: ResourceLinkage | null } | undefined;
   };
 }
 
@@ -227,6 +228,18 @@ type WireTeam = Omit<Http.TeamView, "id" | "organizationId">;
 
 type WireTeamMember = Omit<Http.TeamMemberView, "id" | "teamId" | "userId">;
 
+type WireApiKey = Omit<Http.ApiKeyView, "id" | "userId">;
+
+/** An OIDC client's attributes: JSON:API reserves `type`, so it travels as `clientType`. */
+type WireOAuthClient = Omit<Http.OidcClientView, "clientId" | "type"> & {
+  readonly clientType: Http.OidcClientView["type"];
+};
+
+/** `Omit` over each member of a union, so a discriminated union stays one. */
+type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+type WireSsoProvider = OmitEach<Http.SsoProviderView, "id" | "organizationId">;
+
 interface DataDocument<A> {
   readonly data: WireResource<A>;
   readonly included?: ReadonlyArray<WireResource<WireUser>>;
@@ -261,13 +274,13 @@ const userView = (resource: WireResource<WireUser>): Http.UserView => ({
 
 const sessionView = (resource: WireResource<WireSession>): Http.SessionView => ({
   id: resource.id,
-  userId: resource.relationships?.user?.data.id ?? "",
+  userId: resource.relationships?.user?.data?.id ?? "",
   ...resource.attributes,
 });
 
 /** The id a resource's to-one relationship `name` links to (`""` when absent). */
 const related = (resource: WireResource<unknown>, name: string): string =>
-  resource.relationships?.[name]?.data.id ?? "";
+  resource.relationships?.[name]?.data?.id ?? "";
 
 const organizationView = ({
   id,
@@ -306,6 +319,44 @@ const teamMemberView = (resource: WireResource<WireTeamMember>): Http.TeamMember
   userId: related(resource, "user"),
   ...resource.attributes,
 });
+
+/** The user `userId` names, from a document's `included` (an error when it is missing). */
+const includedUser = (document: DataDocument<unknown>, userId: string): Http.UserView => {
+  const user = document.included?.find((resource) => resource.id === userId);
+  if (user === undefined) {
+    throw new AuthClientError(0, `The ${document.data.type} document did not include its user`);
+  }
+  return userView(user);
+};
+
+/** The `admin-users` item path of user `userId`. */
+const adminUserPath = (userId: string): string => `/admin/users/${encodeURIComponent(userId)}`;
+
+/** A to-one relationship naming user `userId`. */
+const userLinkage = (userId: string) => ({ data: { type: "users", id: userId } });
+
+const apiKeyView = (resource: WireResource<WireApiKey>): Http.ApiKeyView => ({
+  id: resource.id,
+  userId: related(resource, "user"),
+  ...resource.attributes,
+});
+
+const oauthClientView = ({
+  id,
+  attributes,
+}: WireResource<WireOAuthClient>): Http.OidcClientView => {
+  const { clientType, ...rest } = attributes;
+  return { clientId: id, type: clientType, ...rest };
+};
+
+const ssoProviderView = (resource: WireResource<WireSsoProvider>): Http.SsoProviderView => {
+  const organizationId = resource.relationships?.["organization"]?.data?.id;
+  return {
+    id: resource.id,
+    ...resource.attributes,
+    ...(organizationId !== undefined && { organizationId }),
+  };
+};
 
 /** A `device-sessions` resource with its included user, as the session-with-user view. */
 const deviceSessionView = (
@@ -648,7 +699,8 @@ export interface AuthClient {
     readonly listUsers: (payload: Http.AdminListUsersPayload) => Promise<Http.AdminUserListView>;
     readonly setRole: (payload: Http.AdminSetRolePayload) => Promise<Http.UserView>;
     readonly banUser: (payload: Http.AdminBanUserPayload) => Promise<Http.UserView>;
-    readonly unbanUser: (payload: Http.AdminUserActionPayload) => Promise<Http.UserView>;
+    /** Lift the ban; resolves once it is gone (the user is not returned). */
+    readonly unbanUser: (payload: Http.AdminUserActionPayload) => Promise<void>;
     readonly removeUser: (payload: Http.AdminUserActionPayload) => Promise<void>;
     readonly revokeSessions: (payload: Http.AdminUserActionPayload) => Promise<Http.StatusResponse>;
     /** Assume another user's identity — swaps the session cookie. */
@@ -759,11 +811,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     jsonApi<DataDocument<WireSession>>("GET", "/sessions/current?include=user").then(
       (document): Http.SessionWithUserView => {
         const session = sessionView(document.data);
-        const user = document.included?.find((resource) => resource.id === session.userId);
-        if (user === undefined) {
-          throw new AuthClientError(0, "The session document did not include its user");
-        }
-        return { session, user: userView(user) };
+        return { session, user: includedUser(document, session.userId) };
       },
       (error) => {
         if (error instanceof AuthClientError && error.status === 401) return null;
@@ -862,6 +910,18 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       `/invitations/${encodeURIComponent(invitationId)}`,
       { data: { type: "invitations", id: invitationId, attributes: { status } } },
     );
+
+  /**
+   * Approve or deny a device's user code (`POST /device-authorizations/decisions`).
+   * The code travels in the body, never in the URL.
+   */
+  const decideDevice = (
+    userCode: string,
+    decision: "approved" | "denied",
+  ): Promise<Http.StatusResponse> =>
+    jsonApi<void>("POST", "/device-authorizations/decisions", {
+      data: { type: "device-authorization-decisions", attributes: { userCode, decision } },
+    }).then(() => ({ status: true }));
 
   /** Redeem a second-factor challenge with a TOTP or backup code. */
   const verifySecondFactor = (
@@ -980,7 +1040,10 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     revokeSession: (sessionId) =>
       jsonApi<void>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`),
     revokeOtherSessions: () => jsonApi<void>("DELETE", "/sessions?filter%5Bcurrent%5D=false"),
-    jwtToken: () => request<Http.JwtTokenView>("GET", "/token"),
+    jwtToken: () =>
+      jsonApi<DataDocument<Http.JwtTokenView>>("POST", "/tokens").then(
+        (document) => document.data.attributes,
+      ),
     jwks: () => request<Http.JwksView>("GET", "/jwks"),
 
     identifiers: {
@@ -1065,8 +1128,8 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload ?? {}),
       token: (payload) =>
         mutating(() => request<Http.AuthSuccess>("POST", "/device/token", payload)),
-      approve: (payload) => request<Http.StatusResponse>("POST", "/device/approve", payload),
-      deny: (payload) => request<Http.StatusResponse>("POST", "/device/deny", payload),
+      approve: ({ userCode }) => decideDevice(userCode, "approved"),
+      deny: ({ userCode }) => decideDevice(userCode, "denied"),
     },
 
     multiFactor: {
@@ -1245,47 +1308,120 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     apiKeys: {
-      create: (payload) => request<Http.ApiKeyCreatedView>("POST", "/api-keys", payload),
-      list: () => request<Http.ApiKeyListView>("GET", "/api-keys"),
-      update: (keyId, payload) =>
-        request<Http.ApiKeyView>("PATCH", `/api-keys/${encodeURIComponent(keyId)}`, payload),
-      delete: (keyId) => request<void>("DELETE", `/api-keys/${encodeURIComponent(keyId)}`),
+      create: (attributes) =>
+        jsonApi<DataDocument<WireApiKey> & { readonly meta: { readonly key: string } }>(
+          "POST",
+          "/api-keys",
+          { data: { type: "api-keys", attributes } },
+        ).then((document) => ({ key: document.meta.key, apiKey: apiKeyView(document.data) })),
+      list: () =>
+        jsonApi<CollectionDocument<WireApiKey>>("GET", "/api-keys").then((document) =>
+          document.data.map(apiKeyView),
+        ),
+      update: (keyId, attributes) =>
+        jsonApi<DataDocument<WireApiKey>>("PATCH", `/api-keys/${encodeURIComponent(keyId)}`, {
+          data: { type: "api-keys", id: keyId, attributes },
+        }).then((document) => apiKeyView(document.data)),
+      delete: (keyId) => jsonApi<void>("DELETE", `/api-keys/${encodeURIComponent(keyId)}`),
     },
 
     admin: {
-      listUsers: (payload) => request<Http.AdminUserListView>("POST", "/admin/users/list", payload),
-      setRole: (payload) => request<Http.UserView>("POST", "/admin/users/set-role", payload),
-      banUser: (payload) => request<Http.UserView>("POST", "/admin/users/ban", payload),
-      unbanUser: (payload) => request<Http.UserView>("POST", "/admin/users/unban", payload),
-      removeUser: (payload) => request<void>("POST", "/admin/users/remove", payload),
-      revokeSessions: (payload) =>
-        request<Http.StatusResponse>("POST", "/admin/users/revoke-sessions", payload),
+      listUsers: ({ limit, offset, searchEmail }) => {
+        const query = new URLSearchParams();
+        if (searchEmail !== undefined) query.set("filter[email]", searchEmail);
+        if (offset !== undefined) query.set("page[offset]", String(offset));
+        if (limit !== undefined) query.set("page[limit]", String(limit));
+        const search = query.toString();
+        return jsonApi<
+          CollectionDocument<WireUser> & { readonly meta: { readonly total: number } }
+        >("GET", search === "" ? "/admin/users" : `/admin/users?${search}`).then((document) => ({
+          users: document.data.map(userView),
+          total: document.meta.total,
+        }));
+      },
+      setRole: ({ userId, role }) =>
+        jsonApi<DataDocument<WireUser>>("PATCH", adminUserPath(userId), {
+          data: { type: "users", id: userId, attributes: { role } },
+        }).then((document) => userView(document.data)),
+      banUser: ({ userId, reason, expiresIn }) =>
+        jsonApi<DataDocument<unknown>>("POST", "/user-bans", {
+          data: {
+            type: "user-bans",
+            attributes: { reason, expiresIn },
+            relationships: { user: userLinkage(userId) },
+          },
+        }).then((document) => includedUser(document, userId)),
+      unbanUser: ({ userId }) =>
+        jsonApi<void>("DELETE", `/user-bans/${encodeURIComponent(userId)}`),
+      removeUser: ({ userId }) => jsonApi<void>("DELETE", adminUserPath(userId)),
+      revokeSessions: ({ userId }) =>
+        jsonApi<void>("DELETE", `${adminUserPath(userId)}/sessions`).then(() => ({
+          status: true,
+        })),
       // Impersonation swaps the session cookie in both directions.
-      impersonate: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/admin/impersonate", payload)),
+      impersonate: ({ userId }) =>
+        mutating(() =>
+          jsonApi<DataDocument<unknown>>("POST", "/impersonations", {
+            data: { type: "impersonations", relationships: { user: userLinkage(userId) } },
+          }).then((document) => ({
+            user: includedUser(document, userId),
+            needsEmailVerification: false,
+          })),
+        ),
       stopImpersonating: () =>
-        mutating(() => request<Http.StatusResponse>("POST", "/admin/stop-impersonating")),
+        mutating(() =>
+          jsonApi<void>("DELETE", "/impersonations/current").then(() => ({ status: true })),
+        ),
     },
 
     sso: {
-      register: (payload) => request<Http.SsoProviderView>("POST", "/sso/register", payload),
-      signIn: (payload) => request<Http.SsoUrlView>("POST", "/sign-in/sso", payload),
+      register: ({ organizationId, ...attributes }) =>
+        jsonApi<DataDocument<WireSsoProvider>>("POST", "/sso-providers", {
+          data: {
+            type: "sso-providers",
+            attributes,
+            ...(organizationId !== undefined && {
+              relationships: {
+                organization: { data: { type: "organizations", id: organizationId } },
+              },
+            }),
+          },
+        }).then((document) => ssoProviderView(document.data)),
+      signIn: (attributes) =>
+        jsonApi<DataDocument<{ readonly url: string }>>("POST", "/sso-authorizations", {
+          data: { type: "sso-authorizations", attributes },
+        }).then((document) => ({ url: document.data.attributes.url, state: document.data.id })),
       callback: (payload) =>
         mutating(() => request<Http.AuthSuccess>("POST", "/sso/callback", payload)),
     },
 
     oidc: {
-      registerClient: (payload) =>
-        request<Http.OidcClientCreatedView>("POST", "/oauth2/register", payload),
-      listClients: () => request<Http.OidcClientListView>("GET", "/oauth2/clients"),
-      updateClient: (clientId, payload) =>
-        request<Http.OidcClientView>(
-          "PATCH",
-          `/oauth2/clients/${encodeURIComponent(clientId)}`,
-          payload,
+      registerClient: ({ type, ...attributes }) =>
+        jsonApi<
+          DataDocument<WireOAuthClient> & {
+            readonly meta?: { readonly clientSecret?: string };
+          }
+        >("POST", "/oauth-clients", {
+          data: { type: "oauth-clients", attributes: { ...attributes, clientType: type } },
+        }).then((document) => {
+          const clientSecret = document.meta?.clientSecret;
+          return {
+            client: oauthClientView(document.data),
+            ...(clientSecret !== undefined && { clientSecret }),
+          };
+        }),
+      listClients: () =>
+        jsonApi<CollectionDocument<WireOAuthClient>>("GET", "/oauth-clients").then((document) =>
+          document.data.map(oauthClientView),
         ),
+      updateClient: (clientId, attributes) =>
+        jsonApi<DataDocument<WireOAuthClient>>(
+          "PATCH",
+          `/oauth-clients/${encodeURIComponent(clientId)}`,
+          { data: { type: "oauth-clients", id: clientId, attributes } },
+        ).then((document) => oauthClientView(document.data)),
       deleteClient: (clientId) =>
-        request<void>("DELETE", `/oauth2/clients/${encodeURIComponent(clientId)}`),
+        jsonApi<void>("DELETE", `/oauth-clients/${encodeURIComponent(clientId)}`),
       consent: (payload) => request<Http.OidcRedirectView>("POST", "/oauth2/consent", payload),
     },
 
