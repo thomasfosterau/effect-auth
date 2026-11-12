@@ -49,9 +49,11 @@ import { makeToUser, selection } from "./UserStore.ts";
 
 /**
  * Each promoted attribute's column, by the key it has on the table object
- * (what an insert's values are keyed by).
+ * (what an insert's or update's values are keyed by).
+ *
+ * @internal Also used by `UserServiceStore.update`.
  */
-const promotedKeys = (users: UserSchema): Readonly<Record<string, string>> => {
+export const promotedKeys = (users: UserSchema): Readonly<Record<string, string>> => {
   const tableColumns = R.toEntries(getTableColumns(users.table));
   const keyOf = (column: Column): string | undefined =>
     Option.getOrUndefined(
@@ -64,13 +66,17 @@ const promotedKeys = (users: UserSchema): Readonly<Record<string, string>> => {
 };
 
 /**
- * Split a new user's attributes into the promoted columns' insert values and
- * the bag, failing when the bag is unmapped but needed.
+ * Split a user's attributes into the promoted columns' write values and the
+ * bag, failing when the bag is unmapped but needed. `label` names the store
+ * call in the error.
+ *
+ * @internal Also used by `UserServiceStore.update`.
  */
-const splitAttributes = (
+export const splitAttributes = (
   users: UserSchema,
   keys: Readonly<Record<string, string>>,
   attributes: Auth.Attributes,
+  label: string,
 ) => {
   const bag = R.filter(attributes, (_value, name) => !R.has(keys, name));
   const columns = R.mapKeys(
@@ -80,7 +86,7 @@ const splitAttributes = (
   return users.columns.attributes === undefined && !R.isEmptyRecord(bag)
     ? Effect.fail(
         new Auth.AuthError({
-          message: `drizzle emailPassword.createUser failed: the users table has no attribute bag for ${R.keys(bag).join(", ")}`,
+          message: `drizzle ${label} failed: the users table has no attribute bag for ${R.keys(bag).join(", ")}`,
         }),
       )
     : Effect.succeed({ columns, bag });
@@ -137,7 +143,12 @@ export const make = (
 
     const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] = (input) =>
       Effect.gen(function* () {
-        const { columns, bag } = yield* splitAttributes(users, keys, input.attributes ?? {});
+        const { columns, bag } = yield* splitAttributes(
+          users,
+          keys,
+          input.attributes ?? {},
+          "emailPassword.createUser",
+        );
         const id = globalThis.crypto.randomUUID();
         const now = yield* DateTime.nowAsDate;
         yield* query("emailPassword.createUser", (db) =>
