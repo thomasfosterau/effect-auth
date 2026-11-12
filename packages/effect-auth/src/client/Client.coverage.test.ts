@@ -690,6 +690,58 @@ describe("organizations", () => {
     expect((await invitee.organization.rejectInvitation(second.id)).status).toBe("rejected");
   });
 
+  it("lists the signed-in user's own pending invitations, decoded as views (#706)", async () => {
+    const { server, browser } = withServer({ organization: true });
+    const owner = browser();
+    const invitee = browser();
+    const signedOut = browser();
+
+    const boss = await owner.signUp({ email: "boss@client.test", password: PW });
+    const org = await owner.organization.create({ name: "Hooli", slug: "hooli" });
+    await invitee.signUp({ email: "dash@client.test", password: PW });
+    const invitation = await owner.organization.invite(org.id, {
+      email: "dash@client.test",
+      role: "member",
+    });
+    await owner.organization.invite(org.id, { email: "someone@client.test", role: "member" });
+
+    // Unverified, the address lists nothing: its invitation needs the emailed link.
+    expect(await invitee.organization.listMyInvitations()).toEqual([]);
+
+    const email = Arr.findFirst(
+      Arr.fromIterable(server.identifierRecords),
+      ([, identifier]) => identifier.value === "dash@client.test",
+    );
+    assert(Option.isSome(email), "the invitee has an email identifier");
+    const [id, identifier] = email.value;
+    MutableHashMap.set(server.identifierRecords, id, { ...identifier, verified: true });
+
+    const mine = await invitee.organization.listMyInvitations();
+    expect(mine).toEqual([
+      {
+        id: invitation.id,
+        organizationId: org.id,
+        inviterId: signedInUser(boss).id,
+        email: "dash@client.test",
+        role: "member",
+        status: "pending",
+        expiresAt: invitation.expiresAt,
+        createdAt: invitation.createdAt,
+      },
+    ]);
+    const [sent] = server.sentInvitations;
+    assert(sent !== undefined, "the invitation was emailed");
+    expect(toJson(mine)).not.toContain(sent.token);
+    expect(toJson(mine)).not.toContain("tokenHash");
+
+    // Answered, it leaves the list; the owner was invited to nothing.
+    await invitee.organization.acceptInvitation(invitation.id);
+    expect(await invitee.organization.listMyInvitations()).toEqual([]);
+    expect(await owner.organization.listMyInvitations()).toEqual([]);
+    const refused = await rejectionOf(signedOut.organization.listMyInvitations(), AuthClientError);
+    expect(refused.status).toBe(401);
+  });
+
   it("refuses an admin granting the owner role, to themselves included (#585)", async () => {
     const { browser } = withServer({ organization: true });
     const owner = browser();
