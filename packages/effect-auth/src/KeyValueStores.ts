@@ -39,8 +39,24 @@
  * the same count and only bump it once. This is acceptable for the KV
  * backend's intended use (best-effort rate limiting / attempt counting);
  * use a backend with atomic counters when strict enforcement is required.
+ *
+ * `OAuthStateStore.consume` is a security guarantee, not a counter (#685), so
+ * it runs its read and remove under a semaphore the store owns: one process
+ * never hands the same state out twice. A `KeyValueStore` offers no
+ * get-and-delete, so the guarantee does not span processes sharing a backend;
+ * see {@link oauthStateStoreKV}.
  */
-import { Clock, Context, DateTime, Effect, Layer, MutableHashMap, Order, Result } from "effect";
+import {
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Order,
+  Result,
+  Semaphore,
+} from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -163,6 +179,14 @@ const oauthStateKey = (state: string) => `oauth-state:${state}`;
 
 /**
  * Build an {@link OAuthStateStore} over the ambient `KeyValueStore`.
+ *
+ * `consume` is the read and the remove run under one permit of a semaphore
+ * this store owns, so within one process two concurrent callers passing the
+ * same state never both receive it (#685). A `KeyValueStore` has no
+ * get-and-delete, so that guarantee stops at the process: behind several
+ * instances sharing one backend (Redis, Cloudflare KV), use an
+ * `OAuthStateStore` with a native atomic consume (`./sql`'s
+ * `DELETE ... RETURNING`, or Redis `GETDEL`).
  */
 export const oauthStateStoreKV: Effect.Effect<
   typeof OAuthStateStore.Service,
@@ -170,14 +194,20 @@ export const oauthStateStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
+  const consumeLock = Semaphore.makeUnsafe(1);
   return {
     create: (state) =>
       kv.write(oauthStateKey(state.state), state, "oauthState.create").pipe(Effect.as(state)),
-    get: (state) =>
-      kv
-        .read<OAuthState>(oauthStateKey(state), "oauthState.get")
-        .pipe(Effect.map((entry) => entry ?? null)),
-    delete: (state) => kv.remove(oauthStateKey(state), "oauthState.delete"),
+    consume: (state) =>
+      consumeLock.withPermit(
+        kv
+          .read<OAuthState>(oauthStateKey(state), "oauthState.consume")
+          .pipe(
+            Effect.tap((entry) =>
+              entry === null ? Effect.void : kv.remove(oauthStateKey(state), "oauthState.consume"),
+            ),
+          ),
+      ),
   } satisfies typeof OAuthStateStore.Service;
 });
 

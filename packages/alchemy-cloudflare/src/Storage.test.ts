@@ -162,7 +162,8 @@ describe("D1-backed effect-auth storage", () => {
           createdAt: yield* Clock.currentTimeMillis,
           expiresAt: (yield* Clock.currentTimeMillis) + 600_000,
         });
-        const state = yield* states.get("st-1");
+        const state = yield* states.consume("st-1");
+        const replayed = yield* states.consume("st-1");
 
         const otps = yield* Auth.Email.EmailOtpStore;
         yield* otps.upsert({
@@ -175,12 +176,14 @@ describe("D1-backed effect-auth storage", () => {
         });
         const attempts = yield* otps.incrementAttempts("otp@example.com", "sign-in");
 
-        return { challenge, state, attempts };
+        return { challenge, state, replayed, attempts };
       }),
     );
     expect(Array.from(result.challenge?.challenge ?? [])).toEqual([0, 1, 2, 250, 255]);
     expect(result.challenge?.userId).toBeUndefined();
     expect(result.state?.codeVerifier).toBe("cv");
+    // `consume` is one `DELETE … RETURNING`: the state is handed out once (#685).
+    expect(result.replayed).toBeNull();
     expect(result.attempts).toBe(1);
   });
 

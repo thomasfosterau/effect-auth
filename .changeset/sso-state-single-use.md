@@ -1,0 +1,9 @@
+---
+"@thomasfosterau/effect-auth": minor
+---
+
+**Security fix (#685), breaking:** the OAuth and OIDC SSO callback `state` is single-use. Before, `SsoService.handleCallback` (`POST /sso/callback`) and `OAuthService.handleCallback` / `signInWithCallback` / `linkAccount` read the state with `OAuthStateStore.get` and deleted it only after a successful code exchange, so a state stayed valid for its whole 10-minute window after a failed exchange, and two concurrent callbacks carrying it both passed the check. A captured callback could be replayed. Each callback now spends the state first, with an atomic get-and-delete, and refuses any later use, successful first use or not.
+
+- **`OAuthStateStore` replaces `get` and `delete` with `consume(state)`** (breaking for a store you implement): atomically fetch and delete the entry, `null` when it is unknown or already consumed. Two concurrent callers passing the same state must not both receive it. `./sql`'s `makeOAuthStateStore` (SQLite, D1 and PostgreSQL) implements it as one `DELETE … RETURNING`; `oauthStateStoreKV` runs its read and remove under a semaphore the store owns, which makes it atomic within one process only, since a `KeyValueStore` has no get-and-delete. Behind several instances sharing one backend, use `./sql` or a store with a native atomic consume (Redis `GETDEL`).
+- **A replayed callback fails** with `OAuthStateNotFoundError` (message "OAuth state not found, expired or already used") from `OAuthService`, and with `SsoError` ("SSO state not found, expired or already used") from `SsoService`, which `POST /sso/callback` answers with `400`. `linkAccount` now spends the state before it checks the provider, so a state presented for the wrong provider is spent too.
+- The SAML `RelayState` was already single-use: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends. Regression tests now replay the ACS POST as well.

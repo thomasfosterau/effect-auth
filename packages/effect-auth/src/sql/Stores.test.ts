@@ -613,16 +613,34 @@ const storeContract = (engine: StoreEngine): void => {
           yield* store.create(state);
           // create replaces an existing row for the same state
           yield* store.create({ ...state, returnTo: "/dashboard" });
-          const loaded = yield* store.get("st-1");
-          yield* store.delete("st-1");
-          const missing = yield* store.get("st-1");
+          const loaded = yield* store.consume("st-1");
+          const missing = yield* store.consume("st-1");
           return { loaded, missing };
         }),
       );
-      expect(result.loaded?.returnTo).toBe("/dashboard");
-      expect(result.loaded?.codeVerifier).toBe("cv");
-      expect(result.loaded?.nonce).toBe("n-1");
+      expect(result.loaded).toEqual({ ...state, returnTo: "/dashboard" });
       expect(result.missing).toBeNull();
+    });
+
+    it("OAuthStateStore.consume hands a state to one of several concurrent callers (#685)", async () => {
+      const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+      const state: Auth.OAuth.OAuthState = {
+        state: "st-race",
+        provider: "google",
+        createdAt: now,
+        expiresAt: now + 600_000,
+      };
+      const results = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.OAuth.OAuthStateStore;
+          yield* store.create(state);
+          return yield* Effect.all(
+            Arr.makeBy(4, () => store.consume("st-race")),
+            { concurrency: "unbounded" },
+          );
+        }),
+      );
+      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
     });
 
     it("OAuthAccountStore upserts, links, unlinks and reports hasPassword", async () => {

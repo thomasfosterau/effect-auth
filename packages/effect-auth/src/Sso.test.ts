@@ -1,6 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { DateTime, Effect, Layer, MutableHashMap, Struct } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Result, Struct } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -36,12 +36,9 @@ import {
   type OrganizationDomain,
   type SsoProvider,
 } from "./index.ts";
-import {
-  type OAuthCreateUserInput,
-  OAuthStateStore,
-  OAuthUserStore,
-  type OAuthState,
-} from "./oauth/OAuth.ts";
+import { type OAuthCreateUserInput, OAuthStateStore, OAuthUserStore } from "./oauth/OAuth.ts";
+import { oauthStateStoreKV } from "./KeyValueStores.ts";
+import { KeyValueStore } from "effect/persistence";
 import { SsoProviderStore, SsoError, SsoService } from "./Sso.ts";
 import * as Sso from "./Sso.ts";
 import {
@@ -126,6 +123,13 @@ const withFetch = <A>(
   });
 };
 
+/**
+ * The real `KeyValueStore`-backed state store over its own in-memory map,
+ * built once so every run of a test's layer shares it.
+ */
+const kvStateStore = (): typeof OAuthStateStore.Service =>
+  Effect.runSync(oauthStateStoreKV.pipe(Effect.provide(KeyValueStore.layerMemory)));
+
 const makeStores = (
   overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
 ) => {
@@ -133,7 +137,6 @@ const makeStores = (
   const users = MutableHashMap.empty<string, Types.User>();
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
-  const states = MutableHashMap.empty<string, OAuthState>();
   const members: Member[] = [];
   const organizations = MutableHashMap.empty<string, Organization>();
   const domainRecords = MutableHashMap.empty<string, OrganizationDomain>();
@@ -178,11 +181,7 @@ const makeStores = (
     get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
   };
 
-  const stateStore = {
-    create: (s: OAuthState) => Effect.sync(() => (MutableHashMap.set(states, s.state, s), s)),
-    get: (state: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, state))),
-    delete: (state: string) => Effect.sync(() => void MutableHashMap.remove(states, state)),
-  };
+  const stateStore = kvStateStore();
 
   const passwordHashes = MutableHashMap.empty<string, string>();
   const sessionsCleared: Array<string> = [];
@@ -1031,7 +1030,6 @@ const makeHttpFixture = () => {
   const identifierStore = memoryIdentifierStore(identifierRecords);
   const sessions = MutableHashMap.empty<string, Types.Session>();
   const providers = MutableHashMap.empty<string, SsoProvider>();
-  const states = MutableHashMap.empty<string, OAuthState>();
   const members: Member[] = [];
   let userSeq = 0;
 
@@ -1129,11 +1127,7 @@ const makeHttpFixture = () => {
       ),
     list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
   };
-  const stateStore = {
-    create: (s: OAuthState) => Effect.sync(() => (MutableHashMap.set(states, s.state, s), s)),
-    get: (state: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, state))),
-    delete: (state: string) => Effect.sync(() => void MutableHashMap.remove(states, state)),
-  };
+  const stateStore = kvStateStore();
   // SSO only ever calls getMember/createMember plus the organization read that
   // resolves the default role.
   const orgStore = {
@@ -1487,5 +1481,134 @@ describe("HTTP SSO endpoints — SAML", () => {
       new Request("http://test/sso/saml/metadata/anything", { method: "GET" }),
     );
     expect(res.status).toBe(404);
+  });
+});
+
+// --- Single-use callback state (#685) ----------------------------------------
+
+/** The IdP answers every request (the token endpoint included) with `400`. */
+const withFailingIdp = <A>(thunk: () => Promise<A>): Promise<A> => {
+  const original = globalThis.fetch;
+  globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(encodeJson({ error: "invalid_grant" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
+    globalThis.fetch = original;
+  });
+};
+
+const ACME_IDP_ROUTES = {
+  "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
+  "https://idp.acme.test/userinfo": {
+    sub: "idp-user-9",
+    email: "worker@acme.test",
+    email_verified: true,
+  },
+};
+
+/** A registered OIDC connection, and the callback of a started sign-in. */
+const started = async () => {
+  const stores = makeStores();
+  const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(stores.layer)));
+  const { state } = await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* sso.registerProvider("admin", ACME);
+      return yield* sso.signIn({ email: "worker@acme.test" });
+    }).pipe(Effect.provide(stores.layer)),
+  );
+  return (code: string) => sso.handleCallback(state, code).pipe(Effect.provide(stores.layer));
+};
+
+describe("SSO callback state is single-use (#685)", () => {
+  it("refuses a callback replayed after it signed the user in", async () => {
+    const callback = await started();
+    const first = await withFetch(ACME_IDP_ROUTES, () => Effect.runPromise(callback("code-1")));
+    expect(first.session.userId).toBe(first.user.id);
+
+    const replay = await withFetch(ACME_IDP_ROUTES, () =>
+      Effect.runPromise(Effect.flip(callback("code-1"))),
+    );
+    expect(replay).toBeInstanceOf(SsoError);
+    expect(replay.message).toMatch(/already used/);
+  });
+
+  it("refuses a callback replayed after the first use failed at the IdP", async () => {
+    const callback = await started();
+    const failed = await withFailingIdp(() => Effect.runPromise(Effect.flip(callback("code-1"))));
+    expect(failed).toBeInstanceOf(SsoError);
+
+    // The failed attempt spent the state: a retry with a code the IdP would
+    // accept is still refused.
+    const replay = await withFetch(ACME_IDP_ROUTES, () =>
+      Effect.runPromise(Effect.flip(callback("code-2"))),
+    );
+    expect(replay).toBeInstanceOf(SsoError);
+    expect(replay.message).toMatch(/already used/);
+  });
+
+  it("admits only one of two concurrent callbacks carrying the same state", async () => {
+    const callback = await started();
+    const results = await withFetch(ACME_IDP_ROUTES, () =>
+      Effect.runPromise(
+        Effect.all([Effect.result(callback("code-1")), Effect.result(callback("code-1"))], {
+          concurrency: "unbounded",
+        }),
+      ),
+    );
+    const refusals = Arr.filter(results, Result.isFailure).map((r) => r.failure);
+    expect(Arr.filter(results, Result.isSuccess)).toHaveLength(1);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]?.message).toMatch(/already used/);
+  });
+
+  it("answers 400 to a POST /sso/callback replayed after a failed exchange", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    await fx.handler(registerProvider(REGISTER_BODY, adminSid));
+    const { state } = await signInUrl(await fx.handler(startSignIn({ email: "worker@acme.test" })));
+
+    const failed = await withFailingIdp(() =>
+      fx.handler(post("/sso/callback", { state, code: "code-1" })),
+    );
+    expect(failed.status).toBe(400);
+
+    const replay = await withFetch(ACME_IDP_ROUTES, () =>
+      fx.handler(post("/sso/callback", { state, code: "code-2" })),
+    );
+    expect(replay.status).toBe(400);
+    expect(replay.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("answers 400 to a replayed SAML ACS POST, and to a fresh assertion for its RelayState", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    const providerId = await providerIdOf(
+      await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid)),
+    );
+    const { state } = await signInUrl(await fx.handler(startSignIn({ email: "worker@acme.test" })));
+    const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
+    const form = {
+      SAMLResponse: samlResponse({ id: "_replayed", inResponseTo: requestId }),
+      RelayState: state,
+    };
+
+    expect((await fx.handler(acsPost(providerId, form))).status).toBe(200);
+    const replay = await fx.handler(acsPost(providerId, form));
+    expect(replay.status).toBe(400);
+    expect(replay.headers.get("set-cookie")).toBeNull();
+
+    // A new assertion answering the same, spent request with the same
+    // RelayState is refused too: the RelayState lives and dies with it.
+    const fresh = await fx.handler(
+      acsPost(providerId, {
+        SAMLResponse: samlResponse({ id: "_fresh", inResponseTo: requestId }),
+        RelayState: state,
+      }),
+    );
+    expect(fresh.status).toBe(400);
   });
 });
