@@ -23,6 +23,7 @@ import {
 } from "./WebAuthnCodec.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
+import { type HookError, Hooks } from "../Hooks.ts";
 import * as Obs from "../Observability.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
@@ -307,13 +308,23 @@ export const make = (
 ): Effect.Effect<
   typeof WebAuthnService.Service,
   never,
-  ChallengeStore | CredentialStore | SecureRandom.SecureRandom | Digest.Digest
+  ChallengeStore | CredentialStore | Hooks | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
+
+    /**
+     * Fail a passkey sign-in that names no user (an unknown or expired
+     * challenge, an unknown credential, or another user's credential) after
+     * firing the `beforeAuthenticate` gate unkeyed, so the per-IP limit
+     * counts it (#678).
+     */
+    const refuseUnkeyed = <E>(error: E): Effect.Effect<never, E | HookError> =>
+      hooks.beforeAuthenticate({ method: "passkey" }).pipe(Effect.andThen(Effect.fail(error)));
 
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
 
@@ -346,6 +357,52 @@ export const make = (
         return yield* new Errors.ChallengeExpiredError({ message: "Challenge has expired" });
       }
       return stored;
+    });
+
+    /**
+     * The first steps of a passkey sign-in: the live authentication challenge
+     * and the credential the assertion names (the bound user's, on a bound
+     * challenge), then the `beforeAuthenticate` gate for the credential's
+     * user, before the signature is checked or the challenge spent (#678).
+     * Answers the credential.
+     */
+    const resolveAssertion = Effect.fnUntraced(function* (
+      challenge: Uint8Array,
+      response: AuthenticationResponse,
+    ) {
+      const storedChallenge = yield* liveChallenge(challenge, "authentication").pipe(
+        Effect.catchTags({
+          ChallengeNotFoundError: (error) => refuseUnkeyed(error),
+          ChallengeExpiredError: (error) => refuseUnkeyed(error),
+          WebAuthnVerificationError: (error) => refuseUnkeyed(error),
+        }),
+      );
+
+      // On the usernameless path the credentialId is the lookup key; on the
+      // bound path we use the same route for consistency.
+      const credentialId = base64UrlEncode(response.credentialId);
+      const credential = yield* credentialStore.get(credentialId);
+      if (credential === null) {
+        return yield* refuseUnkeyed(
+          new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
+        );
+      }
+
+      // Bound challenge: the credential must belong to the expected user.
+      if (storedChallenge.userId !== undefined && credential.userId !== storedChallenge.userId) {
+        return yield* refuseUnkeyed(
+          new Errors.WebAuthnVerificationError({
+            message: "Credential does not belong to the expected user",
+          }),
+        );
+      }
+
+      yield* hooks.beforeAuthenticate({
+        method: "passkey",
+        identifier: { type: "user", value: credential.userId },
+        userId: credential.userId,
+      });
+      return credential;
     });
 
     /** The `clientDataJSON` checks (WebAuthn §7.1 steps 7-10, §7.2 steps 11-14). */
@@ -561,26 +618,7 @@ export const make = (
       verifyAuthentication: Effect.fn("WebAuthnService.verifyAuthentication")(
         (challenge: Uint8Array, response: AuthenticationResponse) =>
           Effect.gen(function* () {
-            const storedChallenge = yield* liveChallenge(challenge, "authentication");
-
-            // Get credential — on the usernameless path the credentialId is the
-            // lookup key; on the bound path we use the same route for consistency.
-            const credentialId = base64UrlEncode(response.credentialId);
-            const credential = yield* credentialStore.get(credentialId);
-            if (credential === null) {
-              return yield* new Errors.CredentialNotFoundError({
-                message: "Credential not found",
-                credentialId,
-              });
-            }
-
-            // Bound challenge: verify the credential belongs to the expected user.
-            if (
-              storedChallenge.userId !== undefined &&
-              credential.userId !== storedChallenge.userId
-            ) {
-              return yield* verificationError("Credential does not belong to the expected user");
-            }
+            const credential = yield* resolveAssertion(challenge, response);
 
             yield* verifyClientData(response.clientDataJSON, ClientDataType.Get, challenge);
 
@@ -688,7 +726,10 @@ export const make = (
   });
 
 /**
- * WebAuthn service for managing passkey registration and authentication
+ * WebAuthn service for managing passkey registration and authentication.
+ *
+ * Requires `ChallengeStore`, `CredentialStore` and `Hooks` (passkey sign-in
+ * fires `beforeAuthenticate`, #678; provide `Hooks.Default` for no plugins).
  */
 export class WebAuthnService extends Context.Service<
   WebAuthnService,
@@ -730,7 +771,15 @@ export class WebAuthnService extends Context.Service<
       Errors.AuthError
     >;
 
-    /** Verify authentication response from client */
+    /**
+     * Verify authentication response from client (passkey sign-in).
+     *
+     * Fires the `beforeAuthenticate` hook (method `"passkey"`, keyed on the
+     * credential's user) before the signature is checked or the challenge
+     * spent, and unkeyed before failing on an unknown or expired challenge,
+     * an unknown credential or another user's credential (#678). A refusal
+     * fails with the hook's error.
+     */
     verifyAuthentication: (
       challenge: Uint8Array,
       response: AuthenticationResponse,
@@ -741,6 +790,7 @@ export class WebAuthnService extends Context.Service<
       | Errors.ChallengeNotFoundError
       | Errors.ChallengeExpiredError
       | Errors.AuthError
+      | HookError
     >;
 
     /** List all passkeys registered for a user */

@@ -167,6 +167,31 @@ describe("IPRateLimitPlugin", () => {
       }).pipe(Effect.provide(makeHooksLayer())),
     ));
 
+  it("counts passkey attempts, which the account lock exempts, against the IP limit (#698)", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        const passkey: AuthenticateAttempt = {
+          method: "passkey",
+          identifier: { type: "user", value: "u1" },
+          userId: "u1",
+        };
+        const attempt = hooks.beforeAuthenticate(passkey).pipe(
+          Effect.provideService(ClientIP, { ip: "9.9.9.9" }),
+          Effect.map(() => "ok" as const),
+          Effect.catchTag("RateLimitError", () => Effect.succeed("limited" as const)),
+        );
+        const results = yield* Effect.forEach(
+          Arr.makeBy(6, () => attempt),
+          (run) => run,
+          {
+            concurrency: 1,
+          },
+        );
+        expect(results).toStrictEqual(["ok", "ok", "ok", "ok", "ok", "limited"]);
+      }).pipe(Effect.provide(makeHooksLayer())),
+    ));
+
   it("limits different IPs independently", () =>
     Effect.runPromise(
       Effect.gen(function* () {

@@ -573,20 +573,21 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
 
 /**
  * A client-address-keyed rate limit is configured with no client-address
- * source: no `trustedProxy`, and no opt-out. A Web `Request` never carries a
- * socket address, so without a configured source the limiter could not key the
- * request. It would have to skip the request or share one bucket between
- * callers, and neither is allowed (#358, #388).
+ * source: no `trustedProxy`. A Web `Request` never carries a socket address,
+ * so without a configured source the limiter could not key the request. It
+ * would have to skip the request, share one bucket between callers or refuse
+ * every request, and none of these is allowed (#358, #388, #682).
  *
  * Raised at build time, before any request:
  *
  * - `Http.make` throws it synchronously when `ipRateLimit` (on unless it is
- *   `false`, #583) has no `trustedProxy` and no `allowMissingClientIp: true`
- *   (#358), and when the
- *   `Hooks` in `services` include `IPRateLimitPlugin` with neither of them
- *   (#389), and when the `services` include an `OidcProviderService` with
- *   dynamic client registration enabled and there is neither of them (#388,
- *   #398).
+ *   `false`, #583) has no `trustedProxy` (#358), when the `Hooks` in
+ *   `services` include `IPRateLimitPlugin` with no `trustedProxy` (#389), and
+ *   when the `services` include an `OidcProviderService` with dynamic client
+ *   registration enabled and there is no `trustedProxy` (#388, #398).
+ *   `allowMissingClientIp: true` does not stand in for a `trustedProxy`: with
+ *   no proxy no request has an address, so every limited request would be
+ *   refused with `429`, and the handler refuses to start instead (#682).
  *
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.

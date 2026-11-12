@@ -86,6 +86,7 @@ const EXPECTED_PATHS = [
   "/organization-domains/{id}",
   "/organization-domains/{id}/verifications",
   "/admin/organization-domains",
+  "/admin/organization-domains/{id}",
   "/organization-roles/{id}",
   "/teams/{id}",
   "/teams/{id}/members",

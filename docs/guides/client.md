@@ -143,8 +143,9 @@ const session = await client.device.token({ deviceCode }); // 400 until decided
 ```ts
 const org = await client.organization.create({ name: "Acme", slug: "acme" });
 await client.organization.invite(org.id, { email: "new@acme.test", role: "member" });
-await client.organization.acceptInvitation(invitationId); // as the invitee
-await client.organization.resendInvitation(invitationId); // same id, fresh expiry
+// As the invitee, with the token the invitation email's link carried:
+await client.organization.acceptInvitation(invitationId, token);
+await client.organization.resendInvitation(invitationId); // same id, fresh token and expiry
 
 const team = await client.organization.createTeam(org.id, { name: "Engineering" });
 const teamMember = await client.organization.addTeamMember(team.id, { userId });
@@ -184,7 +185,7 @@ Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefa
 
 **JWT** — `jwtToken()` mints a signed token for the current session (`POST /tokens`, so the trusted-origin check covers it); `jwks()` serves the keys that verify it.
 
-**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}` over `/admin/users`, `/user-bans` and `/impersonations`. The actor must satisfy the server's `isAdmin`; everyone else gets `403`. `unbanUser` resolves with nothing (the lifted ban is a `204`). `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches; `stopImpersonating` answers `404` on a session that is not an impersonation.
+**Admin** — `admin.{listUsers,setRole,banUser,unbanUser,removeUser,revokeSessions,impersonate,stopImpersonating}` over `/admin/users`, `/user-bans` and `/impersonations`, and the operator's domain calls `admin.attestDomain({ organizationId, domain })` (`POST /admin/organization-domains`, resolving with the claim, `verified`, its `attestedBy` the signed-in admin) and `admin.releaseDomain(domainId)` (`DELETE /admin/organization-domains/:id`, releasing any organization's claim, whatever its state; resolves with nothing). The actor must satisfy the server's admin rule (its `AdminService`'s `AdminConfig`, else role `admin`); everyone else gets `403`. `unbanUser` resolves with nothing (the lifted ban is a `204`). `impersonate`/`stopImpersonating` swap the session cookie, so the observed session refetches; `stopImpersonating` answers `404` on a session that is not an impersonation.
 
 **OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` over `/oauth-clients` (admin-gated; a confidential client's secret comes back once, from `registerClient`) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
 

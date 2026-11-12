@@ -1,7 +1,18 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Clock, Context, DateTime, Effect, Exit, MutableHashMap, Order, Result } from "effect";
+import {
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  MutableHashMap,
+  Order,
+  Result,
+} from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -17,6 +28,7 @@ import {
   defaultOrganizationRoles,
   memoryOrganizationDomainStore,
   type Invitation,
+  type InvitationDelivery,
   type Member,
   type Organization,
   type OrganizationConfig,
@@ -28,6 +40,10 @@ import {
 } from "./Organization.ts";
 import * as OrganizationModule from "./Organization.ts";
 import * as Testing from "./testing/index.ts";
+import type { AuthError } from "./Errors.ts";
+import { hashToken } from "./TokenHash.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { SessionService } from "./SessionService.ts";
 
 const organizations = MutableHashMap.empty<string, Organization>();
 const members = MutableHashMap.empty<string, Member>();
@@ -42,13 +58,14 @@ const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const orgRoleKey = (organizationId: string, role: string): string =>
   `${organizationId}\u0000${role}`;
 
-/** Give a user an email identifier so invitations addressed to it can be
- * accepted/rejected by that user. */
-const seedEmail = (userId: string, email: string): void => {
+/** Give a user an email identifier (unverified unless `verified`) so
+ * invitations addressed to it can be accepted/rejected by that user. */
+const seedEmail = (userId: string, email: string, verified = false): void => {
   const identifier = makeIdentifier({
     userId,
     type: "email",
     value: email,
+    verified,
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   MutableHashMap.set(identifierRecords, identifier.id, identifier);
@@ -290,39 +307,68 @@ const testContext = Context.merge(
   Context.make(OrganizationDomainStore, memoryOrganizationDomainStore(domainRecords)),
 );
 
-/** Run against an explicit context - used to exercise "domains not enabled". */
+/** The accounts the first-proof tests sign in (#586); passwords live in `userTable`. */
+const userTable = Testing.memoryUserTable();
+const accountUsers = Arr.map(["invitee-user", "other-user"], (id) => Testing.fixtureUser({ id }));
+
+/** Invitations the service "emailed", with their secret tokens (newest last). */
+const sentInvitations: InvitationDelivery[] = [];
+
+/** The token the invitation's latest email carried. */
+const tokenFor = (invitationId: string): string =>
+  Option.match(
+    Arr.findLast(sentInvitations, (sent) => sent.invitation.id === invitationId),
+    { onNone: () => assert.fail(`no email for ${invitationId}`), onSome: (sent) => sent.token },
+  );
+
+/** The invitee's answer to `invitation`, with the token its email carried. */
+const answer = (invitation: Invitation) => ({
+  invitationId: invitation.id,
+  token: tokenFor(invitation.id),
+});
+
+/** A fresh `SessionService` over {@link accountUsers}, and the {@link userTable} passwords. */
+const proofLayer = () =>
+  Layer.merge(
+    Layer.succeed(EmailPasswordStore, Testing.memoryEmailPasswordStore(userTable)),
+    Testing.sessionServiceLayer({ users: accountUsers }),
+  );
+
+/** What every service under test is built over, besides the stores in `context`. */
+type ProofServices = EmailPasswordStore | SessionService;
+
+/** The stores every run's context holds. */
+type BaseServices = OrganizationStore | IdentifierStore | SecureRandom.SecureRandom;
+
+/**
+ * Build the service from `config` (delivering invitations into
+ * {@link sentInvitations} unless the config says otherwise) over `context`,
+ * a fresh `SessionService` and the {@link userTable} passwords, and run
+ * `program` with it.
+ */
 const runServiceIn = <A, E>(
-  context: Context.Context<OrganizationStore | IdentifierStore | SecureRandom.SecureRandom>,
+  context: Context.Context<BaseServices>,
   config: OrganizationConfig,
   program: (
     service: typeof OrganizationService.Service,
-  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore | SecureRandom.SecureRandom>,
+  ) => Effect.Effect<A, E, BaseServices | ProofServices>,
 ): Promise<A> =>
   Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const service = yield* OrganizationModule.make(config);
-        return yield* program(service);
-      }),
-      context,
-    ),
+    Effect.gen(function* () {
+      const service = yield* OrganizationModule.make({
+        sendInvitationEmail: (delivery) => Effect.sync(() => void sentInvitations.push(delivery)),
+        ...config,
+      });
+      return yield* program(service);
+    }).pipe(Effect.provide(Layer.merge(Layer.succeedContext(context), proofLayer()))),
   );
 
 const runService = <A, E>(
   config: OrganizationConfig,
   program: (
     service: typeof OrganizationService.Service,
-  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore>,
-): Promise<A> =>
-  Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const service = yield* OrganizationModule.make(config);
-        return yield* program(service);
-      }),
-      testContext,
-    ),
-  );
+  ) => Effect.Effect<A, E, BaseServices | ProofServices>,
+): Promise<A> => runServiceIn(testContext, config, program);
 
 /** A {@link DomainVerifier} that answers `true` only for the domains it was given. */
 const stubDomainVerifier = (
@@ -342,18 +388,9 @@ const runServiceWithVerifier = <A, E>(
   verifier: typeof DomainVerifier.Service,
   program: (
     service: typeof OrganizationService.Service,
-  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore>,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore | ProofServices>,
 ): Promise<A> =>
-  Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const service = yield* OrganizationModule.make(config);
-        return yield* program(service);
-      }),
-      Context.merge(testContext, Context.make(DomainVerifier, verifier)),
-    ),
-  );
-
+  runServiceIn(Context.merge(testContext, Context.make(DomainVerifier, verifier)), config, program);
 /** Empty every in-memory table between tests. */
 const resetStores = (): void => {
   MutableHashMap.clear(organizations);
@@ -364,6 +401,8 @@ const resetStores = (): void => {
   MutableHashMap.clear(orgRoles);
   MutableHashMap.clear(domainRecords);
   MutableHashMap.clear(identifierRecords);
+  MutableHashMap.clear(userTable.passwordHashes);
+  sentInvitations.length = 0;
 };
 
 describe("OrganizationService", () => {
@@ -493,18 +532,9 @@ describe("OrganizationService", () => {
   });
 
   it("runs the invitation lifecycle: invite, send email, accept", async () => {
-    const sentEmails: Array<{ invitation: Invitation; organization: Organization }> = [];
-
-    const config: OrganizationConfig = {
-      sendInvitationEmail: (invitation, organization) =>
-        Effect.sync(() => {
-          sentEmails.push({ invitation, organization });
-        }),
-    };
-
     seedEmail("invitee-user", "invitee@example.com");
 
-    const result = await runService(config, (service) =>
+    const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
           name: "Acme",
@@ -525,7 +555,7 @@ describe("OrganizationService", () => {
 
         const userInvitations = yield* service.listUserInvitations("invitee@example.com");
 
-        const member = yield* service.acceptInvitation("invitee-user", invitation.id);
+        const member = yield* service.acceptInvitation("invitee-user", answer(invitation));
 
         const afterAccept = yield* service.listUserInvitations("invitee@example.com");
         const full = yield* service.getFullOrganization(organization.id);
@@ -537,9 +567,12 @@ describe("OrganizationService", () => {
     expect(result.invitation.email).toBe("invitee@example.com");
     expect(result.invitation.status).toBe("pending");
     expect(result.invitation.inviterId).toBe("owner-1");
-    expect(sentEmails).toHaveLength(1);
-    expect(sentEmails[0].invitation.id).toBe(result.invitation.id);
-    expect(sentEmails[0].organization.slug).toBe("acme");
+    expect(sentInvitations).toHaveLength(1);
+    expect(sentInvitations[0].invitation.id).toBe(result.invitation.id);
+    expect(sentInvitations[0].organization.slug).toBe("acme");
+    // Only the token's digest is stored.
+    expect(result.invitation.tokenHash).toBe(hashToken(sentInvitations[0].token));
+    expect(R.values(result.invitation)).not.toContain(sentInvitations[0].token);
     expect(result.duplicate._tag).toBe("Failure");
     expect(result.userInvitations).toHaveLength(1);
     expect(result.member.userId).toBe("invitee-user");
@@ -564,7 +597,7 @@ describe("OrganizationService", () => {
           email: "invitee@example.com",
           role: "member",
         });
-        return yield* Effect.result(service.acceptInvitation("other-user", invitation.id));
+        return yield* Effect.result(service.acceptInvitation("other-user", answer(invitation)));
       }),
     );
 
@@ -588,7 +621,7 @@ describe("OrganizationService", () => {
           role: "member",
         });
         const accept = yield* Effect.result(
-          service.acceptInvitation("invitee-user", invitation.id),
+          service.acceptInvitation("invitee-user", answer(invitation)),
         );
         const userInvitations = yield* service.listUserInvitations("invitee@example.com");
         return { accept, userInvitations };
@@ -616,9 +649,9 @@ describe("OrganizationService", () => {
           role: "member",
         });
 
-        const rejected = yield* service.rejectInvitation("invitee-user", invitation.id);
+        const rejected = yield* service.rejectInvitation("invitee-user", answer(invitation));
         const acceptAfterReject = yield* Effect.result(
-          service.acceptInvitation("invitee-user", invitation.id),
+          service.acceptInvitation("invitee-user", answer(invitation)),
         );
 
         return { rejected, acceptAfterReject };
@@ -1190,7 +1223,14 @@ describe("OrganizationService", () => {
           name: "Acme",
           slug: "acme",
         });
+        // A role must be defined to be granted (#585), so the member gets
+        // `auditor` while it exists, and keeps it once the definition is gone.
+        yield* service.upsertOrgRole("owner-1", organization.id, {
+          role: "auditor",
+          permissions: [],
+        });
         yield* service.addMember("owner-1", organization.id, "ghost-1", "auditor");
+        yield* service.deleteOrgRole("owner-1", organization.id, "auditor");
 
         const beforeDefinition = yield* service.checkPermission(
           "ghost-1",
@@ -1221,15 +1261,14 @@ describe("OrganizationService", () => {
   });
 
   it("honors wildcard permissions in custom role definitions", async () => {
-    const result = await runService({}, (service) =>
+    // Granting `superuser` takes an owner who holds `*:*` itself (#585).
+    const config: OrganizationConfig = { roles: { ...defaultOrganizationRoles, owner: ["*:*"] } };
+    const result = await runService(config, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
           name: "Acme",
           slug: "acme",
         });
-        yield* service.addMember("owner-1", organization.id, "lead-1", "lead");
-        yield* service.addMember("owner-1", organization.id, "root-1", "superuser");
-
         yield* service.upsertOrgRole("owner-1", organization.id, {
           role: "lead",
           permissions: ["team:*"],
@@ -1238,6 +1277,8 @@ describe("OrganizationService", () => {
           role: "superuser",
           permissions: ["*:*"],
         });
+        yield* service.addMember("owner-1", organization.id, "lead-1", "lead");
+        yield* service.addMember("owner-1", organization.id, "root-1", "superuser");
 
         const leadCreatesTeams = yield* service.checkPermission(
           "lead-1",
@@ -1408,6 +1449,203 @@ describe("OrganizationService", () => {
     expect(result.second.updatedAt).toBeGreaterThanOrEqual(result.first.updatedAt);
     expect(result.listed).toHaveLength(1);
     expect(result.listed[0].permissions).toEqual(["team:create", "team:delete"]);
+  });
+});
+
+/** An organization owned by `owner-1`, with `admin-1` as an admin. */
+const withAdmin = <A, E>(
+  config: OrganizationConfig,
+  program: (
+    service: typeof OrganizationService.Service,
+    organization: Organization,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore>,
+) =>
+  runService(config, (service) =>
+    Effect.gen(function* () {
+      const organization = yield* service.createOrganization("owner-1", {
+        name: "Acme",
+        slug: "acme",
+      });
+      yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
+      return yield* program(service, organization);
+    }),
+  );
+
+/** The `OrganizationError` message `effect` was refused with. */
+const refusal = <A, R>(
+  effect: Effect.Effect<A, OrganizationModule.OrganizationError | AuthError, R>,
+) =>
+  Effect.map(Effect.flip(effect), (error) => {
+    expect(error._tag).toBe("OrganizationError");
+    return error.message;
+  });
+
+describe("OrganizationService - no granting beyond your own permissions (#585)", () => {
+  beforeEach(resetStores);
+
+  it("refuses an admin promoting themselves, or anyone, to owner", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        const self = yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "admin-1", "owner"),
+        );
+        const other = yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "member-1", "owner"),
+        );
+        const full = yield* service.getFullOrganization(organization.id);
+        return { self, other, full };
+      }),
+    );
+
+    expect(result.self).toBe(
+      "The 'owner' role carries 'organization:delete', which your role does not grant",
+    );
+    expect(result.other).toBe(result.self);
+    expect(result.full.members.filter((member) => member.role === "owner")).toHaveLength(1);
+  });
+
+  it("refuses an admin adding or inviting someone as owner", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        const added = yield* refusal(
+          service.addMember("admin-1", organization.id, "user-2", "owner"),
+        );
+        const invited = yield* refusal(
+          service.inviteMember("admin-1", organization.id, {
+            email: "second@example.com",
+            role: "owner",
+          }),
+        );
+        // At or below their own permissions, both still work.
+        const peer = yield* service.addMember("admin-1", organization.id, "user-3", "admin");
+        return { added, invited, peer };
+      }),
+    );
+
+    expect(result.added).toContain("The 'owner' role carries");
+    expect(result.invited).toContain("The 'owner' role carries");
+    expect(MutableHashMap.size(invitations)).toBe(0);
+    expect(result.peer.role).toBe("admin");
+  });
+
+  it("refuses an admin changing an owner's role", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "owner-2", "owner");
+        return yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "owner-2", "member"),
+        );
+      }),
+    );
+
+    expect(result).toBe(
+      "This member's 'owner' role carries 'organization:delete', which your role does not grant",
+    );
+  });
+
+  it("refuses an admin reactivating a deactivated owner", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "owner-2", "owner");
+        yield* service.deactivateMember("owner-1", organization.id, "owner-2");
+        const byAdmin = yield* refusal(
+          service.reactivateMember("admin-1", organization.id, "owner-2"),
+        );
+        const byOwner = yield* service.reactivateMember("owner-1", organization.id, "owner-2");
+        return { byAdmin, byOwner };
+      }),
+    );
+
+    expect(result.byAdmin).toContain("This member's 'owner' role carries");
+    expect(result.byOwner.role).toBe("owner");
+  });
+
+  it("applies to custom roles: no granting, changing or removing above your own permissions", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.upsertOrgRole("owner-1", organization.id, {
+          role: "billing",
+          permissions: ["role:manage"],
+        });
+        yield* service.addMember("owner-1", organization.id, "billing-1", "billing");
+        const grant = yield* refusal(
+          service.addMember("admin-1", organization.id, "user-2", "billing"),
+        );
+        const change = yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "billing-1", "member"),
+        );
+        const deactivate = yield* refusal(
+          service.deactivateMember("admin-1", organization.id, "billing-1"),
+        );
+        const remove = yield* refusal(
+          service.removeMember("admin-1", organization.id, "billing-1"),
+        );
+        return { grant, change, deactivate, remove };
+      }),
+    );
+
+    expect(result.grant).toBe(
+      "The 'billing' role carries 'role:manage', which your role does not grant",
+    );
+    expect(result.change).toContain("This member's 'billing' role carries 'role:manage'");
+    expect(result.deactivate).toBe(result.change);
+    expect(result.remove).toBe(result.change);
+  });
+
+  it("matches wildcards: a `team:*` role takes a granter holding `team:*` or `*:*`", async () => {
+    const config: OrganizationConfig = {
+      roles: { ...defaultOrganizationRoles, owner: ["*:*"], lead: ["team:*"], root: ["*:*"] },
+    };
+    const result = await withAdmin(config, (service, organization) =>
+      Effect.gen(function* () {
+        // The admin holds every team:<action> by name, but not the wildcard.
+        const byAdmin = yield* refusal(
+          service.addMember("admin-1", organization.id, "lead-1", "lead"),
+        );
+        yield* service.addMember("owner-1", organization.id, "root-1", "root");
+        const byRoot = yield* service.addMember("root-1", organization.id, "lead-1", "lead");
+        return { byAdmin, byRoot };
+      }),
+    );
+
+    expect(result.byAdmin).toBe("The 'lead' role carries 'team:*', which your role does not grant");
+    expect(result.byRoot.role).toBe("lead");
+  });
+
+  it("rejects a role string nothing defines, on every write path", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        const add = yield* refusal(
+          service.addMember("owner-1", organization.id, "user-2", "superadmin"),
+        );
+        const invite = yield* refusal(
+          service.inviteMember("owner-1", organization.id, {
+            email: "x@example.com",
+            role: "superadmin",
+          }),
+        );
+        const update = yield* refusal(
+          service.updateMemberRole("owner-1", organization.id, "member-1", "superadmin"),
+        );
+        return { add, invite, update };
+      }),
+    );
+
+    const undefinedRole = "Role 'superadmin' is not defined for this organization";
+    expect(result).toEqual({ add: undefinedRole, invite: undefinedRole, update: undefinedRole });
+  });
+
+  it("checks the organization's default role when addMember names none", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.setDefaultRole("owner-1", organization.id, "owner");
+        return yield* refusal(service.addMember("admin-1", organization.id, "user-2"));
+      }),
+    );
+
+    expect(result).toContain("The 'owner' role carries");
   });
 });
 
@@ -1638,44 +1876,47 @@ describe("OrganizationService - default role", () => {
 describe("OrganizationService - invitations", () => {
   beforeEach(resetStores);
 
-  it("resends a pending invitation on the same row, with a fresh expiry", async () => {
-    const delivered: Array<{ readonly id: string; readonly expiresAt: number }> = [];
-    const result = await runService(
-      {
-        invitationExpiresIn: 60_000,
-        sendInvitationEmail: (invitation) =>
-          Effect.sync(
-            () => void delivered.push({ id: invitation.id, expiresAt: invitation.expiresAt }),
-          ),
-      },
-      (service) =>
-        Effect.gen(function* () {
-          const organization = yield* service.createOrganization("owner-1", {
-            name: "Acme",
-            slug: "acme",
-          });
-          const invitation = yield* service.inviteMember("owner-1", organization.id, {
-            email: "new@acme.test",
-            role: "member",
-          });
+  it("resends a pending invitation on the same row, with a fresh token and expiry", async () => {
+    seedEmail("invitee-user", "new@acme.test");
+    const result = await runService({ invitationExpiresIn: 60_000 }, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        const invitation = yield* service.inviteMember("owner-1", organization.id, {
+          email: "new@acme.test",
+          role: "member",
+        });
 
-          // Age the row: a pending-but-expired invitation is exactly what a
-          // resend is for.
-          MutableHashMap.set(invitations, invitation.id, {
-            ...invitation,
-            expiresAt: (yield* Clock.currentTimeMillis) - 1_000,
-          });
+        // Age the row: a pending-but-expired invitation is exactly what a
+        // resend is for.
+        MutableHashMap.set(invitations, invitation.id, {
+          ...invitation,
+          expiresAt: (yield* Clock.currentTimeMillis) - 1_000,
+        });
 
-          const resent = yield* service.resendInvitation("owner-1", invitation.id);
-          const listed = yield* service.listInvitations(organization.id);
-          return { invitation, resent, listed };
-        }),
+        const firstToken = tokenFor(invitation.id);
+        const resent = yield* service.resendInvitation("owner-1", invitation.id);
+        const listed = yield* service.listInvitations(organization.id);
+        // Only the digest is stored, so the resend mints a new token: the
+        // link delivered first stops working.
+        const staleLink = yield* Effect.result(
+          service.acceptInvitation("invitee-user", {
+            invitationId: invitation.id,
+            token: firstToken,
+          }),
+        );
+        const accepted = yield* service.acceptInvitation("invitee-user", answer(invitation));
+        return { invitation, resent, listed, firstToken, staleLink, accepted };
+      }),
     );
 
     expect(result.resent.id).toBe(result.invitation.id);
     expect(result.resent.status).toBe("pending");
     expect(result.resent.expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(result.listed).toHaveLength(1);
+    const delivered = sentInvitations.map((sent) => sent.invitation);
     expect(delivered.map((entry) => entry.id)).toEqual([
       result.invitation.id,
       result.invitation.id,
@@ -1683,6 +1924,10 @@ describe("OrganizationService - invitations", () => {
     // The resend re-dates from "now", which in a single tick can equal the
     // original expiry - what matters is that the aged row was pushed forward.
     expect(delivered[1].expiresAt).toBeGreaterThanOrEqual(delivered[0].expiresAt);
+    expect(tokenFor(result.invitation.id)).not.toBe(result.firstToken);
+    expect(result.resent.tokenHash).not.toBe(result.invitation.tokenHash);
+    expect(result.staleLink._tag).toBe("Failure");
+    expect(result.accepted.userId).toBe("invitee-user");
   });
 
   it("refuses to resend an unknown, accepted or canceled invitation", async () => {
@@ -1699,7 +1944,7 @@ describe("OrganizationService - invitations", () => {
           email: "invitee@acme.test",
           role: "member",
         });
-        yield* service.acceptInvitation("invitee-1", accepted.id);
+        yield* service.acceptInvitation("invitee-1", answer(accepted));
 
         const canceled = yield* service.inviteMember("owner-1", organization.id, {
           email: "other@acme.test",
@@ -1733,6 +1978,159 @@ describe("OrganizationService - invitations", () => {
     expect(result.resendAccepted._tag).toBe("Failure");
     expect(result.resendCanceled._tag).toBe("Failure");
     expect(result.byPlainMember._tag).toBe("Failure");
+  });
+});
+
+/** The invitee's stored email identifier. */
+const inviteeEmail = () =>
+  Arr.findFirst(
+    Arr.fromIterable(MutableHashMap.values(identifierRecords)),
+    (identifier) => identifier.userId === "invitee-user",
+  );
+
+/**
+ * An organization with an admin invitation to `invitee@example.com`, whose
+ * holder has a password and two sessions; runs `program` with them (each
+ * session's stored id and its raw token).
+ */
+const withInvitation = <A, E>(
+  verified: boolean,
+  program: (
+    service: typeof OrganizationService.Service,
+    invitation: Invitation,
+    sessions: readonly [IssuedSession, IssuedSession],
+  ) => Effect.Effect<A, E, BaseServices | ProofServices>,
+) => {
+  seedEmail("invitee-user", "invitee@example.com", verified);
+  MutableHashMap.set(userTable.passwordHashes, "invitee-user", "hash-set-at-sign-up");
+  return runService({}, (service) =>
+    Effect.gen(function* () {
+      const organization = yield* service.createOrganization("owner-1", {
+        name: "Acme",
+        slug: "acme",
+      });
+      const invitation = yield* service.inviteMember("owner-1", organization.id, {
+        email: "invitee@example.com",
+        role: "admin",
+      });
+      const sessions = yield* SessionService;
+      const first = yield* sessions.createSession("invitee-user");
+      const second = yield* sessions.createSession("invitee-user");
+      return yield* program(service, invitation, [
+        { id: first.session.id, token: first.token },
+        { id: second.session.id, token: second.token },
+      ]);
+    }),
+  );
+};
+
+/** A session the fixture issued: its stored id (the token's digest) and its raw token. */
+interface IssuedSession {
+  readonly id: string;
+  readonly token: string;
+}
+
+/** Whether each session's raw token still validates. */
+const alive = (issued: ReadonlyArray<IssuedSession>) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionService;
+    return yield* Effect.forEach(
+      issued,
+      ({ token }) =>
+        Effect.match(sessions.validateSession(token), {
+          onFailure: () => false,
+          onSuccess: () => true,
+        }),
+      { concurrency: 1 },
+    );
+  });
+
+describe("OrganizationService - invitation tokens (#586)", () => {
+  beforeEach(resetStores);
+
+  it("accepts and rejects nothing on the invitation id alone, or a wrong token", async () => {
+    const result = await withInvitation(false, (service, invitation) =>
+      Effect.gen(function* () {
+        const forged = { invitationId: invitation.id, token: "forged" };
+        const accept = yield* Effect.flip(service.acceptInvitation("invitee-user", forged));
+        const empty = yield* Effect.flip(
+          service.acceptInvitation("invitee-user", { invitationId: invitation.id, token: "" }),
+        );
+        const reject = yield* Effect.flip(service.rejectInvitation("invitee-user", forged));
+        const full = yield* service.getFullOrganization(invitation.organizationId);
+        return { accept, empty, reject, full };
+      }),
+    );
+
+    expect(result.accept.message).toBe("Invitation not found");
+    expect(result.empty.message).toBe("Invitation not found");
+    expect(result.reject.message).toBe("Invitation not found");
+    expect(result.full.members.map((member) => member.userId)).toEqual(["owner-1"]);
+    expect(Option.getOrUndefined(inviteeEmail())?.verified).toBe(false);
+    expect(Arr.fromIterable(MutableHashMap.values(invitations))[0].status).toBe("pending");
+  });
+
+  it("treats the token as the first proof of an unverified address", async () => {
+    const result = await withInvitation(false, (service, invitation, [current, other]) =>
+      Effect.gen(function* () {
+        const member = yield* service.acceptInvitation("invitee-user", {
+          ...answer(invitation),
+          currentSessionId: current.id,
+        });
+        return { member, sessions: yield* alive([current, other]) };
+      }),
+    );
+
+    expect(result.member.role).toBe("admin");
+    expect(Option.getOrUndefined(inviteeEmail())?.verified).toBe(true);
+    // Whoever signed up with the address unproven no longer holds the
+    // account: the password is gone, and only the accepting session survives.
+    expect(MutableHashMap.has(userTable.passwordHashes, "invitee-user")).toBe(false);
+    expect(result.sessions).toEqual([true, false]);
+  });
+
+  it("revokes every session of an unverified address accepted without a current session", async () => {
+    const result = await withInvitation(false, (service, invitation, issued) =>
+      Effect.gen(function* () {
+        yield* service.acceptInvitation("invitee-user", answer(invitation));
+        return yield* alive(issued);
+      }),
+    );
+
+    expect(result).toEqual([false, false]);
+  });
+
+  it("leaves a verified address's password and sessions alone", async () => {
+    const result = await withInvitation(true, (service, invitation, issued) =>
+      Effect.gen(function* () {
+        yield* service.acceptInvitation("invitee-user", answer(invitation));
+        return yield* alive(issued);
+      }),
+    );
+
+    expect(result).toEqual([true, true]);
+    expect(MutableHashMap.has(userTable.passwordHashes, "invitee-user")).toBe(true);
+  });
+
+  it("refuses to invite when no sendInvitationEmail would carry the token", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrganizationModule.make({});
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        return yield* Effect.flip(
+          service.inviteMember("owner-1", organization.id, {
+            email: "invitee@example.com",
+            role: "member",
+          }),
+        );
+      }).pipe(Effect.provide(Layer.merge(Layer.succeedContext(testContext), proofLayer()))),
+    );
+
+    expect(result.message).toBe("Invitations are not enabled: configure sendInvitationEmail");
+    expect(MutableHashMap.size(invitations)).toBe(0);
   });
 });
 
@@ -2085,6 +2483,117 @@ describe("OrganizationService - domains", () => {
     );
   });
 
+  it("records who attested a claim, and keeps the first attester on a repeat (#680)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const pending = yield* service.addDomain("owner-1", acme.id, { domain: "acme.test" });
+        const attested = yield* service.attestDomain(acme.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+        const again = yield* service.attestDomain(acme.id, "acme.test", { attestedBy: "ops-2" });
+        const anonymous = yield* service.attestDomain(acme.id, "acme-corp.test");
+        const stored = yield* service.getDomainById(pending.id);
+        return { pending, attested, again, anonymous, stored };
+      }),
+    );
+
+    // A tenant's DNS claim never names an attester.
+    expect(result.pending.attestedBy).toBeUndefined();
+    expect(result.attested).toMatchObject({ id: result.pending.id, attestedBy: "ops-1" });
+    expect(result.attested.verifiedAt).toBeTypeOf("number");
+    expect(result.stored?.attestedBy).toBe("ops-1");
+    // A claim already verified is answered unchanged: the record of who
+    // attested it is not overwritten.
+    expect(result.again).toStrictEqual(result.attested);
+    expect("attestedBy" in result.anonymous).toBe(false);
+  });
+
+  it("lets the operator release an organization's claim in any state (#680)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const globex = yield* service.createOrganization("owner-2", {
+          name: "Globex",
+          slug: "globex",
+        });
+        const pending = yield* service.addDomain("owner-1", acme.id, { domain: "pending.test" });
+        const verified = yield* service.attestDomain(acme.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+        // Globex holds its own pending claim on the domain Acme holds verified.
+        const globexClaim = yield* service.addDomain("owner-2", globex.id, {
+          domain: "acme.test",
+        });
+
+        const releasedPending = yield* service.releaseDomain(acme.id, " PENDING.test ");
+        // The dispute: Acme's verified claim blocks Globex's attestation until
+        // the operator releases it.
+        const blocked = yield* Effect.result(service.attestDomain(globex.id, "acme.test"));
+        const releasedVerified = yield* service.releaseDomain(acme.id, "acme.test");
+        const handedOver = yield* service.attestDomain(globex.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+
+        const acmeDomains = yield* service.listDomains("owner-1", acme.id);
+        return {
+          pending,
+          verified,
+          globexClaim,
+          releasedPending,
+          blocked,
+          releasedVerified,
+          handedOver,
+          acmeDomains,
+        };
+      }),
+    );
+
+    expect(result.releasedPending).toStrictEqual(result.pending);
+    assert(Result.isFailure(result.blocked));
+    expect(result.blocked.failure.message).toBe(
+      "That domain is already verified for another organization",
+    );
+    expect(result.releasedVerified).toStrictEqual(result.verified);
+    expect(result.acmeDomains).toEqual([]);
+    // Globex's own pending claim is the one attested, in place.
+    expect(result.handedOver).toMatchObject({
+      id: result.globexClaim.id,
+      verificationState: "verified",
+      attestedBy: "ops-1",
+    });
+  });
+
+  it("refuses a release for an unknown organization, a bad domain or a domain it holds no claim on (#680)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const globex = yield* service.createOrganization("owner-2", {
+          name: "Globex",
+          slug: "globex",
+        });
+        yield* service.attestDomain(acme.id, "acme.test");
+
+        const unknown = yield* Effect.result(service.releaseDomain("org-nope", "acme.test"));
+        const invalid = yield* Effect.result(service.releaseDomain(acme.id, "not-a-domain"));
+        // Another organization's claim is never released through this one.
+        const unclaimed = yield* Effect.result(service.releaseDomain(globex.id, "acme.test"));
+        const acmeDomains = yield* service.listDomains("owner-1", acme.id);
+        return { unknown, invalid, unclaimed, acmeDomains };
+      }),
+    );
+
+    assert(Result.isFailure(result.unknown));
+    expect(result.unknown.failure._tag).toBe("OrganizationError");
+    assert(Result.isFailure(result.invalid));
+    expect(result.invalid.failure._tag).toBe("OrganizationError");
+    assert(Result.isFailure(result.unclaimed));
+    expect(result.unclaimed.failure.message).toBe(
+      "That organization holds no claim on that domain",
+    );
+    expect(result.acmeDomains).toHaveLength(1);
+  });
+
   it("refuses domain operations when no OrganizationDomainStore is wired", async () => {
     const result = await runServiceIn(baseContext, {}, (service) =>
       Effect.gen(function* () {
@@ -2097,15 +2606,17 @@ describe("OrganizationService - domains", () => {
           service.addDomain("owner-1", organization.id, { domain: "acme.test" }),
         );
         const attest = yield* Effect.result(service.attestDomain(organization.id, "acme.test"));
+        const release = yield* Effect.result(service.releaseDomain(organization.id, "acme.test"));
         // JIT is a no-op rather than a failure: it runs on a sign-in path.
         const jit = yield* service.provisionJitMembership("user-1", "user@acme.test");
-        return { list, add, attest, jit };
+        return { list, add, attest, release, jit };
       }),
     );
 
     expect(result.list._tag).toBe("Failure");
     expect(result.add._tag).toBe("Failure");
     expect(result.attest._tag).toBe("Failure");
+    expect(result.release._tag).toBe("Failure");
     expect(result.jit).toBeNull();
   });
 });

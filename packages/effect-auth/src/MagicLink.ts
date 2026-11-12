@@ -19,7 +19,7 @@ import {
   UserStore,
 } from "./UserStore.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
@@ -100,8 +100,9 @@ export interface MagicLinkConfig {
   /**
    * Minimum interval (ms) between successive send requests for the same email.
    * When an outstanding token created within this window already exists, `send`
-   * fails with {@link Errors.ResendTooSoonError}. Off by default; consider
-   * 60_000 for SMS-style flows. Complements the global RateLimit. It applies
+   * fails with {@link Errors.ResendTooSoonError}. Default `60_000` (60 s, as
+   * for the email and phone OTPs, #682); `0` turns it off. Complements the
+   * per-address limit on `POST /otp-challenges`. It applies
    * to every email alike, whether or not it has an account, so the error
    * reveals nothing about which emails are registered. With sign-up disabled,
    * a request for an email with no account stores an undelivered marker
@@ -155,21 +156,33 @@ export class MagicLinkService extends Context.Service<
      * the email's outstanding tokens with a marker token that is never sent,
      * so a known and an unknown email get the same store work.
      *
-     * When `resendCooldown` is configured and an outstanding token for the email
-     * was created within the cooldown window, fails with
+     * When an outstanding token for the email was created within the
+     * `resendCooldown` window (default 60 s), fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
      * The marker token makes the cooldown apply to an email with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown email.
+     *
+     * The `beforeSendCode` hook runs first, before the address is looked up,
+     * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
      */
     readonly send: (
       email: string,
-    ) => Effect.Effect<void, Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError>;
+      options?: SendCodeOptions,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError | HookError
+    >;
 
     /**
      * Verify a magic link token (single use) and sign the user in. A
      * successfully verified link proves ownership of the email, so users
      * created here are marked `emailVerified: true`.
+     *
+     * A known token fires `beforeAuthenticate` keyed on its address before
+     * it is spent; an empty, unknown or expired one fires it unkeyed (no
+     * `identifier`, #678), so `IPRateLimitPlugin` counts guessed tokens,
+     * then fails. `AccountLockoutPlugin` exempts magic links from its lock.
      */
     readonly verify: (
       token: string,
@@ -211,6 +224,7 @@ export const make = (
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
     const disableSignUp = config.disableSignUp ?? false;
+    const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
 
     const store = yield* MagicLinkStore;
     const userStore = yield* MagicLinkUserStore;
@@ -223,11 +237,23 @@ export const make = (
     const detached = yield* makeDetachedSend;
 
     return {
-      send: Effect.fn("MagicLinkService.send")(function* (rawEmail: string) {
+      send: Effect.fn("MagicLinkService.send")(function* (
+        rawEmail: string,
+        options?: SendCodeOptions,
+      ) {
         const email = normalizeEmail(rawEmail);
         if (!email) {
           return yield* Effect.void;
         }
+
+        // The send gate (captcha, #678) runs before the address is looked
+        // up, so it answers alike for every address.
+        yield* hooks.beforeSendCode({
+          method: "magic-link",
+          purpose: "sign-in",
+          address: email,
+          captchaToken: options?.captchaToken,
+        });
 
         // Do not reveal whether the user exists to reduce email enumeration
         // risk: when sign-up is disabled and there is no matching account,
@@ -241,14 +267,14 @@ export const make = (
         // the configured window. It runs for an address with no account too,
         // whose earlier request stored an undelivered token below, so a known
         // and an unknown address get the same answer inside the window.
-        if (config.resendCooldown !== undefined) {
+        if (resendCooldown > 0) {
           const existing = yield* store.getByEmail(email);
           if (existing !== null) {
             const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
-            if (elapsed < config.resendCooldown) {
+            if (elapsed < resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
                 message: "Please wait before requesting another magic link",
-                retryAfter: Duration.millis(config.resendCooldown - elapsed),
+                retryAfter: Duration.millis(resendCooldown - elapsed),
               });
             }
           }
@@ -298,15 +324,12 @@ export const make = (
         rawToken: string,
         options?: MagicLinkVerifyOptions,
       ) {
-        if (!rawToken) {
-          return yield* new Errors.MagicLinkError({
-            message: "Invalid or expired magic link token",
-          });
-        }
-
         const tokenHash = hashToken(rawToken);
-        const magicLink = yield* store.get(tokenHash);
+        const magicLink = rawToken ? yield* store.get(tokenHash) : null;
         if (!magicLink) {
+          // Unkeyed: the token names no address, but the per-IP limit still
+          // counts the guess (#678).
+          yield* hooks.beforeAuthenticate({ method: "magic-link" });
           return yield* new Errors.MagicLinkError({
             message: "Invalid or expired magic link token",
           });
@@ -315,6 +338,7 @@ export const make = (
         // Check expiration
         if ((yield* Clock.currentTimeMillis) > magicLink.expiresAt) {
           yield* store.delete(tokenHash);
+          yield* hooks.beforeAuthenticate({ method: "magic-link" });
           return yield* new Errors.MagicLinkError({
             message: "Magic link token has expired",
           });

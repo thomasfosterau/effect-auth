@@ -17,7 +17,9 @@
  * `multiFactor`) and counters (`rateLimit.increment`,
  * `emailOtp.incrementAttempts`, `emailOtp.recordFailure`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. Multi-step writes (challenge, oauthState, emailOtp.upsert,
+ * races. One-time consumes (`oauthState.consume`, #685) are a single
+ * `DELETE … RETURNING`, so a state is handed out at most once. Multi-step
+ * writes (challenge, oauthState.create, emailOtp.upsert,
  * pendingMultiFactor.delete, and identifier.replace's claim-then-release) run
  * inside `sql.withTransaction`.
  * `ON CONFLICT` targets a declared primary key or unique index. MySQL has no
@@ -574,6 +576,12 @@ export const makeEmailVerificationStore: Effect.Effect<
         "emailVerification.deleteByUserId",
         sql`DELETE FROM auth_email_verifications WHERE user_id = ${userId}`,
       ),
+    getLatestByUserId: (userId) =>
+      firstRow(
+        "emailVerification.getLatestByUserId",
+        sql<EmailVerificationRow>`SELECT * FROM auth_email_verifications WHERE user_id = ${userId}
+            ORDER BY created_at DESC LIMIT 1`,
+      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
   } satisfies typeof Auth.Email.EmailVerificationStore.Service;
 });
 
@@ -776,13 +784,14 @@ export const makeOAuthStateStore: Effect.Effect<
           return state;
         }),
       ),
-    get: (state) =>
+    // One `DELETE ... RETURNING` statement (#685): of two concurrent callers
+    // passing the same state, only the one whose delete removed the row gets
+    // it back, on SQLite, D1 and PostgreSQL alike.
+    consume: (state) =>
       firstRow(
-        "oauthState.get",
-        sql<OAuthStateRow>`SELECT * FROM auth_oauth_states WHERE state = ${state}`,
+        "oauthState.consume",
+        sql<OAuthStateRow>`DELETE FROM auth_oauth_states WHERE state = ${state} RETURNING *`,
       ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
-    delete: (state) =>
-      asVoid("oauthState.delete", sql`DELETE FROM auth_oauth_states WHERE state = ${state}`),
   } satisfies typeof Auth.OAuth.OAuthStateStore.Service;
 });
 

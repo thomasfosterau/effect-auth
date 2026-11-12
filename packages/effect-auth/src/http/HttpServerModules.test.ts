@@ -26,12 +26,13 @@ import {
   type Organization,
   type Member,
   type Invitation,
+  type InvitationDelivery,
   type Team,
   type TeamMember,
   type OrgRole,
   OrganizationService,
 } from "../Organization.ts";
-import { AdminUserStore, AdminService } from "../Admin.ts";
+import { AdminUserStore, AdminService, type AdminConfig } from "../Admin.ts";
 import { ApiKeyStore, type ApiKey, ApiKeyService } from "../ApiKey.ts";
 import { JwtKeyStore, type JwtKeyPair, JwtService } from "../Jwt.ts";
 import {
@@ -46,8 +47,11 @@ import { expectSpecJson } from "../testing/WireFormat.ts";
 
 const HOUR = 60 * 60 * 1000;
 
-/** Build a handler wired with real org/admin/api-key/jwt services + in-memory stores. */
-const makeFixture = () => {
+/**
+ * Build a handler wired with real org/admin/api-key/jwt services + in-memory
+ * stores; `admin`, when given, replaces the `AdminService`'s config.
+ */
+const makeFixture = (admin?: AdminConfig) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const sessions = MutableHashMap.empty<string, Types.Session>();
@@ -389,7 +393,11 @@ const makeFixture = () => {
   );
 
   // Stage 2: services that depend on stage-1 services (SessionService, etc.).
-  const organizationServiceLayer = OrganizationService.layer().pipe(Layer.provide(stage1));
+  // Invitations the server "emailed", with their secret tokens (newest last).
+  const sentInvitations: InvitationDelivery[] = [];
+  const organizationServiceLayer = OrganizationService.layer({
+    sendInvitationEmail: (delivery) => Effect.sync(() => void sentInvitations.push(delivery)),
+  }).pipe(Layer.provide(stage1));
   const adminServiceLayer = AdminService.layer({ adminRoles: ["admin"] }).pipe(
     Layer.provide(stage1),
   );
@@ -401,13 +409,20 @@ const makeFixture = () => {
   const services: Layer.Layer<AuthServices> = Layer.mergeAll(
     stage1,
     organizationServiceLayer,
-    adminServiceLayer,
+    admin === undefined ? adminServiceLayer : AdminService.layer(admin).pipe(Layer.provide(stage1)),
     apiKeyServiceLayer,
     jwtServiceLayer,
   );
   const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
-  return { handler, seedUser, makeSession, sessions, members };
+  /** The token the invitation's latest email carried. */
+  const tokenFor = (invitationId: string): string =>
+    Option.match(
+      Arr.findLast(sentInvitations, (sent) => sent.invitation.id === invitationId),
+      { onNone: () => assert.fail(`no email for ${invitationId}`), onSome: (sent) => sent.token },
+    );
+
+  return { handler, seedUser, makeSession, sessions, members, tokenFor };
 };
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
@@ -514,12 +529,23 @@ const patchMember = (memberId: string, attributes: Schema.Json, sessionId: strin
     sessionId,
   );
 
-/** `PATCH /invitations/:id` to `status`, as `sessionId`. */
-const transitionInvitation = (invitationId: string, status: string, sessionId: string) =>
+/** `PATCH /invitations/:id` to `status`, as `sessionId`, presenting `token` when given. */
+const transitionInvitation = (
+  invitationId: string,
+  status: string,
+  sessionId: string,
+  token?: string,
+) =>
   apiReq(
     "PATCH",
     `/invitations/${invitationId}`,
-    { data: { type: "invitations", id: invitationId, attributes: { status } } },
+    {
+      data: {
+        type: "invitations",
+        id: invitationId,
+        attributes: token === undefined ? { status } : { status, token },
+      },
+    },
     sessionId,
   );
 
@@ -845,9 +871,20 @@ describe("HTTP organization endpoints", () => {
       attributes: { status: "pending" },
     });
 
-    // Only the invitee may accept; the answer carries the new membership.
-    expect((await fx.handler(transitionInvitation(first, "accepted", ownerSid))).status).toBe(400);
-    const accepted = await fx.handler(transitionInvitation(first, "accepted", inviteeSid));
+    // Only the invitee may accept, and only with the emailed token (#586);
+    // the answer carries the new membership.
+    const token = fx.tokenFor(first);
+    expect(
+      (await fx.handler(transitionInvitation(first, "accepted", ownerSid, token))).status,
+    ).toBe(400);
+    expect((await fx.handler(transitionInvitation(first, "accepted", inviteeSid))).status).toBe(
+      400,
+    );
+    expect(
+      (await fx.handler(transitionInvitation(first, "accepted", inviteeSid, "forged"))).status,
+    ).toBe(400);
+    expect(fx.members.some((m) => m.userId === "invitee")).toBe(false);
+    const accepted = await fx.handler(transitionInvitation(first, "accepted", inviteeSid, token));
     expect(accepted.status).toBe(200);
     const acceptedBody = await jsonBody(
       accepted,
@@ -880,7 +917,12 @@ describe("HTTP organization endpoints", () => {
       status: "canceled",
     });
     const third = await invite("invitee@test.com");
-    const rejected = await fx.handler(transitionInvitation(third, "rejected", inviteeSid));
+    expect((await fx.handler(transitionInvitation(third, "rejected", inviteeSid))).status).toBe(
+      400,
+    );
+    const rejected = await fx.handler(
+      transitionInvitation(third, "rejected", inviteeSid, fx.tokenFor(third)),
+    );
     expect(
       (await jsonBody(rejected, resourceBody({ status: Schema.String }))).data.attributes,
     ).toEqual({
@@ -1318,6 +1360,73 @@ describe("HTTP admin endpoints", () => {
       (await jsonBody(left, Schema.Struct({ meta: Schema.Struct({ total: Schema.Finite }) }))).meta
         .total,
     ).toBe(1);
+  });
+});
+
+/** A fixture whose admin role is `operator`, with one operator and one `admin`-role user. */
+const customAdminFixture = () => {
+  const fx = makeFixture({ adminRoles: ["operator"], adminUserIds: ["root"] });
+  fx.seedUser("ops", "ops@test.com", { role: "operator" });
+  fx.seedUser("root", "root@test.com");
+  fx.seedUser("legacy", "legacy@test.com", { role: "admin" });
+  return {
+    fx,
+    opsSid: fx.makeSession("ops"),
+    rootSid: fx.makeSession("root"),
+    legacySid: fx.makeSession("legacy"),
+  };
+};
+
+const attestation = {
+  data: {
+    type: "organization-domains",
+    attributes: { domain: "acme.test" },
+    relationships: { organization: { data: { type: "organizations", id: "org-1" } } },
+  },
+};
+const ssoRegistration = {
+  data: {
+    type: "sso-providers",
+    attributes: {
+      domain: "acme.test",
+      issuer: "https://idp.acme.test",
+      clientId: "client",
+      clientSecret: "secret",
+      redirectUri: "https://app.test/sso/callback",
+    },
+  },
+};
+
+/**
+ * The statuses of `GET /oauth-clients`, `POST /sso-providers`,
+ * `POST /admin/organization-domains`, `DELETE /admin/organization-domains/nope`
+ * and `GET /admin/users`, as `sid`'s user.
+ */
+const gateStatuses = (fx: ReturnType<typeof makeFixture>, sid: string) =>
+  Promise.all(
+    [
+      apiReq("GET", "/oauth-clients", undefined, sid),
+      apiReq("POST", "/sso-providers", ssoRegistration, sid),
+      apiReq("POST", "/admin/organization-domains", attestation, sid),
+      apiReq("DELETE", "/admin/organization-domains/nope", undefined, sid),
+      apiReq("GET", "/admin/users", undefined, sid),
+    ].map(async (request) => (await fx.handler(request)).status),
+  );
+
+describe("HTTP platform-admin endpoints under a custom AdminConfig (#680)", () => {
+  it("lets the configured admins through the SSO-provider, OAuth-client and domain gates", async () => {
+    const { fx, opsSid, rootSid } = customAdminFixture();
+    // Past the gate, each endpoint answers for its own module: this fixture
+    // mounts neither the OIDC provider nor SSO (404), nor a domain store (the
+    // organization service's refusal, 400); `/admin/users` applies the same
+    // rule through the AdminService itself.
+    expect(await gateStatuses(fx, opsSid)).toEqual([404, 404, 400, 400, 200]);
+    expect(await gateStatuses(fx, rootSid)).toEqual([404, 404, 400, 400, 200]);
+  });
+
+  it("refuses a role-`admin` user the custom configuration does not name", async () => {
+    const { fx, legacySid } = customAdminFixture();
+    expect(await gateStatuses(fx, legacySid)).toEqual([403, 403, 403, 403, 403]);
   });
 });
 

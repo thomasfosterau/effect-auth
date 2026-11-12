@@ -286,7 +286,10 @@ describe("MagicLinkService", () => {
     await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          const service = yield* MagicLink.make({
+            sendMagicLink: recordingSend,
+            resendCooldown: 0,
+          });
           yield* service.send("repeat@example.com");
           yield* service.send("repeat@example.com");
         }),
@@ -342,6 +345,7 @@ describe("MagicLinkService", () => {
         Effect.gen(function* () {
           const service = yield* MagicLink.make({
             disableSignUp: true,
+            resendCooldown: 0,
             sendMagicLink: recordingSend,
           });
           yield* service.send("member@example.com");
@@ -749,14 +753,37 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.has(magicLinkTokens, oldToken)).toBe(false);
   });
 
-  it("should not apply the cooldown when resendCooldown is not configured", async () => {
+  it("applies a 60 s cooldown when resendCooldown is not configured (#682)", async () => {
+    const testContext = await makeTestContext();
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("repeat@example.com");
+          return yield* Effect.result(service.send("repeat@example.com"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    assert(Result.isFailure(result));
+    assert(result.failure._tag === "ResendTooSoonError");
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(59_000);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
+    expect(sentLinks.length).toBe(1);
+  });
+
+  it("does not apply the cooldown when resendCooldown is 0", async () => {
     const testContext = await makeTestContext();
 
     await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          // No resendCooldown: default behavior — immediate resend always succeeds.
-          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          const service = yield* MagicLink.make({
+            sendMagicLink: recordingSend,
+            resendCooldown: 0,
+          });
           yield* service.send("repeat@example.com");
           yield* service.send("repeat@example.com");
         }),

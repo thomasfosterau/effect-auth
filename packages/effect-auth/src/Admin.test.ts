@@ -314,6 +314,25 @@ describe("AdminService", () => {
     expect(listed.total).toBe(3);
   });
 
+  it("answers isAdmin under its own config, the rule the HTTP admin gates ask (#680)", async () => {
+    const roleAdmin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    const superuser = seedUser("super-1", "super@example.com", { role: "superuser" });
+    const byId = seedUser("root-1", "root@example.com");
+
+    const testContext = await makeTestContext();
+    const answers = await runService(
+      testContext,
+      { adminRoles: ["superuser"], adminUserIds: ["root-1"] },
+      (service) =>
+        Effect.succeed([roleAdmin, superuser, byId].map((user) => service.isAdmin(user))),
+    );
+    expect(answers).toEqual([false, true, true]);
+    const defaults = await runService(testContext, {}, (service) =>
+      Effect.succeed([roleAdmin, superuser, byId].map((user) => service.isAdmin(user))),
+    );
+    expect(defaults).toEqual([true, false, false]);
+  });
+
   it("sets a user's role via attributes.role", async () => {
     const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });

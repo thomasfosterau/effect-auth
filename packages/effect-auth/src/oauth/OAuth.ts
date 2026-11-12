@@ -265,10 +265,24 @@ export interface OAuthProvider {
 export class OAuthStateStore extends Context.Service<
   OAuthStateStore,
   {
+    /** Record a pending state entry, replacing any entry with the same `state`. */
     readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
-    /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
-    readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
-    readonly delete: (state: string) => Effect.Effect<void, AuthError>;
+    /**
+     * Atomically fetch **and delete** a pending state entry (#685), or `null`
+     * when it is unknown or already consumed.
+     *
+     * This is the replay guard for every OAuth and OIDC SSO callback: the
+     * services spend the state before they exchange the code, so a captured
+     * callback works at most once, whether that first use succeeded or failed.
+     * Two concurrent callers passing the same `state` must not both receive
+     * the entry; the loser gets `null`. Implement it as a conditional
+     * `DELETE ... RETURNING` (or a compare-and-swap, or Redis `GETDEL`), never
+     * as a read followed by a delete.
+     *
+     * An expired entry may be returned or reported as `null`: the services
+     * check `expiresAt` themselves and refuse an expired entry either way.
+     */
+    readonly consume: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
   }
 >()("@effect-auth/OAuthStateStore") {}
 
@@ -1110,26 +1124,36 @@ export const make = (
     };
 
     /**
-     * Shared callback plumbing: verify + consume state, exchange the code and
-     * fetch the provider profile.
+     * Spend a callback's state (#685). It is consumed atomically before
+     * anything else, so a replayed or concurrent callback carrying the same
+     * state is refused, and a failed exchange does not leave it usable.
+     * Fails when the state is unknown, already used or expired.
      */
-    const resolveCallback = (state: string, code: string) =>
+    const consumeState = (state: string) =>
       Effect.gen(function* () {
-        const stateEntry = yield* stateStore.get(state);
+        const stateEntry = yield* stateStore.consume(state);
         if (stateEntry === null) {
           return yield* new OAuthStateNotFoundError({
-            message: "OAuth state not found or expired",
+            message: "OAuth state not found, expired or already used",
             state,
           });
         }
-
         if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
-          yield* stateStore.delete(state);
           return yield* new OAuthStateExpiredError({
             message: "OAuth state expired",
             state,
           });
         }
+        return stateEntry;
+      });
+
+    /**
+     * Shared callback plumbing: consume the state, exchange the code and
+     * fetch the provider profile.
+     */
+    const resolveCallback = (state: string, code: string) =>
+      Effect.gen(function* () {
+        const stateEntry = yield* consumeState(state);
 
         const providerInstance = providers[stateEntry.provider];
         if (!providerInstance) {
@@ -1143,8 +1167,6 @@ export const make = (
         const userInfo = yield* providerInstance.getProfile(tokens, {
           ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
         });
-
-        yield* stateStore.delete(state);
 
         return { stateEntry, tokens, userInfo };
       });
@@ -1284,12 +1306,11 @@ export const make = (
 
             // Update state with returnTo if provided
             if (options?.returnTo) {
-              const stateEntry = yield* stateStore.get(result.state);
+              const stateEntry = yield* stateStore.consume(result.state);
               if (stateEntry === null) {
                 return yield* new AuthError({ message: "OAuth state missing after creation" });
               }
-              // Delete old state and create new one with returnTo
-              yield* stateStore.delete(result.state);
+              // Record the state again, now carrying returnTo.
               yield* stateStore.create({
                 ...stateEntry,
                 returnTo: options.returnTo,
@@ -1415,28 +1436,14 @@ export const make = (
         // Properly implement OAuth flow for account linking
         // This follows the same flow as handleCallback but links to existing user
 
-        // Verify state
-        const stateEntry = yield* stateStore.get(state);
-        if (stateEntry === null) {
-          return yield* new OAuthStateNotFoundError({
-            message: "OAuth state not found or expired",
-            state,
-          });
-        }
+        // Spend the state first (#685): a replayed or concurrent link carrying
+        // the same state is refused, and so is a retry after a failure.
+        const stateEntry = yield* consumeState(state);
 
         if (stateEntry.provider !== provider) {
           return yield* new OAuthProviderError({
             message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
             provider,
-          });
-        }
-
-        // Check expiration
-        if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
-          yield* stateStore.delete(state);
-          return yield* new OAuthStateExpiredError({
-            message: "OAuth state expired",
-            state,
           });
         }
 
@@ -1455,9 +1462,6 @@ export const make = (
         const userInfo = yield* providerInstance.getProfile(tokens, {
           ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
         });
-
-        // Clean up state
-        yield* stateStore.delete(state);
 
         // Email-mismatch guard: reject when the provider email differs from the
         // user's current account email (overridable with allowDifferentEmails).

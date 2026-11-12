@@ -6,6 +6,8 @@ import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
+import { KeyValueStore } from "effect/persistence";
+import { oauthStateStoreKV } from "../KeyValueStores.ts";
 import {
   AuthError,
   EmailInUseError,
@@ -75,13 +77,11 @@ const StateStoreLive = () => {
         MutableHashMap.set(map, s.state, s);
         return s;
       }),
-    get: (state: string) => {
-      const v = Option.getOrUndefined(MutableHashMap.get(map, state));
-      return v ? Effect.succeed(v) : Effect.fail(new AuthError({ message: "not found" }));
-    },
-    delete: (state: string) =>
+    consume: (state: string) =>
       Effect.sync(() => {
+        const v = Option.getOrNull(MutableHashMap.get(map, state));
         MutableHashMap.remove(map, state);
+        return v;
       }),
   });
 };
@@ -132,6 +132,10 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** Parses JSON text as `JSON.parse` does. */
 const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
+
+/** Run `thunk` against a provider that answers every request with `400`. */
+const failingIdp = <A>(thunk: () => Promise<A>): Promise<A> =>
+  withFetch(() => new Response("bad code", { status: 400 }), thunk);
 
 const json = (value: object): Response =>
   new Response(encodeJson(value), { headers: { "content-type": "application/json" } });
@@ -1243,8 +1247,7 @@ describe("OAuthService linking controls", () => {
   const makeStateLayer = (state: OAuthState) =>
     Layer.succeed(OAuthStateStore, {
       create: (s) => Effect.succeed(s),
-      get: (k) => Effect.succeed(k === state.state ? state : null),
-      delete: () => Effect.void,
+      consume: (k) => Effect.succeed(k === state.state ? state : null),
     });
 
   const makeAccountLayer = (
@@ -1944,10 +1947,11 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
           MutableHashMap.set(states, s.state, s);
           return s;
         }),
-      get: (k) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, k))),
-      delete: (k) =>
+      consume: (k) =>
         Effect.sync(() => {
+          const entry = Option.getOrNull(MutableHashMap.get(states, k));
           MutableHashMap.remove(states, k);
+          return entry;
         }),
     };
     return { states, store };
@@ -2137,6 +2141,73 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
     });
   });
 
+  /** The real `KeyValueStore`-backed store, holding one live state. */
+  const kvStateStore = (): typeof OAuthStateStore.Service => {
+    const store = Effect.runSync(oauthStateStoreKV.pipe(Effect.provide(KeyValueStore.layerMemory)));
+    Effect.runSync(store.create(liveState()));
+    return store;
+  };
+
+  describe("the callback state is single-use (#685)", () => {
+    it("refuses handleCallback replayed after the first exchange failed", async () => {
+      const service = await makeService(kvStateStore());
+      const failed = await failingIdp(() =>
+        Effect.runPromise(Effect.flip(service.handleCallback("st-1", "code-1"))),
+      );
+      expect(failed._tag).toBe("OAuthProviderError");
+
+      const replay = await providerFetch(
+        { access_token: "at-1", token_type: "bearer" },
+        { id: "gh-9" },
+        () => Effect.runPromise(Effect.flip(service.handleCallback("st-1", "code-2"))),
+      );
+      expect(replay._tag).toBe("OAuthStateNotFoundError");
+    });
+
+    it("refuses handleCallback replayed after a success", async () => {
+      const service = await makeService(kvStateStore());
+      const callback = () => service.handleCallback("st-1", "code-1");
+      const tokens = { access_token: "at-1", token_type: "bearer" };
+      const first = await providerFetch(tokens, { id: "gh-9" }, () =>
+        Effect.runPromise(callback()),
+      );
+      expect(first.account.providerId).toBe("gh-9");
+      const replay = await providerFetch(tokens, { id: "gh-9" }, () =>
+        Effect.runPromise(Effect.flip(callback())),
+      );
+      expect(replay._tag).toBe("OAuthStateNotFoundError");
+    });
+
+    it("admits only one of two concurrent handleCallback calls with the same state", async () => {
+      const service = await makeService(kvStateStore());
+      const callback = Effect.result(service.handleCallback("st-1", "code-1"));
+      const results = await providerFetch(
+        { access_token: "at-1", token_type: "bearer" },
+        { id: "gh-9" },
+        () => Effect.runPromise(Effect.all([callback, callback], { concurrency: "unbounded" })),
+      );
+      const refusals = Arr.filter(results, Result.isFailure).map((r) => r.failure._tag);
+      expect(Arr.filter(results, Result.isSuccess)).toHaveLength(1);
+      expect(refusals).toEqual(["OAuthStateNotFoundError"]);
+    });
+
+    it("refuses linkAccount replayed after the first exchange failed", async () => {
+      const service = await makeService(kvStateStore());
+      const failed = await failingIdp(() =>
+        Effect.runPromise(Effect.flip(service.linkAccount("u-1", "github", "code-1", "st-1"))),
+      );
+      expect(failed._tag).toBe("OAuthProviderError");
+
+      const replay = await providerFetch(
+        { access_token: "at-1", token_type: "bearer" },
+        { id: "gh-9" },
+        () =>
+          Effect.runPromise(Effect.flip(service.linkAccount("u-1", "github", "code-2", "st-1"))),
+      );
+      expect(replay._tag).toBe("OAuthStateNotFoundError");
+    });
+  });
+
   describe("generateAuthorizationUrl", () => {
     it("fails with OAuthProviderError for an unregistered provider", async () => {
       const service = await makeService(makeStateStore().store);
@@ -2170,7 +2241,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
 
     it("fails with AuthError when the state vanishes before returnTo is recorded", async () => {
       const { store } = makeStateStore();
-      const service = await makeService({ ...store, get: () => Effect.succeed(null) });
+      const service = await makeService({ ...store, consume: () => Effect.succeed(null) });
       const err = await Effect.runPromise(
         Effect.flip(service.generateAuthorizationUrl("github", { returnTo: "/after" })),
       );

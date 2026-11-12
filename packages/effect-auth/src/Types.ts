@@ -7,6 +7,7 @@
  * HTTP protocol layer. Configuration shapes remain plain interfaces.
  */
 import type { Effect } from "effect";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type * as Errors from "./Errors.ts";
 
@@ -76,6 +77,33 @@ export const Session = Schema.Struct({
   attributes: Attributes,
 });
 export type Session = typeof Session.Type;
+
+/**
+ * Whether a session is an admin impersonation, one
+ * `AdminService.impersonateUser` issued: it carries
+ * `attributes.impersonatedBy`. The user did not earn it, so
+ * `AccountLockoutPlugin` leaves the user's lockout standing when one is
+ * issued (#678).
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { isImpersonationSession } from "@thomasfosterau/effect-auth"
+ *
+ * const session = {
+ *   id: "digest",
+ *   userId: "u-1",
+ *   expiresAt: new Date(),
+ *   createdAt: new Date(),
+ *   lastActivityAt: new Date(),
+ *   attributes: { impersonatedBy: "admin-1" },
+ * }
+ * assert.equal(isImpersonationSession(session), true)
+ * assert.equal(isImpersonationSession({ ...session, attributes: {} }), false)
+ * ```
+ */
+export const isImpersonationSession = (session: Session): boolean =>
+  P.isString(session.attributes["impersonatedBy"]);
 
 /**
  * Represents a session with its associated user.

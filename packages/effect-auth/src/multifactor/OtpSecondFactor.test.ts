@@ -2,7 +2,8 @@ import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
-import { Hooks } from "../Hooks.ts";
+import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
+import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { OtpSecondFactorStore, type OtpSecondFactorRecord } from "./OtpSecondFactor.ts";
 import * as OtpSecondFactor from "./OtpSecondFactor.ts";
@@ -274,6 +275,34 @@ describe("OtpSecondFactorService", () => {
     expect(r3.failure._tag).toBe("OtpSecondFactorError");
     expect(r3.failure.message).toContain("attempts");
     expect(MutableHashMap.size(otpRecords)).toBe(0);
+  });
+
+  it("runs beforeAuthenticate unkeyed for an unknown or expired challenge (#678)", async () => {
+    const sentOtps: Array<{ user: User; otp: string }> = [];
+    const testContext = await makeTestContext();
+    const seen: Array<AuthenticateAttempt> = [];
+
+    const outcomes = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            expiresIn: 1,
+            sendOtp: (user, otp) => Effect.sync(() => void sentOtps.push({ user, otp })),
+          });
+          const unknown = yield* Effect.flip(service.verify("no-such-challenge", "123456"));
+          const challenge = yield* service.begin(testUser);
+          yield* Effect.sleep("5 millis");
+          const expired = yield* Effect.flip(
+            service.verify(challenge.token, recorded(sentOtps).otp),
+          );
+          return [unknown._tag, expired._tag];
+        }),
+        testContext,
+      ).pipe(Effect.provide(authenticateGate(seen, false))),
+    );
+
+    expect(outcomes).toEqual(["OtpSecondFactorError", "OtpSecondFactorError"]);
+    expect(seen).toEqual([{ method: "second-factor" }, { method: "second-factor" }]);
   });
 
   it("verify fails when the challenge has expired", async () => {

@@ -25,7 +25,8 @@ const sorted = (keys: Iterable<string>): ReadonlyArray<string> =>
 
 /**
  * The fields a resource carries, named as the store-facing record names them:
- * its declared attributes (renamed where JSON:API reserves the name), its id
+ * its attributes on the resource object (input-only ones, such as an
+ * invitation's `token`, are no field; renamed where JSON:API reserves the name), its id
  * (as `id` names it in the record), and each to-one relationship as the
  * foreign key it stands for.
  */
@@ -40,7 +41,7 @@ const storeFacingKeys = (
 ): ReadonlyArray<string> =>
   sorted([
     options.id ?? "id",
-    ...R.keys(Resource.declaredAttributes(resource))
+    ...Resource.attributeKeys(resource)
       .filter((key) => !(options.derived ?? []).includes(key))
       .map((key) => options.renamed?.[key] ?? key),
     ...R.values(options.foreignKeys ?? {}),
@@ -74,12 +75,13 @@ const invitationKeys = {
   id: true,
   organizationId: true,
   email: true,
+  tokenHash: false,
   role: true,
   status: true,
   inviterId: true,
   expiresAt: true,
   createdAt: true,
-} satisfies Record<keyof Invitation, true>;
+} satisfies Record<keyof Invitation, boolean>;
 
 const domainKeys = {
   id: true,
@@ -90,6 +92,7 @@ const domainKeys = {
   verificationToken: true,
   createdAt: true,
   verifiedAt: true,
+  attestedBy: true,
 } satisfies Record<keyof OrganizationDomain, true>;
 
 const orgRoleKeys = {
@@ -241,18 +244,18 @@ describe("the JSON:API resources", () => {
     ).toStrictEqual(sorted(R.keys(memberKeys)));
   });
 
-  it("invitations carry exactly Invitation, its keys as relationships", () => {
+  it("invitations carry Invitation but its token digest, its keys as relationships", () => {
     expect(
       storeFacingKeys(Resources.Invitation, {
         foreignKeys: { organization: "organizationId", inviter: "inviterId" },
       }),
-    ).toStrictEqual(sorted(R.keys(invitationKeys)));
+    ).toStrictEqual(carried(invitationKeys));
   });
 
-  it("organization-domains carry exactly OrganizationDomain, its organization as a relationship", () => {
+  it("organization-domains carry exactly OrganizationDomain, its organization and attester as relationships", () => {
     expect(
       storeFacingKeys(Resources.OrganizationDomain, {
-        foreignKeys: { organization: "organizationId" },
+        foreignKeys: { organization: "organizationId", attester: "attestedBy" },
       }),
     ).toStrictEqual(sorted(R.keys(domainKeys)));
   });
@@ -294,7 +297,7 @@ describe("the JSON:API resources", () => {
       sorted(["id", "role", "status"]),
     );
     expect(sorted(R.keys(Resources.Invitation.updateInput.fields))).toStrictEqual(
-      sorted(["id", "status"]),
+      sorted(["id", "status", "token"]),
     );
   });
 

@@ -176,7 +176,8 @@ export type SecondFactorVerificationDocument = typeof SecondFactorVerificationDo
 
 /**
  * The body of `POST /otp-challenges`: which channel to send a one-time code or
- * link through, and to whom.
+ * link through, and to whom, with an optional `captchaToken` for the captcha
+ * plugin's `"sendCode"` endpoint (#678).
  */
 export const OtpChallengeDocument = writeDocument(
   "otp-challenges",
@@ -185,13 +186,19 @@ export const OtpChallengeDocument = writeDocument(
       channel: Schema.Literal("email"),
       email: Schema.String,
       purpose: S.EmailOtpPurpose,
+      captchaToken: Schema.optional(Schema.String),
     }),
     Schema.Struct({
       channel: Schema.Literal("phone"),
       phoneNumber: Schema.String,
       purpose: S.PhoneOtpPurpose,
+      captchaToken: Schema.optional(Schema.String),
     }),
-    Schema.Struct({ channel: Schema.Literal("magic-link"), email: Schema.String }),
+    Schema.Struct({
+      channel: Schema.Literal("magic-link"),
+      email: Schema.String,
+      captchaToken: Schema.optional(Schema.String),
+    }),
   ]),
 );
 export type OtpChallengeDocument = typeof OtpChallengeDocument.Type;
@@ -334,14 +341,22 @@ export const secondFactorChallengesGroup = Group.make(
 
 /**
  * `otp-challenges`: send a one-time code (`email`, `phone`) or a magic link.
- * Answers `202` whether or not the address or number has an account.
+ * Answers `202` whether or not the address or number has an account; `400`
+ * when a `beforeSendCode` plugin refuses the send (a captcha that does not
+ * verify).
  */
 export const otpChallengesGroup = Group.make(
   "otp-challenges",
   HttpApiEndpoint.post("create", "/otp-challenges", {
     payload: jsonApiPayload(OtpChallengeDocument),
     success: Accepted,
-    error: [E.NotFound.wire, E.TooManyRequests.wire, E.InternalServerError.wire],
+    error: [
+      E.BadRequest.wire,
+      E.Forbidden.wire,
+      E.NotFound.wire,
+      E.TooManyRequests.wire,
+      E.InternalServerError.wire,
+    ],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -997,7 +1012,8 @@ export const organizationMembersGroup = Group.make(
  * `invitations`: one invitation, by id.
  *
  * - `PATCH /invitations/:id` with a `status`: `accepted` or `rejected` by the
- *   invitee (an acceptance includes the new membership), `canceled` by a member
+ *   invitee, with the invitation email's secret as the `token` attribute
+ *   (an acceptance includes the new membership), `canceled` by a member
  *   holding `invitation:cancel`. A refused acceptance or rejection answers
  *   `400`, a refused cancellation `403`.
  * - `POST /invitations/:id/deliveries`: send a pending invitation again, with
@@ -1042,10 +1058,15 @@ export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
  * - `POST /admin/organization-domains`: the operator's attestation, after
  *   checking ownership out of band, that the `organization` relationship
  *   controls `domain` (`OrganizationService.attestDomain`). Needs the
- *   server's `isAdmin`, never an organization permission; `201` with the
- *   organization's claim, now `verified` with the `manual` strategy. A refusal
- *   (an unknown organization, an invalid domain, a domain verified for
- *   another organization) answers `400`.
+ *   server's admin rule (the mounted `AdminService`'s `AdminConfig`, else
+ *   role `admin`), never an organization permission; `201` with the
+ *   organization's claim, now `verified` with the `manual` strategy and the
+ *   admin as its `attester`. A refusal (an unknown organization, an invalid
+ *   domain, a domain verified for another organization) answers `400`.
+ * - `DELETE /admin/organization-domains/:id`: the operator's release of any
+ *   organization's claim, whatever its state, for disputes
+ *   (`OrganizationService.releaseDomain`, #680). Gated as the attestation is;
+ *   `204`.
  *
  * An unknown id answers `404`; a tenant's refusal, or a server with no
  * `OrganizationDomainStore`, `403`.
@@ -1058,6 +1079,11 @@ export const organizationDomainsGroup = Group.make(
     name: "attest",
     path: "/admin/organization-domains",
     payload: DomainAttestationDocument,
+    errors: resourceErrors,
+  }),
+  Endpoint.delete(R.OrganizationDomain, {
+    name: "release",
+    path: "/admin/organization-domains/:id",
     errors: resourceErrors,
   }),
 );
@@ -1268,8 +1294,8 @@ export const apiKeysGroup = Group.make(
 
 /**
  * `oauth-clients`: the OIDC provider's registered clients. Every call needs
- * the server's `isAdmin` (`403` otherwise); `404` when the provider is not
- * enabled.
+ * the server's admin rule (the mounted `AdminService`'s `AdminConfig`, else
+ * role `admin`; `403` otherwise); `404` when the provider is not enabled.
  *
  * - `GET /oauth-clients`: every store-registered client.
  * - `POST /oauth-clients`: register one; `201` with the client and, for a
@@ -1319,8 +1345,8 @@ export type SsoProviderCreateDocument = typeof SsoProviderCreateDocument.Type;
 
 /**
  * `sso-providers`: `POST /sso-providers` registers an enterprise SSO
- * connection (OIDC or SAML); `201` with it. Needs the server's `isAdmin`
- * (`403` otherwise); a refused registration answers `400`, and `404` means SSO
+ * connection (OIDC or SAML); `201` with it. Needs the server's admin rule,
+ * as `oauth-clients` does (`403` otherwise); a refused registration answers `400`, and `404` means SSO
  * is not enabled.
  */
 export const ssoProvidersGroup = Group.make(

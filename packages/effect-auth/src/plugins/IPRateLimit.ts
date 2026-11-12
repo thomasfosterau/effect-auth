@@ -4,9 +4,16 @@
  * Applies per-operation rate limits keyed by the resolved client IP (from the
  * {@link ClientIP} service): every first-factor authentication attempt
  * (`beforeAuthenticate`: email and password, username, email and phone OTP,
- * magic link) draws on one `signin` bucket per address, second-factor
+ * magic link, passkey) draws on one `signin` bucket per address, second-factor
  * redemptions on a `second-factor` bucket, and sign-up and password-reset
  * requests on their own.
+ *
+ * **Unkeyed attempts count too** (#678). An unknown or expired second-factor
+ * challenge, magic-link token or passkey challenge names no account, so the
+ * per-account plugins let it through; the flow still fires
+ * `beforeAuthenticate` for it, and this plugin draws it from the same bucket
+ * as a keyed attempt of that method, so guessing tokens costs the guesser's
+ * address its budget.
  *
  * **A request with no client address is refused.** When the {@link ClientIP}
  * service is absent (a hook run outside an HTTP request, for example a direct
@@ -20,10 +27,10 @@
  * **`Http.make` needs an address source for it.** A Web `Request` carries no
  * socket address, so under `Http.make` the address comes only from
  * `trustedProxy` (for example `ClientIP.cloudflare`). When the `Hooks` in
- * `services` include this plugin and `make` is given neither `trustedProxy` nor
- * `allowMissingClientIp: true`, `make` throws `ClientAddressConfigError` (#389).
- * `allowMissingClientIp: true` accepts that every request without a resolvable
- * address is refused with `429` on these three hooks.
+ * `services` include this plugin and `make` is given no `trustedProxy`, `make`
+ * throws `ClientAddressConfigError` (#389), and `allowMissingClientIp: true`
+ * does not stand in for one: with no proxy no request has an address, so the
+ * plugin would refuse every one of them (#682).
  *
  * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
  * infrastructure, so in-memory, SQL, and Redis backends all work.
@@ -177,7 +184,7 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
  * A request with no client address is refused with a {@link RateLimitError}:
  * both when the {@link ClientIP} service is absent and when it carries no
  * address. Under `Http.make`, give the handler a `trustedProxy`, or `make`
- * throws `ClientAddressConfigError` unless `allowMissingClientIp: true` is set.
+ * throws `ClientAddressConfigError`.
  * The module documentation has the details.
  */
 export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>

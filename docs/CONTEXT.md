@@ -140,11 +140,14 @@ not a User. Also avoid "the user's org" — a User may have many Memberships.
 
 **Invitation**:
 A pending request to join an Organization, addressed to an email (`Organization.ts`'s
-`Invitation`: `organizationId`, `email`, `role`, `inviterId`, `status`, `expiresAt`). It carries
-no secret token, so there is nothing to hash at rest: acceptance goes by the invitation id plus a
-signed-in User who owns the invited email as an Identifier, and creates the `Member` row.
-_Avoid_: treating the invitation id as a bearer secret — knowing it is not enough to accept;
-the accepting User must own the invited email.
+`Invitation`: `organizationId`, `email`, `tokenHash`, `role`, `inviterId`, `status`, `expiresAt`).
+Its email link carries a secret token, stored only as its digest (#586): presenting the token is
+the proof of the address, so acceptance (and rejection) takes the token plus a signed-in User who
+owns the invited email as an Identifier, verified or not, and creates the `Member` row. For an
+unverified Identifier the token is the address's first proof, so it clears the account's
+password and its other sessions, as a magic link does. A resend mints a new token.
+_Avoid_: treating the invitation id as a bearer secret — knowing it accepts nothing; the token
+does, and only for a User who owns the invited email.
 
 **Active organization**:
 The Organization the user is currently working in: `session.attributes.activeOrganizationId`,
@@ -170,8 +173,10 @@ verifies its claim only through DNS (a TXT record with the claim's server-minted
 by the app's `DomainVerifier`). **Operator attestation** is the other route: the application
 operator checks ownership out of band and calls `OrganizationService.attestDomain` (or the
 platform-admin `POST /admin/organization-domains`), which leaves the claim verified with the
-`manual` strategy (#598). Several Organizations may hold pending claims on one domain; at most
-one claim per domain is verified.
+`manual` strategy and records the attester as `attestedBy` (#598, #680). The operator also
+**releases** any Organization's claim, whatever its state, to settle a dispute
+(`OrganizationService.releaseDomain`, `DELETE /admin/organization-domains/:id`). Several
+Organizations may hold pending claims on one domain; at most one claim per domain is verified.
 _Avoid_: "manual verification" for anything an Organization member does — holding
 `domain:manage` proves nothing about a domain.
 
@@ -182,7 +187,11 @@ A role name resolved against `OrganizationConfig.roles` (a role → `"resource:a
 map), optionally replaced for one organization by an `OrgRole` managed at runtime
 (`upsertOrgRole` / `deleteOrgRole`). The two never merge: a tenant's `OrgRole` grants exactly
 what it lists. The protected creator role (`OrganizationConfig.creatorRole`, default `"owner"`)
-always exists and can't be redefined.
+always exists and can't be redefined. No one grants beyond their own permissions (#585): a member
+assigns a role (add, invite, promote) only when their own role carries every permission it carries,
+and changes, deactivates, reactivates or removes a member only when it carries every permission of
+that member's role (or the `previousRole` a reactivation restores). A role name nothing defines is
+rejected.
 
 **Permission**:
 A resource paired with an action (`PermissionRef { resource, action }` in `Permission.ts`), with
@@ -224,7 +233,8 @@ authentication credential/verification typology — same as Organization.
 
 **Admin**:
 A user whose `attributes.role` is in `AdminConfig.adminRoles` (default `["admin"]`) or whose id is
-in `AdminConfig.adminUserIds`.
+in `AdminConfig.adminUserIds`. Every admin-gated HTTP endpoint asks the mounted `AdminService`'s
+`isAdmin`, so one `AdminConfig` governs them all (#680).
 
 **Ban**:
 `attributes.banned: true` on the User, with optional `banReason` and `banExpires` (epoch ms;

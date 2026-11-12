@@ -373,7 +373,8 @@ export interface OidcDynamicRegistrationConfig {
    * The limit keys on the client address in the `ClientIP` service, which
    * `Http.make` and `Http.makeAsync` resolve from their own `trustedProxy`.
    * They fail at startup with `ClientAddressConfigError` when registration is
-   * enabled with neither `trustedProxy` nor their `allowMissingClientIp: true`.
+   * enabled with no `trustedProxy` (`allowMissingClientIp: true` does not
+   * stand in for one, #682).
    * A registration with no address is refused with `429`, and is never counted
    * under a shared bucket.
    */
