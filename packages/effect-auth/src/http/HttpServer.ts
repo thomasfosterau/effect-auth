@@ -2515,7 +2515,7 @@ export const organizationsGroupLayer = (
             defaultRole === undefined ||
             Arr.some(
               [fields.name, fields.slug, fields.logo, fields.metadata, fields.jitProvisioning],
-              Predicate.isNotUndefined,
+              P.isNotUndefined,
             )
               ? yield* refusedForbidden(
                   org.updateOrganization(resolved.user.id, params.id, updates),
