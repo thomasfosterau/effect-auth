@@ -405,7 +405,7 @@ const makeFixture = () => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   );
-  const { handler } = HttpServer.make({ services, cookie: { secure: false } });
+  const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
   return { handler, seedUser, makeSession, sessions, members };
 };

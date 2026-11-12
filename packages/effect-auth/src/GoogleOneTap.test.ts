@@ -531,10 +531,12 @@ const makeHttpFixture = () => {
     handler: HttpServer.make({
       services: Layer.mergeAll(base, oneTapLayer),
       cookie: { secure: false, lastLoginMethod: true },
+      ipRateLimit: false,
     }).handler,
     handlerWithoutOneTap: HttpServer.make({
       services: base,
       cookie: { secure: false },
+      ipRateLimit: false,
     }).handler,
     nonceStore,
   };

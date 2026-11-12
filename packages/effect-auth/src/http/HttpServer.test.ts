@@ -755,6 +755,9 @@ const handlerFor = (
 ): Handler =>
   HttpServer.make({
     services: options?.features ? fixture.featureServices : fixture.services,
+    // These suites exercise the endpoints, not the IP limit, which has suites
+    // of its own below.
+    ipRateLimit: false,
     ...(options?.multiSession !== undefined && { multiSession: options.multiSession }),
     cookie: {
       secure: options?.secure ?? false,
@@ -3657,6 +3660,266 @@ describe("client IP at the HTTP boundary", () => {
   });
 });
 
+/** Run `step` over `items` one after another, as a limiter counts requests. */
+const inSequence = <A>(items: ReadonlyArray<A>, step: (item: A) => Promise<void>): Promise<void> =>
+  Arr.reduce(items, Promise.resolve(), async (previous, item) => {
+    await previous;
+    await step(item);
+  });
+
+/** A bodiless request from the visitor `ip`, behind Cloudflare. */
+const fromAddress = (method: string, path: string, ip: string, headers = {}): Request =>
+  new Request(`http://test${path}`, {
+    method,
+    headers: { "cf-connecting-ip": ip, ...headers },
+  });
+
+/**
+ * Every endpoint the default IP rules limit (#583), with a concrete path and
+ * the number of requests the default rule allows from one address.
+ */
+const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, max: number]> = [
+  ["POST", "/sessions", 10],
+  ["POST", "/users", 5],
+  ["POST", "/otp-challenges", 5],
+  ["POST", "/password-resets", 5],
+  ["POST", "/email-verifications", 5],
+  ["POST", "/password-resets/redemptions", 10],
+  ["POST", "/email-verifications/redemptions", 10],
+  ["POST", "/second-factor-challenges/verifications", 10],
+  ["PATCH", "/users/me/password", 10],
+  ["POST", "/multi-factor-enrollments", 10],
+  ["PATCH", "/multi-factor-enrollments/current", 10],
+  ["DELETE", "/multi-factor-enrollments/current", 10],
+  ["POST", "/backup-code-sets", 10],
+  ["POST", "/google-one-tap-nonces", 20],
+  ["POST", "/device/code", 10],
+  ["POST", "/device/token", 300],
+  ["POST", "/device-authorizations/decisions", 20],
+  ["POST", "/sso-authorizations", 20],
+  ["POST", "/sso/callback", 20],
+  ["POST", "/sso/saml/acs/acme", 20],
+  ["POST", "/oauth2/token", 60],
+  ["POST", "/register", 10],
+];
+
+/**
+ * The spellings of `path` the router serves as `path` (#582): a trailing
+ * slash, other letter cases, a duplicated slash, and a percent-encoded letter.
+ */
+const pathVariants = (path: string): ReadonlyArray<string> => {
+  const first = path.charAt(1);
+  const rest = path.slice(2);
+  const encoded = `%${first.charCodeAt(0).toString(16)}`;
+  return [
+    `${path}/`,
+    `/${first.toUpperCase()}${rest}`,
+    path.toUpperCase(),
+    `/${path}`,
+    `/${encoded}${rest}`,
+    `/${first.toUpperCase()}${rest}/`.replace("/", "//"),
+  ];
+};
+
+/** The fixture's services with an in-memory `RateLimiter`. */
+const limiter = (): Layer.Layer<AuthServices> =>
+  Layer.merge(makeFixture().services, memoryRateLimiterLayer());
+
+/** A handler with the IP limit on and an in-memory `RateLimiter`, behind Cloudflare. */
+const ipLimitedHandler = (ipRateLimit?: HttpServer.HttpIPRateLimitConfig): Handler =>
+  HttpServer.make({
+    services: limiter(),
+    cookie: { secure: false },
+    trustedProxy: ClientIP.cloudflare,
+    ...(ipRateLimit !== undefined && { ipRateLimit }),
+  }).handler;
+
+describe("the IP limit holds for every spelling of a limited path (#582)", () => {
+  // The default rules, each allowing one request, so every case is two requests.
+  const oncePerRule = {
+    rules: HttpServer.defaultEndpointRules.map((rule) => ({ ...rule, maxRequests: 1 })),
+  };
+
+  it("refuses each path variant once the limit is spent, on every limited endpoint", async () => {
+    const handler = ipLimitedHandler(oncePerRule);
+    const cases = LIMITED_ENDPOINTS.flatMap(([method, path], e) =>
+      pathVariants(path).map((variant, v) => ({ method, variant, ip: `198.18.${e}.${v}` })),
+    );
+    const outcomes: Array<string> = [];
+    await inSequence(cases, async ({ method, variant, ip }) => {
+      const first = await handler(fromAddress(method, variant, ip));
+      const second = await handler(fromAddress(method, variant, ip));
+      outcomes.push(`${method} ${variant}: ${first.status === 429} ${second.status}`);
+    });
+    expect(outcomes).toEqual(cases.map(({ method, variant }) => `${method} ${variant}: false 429`));
+  });
+
+  it("counts every variant in the endpoint's own bucket", async () => {
+    // The limit spent on the canonical path refuses every other spelling.
+    const handler = ipLimitedHandler(oncePerRule);
+    const outcomes: Array<string> = [];
+    await inSequence(
+      LIMITED_ENDPOINTS.map((endpoint, e) => ({ endpoint, ip: `198.19.0.${e}` })),
+      async ({ endpoint: [method, path], ip }) => {
+        expect((await handler(fromAddress(method, path, ip))).status).not.toBe(429);
+        await inSequence(pathVariants(path), async (variant) => {
+          const res = await handler(fromAddress(method, variant, ip));
+          outcomes.push(`${method} ${variant}: ${res.status}`);
+        });
+      },
+    );
+    expect(outcomes).toEqual(
+      LIMITED_ENDPOINTS.flatMap(([method, path]) =>
+        pathVariants(path).map((variant) => `${method} ${variant}: 429`),
+      ),
+    );
+  });
+
+  it("refuses the 11th sign-in under the default rules, however the path is spelled", async () => {
+    // The issue's reproduction: twelve attempts, each spelling, one address.
+    const handler = ipLimitedHandler();
+    const spellings = [
+      "/sessions/",
+      "/Sessions",
+      "/SESSIONS",
+      "//sessions",
+      "/%73essions",
+      "/sessions?x=1",
+    ];
+    await inSequence(
+      spellings.map((path, index) => ({ path, ip: `198.51.100.${index + 1}` })),
+      async ({ path, ip }) => {
+        const signInRequest = authRequest(
+          "password",
+          { email: "nobody@example.com", password: PW },
+          { "cf-connecting-ip": ip },
+        );
+        const statuses: Array<number> = [];
+        await inSequence(Arr.range(1, 12), async () => {
+          const res = await handler(new Request(`http://test${path}`, signInRequest.clone()));
+          statuses.push(res.status);
+        });
+        expect(statuses.slice(0, 10).includes(429)).toBe(false);
+        expect(statuses.slice(10)).toEqual([429, 429]);
+      },
+    );
+  });
+
+  it("matches a rule by the endpoint's path template, not the request path", async () => {
+    // `/sso/saml/acs/{providerId}` names every provider's ACS endpoint, so one
+    // bucket counts them all, whatever the provider id or its spelling.
+    const handler = ipLimitedHandler({
+      rules: [
+        { path: "/sso/saml/acs/{providerId}", methods: ["POST"], maxRequests: 1, windowMs: HOUR },
+      ],
+    });
+    const ip = "198.51.100.77";
+    expect((await handler(fromAddress("POST", "/sso/saml/acs/acme", ip))).status).not.toBe(429);
+    expect((await handler(fromAddress("POST", "/sso/saml/acs/other", ip))).status).toBe(429);
+    expect((await handler(fromAddress("POST", "/SSO/saml//ACS/acme/", ip))).status).toBe(429);
+    // The router's `:providerId` form names the same endpoint.
+    const routerForm = ipLimitedHandler({
+      rules: [
+        { path: "/sso/saml/acs/:providerId", methods: ["POST"], maxRequests: 1, windowMs: HOUR },
+      ],
+    });
+    expect((await routerForm(fromAddress("POST", "/sso/saml/acs/acme", ip))).status).not.toBe(429);
+    expect((await routerForm(fromAddress("POST", "/sso/saml/acs/b", ip))).status).toBe(429);
+  });
+
+  it("holds the origin gate for every spelling of the JWT endpoint, and mints nothing on a read", async () => {
+    // `GET /token` minted a JWT behind an exact-path Origin check; minting is
+    // now `POST /tokens`, under the Origin check every write passes.
+    const handler = handlerFor(makeFixture());
+    const evil = { origin: "https://evil.example" };
+    await inSequence(["/tokens", ...pathVariants("/tokens")], async (path) => {
+      const res = await handler(
+        new Request(`http://test${path}`, { method: "POST", headers: evil }),
+      );
+      expect(res.status).toBe(403);
+    });
+    await inSequence(["/token", ...pathVariants("/token")], async (path) => {
+      const res = await handler(new Request(`http://test${path}`, { headers: evil }));
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
+describe("Http.make refuses to start without the IP limit's dependencies (#583)", () => {
+  it("throws ClientAddressConfigError when given neither a client address source nor ipRateLimit: false", () => {
+    expect(() => HttpServer.make({ services: limiter() })).toThrow(ClientAddressConfigError);
+    expect(() => HttpServer.make({ services: limiter() })).toThrow(/ipRateLimit: false/);
+  });
+
+  it("throws RateLimiterConfigError when given no RateLimiter and no ipRateLimit: false", () => {
+    const services = makeFixture().services;
+    expect(() => HttpServer.make({ services, trustedProxy: ClientIP.cloudflare })).toThrow(
+      RateLimiterConfigError,
+    );
+    expect(() => HttpServer.make({ services, allowMissingClientIp: true })).toThrow(
+      RateLimiterConfigError,
+    );
+  });
+
+  it("rejects makeAsync with the same errors", async () => {
+    await expect(HttpServer.makeAsync({ services: limiter() })).rejects.toBeInstanceOf(
+      ClientAddressConfigError,
+    );
+    await expect(
+      HttpServer.makeAsync({ services: makeFixture().services, trustedProxy: ClientIP.cloudflare }),
+    ).rejects.toBeInstanceOf(RateLimiterConfigError);
+  });
+
+  it("applies the default rules when ipRateLimit is omitted", async () => {
+    const { handler } = HttpServer.make({ services: limiter(), trustedProxy: ClientIP.cloudflare });
+    const statuses: Array<number> = [];
+    await inSequence(Arr.range(1, 11), async () => {
+      const res = await handler(
+        authRequest(
+          "password",
+          { email: "nobody@example.com", password: PW },
+          {
+            "cf-connecting-ip": "203.0.113.40",
+          },
+        ),
+      );
+      statuses.push(res.status);
+    });
+    expect(statuses.slice(0, 10).every((status) => status === 401)).toBe(true);
+    expect(statuses[10]).toBe(429);
+  });
+
+  it("builds with ipRateLimit: false and neither a RateLimiter nor an address source, and limits nothing", async () => {
+    const { handler } = HttpServer.make({ services: makeFixture().services, ipRateLimit: false });
+    const statuses: Array<number> = [];
+    await inSequence(Arr.range(1, 12), async () => {
+      const res = await handler(
+        authRequest("password", { email: "nobody@example.com", password: PW }),
+      );
+      statuses.push(res.status);
+    });
+    expect(statuses).toEqual(Arr.replicate(401, 12));
+  });
+
+  it("limits every endpoint the default rules cover, at its documented limit", async () => {
+    const handler = ipLimitedHandler();
+    const outcomes: Array<string> = [];
+    await inSequence(
+      LIMITED_ENDPOINTS.map((endpoint, e) => ({ endpoint, ip: `198.20.0.${e}` })),
+      async ({ endpoint: [method, path, max], ip }) => {
+        const allowed: Array<number> = [];
+        await inSequence(Arr.range(1, max), async () => {
+          allowed.push((await handler(fromAddress(method, path, ip))).status);
+        });
+        const refused = await handler(fromAddress(method, path, ip));
+        outcomes.push(`${method} ${path}: ${allowed.includes(429)} ${refused.status}`);
+      },
+    );
+    expect(outcomes).toEqual(
+      LIMITED_ENDPOINTS.map(([method, path]) => `${method} ${path}: false 429`),
+    );
+  });
+});
 /**
  * The auth API composed by hand from the exported group layers, outside
  * `Http.make`: no startup check, no `ClientIP` middleware (#389).
@@ -3705,13 +3968,14 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
         trustedProxy: ClientIP.cloudflare,
         ipRateLimit: {},
       }),
-    ).toThrow(/ipRateLimit configured with no RateLimiter/);
+    ).toThrow(/ipRateLimit \(on by default\) configured with no RateLimiter/);
   });
 
   it("throws from make when the device service has no RateLimiter for the user-code limit", () => {
     const fixture = makeFixture();
     expect(() =>
       HttpServer.make({
+        ipRateLimit: false,
         services: fixture.featureServicesWithoutRateLimiter,
         cookie: { secure: false },
       }),
@@ -3721,6 +3985,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
   it("builds without a RateLimiter when the device service opts out, and leaves approve/deny unlimited", async () => {
     const fixture = makeFixture({ deviceAllowMissingRateLimiter: true });
     const { handler } = HttpServer.make({
+      ipRateLimit: false,
       services: fixture.featureServicesWithoutRateLimiter,
       cookie: { secure: false },
     });
@@ -3765,6 +4030,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
   it("builds without any rate limit, with no RateLimiter", async () => {
     const fixture = makeFixture();
     const { handler } = HttpServer.make({
+      ipRateLimit: false,
       services: fixture.services,
       cookie: { secure: false },
     });
@@ -3786,6 +4052,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     );
     const fixture = makeFixture();
     const { handler, dispose } = HttpServer.make({
+      ipRateLimit: false,
       services: Layer.merge(fixture.services, counted),
       cookie: { secure: false },
     });
@@ -3838,9 +4105,13 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
   it("throws ClientAddressConfigError from make with no trustedProxy and no opt-out", () => {
     const fixture = makeFixture({ hooks: ipRateLimitHooks() });
     expect(() =>
-      HttpServer.make({ services: fixture.services, cookie: { secure: false } }),
+      HttpServer.make({
+        ipRateLimit: false,
+        services: fixture.services,
+        cookie: { secure: false },
+      }),
     ).toThrow(ClientAddressConfigError);
-    expect(() => HttpServer.make({ services: fixture.services })).toThrow(
+    expect(() => HttpServer.make({ ipRateLimit: false, services: fixture.services })).toThrow(
       /IPRateLimitPlugin keys its limits on the client address/,
     );
   });
@@ -3848,6 +4119,7 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
   it("builds with trustedProxy and keys each address on its own budget", async () => {
     const fixture = makeFixture({ hooks: ipRateLimitHooks() });
     const { handler } = HttpServer.make({
+      ipRateLimit: false,
       services: fixture.services,
       cookie: { secure: false },
       trustedProxy: ClientIP.cloudflare,
@@ -3869,6 +4141,7 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
   it("refuses an address-less sign-in with 429 when the app opts out with allowMissingClientIp", async () => {
     const fixture = makeFixture({ hooks: ipRateLimitHooks() });
     const { handler } = HttpServer.make({
+      ipRateLimit: false,
       services: fixture.services,
       cookie: { secure: false },
       allowMissingClientIp: true,
@@ -3992,6 +4265,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const fixture = makeFixture();
 
     const { handler, dispose } = HttpServer.make({
+      ipRateLimit: false,
       // provideMerge builds `busy` on the build's own fiber, after the rest.
       services: busy.pipe(Layer.provideMerge(fixture.services)),
       cookie: { secure: false },
@@ -4098,6 +4372,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const fixture = makeFixture();
 
     const { dispose } = HttpServer.make({
+      ipRateLimit: false,
       // provideMerge builds `forks` last, on the build's own fiber.
       services: forks.pipe(Layer.provideMerge(fixture.services)),
       cookie: { secure: false },
@@ -4116,6 +4391,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const fixture = makeFixture();
 
     const { dispose } = HttpServer.make({
+      ipRateLimit: false,
       services: child.pipe(Layer.provideMerge(fixture.services)),
       cookie: { secure: false },
     });
@@ -4138,6 +4414,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
         }),
       );
       HttpServer.make({
+        ipRateLimit: false,
         services: queued.pipe(Layer.provideMerge(makeFixture().services)),
         cookie: { secure: false },
       });
@@ -4178,10 +4455,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
     expect(
       thrownBy(() =>
-        HttpServer.make({
-          services: services,
-          cookie: { secure: false },
-        }),
+        HttpServer.make({ ipRateLimit: false, services: services, cookie: { secure: false } }),
       ),
     ).toBe(boom);
     expect(released).toBe(1);
@@ -4263,7 +4537,9 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       ),
     );
 
-    expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
+    expect(
+      thrownBy(() => HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false } })),
+    ).toBe(failure);
     expect(released).toBe(1);
   });
 
@@ -4277,7 +4553,9 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
     );
 
-    expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(defect);
+    expect(
+      thrownBy(() => HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false } })),
+    ).toBe(defect);
     expect(released).toBe(1);
   });
 
@@ -4311,7 +4589,9 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       ),
     );
 
-    expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
+    expect(
+      thrownBy(() => HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false } })),
+    ).toBe(failure);
     thrown = true;
     expect(spins).toBeLessThan(BOUND);
     const atThrow = spins;
@@ -4404,7 +4684,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         HttpServer.makeAsync({ services: services(), ...limitWithoutLimiter }),
       );
       expect(error).toBeInstanceOf(RateLimiterConfigError);
-      expect(String(error)).toMatch(/ipRateLimit configured with no RateLimiter/);
+      expect(String(error)).toMatch(/ipRateLimit \(on by default\) configured with no RateLimiter/);
     });
   });
 
@@ -4413,7 +4693,9 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       makeFixture({ hooks: ipRateLimitHooks() }).services,
       Layer.effectDiscard(promiseOrDie(() => Promise.resolve())),
     );
-    const error = await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }));
+    const error = await rejectionOf(
+      HttpServer.makeAsync({ ipRateLimit: false, services, cookie: { secure: false } }),
+    );
     expect(error).toBeInstanceOf(ClientAddressConfigError);
     expect(String(error)).toMatch(/IPRateLimitPlugin/);
   });
@@ -4451,12 +4733,17 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
 
     // Effect releases what the failed build acquired before the build ends, so
     // the asynchronous finalizer keeps make from seeing the failure.
-    const made = HttpServer.make({ services: services(), cookie: { secure: false } });
+    const made = HttpServer.make({
+      ipRateLimit: false,
+      services: services(),
+      cookie: { secure: false },
+    });
     await expect(made.handler(signIn())).rejects.toBe(failure);
     await made.dispose();
     expect(released).toBe(1);
 
     const error = await HttpServer.makeAsync({
+      ipRateLimit: false,
       services: services(),
       cookie: { secure: false },
     }).then(
@@ -4475,9 +4762,11 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     const services = Layer.effectDiscard(
       promiseOrDie(() => Promise.resolve()).pipe(Effect.andThen(Effect.die(defect))),
     ).pipe(Layer.provideMerge(makeFixture().services));
-    expect(await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }))).toBe(
-      defect,
-    );
+    expect(
+      await rejectionOf(
+        HttpServer.makeAsync({ ipRateLimit: false, services, cookie: { secure: false } }),
+      ),
+    ).toBe(defect);
   });
 
   it("releases what it built before it rejects, asynchronous finalizers included, and logs a failed release", async () => {
@@ -4541,10 +4830,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
 
     expect(
       await rejectionOf(
-        HttpServer.makeAsync({
-          services: services,
-          cookie: { secure: false },
-        }),
+        HttpServer.makeAsync({ ipRateLimit: false, services: services, cookie: { secure: false } }),
       ),
     ).toBe(boom);
     expect(released).toBe(1);
@@ -4594,6 +4880,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       ),
     );
     const { handler, dispose } = await HttpServer.makeAsync({
+      ipRateLimit: false,
       services: Layer.mergeAll(
         makeFixture().services,
         busy,
@@ -4652,6 +4939,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       counter.state.stopped = true;
     });
     const { dispose } = await HttpServer.makeAsync({
+      ipRateLimit: false,
       services: Layer.merge(makeFixture().services, forking),
       cookie: { secure: false },
     });
@@ -4670,6 +4958,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       counter.state.stopped = true;
     });
     const { dispose } = await HttpServer.makeAsync({
+      ipRateLimit: false,
       services: Layer.merge(makeFixture().services, detached),
       cookie: { secure: false },
     });
@@ -4724,6 +5013,7 @@ describe("make with strict (#416)", () => {
     it(`throws ServicesBuildPendingError for ${composition}, and takes the fallback without it`, async () => {
       const error = thrownBy(() =>
         HttpServer.make({
+          ipRateLimit: false,
           services: services(),
           cookie: { secure: false },
           strict: true,
@@ -4735,6 +5025,7 @@ describe("make with strict (#416)", () => {
       // Without the option, make returns and the handler serves the build once
       // it finishes.
       const { handler, dispose } = HttpServer.make({
+        ipRateLimit: false,
         services: services(),
         cookie: { secure: false },
       });
@@ -4743,6 +5034,7 @@ describe("make with strict (#416)", () => {
 
       // An explicit false is the default.
       const off = HttpServer.make({
+        ipRateLimit: false,
         services: services(),
         cookie: { secure: false },
         strict: false,
@@ -4754,6 +5046,7 @@ describe("make with strict (#416)", () => {
 
   it("returns the handler for a synchronous build", async () => {
     const { handler, dispose } = HttpServer.make({
+      ipRateLimit: false,
       services: makeFixture().services,
       cookie: { secure: false },
       strict: true,
@@ -4770,6 +5063,7 @@ describe("make with strict (#416)", () => {
     expect(
       thrownBy(() =>
         HttpServer.make({
+          ipRateLimit: false,
           services: failing,
           cookie: { secure: false },
           strict: true,
@@ -4807,7 +5101,7 @@ describe("make with strict (#416)", () => {
     const services = waiting.pipe(Layer.provideMerge(Layer.merge(makeFixture().services, counted)));
 
     const error = thrownBy(() =>
-      HttpServer.make({ services, cookie: { secure: false }, strict: true }),
+      HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false }, strict: true }),
     );
     expect(error).toBeInstanceOf(ServicesBuildPendingError);
     expect(acquired).toBe(1);
@@ -4834,7 +5128,9 @@ describe("make with strict (#416)", () => {
     const services = Layer.merge(makeFixture().services, spinning);
 
     expect(
-      thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+      thrownBy(() =>
+        HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false }, strict: true }),
+      ),
     ).toBeInstanceOf(ServicesBuildPendingError);
     expect(interrupted).toBe(true);
     const atThrow = spins;
@@ -4856,7 +5152,9 @@ describe("make with strict (#416)", () => {
     );
 
     expect(
-      thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+      thrownBy(() =>
+        HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false }, strict: true }),
+      ),
     ).toBeInstanceOf(ServicesBuildPendingError);
     expect(released).toBe(false);
     await macrotasks(3);
@@ -4897,6 +5195,7 @@ describe("make with strict (#416)", () => {
     expect(
       thrownBy(() =>
         HttpServer.make({
+          ipRateLimit: false,
           services: recordedServices(events, waiting),
           cookie: { secure: false },
           strict: true,
@@ -4925,6 +5224,7 @@ describe("make with strict (#416)", () => {
     expect(
       thrownBy(() =>
         HttpServer.make({
+          ipRateLimit: false,
           services: recordedServices(events, waiting),
           cookie: { secure: false },
           strict: true,
@@ -4952,6 +5252,7 @@ describe("make with strict (#416)", () => {
     expect(
       thrownBy(() =>
         HttpServer.make({
+          ipRateLimit: false,
           services: recordedServices(events, slowAcquire, ["acquire 1", "release 1"]),
           cookie: { secure: false },
           strict: true,
@@ -4983,7 +5284,12 @@ describe("make with strict (#416)", () => {
 
     expect(
       thrownBy(() =>
-        HttpServer.make({ services: failing, cookie: { secure: false }, strict: true }),
+        HttpServer.make({
+          ipRateLimit: false,
+          services: failing,
+          cookie: { secure: false },
+          strict: true,
+        }),
       ),
     ).toBeInstanceOf(ServicesBuildPendingError);
     expect(released).toBe(false);
@@ -5006,7 +5312,9 @@ describe("make with strict (#416)", () => {
       Layer.provideMerge(makeFixture().services),
     );
     expect(
-      thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+      thrownBy(() =>
+        HttpServer.make({ ipRateLimit: false, services, cookie: { secure: false }, strict: true }),
+      ),
     ).toBeInstanceOf(ServicesBuildPendingError);
     await macrotasks(3);
     const logged = log.mock.calls.map((args) => args.map(String).join(" "));
@@ -5023,6 +5331,7 @@ describe("make with strict (#416)", () => {
     await Arr.reduce(pending, Promise.resolve(), async (previous, [, services]) => {
       await previous;
       const { handler, dispose } = await HttpServer.makeAsync({
+        ipRateLimit: false,
         services: services(),
         cookie: { secure: false },
         strict: true,

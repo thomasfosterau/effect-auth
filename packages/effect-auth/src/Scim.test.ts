@@ -1045,9 +1045,13 @@ const makeHttpFixture = async (
     ...stores,
     token: connection.token,
     otherToken: other.token,
-    handler: HttpServer.make({ services: withScim, cookie: { secure: false } }).handler,
-    handlerWithoutScim: HttpServer.make({ services: withoutScim, cookie: { secure: false } })
+    handler: HttpServer.make({ services: withScim, cookie: { secure: false }, ipRateLimit: false })
       .handler,
+    handlerWithoutScim: HttpServer.make({
+      services: withoutScim,
+      cookie: { secure: false },
+      ipRateLimit: false,
+    }).handler,
   };
 };
 

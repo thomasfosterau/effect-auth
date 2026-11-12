@@ -324,6 +324,7 @@ describe("HttpServer.make docs routes", () => {
       services: stubServices(),
       prefix: "/api/auth",
       docs: true,
+      ipRateLimit: false,
     });
     onTestFinished(dispose);
     const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));
@@ -342,7 +343,11 @@ describe("HttpServer.make docs routes", () => {
   });
 
   it("serves docs at the root when no prefix is configured", async () => {
-    const { handler, dispose } = HttpServer.make({ services: stubServices(), docs: true });
+    const { handler, dispose } = HttpServer.make({
+      services: stubServices(),
+      docs: true,
+      ipRateLimit: false,
+    });
     onTestFinished(dispose);
     const res = await handler(new Request("http://test/openapi.json"));
     expect(res.status).toBe(200);
@@ -352,6 +357,7 @@ describe("HttpServer.make docs routes", () => {
     const { handler, dispose } = HttpServer.make({
       services: stubServices(),
       prefix: "/api/auth",
+      ipRateLimit: false,
     });
     onTestFinished(dispose);
     const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));

@@ -237,7 +237,8 @@ The install context gives a plugin `request` (raw call) and `mutating` (call, th
 The client's `fetch` option is the whole seam: point it at your auth handler in-process and the suite needs no network, no ports and no mock of the protocol.
 
 ```ts
-const { handler } = Http.make({ services, cookie: { secure: false } });
+// One in-process client has no address, so the per-address limits are off.
+const { handler } = Http.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
 const client = createAuthClient({
   baseUrl: "http://app.test",

@@ -1039,7 +1039,7 @@ const servicesConfigError = (
 
   if (Option.isSome(Context.getOption(services, RateLimiter))) return undefined;
   const configured: Array<string> = [];
-  if (options.ipRateLimit !== undefined) configured.push("ipRateLimit");
+  if (options.ipRateLimit !== false) configured.push("ipRateLimit (on by default)");
   if (Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled) {
     configured.push("the dynamic client registration limit (POST /register)");
   }
@@ -1052,7 +1052,7 @@ const servicesConfigError = (
     message:
       `${configured.join(", ")} configured with no RateLimiter in services, so the limit could not run. ` +
       "Compose RateLimiter.layer() with its RateLimitStore into services, or remove the limit " +
-      "(for the device user-code limit, DeviceAuthorizationConfig.allowMissingRateLimiter: true).",
+      "(ipRateLimit: false; for the device user-code limit, DeviceAuthorizationConfig.allowMissingRateLimiter: true).",
   });
 };
 
@@ -4638,12 +4638,22 @@ const PlatformLayer = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer)
 
 /**
  * A single per-endpoint IP rate-limit rule.
- * `path` is matched against the request pathname (exact string or regex).
+ *
+ * `path` names an endpoint by its path template, as the OpenAPI document
+ * writes it (`"/sessions"`, `"/sso/saml/acs/{providerId}"`; the router's
+ * `:providerId` form is accepted too), or is a `RegExp` tested against that
+ * template. The rule is checked once the router has matched the request to an
+ * endpoint, against the endpoint it matched, never against the raw request
+ * path: the router is case-insensitive and ignores trailing and duplicate
+ * slashes and percent-encoding, so `/Sessions/`, `//sessions` and
+ * `/%73essions` all reach `POST /sessions` and all count under its rule
+ * (#582). Paths are relative to the mount `prefix`, as the endpoints are.
+ *
  * `methods` limits the rule to specific HTTP methods (default: all methods).
  *
- * Each rule counts in one bucket per client address, whatever path matched it:
- * a regex rule shares its bucket across every path it matches, so a caller
- * cannot reset its count by varying the path.
+ * Each rule counts in one bucket per client address, whatever endpoint matched
+ * it: a regex rule shares its bucket across every endpoint it matches, so a
+ * caller cannot reset its count by varying the path.
  */
 export interface EndpointRateLimitRule {
   readonly path: string | RegExp;
@@ -4668,86 +4678,187 @@ export interface HttpIPRateLimitConfig {
   readonly rules?: ReadonlyArray<EndpointRateLimitRule>;
 }
 
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+
+/** A `POST` rule for `path`: `maxRequests` per `windowMs`, then a `blockDurationMs` block. */
+const postRule = (
+  path: string,
+  maxRequests: number,
+  windowMs: number,
+  blockDurationMs: number,
+): EndpointRateLimitRule => ({ path, methods: ["POST"], maxRequests, windowMs, blockDurationMs });
+
 /**
- * Sane default IP rate-limit rules applied to sensitive auth endpoints.
+ * Sane default IP rate-limit rules applied to sensitive auth endpoints: every
+ * unauthenticated endpoint that sends a message, writes a row, makes an
+ * outbound call or verifies a secret, and the authenticated ones that hash a
+ * password or check a second factor (#583). `Http.make` applies them unless
+ * it is given `ipRateLimit: false` or rules of its own.
  *
- * | Endpoint(s)                                        | Limit  | Window | Block  |
- * |----------------------------------------------------|--------|--------|--------|
- * | `POST /sessions` (every sign-in method)            | 10 req | 15 min | 30 min |
- * | `POST /users` (sign-up)                            | 5 req  | 1 hr   | 24 hr  |
- * | `POST /otp-challenges` (email / SMS code, link)    | 5 req  | 10 min | 30 min |
- * | `POST /password-resets`                            | 5 req  | 1 hr   | 2 hr   |
- * | `POST /second-factor-challenges/verifications`     | 10 req | 5 min  | 30 min |
- * | `POST /register` (dynamic client registration)     | 10 req | 1 hr   | 1 hr   |
+ * | Endpoint(s)                                                    | Limit   | Window | Block  |
+ * |----------------------------------------------------------------|---------|--------|--------|
+ * | `POST /sessions` (every sign-in method)                        | 10 req  | 15 min | 30 min |
+ * | `POST /users` (sign-up)                                        | 5 req   | 1 hr   | 24 hr  |
+ * | `POST /otp-challenges` (email / SMS code, link)                | 5 req   | 10 min | 30 min |
+ * | `POST /password-resets`                                        | 5 req   | 1 hr   | 2 hr   |
+ * | `POST /email-verifications`                                    | 5 req   | 1 hr   | 2 hr   |
+ * | `POST /password-resets/redemptions`                            | 10 req  | 15 min | 30 min |
+ * | `POST /email-verifications/redemptions`                        | 10 req  | 15 min | 30 min |
+ * | `POST /second-factor-challenges/verifications`                 | 10 req  | 5 min  | 30 min |
+ * | `PATCH /users/me/password` (change password)                   | 10 req  | 15 min | 30 min |
+ * | `POST`, `PATCH`, `DELETE /multi-factor-enrollments[/current]`  | 10 req  | 15 min | 30 min |
+ * | `POST /backup-code-sets` (regenerate backup codes)             | 10 req  | 15 min | 30 min |
+ * | `POST /google-one-tap-nonces`                                  | 20 req  | 10 min | 30 min |
+ * | `POST /device/code`                                            | 10 req  | 10 min | 30 min |
+ * | `POST /device/token` (polling)                                 | 300 req | 15 min | 15 min |
+ * | `POST /device-authorizations/decisions` (approve, deny)        | 20 req  | 10 min | 30 min |
+ * | `POST /sso-authorizations` (SSO sign-in)                       | 20 req  | 10 min | 30 min |
+ * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
+ * | `POST /oauth2/token`                                           | 60 req  | 1 min  | 5 min  |
+ * | `POST /register` (dynamic client registration)                 | 10 req  | 1 hr   | 1 hr   |
+ *
+ * Endpoints named on one row share one bucket.
  */
 export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
+  postRule("/sessions", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/users", 5, HOUR_MS, 24 * HOUR_MS),
+  postRule("/otp-challenges", 5, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/password-resets", 5, HOUR_MS, 2 * HOUR_MS),
+  postRule("/email-verifications", 5, HOUR_MS, 2 * HOUR_MS),
+  postRule("/password-resets/redemptions", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/email-verifications/redemptions", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/second-factor-challenges/verifications", 10, 5 * MINUTE_MS, 30 * MINUTE_MS),
+  // The authenticated endpoints that hash a password or check a second factor.
   {
-    path: "/sessions",
-    methods: ["POST"],
+    path: "/users/me/password",
+    methods: ["PATCH"],
     maxRequests: 10,
-    windowMs: 15 * 60 * 1000,
-    blockDurationMs: 30 * 60 * 1000,
+    windowMs: 15 * MINUTE_MS,
+    blockDurationMs: 30 * MINUTE_MS,
   },
   {
-    path: "/users",
-    methods: ["POST"],
-    maxRequests: 5,
-    windowMs: 60 * 60 * 1000,
-    blockDurationMs: 24 * 60 * 60 * 1000,
-  },
-  {
-    path: "/otp-challenges",
-    methods: ["POST"],
-    maxRequests: 5,
-    windowMs: 10 * 60 * 1000,
-    blockDurationMs: 30 * 60 * 1000,
-  },
-  {
-    path: "/password-resets",
-    methods: ["POST"],
-    maxRequests: 5,
-    windowMs: 60 * 60 * 1000,
-    blockDurationMs: 2 * 60 * 60 * 1000,
-  },
-  {
-    path: "/second-factor-challenges/verifications",
-    methods: ["POST"],
+    path: /^\/multi-factor-enrollments(\/current)?$/,
+    methods: ["POST", "PATCH", "DELETE"],
     maxRequests: 10,
-    windowMs: 5 * 60 * 1000,
-    blockDurationMs: 30 * 60 * 1000,
+    windowMs: 15 * MINUTE_MS,
+    blockDurationMs: 30 * MINUTE_MS,
   },
+  postRule("/backup-code-sets", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  // Unauthenticated endpoints that write a store row or call out.
+  postRule("/google-one-tap-nonces", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/device/code", 10, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  // A device polls every few seconds until the user decides.
+  postRule("/device/token", 300, 15 * MINUTE_MS, 15 * MINUTE_MS),
+  postRule("/device-authorizations/decisions", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/sso-authorizations", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
+  {
+    path: /^\/sso\/(callback|saml\/acs\/\{providerId\})$/,
+    methods: ["POST"],
+    maxRequests: 20,
+    windowMs: 10 * MINUTE_MS,
+    blockDurationMs: 30 * MINUTE_MS,
+  },
+  postRule("/oauth2/token", 60, MINUTE_MS, 5 * MINUTE_MS),
   // RFC 7591 dynamic client registration is open to anonymous callers.
-  {
-    path: "/register",
-    methods: ["POST"],
-    maxRequests: 10,
-    windowMs: 60 * 60 * 1000,
-    blockDurationMs: 60 * 60 * 1000,
-  },
+  postRule("/register", 10, HOUR_MS, HOUR_MS),
 ];
+
+/**
+ * A path template as the OpenAPI document writes it: the router's `:name`
+ * parameters (with any regex constraint or `?`) become `{name}`.
+ */
+const openApiTemplate = (path: string): string =>
+  path.replaceAll(/:(\w+)(?:\([^)]*\))?\??/g, "{$1}");
 
 const matchesEndpointRule = (
   rule: EndpointRateLimitRule,
-  pathname: string,
+  template: string,
   method: string,
 ): boolean => {
-  if (rule.methods !== undefined && !rule.methods.includes(method.toUpperCase())) return false;
-  return P.isString(rule.path) ? rule.path === pathname : rule.path.test(pathname);
+  if (rule.methods !== undefined && !rule.methods.includes(method)) return false;
+  return P.isString(rule.path) ? openApiTemplate(rule.path) === template : rule.path.test(template);
 };
 
 /**
  * The rate-limit bucket a rule counts in: its path. A pattern rule keeps one
- * bucket for every path it matches, so varying the path (an id in it, say)
+ * bucket for every endpoint it matches, so varying the path (an id in it, say)
  * never earns a caller a fresh bucket.
  */
 const ruleKey = (rule: EndpointRateLimitRule): string =>
-  P.isString(rule.path) ? rule.path : `pattern:${rule.path.source}`;
+  P.isString(rule.path) ? openApiTemplate(rule.path) : `pattern:${rule.path.source}`;
 
 const findEndpointRule = (
   rules: ReadonlyArray<EndpointRateLimitRule>,
-  pathname: string,
+  template: string,
   method: string,
-): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
+): EndpointRateLimitRule | undefined =>
+  rules.find((rule) => matchesEndpointRule(rule, template, method));
+
+/** The 429 a request to a limited endpoint gets when no `RateLimiter` is in scope. */
+const noRateLimiterResponse = (): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
+  Effect.logError(
+    "[effect-auth] ipRateLimit is configured with no RateLimiter in services; the request is refused",
+  ).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ message: NO_RATE_LIMITER }, { status: 429 })));
+
+/**
+ * Count one request under `rule` for the caller's address, and answer the
+ * refusal, or `undefined` when the request may proceed. The startup check
+ * refuses the limit without a `RateLimiter`, so that refusal is a backstop:
+ * the limit never runs as a silent no-op (#389). With no address there is no
+ * key (#358): the request is refused rather than skipped or counted under a
+ * bucket that other callers share.
+ */
+const consumeEndpointLimit = (
+  rule: EndpointRateLimitRule,
+): Effect.Effect<HttpServerResponse.HttpServerResponse | undefined> =>
+  Effect.gen(function* () {
+    const limiter = yield* Effect.serviceOption(RateLimiter);
+    if (Option.isNone(limiter)) return yield* noRateLimiterResponse();
+    const clientIp = yield* Effect.serviceOption(ClientIP);
+    const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
+    if (ip === undefined) {
+      return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
+    }
+    const denied = yield* limiter.value
+      .consumeToken(`ip:${ruleKey(rule)}:${ip}`, {
+        maxRequests: rule.maxRequests,
+        windowMs: rule.windowMs,
+        ...(rule.blockDurationMs !== undefined && { blockDurationMs: rule.blockDurationMs }),
+      })
+      .pipe(
+        Effect.as(null),
+        Effect.catchTags({
+          RateLimitError: (e) => Effect.succeed(e),
+          AuthError: () => Effect.succeed(null),
+        }),
+      );
+    return denied === null ? undefined : tooManyRequests(denied.retryAfter);
+  });
+
+/**
+ * The per-endpoint IP limit, as router middleware on every auth route. It runs
+ * once the router has matched the request, before the endpoint decodes the
+ * request or runs any auth logic, and finds its rule by the matched endpoint's
+ * path template and method, so no spelling of the path escapes it (#582).
+ */
+const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>) =>
+  HttpRouter.middleware((effect) =>
+    Effect.gen(function* () {
+      const { route } = yield* HttpRouter.RouteContext;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const method = route.method === "*" ? request.method.toUpperCase() : route.method;
+      const rule = findEndpointRule(rules, openApiTemplate(route.path), method);
+      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule);
+      return refused ?? (yield* effect);
+    }),
+  ).layer;
+
+/** The rules `ipRateLimit` puts in force: none for `false`, else its own or the defaults. */
+const endpointRules = (
+  ipRateLimit: HttpIPRateLimitConfig | false | undefined,
+): ReadonlyArray<EndpointRateLimitRule> =>
+  ipRateLimit === false ? [] : (ipRateLimit?.rules ?? defaultEndpointRules);
 
 // The class lives in Errors.ts; its TSDoc says when each check raises it.
 export { ClientAddressConfigError } from "../Errors.ts";
@@ -4834,7 +4945,10 @@ export interface AuthWebHandlerOptions {
    */
   readonly trustedProxy?: TrustedProxyConfig | undefined;
   /**
-   * Enable IP-keyed rate limiting at the HTTP boundary, before handlers run.
+   * IP-keyed rate limiting at the HTTP boundary, before handlers run. **On by
+   * default** (#583): omitted or `{}`, the built-in
+   * {@link defaultEndpointRules} apply; `{ rules: [...] }` replaces them with a
+   * custom rule set; `false` turns the limit off, and is the only way to.
    *
    * Requires `RateLimiter` in the `services` layer (compose it with its
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
@@ -4846,24 +4960,25 @@ export interface AuthWebHandlerOptions {
    * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
    *
    * **Client address required**: the limiter keys each request by its client
-   * address, so `make` throws {@link ClientAddressConfigError} when this is set
-   * with neither {@link trustedProxy} nor {@link allowMissingClientIp}. A Web
-   * `Request` has no socket address to fall back on.
+   * address, so `make` throws {@link ClientAddressConfigError} unless this is
+   * `false` or {@link trustedProxy} or {@link allowMissingClientIp} is set. A
+   * Web `Request` has no socket address to fall back on.
+   *
+   * Each rule is matched against the endpoint the router matched, by its path
+   * template and method, so no spelling of a path (case, trailing or duplicate
+   * slashes, percent-encoding) escapes its limit (#582).
    *
    * A request to a rate-limited endpoint that resolves no address is refused
    * with `429` and is not counted. It is never let through unlimited and never
    * counted under a bucket shared with other callers. Requests to endpoints
    * with no rule are unaffected.
-   *
-   * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
-   * `{ rules: [...] }` for a custom rule set.
    */
-  readonly ipRateLimit?: HttpIPRateLimitConfig | undefined;
+  readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
   /**
    * Accept that a request may have no resolvable client address, so
-   * {@link ipRateLimit}, or an `IPRateLimitPlugin` in the `services` `Hooks`,
-   * can be configured without {@link trustedProxy}. Default `false`; without it
-   * `make` throws `ClientAddressConfigError` for either.
+   * {@link ipRateLimit} (on unless it is `false`), or an `IPRateLimitPlugin` in
+   * the `services` `Hooks`, can run without {@link trustedProxy}. Default
+   * `false`; without it `make` throws `ClientAddressConfigError` for either.
    *
    * This opts out of the build-time check only. The limits still run: a request
    * with no address that reaches a rate-limited endpoint, or an
@@ -4998,14 +5113,15 @@ export interface AuthWebHandler {
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined =>
-  options.ipRateLimit !== undefined &&
+  options.ipRateLimit !== false &&
   options.trustedProxy === undefined &&
   options.allowMissingClientIp !== true
     ? new ClientAddressConfigError({
         message:
-          "ipRateLimit needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
+          "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-          "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
+          "set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused, " +
+          "or set ipRateLimit: false to serve without the limit.",
       })
     : undefined;
 
@@ -5083,7 +5199,10 @@ const serve = (
   services: Layer.Layer<AuthServices, ClientAddressConfigError | RateLimiterConfigError>,
   release: Effect.Effect<void>,
 ): AuthWebHandler => {
+  // The IP limit is router middleware on every auth route, so it sees the
+  // endpoint the router matched rather than the raw path (#582).
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
+    Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
     Layer.provide(groupLayers(options.cookie, options.multiSession)),
     Layer.provide(PlatformLayer),
   );
@@ -5092,8 +5211,6 @@ const serve = (
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
   const appLayer = apiLayer.pipe(Layer.provideMerge(services));
-
-  const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
 
   const web = HttpRouter.toWebHandler(appLayer, {
     // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
@@ -5104,46 +5221,8 @@ const serve = (
       Effect.gen(function* () {
         const req = yield* HttpServerRequest.HttpServerRequest;
         const ip = resolveClientIP(req, options.trustedProxy);
-
-        // Per-endpoint IP rate limiting (requires RateLimiter in services;
-        // it resolves its own RateLimitStore at Layer-construction time)
-        if (options.ipRateLimit !== undefined) {
-          const url = new URL(req.url, "http://localhost");
-          const rule = findEndpointRule(ipRateRules, url.pathname, req.method);
-          if (rule !== undefined) {
-            const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
-            // The startup check refuses ipRateLimit without a RateLimiter, so this
-            // refusal is a backstop: the limit never runs as a silent no-op (#389).
-            if (Option.isNone(rateLimiterOpt)) {
-              yield* Effect.logError(
-                "[effect-auth] ipRateLimit is configured with no RateLimiter in services; the request is refused",
-              );
-              return HttpServerResponse.jsonUnsafe({ message: NO_RATE_LIMITER }, { status: 429 });
-            }
-            // No address, no key (#358): refuse rather than skip the limit or
-            // count the request under a bucket that other callers share.
-            if (ip === undefined) {
-              return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
-            }
-            const limitConfig: RateLimitConfig = {
-              maxRequests: rule.maxRequests,
-              windowMs: rule.windowMs,
-              ...(rule.blockDurationMs !== undefined && {
-                blockDurationMs: rule.blockDurationMs,
-              }),
-            };
-            const denied = yield* rateLimiterOpt.value
-              .consumeToken(`ip:${ruleKey(rule)}:${ip}`, limitConfig)
-              .pipe(
-                Effect.as(null),
-                Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
-                Effect.catchTag("AuthError", () => Effect.succeed(null)),
-              );
-            if (denied !== null) return tooManyRequests(denied.retryAfter);
-          }
-        }
-
-        // Provide the resolved ClientIP to all downstream effects (hooks, handlers)
+        // Provide the resolved ClientIP to all downstream effects (the IP
+        // limit, hooks, handlers).
         return yield* effect.pipe(Effect.provideService(ClientIP, { ip }));
       }) as Effect.Effect<HttpServerResponse.HttpServerResponse>,
   });
@@ -5288,13 +5367,14 @@ const tooManyRequests = (
  * build. It throws, so the app fails to start, when the configuration cannot be
  * served as written:
  *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, or dynamic client registration enabled in the
- *   `services`' `OidcProviderService`, with neither `trustedProxy` nor
+ * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
+ *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
+ *   dynamic client registration enabled in the `services`'
+ *   `OidcProviderService`, with neither `trustedProxy` nor
  *   `allowMissingClientIp: true`.
- * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
- *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
- *   no `RateLimiter` in `services`.
+ * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
+ *   client registration or a `DeviceAuthorizationService` (without
+ *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
  * - Any failure of the `services` build itself: the failure's error, or for a
  *   defect the defect itself, as `Effect.runSync` throws.
  * - {@link ServicesBuildPendingError}, only with `strict: true`: the build had
@@ -5395,13 +5475,14 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * so `services` is built once, and `dispose` releases it. The promise rejects,
  * so the app fails to start, with the error `make` would throw:
  *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, or dynamic client registration enabled in the
- *   `services`' `OidcProviderService`, with neither `trustedProxy` nor
+ * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
+ *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
+ *   dynamic client registration enabled in the `services`'
+ *   `OidcProviderService`, with neither `trustedProxy` nor
  *   `allowMissingClientIp: true`.
- * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
- *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
- *   no `RateLimiter` in `services`.
+ * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
+ *   client registration or a `DeviceAuthorizationService` (without
+ *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
  * - Any failure of the `services` build itself: the failure's error, or for a
  *   defect the defect itself, as `Effect.runPromise` rejects.
  *

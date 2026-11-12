@@ -10,7 +10,12 @@ app does not have to.
 Mounting `Http.makeAsync` directly in the app's Worker is simpler and should be the default:
 
 ```ts
-const { handler } = await Http.makeAsync({ services, prefix: "/api/auth" /* … */ });
+const { handler } = await Http.makeAsync({
+  services, // with a RateLimiter: the per-address limits are on by default
+  prefix: "/api/auth",
+  trustedProxy: Auth.ClientIP.cloudflare,
+  /* … */
+});
 // Mount `handler` in your framework.
 ```
 

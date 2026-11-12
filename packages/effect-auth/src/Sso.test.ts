@@ -1206,8 +1206,13 @@ const makeHttpFixture = () => {
   return {
     seedUser,
     makeSession,
-    handler: HttpServer.make({ services: withSso, cookie: { secure: false } }).handler,
-    handlerWithoutSso: HttpServer.make({ services: withoutSso, cookie: { secure: false } }).handler,
+    handler: HttpServer.make({ services: withSso, cookie: { secure: false }, ipRateLimit: false })
+      .handler,
+    handlerWithoutSso: HttpServer.make({
+      services: withoutSso,
+      cookie: { secure: false },
+      ipRateLimit: false,
+    }).handler,
     providers,
     identifierRecords,
     samlRequests,
