@@ -3037,8 +3037,9 @@ export const teamMembersGroupLayer = (config?: CookieConfig, multiSession?: Mult
 };
 
 /**
- * Layer implementing the `invitations` group: an invitation's status
- * transitions and re-deliveries (see `invitationsGroup` in `HttpApi.ts`).
+ * Layer implementing the `invitations` group: the caller's own pending
+ * invitations, an invitation's status transitions and re-deliveries (see
+ * `invitationsGroup` in `HttpApi.ts`).
  */
 export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
   const cfg = resolveCookieConfig(config, multiSession);
@@ -3046,6 +3047,15 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
 
   return HttpApiBuilder.group(AuthApi, "invitations", (handlers) =>
     handlers
+      .handle("list", ({ request }) =>
+        Effect.gen(function* () {
+          // Only the caller's own verified addresses (#706); `invitationResource`
+          // never carries the token digest.
+          const { org, actorId } = yield* actor(request);
+          const invitations = yield* storeFailure(org.listInvitationsForUser(actorId));
+          return Handlers.collection(invitations.map(invitationResource));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const { org, actorId, resolved } = yield* actor(request);

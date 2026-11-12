@@ -1009,8 +1009,13 @@ export const organizationMembersGroup = Group.make(
 );
 
 /**
- * `invitations`: one invitation, by id.
+ * `invitations`: the signed-in user's own invitations, and one invitation by id.
  *
+ * - `GET /invitations`: the pending, unexpired invitations addressed to the
+ *   caller's verified email identifiers (#706), the ones they may answer by
+ *   id; `401` without a session. Like `GET /organizations`, the top-level
+ *   collection is scoped to the caller, never every invitation; an
+ *   organization's own list is `GET /organizations/:id/invitations`.
  * - `PATCH /invitations/:id` with a `status`: `accepted` or `rejected` by the
  *   invitee, with the invitation email's secret as the `token` attribute,
  *   which an invitee whose matching email is verified may omit (#673) (an
@@ -1022,6 +1027,9 @@ export const organizationMembersGroup = Group.make(
  */
 export const invitationsGroup = Group.make(
   R.Invitation,
+  Endpoint.list(R.Invitation, {
+    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+  }),
   Endpoint.update(R.Invitation, {
     success: InvitationTransitionDocument,
     errors: resourceErrors,

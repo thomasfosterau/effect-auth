@@ -428,7 +428,7 @@ const makeFixture = (admin?: AdminConfig) => {
       { onNone: () => assert.fail(`no email for ${invitationId}`), onSome: (sent) => sent.token },
     );
 
-  return { handler, seedUser, makeSession, sessions, members, tokenFor };
+  return { handler, seedUser, makeSession, sessions, members, invitations, tokenFor };
 };
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
@@ -991,6 +991,93 @@ describe("HTTP organization endpoints", () => {
       (await fx.handler(transitionInvitation(pending, "rejected", unverifiedSid))).status,
     ).toBe(400);
     expect(fx.members.some((m) => m.userId === "unverified")).toBe(false);
+  });
+
+  it("lists the caller's own pending invitations, never another user's or a digest (#706)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("invitee", "invitee@test.com");
+    fx.seedUser("unverified", "unverified@test.com", {}, false);
+    const ownerSid = fx.makeSession("owner");
+    const inviteeSid = fx.makeSession("invitee");
+    const unverifiedSid = fx.makeSession("unverified");
+    const org = await createOrganization(fx, ownerSid);
+    const other = await createOrganization(fx, ownerSid, "Globex", "globex");
+
+    const invite = async (organizationId: string, email: string) => {
+      const res = await fx.handler(
+        apiReq(
+          "POST",
+          `/organizations/${organizationId}/invitations`,
+          { data: { type: "invitations", attributes: { email, role: "member" } } },
+          ownerSid,
+        ),
+      );
+      expect(res.status).toBe(201);
+      return (await jsonBody(res, resourceBody({}))).data.id;
+    };
+    const listMine = (sessionId?: string) =>
+      fx.handler(apiReq("GET", "/invitations", undefined, sessionId));
+
+    // An answered invitation leaves the list (one organization holds one
+    // pending invitation per address, so it is answered before the next).
+    const answered = await invite(org.id, "invitee@test.com");
+    expect((await fx.handler(transitionInvitation(answered, "rejected", inviteeSid))).status).toBe(
+      200,
+    );
+    const mine = await invite(org.id, "invitee@test.com");
+    const expiring = await invite(other.id, "invitee@test.com");
+    const theirs = await invite(org.id, "unverified@test.com");
+    await invite(org.id, "nobody@test.com");
+    const stored = (invitationId: string) => {
+      const invitation = Option.getOrUndefined(MutableHashMap.get(fx.invitations, invitationId));
+      assert(invitation !== undefined, "the invitation is stored");
+      return invitation;
+    };
+    MutableHashMap.set(fx.invitations, expiring, { ...stored(expiring), expiresAt: 0 });
+
+    const res = await listMine(inviteeSid);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/vnd.api+json");
+    const text = await res.text();
+    const body = Schema.decodeSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          data: Schema.Array(
+            Schema.Struct({
+              type: Schema.Literal("invitations"),
+              id: Schema.String,
+              attributes: Schema.Record(Schema.String, Schema.Json),
+              relationships: Schema.Struct({ organization: Linkage, inviter: Linkage }),
+            }),
+          ),
+        }),
+      ),
+    )(text);
+    expect(body.data.map((invitation) => invitation.id)).toEqual([mine]);
+    const [listed] = body.data;
+    assert(listed !== undefined, "the pending invitation is listed");
+    // Exactly the public attributes: no `tokenHash`, no `token`.
+    expect(listed.attributes).toEqual({
+      email: "invitee@test.com",
+      role: "member",
+      status: "pending",
+      expiresAt: stored(mine).expiresAt,
+      createdAt: stored(mine).createdAt,
+    });
+    expect(listed.relationships.organization.data.id).toBe(org.id);
+    // Neither the digest nor the emailed token reaches the wire.
+    expect(text).not.toContain("tokenHash");
+    expect(text).not.toContain(stored(mine).tokenHash);
+    expect(text).not.toContain(fx.tokenFor(mine));
+
+    // An unverified address's invitation is reachable only through its emailed link.
+    const unverified = await jsonBody(await listMine(unverifiedSid), collectionBody({}));
+    expect(unverified.data.map((invitation) => invitation.id)).not.toContain(theirs);
+    expect(unverified.data).toEqual([]);
+    // The owner was invited to nothing.
+    expect((await jsonBody(await listMine(ownerSid), collectionBody({}))).data).toEqual([]);
+    expect((await listMine()).status).toBe(401);
   });
 
   it("runs a full team lifecycle", async () => {

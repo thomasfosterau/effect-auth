@@ -643,6 +643,13 @@ export interface AuthClient {
     ) => Promise<Http.InvitationView>;
     readonly listInvitations: (organizationId: string) => Promise<Http.InvitationListView>;
     /**
+     * The signed-in user's own pending, unexpired invitations
+     * (`GET /invitations`, #706): those addressed to their verified email
+     * addresses, which {@link acceptInvitation} and {@link rejectInvitation}
+     * answer by id without a token. Rejects with a `401` when signed out.
+     */
+    readonly listMyInvitations: () => Promise<Http.InvitationListView>;
+    /**
      * Accept an invitation addressed to the signed-in user's email, with the
      * secret `token` the invitation email's link carried. Omit the token to
      * accept by id when the user's matching email is verified (#673), as an
@@ -1308,6 +1315,10 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           "GET",
           `/organizations/${encodeURIComponent(organizationId)}/invitations`,
         ).then((document) => document.data.map(invitationView)),
+      listMyInvitations: () =>
+        jsonApi<CollectionDocument<WireInvitation>>("GET", "/invitations").then((document) =>
+          document.data.map(invitationView),
+        ),
       acceptInvitation: async (invitationId, token) => {
         const document = await transitionInvitation(invitationId, "accepted", token);
         const member = document.meta?.membership;

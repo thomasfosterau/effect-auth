@@ -656,6 +656,46 @@ describe("OrganizationService", () => {
     expect(result.userInvitations).toHaveLength(0);
   });
 
+  it("lists a user's own pending invitations, to their verified addresses only (#706)", async () => {
+    seedEmail("invitee-user", "invitee@example.com", true);
+    seedEmail("invitee-user", "invitee@work.example", true);
+    seedEmail("invitee-user", "claimed@example.com");
+    seedEmail("other-user", "other@example.com", true);
+
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        const invite = (email: string) =>
+          service.inviteMember("owner-1", organization.id, { email, role: "member" });
+        const home = yield* invite("invitee@example.com");
+        const work = yield* invite("invitee@work.example");
+        // Addressed to an unverified identifier the user holds, and to another user.
+        yield* invite("claimed@example.com");
+        yield* invite("other@example.com");
+        const before = yield* service.listInvitationsForUser("invitee-user");
+
+        // An answered invitation leaves the list, and so does an expired one.
+        yield* service.rejectInvitation("invitee-user", { invitationId: home.id });
+        yield* Effect.sync(() =>
+          MutableHashMap.set(invitations, work.id, { ...work, expiresAt: 0 }),
+        );
+        const after = yield* service.listInvitationsForUser("invitee-user");
+        const stranger = yield* service.listInvitationsForUser("no-identifiers");
+        return { home, work, before, after, stranger };
+      }),
+    );
+
+    expect(result.before.map((invitation) => invitation.id)).toEqual([
+      result.home.id,
+      result.work.id,
+    ]);
+    expect(result.after).toEqual([]);
+    expect(result.stranger).toEqual([]);
+  });
+
   it("supports rejecting an invitation and blocks re-acceptance", async () => {
     seedEmail("invitee-user", "invitee@example.com");
 

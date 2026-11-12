@@ -910,6 +910,20 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     /**
+     * List the pending, unexpired invitations addressed to `userId`'s own
+     * *verified* email identifiers (#706): what an in-app "pending
+     * invitations" list shows, and exactly the invitations the user may
+     * answer by id without the emailed token (#673). An unverified email
+     * identifier contributes nothing, since holding it proves nothing about
+     * the address; its invitations stay reachable through the emailed link.
+     * Invitations are returned as stored, `tokenHash` included: the HTTP tier
+     * never puts the digest on the wire.
+     */
+    readonly listInvitationsForUser: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+
+    /**
      * Resend a pending invitation: the same row and id, a fresh secret token
      * (the link sent earlier stops working), its `expiresAt` pushed out by the
      * configured invitation TTL from now, and `sendInvitationEmail` invoked
@@ -1729,6 +1743,16 @@ export const make = (
       return { tokenHash: hashToken(token), deliver };
     });
 
+    /** The pending, unexpired invitations addressed to `email`. */
+    const pendingInvitationsTo = (email: string) =>
+      Effect.gen(function* () {
+        const invitations = yield* store.listInvitationsByEmail(email);
+        const now = yield* Clock.currentTimeMillis;
+        return invitations.filter(
+          (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
+        );
+      });
+
     /**
      * The proof an answer to `invitation` brings, with the user's email
      * identifier it is addressed to (if any). With a token, the token: it
@@ -2070,11 +2094,20 @@ export const make = (
       listUserInvitations: Effect.fn("OrganizationService.listUserInvitations")(function* (
         email: string,
       ) {
-        const invitations = yield* store.listInvitationsByEmail(email);
-        const now = yield* Clock.currentTimeMillis;
-        return invitations.filter(
-          (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
-        );
+        return yield* pendingInvitationsTo(email);
+      }),
+
+      listInvitationsForUser: Effect.fn("OrganizationService.listInvitationsForUser")(function* (
+        userId: string,
+      ) {
+        const emails = (yield* identifiers.listByUser(userId))
+          .filter((identifier) => identifier.type === "email" && identifier.verified)
+          .map((identifier) => identifier.value);
+        const invitations = yield* Effect.forEach(emails, pendingInvitationsTo, {
+          concurrency: 1,
+        });
+        // Each invitation is addressed to one email, so the lists are disjoint.
+        return invitations.flat();
       }),
 
       addMember: Effect.fn("OrganizationService.addMember")(function* (
