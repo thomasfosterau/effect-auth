@@ -1,15 +1,22 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
+import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
+import { Hooks } from "./Hooks.ts";
 import {
   make as makeOneTimeTokenService,
+  OneTimeTokenService,
   OneTimeTokenStore,
+  redeemOneTimeTokenForSession,
   type OneTimeTokenRecord,
 } from "./OneTimeToken.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { SessionService } from "./SessionService.ts";
+import { SessionStore } from "./SessionStore.ts";
 import { hashToken } from "./TokenHash.ts";
+import type * as Types from "./Types.ts";
+import { UserStore } from "./UserStore.ts";
 
 const oneTimeTokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
 
@@ -215,5 +222,70 @@ describe("OneTimeTokenService", () => {
         testContext,
       ),
     );
+  });
+});
+
+describe("redeemOneTimeTokenForSession", () => {
+  const users = MutableHashMap.empty<string, Types.User>();
+  const sessions = MutableHashMap.empty<string, Types.Session>();
+
+  const services = Layer.mergeAll(
+    OneTimeTokenService.layer(),
+    SessionService.layer({ sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 } }),
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        Layer.succeed(OneTimeTokenStore)(oneTimeTokenStore),
+        Layer.succeed(SessionStore)({
+          create: (session) =>
+            Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+          get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+          update: (session) =>
+            Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+          delete: (id) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
+          deleteByUserId: () => Effect.void,
+          listByUserId: () => Effect.succeed([]),
+        }),
+        Layer.succeed(UserStore)({
+          get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
+        }),
+        Hooks.Default,
+      ),
+    ),
+  );
+
+  beforeEach(() => {
+    MutableHashMap.clear(oneTimeTokens);
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(sessions);
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+    MutableHashMap.set(users, "u-1", { id: "u-1", createdAt: now, updatedAt: now, attributes: {} });
+  });
+
+  it("mints a session for a token whose user exists", async () => {
+    const subject = await Effect.runPromise(
+      Effect.gen(function* () {
+        const rawToken = yield* (yield* OneTimeTokenService).generate("u-1");
+        return (yield* redeemOneTimeTokenForSession(rawToken)).subject;
+      }).pipe(Effect.provide(services)),
+    );
+    expect(subject).toBe("u-1");
+    expect(MutableHashMap.size(sessions)).toBe(1);
+  });
+
+  it("refuses a token whose user was deleted after issue, as an unknown token", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const rawToken = yield* (yield* OneTimeTokenService).generate("u-1");
+        MutableHashMap.remove(users, "u-1");
+        return yield* Effect.result(redeemOneTimeTokenForSession(rawToken));
+      }).pipe(Effect.provide(services)),
+    );
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OneTimeTokenError");
+    expect(result.failure.message).toBe("Invalid or expired token");
+    expect(MutableHashMap.size(sessions)).toBe(0);
+    // The token was consumed: a recreated user cannot be signed in with it.
+    expect(MutableHashMap.size(oneTimeTokens)).toBe(0);
   });
 });
