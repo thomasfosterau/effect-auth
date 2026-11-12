@@ -61,7 +61,7 @@
  *
  * On deny, the client sees `Forbidden` (403) with a message naming the
  * {@link Policy.Decision.reason} (`"forbid"`, `"default-deny"`, or `"invalid-request"` for
- * a request naming an empty entity id) — enough to
+ * a request naming an entity with an empty id or type) — enough to
  * distinguish "a policy explicitly forbids this" from "no policy allows it"
  * without leaking policy ids or the full evaluation trace. The full
  * `Decision` (`determining`/`outcomes`) is logged via `Effect.logDebug` for

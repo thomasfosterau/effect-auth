@@ -150,16 +150,18 @@ console.log(await Effect.runPromise(Effect.provide(program, AuthorizationLive)))
 
 Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/authorization-kernel-migration.md).
 
-### Empty entity ids
+### Empty entity ids and types
 
-An entity id is never empty. `Auth.Entity.EntityRef` refuses `""` when it decodes, and a reference
-built by hand with one (`Auth.Entity.ref("User", "")`) names no entity: it equals nothing, itself
-included. `Policy.decidePure` and `Policy.decide` deny a request whose principal, action or resource
-has an empty id, with reason `"invalid-request"`, before any policy runs, and `ReadScope.compile`
-compiles such a principal or action to `ReadScope.deny`. Never use an empty id as a "no user"
-stand-in: it would match every row whose owner column is `""`. A signed-out caller is a principal
-of its own type, such as `Anonymous::"anonymous"`, which user-typed policies never match.
-`Guard.make` reads a viewer whose id is empty as anonymous.
+An entity's id and type are never empty. `Auth.Entity.EntityRef` refuses `""` in either field when
+it decodes, and a reference built by hand with one (`Auth.Entity.ref("User", "")` or
+`Auth.Entity.ref("", "u1")`) names no entity: it equals nothing, itself included, it is in no
+hierarchy, and no type scope matches it (`Policy.isType("")` included). `Auth.Entity.namesEntity`
+is the check. `Policy.decidePure` and `Policy.decide` deny a request whose principal, action or
+resource has an empty id or type, with reason `"invalid-request"`, before any policy runs, and
+`ReadScope.compile` compiles such a principal or action to `ReadScope.deny`. Never use an empty id
+or type as a "no user" stand-in: an empty id would match every row whose owner column is `""`. A
+signed-out caller is a principal of its own type, such as `Anonymous::"anonymous"`, which
+user-typed policies never match. `Guard.make` reads a viewer whose id is empty as anonymous.
 
 ### System principals
 

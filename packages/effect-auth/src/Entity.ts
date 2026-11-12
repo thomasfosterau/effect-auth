@@ -39,16 +39,18 @@ import * as Str from "effect/String";
  * cron handlers): construct one with `System.ref`, never by hand, and never
  * name an application's own principal type `"System"` (`Guard.make` refuses it).
  *
- * The id is never empty (#661). Decoding refuses `""`, and a reference built
- * with one by hand ({@link ref} stays total) **names no entity**: it equals
- * nothing, itself included ({@link refEquals}, {@link attributeValueEquals}),
- * and a request naming one is refused by `Policy.decidePure` / `Policy.decide`
- * (reason `"invalid-request"`) and compiles to `ReadScope.deny`. An empty id
+ * Neither the type nor the id is ever empty (#661, #666). Decoding refuses
+ * `""` in either field, and a reference built with one by hand ({@link ref}
+ * stays total) **names no entity**: it equals nothing, itself included
+ * ({@link refEquals}, {@link attributeValueEquals}), it is in nothing
+ * ({@link entityIn}), no type scope matches it, and a request naming one is
+ * refused by `Policy.decidePure` / `Policy.decide` (reason
+ * `"invalid-request"`) and compiles to `ReadScope.deny`. An empty id or type
  * is never an "anonymous" stand-in: a signed-out caller is a principal of its
  * own type, such as `Anonymous::"anonymous"`.
  */
 export const EntityRef = Schema.Struct({
-  type: Schema.String,
+  type: Schema.NonEmptyString,
   id: Schema.NonEmptyString,
 });
 export type EntityRef = typeof EntityRef.Type;
@@ -62,20 +64,22 @@ export const systemType = "System";
 
 /**
  * Construct an {@link EntityRef}. Total, like the rest of this module: an
- * empty `id` is not rejected here but yields a reference that names no entity
- * (see {@link EntityRef}), so it can never match.
+ * empty `type` or `id` is not rejected here but yields a reference that names
+ * no entity (see {@link EntityRef}), so it can never match.
  */
 export const ref = (type: string, id: string): EntityRef => ({ type, id });
 
 /**
- * Whether a reference names an entity: its id is not empty. A reference that
- * names none is refused by the decision procedure and equals nothing (#661).
+ * Whether a reference names an entity: neither its type nor its id is empty.
+ * A reference that names none is refused by the decision procedure and equals
+ * nothing (#661, #666).
  */
-export const namesEntity = (r: EntityRef): boolean => Str.isNonEmpty(r.id);
+export const namesEntity = (r: EntityRef): boolean =>
+  Str.isNonEmpty(r.type) && Str.isNonEmpty(r.id);
 
 /**
- * Structural equality on entity references. A reference with an empty id
- * names no entity, so it equals nothing, itself included (#661).
+ * Structural equality on entity references. A reference with an empty type
+ * or id names no entity, so it equals nothing, itself included (#661, #666).
  */
 export const refEquals = (a: EntityRef, b: EntityRef): boolean =>
   namesEntity(a) && a.type === b.type && a.id === b.id;
@@ -156,7 +160,8 @@ const namesNoEntity = (value: AttributeValue): boolean =>
 
 /**
  * Deep structural equality over {@link AttributeValue}s. An entity value
- * whose id is empty equals nothing, itself included (#661), at any depth.
+ * whose type or id is empty equals nothing, itself included (#661, #666), at
+ * any depth.
  */
 export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): boolean => {
   if (namesNoEntity(a) || namesNoEntity(b)) return false;
@@ -252,7 +257,8 @@ export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): Attrib
  * transitive descendant of it in the slice's parent DAG? Reflexive, like
  * Cedar's `in`. Cycle-safe (a malformed cyclic hierarchy terminates and
  * never grants beyond the visited set). Never true when either side has an
- * empty id: such a reference names no entity, so it is in nothing (#661).
+ * empty type or id: such a reference names no entity, so it is in nothing
+ * (#661, #666).
  */
 export const entityIn = (s: EntitySlice, child: EntityRef, ancestor: EntityRef): boolean => {
   if (!namesEntity(child) || !namesEntity(ancestor)) return false;
