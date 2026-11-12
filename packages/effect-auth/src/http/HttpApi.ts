@@ -846,8 +846,9 @@ export const InvitationCreateDocument = writeDocument("invitations", S.InviteMem
 export type InvitationCreateDocument = typeof InvitationCreateDocument.Type;
 
 /**
- * The body of `POST /organizations/:id/domains`: the domain to claim, and
- * optionally how it is proved (`dns`, the default, or `manual`).
+ * The body of `POST /organizations/:id/domains`: the domain to claim. Its
+ * `verificationStrategy` may only be `dns` (the default); `manual` answers
+ * `400`, since manual attestation is the operator's (#598).
  */
 export const DomainCreateDocument = writeDocument(
   "organization-domains",
@@ -1011,21 +1012,53 @@ export const invitationsGroup = Group.make(
 );
 
 /**
- * `organization-domains`: one email-domain claim, by id. Both need
- * `domain:manage` in the claim's organization.
+ * The body of `POST /admin/organization-domains`: the domain the operator
+ * attests, and the organization it is attested for as the `organization`
+ * relationship.
+ */
+export const DomainAttestationDocument = Schema.Struct({
+  data: Schema.Struct({
+    type: Schema.Literal("organization-domains"),
+    attributes: Schema.Struct({ domain: Schema.String }),
+    relationships: Schema.Struct({
+      organization: Schema.Struct({
+        data: Schema.Struct({ type: Schema.Literal("organizations"), id: Schema.String }),
+      }),
+    }),
+  }),
+});
+export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
+
+/**
+ * `organization-domains`: email-domain claims.
  *
- * - `DELETE /organization-domains/:id`: release the claim; `204`.
- * - `POST /organization-domains/:id/verifications`: run the proof (the DNS TXT
- *   record through the server's `DomainVerifier`, or the admin's attestation
- *   for a `manual` claim); `200` with the claim, now `verified` or `failed`.
+ * - `DELETE /organization-domains/:id`: release the claim (`domain:manage` in
+ *   its organization); `204`.
+ * - `POST /organization-domains/:id/verifications`: check the DNS TXT record
+ *   through the server's `DomainVerifier` (`domain:manage`); `200` with the
+ *   claim, now `verified` or `failed`. The permission is never the proof: an
+ *   unverified `manual` claim is refused (#598).
+ * - `POST /admin/organization-domains`: the operator's attestation, after
+ *   checking ownership out of band, that the `organization` relationship
+ *   controls `domain` (`OrganizationService.attestDomain`). Needs the
+ *   server's `isAdmin`, never an organization permission; `201` with the
+ *   organization's claim, now `verified` with the `manual` strategy. A refusal
+ *   (an unknown organization, an invalid domain, a domain verified for
+ *   another organization) answers `400`.
  *
- * An unknown id answers `404`; a refusal, or a server with no
+ * An unknown id answers `404`; a tenant's refusal, or a server with no
  * `OrganizationDomainStore`, `403`.
  */
 export const organizationDomainsGroup = Group.make(
   R.OrganizationDomain,
   Endpoint.delete(R.OrganizationDomain, { errors: resourceErrors }),
   itemAction("verify", "/organization-domains/:id/verifications", R.OrganizationDomain, 200),
+  Endpoint.create(R.OrganizationDomain, {
+    name: "attest",
+    path: "/admin/organization-domains",
+    payload: DomainAttestationDocument,
+    errors: resourceErrors,
+  }),
 );
 
 /**

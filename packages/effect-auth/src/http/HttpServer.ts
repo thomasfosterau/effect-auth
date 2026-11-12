@@ -2645,13 +2645,11 @@ export const organizationsGroupLayer = (
         ),
       )
       .handle("addDomain", ({ params, payload, request }) =>
-        asOrganizationActor(request, cfg, (org, actorId) => {
-          const { domain, verificationStrategy } = payload.data.attributes;
-          return org.addDomain(actorId, params.id, {
-            domain,
-            ...(verificationStrategy !== undefined && { verificationStrategy }),
-          });
-        }).pipe(
+        // The payload admits only the `dns` strategy (#598), so the domain is
+        // all there is to pass on.
+        asOrganizationActor(request, cfg, (org, actorId) =>
+          org.addDomain(actorId, params.id, { domain: payload.data.attributes.domain }),
+        ).pipe(
           Effect.map((domain) => Handlers.data(domainResource(domain))),
           JsonApiErrors.mapHttpErrors,
         ),
@@ -2767,7 +2765,8 @@ export const organizationMembersGroupLayer = (
 
 /**
  * Layer implementing the `organization-domains` group: one domain claim, by
- * id (see `organizationDomainsGroup` in `HttpApi.ts`).
+ * id, and the operator's attestation (see `organizationDomainsGroup` in
+ * `HttpApi.ts`).
  */
 export const organizationDomainsGroupLayer = (
   config?: CookieConfig,
@@ -2791,6 +2790,21 @@ export const organizationDomainsGroupLayer = (
             org.verifyDomain(actorId, domain.organizationId, domain.id),
           );
           return Handlers.data(domainResource(verified));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // The operator's attestation (#598): gated on `isAdmin`, never on an
+      // organization permission, like SSO connection registration.
+      .handle("attest", ({ payload, request }) =>
+        Effect.gen(function* () {
+          yield* requireAdminCaller(request, cfg);
+          const org = yield* resolveOrganization;
+          const attested = yield* refusedBadRequest(
+            org.service.attestDomain(
+              payload.data.relationships.organization.data.id,
+              payload.data.attributes.domain,
+            ),
+          );
+          return Handlers.data(domainResource(attested));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
