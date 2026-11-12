@@ -8,6 +8,9 @@ import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import type { RateLimitStore } from "../RateLimit.ts";
+import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
+import type { RecipientSendLimit } from "../Types.ts";
 import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
@@ -53,6 +56,15 @@ export interface PasswordResetConfig {
   readonly minPasswordLength?: number;
   readonly maxPasswordLength?: number;
   readonly revokeSessionsOnPasswordReset?: boolean;
+  /**
+   * The per-recipient send cap (#684): at most `max` reset requests for one
+   * email within `windowMs`, counted through the `RateLimitStore` before the
+   * email is looked up. Default 5 an hour; `false` turns it off. A request
+   * past it fails with `RateLimitError`, for an email with and without an
+   * account alike, so the refusal reveals nothing about which emails are
+   * registered.
+   */
+  readonly recipientSendLimit?: RecipientSendLimit | false | undefined;
   readonly sendResetPassword: (
     email: string,
     token: string,
@@ -69,7 +81,9 @@ export interface PasswordResetResult {
 /**
  * Password reset by emailed single-use token. Requests for unknown addresses succeed silently (anti-enumeration), and a reset can revoke the user's sessions.
  *
- * Requires `PasswordResetStore`, `PasswordResetUserStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
+ * Past the `recipientSendLimit` cap (default 5 requests per email an hour, #684), `requestPasswordReset` fails with `RateLimitError`, whether or not the email has an account.
+ *
+ * Requires `PasswordResetStore`, `PasswordResetUserStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService`, `Hooks` and `RateLimitStore` (the per-recipient send cap).
  */
 export class PasswordResetService extends Context.Service<
   PasswordResetService,
@@ -129,6 +143,7 @@ export const make = (
   | PasswordHasher
   | SessionService
   | Hooks
+  | RateLimitStore
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -146,6 +161,7 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
+    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
     const generateResetToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
@@ -160,6 +176,10 @@ export const make = (
         if (!normalizedEmail) {
           return;
         }
+
+        // The per-recipient cap (#684), counted before the lookup, so an
+        // unknown email is capped exactly as a known one.
+        yield* recipientSendGate("password-reset", normalizedEmail);
 
         const resolved = yield* resolveUserByIdentifier(
           identifiers,

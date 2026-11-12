@@ -23,6 +23,8 @@ import { deliverCode } from "../CodeDelivery.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
 import * as OtpCode from "../OtpCode.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import type { RateLimitStore } from "../RateLimit.ts";
+import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
@@ -187,6 +189,15 @@ export interface EmailOtpConfig {
    * send for that purpose is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
+  /**
+   * The per-recipient send cap (#684): at most `max` sends to one email for
+   * one purpose within `windowMs`, counted through the `RateLimitStore`.
+   * Default 5 an hour; `false` turns it off. A send past it fails with
+   * {@link Errors.RateLimitError}. It counts every send the resend cooldown
+   * and the backoff let through, for an email with and without an account
+   * alike, so the refusal reveals nothing about which emails are registered.
+   */
+  readonly recipientSendLimit?: Types.RecipientSendLimit | false | undefined;
   readonly sendVerificationOtp: (
     email: string,
     otp: string,
@@ -222,7 +233,7 @@ export interface EmailOtpCheckResult {
 /**
  * Email OTP service.
  *
- * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks` and `SecureRandom`.
+ * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks`, `RateLimitStore` (the per-recipient send cap) and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -251,6 +262,10 @@ export class EmailOtpService extends Context.Service<
      * The marker record makes the cooldown apply to an email with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown email.
+     *
+     * Past the `recipientSendLimit` cap (default 5 sends per email and
+     * purpose an hour, #684), fails with {@link Errors.RateLimitError}, for a
+     * known and an unknown email alike.
      *
      * The `beforeSendCode` hook runs first, before the address is looked up,
      * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
@@ -343,6 +358,7 @@ export const make = (
   | SessionService
   | EmailPasswordStore
   | Hooks
+  | RateLimitStore
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -363,6 +379,7 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
+    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
     /**
      * Whether `send` hides, for this purpose, whether the email has an
@@ -425,6 +442,9 @@ export const make = (
         // undelivered marker record below and whose wrong codes are counted
         // alike, so a known and an unknown address get the same answer.
         yield* OtpCode.gateSend(store, email, purpose, codes);
+
+        // The per-recipient cap (#684), counted whatever the lookup found.
+        yield* recipientSendGate(`email-otp:${purpose}`, email);
 
         // An address with no account gets a marker record that no code
         // redeems (see `issueCode`).

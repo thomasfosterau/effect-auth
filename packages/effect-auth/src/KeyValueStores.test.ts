@@ -422,6 +422,7 @@ describe("KeyValueStores", () => {
 
       const layer = Layer.mergeAll(
         EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+        RateLimitStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
         Hooks.Default,
         PlatformCrypto.layer,
       );
@@ -458,6 +459,7 @@ describe("KeyValueStores", () => {
       const sent: Array<string> = [];
       const layer = Layer.mergeAll(
         EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+        RateLimitStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
         Hooks.Default,
         PlatformCrypto.layer,
         TestClock.layer(),

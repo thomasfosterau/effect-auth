@@ -21,6 +21,8 @@ import {
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import type { RateLimitStore } from "./RateLimit.ts";
+import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -110,6 +112,15 @@ export interface MagicLinkConfig {
    * send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
+  /**
+   * The per-recipient send cap (#684): at most `max` links to one email
+   * within `windowMs`, counted through the `RateLimitStore`. Default 5 an
+   * hour; `false` turns it off. A send past it fails with
+   * {@link Errors.RateLimitError}. It counts every send the resend cooldown
+   * lets through, for an email with and without an account alike, so the
+   * refusal reveals nothing about which emails are registered.
+   */
+  readonly recipientSendLimit?: Types.RecipientSendLimit | false | undefined;
   readonly sendMagicLink: (
     email: string,
     token: string,
@@ -136,7 +147,7 @@ export interface MagicLinkResult {
 /**
  * Magic link service.
  *
- * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks` and `SecureRandom`.
+ * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks`, `RateLimitStore` (the per-recipient send cap) and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -162,6 +173,10 @@ export class MagicLinkService extends Context.Service<
      * The marker token makes the cooldown apply to an email with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown email.
+     *
+     * Past the `recipientSendLimit` cap (default 5 links per email an hour,
+     * #684), fails with {@link Errors.RateLimitError}, for a known and an
+     * unknown email alike.
      *
      * The `beforeSendCode` hook runs first, before the address is looked up,
      * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
@@ -219,12 +234,14 @@ export const make = (
   | SessionService
   | EmailPasswordStore
   | Hooks
+  | RateLimitStore
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
     const disableSignUp = config.disableSignUp ?? false;
     const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
+    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
     const store = yield* MagicLinkStore;
     const userStore = yield* MagicLinkUserStore;
@@ -284,6 +301,9 @@ export const make = (
             }
           }
         }
+
+        // The per-recipient cap (#684), counted whatever the lookup found.
+        yield* recipientSendGate("magic-link", email);
 
         // Invalidate outstanding tokens so only the latest link is usable.
         yield* store.deleteByEmail(email);
