@@ -16,7 +16,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import { drizzle } from "drizzle-orm/pglite";
 import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import * as EffectPglite from "drizzle-orm-effect/effect-pglite";
+import * as EffectPglite from "drizzle-orm/effect-pglite";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";

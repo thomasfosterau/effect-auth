@@ -18,7 +18,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { binaryVarchar } from "./MySqlSchema.ts";
-import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
+import { mysqlProxyConfig } from "./testing/MySqlProxy.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
 
 const appUsers = mysqlTable("app_users", {
@@ -89,7 +89,7 @@ const makeProxy = (): Proxy => {
   const statements: Array<Statement> = [];
   let queued: ReadonlyArray<ReadonlyArray<unknown>> = [];
   const db = drizzle(async (sql, params, method) => {
-    statements.push({ sql: normalizeSql(sql), params });
+    statements.push({ sql, params });
     if (method === "all") {
       const rows = queued;
       queued = [];
@@ -283,7 +283,7 @@ describe("single-table MySQL / replace", () => {
     expect(proxy.statements).toHaveLength(2);
     const [update, read] = proxy.statements;
     expect(update?.sql).toBe(
-      "update `app_users` set `email` = ?, `email_verified` = ? where (`app_users`.`id` = ? and `app_users`.`email` = ?)",
+      "update `app_users` set `email` = ?, `email_verified` = ? where ((`app_users`.`id` = ?) and (`app_users`.`email` = ?))",
     );
     expect(update?.params).toEqual(["ada-new@example.com", true, USER_ID, "ada@example.com"]);
     expect(read?.sql).toMatch(/^select /);
@@ -312,7 +312,7 @@ describe("single-table MySQL / replace", () => {
     );
 
     expect(proxy.statements[0]?.sql).toBe(
-      "update `app_users_strict` set `email` = ?, `email_verified` = ? where (`app_users_strict`.`id` = ? and `app_users_strict`.`email` = ?)",
+      "update `app_users_strict` set `email` = ?, `email_verified` = ? where ((`app_users_strict`.`id` = ?) and (`app_users_strict`.`email` = ?))",
     );
     expect(proxy.statements[0]?.params).not.toContain(null);
   });
@@ -331,7 +331,7 @@ describe("single-table MySQL / replace", () => {
     );
 
     expect(proxy.statements[0]?.sql).toBe(
-      "update `app_users_verified` set `email` = ?, `email_verified` = ?, `email_verified_at` = ? where (`app_users_verified`.`id` = ? and `app_users_verified`.`email` = ?)",
+      "update `app_users_verified` set `email` = ?, `email_verified` = ?, `email_verified_at` = ? where ((`app_users_verified`.`id` = ?) and (`app_users_verified`.`email` = ?))",
     );
     expect(proxy.statements[0]?.params).toEqual([
       "ada-new@example.com",
@@ -432,7 +432,7 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
 
     const [update] = proxy.statements;
     expect(update?.sql).toBe(
-      "update `app_users_verified` set `email_verified` = ?, `email_verified_at` = ? where (`app_users_verified`.`id` = ? and `app_users_verified`.`email` is not null)",
+      "update `app_users_verified` set `email_verified` = ?, `email_verified_at` = ? where ((`app_users_verified`.`id` = ?) and ((`app_users_verified`.`email` is not null)))",
     );
     expect(update?.params).toEqual([true, "2026-01-02 09:30:00.000", USER_ID]);
     expect(verified?.verifiedAt).toEqual(verifiedAt);
