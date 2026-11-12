@@ -142,12 +142,19 @@ describe("the client subpath", () => {
 
 describe("the client/atoms subpath", () => {
   // The session Atoms are where the Effect runtime enters a browser bundle, and
-  // only there: `effect` and the client, with the HTTP tier still types only.
+  // only there: `effect` (by its root and module subpaths) and the client, with
+  // the HTTP tier still types only.
   it("imports effect and the client, and the HTTP tier for types only", async () => {
     const imports = await valueImportsOf(
       path.resolve(import.meta.dirname, "client", "SessionAtoms.ts"),
     );
-    expect(imports.toSorted()).toEqual(["./Client.ts", "effect", "effect/reactivity"]);
+    expect(imports.toSorted()).toEqual([
+      "./Client.ts",
+      "effect",
+      "effect/Option",
+      "effect/Predicate",
+      "effect/reactivity",
+    ]);
   });
 });
 
