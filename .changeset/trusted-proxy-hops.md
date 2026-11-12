@@ -1,0 +1,9 @@
+---
+"@thomasfosterau/effect-auth": minor
+---
+
+Security fix (#584): `trustedProxy: { hopCount }` no longer lets a client choose its own rate-limit key on a Web `Request`. A Web `Request` (what `Http.make` handles) has no socket address, but `resolveClientIP` indexed the chain as though the socket peer were its last entry, so it selected one entry too far left: under `hopCount: 1` an honest client behind one proxy (`X-Forwarded-For: 203.0.113.9`) was refused with `429`, while a client that prepended a fresh value to every request (`X-Forwarded-For: 10.9.9.<i>, 203.0.113.9`) got a fresh bucket each time and was never limited. The same address feeds `ipRateLimit`, `IPRateLimitPlugin`, the `/register` limit and every hook that reads `ClientIP`.
+
+With no socket address, `hopCount: n` now selects the `n`-th header entry from the right, the one the outermost trusted proxy wrote; with a socket address the arithmetic is unchanged. Under both `hopCount` and `trustedProxyCidrs`, header entries are now parsed as single IPv4 or IPv6 literals (IPv6 canonicalised as RFC 5952, IPv4-mapped IPv6 as dotted IPv4, as `ClientIP.trustedHeader` already did): a selected entry, or one a trusted proxy wrote, that is not an IP literal (`garbage`, a hostname, `203.0.113.9:443`, `[2001:db8::1]`) resolves no address instead of becoming a key, and `trustedProxyCidrs` no longer skips such an entry to reach one further left. A `hopCount` that is not a non-negative integer resolves no address.
+
+Migration: under `Http.make`, a `hopCount` set one higher than the number of proxies to make the old arithmetic work should now be the real number of proxies; `hopCount: 0` there trusts no header entry and resolves no address. A request whose address no longer resolves is refused with `429` on rate-limited endpoints, never let through.

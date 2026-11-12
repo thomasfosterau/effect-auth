@@ -3283,6 +3283,16 @@ describe("bearer mode", () => {
   });
 });
 
+/** A sign-in for an unknown account carrying only `X-Forwarded-For`. */
+const forwardedAttempt = (handler: Handler, xForwardedFor: string) =>
+  handler(
+    authRequest(
+      "password",
+      { email: "nobody@example.com", password: PW },
+      { "x-forwarded-for": xForwardedFor },
+    ),
+  );
+
 // ---------------------------------------------------------------------------
 // The session token never reaches a response body (#581)
 // ---------------------------------------------------------------------------
@@ -3570,6 +3580,48 @@ describe("client IP at the HTTP boundary", () => {
     expect((await attempt(handler, "203.0.113.2", "7.7.7.7")).status).not.toBe(429);
     // The same visitor, with a different forged X-Forwarded-For, is still limited.
     expect((await attempt(handler, "203.0.113.1", "8.8.8.8")).status).toBe(429);
+  });
+
+  // A Web Request has no socket address, so the header's last entry is the one
+  // the trusted proxy wrote (#584).
+  describe("under hopCount: 1 with no socket address (#584)", () => {
+    it("keys an honest client on the address its proxy appended", async () => {
+      const { handler, keys } = limitedHandler({ trustedProxy: { hopCount: 1 } });
+
+      expect((await forwardedAttempt(handler, "203.0.113.9")).status).not.toBe(429);
+      expect(Arr.fromIterable(keys).some((key) => key.endsWith("203.0.113.9"))).toBe(true);
+      expect((await forwardedAttempt(handler, "203.0.113.9")).status).toBe(429);
+    });
+
+    it("limits a client that prepends a fresh value to every attempt", async () => {
+      const { handler } = limitedHandler({ trustedProxy: { hopCount: 1 } });
+
+      expect((await forwardedAttempt(handler, "10.9.9.0, 203.0.113.9")).status).not.toBe(429);
+      const statuses = await Arr.reduce(
+        Arr.range(1, 12),
+        Promise.resolve<ReadonlyArray<number>>([]),
+        async (previous, i) => [
+          ...(await previous),
+          (await forwardedAttempt(handler, `10.9.9.${i}, 203.0.113.9`)).status,
+        ],
+      );
+      expect(statuses.every((status) => status === 429)).toBe(true);
+    });
+
+    it("never keys the limit on a prepended non-address", async () => {
+      const { handler, keys } = limitedHandler({ trustedProxy: { hopCount: 1 } });
+
+      expect((await forwardedAttempt(handler, "garbage, 203.0.113.9")).status).not.toBe(429);
+      expect(Arr.fromIterable(keys).some((key) => key.includes("garbage"))).toBe(false);
+      expect((await forwardedAttempt(handler, "other, 203.0.113.9")).status).toBe(429);
+    });
+
+    it("refuses a request whose selected entry is not an address, without a bucket", async () => {
+      const { handler, keys } = limitedHandler({ trustedProxy: { hopCount: 1 } });
+
+      expect((await forwardedAttempt(handler, "203.0.113.9, garbage")).status).toBe(429);
+      expect(Arr.fromIterable(keys)).toEqual([]);
+    });
   });
 
   it("counts a pattern rule in one bucket across every path it matches", async () => {

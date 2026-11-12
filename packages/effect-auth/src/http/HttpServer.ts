@@ -4956,7 +4956,10 @@ export interface AuthWebHandlerOptions {
    * trust assumption in full.
    *
    * `Http.make` serves Web `Request`s, which never carry a socket address, so
-   * with this option set the address comes only from the forwarded data. When
+   * with this option set the address comes only from the forwarded data. Under
+   * `{ hopCount: n }` the client is the `n`-th `X-Forwarded-For` entry from the
+   * right (the entry the outermost trusted proxy wrote), never one the client
+   * sent ahead of it, and only an IP literal is ever taken. When
    * that data is absent or unusable, the request has no client address:
    * `ClientIP` carries `undefined`, and a request that reaches a rate-limited
    * endpoint (see {@link ipRateLimit}) or an `IPRateLimitPlugin` hook is refused

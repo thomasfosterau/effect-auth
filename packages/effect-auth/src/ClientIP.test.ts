@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import { HttpServerRequest } from "effect/http";
@@ -169,22 +170,42 @@ describe("resolveClientIP — hopCount", () => {
   });
 
   it("does NOT allow spoofing by prepending extra IPs beyond the hop count", () => {
-    // Attacker sends: X-Forwarded-For: evil, victim, proxy1
-    // Real chain (remote=proxy1): [evil, victim, proxy1(xff), 9.10.11.12(remote)]
-    // With hopCount:1 → skip remote → return proxy1 from xff, NOT victim
-    // Client = chain[3 - 1 - 1] = chain[1] = "victim.ip"
-    // Wait, let's trace more carefully:
-    // XFF: "evil, victim, proxy1" → entries: [evil, victim, proxy1]
-    // remote: "9.10.11.12"
-    // extended chain: [evil, victim, proxy1, 9.10.11.12]
-    // hopCount:1 → index = 4 - 1 - 1 = 2 → "proxy1" (not evil or victim)
-    const result = resolveClientIP(req("evil.ip, victim.ip, 10.0.0.100", "9.10.11.12"), {
+    // The client sent `6.6.6.6, 7.7.7.7`; the one trusted proxy (the socket
+    // peer 9.10.11.12) appended the address it saw, 10.0.0.100.
+    // Chain: [6.6.6.6, 7.7.7.7, 10.0.0.100, 9.10.11.12(remote)] → index 2.
+    const result = resolveClientIP(req("6.6.6.6, 7.7.7.7, 10.0.0.100", "9.10.11.12"), {
       hopCount: 1,
     });
-    // With hopCount:1 we trust 1 proxy (the last one, socket peer 9.10.11.12).
-    // The second-to-last is the entry the trusted proxy got: 10.0.0.100.
     expect(result).toBe("10.0.0.100");
   });
+
+  it("ignores client-written garbage to the left of the selected entry", () => {
+    expect(resolveClientIP(req("garbage, 203.0.113.9", "9.10.11.12"), { hopCount: 1 })).toBe(
+      "203.0.113.9",
+    );
+  });
+
+  it("resolves no address when the selected entry is not an IP literal", () => {
+    expect(resolveClientIP(req("garbage", "9.10.11.12"), { hopCount: 1 })).toBeUndefined();
+    expect(resolveClientIP(req("203.0.113.9:443", "9.10.11.12"), { hopCount: 1 })).toBeUndefined();
+    expect(resolveClientIP(req("[2001:db8::1]", "9.10.11.12"), { hopCount: 1 })).toBeUndefined();
+  });
+
+  it("resolves no address when an entry a trusted proxy wrote is not an IP literal", () => {
+    // hopCount:2 trusts the socket peer and the proxy before it; that proxy's
+    // entry (`unknown`) is not an address, so the chain is not what was configured.
+    expect(
+      resolveClientIP(req("203.0.113.9, unknown", "9.10.11.12"), { hopCount: 2 }),
+    ).toBeUndefined();
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "resolves no address for hopCount %s",
+    (hopCount) => {
+      expect(resolveClientIP(req("203.0.113.9", "9.10.11.12"), { hopCount })).toBeUndefined();
+      expect(resolveClientIP(req("203.0.113.9", undefined), { hopCount })).toBeUndefined();
+    },
+  );
 
   it("uses custom header name", () => {
     const r: IPResolvableRequest = {
@@ -194,6 +215,85 @@ describe("resolveClientIP — hopCount", () => {
     const result = resolveClientIP(r, { header: "x-real-ip", hopCount: 1 });
     // Chain: [1.2.3.4, 9.10.11.12(remote)] — hopCount:1 → index 0 → 1.2.3.4
     expect(result).toBe("1.2.3.4");
+  });
+});
+
+// A Web `Request` (what `Http.make` handles) has no socket address: the header's
+// last `hopCount` entries are the ones the trusted proxies wrote (#584).
+describe("resolveClientIP — hopCount without a socket address (#584)", () => {
+  const oneHop = { hopCount: 1 };
+
+  it("takes the header's last entry for an honest client behind one proxy", () => {
+    expect(resolveClientIP(req("203.0.113.9", undefined), oneHop)).toBe("203.0.113.9");
+  });
+
+  it("is not moved by a value the client prepends", () => {
+    Arr.forEach(Arr.range(1, 13), (i) => {
+      expect(resolveClientIP(req(`10.9.9.${i}, 203.0.113.9`, undefined), oneHop)).toBe(
+        "203.0.113.9",
+      );
+    });
+  });
+
+  it("never keys on a prepended non-address", () => {
+    expect(resolveClientIP(req("garbage, 203.0.113.9", undefined), oneHop)).toBe("203.0.113.9");
+  });
+
+  it("counts every trusted hop from the header's end", () => {
+    // client → proxy A (writes 203.0.113.9) → proxy B (writes 10.0.0.1) → app
+    expect(
+      resolveClientIP(req("198.51.100.1, 203.0.113.9, 10.0.0.1", undefined), { hopCount: 2 }),
+    ).toBe("203.0.113.9");
+  });
+
+  it("resolves no address for hopCount 0, which trusts no header entry", () => {
+    expect(resolveClientIP(req("203.0.113.9", undefined), { hopCount: 0 })).toBeUndefined();
+  });
+
+  it("resolves no address when hopCount exceeds the header", () => {
+    expect(resolveClientIP(req("203.0.113.9", undefined), { hopCount: 2 })).toBeUndefined();
+  });
+
+  it("resolves no address when the selected or a trusted entry is not an IP literal", () => {
+    expect(resolveClientIP(req("garbage", undefined), oneHop)).toBeUndefined();
+    expect(resolveClientIP(req("203.0.113.9, garbage", undefined), oneHop)).toBeUndefined();
+    expect(
+      resolveClientIP(req("203.0.113.9, garbage", undefined), { hopCount: 2 }),
+    ).toBeUndefined();
+  });
+
+  it("resolves no address when the header is missing or holds only separators", () => {
+    expect(resolveClientIP(req(undefined, undefined), oneHop)).toBeUndefined();
+    expect(resolveClientIP(req(" , ", undefined), oneHop)).toBeUndefined();
+  });
+
+  it("skips empty list elements", () => {
+    expect(resolveClientIP(req("198.51.100.1,, 203.0.113.9 ,", undefined), oneHop)).toBe(
+      "203.0.113.9",
+    );
+  });
+
+  it("canonicalises the selected address, so one visitor has one key", () => {
+    expect(resolveClientIP(req("2001:DB8:0:0:0:0:0:1", undefined), oneHop)).toBe("2001:db8::1");
+    expect(resolveClientIP(req("::ffff:203.0.113.9", undefined), oneHop)).toBe("203.0.113.9");
+  });
+
+  it("resolves the same way through clientIPLayer over a real Web Request", async () => {
+    const request = HttpServerRequest.fromWeb(
+      new Request("http://localhost/", {
+        headers: { "x-forwarded-for": "10.9.9.1, 203.0.113.9" },
+      }),
+    );
+    const resolved = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { ip } = yield* ClientIP;
+        return ip;
+      }).pipe(
+        Effect.provide(clientIPLayer(oneHop)),
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      ),
+    );
+    expect(resolved).toBe("203.0.113.9");
   });
 });
 
@@ -211,9 +311,27 @@ describe("resolveClientIP — trustedProxyCidrs", () => {
 
   it("prevents XFF spoofing — stops at first untrusted from the right", () => {
     // Remote is untrusted (attacker directly connected), XFF is attacker-crafted
-    const result = resolveClientIP(req("victim.ip, 10.0.0.100", "evil.attacker.ip"), trusted10);
-    // Chain right-to-left: evil.attacker.ip (NOT in 10/8) → stop, return it
-    expect(result).toBe("evil.attacker.ip");
+    const result = resolveClientIP(req("198.51.100.7, 10.0.0.100", "6.6.6.6"), trusted10);
+    // Chain right-to-left: 6.6.6.6 (NOT in 10/8) → stop, return it
+    expect(result).toBe("6.6.6.6");
+  });
+
+  it("resolves no address when the first untrusted entry is not an IP literal", () => {
+    // Without validation this keyed the limit on the literal `garbage` (#584).
+    expect(resolveClientIP(req("garbage, 10.0.0.100", "10.0.0.200"), trusted10)).toBeUndefined();
+  });
+
+  it("does not skip a non-address to reach an entry further left", () => {
+    expect(
+      resolveClientIP(req("198.51.100.7, garbage, 10.0.0.100", "10.0.0.200"), trusted10),
+    ).toBeUndefined();
+  });
+
+  it("walks the header alone when there is no socket address", () => {
+    expect(resolveClientIP(req("198.51.100.7, 10.0.0.100", undefined), trusted10)).toBe(
+      "198.51.100.7",
+    );
+    expect(resolveClientIP(req("10.0.0.1, 10.0.0.2", undefined), trusted10)).toBeUndefined();
   });
 
   it("returns undefined when all IPs are trusted proxies", () => {
