@@ -2,7 +2,7 @@
 
 Argon2id `PasswordHasher` for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) — OWASP's first-choice password hashing algorithm, as an Effect `Layer`.
 
-Core effect-auth ships only dependency-free hashers (PBKDF2, scrypt) because Web Crypto has no Argon2 and Node's `crypto.argon2` (24.7+, experimental) is Node-only. This package fills that gap with a pure WebAssembly backend ([`hash-wasm`](https://github.com/Daninet/hash-wasm), MIT): no native module, no post-install step, and no `node:` imports, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
+Core effect-auth ships only dependency-free hashers (PBKDF2, scrypt) because Web Crypto has no Argon2 and Node's `crypto.argon2` (24.7+, experimental) is Node-only. This package fills that gap with a WebAssembly backend: the RustCrypto [`argon2`](https://crates.io/crates/argon2) crate as built by [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2) (MIT), embedded as a base64 string and compiled once, when the module loads. No native module, no post-install step, no `node:` imports and no `.wasm` asset, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
 
 Hashes are standard PHC strings (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), so they're interchangeable with older configurations of this package and with any other Argon2 implementation.
 
@@ -12,7 +12,7 @@ Hashes are standard PHC strings (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), 
 pnpm add @thomasfosterau/effect-auth-argon2 @thomasfosterau/effect-auth effect
 ```
 
-`effect` (`^4.1.0`) is a peer dependency; `hash-wasm` comes along as a dependency.
+`effect` (`^4.1.0`) is a peer dependency. The wasm ships inside this package, so there is nothing else to install and no bundler configuration: bundlers see plain JavaScript.
 
 ## Usage
 
@@ -62,15 +62,23 @@ const custom = argon2HasherLayer({ memoryCost: 32768, timeCost: 3 });
 
 ## Cloudflare Workers
 
-This package imports only WebAssembly and the platform Web Crypto API (`globalThis.crypto.getRandomValues`, the same source core effect-auth's `PlatformCrypto` layer uses). It needs no `nodejs_compat` flag and no native module.
+workerd refuses to compile WebAssembly while it serves a request (`CompileError: WebAssembly.compile(): Wasm code generation disallowed by embedder`). Releases up to 0.1.3 used [`hash-wasm`](https://github.com/Daninet/hash-wasm), which compiles lazily on the first hash, so every sign-up and sign-in failed on a deployed Worker ([#744](https://github.com/thomasfosterau/effect-auth/issues/744)). The hasher now compiles its wasm once, at module scope, while the Worker starts; inside a request it only runs it. A test serves the hasher from the real `workerd` binary and hashes and verifies inside `fetch`.
 
-Budget: with `defaultProfile`, a single hash costs ~19 MiB of the isolate's 128 MiB and tens of milliseconds of CPU. Hash one password per request.
+What a Worker needs:
+
+- **A compatibility date of 2025-06-01 or later**, or the `allow_eval_during_startup` compatibility flag on an older date. Before that date workerd refuses wasm compilation at startup as well, and the Worker fails to start with the same `CompileError`.
+- **`nodejs_compat`** on a compatibility date before 2026-08-04 (it is the default from that date). This package needs no `node:` module, but `@thomasfosterau/effect-auth`'s root imports `node:crypto`.
+- **No bundler configuration.** The wasm is a base64 string in this package's JavaScript, not a `.wasm` import, so Wrangler, Vite (with or without `@cloudflare/vite-plugin`) and esbuild need no `?module` / `?init` suffix, `CompiledWasm` rule or plugin.
+
+Budget: with `defaultProfile`, a hash costs ~19 MiB of the isolate's 128 MiB and tens of milliseconds of CPU. The wasm instance's linear memory grows to the largest `memoryCost` hashed or verified and stays at that size for the isolate's life, so hash one password per request and keep `defaultProfile` on Workers.
 
 ## Verification and parameter changes
 
 `verify` reads the variant, cost parameters, salt and digest length out of the **stored** hash rather than assuming the configured ones. Raising your cost parameters (or moving from `defaultProfile` to `serverProfile`) therefore never locks anyone out — existing hashes keep verifying under the parameters they were written with.
 
-Hashes that cannot be recomputed (a malformed PHC string, an unsupported variant, Argon2 `v=0x10`) fail with a `HashingError` rather than silently returning `false`.
+Hashes that cannot be recomputed (a malformed PHC string, an unsupported variant, Argon2 `v=0x10`, or a salt or digest outside the Argon2 crate's bounds: salt 8–48 bytes, digest 4–64 bytes) fail with a `HashingError` rather than silently returning `false`.
+
+Every hash 0.1.x wrote with `hash-wasm` keeps verifying: the PHC format, the default parameters (`m=19456,t=2,p=1`, 16-byte salt, 32-byte digest) and the encoding are unchanged, and the tests verify `hash-wasm`-written fixtures for argon2id, argon2i and argon2d and check that the new backend derives byte-identical strings from the same salt.
 
 ## Migrating from another hasher
 
@@ -97,4 +105,6 @@ Package root (`@thomasfosterau/effect-auth-argon2`):
 
 ## License
 
-MIT
+MIT.
+
+The embedded WebAssembly binary is copied from [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2) 0.1.1, MIT, Copyright (c) 2026 Thomas Foster. It is compiled from Rust, not from the Argon2 reference C implementation: the RustCrypto [`argon2`](https://crates.io/crates/argon2) crate and the RustCrypto crates it builds on (`blake2`, `password-hash`, `base64ct`, `subtle`) are dual-licensed MIT OR Apache-2.0, used here under MIT.

@@ -68,6 +68,13 @@ catalog:
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/svelte": ^5.4.2
   "@types/better-sqlite3": ^9.6.0
+  # effect-auth-argon2's Argon2 kernel (#744): the RustCrypto `argon2` crate
+  # built for wasm32-unknown-unknown. Its exports take no cost parameters, so
+  # the adapter embeds this release's wasm (`src/WasmBinary.ts`), compiles it
+  # at module scope and calls its C ABI; this devDependency is the source
+  # `Wasm.test.ts` checks those bytes against, and the oracle the tests
+  # cross-verify with. Exact, because the ABI is per release.
+  "@thomasfosterau/argon2": 0.1.1
   # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
   # peer of effect-auth, needed only by that subpath. 0.22 (#723) needs
   # `effect ^4.1.0`, which the peers catalog already floors.
@@ -102,7 +109,6 @@ catalog:
   # (.claude/hooks/fallow-gate.sh) and `fallow audit` (AGENTS.md, Verification).
   # Config in .fallowrc.json.
   fallow: 3.42.0
-  hash-wasm: ^4.13.0
   jsdom: ^31.0.0
   # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
   # its peer range and checks a requested version against that range, with the
@@ -129,8 +135,8 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.5.1
   vitest: 5.1.0
   # Cloudflare's runtime, for the core's and the vendor adapters'
-  # `Workerd.test.ts` (#748, #606), which run the code inside a real workerd.
-  # The same exact release alchemy's
+  # `Workerd.test.ts` (#748, #606, #744), which run the code inside a real
+  # workerd. The same exact release alchemy's
   # `@alchemy.run/cloudflare-runtime` resolves. `allowBuilds` keeps its
   # postinstall off: the binary comes from the per-platform optional
   # `@cloudflare/workerd-*` package, which needs no build step.
