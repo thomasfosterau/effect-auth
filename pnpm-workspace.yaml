@@ -52,7 +52,7 @@ catalog:
   # configures; older releases reject the key with an `unknownRuleName`
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
-  "@effect/tsgo": 0.67.7
+  "@effect/tsgo": 0.68.0
   "@electric-sql/pglite": ^0.5.16
   # The Effect lint rules (`effect/*`), `recommended` extended in the root
   # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, but
@@ -131,7 +131,7 @@ catalog:
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override forces
   # every resolution to the catalog singleton.
-  vite-plus: 1.5.1
+  vite-plus: 1.6.0
   vite: npm:@voidzero-dev/vite-plus-core@1.5.1
   vitest: 5.1.0
   # Cloudflare's runtime, for the core's and the vendor adapters'
