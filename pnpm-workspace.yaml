@@ -52,7 +52,7 @@ catalog:
   # configures; older releases reject the key with an `unknownRuleName`
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
-  "@effect/tsgo": 0.63.0
+  "@effect/tsgo": 0.67.7
   "@electric-sql/pglite": ^0.5.16
   # The Effect lint rules (`effect/*`), `recommended` extended in the root
   # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, but
@@ -78,7 +78,7 @@ catalog:
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a
   # mismatch, so it moves with vite-plus.
-  "@vitest/coverage-istanbul": 5.0.5
+  "@vitest/coverage-istanbul": 5.1.0
   # alchemy 2.0.0-beta.84 split the providers out of `alchemy`: each is its own
   # `@alchemy.run/*` package on the same exact version, peering on `alchemy`
   # at that version, so they move together (Dependabot's `alchemy` group).
@@ -122,9 +122,9 @@ catalog:
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override forces
   # every resolution to the catalog singleton.
-  vite-plus: 1.4.0
+  vite-plus: 1.5.1
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
-  vitest: 5.0.5
+  vitest: 5.1.0
   xml-crypto: ^6.4.0
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
