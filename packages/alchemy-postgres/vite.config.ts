@@ -4,7 +4,11 @@ import { packageTasks } from "../../vite.tasks.ts";
 // `AuthSchema.test.ts` loads the alchemy runtime (the engine and its
 // transitive clients), so it runs as `test:alchemy` in CI's separate `alchemy`
 // job ("Alchemy runtime"), beside `Postgres.test.ts`, whose cases need a
-// server (`DATABASE_URL`, which that job starts; without one they skip).
+// server (`DATABASE_URL`, which that job starts). The task declares
+// `DATABASE_URL` and `CI` as fingerprinted inputs: a cached task sees only the
+// variables it declares, and without them the server cases silently skipped in
+// CI (#766). Under `CI` a missing `DATABASE_URL` fails them; elsewhere they skip
+// with a warning.
 // `test:unit` runs neither: it has no other suite, so it passes with none.
 const alchemySuites = "src/AuthSchema.test.ts src/Postgres.test.ts";
 
@@ -14,7 +18,9 @@ export default defineConfig({
     check:
       "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run --exclude src/AuthSchema.test.ts",
     test: "vp test run --passWithNoTests --exclude src/AuthSchema.test.ts --exclude src/Postgres.test.ts",
-    extra: { "test:alchemy": `vp test run ${alchemySuites}` },
+    extra: {
+      "test:alchemy": { command: `vp test run ${alchemySuites}`, env: ["DATABASE_URL", "CI"] },
+    },
   }),
   test: {
     globals: true,

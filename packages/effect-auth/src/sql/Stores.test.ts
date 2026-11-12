@@ -8,7 +8,7 @@ import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
 import { TestClock } from "effect/testing";
 import Database from "better-sqlite3";
-import type { PGlite } from "@electric-sql/pglite";
+import { types, type PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import * as Auth from "../index.ts";
 import * as Testing from "../testing/index.ts";
@@ -192,46 +192,60 @@ const authTables: ReadonlyArray<string> = schemaStatements.flatMap((statement) =
   return name === undefined ? [] : [name];
 });
 
-let database: PGlite | undefined;
-
-const openDatabase = (): PGlite => {
-  assert(database !== undefined, "the PGlite database is opened in the suite's beforeAll");
-  return database;
-};
-
-const postgres: StoreEngine = {
-  name: "PostgreSQL (PGlite)",
-  compiler: PgliteClient.makeCompiler(),
-  hooks: () => {
-    beforeAll(async () => {
-      database = await migratedPglite();
-    });
-    beforeEach(async () => {
-      await openDatabase().exec(`TRUNCATE ${authTables.map((table) => `"${table}"`).join(", ")}`);
-    });
-    afterAll(async () => {
-      await database?.close();
-      database = undefined;
-    });
-  },
-  client: () => PgliteClient.layer({ liveClient: openDatabase() }),
-  tableNames: Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql<{ name: string }>`
-      SELECT table_name AS name FROM information_schema.tables
-      WHERE table_schema = current_schema() AND left(table_name, 5) = 'auth_'
-      ORDER BY table_name`;
-    return rows.map((row) => row.name);
-  }),
-  columnTypes: (table) =>
-    Effect.gen(function* () {
+/**
+ * PostgreSQL over PGlite. `int8` is how the engine reads a `BIGINT` column
+ * back: PGlite's own parser gives a `number`, but `@effect/sql-pg` returns a
+ * `bigint` and node-postgres a decimal string, and the stores must read all
+ * three (#766), so the contract runs once per shape.
+ */
+const pgliteEngine = (name: string, int8?: (text: string) => bigint | string): StoreEngine => {
+  let database: PGlite | undefined;
+  const openDatabase = (): PGlite => {
+    assert(database !== undefined, "the PGlite database is opened in the suite's beforeAll");
+    return database;
+  };
+  return {
+    name,
+    compiler: PgliteClient.makeCompiler(),
+    hooks: () => {
+      beforeAll(async () => {
+        database = await migratedPglite(int8 === undefined ? undefined : { [types.INT8]: int8 });
+      });
+      beforeEach(async () => {
+        await openDatabase().exec(`TRUNCATE ${authTables.map((table) => `"${table}"`).join(", ")}`);
+      });
+      afterAll(async () => {
+        await database?.close();
+        database = undefined;
+      });
+    },
+    client: () => PgliteClient.layer({ liveClient: openDatabase() }),
+    tableNames: Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      const rows = yield* sql<{ readonly name: string; readonly type: string }>`
-        SELECT column_name AS name, data_type AS type FROM information_schema.columns
-        WHERE table_schema = current_schema() AND table_name = ${table}`;
-      return R.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
+      const rows = yield* sql<{ name: string }>`
+        SELECT table_name AS name FROM information_schema.tables
+        WHERE table_schema = current_schema() AND left(table_name, 5) = 'auth_'
+        ORDER BY table_name`;
+      return rows.map((row) => row.name);
     }),
+    columnTypes: (table) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ readonly name: string; readonly type: string }>`
+          SELECT column_name AS name, data_type AS type FROM information_schema.columns
+          WHERE table_schema = current_schema() AND table_name = ${table}`;
+        return R.fromEntries(rows.map((row) => [row.name, row.type.toUpperCase()]));
+      }),
+  };
 };
+
+const postgres = pgliteEngine("PostgreSQL (PGlite)");
+/** `int8` as `@effect/sql-pg` returns it. */
+const postgresBigint = pgliteEngine("PostgreSQL (PGlite, int8 as bigint)", (text) =>
+  globalThis.BigInt(text),
+);
+/** `int8` as node-postgres (`pg`) returns it. */
+const postgresString = pgliteEngine("PostgreSQL (PGlite, int8 as string)", (text) => text);
 
 const makeUser = (email: string) =>
   Effect.gen(function* () {
@@ -1801,6 +1815,8 @@ const storeContract = (engine: StoreEngine): void => {
 
 storeContract(sqlite);
 storeContract(postgres);
+storeContract(postgresBigint);
+storeContract(postgresString);
 
 // ---------------------------------------------------------------------------
 // IdentifierStore.replace inside its transaction (SQLite)

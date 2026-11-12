@@ -14,22 +14,33 @@ const builtDependencies = {
   from: ["dependencies", "devDependencies"],
 } as const;
 
+/**
+ * An extra task: its command, or its command and the environment variables it
+ * reads. A cached task sees only the variables it declares, so a variable the
+ * command needs (a test server's `DATABASE_URL`, `CI`) goes in `env`, which
+ * passes it through and fingerprints it: a run without it is never replayed
+ * for a run with it (#766).
+ */
+type ExtraTask = string | { readonly command: string; readonly env: ReadonlyArray<string> };
+
+const extraTask = (task: ExtraTask) =>
+  typeof task === "string"
+    ? { command: task, dependsOn: [builtDependencies] }
+    : { command: task.command, dependsOn: [builtDependencies], cache: { env: [...task.env] } };
+
 export const packageTasks = (commands: {
   readonly build: string;
   readonly check: string;
   readonly test?: string;
   /** Extra tasks, each built behind the same `build` dependencies. */
-  readonly extra?: Readonly<Record<string, string>>;
+  readonly extra?: Readonly<Record<string, ExtraTask>>;
 }) => ({
   tasks: {
     build: { command: commands.build, dependsOn: [builtDependencies] },
     check: { command: commands.check, dependsOn: [builtDependencies] },
     "test:unit": { command: commands.test ?? "vp test run", dependsOn: [builtDependencies] },
     ...Object.fromEntries(
-      Object.entries(commands.extra ?? {}).map(([name, command]) => [
-        name,
-        { command, dependsOn: [builtDependencies] },
-      ]),
+      Object.entries(commands.extra ?? {}).map(([name, task]) => [name, extraTask(task)]),
     ),
   },
 });

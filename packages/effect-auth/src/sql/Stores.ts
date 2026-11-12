@@ -9,7 +9,8 @@
  * a `SqlClient` layer for a supported dialect (SQLite, Cloudflare D1 and
  * PostgreSQL; see the package README). MySQL is not supported (#260).
  *
- * Data codecs: dates as epoch milliseconds, booleans as `0`/`1`, attribute
+ * Data codecs: dates as epoch milliseconds (`BIGINT`, read back as a number
+ * from whatever an `int8` comes back as: see `Int8.ts`), booleans as `0`/`1`, attribute
  * bags and other structured values as JSON `TEXT`, binary values (WebAuthn
  * keys/challenges) as base64 `TEXT`.
  *
@@ -39,6 +40,7 @@ import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { SqlClient, Statement } from "effect/sql";
 import * as Auth from "../index.ts";
+import { decodeBigintColumns } from "./Int8.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs
@@ -98,11 +100,27 @@ const toAuthError =
 const asVoid = <A, E>(label: string, statement: Effect.Effect<A, E>) =>
   statement.pipe(Effect.asVoid, Effect.mapError(toAuthError(label)));
 
-const allRows = <A>(label: string, statement: Effect.Effect<ReadonlyArray<A>, unknown>) =>
-  statement.pipe(Effect.mapError(toAuthError(label)));
+/**
+ * Every row a store reads, with its `BIGINT` columns read as numbers whatever
+ * the driver returns for an `int8` (a `bigint` from `@effect/sql-pg`, a string
+ * from node-postgres; #766). A value that is not a safe integer fails as an
+ * `AuthError`.
+ */
+const allRows = <A extends object>(
+  label: string,
+  statement: Effect.Effect<ReadonlyArray<A>, unknown>,
+): Effect.Effect<ReadonlyArray<A>, Auth.AuthError> =>
+  statement.pipe(
+    Effect.mapError(toAuthError(label)),
+    Effect.flatMap((rows) =>
+      Effect.forEach(rows, (row) => decodeBigintColumns(row, label), { concurrency: 1 }),
+    ),
+  );
 
-const firstRow = <A>(label: string, statement: Effect.Effect<ReadonlyArray<A>, unknown>) =>
-  allRows(label, statement).pipe(Effect.map((rows) => rows[0] ?? null));
+const firstRow = <A extends object>(
+  label: string,
+  statement: Effect.Effect<ReadonlyArray<A>, unknown>,
+) => allRows(label, statement).pipe(Effect.map((rows) => rows[0] ?? null));
 
 /**
  * Wraps an effect in a SQL transaction, mapping any transaction-level SQL
