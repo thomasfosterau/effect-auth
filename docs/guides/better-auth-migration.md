@@ -282,7 +282,8 @@ Better Auth's most common customisation is a `role` `additionalField` on the use
 - **Storage.** The role lives in the user's attribute bag (`auth_users.attributes.role`). The data
   migration copies the column into the bag, as for any additional field (§6).
 - **Writes.** `role` is a server-only attribute by default (`UserServiceConfig.serverOnlyAttributes`,
-  default `["role"]`). A user can't set it through the profile update, and the session cookie
+  default `["role"]`). A user can't set it through the profile update or at sign-up (a sign-up
+  never stores it, whatever `Http.make`'s `signUpAttributes` allows), and the session cookie
   cache never carries it to the browser. Change it with the admin endpoints, or with
   `UserService` from trusted code.
 - **Meaning.** An ordered set of roles is a `Ladder`. `Ladder.make(["user", "moderator", "admin"])`
