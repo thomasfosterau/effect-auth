@@ -150,16 +150,18 @@ console.log(await Effect.runPromise(Effect.provide(program, AuthorizationLive)))
 
 Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/authorization-kernel-migration.md).
 
-### Empty entity ids
+### Empty entity ids and types
 
-An entity id is never empty. `Auth.Entity.EntityRef` refuses `""` when it decodes, and a reference
-built by hand with one (`Auth.Entity.ref("User", "")`) names no entity: it equals nothing, itself
-included. `Policy.decidePure` and `Policy.decide` deny a request whose principal, action or resource
-has an empty id, with reason `"invalid-request"`, before any policy runs, and `ReadScope.compile`
-compiles such a principal or action to `ReadScope.deny`. Never use an empty id as a "no user"
-stand-in: it would match every row whose owner column is `""`. A signed-out caller is a principal
-of its own type, such as `Anonymous::"anonymous"`, which user-typed policies never match.
-`Guard.make` reads a viewer whose id is empty as anonymous.
+An entity's id and type are never empty. `Auth.Entity.EntityRef` refuses `""` in either field when
+it decodes, and a reference built by hand with one (`Auth.Entity.ref("User", "")` or
+`Auth.Entity.ref("", "u1")`) names no entity: it equals nothing, itself included, it is in no
+hierarchy, and no type scope matches it (`Policy.isType("")` included). `Auth.Entity.namesEntity`
+is the check. `Policy.decidePure` and `Policy.decide` deny a request whose principal, action or
+resource has an empty id or type, with reason `"invalid-request"`, before any policy runs, and
+`ReadScope.compile` compiles such a principal or action to `ReadScope.deny`. Never use an empty id
+or type as a "no user" stand-in: an empty id would match every row whose owner column is `""`. A
+signed-out caller is a principal of its own type, such as `Anonymous::"anonymous"`, which
+user-typed policies never match. `Guard.make` reads a viewer whose id is empty as anonymous.
 
 ### System principals
 
@@ -315,9 +317,9 @@ await Effect.runPromise(
 
 `expectRefusesAnonymous`, `expectRefusesBelow` and `expectAllowsOwner` check one case each.
 
-The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`, and `organizationStoreConformance` for the `OrganizationStore` records the HTTP API addresses by id: memberships, team memberships and custom roles) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
+The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`, `challengeStoreConformance` for the WebAuthn `ChallengeStore` (each challenge keeps its ceremony), `emailOtpStoreConformance` and `phoneOtpStoreConformance` (the OTP records and their failure budget, #590), and `organizationStoreConformance` for the `OrganizationStore` records the HTTP API addresses by id: memberships, team memberships and custom roles) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
 
-`memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`, which it also provides with its `KeyValueStoreKeys` listing so `purgeExpiredKV` runs against it. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
+`memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`, which it also provides with its `KeyValueStoreKeys` listing so `purgeExpiredKV` runs against it. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …). `memoryPhoneOtpStore()` is a `PhoneOtpStore` outside the layer, and `memoryOtpFailures()` the failure-budget half of either OTP store, to spread into one of your own.
 
 `sessionServiceLayer({ users, config? })` provides `SessionService` (plus its `SessionStore` and `UserStore`) over a `UserStore` seeded with `users` (any iterable of `User`, e.g. `fixtureUser()`s), an empty session store and `Hooks.Default`. `config` defaults to `defaultSessionConfig`: a 24 hour `activePeriod` and a 1 hour `idlePeriod`. `apiKeyServiceLayer({ keys?, config? })` provides `ApiKeyService` (plus its `ApiKeyStore` and `RateLimitStore`) over a `memoryApiKeyStore` seeded with `keys` and an in-memory `RateLimiter`, so `verifyWithRateLimit` works; `config` is `ApiKeyService.layer`'s own. Each build starts from fresh state, and `memoryApiKeyStore(keys?)` is also exported on its own (and part of `memoryStores`).
 
@@ -478,14 +480,18 @@ const beginRegistration = Effect.gen(function* () {
     displayName: "User Name",
   });
 });
+// `userId` is the signed-in user, from the session, never from the request: the
+// challenge must be a registration challenge issued to that same user, so an
+// authentication challenge, or another user's, is refused.
 const finishRegistration = (
+  userId: string,
   challenge: Uint8Array,
   response: Auth.MultiFactor.RegistrationResponse,
 ) =>
   Effect.gen(function* () {
     const webAuthn = yield* Auth.MultiFactor.WebAuthnService;
-    const { credential } = yield* webAuthn.verifyRegistration(challenge, response);
-    return credential; // now stored and usable for sign-in
+    const { credential } = yield* webAuthn.verifyRegistration(userId, challenge, response);
+    return credential; // stored under the attested credential id, usable for sign-in
   });
 
 // Authentication: the browser signs the challenge with `navigator.credentials.get()`.
@@ -495,13 +501,21 @@ const finishAuthentication = (
 ) =>
   Effect.gen(function* () {
     const webAuthn = yield* Auth.MultiFactor.WebAuthnService;
-    const { credential } = yield* webAuthn.verifyAuthentication(challenge, response);
-    return credential.userId; // create a session for this user
+    // `userVerified` is the UV flag (a PIN or biometric, not only presence);
+    // `backupEligible` / `backupState` say whether this is a synced passkey.
+    const { credential, userVerified } = yield* webAuthn.verifyAuthentication(challenge, response);
+    return { userId: credential.userId, userVerified }; // create a session for this user
   });
 
 const { challenge } = await Effect.runPromise(Effect.provide(beginRegistration, WebAuthnLive));
 export { challenge, finishRegistration, finishAuthentication };
 ```
+
+What the service enforces:
+
+- **A challenge is bound to its ceremony.** Each stored `WebAuthnChallenge` carries `ceremony: "registration" | "authentication"`; `verifyRegistration` refuses an authentication challenge and `verifyAuthentication` a registration one, leaving it in place. A registration challenge is also bound to the user it was issued to, which must be the `userId` passed to `verifyRegistration`. A `ChallengeStore` must persist the ceremony; a stored challenge without a known one reads as `null` (`Testing.challengeStoreConformance` pins the contract).
+- **`userVerification: "required"` is enforced**, not only advertised: a registration or assertion without the UV flag is refused. Under `"preferred"` (the default) or `"discouraged"`, both results report `userVerified`, with the backup flags `backupEligible` and `backupState`, for the host to act on (for example, to require a second factor when `userVerified` is `false`).
+- **The stored credential is the attested one.** Its id is the credential id inside the attestation, which must equal `response.credentialId`; an id already registered, to any user, is refused rather than overwritten. ES256 keys must be on P-256, and a `clientDataJSON` with `crossOrigin: true` is refused.
 
 ## OAuth 2.0 social login
 
@@ -717,6 +731,8 @@ const { handler } = Http.make({
 
 This is correct only when the app is reachable solely through Cloudflare. A request that bypasses the edge can set `CF-Connecting-IP` to any value and choose its own key. Only that one header is read; `X-Forwarded-For` and the rest are ignored. A value is taken only when it is exactly one IPv4 or IPv6 address. A missing, empty or malformed value, or a comma-separated list, falls back to the socket address. The first entry of a list is never used. Behind Cloudflare that fallback is an edge address shared by many visitors, so it is a fallback, not a per-visitor key. Under `Http.make` serving Web `Request`s (Workers, for example) there is no socket address. So the IP limit, which is on unless `ipRateLimit: false`, needs a `trustedProxy`: without one, `Http.make` throws `ClientAddressConfigError` at build, unless `allowMissingClientIp: true` is set. When the header is unusable, the request resolves no address, and a request to a rate-limited endpoint is refused with `429`. It is never let through unlimited and never counted under a bucket shared with other callers. An accepted IPv6 address is canonicalised (RFC 5952), and an IPv4-mapped address becomes dotted IPv4, so one visitor has one key.
 
+Behind proxies of your own that append to `X-Forwarded-For`, pass `trustedProxy: { hopCount: n }` (the number of proxies in front of the app) or `trustedProxy: { trustedProxyCidrs: [...] }` (their address ranges). With `hopCount`, a request with a socket address (Node, Bun) treats the socket peer as the nearest proxy and takes the entry `n` positions from the right of `[...X-Forwarded-For, socket]`; a Web `Request`, which is what `Http.make` handles, has no socket address, so the client is the `n`-th header entry from the right, the one the outermost trusted proxy wrote. Entries to its left come from the client and never change the result, so prepending values to the header does not earn a fresh bucket. `trustedProxyCidrs` walks the same chain right to left and takes the first entry outside the ranges. In both forms an entry is used only when it is one IPv4 or IPv6 literal: when the selected entry, or one a trusted proxy wrote, is anything else, the request resolves no address and a rate-limited endpoint answers `429`. `hopCount: 0` under `Http.make` trusts no header entry and so resolves no address (#584).
+
 Without `trustedProxy`, forwarded headers are ignored and the socket address is used as-is. Under `Http.make` there is no socket address, so the IP limit without `trustedProxy` is a build error. Set `allowMissingClientIp: true` to accept refusing address-less requests on rate-limited endpoints instead. Dynamic client registration is keyed the same way, by the address this `trustedProxy` resolves: with registration enabled and neither option set, `Http.make` fails at startup with `ClientAddressConfigError`.
 
 **`IPRateLimitPlugin` refuses every request without a client address.** The plugin limits authentication attempts (every `beforeAuthenticate`: one `signin` bucket for the first-factor methods, a `second-factor` bucket for second-factor redemptions), sign-up and password-reset requests per address. A request it cannot key is refused with `RateLimitError` (`429` over HTTP), never let through: a request whose address cannot be resolved, and any hook run with no `ClientIP` service in scope, such as a direct `EmailPasswordService.signIn` call from server code. So under `Http.make` the plugin needs `trustedProxy`. When the `Hooks` in `services` include it and `make` has neither `trustedProxy` nor `allowMissingClientIp: true`, `make` throws `ClientAddressConfigError`. With `allowMissingClientIp: true` and no `trustedProxy`, every sign-in, sign-up and password-reset request is refused with `429` (#389).
@@ -806,6 +822,28 @@ Every flow that verifies a credential fires `beforeAuthenticate` before it check
 - **`AccountLockoutPlugin`** counts every attempt per account (`authenticationSubject`: `user:<id>` for a resolved handle, so an account's email, username and phone share one count, else the handle itself, so an unknown handle locks like a known one) and locks after `maxAttempts` for `lockoutDurationMs`. The counts clear only when a session is issued for the user (`afterCreateSession`), never on a correct password that earned only a second-factor challenge. Second-factor redemptions have a per-user count of their own (`maxSecondFactorAttempts`, default 5) that runs across challenges, so fresh challenges buy no fresh guesses; only someone past the first factor can drive it. A lock refuses every method of the account until it lapses, so anyone who knows a handle can lock the account for `lockoutDurationMs`: pair it with `IPRateLimitPlugin` or a captcha.
 - **`CaptchaPlugin`** with the `"signIn"` endpoint verifies the token on the two password methods; the code, link and second-factor flows carry no token.
 - **`RateLimitPlugin`** draws first-factor attempts from one bucket per account (`RateLimitPresets.login`) and second-factor redemptions from another (`RateLimitPresets.totpVerification`).
+
+## Sign-up attributes
+
+A sign-up never sets an attribute that carries authority (#580). Whatever reaches it, `EmailPasswordService.signUp` (and so `UsernameService.signUp`) and `AuthLifecycleService.signUp` drop, after the `beforeSignUp` hooks, the `UserService`'s server-only attributes (`UserServiceConfig.serverOnlyAttributes`, default `["role"]`) and `Auth.SIGN_UP_PROTECTED_ATTRIBUTES`: the ban keys (`banned`, `banReason`, `banExpires`), the SCIM keys (`scimUserName`, `scimDeactivated`, `scimExternalId`) and `isAnonymous`. Set those once the user exists, through their own door (`AdminService.setRole`, `banUser`, SCIM provisioning). `EmailPasswordService` reads `UserService`'s list when `UserService` is in context as its layer is built; `AuthLifecycleService` always does.
+
+Over HTTP, `POST /users` keeps only the `attributes` keys you list in `signUpAttributes`. The default is none:
+
+```typescript
+const { handler } = Http.make({
+  services,
+  // A sign-up may set these two; any other key it sends is dropped.
+  signUpAttributes: ["plan", "locale"],
+});
+```
+
+A key the list doesn't name is dropped without an error, so a client that sends one still signs up, and the answer doesn't tell a caller which keys the server guards; the user in a `201` shows what was kept. Naming a server-only, ban or SCIM key here has no effect. The kept attributes may take at most `Http.SIGN_UP_ATTRIBUTES_MAX_BYTES` (4096) bytes as UTF-8 JSON; a larger bag is refused with `400`. Dropped keys don't count, and the whole request body stays under `maxBodySize` (default 64 KiB). `groupLayers(cookie, multiSession, signUpAttributes)` takes the same list when you compose the contract yourself.
+
+### One-time code guessing
+
+Email and phone OTP sign-in (`EmailOtpService`, `PhoneOtpService`) bound the wrong codes an address accepts across resends, not only per code (#590). `maxAttempts` (default 3) limits one code; every wrong code is also counted against the address and purpose in the store's failure budget, which a resend, an expiry or the attempt limit never resets. Once the count reaches `backoff.freeFailures` (default 5), `send` answers `ResendTooSoonError` (`429` with `Retry-After` over HTTP) until `backoff.baseDelay` (default one minute), doubled for each further wrong code and capped at `backoff.maxDelay` (default one day), has passed since the latest one. A successful verification resets the count.
+
+There is no lockout: once the delay has passed a send goes through, so an attacker can slow an address's owner down but never lock them out. Under the defaults, an attacker gets 18 guesses at a six-digit code in the first day and 3 a day after that. `resendCooldown` (default 60 s; `0` turns it off) still spaces sends of an outstanding code. Both apply alike to an address with and without an account, so neither reveals which addresses are registered. The code length stays 6 digits by default (`otpLength`).
 
 ## Expired codes and links
 
@@ -917,7 +955,7 @@ No response body carries a session token (#581). Every `sessions`, `device-sessi
 | `PATCH /users/me`                                                                      | Update `name` / `image`; nothing else is writable, the `attributes` bag included                                                                                                                                                                                                                                                                                              |
 | `POST /sessions`                                                                       | Sign in: a `sessions` document whose write-only `credential` attribute names the method (`password`, `username`, `email-otp`, `phone-otp`, `magic-link`, `anonymous`, `google-one-tap`). `201` with the session, its user in `included`; `202` with a `second-factor-challenges` resource, or with only `meta.needsEmailVerification` when the address must be verified first |
 | `POST /second-factor-challenges/verifications`                                         | Redeem a second-factor challenge, named in the body, with a `totp` or `backup-code`; `201` with the session                                                                                                                                                                                                                                                                   |
-| `POST /users`                                                                          | Sign up: `201` with the session when one is issued, else `202` with only `meta.needsEmailVerification`. Under `antiEnumeration` a fresh address and a held one both get the same `202`                                                                                                                                                                                        |
+| `POST /users`                                                                          | Sign up: `201` with the session when one is issued, else `202` with only `meta.needsEmailVerification`. Under `antiEnumeration` a fresh address and a held one both get the same `202`; only the `attributes` keys `signUpAttributes` allows are kept ([Sign-up attributes](#sign-up-attributes))                                                                             |
 | `POST /otp-challenges`                                                                 | Send an email or SMS code, or a magic link (`channel`: `email`, `phone`, `magic-link`); `202` whether or not the account exists                                                                                                                                                                                                                                               |
 | `POST /email-verifications` · `POST /email-verifications/redemptions`                  | (Re)send a verification link (`202`); verify with its token, `201` with the session when verification signs in, else `204`                                                                                                                                                                                                                                                    |
 | `POST /password-resets` · `POST /password-resets/redemptions`                          | Request a reset link (`202`); set the new password with its token (`204`)                                                                                                                                                                                                                                                                                                     |
@@ -1180,7 +1218,7 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 | `Auth.IdentifierStore`                     | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`                                                |
 | `Auth.Email.EmailPasswordStore`            | `makeEmailPasswordStore` / `EmailPasswordStoreLayer`           | `auth_users`                                                      |
 | `Auth.Email.EmailVerificationStore`        | `makeEmailVerificationStore` / `EmailVerificationStoreLayer`   | `auth_email_verifications`                                        |
-| `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`                                                 |
+| `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`, `auth_email_otp_failures`                      |
 | `Auth.Email.EmailOtpUserStore`             | `makeEmailOtpUserStore` / `EmailOtpUserStoreLayer`             | `auth_users`                                                      |
 | `Auth.Password.PasswordResetStore`         | `makePasswordResetStore` / `PasswordResetStoreLayer`           | `auth_password_resets`                                            |
 | `Auth.Password.PasswordResetUserStore`     | `makePasswordResetUserStore` / `PasswordResetUserStoreLayer`   | `auth_users`                                                      |
@@ -1223,7 +1261,7 @@ Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 o
 
 - `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes the `auth_magic_links` and `auth_email_otps` rows whose `expires_at` has passed (read from the `Clock`) and reports how many went from each. No store deletes them on its own: a code or link nobody redeems stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address, so without a purge those tables grow with every distinct address a caller tries. Schedule it from the host: a cron trigger on Workers, a timer or job on a long-lived server. The services already refuse an expired row, so a purge changes no outcome.
 
-Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
+Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
 
 ### Authorization
 

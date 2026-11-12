@@ -26,11 +26,17 @@ import { hashToken } from "../TokenHash.ts";
 import { make, SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
-import type { Session, User, SessionConfig } from "../Types.ts";
+import type { OtpFailures, Session, User, SessionConfig } from "../Types.ts";
 import * as Errors from "../Errors.ts";
 import {
   observable,
+  advanceTime,
+  bruteForce,
+  sendTwice,
+  day,
+  defaultBackoffDay,
   type RecordState,
+  recordingOtpFailures,
   runVerifySequence,
   verifySequences,
   wrongCode,
@@ -53,6 +59,8 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
 const users = MutableHashMap.empty<string, User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const otpRecords = MutableHashMap.empty<string, EmailOtpRecord>();
+/** Each email + purpose pair's failure budget (#590). */
+const otpFailures = MutableHashMap.empty<string, OtpFailures>();
 const sessions = MutableHashMap.empty<string, Session>();
 const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
 /** The name of each `EmailOtpStore` call, in order. */
@@ -178,6 +186,8 @@ const emailOtpStore = {
       MutableHashMap.set(otpRecords, recordKey(email, purpose), updated);
       return updated.attempts;
     }),
+
+  ...recordingOtpFailures<EmailOtpPurpose>(otpFailures, storeOps),
 };
 
 const sessionConfig: SessionConfig = {
@@ -238,6 +248,7 @@ describe("EmailOtpService", () => {
     MutableHashMap.clear(users);
     MutableHashMap.clear(identifierRecords);
     MutableHashMap.clear(otpRecords);
+    MutableHashMap.clear(otpFailures);
     MutableHashMap.clear(sessions);
     MutableHashMap.clear(passwordHashes);
     sentOtps.splice(0, sentOtps.length);
@@ -279,6 +290,7 @@ describe("EmailOtpService", () => {
         Effect.gen(function* () {
           const service = yield* EmailOtp.make({
             otpLength: 8,
+            resendCooldown: 0,
             sendVerificationOtp: recordingSend,
           });
           yield* service.send("repeat@example.com", "sign-in");
@@ -392,6 +404,31 @@ describe("EmailOtpService", () => {
     );
     expect(record?.attempts).toBe(0);
     expect(MutableHashMap.size(sessions)).toBe(0);
+  });
+
+  it("counts no failure against the email when beforeAuthenticate refuses a wrong code (#590, #592)", async () => {
+    const testContext = await makeTestContext();
+    const seen: Array<AuthenticateAttempt> = [];
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+          yield* service.send("gated@example.com", "sign-in");
+          yield* Effect.flip(service.signIn("gated@example.com", wrongCode));
+        }),
+        testContext,
+      ).pipe(Effect.provide(authenticateGate(seen, true))),
+    );
+
+    // The hook refused before the code was checked: no attempt, no failure budget.
+    expect(seen).toHaveLength(1);
+    expect(
+      Option.getOrUndefined(
+        MutableHashMap.get(otpRecords, recordKey("gated@example.com", "sign-in")),
+      )?.attempts,
+    ).toBe(0);
+    expect(MutableHashMap.size(otpFailures)).toBe(0);
   });
 
   it("clears a squatter's password and sessions on the address's first proof (#440)", async () => {
@@ -793,22 +830,37 @@ describe("EmailOtpService", () => {
     expect(MutableHashMap.size(otpRecords)).toBe(2);
   });
 
-  it("should not apply the cooldown when resendCooldown is not configured", async () => {
+  it("should apply a 60 s cooldown by default, and none with resendCooldown: 0 (#590)", async () => {
     const testContext = await makeTestContext();
 
-    await Effect.runPromise(
+    const { defaulted, disabled } = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
-          yield* service.send("repeat@example.com", "sign-in");
-          yield* service.send("repeat@example.com", "sign-in");
+          const defaultService = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+          const disabledService = yield* EmailOtp.make({
+            sendVerificationOtp: recordingSend,
+            resendCooldown: 0,
+          });
+          return {
+            defaulted: yield* sendTwice(defaultService.send("default@example.com", "sign-in")),
+            disabled: yield* sendTwice(disabledService.send("repeat@example.com", "sign-in")),
+          };
         }),
         testContext,
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    expect(sentOtps.length).toBe(2);
-    expect(MutableHashMap.size(otpRecords)).toBe(1);
+    expect(Result.isSuccess(defaulted[0])).toBe(true);
+    const refused = defaulted[1];
+    assert(Result.isFailure(refused) && P.isTagged(refused.failure, "ResendTooSoonError"));
+    expect(Duration.toMillis(refused.failure.retryAfter)).toBeGreaterThan(0);
+    expect(Duration.toMillis(refused.failure.retryAfter)).toBeLessThanOrEqual(60_000);
+    expect(disabled.every(Result.isSuccess)).toBe(true);
+    expect(sentOtps.map((sent) => sent.email)).toEqual([
+      "default@example.com",
+      "repeat@example.com",
+      "repeat@example.com",
+    ]);
   });
 
   // #415: where `send` hides whether the email has an account, an unknown email
@@ -950,6 +1002,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
     MutableHashMap.clear(users);
     MutableHashMap.clear(identifierRecords);
     MutableHashMap.clear(otpRecords);
+    MutableHashMap.clear(otpFailures);
     MutableHashMap.clear(sessions);
     sentOtps.splice(0, sentOtps.length);
     storeOps.length = 0;
@@ -1090,7 +1143,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
   );
 
   it.each(hidden)(
-    "does the same store work to send to a known and an unknown email without a cooldown ($purpose)",
+    "does the same store work to send to a known and an unknown email ($purpose)",
     async ({ purpose, disableSignUp }) => {
       const { knownOps, unknownOps } = await runPromise(
         Effect.gen(function* () {
@@ -1106,7 +1159,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       );
 
       expect(unknownOps).toEqual(knownOps);
-      expect(knownOps).toEqual(["upsert"]);
+      expect(knownOps).toEqual(["get", "getFailures", "upsert"]);
       expect(recordOf("missing@example.com", purpose)()).toEqual(
         recordOf("member@example.com", purpose)(),
       );
@@ -1190,5 +1243,159 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       .filter((span) => span.name === "EmailOtpService.signIn")
       .map((span) => span.attributes.get("auth.otp.failure"));
     expect(reasons).toEqual(["mismatch", "mismatch", "attempts", "missing"]);
+  });
+});
+
+// #590: `maxAttempts` bounds one code, and a resend issues a new one, so the
+// wrong codes an address accepts must be bounded across resends: a failure
+// count per email + purpose that a resend never resets, delaying each send
+// once it grows, and cleared only by a successful verification.
+const runInContext = <A, E>(
+  program: Effect.Effect<
+    A,
+    E,
+    | EmailOtpStore
+    | EmailOtpUserStore
+    | IdentifierStore
+    | UserStore
+    | SessionService
+    | EmailPasswordStore
+    | SecureRandom.SecureRandom
+    | Hooks
+  >,
+) =>
+  makeTestContext().then((context) =>
+    Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(TestHooks))),
+  );
+
+/** The #590 attack against `email` for `horizon` ms, with the default policy. */
+const attackEmail = (
+  email: string,
+  options: {
+    readonly purpose?: EmailOtpPurpose;
+    readonly disableSignUp?: boolean;
+    readonly horizon?: number;
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const purpose = options.purpose ?? "sign-in";
+    const service = yield* EmailOtp.make({
+      disableSignUp: options.disableSignUp ?? false,
+      sendVerificationOtp: recordingSend,
+    });
+    return yield* bruteForce({
+      send: service.send(email, purpose),
+      guess:
+        purpose === "sign-in"
+          ? service.signIn(email, wrongCode)
+          : service.check(email, wrongCode, purpose),
+      maxAttempts: 3,
+      horizon: options.horizon ?? day,
+      maxSends: 1000,
+    });
+  });
+
+describe("EmailOtpService failure backoff across resends (#590)", () => {
+  const member = "member@example.com";
+
+  beforeEach(() => {
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(otpRecords);
+    MutableHashMap.clear(otpFailures);
+    MutableHashMap.clear(sessions);
+    sentOtps.splice(0, sentOtps.length);
+    storeOps.length = 0;
+    createdWith.length = 0;
+    addUser({
+      id: "user-member",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-member", member, true);
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("bounds the wrong codes at one email in a day, however often it resends", async () => {
+    const result = await runInContext(attackEmail(member));
+
+    // Before #590 all 1000 sends issued a code at once: 3000 guesses.
+    expect(result).toEqual(defaultBackoffDay);
+    expect(Option.getOrUndefined(MutableHashMap.get(otpFailures, `sign-in:${member}`))).toEqual({
+      count: 18,
+      lastFailureAt: expect.any(Number),
+    });
+  });
+
+  it("holds the backoff at its one-day cap after the first day", async () => {
+    const result = await runInContext(attackEmail(member, { horizon: 7 * day }));
+
+    // The first day's 6 codes, then one code a day for the other six.
+    expect(result.sends).toBe(12);
+    expect(result.guesses).toBe(36);
+    expect(result.waits.slice(defaultBackoffDay.waits.length)).toEqual(Arr.makeBy(6, () => day));
+  });
+
+  it.each([
+    { purpose: "sign-in", disableSignUp: true },
+    { purpose: "forget-password", disableSignUp: false },
+  ] as const)(
+    "delays a known and an unknown email alike ($purpose, disableSignUp: $disableSignUp)",
+    async ({ purpose, disableSignUp }) => {
+      const { known, unknown } = await runInContext(
+        Effect.gen(function* () {
+          // Each address has its own count, so the second run starts afresh.
+          return {
+            known: yield* attackEmail(member, { purpose, disableSignUp }),
+            unknown: yield* attackEmail("missing@example.com", { purpose, disableSignUp }),
+          };
+        }),
+      );
+
+      expect(unknown).toEqual(known);
+      expect(known).toEqual(defaultBackoffDay);
+      expect(sentOtps.every((sent) => sent.email === member)).toBe(true);
+    },
+  );
+
+  it("never locks the owner out: after the delay a code signs in and resets the count", async () => {
+    const { first, afterSignIn } = await runInContext(
+      Effect.gen(function* () {
+        const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+        // Three codes' worth of wrong guesses puts the email in the backoff.
+        const spent = yield* bruteForce({
+          send: service.send(member, "sign-in"),
+          guess: service.signIn(member, wrongCode),
+          maxAttempts: 3,
+          horizon: 10 * 60_000,
+          maxSends: 3,
+        });
+        const refused = yield* Effect.flip(service.send(member, "sign-in"));
+        assert(P.isTagged(refused, "ResendTooSoonError"));
+        yield* advanceTime(Duration.toMillis(refused.retryAfter));
+
+        // The owner's send now goes through, and the right code signs in.
+        yield* service.send(member, "sign-in");
+        const { user } = yield* service.signIn(member, recorded(sentOtps, 3).otp);
+        expect(user.id).toBe("user-member");
+        const budget = Option.getOrNull(MutableHashMap.get(otpFailures, `sign-in:${member}`));
+
+        // With the count reset, one wrong code waits only the cooldown.
+        yield* service.send(member, "sign-in");
+        yield* Effect.flip(service.signIn(member, wrongCode));
+        yield* advanceTime(60_000);
+        yield* service.send(member, "sign-in");
+        return { first: spent, afterSignIn: budget };
+      }),
+    );
+
+    expect(first.guesses).toBe(9);
+    expect(afterSignIn).toBeNull();
+    expect(sentOtps).toHaveLength(6);
   });
 });

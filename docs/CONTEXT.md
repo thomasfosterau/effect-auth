@@ -83,7 +83,8 @@ _Avoid_: storing codes as a JSON array on the enrollment record.
 
 **OAuthState**: single-use anti-CSRF artifact tying a callback to the redirect that initiated it.
 Never seen by the user — round-tripped via redirect.
-**WebAuthnChallenge**: single-use freshness proof for a WebAuthn assertion. Server-side only.
+**WebAuthnChallenge**: single-use freshness proof for one WebAuthn ceremony, registration or
+authentication; the other ceremony refuses it. Server-side only.
 
 ### Auth state — _record of having authenticated_
 

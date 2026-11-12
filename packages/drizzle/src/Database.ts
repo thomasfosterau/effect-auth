@@ -166,9 +166,38 @@ export interface DrizzleFieldsSelectBuilder<TFields extends DrizzleSelectFields>
   from(table: Table): DrizzleRowSelectFrom<DrizzleSelected<TFields>>;
 }
 
+/** A value an upsert sets a column to: a plain value, or a SQL expression. */
+export type DrizzleUpsertValue = SQLWrapper | string | number | boolean | Date | null;
+
+/** What an upsert sets on the row it found, by column key. */
+export type DrizzleUpsertSet = Readonly<Record<string, DrizzleUpsertValue>>;
+
+/** An `INSERT ... ON CONFLICT DO UPDATE` that can still name what it returns. */
+export interface DrizzleConflictUpdate extends DrizzleExecutable<unknown> {
+  returning<TFields extends DrizzleSelectFields>(
+    fields: TFields,
+  ): DrizzleExecutable<Array<DrizzleSelected<TFields>>>;
+}
+
+/**
+ * An `INSERT ... VALUES`, runnable as-is or turned into an upsert.
+ *
+ * The upsert is the one place the dialects spell differently: PostgreSQL and
+ * SQLite have `onConflictDoUpdate` (with `RETURNING`), MySQL has
+ * `onDuplicateKeyUpdate` (without). Each handle carries exactly one of the two,
+ * so both are optional here and the rate-limit store picks whichever it finds.
+ */
+export interface DrizzleInsertValues extends DrizzleExecutable<unknown> {
+  onConflictDoUpdate?(config: {
+    readonly target: Column;
+    readonly set: DrizzleUpsertSet;
+  }): DrizzleConflictUpdate;
+  onDuplicateKeyUpdate?(config: { readonly set: DrizzleUpsertSet }): DrizzleExecutable<unknown>;
+}
+
 /** The value `db.insert(table)` returns. */
 export interface DrizzleInsertBuilder<TTable extends Table> {
-  values(values: TTable["$inferInsert"]): DrizzleExecutable<unknown>;
+  values(values: TTable["$inferInsert"]): DrizzleInsertValues;
 }
 
 /** A statement whose only remaining step is its `WHERE`. */

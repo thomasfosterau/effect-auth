@@ -28,6 +28,9 @@ export {
 } from "./MultiFactor.ts";
 export {
   base64UrlDecode,
+  WebAuthnCeremony,
+  isWebAuthnCeremony,
+  type AuthenticatorFlags,
   type WebAuthnChallenge,
   type WebAuthnCredential,
   type WebAuthnConfig,

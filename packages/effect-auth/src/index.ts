@@ -61,7 +61,12 @@ export * from "./RateLimitPersistence.ts";
 export * from "./KeyValueStores.ts";
 
 // Core user service
-export { UserServiceStore, type UpdateUserInput, UserService } from "./User.ts";
+export {
+  SIGN_UP_PROTECTED_ATTRIBUTES,
+  UserServiceStore,
+  type UpdateUserInput,
+  UserService,
+} from "./User.ts";
 
 // Feature modules
 export {

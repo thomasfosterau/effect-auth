@@ -60,9 +60,13 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as ApiKey from "../ApiKey.ts";
+import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "../email/EmailOtp.ts";
+import { type PhoneOtpPurpose, type PhoneOtpRecord, PhoneOtpStore } from "../PhoneOtp.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
+import type { CodeRecord, CodeStore } from "../OtpCode.ts";
 import { type PendingMultiFactor, PendingMultiFactorStore } from "../multifactor/MultiFactor.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "../multifactor/WebAuthn.ts";
 import {
   type Member,
   type OrgRole,
@@ -1024,6 +1028,126 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
   ]);
 
 // ---------------------------------------------------------------------------
+// ChallengeStore (WebAuthn)
+// ---------------------------------------------------------------------------
+
+/** Fresh challenge bytes: a random UUID's text, so cases never collide. */
+const challengeBytes = (): Uint8Array => new TextEncoder().encode(uuid());
+
+/** A challenge with its bytes as a plain array, so two compare by content. */
+const challengeView = (challenge: WebAuthnChallenge | null) =>
+  challenge === null ? null : { ...challenge, challenge: Arr.fromIterable(challenge.challenge) };
+
+/**
+ * The WebAuthn `ChallengeStore` contract: a challenge round-trips with its
+ * bytes, its ceremony, its expiry and its user (absent for a discoverable
+ * authentication challenge), a miss is `null`, `create` under bytes already
+ * stored replaces that challenge (ceremony and user included), and `delete`
+ * removes it (a no-op for unknown bytes). The ceremony is what keeps an
+ * authentication challenge from being redeemed as a registration (#591), so a
+ * store that drops or defaults it fails here.
+ *
+ * @since 0.3.0
+ * @category suites
+ */
+export const challengeStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | ChallengeStore> =>
+  suite<E, R, ChallengeStore>("ChallengeStore", options, [
+    {
+      name: "create returns the challenge, get reads it back with its ceremony, and a miss is null",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ChallengeStore;
+          const userId = yield* newUser();
+          const challenges: ReadonlyArray<WebAuthnChallenge> = [
+            {
+              challenge: challengeBytes(),
+              ceremony: "registration",
+              expiresAt: at(60_000).getTime(),
+              userId,
+            },
+            {
+              challenge: challengeBytes(),
+              ceremony: "authentication",
+              expiresAt: at(60_000).getTime(),
+              userId,
+            },
+            {
+              challenge: challengeBytes(),
+              ceremony: "authentication",
+              expiresAt: at(60_000).getTime(),
+            },
+          ];
+          yield* Effect.forEach(
+            challenges,
+            (challenge) =>
+              Effect.gen(function* () {
+                yield* expectEqual(
+                  `create (${challenge.ceremony})`,
+                  challengeView(yield* store.create(challenge)),
+                  challengeView(challenge),
+                );
+                yield* expectEqual(
+                  `get (${challenge.ceremony}, ${challenge.userId === undefined ? "no user" : "bound"})`,
+                  challengeView(yield* store.get(challenge.challenge)),
+                  challengeView(challenge),
+                );
+              }),
+            { concurrency: 1, discard: true },
+          );
+          yield* expectEqual("get of unknown bytes", yield* store.get(challengeBytes()), null);
+        }),
+    },
+    {
+      name: "create under stored bytes replaces the challenge, its ceremony and its user",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ChallengeStore;
+          const bytes = challengeBytes();
+          yield* store.create({
+            challenge: bytes,
+            ceremony: "registration",
+            expiresAt: at(60_000).getTime(),
+            userId: yield* newUser(),
+          });
+          const replacement: WebAuthnChallenge = {
+            challenge: bytes,
+            ceremony: "authentication",
+            expiresAt: at(90_000).getTime(),
+          };
+          yield* store.create(replacement);
+          yield* expectEqual(
+            "get after the replacement",
+            challengeView(yield* store.get(bytes)),
+            challengeView(replacement),
+          );
+        }),
+    },
+    {
+      name: "delete removes the challenge, and is a no-op for unknown bytes",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ChallengeStore;
+          const challenge: WebAuthnChallenge = {
+            challenge: challengeBytes(),
+            ceremony: "registration",
+            expiresAt: at(60_000).getTime(),
+            userId: yield* newUser(),
+          };
+          yield* store.create(challenge);
+          yield* store.delete(challenge.challenge);
+          yield* store.delete(challengeBytes());
+          yield* expectEqual(
+            "get of the deleted challenge",
+            yield* store.get(challenge.challenge),
+            null,
+          );
+        }),
+    },
+  ]);
+
+// ---------------------------------------------------------------------------
 // OrganizationStore (memberships)
 // ---------------------------------------------------------------------------
 
@@ -1262,3 +1386,197 @@ export const organizationStoreConformance = <E = never, R = never>(
         }),
     },
   ]);
+
+// ---------------------------------------------------------------------------
+// EmailOtpStore / PhoneOtpStore
+// ---------------------------------------------------------------------------
+
+/** The part of a one-time code store the code suites exercise. */
+interface CodeStoreShape<P, A extends CodeRecord> extends CodeStore<P, A> {
+  readonly upsert: (record: A) => Effect.Effect<A, Errors.AuthError>;
+}
+
+/** A record's code fields: a fresh digest, no attempts, five minutes to live. */
+const codeFields = () => ({
+  otpHash: digest(),
+  attempts: 0,
+  createdAt: at().getTime(),
+  expiresAt: at(5 * 60 * 1000).getTime(),
+});
+
+/** A failure budget counted at `at(offset)`. */
+const failuresAt = (count: number, offset: number): Types.OtpFailures => ({
+  count,
+  lastFailureAt: at(offset).getTime(),
+});
+
+/** The cases `EmailOtpStore` and `PhoneOtpStore` share, over two of the store's purposes. */
+const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
+  contract: string,
+  options: ConformanceOptions<E, R> | undefined,
+  spec: {
+    readonly store: Effect.Effect<CodeStoreShape<P, A>, never, S>;
+    readonly purposes: readonly [P, P];
+    readonly newAddress: () => string;
+    readonly makeRecord: (address: string, purpose: P) => A;
+  },
+): ConformanceSuite<E, R | S> => {
+  const [purpose, other] = spec.purposes;
+  return suite<E, R, S>(contract, options, [
+    {
+      name: "upsert replaces the pair's record, get reads it back, incrementAttempts counts and delete removes it",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* spec.store;
+          const address = spec.newAddress();
+          const first = spec.makeRecord(address, purpose);
+          const second = spec.makeRecord(address, purpose);
+          yield* expectEqual("upsert", yield* store.upsert(first), first);
+          yield* store.upsert(second);
+          yield* expectEqual(
+            "get after a second upsert",
+            yield* store.get(address, purpose),
+            second,
+          );
+          yield* expectEqual("get of the other purpose", yield* store.get(address, other), null);
+          const counts = [
+            yield* store.incrementAttempts(address, purpose),
+            yield* store.incrementAttempts(address, purpose),
+          ];
+          yield* expectEqual("incrementAttempts", counts, [1, 2]);
+          yield* store.delete(address, purpose);
+          yield* store.delete(spec.newAddress(), purpose);
+          yield* expectEqual("get after delete", yield* store.get(address, purpose), null);
+        }),
+    },
+    {
+      name: "recordFailure counts each pair's wrong codes from 1, independently, at the time given",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* spec.store;
+          const address = spec.newAddress();
+          const neighbour = spec.newAddress();
+          yield* expectEqual(
+            "getFailures before any",
+            yield* store.getFailures(address, purpose),
+            null,
+          );
+          const counted = [
+            yield* store.recordFailure(address, purpose, at(1).getTime()),
+            yield* store.recordFailure(address, purpose, at(2).getTime()),
+            yield* store.recordFailure(address, other, at(3).getTime()),
+            yield* store.recordFailure(neighbour, purpose, at(4).getTime()),
+          ];
+          yield* expectEqual("recordFailure", counted, [
+            failuresAt(1, 1),
+            failuresAt(2, 2),
+            failuresAt(1, 3),
+            failuresAt(1, 4),
+          ]);
+          yield* expectEqual(
+            "getFailures",
+            yield* store.getFailures(address, purpose),
+            failuresAt(2, 2),
+          );
+        }),
+    },
+    {
+      name: "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* spec.store;
+          const address = spec.newAddress();
+          yield* store.upsert(spec.makeRecord(address, purpose));
+          yield* store.recordFailure(address, purpose, at(1).getTime());
+          yield* store.incrementAttempts(address, purpose);
+          // A resend replaces the record; the budget must stay.
+          yield* store.upsert(spec.makeRecord(address, purpose));
+          yield* store.delete(address, purpose);
+          yield* expectEqual(
+            "getFailures",
+            yield* store.getFailures(address, purpose),
+            failuresAt(1, 1),
+          );
+          yield* expectEqual(
+            "recordFailure after the record is gone",
+            yield* store.recordFailure(address, purpose, at(2).getTime()),
+            failuresAt(2, 2),
+          );
+        }),
+    },
+    {
+      name: "clearFailures forgets only the pair's budget, and is a no-op without one",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* spec.store;
+          const address = spec.newAddress();
+          yield* store.upsert(spec.makeRecord(address, purpose));
+          yield* Effect.forEach(
+            [
+              [other, 3],
+              [purpose, 1],
+              [purpose, 2],
+            ] as const,
+            ([pairPurpose, offset]) =>
+              store.recordFailure(address, pairPurpose, at(offset).getTime()),
+            { concurrency: 1, discard: true },
+          );
+          yield* store.clearFailures(address, purpose);
+          yield* store.clearFailures(spec.newAddress(), purpose);
+          yield* expectEqual(
+            "getFailures after clear",
+            yield* store.getFailures(address, purpose),
+            null,
+          );
+          yield* expectEqual(
+            "getFailures of the other purpose",
+            yield* store.getFailures(address, other),
+            failuresAt(1, 3),
+          );
+          yield* expectThat("the record stays", (yield* store.get(address, purpose)) !== null);
+          yield* expectEqual(
+            "the first count after a clear",
+            yield* store.recordFailure(address, purpose, at(4).getTime()),
+            failuresAt(1, 4),
+          );
+        }),
+    },
+  ]);
+};
+
+/**
+ * The `EmailOtpStore` contract: one record per email and purpose (`upsert`
+ * replaces it, `incrementAttempts` counts from 1, `delete` removes it, a miss
+ * is `null`), and a failure budget per pair (#590) that counts wrong codes
+ * from 1 at the time given, outlives every write to the pair's record, and is
+ * forgotten only by `clearFailures`.
+ *
+ * @since 0.3.0
+ * @category suites
+ */
+export const emailOtpStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | EmailOtpStore> =>
+  codeStoreSuite<EmailOtpPurpose, EmailOtpRecord, EmailOtpStore, E, R>("EmailOtpStore", options, {
+    store: EmailOtpStore,
+    purposes: ["sign-in", "forget-password"],
+    newAddress: () => `${uuid()}@example.com`,
+    makeRecord: (address, purpose) => ({ email: address, purpose, ...codeFields() }),
+  });
+
+/**
+ * The `PhoneOtpStore` contract: as {@link emailOtpStoreConformance}, keyed by
+ * phone number and purpose.
+ *
+ * @since 0.3.0
+ * @category suites
+ */
+export const phoneOtpStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | PhoneOtpStore> =>
+  codeStoreSuite<PhoneOtpPurpose, PhoneOtpRecord, PhoneOtpStore, E, R>("PhoneOtpStore", options, {
+    store: PhoneOtpStore,
+    purposes: ["sign-in", "phone-verification"],
+    newAddress: () => `+${uuid()}`,
+    makeRecord: (phoneNumber, purpose) => ({ phoneNumber, purpose, ...codeFields() }),
+  });

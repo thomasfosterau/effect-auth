@@ -27,10 +27,11 @@ import * as UserStore from "./UserStore.ts";
  * any of the three) to match the handle you provided, or a `defineSchema(...)`
  * mapping to run the stores against tables this package did not define.
  *
- * Stores beyond these three — OAuth accounts, WebAuthn credentials, rate
- * limits, and the rest — are not covered here yet; use
- * `@thomasfosterau/effect-auth/sql` or a `KeyValueStore`-backed layer from
- * core for those.
+ * The package's other stores — `EmailPasswordStore`, `ApiKeyStore`,
+ * `RateLimitStore`, `TokenStore` — have layers of their own, which take the
+ * same tables; merge the ones the application uses. Stores this package does
+ * not implement (OAuth accounts, WebAuthn credentials, and the rest) come from
+ * `@thomasfosterau/effect-auth/sql` or a `KeyValueStore`-backed layer from core.
  *
  * @example
  * ```ts

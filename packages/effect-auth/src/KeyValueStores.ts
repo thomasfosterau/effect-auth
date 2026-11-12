@@ -33,7 +33,7 @@
  *
  * ## Atomicity caveat
  *
- * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts`,
+ * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts` / `recordFailure`,
  * `PendingMultiFactorStore.recordFailedAttempt` / the secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
  * the same count and only bump it once. This is acceptable for the KV
@@ -61,8 +61,13 @@ import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { type PendingMultiFactor, PendingMultiFactorStore } from "./multifactor/MultiFactor.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "./multifactor/WebAuthn.ts";
+import {
+  ChallengeStore,
+  isWebAuthnCeremony,
+  type WebAuthnChallenge,
+} from "./multifactor/WebAuthn.ts";
 import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
+import type { OtpFailures } from "./Types.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs & helpers
@@ -191,20 +196,29 @@ export const OAuthStateStoreKV: Layer.Layer<OAuthStateStore, never, KeyValueStor
 // WebAuthn ChallengeStore
 // ---------------------------------------------------------------------------
 
-/** JSON-safe encoding of a {@link WebAuthnChallenge} (bytes as base64). */
+/**
+ * JSON-safe encoding of a {@link WebAuthnChallenge} (bytes as base64). An
+ * entry written before ceremonies were recorded (#591) has no `ceremony`.
+ */
 interface StoredChallenge {
   readonly challenge: string;
+  readonly ceremony?: unknown;
   readonly expiresAt: number;
   readonly userId?: string;
 }
 
 const challengeKey = (challenge: Uint8Array) => `webauthn-challenge:${toBase64(challenge)}`;
 
-const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge => ({
-  challenge: fromBase64(stored.challenge),
-  expiresAt: stored.expiresAt,
-  ...(stored.userId !== undefined ? { userId: stored.userId } : {}),
-});
+/** A stored challenge without a known ceremony reads as missing, so no ceremony redeems it. */
+const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge | null =>
+  isWebAuthnCeremony(stored.ceremony)
+    ? {
+        challenge: fromBase64(stored.challenge),
+        ceremony: stored.ceremony,
+        expiresAt: stored.expiresAt,
+        ...(stored.userId !== undefined ? { userId: stored.userId } : {}),
+      }
+    : null;
 
 /**
  * Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
@@ -222,6 +236,7 @@ export const challengeStoreKV: Effect.Effect<
           challengeKey(challenge.challenge),
           {
             challenge: toBase64(challenge.challenge),
+            ceremony: challenge.ceremony,
             expiresAt: challenge.expiresAt,
             ...(challenge.userId !== undefined ? { userId: challenge.userId } : {}),
           } satisfies StoredChallenge,
@@ -497,13 +512,19 @@ export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.
 // ---------------------------------------------------------------------------
 
 const emailOtpKey = (email: string, purpose: EmailOtpPurpose) => `email-otp:${purpose}:${email}`;
+/** The pair's failure budget: a key of its own, outside the `email-otp:` prefix `purgeExpiredKV` sweeps. */
+const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
+  `email-otp-failures:${purpose}:${email}`;
 
 /**
  * Build an {@link EmailOtpStore} over the ambient `KeyValueStore`.
  *
  * There is at most one active OTP per email + purpose pair, so the pair is
- * the key itself and no secondary index is needed. `incrementAttempts` is
- * read-modify-write (see the module docs on atomicity).
+ * the key itself and no secondary index is needed. The pair's failure budget
+ * (#590) lives under its own `email-otp-failures:` key, so replacing or
+ * deleting the OTP leaves it, and it carries no expiry: only `clearFailures`
+ * removes it. `incrementAttempts` and `recordFailure` are read-modify-write
+ * (see the module docs on atomicity).
  */
 export const emailOtpStoreKV: Effect.Effect<
   typeof EmailOtpStore.Service,
@@ -531,6 +552,18 @@ export const emailOtpStoreKV: Effect.Effect<
         yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
         return updated.attempts;
       }),
+    getFailures: (email, purpose) =>
+      kv.read<OtpFailures>(emailOtpFailuresKey(email, purpose), "emailOtp.getFailures"),
+    recordFailure: (email, purpose, at) =>
+      Effect.gen(function* () {
+        const key = emailOtpFailuresKey(email, purpose);
+        const stored = yield* kv.read<OtpFailures>(key, "emailOtp.recordFailure");
+        const failures: OtpFailures = { count: (stored?.count ?? 0) + 1, lastFailureAt: at };
+        yield* kv.write(key, failures, "emailOtp.recordFailure");
+        return failures;
+      }),
+    clearFailures: (email, purpose) =>
+      kv.remove(emailOtpFailuresKey(email, purpose), "emailOtp.clearFailures"),
   } satisfies typeof EmailOtpStore.Service;
 });
 
