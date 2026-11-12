@@ -50,6 +50,7 @@ For Effect APIs, read what the pinned `effect` ships: `node_modules/effect/AGENT
 
 - `vp install` — dependencies, plus the Vite+ git hooks (pre-commit runs `vp staged`: format + lint on staged files). There is no pre-push hook.
 - `vp check` — format + lint (Oxfmt + Oxlint). Lint is type-aware through oxlint-tsgolint, which resolves sibling packages through their built `dist/`, so run `vp run build` first (`typeCheck` stays off: `vp run check` is the type gate). `vp run check` — the type gate: every package's `tsc` over sources and tests (`svelte-check` for `packages/svelte`), plus `vp test --typecheck`, plus `vp run check:scripts` over `scripts/`. They are different commands.
+- `vp run ci` — every gate CI runs, in CI's order, stopping at the first failure: build, `vp check`, docs, both `check:dist` runs, `vp run check`, `vp run -r test:unit`, `pnpm audit --audit-level high` (network) and the alchemy runtime suites (`test:alchemy`; alchemy-postgres's server cases need `DATABASE_URL`). CI's one workflow runs only this, on Node `lts` and `latest`.
 - `vp run -r test:unit` — every package's unit tests.
 - `vp run build` — every package's `dist/`. Each package's `build`, `check` and `test:unit` first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so a fresh checkout needs no manual build.
 - `vp run check:dist` (network) — packs the built packages, installs them from the registry beside an exact `effect` and imports every entry point. By default each package gets the floor of its own packed `effect` peer range (`catalogs.alchemy-peers` floors the Alchemy packages apart from the rest, so they install in their own project); `-- --effect catalog` installs all of them at the version the workspace builds against; `-- --effect <version>` skips each package whose range excludes that version. Each run fails if the installed `effect` misses the range one of our packages or an installed peer (such as `alchemy`) declares. Run `vp run build` first.
@@ -87,7 +88,7 @@ The full gate list is in [AGENTS.md → Verification](AGENTS.md#verification). W
 
 ## Before you open a pull request
 
-Run the gates in [AGENTS.md → Verification](AGENTS.md#verification), in that order, and record each result in the PR body; CI's `test` job runs the same list and its `alchemy` job runs the alchemy runtime suites. The PR template ([.github/pull_request_template.md](.github/pull_request_template.md)) asks for the rest.
+Run the gates in [AGENTS.md → Verification](AGENTS.md#verification), in that order, and record each result in the PR body; `vp run ci` runs steps 1–8 and the alchemy runtime suites in one command, and CI runs exactly that. The PR template ([.github/pull_request_template.md](.github/pull_request_template.md)) asks for the rest.
 
 ## Reporting a vulnerability
 

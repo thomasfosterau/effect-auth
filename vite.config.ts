@@ -315,6 +315,29 @@ export default defineConfig({
   },
   run: {
     tasks: {
+      // Everything CI checks, in CI's order, as one fail-fast chain: the
+      // single `ci` workflow (.github/workflows/ci.yml) runs only `vp run ci`
+      // after `vp install --frozen-lockfile`. AGENTS.md (Verification) lists
+      // the same gates, steps 1–8, then the alchemy runtime suites. Build
+      // first: type-aware lint resolves each workspace import through the
+      // sibling's built `dist/` (`lint.options` above). `check:dist` and
+      // `pnpm audit` need registry access; alchemy-postgres's
+      // `Postgres.test.ts` skips its cases without `DATABASE_URL`, which
+      // does not yet reach the cached `test:alchemy` task (#766).
+      ci: {
+        command: [
+          "vp run build",
+          "vp check",
+          "vp run docs",
+          "vp run check:dist",
+          "vp run check:dist -- --effect catalog",
+          "vp run check",
+          "vp run -r test:unit",
+          "pnpm audit --audit-level high",
+          "vp run --filter @thomasfosterau/effect-auth-alchemy-cloudflare --filter @thomasfosterau/effect-auth-alchemy-postgres test:alchemy",
+        ].join(" && "),
+        cache: false,
+      },
       // Every package's unit suite under one Istanbul coverage map
       // (`coverage/coverage-final.json`), which `fallow audit` reads for exact
       // per-function CRAP scores (`health.coverage` in .fallowrc.json).
