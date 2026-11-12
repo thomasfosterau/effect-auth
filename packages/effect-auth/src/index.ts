@@ -240,6 +240,7 @@ export {
   type UpdateTeamInput,
   type UpsertOrgRoleInput,
   type FullOrganization,
+  type AcceptedInvitation,
   OrganizationService,
 } from "./Organization.ts";
 export {

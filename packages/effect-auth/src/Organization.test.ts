@@ -576,12 +576,15 @@ describe("OrganizationService", () => {
 
         const userInvitations = yield* service.listUserInvitations("invitee@example.com");
 
-        const member = yield* service.acceptInvitation("invitee-user", answer(invitation));
+        const { member, invitation: accepted } = yield* service.acceptInvitation(
+          "invitee-user",
+          answer(invitation),
+        );
 
         const afterAccept = yield* service.listUserInvitations("invitee@example.com");
         const full = yield* service.getFullOrganization(organization.id);
 
-        return { invitation, duplicate, userInvitations, member, afterAccept, full };
+        return { invitation, duplicate, userInvitations, member, accepted, afterAccept, full };
       }),
     );
 
@@ -598,6 +601,8 @@ describe("OrganizationService", () => {
     expect(result.userInvitations).toHaveLength(1);
     expect(result.member.userId).toBe("invitee-user");
     expect(result.member.role).toBe("member");
+    expect(result.accepted.id).toBe(result.invitation.id);
+    expect(result.accepted.status).toBe("accepted");
     expect(result.afterAccept).toHaveLength(0);
     expect(
       Option.getOrUndefined(MutableHashMap.get(invitations, result.invitation.id))?.status,
@@ -748,7 +753,7 @@ describe("OrganizationService", () => {
           service.cancelInvitation("member-1", invitation.id),
         );
         const ownerCancel = yield* service.cancelInvitation("owner-1", invitation.id);
-        const orgInvitations = yield* service.listInvitations(organization.id);
+        const orgInvitations = yield* service.listInvitations("owner-1", organization.id);
 
         return { memberInvite, memberCancel, ownerCancel, orgInvitations };
       }),
@@ -759,6 +764,42 @@ describe("OrganizationService", () => {
     expect(result.ownerCancel.status).toBe("canceled");
     expect(result.orgInvitations).toHaveLength(1);
     expect(result.orgInvitations[0].status).toBe("canceled");
+  });
+
+  it("lists an organization's invitations only for a member holding invitation:create (#715)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        yield* service.createOrganization("stranger-1", { name: "Other", slug: "other" });
+        yield* service.inviteMember("owner-1", organization.id, {
+          email: "invitee@example.com",
+          role: "member",
+        });
+
+        const refusal = (actorId: string, organizationId: string) =>
+          Effect.flip(service.listInvitations(actorId, organizationId));
+        return {
+          owner: yield* service.listInvitations("owner-1", organization.id),
+          admin: yield* service.listInvitations("admin-1", organization.id),
+          stranger: yield* refusal("stranger-1", organization.id),
+          member: yield* refusal("member-1", organization.id),
+          unknown: yield* refusal("owner-1", "no-such-organization"),
+        };
+      }),
+    );
+
+    expect(result.owner.map((invitation) => invitation.email)).toEqual(["invitee@example.com"]);
+    expect(result.admin).toEqual(result.owner);
+    // A stranger, a member without the permission and an unknown id are
+    // refused alike, so the refusal tells no one which ids exist.
+    expect(result.stranger._tag).toBe("OrganizationError");
+    expect(result.member).toEqual(result.stranger);
+    expect(result.unknown).toEqual(result.stranger);
   });
 
   it("enforces the membership limit on invites and direct adds", async () => {
@@ -2115,7 +2156,7 @@ describe("OrganizationService - invitations", () => {
 
         const firstToken = tokenFor(invitation.id);
         const resent = yield* service.resendInvitation("owner-1", invitation.id);
-        const listed = yield* service.listInvitations(organization.id);
+        const listed = yield* service.listInvitations("owner-1", organization.id);
         // Only the digest is stored, so the resend mints a new token: the
         // link delivered first stops working.
         const staleLink = yield* Effect.result(
@@ -2124,7 +2165,10 @@ describe("OrganizationService - invitations", () => {
             token: firstToken,
           }),
         );
-        const accepted = yield* service.acceptInvitation("invitee-user", answer(invitation));
+        const { member: accepted } = yield* service.acceptInvitation(
+          "invitee-user",
+          answer(invitation),
+        );
         return { invitation, resent, listed, firstToken, staleLink, accepted };
       }),
     );
@@ -2291,7 +2335,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
     seedInviteeKey();
     const result = await withInvitation(false, (service, invitation, [current, other]) =>
       Effect.gen(function* () {
-        const member = yield* service.acceptInvitation("invitee-user", {
+        const { member } = yield* service.acceptInvitation("invitee-user", {
           ...answer(invitation),
           currentSessionId: current.id,
         });
@@ -2362,7 +2406,7 @@ describe("OrganizationService - answering by id from a verified address (#673)",
   it("accepts by id, without the token, for a verified matching address", async () => {
     const result = await withInvitation(true, (service, invitation, issued) =>
       Effect.gen(function* () {
-        const member = yield* service.acceptInvitation("invitee-user", {
+        const { member } = yield* service.acceptInvitation("invitee-user", {
           invitationId: invitation.id,
         });
         return { member, sessions: yield* alive(issued) };
@@ -2394,7 +2438,7 @@ describe("OrganizationService - answering by id from a verified address (#673)",
           service.rejectInvitation("invitee-user", { invitationId: invitation.id }),
         );
         const pending = Arr.fromIterable(MutableHashMap.values(invitations))[0].status;
-        const member = yield* service.acceptInvitation("invitee-user", {
+        const { member } = yield* service.acceptInvitation("invitee-user", {
           ...answer(invitation),
           currentSessionId: current.id,
         });

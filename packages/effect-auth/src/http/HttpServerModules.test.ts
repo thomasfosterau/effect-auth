@@ -941,6 +941,50 @@ describe("HTTP organization endpoints", () => {
     expect((await fx.handler(transitionInvitation(fourth, "pending", ownerSid))).status).toBe(400);
   });
 
+  it("lists an organization's invitations only to a member holding invitation:create (#715)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("member", "member@test.com");
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const memberSid = fx.makeSession("member");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+    expect((await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid))).status).toBe(
+      201,
+    );
+    const invited = await fx.handler(
+      apiReq(
+        "POST",
+        `/organizations/${org.id}/invitations`,
+        { data: { type: "invitations", attributes: { email: "new@test.com", role: "member" } } },
+        ownerSid,
+      ),
+    );
+    expect(invited.status).toBe(201);
+    const invitationId = (await jsonBody(invited, resourceBody({}))).data.id;
+
+    const list = (organizationId: string, sessionId: string) =>
+      fx.handler(
+        apiReq("GET", `/organizations/${organizationId}/invitations`, undefined, sessionId),
+      );
+
+    const permitted = await list(org.id, ownerSid);
+    expect(permitted.status).toBe(200);
+    expect((await jsonBody(permitted, collectionBody({}))).data.map((i) => i.id)).toEqual([
+      invitationId,
+    ]);
+
+    // A stranger and a member without the permission get exactly what an
+    // unknown organization id gets, so the answer reveals no ids.
+    const answer = async (res: Response) => ({ status: res.status, body: await res.text() });
+    const unknown = await answer(await list("no-such-organization", ownerSid));
+    expect(unknown.status).toBe(403);
+    expect(unknown.body).not.toContain("new@test.com");
+    expect(await answer(await list(org.id, strangerSid))).toEqual(unknown);
+    expect(await answer(await list(org.id, memberSid))).toEqual(unknown);
+  });
+
   it("answers an invitation by id from a verified address, and only from one (#673)", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
