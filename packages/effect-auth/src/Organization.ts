@@ -801,9 +801,15 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
-     * Fetch an organization together with all of its members.
+     * Fetch an organization together with all of its members, as `actorId`.
+     * Any active member may read it, as the team, domain and role listings
+     * (#717): the member list carries every member's user id and role. A
+     * non-member (a deactivated member included) and an organization that
+     * does not exist are refused with the same `OrganizationError`, so the
+     * refusal does not tell which organization ids exist.
      */
     readonly getFullOrganization: (
+      actorId: string,
       organizationId: string,
     ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError>;
 
@@ -843,7 +849,9 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<OrganizationDomain | null, OrganizationError | Errors.AuthError>;
 
     /**
-     * List the organizations a user belongs to.
+     * List the organizations a user is an active member of. A deactivated
+     * membership is left out, since its holder may not read the organization
+     * (`getFullOrganization`, #717).
      */
     readonly listOrganizations: (
       userId: string,
@@ -1931,8 +1939,12 @@ export const make = (
       }),
 
       getFullOrganization: Effect.fn("OrganizationService.getFullOrganization")(function* (
+        actorId: string,
         organizationId: string,
       ) {
+        // Any member reads it (#717). An unknown organization has no member, so
+        // it is refused exactly as a stranger is.
+        yield* requireMembership(actorId, organizationId);
         const organization = yield* getOrganizationOrFail(organizationId);
         const members = yield* store.listMembersByOrganization(organizationId);
         return { organization, members } satisfies FullOrganization;
@@ -1963,8 +1975,10 @@ export const make = (
         userId: string,
       ) {
         const memberships = yield* store.listMembersByUser(userId);
+        // Only active memberships (#717): a deactivated member may not read the
+        // organization, so the listing does not show it either.
         const organizations = yield* Effect.forEach(
-          memberships,
+          Arr.filter(memberships, isActiveMember),
           (membership) => store.getOrganizationById(membership.organizationId),
           { concurrency: 1 },
         );

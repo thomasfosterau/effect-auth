@@ -903,9 +903,11 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
 /**
  * `organizations`: the organizations the signed-in user belongs to.
  *
- * - `GET /organizations`: every organization the caller is a member of.
+ * - `GET /organizations`: every organization the caller is an active member
+ *   of (#717).
  * - `POST /organizations`: create one; the caller becomes its owner. `201`.
- * - `GET /organizations/:id`: one organization.
+ * - `GET /organizations/:id`: one organization (any member; a non-member
+ *   and an unknown id get the same `403`, #717).
  * - `PATCH /organizations/:id`: `name`, `slug`, `logo`, `metadata` and
  *   `jitProvisioning` (`organization:update`) and `defaultRole`
  *   (`role:manage`).
@@ -913,7 +915,8 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  * - `PATCH /organizations/active`: record the session's active organization
  *   (a linkage to it, or `null` to clear it); `204`.
  * - `GET /organizations/:id/members` · `POST /organizations/:id/members`: its
- *   memberships, and add one directly (`member:create`).
+ *   memberships (any member, refused as `GET /organizations/:id` is, #717),
+ *   and add one directly (`member:create`).
  * - `GET /organizations/:id/invitations` · `POST /organizations/:id/invitations`:
  *   its invitations, and invite someone by email (both `invitation:create`;
  *   a non-member and an unknown id get the same `403` as a member without
@@ -926,9 +929,10 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  * - `GET /organizations/:id/teams` · `POST /organizations/:id/teams`: its
  *   teams (any member), and create one (`team:create`).
  *
- * `404` when organizations are not enabled; `403` when the actor's role lacks
- * the permission, or (for a domain request) when the server has no
- * `OrganizationDomainStore`.
+ * `404` when organizations are not enabled; `403` when the actor is not a
+ * member, when the actor's role lacks the permission, when the organization
+ * does not exist (so the answer reveals no ids), or (for a domain request)
+ * when the server has no `OrganizationDomainStore`.
  */
 export const organizationsGroup = Group.make(
   R.Organization,
@@ -944,7 +948,7 @@ export const organizationsGroup = Group.make(
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
   Endpoint.get(R.Organization, {
-    errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
+    errors: [E.Unauthorized, E.Forbidden, E.NotFound, E.InternalServerError],
   }),
   Endpoint.update(R.Organization, { errors: resourceErrors }),
   Endpoint.delete(R.Organization, { errors: resourceErrors }),
