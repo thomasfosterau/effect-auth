@@ -124,7 +124,9 @@ describe("the kernel's limits", () => {
   it("recovers from a trap: the next call runs on a fresh instance", async () => {
     // 4 GiB of blocks cannot be allocated in 32-bit linear memory, so the
     // Rust side aborts (a wasm trap) rather than returning an error.
-    const huge = Argon2.argon2Hasher({ memoryCost: 4 * 1024 * 1024 - 8, timeCost: 1 });
+    // Raise the verify ceiling with it, or the hasher refuses the costs.
+    const memoryCost = 4 * 1024 * 1024 - 8;
+    const huge = Argon2.argon2Hasher({ memoryCost, timeCost: 1, maxMemoryKiB: memoryCost });
     const error = await run(Effect.flip(huge.hash("trap")));
     expect(error._tag).toBe("HashingError");
 

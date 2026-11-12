@@ -286,7 +286,9 @@ describe("twilioSmsSender's outbound request (#606)", () => {
       const body = trackedBody(cancelFails);
       const { fetch } = stubFetch(new Response(body.stream, { status: 200 }));
 
-      await run(Effect.flip(sendOneTo(twilioSmsSender({ ...baseConfig, fetch }))));
+      const sender = twilioSmsSender({ ...baseConfig, fetch });
+      const sent = sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } });
+      await expect(run(Effect.exit(sent))).resolves.toEqual(Exit.void);
 
       expect(body.cancelled()).toBe(true);
     },

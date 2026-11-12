@@ -13,7 +13,8 @@
  * serves it from the `workerd` binary at workerd's newest compatibility date
  * and at 2023-01-01 with `allow_eval_during_startup`, and hashes and verifies
  * inside `fetch`; it also pins that the 2023 date without the flag refuses
- * the worker at startup.
+ * the worker at startup, and that a stored hash over the verify ceiling
+ * (#752) is refused inside `fetch` while the isolate keeps serving.
  */
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -92,9 +93,15 @@ const run = (effect) =>
 
 const hasher = argon2Hasher();
 
+// Drawn on the first request (workerd refuses randomness at global scope), so
+// a test can tell whether later requests reach the same isolate.
+let isolate;
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    isolate ??= crypto.randomUUID();
+    if (url.pathname === "/isolate") return Response.json({ isolate });
     if (url.pathname === "/probe") {
       return Response.json({
         compile: await attempt(() => WebAssembly.compile(EMPTY_MODULE)),
@@ -262,7 +269,13 @@ const Roundtrip = Schema.Struct({
   rejected: Schema.optional(Verified),
 });
 
+const Isolate = Schema.Struct({ isolate: Schema.String });
+
 const DISALLOWED = "Wasm code generation disallowed by embedder";
+
+/** A stored hash demanding 4 TiB, which would grow the wasm memory past any isolate's. */
+const HUGE_M = 2 ** 32 - 1;
+const HUGE_MEMORY = (hashWasmFixtures[0]?.hash ?? "").replace("m=19456", `m=${HUGE_M}`);
 
 describe.each(SERVED_NAMES)("workerd, the %s worker", (name) => {
   it("refuses to compile wasm inside a request, but instantiates a compiled module", async () => {
@@ -283,6 +296,26 @@ describe.each(SERVED_NAMES)("workerd, the %s worker", (name) => {
     );
     expect(result.verified).toEqual({ ok: true, value: true });
     expect(result.rejected).toEqual({ ok: true, value: false });
+  });
+
+  it("refuses a stored hash over the verify ceiling inside fetch; the isolate keeps serving", async () => {
+    const before = await callWorker(Isolate, name, "/isolate");
+    const fixture = hashWasmFixtures[0];
+    assert(fixture !== undefined, "a hash-wasm fixture exists");
+    expect(HUGE_MEMORY).toContain(`$m=${HUGE_M},t=2,p=1$`);
+    const { password } = fixture;
+
+    expect(await callWorker(Verified, name, "/verify", { password, hash: HUGE_MEMORY })).toEqual({
+      ok: false,
+      tag: "HashingError",
+      message: `Argon2 hash exceeds the verify ceiling: m=${HUGE_M} is over maxMemoryKiB=131072`,
+      cause: "undefined",
+    });
+    expect(await callWorker(Verified, name, "/verify", { password, hash: fixture.hash })).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(await callWorker(Isolate, name, "/isolate")).toEqual(before);
   });
 
   it.each(hashWasmFixtures)("verifies a hash-wasm hash inside fetch: $label", async (fixture) => {

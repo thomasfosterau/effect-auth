@@ -5580,7 +5580,10 @@ const serve = (
   release: Effect.Effect<void>,
 ): AuthWebHandler => {
   // The IP limit is router middleware on every auth route, so it sees the
-  // endpoint the router matched rather than the raw path (#582).
+  // endpoint the router matched rather than the raw path (#582). The later
+  // `Layer.provide` is the outer middleware: `tokenEndpointsNoStore` must stay
+  // after `endpointRateLimit`, so a token endpoint's 429 is `no-store` too
+  // (RFC 6749 §5.2; HttpServer.test.ts, "marks a rate-limited … 429 no-store").
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
     Layer.provide(tokenEndpointsNoStore),

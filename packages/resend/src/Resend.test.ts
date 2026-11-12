@@ -277,7 +277,9 @@ describe("resendEmailSender's outbound request (#606)", () => {
       const body = trackedBody(cancelFails);
       const { fetch } = stubFetch(new Response(body.stream, { status: 200 }));
 
-      await run(Effect.flip(sendOneTo(resendEmailSender({ ...baseConfig, fetch }))));
+      const sender = resendEmailSender({ ...baseConfig, fetch });
+      const sent = sender.send({ to: "a@b.com", purpose: "magic-link", params: { token: "t" } });
+      await expect(run(Effect.exit(sent))).resolves.toEqual(Exit.void);
 
       expect(body.cancelled()).toBe(true);
     },

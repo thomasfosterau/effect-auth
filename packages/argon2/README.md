@@ -70,11 +70,34 @@ What a Worker needs:
 - **`nodejs_compat`** on a compatibility date before 2026-08-04 (it is the default from that date). This package needs no `node:` module, but `@thomasfosterau/effect-auth`'s root imports `node:crypto`.
 - **No bundler configuration.** The wasm is a base64 string in this package's JavaScript, not a `.wasm` import, so Wrangler, Vite (with or without `@cloudflare/vite-plugin`) and esbuild need no `?module` / `?init` suffix, `CompiledWasm` rule or plugin.
 
-Budget: with `defaultProfile`, a hash costs ~19 MiB of the isolate's 128 MiB and tens of milliseconds of CPU. The wasm instance's linear memory grows to the largest `memoryCost` hashed or verified and stays at that size for the isolate's life, so hash one password per request and keep `defaultProfile` on Workers.
+Budget: with `defaultProfile`, a hash costs ~19 MiB of the isolate's 128 MiB and tens of milliseconds of CPU. The wasm instance's linear memory grows to the largest `memoryCost` hashed or verified and stays at that size for the isolate's life, so hash one password per request and keep `defaultProfile` on Workers. The [verify ceiling](#verify-ceiling) bounds what a stored hash can make it grow to; on Workers, consider lowering `maxMemoryKiB` to the largest `memoryCost` you have written.
 
 ## Verification and parameter changes
 
 `verify` reads the variant, cost parameters, salt and digest length out of the **stored** hash rather than assuming the configured ones. Raising your cost parameters (or moving from `defaultProfile` to `serverProfile`) therefore never locks anyone out — existing hashes keep verifying under the parameters they were written with.
+
+### Verify ceiling
+
+Because the costs come from the stored hash, a corrupt or attacker-written one (through a store-level compromise or a bring-your-own store bug) could demand gigabytes of memory or billions of iterations on the next sign-in. The wasm instance's memory never shrinks, so on Workers that would push the isolate past its 128 MiB and kill it, failing every request it serves. `verify` therefore refuses, with a `HashingError` and before the kernel runs, a stored hash whose costs exceed a ceiling:
+
+| Option           | Default            | Refuses a stored hash with |
+| ---------------- | ------------------ | -------------------------- |
+| `maxMemoryKiB`   | `131072` (128 MiB) | `m` above it               |
+| `maxIterations`  | `10`               | `t` above it               |
+| `maxParallelism` | `8`                | `p` above it               |
+
+The names and defaults match `@thomasfosterau/argon2`'s `verify(password, hash, { maxMemoryKiB, maxIterations, maxParallelism })`. The defaults sit above `serverProfile`, so every hash written with either profile verifies. Set them beside the costs:
+
+```ts
+import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2";
+
+// Tighter on Workers: nothing this deployment wrote needs more than 19 MiB.
+const layer = argon2HasherLayer({ maxMemoryKiB: 19456, maxIterations: 4, maxParallelism: 1 });
+```
+
+`verify` also refuses, the same way, a stored hash whose parameters repeat a name or add one other than `m`, `t` and `p` (so the ceiling always reads the costs the kernel would run), and one longer than 512 characters, before it is copied into wasm memory.
+
+`argon2Hasher` and `argon2HasherLayer` throw a `RangeError` when a cost or a limit is not a positive integer, or when the configured costs exceed the ceiling (for example `memoryCost: 262144` without raising `maxMemoryKiB`), since such a hasher would write hashes its own `verify` refuses. Lowering the ceiling below costs your stored hashes already carry locks those users out until they reset their password, so lower it only to what you have written.
 
 Hashes that cannot be recomputed (a malformed PHC string, an unsupported variant, Argon2 `v=0x10`, or a salt or digest outside the Argon2 crate's bounds: salt 8–48 bytes, digest 4–64 bytes) fail with a `HashingError` rather than silently returning `false`.
 
@@ -98,8 +121,9 @@ Package root (`@thomasfosterau/effect-auth-argon2`):
 - `argon2Hasher(options?)` — WASM-backed `PasswordHasher` service.
 - `argon2HasherLayer(options?)` — the same as a `Layer`.
 - `ARGON2ID` — the `"argon2id"` PHC algorithm identifier.
-- `Argon2Options`, `Argon2Profile` — cost parameter types.
+- `Argon2Options` (costs and verify limits), `Argon2Profile`, `Argon2VerifyLimits` — option types.
 - `defaultProfile`, `serverProfile`, `resolveOptions(options?)`.
+- `defaultVerifyLimits` (`maxMemoryKiB` 131072, `maxIterations` 10, `maxParallelism` 8), `resolveVerifyLimits(options?)`.
 - `SALT_LENGTH` (16 bytes), `HASH_LENGTH` (32 bytes), `MAX_PASSWORD_BYTES` (1024 UTF-8 bytes: `hash` refuses a longer password with a `HashingError`, `verify` reads one as `false` without running the KDF).
 - Input guards the hasher applies, exported for other hashers to share: `isWithinMaxLength(password)`, `requireNonEmptyPassword(password)`, `requireNonEmptyHash(hash)`, `requireHashablePassword(password)` (the `require*` guards fail with `HashingError`; `isWithinMaxLength` returns a boolean).
 

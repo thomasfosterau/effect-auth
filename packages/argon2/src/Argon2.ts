@@ -17,7 +17,10 @@
  * assuming the configured ones — so hashes written by `hash-wasm` (this
  * package's backend through 0.1.x), by `@node-rs/argon2`, by an older
  * configuration of this package, or by any other Argon2 implementation keep
- * verifying after a parameter change.
+ * verifying after a parameter change. Those costs are bounded by a verify
+ * ceiling (`maxMemoryKiB`, `maxIterations`, `maxParallelism`; #752): a stored
+ * hash over it is refused before the kernel runs, so it cannot grow the wasm
+ * memory or spin for billions of passes.
  *
  * @module argon2/argon2
  */
@@ -30,11 +33,14 @@ import {
   ARGON2ID,
   SALT_LENGTH,
   isWithinMaxLength,
+  resolveVerifyLimits,
   requireHashablePassword,
   requireNonEmptyHash,
   requireNonEmptyPassword,
   resolveOptions,
   type Argon2Options,
+  type Argon2Profile,
+  type Argon2VerifyLimits,
 } from "./Common.ts";
 import { hashArgon2id, verifyArgon2 } from "./Wasm.ts";
 
@@ -61,6 +67,61 @@ const parsePositiveInt = (value: string | undefined): number => {
 };
 
 /**
+ * The longest stored hash `verify` copies into the kernel. The longest PHC
+ * string the kernel can verify is about 210 characters: the header with
+ * ten-digit `m`, `t` and `p`, a 48-byte salt (64 base64 characters) and a
+ * 64-byte digest (86), the crate's maxima. 512 leaves room for any honest
+ * hash and keeps a multi-megabyte stored value from being copied into linear
+ * memory, which would grow it for the isolate's life (#752).
+ */
+const MAX_STORED_HASH_LENGTH = 512;
+
+/** The cost parameters a stored PHC string must carry, each exactly once. */
+const COST_NAMES: ReadonlyArray<string> = ["m", "t", "p"];
+
+/**
+ * Parse the `m=..,t=..,p=..` segment, in any order. A parameter that is not
+ * `name=value`, an unknown or repeated name (`m=4294967295,m=256` must not
+ * read as either), a missing cost, or a value that is not a positive decimal
+ * integer is refused with the reason.
+ */
+const parseCosts = (
+  parameters: string,
+): { readonly costs: Argon2Profile } | { readonly refused: string } => {
+  const pairs = Arr.map(parameters.split(","), (parameter) => {
+    const [name, value, ...rest] = parameter.split("=");
+    return { parameter, name, value, extra: Arr.isReadonlyArrayNonEmpty(rest) };
+  });
+  const malformed = Arr.findFirst(
+    pairs,
+    ({ name, value, extra }) => name === undefined || value === undefined || extra,
+  );
+  if (Option.isSome(malformed)) {
+    return { refused: `malformed parameter "${malformed.value.parameter}"` };
+  }
+  const names = Arr.map(pairs, ({ name }) => name);
+  const unexpected = Arr.findFirst(names, (name) => !Arr.contains(COST_NAMES, name));
+  if (Option.isSome(unexpected)) return { refused: `unknown parameter "${unexpected.value}"` };
+  if (Arr.dedupe(names).length !== names.length) {
+    return { refused: `repeated parameter in "${parameters}"` };
+  }
+  const costs: Record<string, number> = R.fromEntries(
+    Arr.map(pairs, ({ name, value }): readonly [string, number] => [name, parsePositiveInt(value)]),
+  );
+  const profile = {
+    memoryCost: costs["m"] ?? Number.NaN,
+    timeCost: costs["t"] ?? Number.NaN,
+    parallelism: costs["p"] ?? Number.NaN,
+  };
+  return Arr.every([profile.memoryCost, profile.timeCost, profile.parallelism], Number.isFinite)
+    ? { costs: profile }
+    : { refused: `malformed parameters "${parameters}"` };
+};
+
+const overCeiling = (detail: string): Effect.Effect<never, HashingError> =>
+  Effect.fail(new HashingError({ message: `Argon2 hash exceeds the verify ceiling: ${detail}` }));
+
+/**
  * Check a stored PHC string's header before handing it to the kernel.
  *
  * Deliberately tolerant about the order of the `m`/`t`/`p` parameters (the PHC
@@ -70,9 +131,20 @@ const parsePositiveInt = (value: string | undefined): number => {
  * Argon2 `v=16`; this check keeps refusing it, as earlier releases did. The
  * salt and digest are left to the kernel, which reports a malformed or
  * out-of-range one as unverifiable.
+ *
+ * The costs must also sit within `limits` (#752). The kernel allocates `m`
+ * KiB in linear memory, which never shrinks, so a stored hash with a huge `m`
+ * would leave the isolate holding it (on Workers, past its 128 MiB, killing
+ * it); a huge `t` or `p` would spin. Such a hash is refused here, before the
+ * kernel is entered. So is a stored string over `MAX_STORED_HASH_LENGTH`,
+ * before anything is copied into linear memory, and one whose parameters
+ * repeat or add a name (so the ceiling reads the costs the kernel would).
  */
-const checkHash = (hash: string): Effect.Effect<void, HashingError> =>
+const checkHash = (hash: string, limits: Argon2VerifyLimits): Effect.Effect<void, HashingError> =>
   Effect.suspend(() => {
+    if (hash.length > MAX_STORED_HASH_LENGTH) {
+      return invalidHash(`longer than ${MAX_STORED_HASH_LENGTH} characters`);
+    }
     const segments = hash.split("$");
     // "$argon2id$v=19$m=..,t=..,p=..$salt$digest" splits into a leading empty
     // segment plus five fields.
@@ -90,35 +162,57 @@ const checkHash = (hash: string): Effect.Effect<void, HashingError> =>
       return invalidHash(`unsupported version "${version}" (only v=19 is supported)`);
     }
 
-    const pairs = Arr.map(parameters.split(","), (parameter) => {
-      const [name, value] = parameter.split("=");
-      return { parameter, name, value };
-    });
-    const malformed = Arr.findFirst(
-      pairs,
-      ({ name, value }) => name === undefined || value === undefined,
-    );
-    if (Option.isSome(malformed)) {
-      return invalidHash(`malformed parameter "${malformed.value.parameter}"`);
+    const parsed = parseCosts(parameters);
+    if ("refused" in parsed) return invalidHash(parsed.refused);
+    const { memoryCost, timeCost, parallelism } = parsed.costs;
+    if (memoryCost > limits.maxMemoryKiB) {
+      return overCeiling(`m=${memoryCost} is over maxMemoryKiB=${limits.maxMemoryKiB}`);
     }
-    const costs: Record<string, number> = R.fromEntries(
-      Arr.map(pairs, ({ name, value }): readonly [string, number] => [
-        name,
-        parsePositiveInt(value),
-      ]),
-    );
-    const memoryCost = costs["m"] ?? Number.NaN;
-    const timeCost = costs["t"] ?? Number.NaN;
-    const parallelism = costs["p"] ?? Number.NaN;
-    if (
-      !Number.isFinite(memoryCost) ||
-      !Number.isFinite(timeCost) ||
-      !Number.isFinite(parallelism)
-    ) {
-      return invalidHash(`malformed parameters "${parameters}"`);
+    if (timeCost > limits.maxIterations) {
+      return overCeiling(`t=${timeCost} is over maxIterations=${limits.maxIterations}`);
+    }
+    if (parallelism > limits.maxParallelism) {
+      return overCeiling(`p=${parallelism} is over maxParallelism=${limits.maxParallelism}`);
     }
     return Effect.void;
   });
+
+const isPositiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
+
+/**
+ * Refuse a configuration whose costs or verify limits are not positive
+ * integers (a `NaN` cost would slip past every `>` check), or whose hashing
+ * costs exceed the limits: such a hasher would write hashes its own `verify`
+ * refuses, locking out every user it signs up.
+ */
+const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits): void => {
+  const invalid = Arr.findFirst(
+    [
+      ["memoryCost", costs.memoryCost],
+      ["timeCost", costs.timeCost],
+      ["parallelism", costs.parallelism],
+      ["maxMemoryKiB", limits.maxMemoryKiB],
+      ["maxIterations", limits.maxIterations],
+      ["maxParallelism", limits.maxParallelism],
+    ] as const,
+    ([, value]) => !isPositiveInteger(value),
+  );
+  if (Option.isSome(invalid)) {
+    const [name, value] = invalid.value;
+    throw new RangeError(`Argon2 ${name} must be a positive integer, got ${value}`);
+  }
+  const checks = [
+    ["memoryCost", costs.memoryCost, "maxMemoryKiB", limits.maxMemoryKiB],
+    ["timeCost", costs.timeCost, "maxIterations", limits.maxIterations],
+    ["parallelism", costs.parallelism, "maxParallelism", limits.maxParallelism],
+  ] as const;
+  const over = Arr.findFirst(checks, ([, value, , max]) => value > max);
+  if (Option.isNone(over)) return;
+  const [cost, value, limit, max] = over.value;
+  throw new RangeError(
+    `Argon2 ${cost}=${value} is over ${limit}=${max}: its hashes would not verify`,
+  );
+};
 
 /**
  * Create an Argon2id {@link Password.PasswordHasher} backed by WebAssembly.
@@ -126,6 +220,12 @@ const checkHash = (hash: string): Effect.Effect<void, HashingError> =>
  * Defaults to OWASP's low-memory profile (m = 19 MiB, t = 2, p = 1) so the
  * hasher is safe to run on Cloudflare Workers; pass `serverProfile` (or your
  * own numbers) on a plain Node deployment.
+ *
+ * `verify` refuses, with a `HashingError` and before running the KDF, a
+ * stored hash whose costs exceed the verify ceiling (`maxMemoryKiB` 131072,
+ * `maxIterations` 10, `maxParallelism` 8 unless configured). Throws a
+ * `RangeError` when a limit is not a positive integer, or when the configured
+ * costs exceed the ceiling, since their hashes would not verify.
  *
  * @example
  * ```ts
@@ -137,6 +237,8 @@ const checkHash = (hash: string): Effect.Effect<void, HashingError> =>
  */
 export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => {
   const costs = resolveOptions(options);
+  const limits = resolveVerifyLimits(options);
+  requireWithinCeiling(costs, limits);
 
   return {
     algorithm: ARGON2ID,
@@ -164,8 +266,9 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
       if (!isWithinMaxLength(password)) return false;
 
       // Cost parameters come from the stored hash, never from `options`, so
-      // hashes written under a different configuration still verify.
-      yield* checkHash(hash);
+      // hashes written under a different configuration still verify; only the
+      // ceiling comes from `options`.
+      yield* checkHash(hash, limits);
 
       const verdict = yield* Effect.mapError(
         Effect.suspend(() => Effect.fromResult(verifyArgon2(password, hash))),
@@ -183,7 +286,8 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
 /**
  * A `Layer` providing {@link Password.PasswordHasher} backed by the WASM
  * Argon2id hasher. Use in place of `PasswordHasher.layer()` to make Argon2id
- * the default hasher for new passwords.
+ * the default hasher for new passwords. Like {@link argon2Hasher}, it throws
+ * a `RangeError` when the configured costs exceed the verify ceiling.
  */
 export const argon2HasherLayer = (options?: Argon2Options): Layer.Layer<Password.PasswordHasher> =>
   Layer.succeed(PasswordHasher, argon2Hasher(options));

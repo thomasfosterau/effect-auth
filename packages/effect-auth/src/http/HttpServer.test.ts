@@ -4245,6 +4245,21 @@ describe("Http.make refuses to start without the IP limit's dependencies (#583)"
     expect(signIn[10]).toBe(429);
   });
 
+  // RFC 6749 §5.2: every token endpoint answer is no-store, the IP limit's
+  // 429 included, so the limit must not run outside the marking.
+  it.each(["/oauth2/token", "/device/token"])(
+    "marks a rate-limited %s 429 no-store",
+    async (path) => {
+      const handler = ipLimitedHandler({
+        rules: [{ path, methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
+      });
+      await handler(fromAddress("POST", path, "203.0.113.60"));
+      const refused = await handler(fromAddress("POST", path, "203.0.113.60"));
+      expect(refused.status).toBe(429);
+      expect(refused.headers.get("cache-control")).toBe("no-store");
+    },
+  );
+
   it("builds with ipRateLimit: false and neither a RateLimiter nor an address source, and limits nothing", async () => {
     const { handler } = HttpServer.make({ services: makeFixture().services, ipRateLimit: false });
     const statuses: Array<number> = [];
