@@ -1,9 +1,16 @@
-import { assert, describe, it, expect } from "vite-plus/test";
+import { createServer } from "node:http";
+import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
 import { Data, Effect, Redacted } from "effect";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
-import { defaultRender, layer, twilioSmsSender } from "./index.ts";
+import {
+  MAX_ERROR_BODY_CHARS,
+  TRUNCATION_MARKER,
+  defaultRender,
+  layer,
+  twilioSmsSender,
+} from "./index.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -45,6 +52,124 @@ const baseConfig = {
 };
 
 const twilioSuccessBody = toJson({ sid: "SM1234", status: "queued" });
+
+/** The Basic credentials `baseConfig` sends, which an echo must not reveal either. */
+const basicCredentials = Buffer.from(`${baseConfig.accountSid}:test-auth-token`).toString("base64");
+
+/** The `body` an `AuthError`'s `{ status, body }` cause carries. */
+const causeBody = (cause: unknown): string => {
+  assert(P.isObject(cause) && "body" in cause && P.isString(cause.body), "cause has a body");
+  return cause.body;
+};
+
+/** A body stream that never ends, recording whether the reader cancelled it. */
+const endlessBody = (): { readonly stream: ReadableStream<Uint8Array>; cancelled: boolean } => {
+  const chunk = new TextEncoder().encode("x".repeat(4096));
+  const state = {
+    cancelled: false,
+    stream: new ReadableStream<Uint8Array>({
+      pull: (controller) => controller.enqueue(chunk),
+      cancel: () => {
+        state.cancelled = true;
+      },
+    }),
+  };
+  return state;
+};
+
+/**
+ * Start a local server that answers every request outside `/landed` with a
+ * 307 to `/landed`, counting the requests it receives. It closes when the
+ * test finishes.
+ */
+const startRedirectingServer = async (): Promise<{
+  readonly baseUrl: string;
+  readonly hits: () => number;
+}> => {
+  let hits = 0;
+  const server = createServer((request, response) => {
+    hits += 1;
+    if (request.url === "/landed") response.writeHead(201).end(twilioSuccessBody);
+    else response.writeHead(307, { Location: "/landed" }).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  onTestFinished(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  const address = server.address();
+  assert(P.isNotNull(address) && !P.isString(address), "the server listens on a port");
+  return { baseUrl: `http://127.0.0.1:${address.port}`, hits: () => hits };
+};
+
+const sendOneTo = (sender: typeof SmsSender.Service) =>
+  Effect.flip(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } }));
+
+describe("twilioSmsSender's outbound request (#606)", () => {
+  it("never follows a redirect, and passes the abort signal", async () => {
+    const { fetch, calls } = stubFetch(
+      new Response(null, { status: 307, headers: { Location: "https://elsewhere.example/" } }),
+    );
+
+    const err = await run(sendOneTo(twilioSmsSender({ ...baseConfig, fetch })));
+
+    expect(err._tag).toBe("AuthError");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init.redirect).toBe("error");
+    expect(calls[0]?.init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("fails a real 3xx without a second request", async () => {
+    const { baseUrl, hits } = await startRedirectingServer();
+    const err = await run(sendOneTo(twilioSmsSender({ ...baseConfig, baseUrl })));
+
+    expect(err._tag).toBe("AuthError");
+    expect(hits()).toBe(1);
+    expect(toJson(err)).not.toContain("test-auth-token");
+  });
+
+  it("keeps at most MAX_ERROR_BODY_CHARS of a huge error body, in the cause and the message", async () => {
+    const { fetch } = stubFetch(new Response("e".repeat(1_000_000), { status: 500 }));
+
+    const err = await run(sendOneTo(twilioSmsSender({ ...baseConfig, fetch })));
+
+    expect(causeBody(err.cause)).toBe(`${"e".repeat(MAX_ERROR_BODY_CHARS)}${TRUNCATION_MARKER}`);
+    expect(err.message.length).toBeLessThan(MAX_ERROR_BODY_CHARS + 100);
+  });
+
+  it("stops reading an endless error body and cancels it", async () => {
+    const endless = endlessBody();
+    const { fetch } = stubFetch(new Response(endless.stream, { status: 502 }));
+
+    const err = await run(sendOneTo(twilioSmsSender({ ...baseConfig, fetch })));
+
+    expect(causeBody(err.cause).endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(endless.cancelled).toBe(true);
+  });
+
+  it.each([
+    ["the token echoed", "unauthorized: token test-auth-token"],
+    ["the Basic header echoed", `unauthorized: Authorization: Basic ${basicCredentials}`],
+    [
+      "the token cut at the limit",
+      `${"a".repeat(MAX_ERROR_BODY_CHARS - 4)}test-auth-token${"b".repeat(5000)}`,
+    ],
+  ])("scrubs the credentials from an error body (%s)", async (_case, text) => {
+    const { fetch } = stubFetch(new Response(text, { status: 401 }));
+
+    const err = await run(sendOneTo(twilioSmsSender({ ...baseConfig, fetch })));
+
+    const serialized = toJson(err);
+    expect(serialized).not.toContain("test-auth-token");
+    expect(serialized).not.toContain(basicCredentials);
+    expect(causeBody(err.cause)).not.toContain("test-");
+    expect(err.message).not.toContain("test-auth-token");
+    expect(err.message).not.toContain(basicCredentials);
+  });
+});
 
 describe("defaultRender", () => {
   it("uses a purpose-keyed lead-in and includes the OTP", () => {

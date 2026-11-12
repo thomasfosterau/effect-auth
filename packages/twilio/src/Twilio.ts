@@ -14,6 +14,7 @@ import { Data, Effect, Formatter, Layer, Match, Redacted } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { AuthError, SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,81 @@ class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
 }> {}
 
 /**
+ * The most characters of a non-2xx response body an {@link AuthError} keeps
+ * (#606), in its `cause` and in its message. A longer body is cut here and
+ * ends in {@link TRUNCATION_MARKER}.
+ */
+export const MAX_ERROR_BODY_CHARS = 1024;
+
+/** Ends an error-body excerpt that was cut at {@link MAX_ERROR_BODY_CHARS}. */
+export const TRUNCATION_MARKER = "…[truncated]";
+
+/** Stands in for a credential an upstream body echoed back. */
+const REDACTED_MARKER = "[redacted]";
+
+/** Drop every occurrence of each secret from `text`. */
+const scrubSecrets = (text: string, secrets: ReadonlyArray<string>): string =>
+  secrets.reduce(
+    (scrubbed, secret) => (secret === "" ? scrubbed : scrubbed.replaceAll(secret, REDACTED_MARKER)),
+    text,
+  );
+
+/**
+ * The excerpt of a body read up to `MAX_ERROR_BODY_CHARS + longest`
+ * characters, secrets scrubbed. A read that stopped early also loses its last
+ * `longest` characters, where a secret cut off mid-way would sit.
+ */
+const boundedExcerpt = (raw: string, secrets: ReadonlyArray<string>, longest: number): string => {
+  const scrubbed = scrubSecrets(raw, secrets);
+  if (raw.length <= MAX_ERROR_BODY_CHARS + longest && scrubbed.length <= MAX_ERROR_BODY_CHARS) {
+    return scrubbed;
+  }
+  const cut = raw.length > MAX_ERROR_BODY_CHARS + longest ? scrubbed.length - longest : Infinity;
+  return `${scrubbed.slice(0, Math.min(MAX_ERROR_BODY_CHARS, cut))}${TRUNCATION_MARKER}`;
+};
+
+/** Stops the body read once more than `limit` characters are in. */
+const readPast =
+  (limit: number) =>
+  (text: string): boolean =>
+    text.length > limit;
+
+/**
+ * A non-2xx response's body as a bounded, scrubbed excerpt. The stream is
+ * read only until it passes the limit, then cancelled.
+ */
+const errorBodyExcerpt = (
+  response: Response,
+  secrets: ReadonlyArray<string>,
+): Effect.Effect<string> => {
+  const stream = response.body;
+  if (stream === null) return Effect.succeed("");
+  const longest = Math.max(0, ...secrets.map((secret) => secret.length));
+  return Stream.runLast(
+    Stream.fromReadableStream({
+      evaluate: () => stream,
+      onError: (cause) => new ResponseBodyError({ cause }),
+    }).pipe(
+      Stream.decodeText,
+      Stream.scan(
+        () => "",
+        (read, chunk) => read + chunk,
+      ),
+      Stream.takeUntil(readPast(MAX_ERROR_BODY_CHARS + longest)),
+    ),
+  ).pipe(
+    Effect.map((read) =>
+      boundedExcerpt(
+        Option.getOrElse(read, () => ""),
+        secrets,
+        longest,
+      ),
+    ),
+    Effect.orDie,
+  );
+};
+
+/**
  * Twilio's `{ code, message }` error body. The fields are any JSON value, so
  * any JSON object is accepted and its `code`/`message` are rendered as they are.
  */
@@ -113,9 +189,13 @@ const describeTwilioError = (status: number, bodyText: string): string =>
 
 /**
  * Build an {@link SmsSender} service backed by Twilio's Messages API. Every
- * failure (network, non-2xx response) surfaces as an {@link AuthError} whose
- * `cause` carries the response `status`/`body` and, when parseable, Twilio's
- * own error `code`/`message` — the auth token is never included.
+ * failure (network, redirect, non-2xx response) surfaces as an
+ * {@link AuthError}; a non-2xx one's `cause` carries the response `status` and
+ * a `body` excerpt of at most {@link MAX_ERROR_BODY_CHARS} characters, and its
+ * message Twilio's own error `code`/`message` when the body parses. The auth
+ * token is never included, even when the response echoes it. Redirects are
+ * never followed (`redirect: "error"`), so the credentials go to `baseUrl`
+ * only.
  *
  * @example
  * ```ts
@@ -138,14 +218,17 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
     Effect.gen(function* () {
       const body = render(message);
       const form = new URLSearchParams({ Body: body, From: config.from, To: message.to });
-      const credentials = `${config.accountSid}:${Redacted.value(config.authToken)}`;
+      const authToken = Redacted.value(config.authToken);
+      const basic = btoa(`${config.accountSid}:${authToken}`);
 
       const response = yield* Effect.tryPromise({
-        try: () =>
+        try: (signal) =>
           doFetch(`${baseUrl}/2010-04-01/Accounts/${config.accountSid}/Messages.json`, {
             method: "POST",
+            redirect: "error",
+            signal,
             headers: {
-              Authorization: `Basic ${btoa(credentials)}`,
+              Authorization: `Basic ${basic}`,
               "Content-Type": "application/x-www-form-urlencoded",
             },
             body: form.toString(),
@@ -154,10 +237,7 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
       });
 
       if (!response.ok) {
-        const bodyText = yield* Effect.tryPromise({
-          try: () => response.text(),
-          catch: (cause) => new ResponseBodyError({ cause }),
-        }).pipe(Effect.orDie);
+        const bodyText = yield* errorBodyExcerpt(response, [authToken, basic]);
         return yield* new AuthError({
           message: `Twilio API request failed (${describeTwilioError(response.status, bodyText)})`,
           cause: { status: response.status, body: bodyText },

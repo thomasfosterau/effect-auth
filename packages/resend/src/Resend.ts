@@ -11,7 +11,9 @@
  */
 import { Config, Data, Effect, Layer, Match, Redacted } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { AuthError, EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -117,14 +119,91 @@ const ResendPayloadJson = Schema.fromJsonString(
 const encodePayload = Schema.encodeSync(ResendPayloadJson);
 
 // ---------------------------------------------------------------------------
+// Error bodies
+// ---------------------------------------------------------------------------
+
+/**
+ * The most characters of a non-2xx response body an {@link AuthError}'s
+ * `cause` keeps (#606). A longer body is cut here and ends in
+ * {@link TRUNCATION_MARKER}.
+ */
+export const MAX_ERROR_BODY_CHARS = 1024;
+
+/** Ends an error-body excerpt that was cut at {@link MAX_ERROR_BODY_CHARS}. */
+export const TRUNCATION_MARKER = "…[truncated]";
+
+/** Stands in for a credential an upstream body echoed back. */
+const REDACTED_MARKER = "[redacted]";
+
+/**
+ * The excerpt of a body read up to `MAX_ERROR_BODY_CHARS + longest`
+ * characters, with every occurrence of a secret replaced. When the read
+ * stopped early, the last `longest` characters are dropped as well, so a
+ * secret cut off at the end of the read leaves no prefix behind.
+ */
+const excerptBody = (raw: string, secrets: ReadonlyArray<string>, longest: number): string => {
+  const complete = raw.length <= MAX_ERROR_BODY_CHARS + longest;
+  const scrubbed = secrets.reduce(
+    (text, secret) => (secret === "" ? text : text.replaceAll(secret, REDACTED_MARKER)),
+    raw,
+  );
+  const keep = complete ? scrubbed.length : scrubbed.length - longest;
+  return complete && keep <= MAX_ERROR_BODY_CHARS
+    ? scrubbed
+    : `${scrubbed.slice(0, Math.min(MAX_ERROR_BODY_CHARS, keep))}${TRUNCATION_MARKER}`;
+};
+
+/** Whether the body read so far has passed `limit` characters, so reading stops. */
+const pastLimit =
+  (limit: number) =>
+  (text: string): boolean =>
+    text.length > limit;
+
+/**
+ * Read a non-2xx response's body as a bounded excerpt: the stream is read
+ * only until it passes the limit and is then cancelled, and no `secrets`
+ * survive into the result.
+ */
+const readErrorBody = (
+  response: Response,
+  secrets: ReadonlyArray<string>,
+): Effect.Effect<string> => {
+  const body = response.body;
+  if (body === null) return Effect.succeed("");
+  const longest = Math.max(0, ...secrets.map((secret) => secret.length));
+  return Stream.fromReadableStream({
+    evaluate: () => body,
+    onError: (cause) => new ResponseBodyError({ cause }),
+  }).pipe(
+    Stream.decodeText,
+    Stream.scan(
+      () => "",
+      (text, chunk) => text + chunk,
+    ),
+    Stream.takeUntil(pastLimit(MAX_ERROR_BODY_CHARS + longest)),
+    Stream.runLast,
+    Effect.map((text) =>
+      excerptBody(
+        Option.getOrElse(text, () => ""),
+        secrets,
+        longest,
+      ),
+    ),
+    Effect.orDie,
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Sender
 // ---------------------------------------------------------------------------
 
 /**
  * Build an {@link EmailSender} service backed by Resend's REST API. Every
- * failure (network, non-2xx response) surfaces as an {@link AuthError} whose
- * `cause` carries the response `status`/`body` — the API key is never
- * included.
+ * failure (network, redirect, non-2xx response) surfaces as an
+ * {@link AuthError}; a non-2xx one's `cause` carries the response `status` and
+ * a `body` excerpt of at most {@link MAX_ERROR_BODY_CHARS} characters. The API
+ * key is never included, even when the response echoes it. Redirects are
+ * never followed (`redirect: "error"`), so the key goes to `baseUrl` only.
  *
  * @example
  * ```ts
@@ -155,9 +234,11 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
       };
 
       const response = yield* Effect.tryPromise({
-        try: () =>
+        try: (signal) =>
           doFetch(`${baseUrl}/emails`, {
             method: "POST",
+            redirect: "error",
+            signal,
             headers: {
               Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
               "Content-Type": "application/json",
@@ -168,10 +249,7 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
       });
 
       if (!response.ok) {
-        const body = yield* Effect.tryPromise({
-          try: () => response.text(),
-          catch: (cause) => new ResponseBodyError({ cause }),
-        }).pipe(Effect.orDie);
+        const body = yield* readErrorBody(response, [Redacted.value(config.apiKey)]);
         return yield* new AuthError({
           message: `Resend API request failed with status ${response.status}`,
           cause: { status: response.status, body },
