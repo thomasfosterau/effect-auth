@@ -33,7 +33,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
@@ -512,11 +512,14 @@ export const make = (
 
       const email = profile.email.trim().toLowerCase();
 
-      const identifier = yield* identifiers.getByValue("email", email);
-      let user = identifier === null ? null : yield* users.get(identifier.userId);
-      if (identifier !== null && user === null) {
-        return yield* new SsoError({ message: "Account is unavailable" });
-      }
+      const { identifier, user: owner } = yield* findIdentifierOwner(
+        identifiers,
+        users.get,
+        "email",
+        email,
+        () => new SsoError({ message: "Account is unavailable" }),
+      );
+      let user = owner;
       const isNewUser = user === null;
       if (user === null) {
         // The IdP attested the address as verified.

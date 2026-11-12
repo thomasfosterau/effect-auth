@@ -109,11 +109,11 @@ The Svelte package ships six headless form components out of the box: `SignInFor
 
 ## 5. Endpoint coverage
 
-Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from the `@thomasfosterau/effect-auth/http` subpath (`import type * as Http from "@thomasfosterau/effect-auth/http"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing.
+Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from the `@thomasfosterau/effect-auth/http` subpath (`import type * as Http from "@thomasfosterau/effect-auth/http"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing. The endpoint each one calls is in the core README's [endpoint reference](../../packages/effect-auth/README.md#http-endpoint-reference); a client from before the JSON:API conversion is mapped onto the current methods in the [migration guide](./jsonapi-migration.md).
 
 **Core** — `signUp`, `signIn`, `signOut`, `getSession`, `sendVerificationEmail`, `verifyEmail`, `passwordResetRequest`, `passwordResetConfirm`, `changePassword`, `updateUser`, `listSessions`, `revokeSession`, `revokeOtherSessions`.
 
-**Identifiers** — the login handles (email / username / phone) behind an account. Deleting the last one is refused by the server (`400`), so an account is never orphaned.
+**Identifiers** — the login handles (email / username / phone) behind an account. Deleting the last one is refused by the server (`403`), so an account is never orphaned.
 
 ```ts
 const handles = await client.identifiers.list();
@@ -179,7 +179,7 @@ verified.verificationState; // "verified" | "failed" — retry a failed check
 await client.organization.setActive({ organizationId: org.id }); // recorded on the session
 ```
 
-Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier` (claim the domain with `verificationStrategy: "manual"` instead).
+Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier`. An organization proves a domain only through DNS; manual attestation is the operator's, after checking ownership out of band, through the `isAdmin`-gated `client.admin.attestDomain({ organizationId, domain })` (#598).
 
 **API keys** — `apiKeys.{create,list,update,delete}` over `/api-keys`. The plaintext key comes back exactly once, from `create` (the server sends it in the create's `meta.key`). Creating one needs the session cookie: over a bearer credential it is `403`.
 
@@ -251,4 +251,4 @@ await client.signUp({ email, password });
 expect((await client.getSession())?.user.email).toBe(email);
 ```
 
-The package's own suite does exactly this: `src/testing/fixture.ts` builds the real handler over in-memory stores (`makeServerFixture({ features, organization, multiSession })`) and pairs it with `makeCookieJarFetch`. It is test-only — excluded from the published build — so copy the ~30-line pattern rather than importing it. For groups whose server module is disproportionate to stand up (API keys, admin, …), a recording `fetch` that asserts method/path/body is enough.
+`@thomasfosterau/effect-auth/client/testing` packages exactly this: `makeServerFixture({ features, organization, multiSession })` builds the real handler over in-memory stores, and `makeCookieJarFetch(handler)` is the cookie-jar `fetch`. It imports the core and `effect` at runtime, so keep it to tests. For groups whose server module is disproportionate to stand up (API keys, admin, …), a recording `fetch` that asserts method/path/body is enough.

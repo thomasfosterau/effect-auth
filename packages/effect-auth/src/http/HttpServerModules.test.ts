@@ -43,6 +43,7 @@ import {
 } from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
+import { expectSpecJson } from "../testing/WireFormat.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -1524,7 +1525,10 @@ describe("HTTP JWT endpoints", () => {
 
     const jwksRes = await fx.handler(req("GET", "/jwks"));
     expect(jwksRes.status).toBe(200);
-    const { keys } = Schema.decodeUnknownSync(Jwks)(await jwksRes.json());
+    // RFC 7517 JSON, served as `application/json`, never a JSON:API document.
+    const { keys } = Schema.decodeUnknownSync(Jwks)(
+      await expectSpecJson(jwksRes, "application/json", ["keys"]),
+    );
     expect(keys.length).toBe(1);
 
     // Verify the ES256 signature against the published JWK.

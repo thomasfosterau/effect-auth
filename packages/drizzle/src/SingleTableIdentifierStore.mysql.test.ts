@@ -17,13 +17,14 @@ import { DateTime, Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
+import { binaryVarchar } from "./MySqlSchema.ts";
 import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
 
 const appUsers = mysqlTable("app_users", {
   userId: varchar("id", { length: 255 }).primaryKey(),
   name: varchar("name", { length: 255 }),
-  email: varchar("email", { length: 255 }).unique(),
+  email: binaryVarchar("email", { length: 255 }).unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
   updatedAt: datetime("updated_at", { mode: "date", fsp: 3 }).notNull(),
@@ -37,7 +38,7 @@ const usersMapping = defineUsers({
 /** The same table with `email` NOT NULL: the store cannot clear an address on it. */
 const strictUsers = mysqlTable("app_users_strict", {
   userId: varchar("id", { length: 255 }).primaryKey(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
+  email: binaryVarchar("email", { length: 255 }).notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
 });
@@ -50,7 +51,7 @@ const strictMapping = defineUsers({
 /** The nullable table with the application's verification-time column mapped. */
 const verifiedUsers = mysqlTable("app_users_verified", {
   userId: varchar("id", { length: 255 }).primaryKey(),
-  email: varchar("email", { length: 255 }).unique(),
+  email: binaryVarchar("email", { length: 255 }).unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   emailVerifiedAt: datetime("email_verified_at", { mode: "date", fsp: 3 }),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),

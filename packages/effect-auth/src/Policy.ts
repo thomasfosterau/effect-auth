@@ -38,6 +38,16 @@
  * like everyone else. For every other principal, scopes match as documented on
  * {@link Scope}.
  *
+ * ## An empty entity id names no entity
+ *
+ * A request whose principal, action or resource has an empty id is refused
+ * before any policy runs: the decision is a deny with reason
+ * `"invalid-request"` (#661). `ReadScope.compile` agrees, compiling such a
+ * principal or action to `ReadScope.deny`. An empty-id reference also equals
+ * nothing in a scope or condition (`Entity.refEquals`). So `User::""` is never
+ * a "no user" stand-in: a signed-out caller is a principal of its own type
+ * (`Anonymous::"anonymous"`), which user-typed policies never match.
+ *
  * @module policy
  */
 import { Data, Effect, Match } from "effect";
@@ -384,10 +394,14 @@ export interface PolicyOutcome {
 /**
  * The full decision: `allowed`, why (`reason`), the policies that determined
  * it, and every policy's outcome (the trace fed to audit hooks and spans).
+ *
+ * `"invalid-request"` is a request that names an entity with an empty id
+ * (principal, action or resource; #661): it is denied before any policy is
+ * evaluated, so `determining` and `outcomes` are empty.
  */
 export interface Decision {
   readonly allowed: boolean;
-  readonly reason: "forbid" | "permit" | "default-deny";
+  readonly reason: "forbid" | "permit" | "default-deny" | "invalid-request";
   readonly determining: ReadonlyArray<PolicyOutcome>;
   readonly outcomes: ReadonlyArray<PolicyOutcome>;
 }
@@ -416,6 +430,23 @@ const combineOutcomes = (outcomes: ReadonlyArray<PolicyOutcome>): Decision => {
     return { allowed: true, reason: "permit", determining: permitting, outcomes };
   }
   return { allowed: false, reason: "default-deny", determining: [], outcomes };
+};
+
+/**
+ * Whether a request names only entities: no empty id in its principal, action
+ * or resource. A request that does not is refused outright (#661), so an empty
+ * id can never stand in for "no user" and still match type-scoped policies.
+ */
+export const isWellFormed = (req: PolicyRequest): boolean =>
+  Entity.namesEntity(req.principal) &&
+  Entity.namesEntity(req.action) &&
+  Entity.namesEntity(req.resource);
+
+const invalidRequest: Decision = {
+  allowed: false,
+  reason: "invalid-request",
+  determining: [],
+  outcomes: [],
 };
 
 const evaluateDeclarative = (
@@ -454,13 +485,18 @@ const evaluateDeclarative = (
 
 /**
  * The pure decision procedure over declarative policies: deterministic,
- * total, order-independent, replayable from a logged slice + request.
+ * total, order-independent, replayable from a logged slice + request. A
+ * request that is not {@link isWellFormed} is denied with reason
+ * `"invalid-request"`.
  */
 export const decidePure = (
   policies: ReadonlyArray<DeclarativePolicy>,
   req: PolicyRequest,
   slice: Entity.EntitySlice = Entity.emptySlice,
-): Decision => combineOutcomes(policies.map((policy) => evaluateDeclarative(slice, req, policy)));
+): Decision =>
+  isWellFormed(req)
+    ? combineOutcomes(policies.map((policy) => evaluateDeclarative(slice, req, policy)))
+    : invalidRequest;
 
 /**
  * Decide over a mixed policy set (declarative + custom). Custom predicate
@@ -468,12 +504,20 @@ export const decidePure = (
  * by {@link Decision} combination. Only the custom policies' requirements
  * (`R`) remain. A custom permit is `not-matched` for a system principal
  * without running its predicate (see the module docs); a custom forbid runs
- * as usual.
+ * as usual. A request that is not {@link isWellFormed} is denied with reason
+ * `"invalid-request"`, and no predicate runs.
  */
 export const decide = <E, R>(
   policies: ReadonlyArray<Policy<E, R>>,
   req: PolicyRequest,
   slice: Entity.EntitySlice = Entity.emptySlice,
+): Effect.Effect<Decision, never, R> =>
+  isWellFormed(req) ? decideWellFormed(policies, req, slice) : Effect.succeed(invalidRequest);
+
+const decideWellFormed = <E, R>(
+  policies: ReadonlyArray<Policy<E, R>>,
+  req: PolicyRequest,
+  slice: Entity.EntitySlice,
 ): Effect.Effect<Decision, never, R> =>
   Effect.forEach(
     policies,

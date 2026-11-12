@@ -11,7 +11,7 @@
 import { Clock, Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
-import { IdentifierStore } from "../Identifier.ts";
+import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -20,7 +20,7 @@ import {
 } from "../UserStore.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { deliverCode } from "../CodeDelivery.ts";
-import type { HookError } from "../Hooks.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
 import { SessionService } from "../SessionService.ts";
@@ -174,7 +174,7 @@ export interface EmailOtpCheckResult {
 /**
  * Email OTP service.
  *
- * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `SecureRandom`.
+ * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks` and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -306,6 +306,7 @@ export const make = (
   | UserStore
   | SessionService
   | EmailPasswordStore
+  | Hooks
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -320,6 +321,7 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
@@ -409,7 +411,7 @@ export const make = (
         // Sign-in with sign-up enabled always sends (the user is created at
         // verification time).
         const deliver = hidesAccount(purpose)
-          ? (yield* identifiers.getByValue("email", email)) !== null
+          ? (yield* lookupIdentifier(identifiers, "email", email)) !== null
           : true;
 
         // Resend cooldown: reject if an outstanding OTP was created within
@@ -471,13 +473,22 @@ export const make = (
       ) {
         const email = normalizeEmail(rawEmail);
 
+        const { identifier, user: owner } = yield* findIdentifierOwner(
+          identifiers,
+          users.get,
+          "email",
+          email,
+          () => new EmailOtpError({ message: "Account is unavailable" }),
+        );
+        yield* hooks.beforeAuthenticate({
+          method: "email-otp",
+          identifier: { type: "email", value: email },
+          userId: owner?.id,
+        });
+
         yield* verifyOtp(email, otp, "sign-in");
 
-        const identifier = yield* identifiers.getByValue("email", email);
-        let user = identifier === null ? null : yield* users.get(identifier.userId);
-        if (identifier !== null && user === null) {
-          return yield* new EmailOtpError({ message: "Account is unavailable" });
-        }
+        let user = owner;
         if (!user) {
           if (disableSignUp) {
             return yield* new EmailOtpError({

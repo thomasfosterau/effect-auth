@@ -2,7 +2,12 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
-import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";
+import {
+  IdentifierStore,
+  lookupIdentifier,
+  resolveUserByIdentifier,
+  type IdentifierType,
+} from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { makeDecoyHash, verifyPasswordOrDecoy } from "../password/DecoyVerify.ts";
 import type * as Types from "../Types.ts";
@@ -161,7 +166,7 @@ export interface SignInInput {
   readonly email: string;
   readonly password: string;
   readonly sessionAttributes?: Types.Attributes;
-  /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignIn` hook. */
+  /** Optional captcha token, consumed by the `CaptchaPlugin` on the `beforeAuthenticate` hook. */
   readonly captchaToken?: string;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
@@ -250,7 +255,8 @@ export const answeredByStandIn = (
   email: string,
 ): Effect.Effect<boolean, Errors.AuthError> =>
   Effect.gen(function* () {
-    const holder = yield* identifiers.getByValue(
+    const holder = yield* lookupIdentifier(
+      identifiers,
       "email",
       result.identifier?.value ?? normalizeEmail(email),
     );
@@ -456,7 +462,7 @@ export const make = (
             maxPasswordLength: resolved.maxPasswordLength,
           });
 
-          const taken = yield* identifiers.getByValue("email", email);
+          const taken = yield* lookupIdentifier(identifiers, "email", email);
           if (taken) return yield* addressTaken(input, email);
 
           // The identifier's unique (type, value) index is the real claim; a
@@ -543,6 +549,12 @@ export const make = (
             email,
           );
           const user = resolvedUser?.user ?? null;
+          yield* hooks.beforeAuthenticate({
+            method: "email-password",
+            identifier: { type: "email", value: email },
+            userId: user?.id,
+            captchaToken: input.captchaToken,
+          });
           const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
           // Always verify against a real or decoy hash so timing is constant
           // regardless of whether the account exists.

@@ -372,11 +372,11 @@ export type Invitation = typeof Invitation.Type;
  * An email domain an organization claims (`organization-domains`):
  * `Organization.OrganizationDomain`, its `organizationId` as the
  * `organization` relationship. A claim is created through
- * `POST /organizations/:id/domains` (`domain`, and optionally the
- * `verificationStrategy`, `dns` by default) and proved through
- * `POST /organization-domains/:id/verifications`; nothing else about it is
- * writable. `verificationToken` is the value a `dns` claim publishes as a TXT
- * record.
+ * `POST /organizations/:id/domains` (`domain`; always a `dns` claim) and
+ * proved through `POST /organization-domains/:id/verifications`, or attested
+ * by the operator through `POST /admin/organization-domains` (a `manual`
+ * claim, #598); nothing else about it is writable. `verificationToken` is the
+ * value a `dns` claim publishes as a TXT record.
  *
  * @since 0.3.0
  * @category resources
@@ -389,7 +389,7 @@ export const OrganizationDomain = Resource.make("organization-domains", {
       Schema.Literals(["pending", "verified", "failed"]),
     ),
     verificationStrategy: Resource.attribute(Schema.Literals(["dns", "manual"]), {
-      create: "optional",
+      create: false,
       update: false,
     }),
     verificationToken: Resource.attribute(Schema.String, {

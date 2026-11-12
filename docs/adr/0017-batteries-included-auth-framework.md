@@ -3,6 +3,11 @@
 **Supersedes [ADR-0001](0001-headless-toolkit-not-framework-instance.md) and
 [ADR-0003](0003-protocol-server-plugins-out-of-scope.md).**
 
+> **Extended by [ADR-0024](0024-json-api-http-tier.md).** The JSON:API wire format settled below
+> now covers every endpoint this library designs (#205); the endpoints whose format another
+> specification fixes (OAuth 2.0 / OIDC, RFC 8628, RFC 7591 / 7592, RFC 8414, JWKS, the SSO
+> bindings, SCIM) keep it as the RFC tier. The text below is left as written.
+
 ADR-0001 scoped effect-auth as a toolkit of composable Effect primitives with "no central instance,
 no plugin runtime, no auto-mounted HTTP routes, no shipped client, no framework integrations, no
 schema-migration CLI, and no cookie/CSRF helpers", and ADR-0003 followed from it, scoping out the

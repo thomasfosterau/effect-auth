@@ -7,7 +7,8 @@ import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { CaptchaPlugin } from "./Captcha.ts";
 import { PwnedPasswordError, CaptchaError } from "../Errors.ts";
-import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
+import type { AuthenticateAttempt } from "../Hooks.ts";
+import type { SignUpInput } from "../email/EmailPassword.ts";
 
 /** A stubbed HttpClient that answers every request with `respond(request)`. */
 const stubHttpClient = (respond: (url: string) => Response) =>
@@ -62,10 +63,10 @@ const signUp = (password: string, captchaToken?: string): SignUpInput => ({
   ...(captchaToken !== undefined && { captchaToken }),
 });
 
-const signIn = (captchaToken?: string): SignInInput => ({
-  email: "u@example.com",
-  password: "pw",
-  ...(captchaToken !== undefined && { captchaToken }),
+const signIn = (captchaToken?: string): AuthenticateAttempt => ({
+  method: "email-password",
+  identifier: { type: "email", value: "u@example.com" },
+  captchaToken,
 });
 
 const sha1UpperSuffix = async (password: string): Promise<string> => {
@@ -120,7 +121,7 @@ describe("CaptchaPlugin", () => {
   it("rejects (short-circuits) sign-in when verification fails", async () => {
     const client = stubHttpClient(() => Response.json({ success: false }));
     const err = await drive(CaptchaPlugin(config), client, (hooks) =>
-      Effect.flip(hooks.beforeSignIn(signIn("tok"))),
+      Effect.flip(hooks.beforeAuthenticate(signIn("tok"))),
     );
     expect(err).toBeInstanceOf(CaptchaError);
   });
@@ -139,9 +140,9 @@ describe("CaptchaPlugin", () => {
     const result = await drive(
       CaptchaPlugin({ ...config, endpoints: ["signUp"] }),
       client,
-      (hooks) => hooks.beforeSignIn(signIn()),
+      (hooks) => hooks.beforeAuthenticate(signIn()),
     );
-    expect(result.email).toBe("u@example.com");
+    expect(result.identifier.value).toBe("u@example.com");
   });
 
   it("sends secret and token in the POST body, not the URL query string", async () => {

@@ -688,7 +688,7 @@ describe("organizations", () => {
     expect(canceled.status).toBe(403);
   });
 
-  it("claims a domain, verifies it over DNS, and keeps it unique across orgs", async () => {
+  it("claims a domain, verifies it over DNS, and keeps one verified claim across orgs", async () => {
     const { server, browser } = withServer({ organization: true });
     const owner = browser();
 
@@ -714,22 +714,25 @@ describe("organizations", () => {
     expect(verified.verificationState).toBe("verified");
     expect(verified.verifiedAt).toBeTypeOf("number");
 
-    // A second organization cannot claim the same domain.
+    // A second organization may claim the domain (nothing reveals the first
+    // claim), but cannot verify it while the first holds it verified.
     const rival = browser();
     await rival.signUp({ email: "rival@client.test", password: PW });
     const other = await rival.organization.create({ name: "Globex", slug: "globex" });
+    const rivalClaim = await rival.organization.addDomain(other.id, { domain: "acme.test" });
+    expect(rivalClaim.verificationState).toBe("pending");
     const conflict = await rejectionOf(
-      rival.organization.addDomain(other.id, { domain: "acme.test" }),
+      rival.organization.verifyDomain(rivalClaim.id),
       AuthClientError,
     );
     assert.instanceOf(conflict, AuthClientError);
     expect(conflict.status).toBe(403);
 
-    // Releasing the claim frees the domain again.
+    // Releasing the verified claim lets the next proof verify.
     await owner.organization.removeDomain(claim.id);
     expect(await owner.organization.listDomains(org.id)).toEqual([]);
-    expect((await rival.organization.addDomain(other.id, { domain: "acme.test" })).domain).toBe(
-      "acme.test",
+    expect((await rival.organization.verifyDomain(rivalClaim.id)).verificationState).toBe(
+      "verified",
     );
   });
 

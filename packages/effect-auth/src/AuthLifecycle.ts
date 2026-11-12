@@ -10,7 +10,7 @@ import {
   type SignInInput,
   type SignUpInput,
 } from "./email/EmailPassword.ts";
-import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
+import { IdentifierStore, lookupIdentifier, type IdentifierType } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import {
   type EmailVerificationResult,
@@ -230,7 +230,7 @@ export const make = (
               // The address `EmailPasswordService.signUp` found taken: the one
               // its `beforeSignUp` hooks returned, not the raw input (#426).
               const email = e.email ?? normalizeEmail(input.email);
-              const identifier = yield* identifiers.getByValue("email", email);
+              const identifier = yield* lookupIdentifier(identifiers, "email", email);
               const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
 
               if (!identifier || !existing || identifier.verified) {
@@ -311,10 +311,10 @@ export const make = (
           "EmailNotVerifiedError",
           (error) =>
             Effect.gen(function* () {
-              const identifier = yield* identifiers.getByValue("email", error.email);
+              const identifier = yield* lookupIdentifier(identifiers, "email", error.email);
               const user = identifier === null ? null : yield* userStore.get(identifier.userId);
 
-              if (!user) {
+              if (identifier === null || user === null) {
                 return yield* new Errors.InvalidCredentialsError({
                   message: "Invalid email or password",
                 });
@@ -323,7 +323,7 @@ export const make = (
               // FIX 5: use resendVerification (which invalidates prior tokens
               // via deleteByUserId) instead of createVerification.
               if (sendOnSignIn) {
-                yield* verification.resendVerification(user.id, error.email);
+                yield* verification.resendVerification(user.id, identifier.value);
               }
 
               return {
@@ -359,7 +359,7 @@ export const make = (
         // identifiers — a stale token for a since-removed address must not
         // verify anything.
         const tokenEmail = normalizeEmail(verificationRecord.email);
-        const identifier = yield* identifiers.getByValue("email", tokenEmail);
+        const identifier = yield* lookupIdentifier(identifiers, "email", tokenEmail);
         if (identifier === null || identifier.userId !== verificationRecord.userId) {
           return yield* new Errors.EmailVerificationError({
             message: "Verification token is no longer valid for this email address",

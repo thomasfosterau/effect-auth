@@ -24,6 +24,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 
 // ---------------------------------------------------------------------------
 // Entity references
@@ -37,10 +38,18 @@ import * as Schema from "effect/Schema";
  * parents). `"System"` is reserved for non-human principals (background jobs,
  * cron handlers): construct one with `System.ref`, never by hand, and never
  * name an application's own principal type `"System"` (`Guard.make` refuses it).
+ *
+ * The id is never empty (#661). Decoding refuses `""`, and a reference built
+ * with one by hand ({@link ref} stays total) **names no entity**: it equals
+ * nothing, itself included ({@link refEquals}, {@link attributeValueEquals}),
+ * and a request naming one is refused by `Policy.decidePure` / `Policy.decide`
+ * (reason `"invalid-request"`) and compiles to `ReadScope.deny`. An empty id
+ * is never an "anonymous" stand-in: a signed-out caller is a principal of its
+ * own type, such as `Anonymous::"anonymous"`.
  */
 export const EntityRef = Schema.Struct({
   type: Schema.String,
-  id: Schema.String,
+  id: Schema.NonEmptyString,
 });
 export type EntityRef = typeof EntityRef.Type;
 
@@ -51,12 +60,25 @@ export type EntityRef = typeof EntityRef.Type;
  */
 export const systemType = "System";
 
-/** Construct an {@link EntityRef}. */
+/**
+ * Construct an {@link EntityRef}. Total, like the rest of this module: an
+ * empty `id` is not rejected here but yields a reference that names no entity
+ * (see {@link EntityRef}), so it can never match.
+ */
 export const ref = (type: string, id: string): EntityRef => ({ type, id });
 
-/** Structural equality on entity references. */
+/**
+ * Whether a reference names an entity: its id is not empty. A reference that
+ * names none is refused by the decision procedure and equals nothing (#661).
+ */
+export const namesEntity = (r: EntityRef): boolean => Str.isNonEmpty(r.id);
+
+/**
+ * Structural equality on entity references. A reference with an empty id
+ * names no entity, so it equals nothing, itself included (#661).
+ */
 export const refEquals = (a: EntityRef, b: EntityRef): boolean =>
-  a.type === b.type && a.id === b.id;
+  namesEntity(a) && a.type === b.type && a.id === b.id;
 
 const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 
@@ -128,8 +150,16 @@ const typeName = (value: AttributeValue): string =>
         ? "boolean"
         : "object";
 
-/** Deep structural equality over {@link AttributeValue}s. */
+/** Whether a value is an entity value whose reference names no entity (an empty id). */
+const namesNoEntity = (value: AttributeValue): boolean =>
+  isEntityValue(value) && P.isObject(value.__entity) && !namesEntity(value.__entity);
+
+/**
+ * Deep structural equality over {@link AttributeValue}s. An entity value
+ * whose id is empty equals nothing, itself included (#661), at any depth.
+ */
 export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): boolean => {
+  if (namesNoEntity(a) || namesNoEntity(b)) return false;
   if (a === b) return true;
   if (typeName(a) !== typeName(b)) return false;
   if (!P.isObjectOrArray(a) || b === null) return false;
@@ -221,9 +251,11 @@ export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): Attrib
  * Hierarchy membership: is `child` the same entity as `ancestor`, or a
  * transitive descendant of it in the slice's parent DAG? Reflexive, like
  * Cedar's `in`. Cycle-safe (a malformed cyclic hierarchy terminates and
- * never grants beyond the visited set).
+ * never grants beyond the visited set). Never true when either side has an
+ * empty id: such a reference names no entity, so it is in nothing (#661).
  */
 export const entityIn = (s: EntitySlice, child: EntityRef, ancestor: EntityRef): boolean => {
+  if (!namesEntity(child) || !namesEntity(ancestor)) return false;
   if (refEquals(child, ancestor)) return true;
   const visited = MutableHashSet.empty<string>();
   // Depth-first over a stack of pending refs. Each step pops one ref and emits

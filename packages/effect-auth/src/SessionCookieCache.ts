@@ -2,7 +2,7 @@
  * Signed session-data cookie cache.
  *
  * better-auth's `session.cookieCache` stores a short-lived HMAC-signed copy of
- * the session + user in a cookie so `GET /session` (and other authenticated
+ * the session + user in a cookie so `GET /sessions/current` (and other authenticated
  * requests) can be served without hitting the session store on every request.
  *
  * The cookie value is `base64url(payload) . base64url(HMAC-SHA256(base64url

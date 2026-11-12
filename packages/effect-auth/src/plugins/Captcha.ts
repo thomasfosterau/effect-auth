@@ -2,10 +2,14 @@
  * Captcha plugin (transform hook with short-circuit).
  *
  * Verifies a captcha token against the provider's siteverify endpoint on
- * `beforeSignUp` / `beforeSignIn` and short-circuits with `AuthError` when the
- * token is missing or verification fails. The token is read from the optional
- * `captchaToken` field on `SignUpInput` / `SignInInput` (wired through the
- * `SignUpPayload` / `SignInPayload` HTTP schemas).
+ * `beforeSignUp` and on `beforeAuthenticate` for the password sign-in
+ * methods (`"email-password"` and `"username"`), and short-circuits with
+ * `CaptchaError` when the token is missing or verification fails. The token
+ * is read from the optional `captchaToken` field on `SignUpInput`,
+ * `SignInInput` and `UsernameSignInInput` (wired through the `SignUpPayload`
+ * HTTP schema and the `password` and `username` sign-in credentials). The
+ * one-time-code, magic-link and second-factor flows carry no captcha token,
+ * so the `"signIn"` endpoint does not guard them.
  *
  * Supports Cloudflare Turnstile, Google reCAPTCHA and hCaptcha (all expose a
  * compatible `{ secret, response }` siteverify returning `{ success }`).
@@ -16,15 +20,23 @@ import { Effect, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import { HttpClient, HttpClientRequest } from "effect/http";
-import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
-import { makePlugin, type PluginImpls } from "../Hooks.ts";
+import type { SignUpInput } from "../email/EmailPassword.ts";
+import { type AuthenticateAttempt, makePlugin, type PluginImpls } from "../Hooks.ts";
 import { CaptchaError } from "../Errors.ts";
 
 /** The captcha services {@link CaptchaPlugin} can verify tokens with. */
 export type CaptchaProvider = "cloudflare-turnstile" | "google-recaptcha" | "hcaptcha";
 
-/** Which auth endpoints the captcha guards. */
+/**
+ * Which auth endpoints the captcha guards: `"signUp"` (`beforeSignUp`) and
+ * `"signIn"` (`beforeAuthenticate` for the password methods, by email or by
+ * username).
+ */
 export type CaptchaEndpoint = "signUp" | "signIn";
+
+/** Whether an attempt is a password sign-in, the attempts a captcha token rides on. */
+const isPasswordSignIn = (attempt: AuthenticateAttempt): boolean =>
+  attempt.method === "email-password" || attempt.method === "username";
 
 const VERIFY_URLS: Record<CaptchaProvider, string> = {
   "cloudflare-turnstile": "https://challenges.cloudflare.com/turnstile/v0/siteverify",
@@ -83,7 +95,10 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
           beforeSignUp: (input: SignUpInput) => verify(input.captchaToken).pipe(Effect.as(input)),
         }),
         ...(Arr.contains(endpoints, "signIn") && {
-          beforeSignIn: (input: SignInInput) => verify(input.captchaToken).pipe(Effect.as(input)),
+          beforeAuthenticate: (attempt: AuthenticateAttempt) =>
+            isPasswordSignIn(attempt)
+              ? verify(attempt.captchaToken).pipe(Effect.as(attempt))
+              : Effect.succeed(attempt),
         }),
       };
       return impls;
