@@ -141,12 +141,12 @@ describe("the JSON:API resources", () => {
         derived: ["active"],
         foreignKeys: { user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(Session.fields)));
+    ).toStrictEqual(sorted(R.keys(Session.fields)));
   });
 
   it("organizations carry exactly Organization", () => {
     expect(storeFacingKeys(Resources.Organization)).toStrictEqual(
-      sorted(Rec.keys(organizationKeys)),
+      sorted(R.keys(organizationKeys)),
     );
   });
 
@@ -155,7 +155,7 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.OrganizationMember, {
         foreignKeys: { organization: "organizationId", user: "userId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(memberKeys)));
+    ).toStrictEqual(sorted(R.keys(memberKeys)));
   });
 
   it("invitations carry exactly Invitation, its keys as relationships", () => {
@@ -163,7 +163,7 @@ describe("the JSON:API resources", () => {
       storeFacingKeys(Resources.Invitation, {
         foreignKeys: { organization: "organizationId", inviter: "inviterId" },
       }),
-    ).toStrictEqual(sorted(Rec.keys(invitationKeys)));
+    ).toStrictEqual(sorted(R.keys(invitationKeys)));
   });
 
   it("organization-domains carry exactly OrganizationDomain, its organization as a relationship", () => {
@@ -209,10 +209,10 @@ describe("the JSON:API resources", () => {
   });
 
   it("accepts no write to a membership's previousRole or an invitation's invitee", () => {
-    expect(sorted(Rec.keys(Resources.OrganizationMember.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.OrganizationMember.updateInput.fields))).toStrictEqual(
       sorted(["id", "role", "status"]),
     );
-    expect(sorted(Rec.keys(Resources.Invitation.updateInput.fields))).toStrictEqual(
+    expect(sorted(R.keys(Resources.Invitation.updateInput.fields))).toStrictEqual(
       sorted(["id", "status"]),
     );
   });
