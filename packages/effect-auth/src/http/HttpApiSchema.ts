@@ -711,12 +711,26 @@ export type OrganizationDomainView = typeof OrganizationDomainView.Type;
 export const OrganizationDomainListView = Schema.Array(OrganizationDomainView);
 export type OrganizationDomainListView = typeof OrganizationDomainListView.Type;
 
-/** Request body for claiming a domain (strategy defaults to `"dns"`). */
+/**
+ * Request body for claiming a domain. An organization proves a claim through
+ * DNS only: `verificationStrategy` may be omitted or `"dns"`, and `"manual"`
+ * is refused (`400`), since manual attestation is the operator's (#598).
+ */
 export const AddOrganizationDomainPayload = Schema.Struct({
   domain: Schema.String,
-  verificationStrategy: Schema.optional(Schema.Literals(["dns", "manual"])),
+  verificationStrategy: Schema.optional(Schema.Literal("dns")),
 });
 export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.Type;
+
+/**
+ * The operator's attestation that `organizationId` controls `domain`
+ * (`POST /admin/organization-domains`, `isAdmin`-gated, #598).
+ */
+export const AdminAttestDomainPayload = Schema.Struct({
+  organizationId: Schema.String,
+  domain: Schema.String,
+});
+export type AdminAttestDomainPayload = typeof AdminAttestDomainPayload.Type;
 
 /** Request body for setting the session's active organization (null clears it). */
 export const SetActiveOrganizationPayload = Schema.Struct({

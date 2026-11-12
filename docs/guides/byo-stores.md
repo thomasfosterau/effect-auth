@@ -385,7 +385,7 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 | `AnonymousUserStore`       | `Auth.AnonymousUserStore`       | Create/delete guest users                                             | `AnonymousService`                                 |
 | `AdminUserStore`           | `Auth.AdminUserStore`           | List/create users, admin password reset                               | `AdminService`                                     |
 | `OrganizationStore`        | `Auth.OrganizationStore`        | Organizations, members, invitations, teams, custom roles              | `OrganizationService`                              |
-| `OrganizationDomainStore`  | `Auth.OrganizationDomainStore`  | Email-domain claims and their verification state (unique on `domain`) | `OrganizationService` — domains + JIT provisioning |
+| `OrganizationDomainStore`  | `Auth.OrganizationDomainStore`  | Email-domain claims (one per org and domain, one verified per domain) | `OrganizationService` — domains + JIT provisioning |
 | `AccountManagementStore`   | `Auth.AccountManagementStore`   | Pending email-change/delete-account tokens                            | `AccountManagementService`                         |
 
 **Rate limiting, lockout, authorization**
