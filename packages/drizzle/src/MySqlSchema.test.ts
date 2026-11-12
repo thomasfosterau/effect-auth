@@ -42,7 +42,6 @@ import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
 import { layer } from "./Layers.ts";
 import {
   binaryVarchar,
-  collationMigrationStatements,
   defineTables,
   identifierCollation,
   migrationStatements,
@@ -430,17 +429,6 @@ describe("MySQL / Schema", () => {
     expect(appUsers.email.getSQLType()).toBe(
       "varchar(320) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
     );
-  });
-
-  it("converts an existing identifiers table with a one-off migration (#602)", () => {
-    expect(collationMigrationStatements()).toEqual([
-      "ALTER TABLE effect_auth_identifiers MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL",
-    ]);
-    expect(collationMigrationStatements({ identifiers: "app_handles" })).toEqual([
-      "ALTER TABLE app_handles MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL",
-    ]);
-    // The everyday script stays replayable and leaves existing tables alone.
-    expect(migrationStatements().join("\n")).not.toContain("ALTER TABLE");
   });
 
   it("honours custom table names in both the tables and the DDL", () => {

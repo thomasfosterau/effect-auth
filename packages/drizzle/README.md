@@ -92,18 +92,18 @@ yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
 
 ### The export map
 
-| Export                                                        | What it is                                                                                                            |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `layer(schema?)`                                              | All three stores at once, over a dialect's `tables` or an `AuthSchema`                                                |
-| `databaseLayer(db)`, `effectDatabaseLayer(db)`                | The database seam for Promise and Effect drivers (`DrizzleDatabase`)                                                  |
-| `SessionStore`, `UserStore`, `IdentifierStore`                | One namespace per store: `make`, `layer`, requests, resolvers                                                         |
-| `SingleTableIdentifierStore`                                  | The opt-in one-email-per-user store over your own `users` table                                                       |
-| `Requests`                                                    | The batched read interface                                                                                            |
-| `Pg`, `Sqlite`, `MySql`                                       | One namespace per dialect: tables, `defineTables`, DDL (`MySql` also `binaryVarchar`, `collationMigrationStatements`) |
-| `defineSchema`, `fromTables`, `AuthSchema` and column types   | The stores pointed at tables you already have                                                                         |
-| `TableNames`, `defaultTableNames`, `Tables`, row types        | What the three dialects agree on                                                                                      |
-| `ladderCheck(column, ladder)`                                 | A role column's `CHECK` derived from an `Auth.Ladder`                                                                 |
-| `ownedListFilter(columns)`, `isFollowerLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`                                                          |
+| Export                                                        | What it is                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `layer(schema?)`                                              | All three stores at once, over a dialect's `tables` or an `AuthSchema`                |
+| `databaseLayer(db)`, `effectDatabaseLayer(db)`                | The database seam for Promise and Effect drivers (`DrizzleDatabase`)                  |
+| `SessionStore`, `UserStore`, `IdentifierStore`                | One namespace per store: `make`, `layer`, requests, resolvers                         |
+| `SingleTableIdentifierStore`                                  | The opt-in one-email-per-user store over your own `users` table                       |
+| `Requests`                                                    | The batched read interface                                                            |
+| `Pg`, `Sqlite`, `MySql`                                       | One namespace per dialect: tables, `defineTables`, DDL (`MySql` also `binaryVarchar`) |
+| `defineSchema`, `fromTables`, `AuthSchema` and column types   | The stores pointed at tables you already have                                         |
+| `TableNames`, `defaultTableNames`, `Tables`, row types        | What the three dialects agree on                                                      |
+| `ladderCheck(column, ladder)`                                 | A role column's `CHECK` derived from an `Auth.Ladder`                                 |
+| `ownedListFilter(columns)`, `isFollowerLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`                          |
 
 ## Dialects
 
@@ -169,28 +169,9 @@ const appUsers = mysqlTable("users", {
 declares the same column; 0.4x's `varchar` has no `collate`.) `utf8mb4_bin`
 treats trailing spaces as insignificant, which never matters here: core trims
 the addresses and usernames it stores. Core also never acts on a record whose
-value differs from the one it looked up (`Auth.lookupIdentifier`), so a table
-that has not been migrated yet fails closed (a look-alike reads as unknown)
+value differs from the one it looked up (`Auth.lookupIdentifier`), so a
+store that compares loosely fails closed (a look-alike reads as unknown)
 rather than resolving another account.
-
-#### Migrating an existing MySQL deployment
-
-`migrationSql` is `CREATE TABLE IF NOT EXISTS`, so it does not change an
-identifiers table created by an earlier release. Run
-`MySql.collationMigrationStatements(names?)` once:
-
-```sql
-ALTER TABLE effect_auth_identifiers
-  MODIFY value VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL;
-```
-
-The old unique key refused any two values that compared equal under the
-insensitive collation, so no existing rows collide under the binary one and the
-statement cannot fail on duplicates. It rebuilds the table, so schedule it like
-any `ALTER TABLE` on a large table. For the single-table store, run the same
-`MODIFY` on your `users.email` column (keeping its `NULL` / `NOT NULL`). If you
-use drizzle-kit, regenerating from `MySql.tables` (or from a table declared with
-`binaryVarchar`) produces the equivalent migration.
 
 ### Support status
 
