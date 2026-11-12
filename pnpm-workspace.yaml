@@ -87,7 +87,7 @@ catalog:
   # release.
   "@alchemy.run/cloudflare": 2.0.0-beta.85
   alchemy: 2.0.0-beta.85
-  better-sqlite3: ^13.0.3
+  better-sqlite3: ^13.1.1
   # The drizzle 1.0 line, at its tagged release candidate (npm's `rc` tag,
   # which ships the Effect drivers, `drizzle-orm/effect-postgres` and friends).
   # `packages/drizzle` builds its declarations against it; the 0.4x line is
