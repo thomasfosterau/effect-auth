@@ -145,9 +145,7 @@ describe("the JSON:API resources", () => {
   });
 
   it("organizations carry exactly Organization", () => {
-    expect(storeFacingKeys(Resources.Organization)).toStrictEqual(
-      sorted(R.keys(organizationKeys)),
-    );
+    expect(storeFacingKeys(Resources.Organization)).toStrictEqual(sorted(R.keys(organizationKeys)));
   });
 
   it("organization-members carry exactly Member, its keys as relationships", () => {
