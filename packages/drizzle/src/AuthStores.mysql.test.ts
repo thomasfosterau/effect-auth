@@ -14,7 +14,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { tables } from "./MySqlSchema.ts";
 import * as RateLimitStore from "./RateLimitStore.ts";
-import { mysqlProxyConfig, normalizeSql } from "./testing/DrizzleLine.ts";
+import { mysqlProxyConfig } from "./testing/MySqlProxy.ts";
 import * as TokenStore from "./TokenStore.ts";
 import * as UserServiceStore from "./UserServiceStore.ts";
 
@@ -22,7 +22,7 @@ import * as UserServiceStore from "./UserServiceStore.ts";
 const recording = (rows: ReadonlyArray<ReadonlyArray<unknown>>) => {
   const sent: Array<{ readonly sql: string; readonly params: ReadonlyArray<unknown> }> = [];
   const db = drizzle(async (sql, params, method) => {
-    sent.push({ sql: normalizeSql(sql), params });
+    sent.push({ sql, params });
     return method === "all"
       ? { rows: rows.map((row) => [...row]) }
       : { rows: [{ insertId: 0, affectedRows: 1 }] };
@@ -43,7 +43,7 @@ describe("MySQL / RateLimitStore", () => {
     );
     expect(count).toBe(3);
     expect(proxy.sent.map((statement) => statement.sql)).toEqual([
-      "update `effect_auth_rate_limits` set `count` = ?, `reset_at` = ?, `blocked_until` = ? where (`effect_auth_rate_limits`.`key` = ? and `effect_auth_rate_limits`.`reset_at` <= ?)",
+      "update `effect_auth_rate_limits` set `count` = ?, `reset_at` = ?, `blocked_until` = ? where ((`effect_auth_rate_limits`.`key` = ?) and (`effect_auth_rate_limits`.`reset_at` <= ?))",
       "insert into `effect_auth_rate_limits` (`key`, `count`, `reset_at`, `blocked_until`) values (?, ?, ?, ?) on duplicate key update `count` = `effect_auth_rate_limits`.`count` + 1",
       "select `key`, `count`, `reset_at`, `blocked_until` from `effect_auth_rate_limits` where `effect_auth_rate_limits`.`key` = ? limit ?",
     ]);
@@ -58,7 +58,7 @@ describe("MySQL / RateLimitStore", () => {
       ),
     );
     expect(proxy.sent.map((statement) => statement.sql)).toEqual([
-      "delete from `effect_auth_rate_limits` where (`effect_auth_rate_limits`.`reset_at` <= ? and (`effect_auth_rate_limits`.`blocked_until` is null or `effect_auth_rate_limits`.`blocked_until` <= ?))",
+      "delete from `effect_auth_rate_limits` where ((`effect_auth_rate_limits`.`reset_at` <= ?) and ((((`effect_auth_rate_limits`.`blocked_until` is null)) or (`effect_auth_rate_limits`.`blocked_until` <= ?))))",
     ]);
     expect(proxy.sent[0]?.params).toHaveLength(2);
   });
