@@ -71,7 +71,7 @@ catalog:
   # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
   # peer of effect-auth, needed only by that subpath. 0.22 (#723) needs
   # `effect ^4.1.0`, which the peers catalog already floors.
-  "@thomasfosterau/effect-jsonapi": ^0.22.0
+  "@thomasfosterau/effect-jsonapi": ^0.22.1
   "@types/node": ^26.6.6
   "@types/pg": ^8.15.0
   # Types for `semver` in `scripts/check-dist.ts` (checked by `vp run check:scripts`).
@@ -149,7 +149,7 @@ catalogs:
     # 0.x minors break, so the peer range is the minor line: 0.22 since #723
     # (its negotiation error codes are underscored, `not_acceptable` /
     # `unsupported_media_type`).
-    "@thomasfosterau/effect-jsonapi": ^0.22.0
+    "@thomasfosterau/effect-jsonapi": ^0.22.1
     # The optional peer of effect-auth's `./saml` subpath, at the same
     # CVE-fixed floor as the catalog pin above.
     "@node-saml/node-saml": ^5.2.0
