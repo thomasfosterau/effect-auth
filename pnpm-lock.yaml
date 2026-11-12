@@ -70,8 +70,8 @@ catalogs:
       specifier: 2.0.0-beta.85
       version: 2.0.0-beta.85
     better-sqlite3:
-      specifier: ^13.0.3
-      version: 13.0.3
+      specifier: ^13.1.1
+      version: 13.1.1
     drizzle-orm:
       specifier: 1.0.0-rc.5
       version: 1.0.0-rc.5
@@ -203,7 +203,7 @@ importers:
         version: 2.0.0-beta.85(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.3.0))(@types/react@19.3.0)(@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1))(effect@4.1.4)(ws@8.22.1)
       better-sqlite3:
         specifier: 'catalog:'
-        version: 13.0.3
+        version: 13.1.1
       effect:
         specifier: 4.1.4
         version: 4.1.4
@@ -284,10 +284,10 @@ importers:
         version: 8.23.1
       better-sqlite3:
         specifier: 'catalog:'
-        version: 13.0.3
+        version: 13.1.1
       drizzle-orm:
         specifier: 'catalog:'
-        version: 1.0.0-rc.5(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@effect/sql-pglite@4.1.4(effect@4.1.4))(@effect/sql-sqlite-do@4.0.0(effect@4.1.4))(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.1.4)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2))
+        version: 1.0.0-rc.5(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@effect/sql-pglite@4.1.4(effect@4.1.4))(@effect/sql-sqlite-do@4.0.0(effect@4.1.4))(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.1.1)(effect@4.1.4)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2))
       effect:
         specifier: 4.1.4
         version: 4.1.4
@@ -320,7 +320,7 @@ importers:
         version: 26.6.6
       better-sqlite3:
         specifier: 'catalog:'
-        version: 13.0.3
+        version: 13.1.1
       effect:
         specifier: 4.1.4
         version: 4.1.4
@@ -2372,8 +2372,8 @@ packages:
   bcp-47@2.1.2:
     resolution: {integrity: sha512-wsv86UuNFuPnVieKLyECTT+CP1WSAHeoIg5P3xu2kA9Z+7fVPoKt7dxzSeEhtJel0AI+NW3fIW3KtTKQKUCngg==}
 
-  better-sqlite3@13.0.3:
-    resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
+  better-sqlite3@13.1.1:
+    resolution: {integrity: sha512-JjyLCATp+VLxZVFyWkicyzKYwpEFLCrV4MmshW97xv3JXdhw5jBDcsbEWRGm2L/96E+k7rtjON8q9nml05h3Pw==}
     engines: {node: '>=22'}
 
   brace-expansion@5.0.12:
@@ -5177,7 +5177,7 @@ snapshots:
       is-alphanumerical: 2.0.1
       is-decimal: 2.0.1
 
-  better-sqlite3@13.0.3:
+  better-sqlite3@13.1.1:
     dependencies:
       node-addon-api: 8.9.2
 
@@ -5269,7 +5269,7 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
-  drizzle-orm@1.0.0-rc.5(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@effect/sql-pglite@4.1.4(effect@4.1.4))(@effect/sql-sqlite-do@4.0.0(effect@4.1.4))(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.1.4)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2)):
+  drizzle-orm@1.0.0-rc.5(@cloudflare/workers-types@5.20261106.1)(@effect/sql-d1@4.1.2(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@effect/sql-pglite@4.1.4(effect@4.1.4))(@effect/sql-sqlite-do@4.0.0(effect@4.1.4))(@electric-sql/pglite@0.5.16)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.1.1)(effect@4.1.4)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2)):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261106.1
       '@effect/sql-d1': 4.1.2(effect@4.1.4)
@@ -5280,7 +5280,7 @@ snapshots:
       '@libsql/client': 0.17.4
       '@types/better-sqlite3': 9.6.0
       '@types/pg': 8.23.1
-      better-sqlite3: 13.0.3
+      better-sqlite3: 13.1.1
       effect: 4.1.4
       mysql2: 3.24.2(@types/node@26.6.6)
       pg: 8.23.0
