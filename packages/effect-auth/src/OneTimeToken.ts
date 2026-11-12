@@ -21,6 +21,7 @@ import { randomBase64UrlToken } from "./RandomToken.ts";
 import { hashToken } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
+import { UserStore } from "./UserStore.ts";
 
 // ---------------------------------------------------------------------------
 // Store record
@@ -282,8 +283,12 @@ export const make = (
  * await Effect.runPromise(program)
  * ```
  *
- * Requires `OneTimeTokenService`, `OneTimeTokenStore`, and `SessionService`
- * in the Effect context.
+ * The subject must still name a user in `UserStore`: a token whose user has
+ * been deleted is consumed and refused with the same `OneTimeTokenError` as an
+ * unknown token, so no session is minted for a deleted account.
+ *
+ * Requires `OneTimeTokenService`, `OneTimeTokenStore`, `SessionService` and
+ * `UserStore` in the Effect context.
  */
 export const redeemOneTimeTokenForSession = (
   rawToken: string,
@@ -297,12 +302,17 @@ export const redeemOneTimeTokenForSession = (
     readonly metadata?: Types.JsonObject;
   },
   Errors.OneTimeTokenError | Errors.AuthError | HookError,
-  OneTimeTokenService | OneTimeTokenStore | SessionService | Hooks
+  OneTimeTokenService | OneTimeTokenStore | SessionService | UserStore | Hooks
 > =>
   Effect.gen(function* () {
     const service = yield* OneTimeTokenService;
     const sessionService = yield* SessionService;
+    const userStore = yield* UserStore;
     const result = yield* service.verify(rawToken);
+    // Fail closed: a token outliving its user (deleted, or never one) mints no session.
+    if ((yield* userStore.get(result.subject)) === null) {
+      return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
+    }
     const { session, token } = yield* sessionService.createSession(
       result.subject,
       options?.sessionAttributes,

@@ -29,10 +29,13 @@ import * as EffectPglite from "drizzle-orm/effect-pglite";
 import { DateTime, Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as ApiKeyStore from "./ApiKeyStore.ts";
 import { effectDatabaseLayer, type EffectDrizzleDatabase } from "./Database.ts";
+import * as EmailPasswordStore from "./EmailPasswordStore.ts";
 import { layer as storesLayer } from "./Layers.ts";
 import { tables } from "./PgSchema.ts";
 import * as Requests from "./Requests.ts";
+import * as UserServiceStore from "./UserServiceStore.ts";
 import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 const at = (offsetMs: number): Date =>
@@ -168,5 +171,91 @@ describe("the stores inside a drizzle Effect transaction", () => {
     expect(observed.batched).toEqual(["committed", "committed"]);
     expect(observed.committed).toBe("committed");
     expect(observed.afterRollback).toBeNull();
+  });
+});
+
+interface Held {
+  readonly user: boolean;
+  readonly identifiers: number;
+  readonly apiKeys: number;
+  readonly sessions: number;
+}
+
+/** Deletes a user inside `db.transaction`, then fails or commits, and reports what is left. */
+const purge = (outcome: "fail" | "commit"): Promise<Held> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const db = yield* EffectPglite.make();
+      const stores = Layer.mergeAll(
+        storesLayer(tables),
+        UserServiceStore.layer(tables),
+        ApiKeyStore.layer(tables),
+        EmailPasswordStore.layer(tables),
+      ).pipe(Layer.provide(effectDatabaseLayer(db)));
+      const deletion = Auth.accountDeletionLayer.pipe(
+        Layer.provideMerge(
+          Auth.SessionService.layer({
+            sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 },
+          }),
+        ),
+        Layer.provideMerge(Layer.mergeAll(stores, Auth.Hooks.Default)),
+      );
+
+      return yield* Effect.gen(function* () {
+        const { user } = yield* (yield* Auth.Email.EmailPasswordStore).createUser({});
+        const identifiers = yield* Auth.IdentifierStore;
+        const apiKeys = yield* Auth.ApiKeyStore;
+        const sessions = yield* Auth.SessionService;
+        const now = at(0);
+        yield* identifiers.create(
+          Auth.makeIdentifier({
+            userId: user.id,
+            type: "email",
+            value: "purge-tx@example.com",
+            now,
+          }),
+        );
+        yield* apiKeys.create({
+          id: "key-1",
+          start: "abc123",
+          keyHash: "key-hash-1",
+          userId: user.id,
+          enabled: true,
+          metadata: {},
+          createdAt: now.getTime(),
+          updatedAt: now.getTime(),
+        });
+        yield* sessions.createSession(user.id);
+
+        const deleteUser = (yield* Auth.AccountDeletion).deleteUser(user.id);
+        yield* db
+          .transaction(() =>
+            outcome === "fail"
+              ? deleteUser.pipe(Effect.andThen(Effect.fail("boom" as const)))
+              : deleteUser,
+          )
+          .pipe(Effect.ignore);
+
+        return {
+          user: (yield* (yield* Auth.UserStore).get(user.id)) !== null,
+          identifiers: (yield* identifiers.listByUser(user.id)).length,
+          apiKeys: (yield* apiKeys.listByUserId(user.id)).length,
+          sessions: (yield* sessions.listSessions(user.id)).length,
+        };
+      }).pipe(Effect.provide(deletion), Effect.timeout("10 seconds"));
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(EffectPglite.DefaultServices, PgliteClient.layer({ liveClient: client })),
+      ),
+    ),
+  );
+
+describe("the user purge inside a drizzle Effect transaction (#601)", () => {
+  it("rolls the whole purge back when the transaction fails after it", async () => {
+    expect(await purge("fail")).toEqual({ user: true, identifiers: 1, apiKeys: 1, sessions: 1 });
+  });
+
+  it("commits it when the transaction succeeds", async () => {
+    expect(await purge("commit")).toEqual({ user: false, identifiers: 0, apiKeys: 0, sessions: 0 });
   });
 });
