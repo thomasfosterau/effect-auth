@@ -13,7 +13,14 @@ import { Effect, Exit, HashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";
-import type { AuthDatabase, DrizzleHandle, DrizzleResult } from "./Database.ts";
+import type { SQL, Table } from "drizzle-orm";
+import type {
+  AuthDatabase,
+  DrizzleHandle,
+  DrizzleResult,
+  DrizzleSelected,
+  DrizzleSelectFields,
+} from "./Database.ts";
 import { defaultTableNames, type TableNames } from "./Schema.ts";
 
 /**
@@ -71,6 +78,23 @@ export const makeQuery =
 export type Query = ReturnType<typeof makeQuery>;
 
 /**
+ * The first row of `table` matching `where`, projected onto `fields`, or
+ * `null` on a miss.
+ *
+ * @internal
+ */
+export const selectOne = <TFields extends DrizzleSelectFields>(
+  query: Query,
+  label: string,
+  fields: TFields,
+  table: Table,
+  where: SQL,
+): Effect.Effect<DrizzleSelected<TFields> | null, Auth.AuthError> =>
+  query(label, (db) => db.select(fields).from(table).where(where).limit(1).execute()).pipe(
+    Effect.map((rows) => rows[0] ?? null),
+  );
+
+/**
  * One entry of a batch of by-id lookups: the request carries the id, and the
  * entry is completed with the found value or `null`.
  *
@@ -106,7 +130,6 @@ export const completeById = <Row extends { readonly id: string }, A, E>(
  * @internal
  */
 export const resolveTableNames = (names?: Partial<TableNames>): TableNames => ({
-  sessions: names?.sessions ?? defaultTableNames.sessions,
-  users: names?.users ?? defaultTableNames.users,
-  identifiers: names?.identifiers ?? defaultTableNames.identifiers,
+  ...defaultTableNames,
+  ...names,
 });

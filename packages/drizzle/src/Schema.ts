@@ -1,5 +1,5 @@
 /**
- * What the three auth tables are called, and the dialect-independent shape the
+ * What the auth tables are called, and the dialect-independent shape the
  * stores address them through.
  *
  * The tables themselves are defined once per dialect — `Pg`, `Sqlite` and
@@ -44,11 +44,17 @@ import type * as Sqlite from "./SqliteSchema.ts";
 // Table names
 // ---------------------------------------------------------------------------
 
-/** The physical table name for each of the three auth tables. */
+/** The physical table name for each of the auth tables. */
 export interface TableNames {
   readonly sessions: string;
   readonly users: string;
   readonly identifiers: string;
+  /** `ApiKeyStore`'s keys, by SHA-256 digest. */
+  readonly apiKeys: string;
+  /** `RateLimitStore`'s fixed-window counters. */
+  readonly rateLimits: string;
+  /** `EmailVerificationStore`'s and `PasswordResetStore`'s pending tokens, by digest. */
+  readonly tokens: string;
 }
 
 /** The default `effect_auth_*` table names, shared by every dialect. */
@@ -56,14 +62,27 @@ export const defaultTableNames: TableNames = {
   sessions: "effect_auth_sessions",
   users: "effect_auth_users",
   identifiers: "effect_auth_identifiers",
+  apiKeys: "effect_auth_api_keys",
+  rateLimits: "effect_auth_rate_limits",
+  tokens: "effect_auth_tokens",
 };
+
+/** What `ApiKey.permissions` holds: resource to allowed actions. */
+export type ApiKeyPermissions = Record<string, ReadonlyArray<string>>;
+
+/**
+ * Which flow a row of the tokens table belongs to. One table holds both kinds;
+ * every read and delete is scoped to its purpose, so a password-reset request
+ * never clears a pending email verification.
+ */
+export type TokenPurpose = "email-verification" | "password-reset";
 
 // ---------------------------------------------------------------------------
 // Tables
 // ---------------------------------------------------------------------------
 
 /**
- * The set of tables a store factory reads and writes: one dialect's three
+ * The set of tables a store factory reads and writes: one dialect's six
  * tables, never a mixture.
  *
  * The union is what makes the stores dialect-generic without giving up type
@@ -79,3 +98,9 @@ export type SessionRow = Tables["sessions"]["$inferSelect"];
 export type UserRow = Tables["users"]["$inferSelect"];
 /** The row `select()` returns from any dialect's identifiers table. */
 export type IdentifierRow = Tables["identifiers"]["$inferSelect"];
+/** The row `select()` returns from any dialect's API keys table. */
+export type ApiKeyRow = Tables["apiKeys"]["$inferSelect"];
+/** The row `select()` returns from any dialect's rate limits table. */
+export type RateLimitRow = Tables["rateLimits"]["$inferSelect"];
+/** The row `select()` returns from any dialect's tokens table. */
+export type TokenRow = Tables["tokens"]["$inferSelect"];

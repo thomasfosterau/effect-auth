@@ -495,7 +495,15 @@ describe("SQLite / Schema", () => {
       names,
     );
 
-    expect(result.present).toEqual(["app_identifiers", "app_sessions", "app_users"]);
+    // The tables the names leave out keep their defaults.
+    expect(result.present).toEqual([
+      "app_identifiers",
+      "app_sessions",
+      "app_users",
+      "effect_auth_api_keys",
+      "effect_auth_rate_limits",
+      "effect_auth_tokens",
+    ]);
     expect(result.session?.attributes).toEqual({ via: "custom" });
     expect(result.user?.id).toBe("user-1");
     expect(result.identifier?.id).toBe("identifier-1");
@@ -503,8 +511,11 @@ describe("SQLite / Schema", () => {
 
   it("emits SQLite DDL matching the requested table names", () => {
     const statements = migrationStatements();
-    expect(statements).toHaveLength(6);
+    expect(statements).toHaveLength(12);
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_users");
+    expect(statements[6]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_api_keys");
+    expect(statements[9]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_rate_limits");
+    expect(statements[10]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_tokens");
     // Instants are epoch-millisecond integers, bags are JSON text, flags are 0/1.
     expect(statements[0]).toContain("created_at INTEGER NOT NULL");
     expect(statements[0]).toContain("attributes TEXT NOT NULL DEFAULT '{}'");

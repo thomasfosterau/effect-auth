@@ -396,8 +396,8 @@ describe("MySQL / statements", () => {
 describe("MySQL / Schema", () => {
   it("emits MySQL DDL with the indexes inline", () => {
     const statements = migrationStatements();
-    // Three, not six: MySQL has no `CREATE INDEX IF NOT EXISTS`.
-    expect(statements).toHaveLength(3);
+    // One per table: MySQL has no `CREATE INDEX IF NOT EXISTS`.
+    expect(statements).toHaveLength(6);
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS effect_auth_users");
     expect(statements[0]).toContain("id VARCHAR(255) NOT NULL PRIMARY KEY");
     expect(statements[0]).toContain("attributes JSON NOT NULL");
