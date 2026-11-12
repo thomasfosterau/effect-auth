@@ -12,6 +12,15 @@ pnpm add @thomasfosterau/effect-auth effect
 
 `effect` is a peer dependency (`^4.1.0`). Two subpaths take an optional peer: `/http` (and `/client/testing` through it) needs `@thomasfosterau/effect-jsonapi`, and `/saml` needs `@node-saml/node-saml`. Storage comes from your own store implementations, the [`/sql` subpath](#sql-storage-sql) or an adapter package (`@thomasfosterau/effect-auth-drizzle`).
 
+### Runtimes
+
+The core runs on Node.js (`^20.19.0 || ^22.18.0 || >=24.11.0`) and on Cloudflare Workers; `/saml` is Node-only. Password hashing, token digests, AES-256-GCM, HMAC and JWS signing take a few primitives from `node:crypto` (and `Buffer` from `node:buffer`), so a Worker needs:
+
+- the **`nodejs_compat`** compatibility flag (on by default from compatibility date 2026-08-04), and
+- a **compatibility date of 2023-01-01 or later**.
+
+The core never relies on the Node globals `nodejs_compat` sets only from 2024-09-23 (`Buffer`, `process`), so an older date works. Every primitive (PBKDF2 and scrypt hashing and verification, `hashToken` and the constant-time comparisons, AES-256-GCM, HMAC, the WebAuthn signature checks, and ES256, EdDSA and RS256 JWS through `JwtService`, `verifyJws` and the Apple client secret) is tested inside a real workerd at 2023-01-01 and at workerd's newest date (`src/Workerd.test.ts`). Releases up to 0.4.0 fail there: ES256 signing and verification on every date, JWT key generation from 2025-12-03, and password hashing, AES-GCM and the WebAuthn checks before 2024-09-23 (#748).
+
 ## Usage
 
 Implement the store interfaces (or take them from an adapter), provide the service layer, and use the service:
