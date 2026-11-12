@@ -34,8 +34,10 @@ import {
   UserNotFoundError,
 } from "../Errors.ts";
 import { type HookError } from "../Hooks.ts";
+import { type OAuthAccount, OAuthAccountStore } from "./OAuthAccount.ts";
+export { type OAuthAccount, OAuthAccountStore } from "./OAuthAccount.ts";
 import { EmailPasswordStore } from "../email/EmailPassword.ts";
-import { proveAddress } from "../FirstProof.ts";
+import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -102,24 +104,6 @@ export interface OAuthState {
   readonly returnTo?: string;
   readonly createdAt: number;
   readonly expiresAt: number;
-}
-
-/**
- * OAuth account linking to user
- */
-export interface OAuthAccount {
-  readonly id: string;
-  readonly userId: string;
-  readonly provider: string;
-  readonly providerId: string;
-  readonly email?: string;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly accessToken: string;
-  readonly refreshToken?: string;
-  readonly expiresAt?: number;
-  readonly createdAt: number;
-  readonly updatedAt: number;
 }
 
 /**
@@ -285,37 +269,6 @@ export class OAuthStateStore extends Context.Service<
     readonly consume: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
   }
 >()("@effect-auth/OAuthStateStore") {}
-
-/**
- * Storage interface for OAuth accounts (persistent, database)
- */
-export class OAuthAccountStore extends Context.Service<
-  OAuthAccountStore,
-  {
-    readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
-    readonly get: (
-      provider: string,
-      providerId: string,
-    ) => Effect.Effect<OAuthAccount | null, AuthError>;
-    readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
-    readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
-    readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
-    readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
-    readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
-    /**
-     * Optional: report whether the user has a password hash set. Consulted by
-     * {@link OAuthService.unlinkAccount}'s last-credential lockout guard to
-     * decide whether the account being unlinked is the user's only sign-in
-     * credential.
-     *
-     * When this capability is **absent** the guard **fails open**: it assumes
-     * the user retains another credential and permits the unlink, rather than
-     * blocking on incomplete information. Implement it to enable the lockout
-     * check.
-     */
-    readonly hasPassword?: (userId: string) => Effect.Effect<boolean, AuthError>;
-  }
->()("@effect-auth/OAuthAccountStore") {}
 
 /**
  * Minimal user store the OAuth sign-in flow needs to create or look up users
@@ -1022,7 +975,8 @@ export interface OAuthServiceOptions {
    * when {@link autoLinkByVerifiedEmail} is `false`. The same rule holds for
    * them: the provider must report `email_verified: true`, or the sign-in is
    * refused with `EmailInUseError` (#588), and an unverified local address is
-   * proven first, clearing its account's password and sessions (#671).
+   * proven first, clearing its account's password, credentials and sessions
+   * (#671, #694).
    * Defaults to `[]`.
    */
   readonly trustedProviders?: readonly string[];
@@ -1085,6 +1039,11 @@ export const make = (
     const coreUsers = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
+    const firstProof = yield* firstProofServices({
+      identifiers,
+      passwords,
+      sessions: sessionManager,
+    });
     const crypto = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
 
@@ -1243,7 +1202,8 @@ export const make = (
      * the provider verified the address and auto-linking applies to the
      * provider (#588). An unverified local address may belong to whoever
      * signed up with it first, so the provider's verification is its first
-     * proof (#440, #671): `proveAddress` clears the account's password and
+     * proof (#440, #671, #694): `proveAddress` clears the account's password,
+     * its other credentials (the link made now is created after) and
      * revokes its sessions before the link, as Google One Tap and SSO do.
      * Anything else (an unverified provider email, auto-linking off for the
      * provider, a dangling identifier) fails with `EmailInUseError`; nothing
@@ -1258,7 +1218,7 @@ export const make = (
         const user = mayLink ? yield* coreUsers.get(existing.userId) : null;
         if (user === null) return yield* emailInUse(email);
         if (!existing.verified) {
-          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, existing);
+          yield* proveAddress({ ...firstProof, oauthAccounts: accountStore }, existing);
         }
         return user;
       });
