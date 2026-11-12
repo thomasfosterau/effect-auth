@@ -70,8 +70,8 @@ describe("MySQL / RateLimitStore", () => {
         Effect.provide(Layer.merge(databaseLayer(proxy.db), TestClock.layer())),
       ),
     );
-    expect(proxy.sent.map((statement) => normalizeSql(statement.sql))).toEqual([
-      "delete from `effect_auth_rate_limits` where (`effect_auth_rate_limits`.`reset_at` <= ? and (`effect_auth_rate_limits`.`blocked_until` is null or `effect_auth_rate_limits`.`blocked_until` <= ?)) and `effect_auth_rate_limits`.`key` in (select `key` from (select `effect_auth_rate_limits`.`key` from `effect_auth_rate_limits` where (`effect_auth_rate_limits`.`reset_at` <= ? and (`effect_auth_rate_limits`.`blocked_until` is null or `effect_auth_rate_limits`.`blocked_until` <= ?)) limit 500) as `spent`)",
+    expect(proxy.sent.map((statement) => statement.sql)).toEqual([
+      "delete from `effect_auth_rate_limits` where ((`effect_auth_rate_limits`.`reset_at` <= ?) and ((((`effect_auth_rate_limits`.`blocked_until` is null)) or (`effect_auth_rate_limits`.`blocked_until` <= ?)))) and `effect_auth_rate_limits`.`key` in (select `key` from (select `effect_auth_rate_limits`.`key` from `effect_auth_rate_limits` where ((`effect_auth_rate_limits`.`reset_at` <= ?) and ((((`effect_auth_rate_limits`.`blocked_until` is null)) or (`effect_auth_rate_limits`.`blocked_until` <= ?)))) limit 500) as `spent`)",
     ]);
     // The outer predicate rechecks expiry, so a row a concurrent increment
     // refreshed after the subquery picked it survives (#729).
