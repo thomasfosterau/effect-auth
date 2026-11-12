@@ -129,8 +129,8 @@ describe("AccountLockoutPlugin", () => {
       userId: "u1",
     });
     await h.attempt({
-      method: "passkey",
-      identifier: { type: "user", value: "u1" },
+      method: "username",
+      identifier: { type: "username", value: "ada" },
       userId: "u1",
     });
     expect(h.failures("lockout:user:u1")).toBe(3);
@@ -142,6 +142,28 @@ describe("AccountLockoutPlugin", () => {
       userId: "u1",
     });
     expect(blocked).toBeInstanceOf(AccountLockedError);
+  });
+
+  it("neither counts nor refuses a passkey attempt, even on a locked account (#698)", async () => {
+    const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
+    const passkey: AuthenticateAttempt = {
+      method: "passkey",
+      identifier: { type: "user", value: "u1" },
+      userId: "u1",
+    };
+    const attempts = Array.from({ length: 5 }, () => passkey);
+    expect(await Promise.all(attempts.map((attempt) => h.attemptResult(attempt)))).toEqual(
+      attempts,
+    );
+    expect(h.failures("lockout:user:u1")).toBeUndefined();
+
+    // Lock the account with passwords; a passkey still gets through.
+    await h.attempt(byEmail("user@example.com", "u1"));
+    await h.attempt(byEmail("user@example.com", "u1"));
+    expect(await h.attemptResult(byEmail("user@example.com", "u1"))).toBeInstanceOf(
+      AccountLockedError,
+    );
+    expect(await h.attemptResult(passkey)).toEqual(passkey);
   });
 
   it("neither counts nor refuses a possession proof (one-time code, magic link) (#678)", async () => {

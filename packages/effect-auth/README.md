@@ -822,14 +822,21 @@ An attempt that names no account is **unkeyed** (#678): an unknown or expired se
 
 `AccountLockoutPlugin`, `CaptchaPlugin`, `RateLimitPlugin` and `IPRateLimitPlugin` guard it:
 
-- **`AccountLockoutPlugin`** counts every password, passkey and second-factor attempt per account (`authenticationSubject`: `user:<id>` for a resolved handle, so an account's email, username and phone share one count, else the handle itself, so an unknown handle locks like a known one) and locks after `maxAttempts` for `lockoutDurationMs`. The counts clear only when the user earns a session (`afterCreateSession`): never on a correct password that earned only a second-factor challenge, and never on an admin impersonation (`isImpersonationSession`). Second-factor redemptions have a per-user count of their own (`maxSecondFactorAttempts`, default 5) that runs across challenges, so fresh challenges buy no fresh guesses; only someone past the first factor can drive it. Anyone who knows a handle can lock the password methods for `lockoutDurationMs`: pair it with `IPRateLimitPlugin` or a captcha.
+- **`AccountLockoutPlugin`** counts every password and second-factor attempt per account (`authenticationSubject`: `user:<id>` for a resolved handle, so an account's email, username and phone share one count, else the handle itself, so an unknown handle locks like a known one) and locks after `maxAttempts` for `lockoutDurationMs`. The counts clear only when the user earns a session (`afterCreateSession`): never on a correct password that earned only a second-factor challenge, and never on an admin impersonation (`isImpersonationSession`). Second-factor redemptions have a per-user count of their own (`maxSecondFactorAttempts`, default 5) that runs across challenges, so fresh challenges buy no fresh guesses; only someone past the first factor can drive it. Anyone who knows a handle can lock the password methods for `lockoutDurationMs`: pair it with `IPRateLimitPlugin` or a captcha.
 - **Magic link and one-time codes are exempt from the lock** (#678, `isPossessionMethod`): an email or phone OTP and a magic link are neither refused by it nor counted toward it, so a locked-out owner can still recover by proving they hold the address, and a session that proof earns clears the lock. The exemption opens no brute-force path: a code accepts `maxAttempts` wrong guesses, the address's wrong codes put its sends into the backoff below, which no resend resets, a magic-link token is 256 random bits and an unknown one is an unkeyed attempt the per-IP limit counts, and `RateLimitPlugin` and `IPRateLimitPlugin` count every attempt.
+- **Passkeys are exempt from the lock too** (#698): a WebAuthn assertion is a signature nobody can guess, and a credential id is not secret, so counting passkey attempts would let anyone who holds one lock the account. Passkey verification still counts against `IPRateLimitPlugin` and `RateLimitPlugin`.
 - **`CaptchaPlugin`** with the `"signIn"` endpoint verifies the token on the two password methods; verifying a code or a link, a passkey and a second factor carry no token.
 - **`RateLimitPlugin`** draws first-factor attempts from one bucket per account (`RateLimitPresets.login`) and second-factor redemptions from another (`RateLimitPresets.totpVerification`).
 
 ### The `beforeSendCode` hook
 
 Every send of a one-time code or a magic link (`EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send`) fires `beforeSendCode` with `{ method, purpose, address, captchaToken? }` before it looks the address up, stores or sends anything, so it answers alike for an address with and without an account (#678). A plugin refuses the send by failing; over HTTP `POST /otp-challenges` answers `400` for a `CaptchaError`. `CaptchaPlugin`'s `"sendCode"` endpoint (on by default) guards it: a send is the step that costs money, so it is where the captcha guards the passwordless flows.
+
+### One-time code guessing
+
+Email and phone OTP sign-in (`EmailOtpService`, `PhoneOtpService`) bound the wrong codes an address accepts across resends, not only per code (#590). `maxAttempts` (default 3) limits one code; every wrong code is also counted against the address and purpose in the store's failure budget, which a resend, an expiry or the attempt limit never resets. Once the count reaches `backoff.freeFailures` (default 5), `send` answers `ResendTooSoonError` (`429` with `Retry-After` over HTTP) until `backoff.baseDelay` (default one minute), doubled for each further wrong code and capped at `backoff.maxDelay` (default one day), has passed since the latest one. A successful verification resets the count.
+
+There is no lockout: once the delay has passed a send goes through, so an attacker can slow an address's owner down but never lock them out. Under the defaults, an attacker gets 18 guesses at a six-digit code in the first day and 3 a day after that. `resendCooldown` (default 60 s; `0` turns it off) still spaces sends of an outstanding code. Both apply alike to an address with and without an account, so neither reveals which addresses are registered. The code length stays 6 digits by default (`otpLength`).
 
 ## Sign-up attributes
 
@@ -846,12 +853,6 @@ const { handler } = Http.make({
 ```
 
 A key the list doesn't name is dropped without an error, so a client that sends one still signs up, and the answer doesn't tell a caller which keys the server guards; the user in a `201` shows what was kept. Naming a server-only, ban or SCIM key here has no effect. The kept attributes may take at most `Http.SIGN_UP_ATTRIBUTES_MAX_BYTES` (4096) bytes as UTF-8 JSON; a larger bag is refused with `400`. Dropped keys don't count, and the whole request body stays under `maxBodySize` (default 64 KiB). `groupLayers(cookie, multiSession, signUpAttributes)` takes the same list when you compose the contract yourself.
-
-### One-time code guessing
-
-Email and phone OTP sign-in (`EmailOtpService`, `PhoneOtpService`) bound the wrong codes an address accepts across resends, not only per code (#590). `maxAttempts` (default 3) limits one code; every wrong code is also counted against the address and purpose in the store's failure budget, which a resend, an expiry or the attempt limit never resets. Once the count reaches `backoff.freeFailures` (default 5), `send` answers `ResendTooSoonError` (`429` with `Retry-After` over HTTP) until `backoff.baseDelay` (default one minute), doubled for each further wrong code and capped at `backoff.maxDelay` (default one day), has passed since the latest one. A successful verification resets the count.
-
-There is no lockout: once the delay has passed a send goes through, so an attacker can slow an address's owner down but never lock them out. Under the defaults, an attacker gets 18 guesses at a six-digit code in the first day and 3 a day after that. `resendCooldown` (default 60 s; `0` turns it off) still spaces sends of an outstanding code. Both apply alike to an address with and without an account, so neither reveals which addresses are registered. The code length stays 6 digits by default (`otpLength`).
 
 ## Expired codes and links
 

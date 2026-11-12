@@ -343,6 +343,32 @@ describe("MagicLinkForm", () => {
     );
   });
 
+  it("sends the captcha token the getter returns at submit time (#698)", async () => {
+    const calls: unknown[] = [];
+    const client = stub({
+      magicLink: {
+        send: (payload: object) => {
+          calls.push(payload);
+          return Promise.resolve(ok);
+        },
+      },
+    });
+    let token: string | undefined;
+    const { container } = render(MagicLinkForm, {
+      props: { captchaToken: () => token },
+      context: withClient(client),
+    });
+
+    await type("Email", EMAIL);
+    // The widget solves after the form rendered; the form reads the token on submit.
+    token = "captcha-ok";
+    await fireEvent.submit(formOf(container));
+
+    await waitFor(() =>
+      expect(calls).toStrictEqual([{ email: EMAIL, captchaToken: "captcha-ok" }]),
+    );
+  });
+
   it('reports a failure through role="alert" and fires onError', async () => {
     const failure = new Error("Magic link is not configured.");
     const seen: unknown[] = [];
@@ -373,6 +399,24 @@ describe("EmailOtpForm", () => {
         },
       },
     });
+
+  it("sends the captcha token with the code request only (#698)", async () => {
+    const calls: unknown[] = [];
+    const { container } = render(EmailOtpForm, {
+      props: { captchaToken: () => "captcha-ok" },
+      context: withClient(otpClient(calls)),
+    });
+
+    await type("Email", EMAIL);
+    await fireEvent.submit(formOf(container));
+
+    await waitFor(() =>
+      expect(calls[0]).toStrictEqual([
+        "send",
+        { email: EMAIL, purpose: "sign-in", captchaToken: "captcha-ok" },
+      ]),
+    );
+  });
 
   it("sends a code, swaps to the verify step, then signs in", async () => {
     const calls: unknown[] = [];

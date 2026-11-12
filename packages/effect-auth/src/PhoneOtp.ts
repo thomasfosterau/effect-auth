@@ -274,7 +274,10 @@ export class PhoneOtpService extends Context.Service<
       userId: string,
       phoneNumber: string,
       otp: string,
-    ) => Effect.Effect<Types.User, PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError>;
+    ) => Effect.Effect<
+      Types.User,
+      PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError | HookError
+    >;
   }
 >()("@effect-auth/PhoneOtpService") {
   /**
@@ -468,6 +471,12 @@ export const make = (
         otp: string,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
+        // The signed-in user proves a number: the gate keys on them (#698).
+        yield* hooks.beforeAuthenticate({
+          method: "phone-otp",
+          identifier: { type: "phone", value: phoneNumber },
+          userId,
+        });
 
         yield* verifyOtp(phoneNumber, otp, "phone-verification");
 

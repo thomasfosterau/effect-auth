@@ -398,6 +398,36 @@ describe("PhoneOtpService", () => {
     expect(MutableHashMap.size(users)).toBe(0);
   });
 
+  it("runs beforeAuthenticate keyed on the signed-in user before checking a verification code (#698)", async () => {
+    const testContext = await makeTestContext();
+    const created = seedPhoneUser("+15551237778", false);
+    const seen: Array<AuthenticateAttempt> = [];
+
+    const refused = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
+        yield* service.send("+15551237778", "phone-verification");
+        return yield* Effect.flip(
+          service.verifyPhoneNumber(created.id, "+15551237778", recorded(sentOtps).otp),
+        );
+      }).pipe(Effect.provide(testContext), Effect.provide(authenticateGate(seen, true))),
+    );
+
+    expect(refused).toBeInstanceOf(RateLimitError);
+    expect(seen).toEqual([
+      {
+        method: "phone-otp",
+        identifier: { type: "phone", value: "+15551237778" },
+        userId: created.id,
+      },
+    ]);
+    // Refused before the code was checked: not spent, not counted.
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(records, "+15551237778:phone-verification"))
+        ?.attempts,
+    ).toBe(0);
+  });
+
   it("verifies an existing user's phone number", async () => {
     const testContext = await makeTestContext();
     const created = seedPhoneUser("+15551237777", false);
