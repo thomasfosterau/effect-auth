@@ -1,12 +1,12 @@
 /**
- * The first proof of an address (#425, #440).
+ * The first proof of an address (#425, #440, #671).
  *
  * An email identifier is created unverified only by a sign-up that proved
  * nothing about the address, so the password and sessions on its account may
  * belong to whoever signed up with it first, not to the address's holder. Every
  * flow that promotes such an identifier to verified on the strength of a
  * proof (a verification link, a magic link, an email OTP, an IdP's verified
- * email claim) first clears the account's password and revokes its sessions,
+ * email claim through OAuth, Google One Tap or SSO) first clears the account's password and revokes its sessions,
  * so the prover is left the only one holding the account.
  *
  * @internal

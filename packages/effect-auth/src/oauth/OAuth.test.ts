@@ -15,11 +15,20 @@ import {
 import * as Cipher from "../Cipher.ts";
 import {
   IdentifierStore,
+  lookupIdentifier,
   makeIdentifier,
   memoryIdentifierStore,
   type Identifier,
 } from "../Identifier.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
+import { Hooks } from "../Hooks.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import {
+  layer as memoryStores,
+  memoryEmailPasswordStore,
+  memoryUserTable,
+} from "../testing/MemoryStores.ts";
 import { SessionService } from "../SessionService.ts";
 import { UserStore } from "../UserStore.ts";
 import type * as Types from "../Types.ts";
@@ -852,14 +861,16 @@ describe("Cipher.aes256GcmCipher", () => {
 
 describe("OAuthService encryptTokens", () => {
   // SAFETY: OAuth.make resolves OAuthStateStore | OAuthAccountStore |
-  // OAuthUserStore | IdentifierStore | UserStore | SessionService at construction
-  // time. These tests only exercise refreshAccessToken (which only touches
-  // OAuthAccountStore, via closure), so the `undefined` others are never invoked.
+  // OAuthUserStore | IdentifierStore | UserStore | EmailPasswordStore |
+  // SessionService at construction time. These tests only exercise
+  // refreshAccessToken (which only touches OAuthAccountStore, via closure), so
+  // the `undefined` others are never invoked.
   const unusedDepsLayer = Layer.mergeAll(
     Layer.succeed(OAuthStateStore)(undefined as never),
     Layer.succeed(OAuthUserStore)(undefined as never),
     Layer.succeed(IdentifierStore)(undefined as never),
     Layer.succeed(UserStore)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Layer.succeed(SessionService)(undefined as never),
     PlatformCrypto.layer,
   );
@@ -1084,6 +1095,7 @@ describe("OAuthService unlinkAccount guard", () => {
     Layer.succeed(OAuthUserStore)(undefined as never),
     Layer.succeed(IdentifierStore)(undefined as never),
     Layer.succeed(UserStore)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Layer.succeed(SessionService)(undefined as never),
     PlatformCrypto.layer,
   );
@@ -1195,11 +1207,13 @@ describe("OAuthService unlinkAccount guard", () => {
 // trustedProviders, updateUserInfoOnLink)
 // ---------------------------------------------------------------------------
 
-/** An OAuth sign-in refused over a claimed email (#588): a conflict on the address, nothing linked or minted, the address as it was. */
+/** An OAuth sign-in refused over a claimed email (#588): a conflict on the address, nothing linked, minted or revoked, the password and the address as they were. */
 const refusedClaim = (localVerified: boolean) => ({
   failure: expect.objectContaining({ _tag: "EmailInUseError", email: "user@example.com" }),
   accounts: 0,
   minted: [],
+  journal: [],
+  password: "squatter-hash",
   address: { userId: "user-existing", verified: localVerified },
 });
 
@@ -1322,7 +1336,15 @@ describe("OAuthService linking controls", () => {
       get: (id) => Effect.succeed(users.find((u) => u.id === id) ?? null),
     });
 
-  const makeSessionLayer = (userId: string, minted: Array<string> = []) => {
+  /**
+   * A `SessionService` stub. `minted` collects the user ids sessions were
+   * created for; `journal` records both mints and revocations, in order.
+   */
+  const makeSessionLayer = (
+    userId: string,
+    minted: Array<string> = [],
+    journal: Array<string> = [],
+  ) => {
     const session: Types.Session = {
       id: "sess-test",
       userId,
@@ -1333,10 +1355,15 @@ describe("OAuthService linking controls", () => {
     };
     const user: Types.User = makeUser({ id: userId });
     return Layer.succeed(SessionService, {
-      createSession: (id) => Effect.sync(() => (minted.push(id), { session, token: "token-test" })),
+      createSession: (id) =>
+        Effect.sync(() => {
+          minted.push(id);
+          journal.push(`mint:${id}`);
+          return { session, token: "token-test" };
+        }),
       validateSession: () => Effect.succeed({ session, user }),
       invalidateSession: () => Effect.void,
-      invalidateUserSessions: () => Effect.void,
+      invalidateUserSessions: (id) => Effect.sync(() => void journal.push(`revoke:${id}`)),
       listSessions: () => Effect.succeed([]),
       revokeSessionById: () => Effect.succeed(false),
       revokeOtherSessions: () => Effect.void,
@@ -1347,6 +1374,9 @@ describe("OAuthService linking controls", () => {
   // SAFETY: linkAccount never touches SessionService, so the `undefined` stub is
   // never invoked by the tests that use it.
   const noSession = Layer.succeed(SessionService)(undefined as never);
+
+  /** A password store holding no passwords, for the tests that never prove an address. */
+  const noPasswordsLayer = Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore());
 
   const mockTokenResponse = { access_token: "at-new", token_type: "bearer" };
 
@@ -1386,6 +1416,7 @@ describe("OAuthService linking controls", () => {
             identifiers.layer,
             makeCoreUserLayer(user),
             noSession,
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1412,6 +1443,7 @@ describe("OAuthService linking controls", () => {
             identifiers.layer,
             makeCoreUserLayer(user),
             noSession,
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1438,6 +1470,7 @@ describe("OAuthService linking controls", () => {
             identifiers.layer,
             makeCoreUserLayer(user),
             noSession,
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1453,9 +1486,10 @@ describe("OAuthService linking controls", () => {
 
   /**
    * Run `signInWithCallback` for a provider identity that is new, against one
-   * existing user holding `user@example.com` (verified or not), and report what
-   * the flow wrote: the accounts it created, the sessions it minted and the
-   * address afterwards (#588).
+   * existing user holding `user@example.com` (verified or not) with a
+   * password, and report what the flow wrote: the accounts it created, the
+   * sessions it minted and revoked (in order), the password left on the
+   * account and the address afterwards (#588, #671).
    */
   const signInOverClaimedEmail = async (
     options: OAuth.OAuthServiceOptions,
@@ -1469,6 +1503,10 @@ describe("OAuthService linking controls", () => {
     });
     const accounts = MutableHashMap.empty<string, OAuthAccount>();
     const minted: Array<string> = [];
+    const journal: Array<string> = [];
+    const table = memoryUserTable();
+    MutableHashMap.set(table.passwordHashes, existingUser.id, "squatter-hash");
+    const passwords = memoryEmailPasswordStore(table);
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }, options).pipe(
         Effect.provide(
@@ -1478,7 +1516,8 @@ describe("OAuthService linking controls", () => {
             makeUserLayer(existingUser),
             identifiers.layer,
             makeCoreUserLayer(existingUser),
-            makeSessionLayer(existingUser.id, minted),
+            makeSessionLayer(existingUser.id, minted, journal),
+            Layer.succeed(EmailPasswordStore)(passwords),
             PlatformCrypto.layer,
           ),
         ),
@@ -1498,19 +1537,47 @@ describe("OAuthService linking controls", () => {
     const address = await Effect.runPromise(
       identifiers.store.getByValue("email", "user@example.com"),
     );
-    return { result, existingUser, accounts: MutableHashMap.size(accounts), minted, address };
+    const password = await Effect.runPromise(passwords.getPasswordHash(existingUser.id));
+    return {
+      result,
+      existingUser,
+      accounts: MutableHashMap.size(accounts),
+      minted,
+      journal,
+      password,
+      address,
+    };
   };
   type ClaimedEmailOutcome = Awaited<ReturnType<typeof signInOverClaimedEmail>>;
 
   /** What a sign-in left behind: the error it failed with and the writes it made. */
-  const aftermath = ({ result, accounts, minted, address }: ClaimedEmailOutcome) => ({
+  const aftermath = ({
+    result,
+    accounts,
+    minted,
+    journal,
+    password,
+    address,
+  }: ClaimedEmailOutcome) => ({
     failure: Result.isFailure(result) ? result.failure : null,
     accounts,
     minted,
+    journal,
+    password,
     address: address === null ? null : { userId: address.userId, verified: address.verified },
   });
 
-  it("auto-links a provider-verified email to a verified local address by default", async () => {
+  /** A first-proof takeover (#440, #671): the squatter's password and sessions cleared, then the link and the prover's session. */
+  const provenClaim = {
+    failure: null,
+    accounts: 1,
+    minted: ["user-existing"],
+    journal: ["revoke:user-existing", "mint:user-existing"],
+    password: null,
+    address: { userId: "user-existing", verified: true },
+  };
+
+  it("auto-links a provider-verified email to a verified local address by default, keeping its password and sessions", async () => {
     const outcome = await signInOverClaimedEmail(
       {},
       { localVerified: true, providerVerified: true },
@@ -1519,18 +1586,27 @@ describe("OAuthService linking controls", () => {
     assert(Result.isSuccess(outcome.result));
     expect(outcome.result.success.isNewUser).toBe(false);
     expect(outcome.result.success.user.id).toBe(outcome.existingUser.id);
-    expect(outcome.accounts).toBe(1);
-    expect(outcome.minted).toEqual([outcome.existingUser.id]);
     expect(outcome.result.success.token).toBe("token-test");
+    expect(aftermath(outcome)).toEqual({
+      ...provenClaim,
+      journal: ["mint:user-existing"],
+      password: "squatter-hash",
+    });
   });
 
-  it("refuses to auto-link a provider-verified email to an unverified local address (#588)", async () => {
+  it("a provider-verified email proves an unverified local address: the squatter's password and sessions are cleared before the link (#671)", async () => {
     // The squatter signed up with the victim's address and a password; the
-    // victim's provider verified it. Linking would hand the victim's sign-in
-    // to the squatter's account, password and sessions intact.
-    expect(
-      aftermath(await signInOverClaimedEmail({}, { localVerified: false, providerVerified: true })),
-    ).toEqual(refusedClaim(false));
+    // victim's provider verified it. That is the address's first proof: the
+    // victim lands in the account, and the squatter keeps nothing.
+    const outcome = await signInOverClaimedEmail(
+      {},
+      { localVerified: false, providerVerified: true },
+    );
+
+    assert(Result.isSuccess(outcome.result));
+    expect(outcome.result.success.isNewUser).toBe(false);
+    expect(outcome.result.success.user.id).toBe(outcome.existingUser.id);
+    expect(aftermath(outcome)).toEqual(provenClaim);
   });
 
   it("trustedProviders: refuses to link an unverified provider email to a verified local address (#588)", async () => {
@@ -1544,7 +1620,7 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(true));
   });
 
-  it("trustedProviders: refuses to link an unverified provider email to an unverified local address (#588)", async () => {
+  it("trustedProviders: an unverified provider email never takes over an unverified local address (#588, #671)", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail(
@@ -1555,7 +1631,15 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(false));
   });
 
-  it("trustedProviders: refuses a verified match on an unverified local address with auto-link off (#588)", async () => {
+  it("an unverified provider email never takes over an unverified local address by default (#671)", async () => {
+    expect(
+      aftermath(
+        await signInOverClaimedEmail({}, { localVerified: false, providerVerified: false }),
+      ),
+    ).toEqual(refusedClaim(false));
+  });
+
+  it("trustedProviders: a trusted provider proves an unverified local address with auto-link off (#671)", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail(
@@ -1563,7 +1647,7 @@ describe("OAuthService linking controls", () => {
           { localVerified: false, providerVerified: true },
         ),
       ),
-    ).toEqual(refusedClaim(false));
+    ).toEqual(provenClaim);
   });
 
   it("trustedProviders: a trusted provider auto-links a verified match with auto-link off", async () => {
@@ -1588,6 +1672,17 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(true));
   });
 
+  it("autoLinkByVerifiedEmail: false never takes over an unverified local address for an untrusted provider (#671)", async () => {
+    expect(
+      aftermath(
+        await signInOverClaimedEmail(
+          { autoLinkByVerifiedEmail: false },
+          { localVerified: false, providerVerified: true },
+        ),
+      ),
+    ).toEqual(refusedClaim(false));
+  });
+
   it("trustedProviders: untrusted provider refuses a claimed email without email_verified", async () => {
     // Without email_verified the flow must not auto-link, and it must not
     // double-claim the email either.
@@ -1600,7 +1695,6 @@ describe("OAuthService linking controls", () => {
       ),
     ).toEqual(refusedClaim(true));
   });
-
   it("trustedProviders: unclaimed unverified email creates a new user with an unverified identifier", async () => {
     const newUser = makeUser({ id: "new-user-id" });
     const identifiers = makeIdentifiers();
@@ -1624,6 +1718,7 @@ describe("OAuthService linking controls", () => {
             identifiers.layer,
             makeCoreUserLayer(newUser),
             makeSessionLayer(newUser.id),
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1668,6 +1763,7 @@ describe("OAuthService linking controls", () => {
             identifiers.layer,
             makeCoreUserLayer(newUser),
             makeSessionLayer(newUser.id),
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1737,6 +1833,7 @@ describe("OAuthService linking controls", () => {
             identifiers.layer,
             makeCoreUserLayer(owner),
             makeSessionLayer(owner.id),
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1773,6 +1870,7 @@ describe("OAuthService linking controls", () => {
             makeIdentifiers().layer,
             makeCoreUserLayer(user),
             noSession,
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1803,6 +1901,7 @@ describe("OAuthService linking controls", () => {
             makeIdentifiers().layer,
             makeCoreUserLayer(user),
             noSession,
+            noPasswordsLayer,
             PlatformCrypto.layer,
           ),
         ),
@@ -1890,6 +1989,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
     Layer.succeed(IdentifierStore)(undefined as never),
     // SAFETY: never called by handleCallback or generateAuthorizationUrl.
     Layer.succeed(UserStore)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     // SAFETY: never called by handleCallback or generateAuthorizationUrl.
     Layer.succeed(SessionService)(undefined as never),
   );
@@ -2076,5 +2176,88 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       );
       expect(err).toBeInstanceOf(AuthError);
     });
+  });
+});
+
+describe("OAuthService first proof over the real services (#671)", () => {
+  const github = OAuth.provider(
+    "github",
+    {
+      clientId: "c",
+      clientSecret: Redacted.make("s"),
+      redirectUri: "https://app/cb",
+      authorizationEndpoint: "https://github.example/authorize",
+      tokenEndpoint: "https://github.example/token",
+      userInfoEndpoint: "https://github.example/userinfo",
+      scopes: ["user:email"],
+    },
+    false,
+  );
+
+  const services = Layer.mergeAll(
+    OAuth.OAuthService.layer({ github }),
+    EmailPasswordService.layer(),
+  ).pipe(
+    Layer.provideMerge(
+      SessionService.layer({
+        sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 },
+      }),
+    ),
+    Layer.provideMerge(Layer.mergeAll(memoryStores, PasswordHasher.layer(), Hooks.Default)),
+    Layer.provideMerge(PlatformCrypto.layer),
+  );
+
+  it("a squatter's password sign-up is taken over by the address's holder signing in with a provider that verified it", async () => {
+    const outcome = await withFetch(
+      (url) =>
+        url.includes("/token")
+          ? json({ access_token: "at", token_type: "bearer" })
+          : json({ id: "gh-victim", email: "victim@example.com", email_verified: true }),
+      () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const emailPassword = yield* EmailPasswordService;
+            const sessions = yield* SessionService;
+            const oauth = yield* OAuth.OAuthService;
+            const identifiers = yield* IdentifierStore;
+
+            // The squatter signs up with the victim's address and a password.
+            const squatter = yield* emailPassword.signUp({
+              email: "victim@example.com",
+              password: "squatter password 123",
+            });
+            assert(squatter.token !== undefined, "the squatter's sign-up issued a session");
+
+            // The victim signs in with a provider that verified the address.
+            const { state } = yield* oauth.generateAuthorizationUrl("github");
+            const victim = yield* oauth.signInWithCallback(state, "code");
+
+            return {
+              squatter,
+              victim,
+              squatterSession: yield* Effect.result(sessions.validateSession(squatter.token)),
+              squatterPassword: yield* Effect.result(
+                emailPassword.signIn({
+                  email: "victim@example.com",
+                  password: "squatter password 123",
+                }),
+              ),
+              victimSession: yield* Effect.result(sessions.validateSession(victim.token)),
+              address: yield* lookupIdentifier(identifiers, "email", "victim@example.com"),
+            };
+          }).pipe(Effect.provide(services)),
+        ),
+    );
+
+    // The victim lands in the account the address names, now verified.
+    expect(outcome.victim.isNewUser).toBe(false);
+    expect(outcome.victim.user.id).toBe(outcome.squatter.user.id);
+    expect(outcome.address).toMatchObject({ userId: outcome.squatter.user.id, verified: true });
+    assert(Result.isSuccess(outcome.victimSession));
+    expect(outcome.victimSession.success.user.id).toBe(outcome.squatter.user.id);
+    // The squatter's session and password are gone.
+    assert(Result.isFailure(outcome.squatterSession));
+    assert(Result.isFailure(outcome.squatterPassword));
+    expect(outcome.squatterPassword.failure).toMatchObject({ _tag: "InvalidCredentialsError" });
   });
 });

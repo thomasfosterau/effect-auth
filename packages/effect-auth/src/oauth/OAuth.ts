@@ -34,6 +34,8 @@ import {
   UserNotFoundError,
 } from "../Errors.ts";
 import { type HookError } from "../Hooks.ts";
+import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { proveAddress } from "../FirstProof.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -883,13 +885,15 @@ export class OAuthService extends Context.Service<
      *
      * A provider identity seen for the first time whose email matches an
      * existing user is auto-linked to that user only when the provider reports
-     * the email verified, the local address is verified too, and auto-linking
-     * applies to the provider ({@link OAuthServiceOptions.autoLinkByVerifiedEmail},
-     * {@link OAuthServiceOptions.trustedProviders}). Any other match fails with
-     * `EmailInUseError` and links nothing (#588): an unverified local address
-     * may belong to whoever signed up with it first, so its holder proves it
-     * another way (a verification link, magic link or email OTP) before
-     * signing in with the provider.
+     * the email verified and auto-linking applies to the provider
+     * ({@link OAuthServiceOptions.autoLinkByVerifiedEmail},
+     * {@link OAuthServiceOptions.trustedProviders}). When the local address is
+     * still unverified, the provider's verification is its first proof (#440,
+     * #671), as in Google One Tap and SSO: the account's password is cleared
+     * and its sessions revoked, the address is marked verified, and then the
+     * identity is linked and the prover's session minted. Any other match (an
+     * unverified provider email, auto-linking off for the provider, a dangling
+     * identifier) fails with `EmailInUseError` and changes nothing.
      *
      * This is the recommended high-level entrypoint; use {@link handleCallback}
      * only when managing users yourself.
@@ -971,10 +975,12 @@ export const oauthServiceOptionsConfig = Config.all({
 export interface OAuthServiceOptions {
   /**
    * When a new OAuth account arrives with a provider-verified email that
-   * matches an existing user's verified email, link the account to that user
-   * instead of creating a new one. Defaults to `true`. Never links when the
-   * provider reports the email unverified or the local address is unverified
-   * (#588); {@link OAuthService.signInWithCallback} refuses those matches with
+   * matches an existing user's email, link the account to that user instead of
+   * creating a new one. Defaults to `true`. An unverified local address is
+   * proven first (#671): its account's password is cleared and its sessions
+   * revoked before the link. Never links when the provider reports the email
+   * unverified (#588); {@link OAuthService.signInWithCallback} refuses that
+   * match, and every match when auto-linking is off for the provider, with
    * `EmailInUseError`.
    */
   readonly autoLinkByVerifiedEmail?: boolean;
@@ -999,10 +1005,11 @@ export interface OAuthServiceOptions {
 
   /**
    * Providers that auto-link in {@link OAuthService.signInWithCallback} even
-   * when {@link autoLinkByVerifiedEmail} is `false`. The same verified-match
-   * rule holds for them: the provider must report `email_verified: true` and
-   * the local address must be verified, or the sign-in is refused with
-   * `EmailInUseError` (#588). Defaults to `[]`.
+   * when {@link autoLinkByVerifiedEmail} is `false`. The same rule holds for
+   * them: the provider must report `email_verified: true`, or the sign-in is
+   * refused with `EmailInUseError` (#588), and an unverified local address is
+   * proven first, clearing its account's password and sessions (#671).
+   * Defaults to `[]`.
    */
   readonly trustedProviders?: readonly string[];
 
@@ -1040,6 +1047,7 @@ export const make = (
   | OAuthUserStore
   | IdentifierStore
   | UserStore
+  | EmailPasswordStore
   | SessionService
   | SecureRandom.SecureRandom
   | Digest.Digest
@@ -1062,6 +1070,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const coreUsers = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const passwords = yield* EmailPasswordStore;
     const crypto = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
 
@@ -1208,23 +1217,28 @@ export const make = (
 
     /**
      * The existing user a first sign-in with `providerName` auto-links to by its
-     * email, or `null` when no identifier holds the address. Links only a
-     * verified match on both sides (#588): the provider verified the address,
-     * and so did this application, since an unverified local address may
-     * belong to whoever signed up with it first. Anything else (an unverified
-     * side, auto-linking off for the provider, a dangling identifier) fails
-     * with `EmailInUseError`; nothing is linked and nothing is wiped.
+     * email, or `null` when no identifier holds the address. Links only when
+     * the provider verified the address and auto-linking applies to the
+     * provider (#588). An unverified local address may belong to whoever
+     * signed up with it first, so the provider's verification is its first
+     * proof (#440, #671): `proveAddress` clears the account's password and
+     * revokes its sessions before the link, as Google One Tap and SSO do.
+     * Anything else (an unverified provider email, auto-linking off for the
+     * provider, a dangling identifier) fails with `EmailInUseError`; nothing
+     * is linked and nothing is wiped.
      */
     const autoLinkTarget = (providerName: string, email: string, emailVerified: boolean) =>
       Effect.gen(function* () {
         const existing = yield* lookupIdentifier(identifiers, "email", email);
         if (existing === null) return null;
         const mayLink =
-          emailVerified &&
-          existing.verified &&
-          (autoLinkByVerifiedEmail || trustedProviders.includes(providerName));
+          emailVerified && (autoLinkByVerifiedEmail || trustedProviders.includes(providerName));
         const user = mayLink ? yield* coreUsers.get(existing.userId) : null;
-        return user ?? (yield* emailInUse(email));
+        if (user === null) return yield* emailInUse(email);
+        if (!existing.verified) {
+          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, existing);
+        }
+        return user;
       });
 
     /** Create the user for a first sign-in whose email no identifier holds. */
