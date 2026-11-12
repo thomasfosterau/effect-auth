@@ -27,6 +27,7 @@ import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
+import { isInGoodStanding } from "./UserStanding.ts";
 
 /**
  * API key error
@@ -219,7 +220,8 @@ export interface ApiKeyUpdate {
 
 /**
  * API key service. Requires `ApiKeyStore`, `RateLimiter` and `UserStore`
- * (a key verifies only while its owner exists, #601).
+ * (a key verifies only while its owner exists and is neither banned nor
+ * SCIM-deactivated, #601, #755).
  */
 export class ApiKeyService extends Context.Service<
   ApiKeyService,
@@ -236,7 +238,8 @@ export class ApiKeyService extends Context.Service<
 
     /**
      * Verify a plaintext API key: sha256 hash lookup, then the owner check (a
-     * key whose `userId` names no user answers `Invalid API key`, as an
+     * key whose `userId` names no user, or a banned or SCIM-deactivated one,
+     * answers `Invalid API key`, as an
      * unknown key does, #601), then enabled / expiry /
      * remaining-uses / permission checks. On success `remaining` is
      * decremented (when set) and `lastUsedAt` is updated. `requiredPermissions`
@@ -470,7 +473,7 @@ export const make = (
 
     /**
      * Hash lookup for a plaintext key, `null` when no key matches or its owner
-     * no longer exists (#601): a key outlives its user only when something
+     * no longer exists (#601) or is banned or SCIM-deactivated (#755): a key outlives its user only when something
      * deleted the user row without the purge, and it must not authenticate.
      * Lookup is by exact sha256 digest, so the comparison carries no
      * secret-dependent timing.
@@ -479,7 +482,13 @@ export const make = (
       Effect.flatMap(store.getByHash(hashApiKey(plaintextKey)), (apiKey) =>
         apiKey === null
           ? Effect.succeed(null)
-          : Effect.map(users.get(apiKey.userId), (owner) => (owner === null ? null : apiKey)),
+          : Effect.flatMap(users.get(apiKey.userId), (owner) =>
+              owner === null
+                ? Effect.succeed(null)
+                : // A banned or SCIM-deactivated owner's key is refused as
+                  // unknown, before the per-key limit and the spend (#730, #755).
+                  Effect.map(isInGoodStanding(owner), (good) => (good ? apiKey : null)),
+            ),
       );
 
     return {

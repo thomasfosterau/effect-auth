@@ -20,14 +20,19 @@ Resolve an API key over the HTTP tier and across a service binding (#730).
   - The cookie is not forwarded on that call.
   - A request carrying a key **and** a session cookie or bearer token used to resolve through the cookie or token. It now resolves the key.
   - If the auth service has no `ApiKeyService`, that call answers `404`. `resolveAtEdge` then fails closed with a `RemoteSessionError` (`status: 404`), and `resolveAtEdgeFailOpen` degrades to anonymous. Neither falls back to the cookie.
+  - A key over its own per-key limit reaches the edge as a `RemoteSessionError` with `status: 429`: `resolveAtEdge` fails with it, and `resolveAtEdgeFailOpen` degrades to anonymous.
   - New API: `RemoteSessionResult.user` / `apiKey`, a `RemoteApiKey` type, `RemoteSessionClient.readApiKey` and `fromApiKeyDocument`.
 - **Fix in `ApiKeyService.verifyWithRateLimit`.** It now runs the enabled, expiry, remaining-uses and permission checks before it consumes the key's per-key rate-limit token.
   - A disabled, expired, exhausted or under-permitted key is refused with that reason even when it is over its limit. It used to be refused as `Rate limit exceeded`, which told a revoked-but-real key apart from an unknown one.
   - A refused attempt no longer spends a token from the key's bucket.
+- **A banned or SCIM-deactivated owner's key is refused (#755, in part).** `ApiKeyService.verify` and `verifyWithRateLimit` answer `Invalid API key` (`reason: "invalid"`) for a key whose owner is currently banned (`isBanned`: `banned`, an unlapsed `banExpires`) or SCIM-deactivated (`isScimDeactivated`), as they already did for an owner that no longer exists (#601).
+  - It is decided at lookup, before the per-key limit and before a use is spent. So such a key gets the unknown-key `401` from `GET /api-keys/current` whether or not it is over its limit, and a refused call spends neither a use nor a bucket token.
+  - `isBanned`, `isScimDeactivated` and `SCIM_DEACTIVATED_ATTRIBUTE` now live in a new internal `UserStanding.ts` and are re-exported, unchanged, from `Admin.ts`, `Scim.ts` and the root.
 - **Type narrowing in `ApiKeyService.verifyWithRateLimit`.** It now declares `R = never` instead of `RateLimitStore`, as every service method does; it never read the store from its context.
   - Callers keep compiling.
   - It breaks only a hand-written `ApiKeyService` implementation whose `verifyWithRateLimit` requires `RateLimitStore`.
 - **Smaller additions:**
   - `ApiKeyVerifyResult` gains `reason` (`ApiKeyRefusal`) and, for `rate-limited`, `retryAfter`.
   - `SessionResolution.ResolveWithOptions` gains an optional `resolved` predicate.
-  - `./client/testing`'s `makeServerFixture` gains `apiKeys`, `layer` and `cookie` options.
+  - `./client/testing`'s `makeServerFixture` gains `apiKeys`, `layer`, `cookie` and `rateLimitStore` options, and returns `apiKeyRecords`.
+  - `Http.ResolvedCookieConfig` (exported, marked internal) gains a required `apiKeyHeaders` field. `resolveCookieConfig` fills it in; only a hand-built value of the type needs it added.

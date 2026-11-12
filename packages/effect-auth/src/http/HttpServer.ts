@@ -89,7 +89,6 @@ import {
   AdminService,
   type BanUserOptions,
   isAdmin,
-  isBanned,
   type ListUsersQuery,
 } from "../Admin.ts";
 import {
@@ -3544,11 +3543,12 @@ const resolveCurrentApiKey = (
     const userService = yield* UserService;
     const user = yield* userService.getUser(key.userId).pipe(
       Effect.catchTags({
+        // Owner existence, ban and SCIM deactivation are decided in `verify`, before
+        // the limit and the spend (#755); this covers a delete racing the read.
         UserNotFoundError: () => refuseApiKey("API key owner not found"),
         AuthError: (e) => internalServerError(e),
       }),
     );
-    if (yield* isBanned(user)) return yield* refuseApiKey("API key owner is banned");
     return Handlers.data(apiKeyResource(key), { included: [yield* loadUserResource(user)] });
   });
 

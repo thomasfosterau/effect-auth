@@ -64,6 +64,8 @@ export interface ServerFixtureOptions {
   readonly layer?: Layer.Layer<never> | undefined;
   /** The server's cookie settings beyond `secure: false` (`apiKeyHeaders`, …). */
   readonly cookie?: Http.CookieConfig | undefined;
+  /** The `RateLimitStore` every limiter in the fixture runs on; default in-memory. */
+  readonly rateLimitStore?: typeof Auth.RateLimitStore.Service | undefined;
 }
 
 export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
@@ -492,7 +494,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   // RateLimiter (Http.make throws without one, #389), so the feature set carries
   // an in-memory one. Device approve/deny are limited to 5 per user code per 15
   // minutes, as in production.
-  const rateLimitStore = memoryRateLimitStore();
+  const rateLimitStore = options.rateLimitStore ?? memoryRateLimitStore();
   const rateLimitStoreLayer = Layer.succeed(Auth.RateLimitStore, rateLimitStore);
   const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
 
@@ -549,6 +551,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     handler,
     sessions,
     usersById,
+    /** The API keys `apiKeys: true` stores, by id. */
+    apiKeyRecords,
     identifierRecords,
     registerUsername,
     /** Change-email verifications the server "sent" (newest last). */

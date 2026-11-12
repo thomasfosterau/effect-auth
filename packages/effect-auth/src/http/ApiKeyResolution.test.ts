@@ -6,10 +6,14 @@
  * falls back to a session cookie the request also carries.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Logger } from "effect";
+import { Effect, Exit, Logger, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
+import { AuthError } from "../Errors.ts";
+import type * as Auth from "../index.ts";
+import { memoryRateLimitStore } from "../testing/MemoryStores.ts";
 import { hashApiKey } from "../ApiKey.ts";
 import { makeServerFixture, type ServerFixtureOptions } from "../client/testing/fixture.ts";
 import * as RemoteSession from "./RemoteSession.ts";
@@ -21,6 +25,9 @@ const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 type Handler = (request: Request) => Promise<Response>;
 
+/** A store call that fails as a down store does. */
+const broken = () => Effect.fail(new AuthError({ message: "rate-limit store down" }));
+
 /** A server with API keys mounted (unless `apiKeys: false`), its log captured as JSON lines. */
 const server = (options: ServerFixtureOptions = {}) => {
   const logs: Array<string> = [];
@@ -30,7 +37,7 @@ const server = (options: ServerFixtureOptions = {}) => {
     ...options,
     layer: Logger.layer([collector]),
   });
-  return { handler: fixture.handler, logs };
+  return { handler: fixture.handler, logs, fixture };
 };
 
 /** Sign up `email`; answers the raw session token the cookie carries. */
@@ -345,6 +352,75 @@ describe("GET /api-keys/current (#730)", () => {
       async () => (await current(handler, { "x-api-key": "ak_unknown" })).status,
     );
     expect(unknown).toEqual(Arr.replicate(401, 5));
+  });
+
+  describe("a key whose owner is banned, SCIM-deactivated or gone (#755)", () => {
+    const owners = {
+      banned: (user: Auth.User): Auth.User | null => ({
+        ...user,
+        attributes: { ...user.attributes, banned: true },
+      }),
+      deactivated: (user: Auth.User): Auth.User | null => ({
+        ...user,
+        attributes: { ...user.attributes, scimDeactivated: true },
+      }),
+      gone: (): Auth.User | null => null,
+    };
+
+    it.each(Struct.keys(owners))(
+      "%s: answers the unknown-key 401 under and over its limit, spending nothing",
+      async (state) => {
+        const { handler, fixture } = server();
+        const token = await signUp(handler, "ada@example.com");
+        const rateLimit = { maxRequests: 1, windowMs: 60_000 };
+        const under = await createKey(handler, token, { rateLimit, remaining: 10 });
+        const over = await createKey(handler, token, { rateLimit, remaining: 10 });
+        // `over` spends its one request in the window; `under` keeps its token.
+        expect((await current(handler, { "x-api-key": over.key })).status).toBe(200);
+
+        const record = (id: string) =>
+          Option.getOrUndefined(MutableHashMap.get(fixture.apiKeyRecords, id));
+        const userId = record(under.id)?.userId ?? "";
+        const owner = Option.getOrUndefined(MutableHashMap.get(fixture.usersById, userId));
+        assert(owner !== undefined, "the key's owner exists before the change");
+        const changed = owners[state](owner);
+        if (changed === null) MutableHashMap.remove(fixture.usersById, userId);
+        else MutableHashMap.set(fixture.usersById, userId, changed);
+        const before = [under, over].map(({ id }) => record(id));
+
+        const unknown = await refusalShape(await current(handler, { "x-api-key": "ak_not-a-key" }));
+        const answers = await inSequence([under, over, under, over], async ({ key }) =>
+          refusalShape(await current(handler, { "x-api-key": key })),
+        );
+
+        expect(answers).toEqual([unknown, unknown, unknown, unknown]);
+        expect(unknown.body).toBe(REFUSED_BODY);
+        // Neither key spent a use: `remaining` and `lastUsedAt` are as they were.
+        expect([under, over].map(({ id }) => record(id))).toEqual(before);
+      },
+    );
+  });
+
+  it("answers 500 when the per-key limiter's store fails, never resolving the key", async () => {
+    const failing = { on: false };
+    const inner = memoryRateLimitStore();
+    const rateLimitStore: typeof Auth.RateLimitStore.Service = {
+      get: (key) => (failing.on ? broken() : inner.get(key)),
+      set: (key, entry, ttl) => (failing.on ? broken() : inner.set(key, entry, ttl)),
+      increment: (key, ttl) => (failing.on ? broken() : inner.increment(key, ttl)),
+      delete: (key) => (failing.on ? broken() : inner.delete(key)),
+    };
+    const { handler } = server({ rateLimitStore });
+    const token = await signUp(handler, "ada@example.com");
+    const limited = await createKey(handler, token, {
+      rateLimit: { maxRequests: 10, windowMs: 60_000 },
+    });
+
+    failing.on = true;
+    const res = await current(handler, { "x-api-key": limited.key });
+    expect(res.status).toBe(500);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.text()).not.toContain(limited.key);
   });
 
   it("answers 404, cookie or not, when no ApiKeyService is mounted", async () => {
