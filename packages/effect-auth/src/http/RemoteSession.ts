@@ -44,11 +44,13 @@
  *
  * ### Never relay a cookie to a machine caller
  *
- * A request bearing an API key is not a browser. Handing it a `Set-Cookie`
- * plants session state in whatever cookie jar its HTTP client happens to keep,
- * for no benefit — the key, not a session, is its credential. The relay drops
- * `Set-Cookie` whenever the *inbound* request carries a machine credential,
- * including the mixed case where it carries both a cookie and a key.
+ * A request bearing an API key or a bearer token is not a browser. Handing it
+ * a `Set-Cookie` plants session state in whatever cookie jar its HTTP client
+ * happens to keep, for no benefit — the key or token, not a session, is its
+ * credential. The relay drops `Set-Cookie` whenever the *inbound* request
+ * carries a machine credential, including the mixed case where it carries both
+ * a cookie and a key or token. Every other caller receives it, a browser with
+ * no cookie yet included, so a first sign-in through the relay signs in (#619).
  *
  * @module remote-session
  */
@@ -584,8 +586,10 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
 /**
  * Rebuild an upstream response for the browser, applying the machine-caller
- * rule: `Set-Cookie` is relayed only when the inbound request carried a browser
- * session cookie and no machine credential.
+ * rule: `Set-Cookie` is relayed to every caller without a machine credential,
+ * and stripped when the inbound request carried an API key or a bearer token
+ * (with or without a session cookie beside it). A browser with no cookie yet
+ * therefore receives its session cookie on first sign-in (#619).
  *
  * Exported so an app relaying through its own code path gets the same rule.
  *
@@ -599,10 +603,11 @@ export const relayResponse = (
   const cookies = upstream.headers.getSetCookie();
   if (Arr.isReadonlyArrayEmpty(cookies)) return upstream;
 
-  // A key-bearing caller is not a browser. The mixed case — a request carrying
-  // both a cookie and a key — is excluded too: the key is its credential, so
-  // the session state has nowhere useful to go.
-  const mayReceiveCookies = inbound.hasSessionCookie && !inbound.hasApiKey;
+  // A key- or token-bearing caller is not a browser. The mixed case — a
+  // request carrying both a cookie and a key or token — is excluded too: the
+  // machine credential is its credential, so the session state has nowhere
+  // useful to go. A cookie is not required: a first sign-in has none yet.
+  const mayReceiveCookies = !inbound.hasApiKey && !inbound.hasBearer;
   if (mayReceiveCookies) return upstream;
 
   const headers = new Headers(upstream.headers);

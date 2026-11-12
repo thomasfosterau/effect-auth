@@ -1,0 +1,5 @@
+---
+"@thomasfosterau/effect-auth": patch
+---
+
+`Http.RemoteSession`: a first sign-in through `relay` now signs the browser in (#619). `relayResponse` (and `relay`, which applies it) used to pass `Set-Cookie` on only when the inbound request already carried a session or cache cookie, so a browser signing in for the first time got a `201` with its session cookie stripped and the new session orphaned. `Set-Cookie` is now relayed to every caller without a machine credential: a request with no credential at all, or with a session cookie only. It is still stripped when the inbound request carries an API key or an `Authorization: Bearer` token, alone or beside a session cookie, since such a caller authenticates with that key or token and a cookie would only plant session state in whatever jar its HTTP client keeps; a bearer client gets its token through `bearerMode`'s `set-auth-token` header. A request carrying a session cookie and a bearer token, which previously received `Set-Cookie`, no longer does.

@@ -417,6 +417,54 @@ describe("RemoteSession relay", () => {
     expect(await response.json()).toStrictEqual(signedIn);
   });
 
+  it("a first sign-in with no inbound cookie receives its session cookie (#619)", async () => {
+    const { fetcher } = spy(() => signInResponse());
+    const client = RemoteSession.make({ fetcher });
+
+    // A browser that has never signed in carries no session or cache cookie:
+    // the cookie it is about to receive is the one it lacks.
+    const request = new Request("https://app.example.com/auth/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/vnd.api+json", origin: "https://app.example.com" },
+      body: toJson({
+        data: {
+          type: "sessions",
+          attributes: {
+            credential: {
+              method: "password",
+              email: "user@example.com",
+              password: "hunter2hunter2",
+            },
+          },
+        },
+      }),
+    });
+
+    const response = await Effect.runPromise(client.relay(request, "/sessions"));
+    expect(response.status).toBe(201);
+    expect(response.headers.getSetCookie()).toStrictEqual([
+      "__Host-conduit_session=new-token; Path=/; HttpOnly; Secure",
+      "__Host-conduit_session_data=cache; Path=/; HttpOnly",
+    ]);
+  });
+
+  it("a relayed session read with a session cookie receives its refreshed cookies", async () => {
+    const refreshed = "__Host-conduit_session_data=fresh; Path=/; HttpOnly";
+    const { calls, fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    const request = new Request("https://app.example.com/auth/sessions/current?include=user", {
+      headers: withSession,
+    });
+
+    const response = await Effect.runPromise(
+      client.relay(request, "/sessions/current?include=user"),
+    );
+    expect(calls[0]?.method).toBe("GET");
+    expect(response.status).toBe(200);
+    expect(response.headers.getSetCookie()).toStrictEqual([refreshed]);
+  });
+
   it("a key-bearing request provably receives no Set-Cookie", async () => {
     const { fetcher } = spy(() => signInResponse());
     const client = RemoteSession.make({ fetcher });
@@ -468,6 +516,24 @@ describe("RemoteSession relay", () => {
     expect(response.headers.getSetCookie()).toStrictEqual([]);
   });
 
+  it("the mixed cookie+bearer case receives no Set-Cookie either", async () => {
+    const { fetcher } = spy(() => signInResponse());
+    const client = RemoteSession.make({ fetcher });
+
+    const request = new Request("https://app.example.com/auth/sessions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/vnd.api+json",
+        authorization: "Bearer tok",
+        cookie: "__Host-conduit_session=raw-token",
+      },
+      body: "{}",
+    });
+
+    const response = await Effect.runPromise(client.relay(request, "/sessions"));
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+  });
+
   it("relayResponse applies the same rule to a hand-rolled relay", () => {
     const keyed = SessionResolution.detectCredential(
       SessionResolution.fromRequest(inbound({ "x-api-key": "k" })),
@@ -475,6 +541,10 @@ describe("RemoteSession relay", () => {
     const browser = SessionResolution.detectCredential(
       SessionResolution.fromRequest(inbound(withSession)),
     );
+    const bearer = SessionResolution.detectCredential(
+      SessionResolution.fromRequest(inbound({ authorization: "Bearer tok" })),
+    );
+    const none = SessionResolution.detectCredential(SessionResolution.fromRequest(inbound()));
 
     expect(
       RemoteSession.relayResponse(signInResponse(), keyed).headers.getSetCookie(),
@@ -482,6 +552,12 @@ describe("RemoteSession relay", () => {
     expect(
       RemoteSession.relayResponse(signInResponse(), browser).headers.getSetCookie(),
     ).toHaveLength(2);
+    expect(
+      RemoteSession.relayResponse(signInResponse(), bearer).headers.getSetCookie(),
+    ).toStrictEqual([]);
+    expect(RemoteSession.relayResponse(signInResponse(), none).headers.getSetCookie()).toHaveLength(
+      2,
+    );
   });
 });
 
