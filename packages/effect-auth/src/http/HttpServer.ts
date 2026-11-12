@@ -52,7 +52,7 @@ import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
-import { IdentifierStore, type Identifier } from "../Identifier.ts";
+import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
@@ -1997,13 +1997,13 @@ export const emailVerificationsGroupLayer = (
           const identifiers = yield* IdentifierStore;
           const verification = yield* EmailVerificationService;
           const email = payload.data.attributes.email.trim().toLowerCase();
-          const identifier = yield* identifiers
-            .getByValue("email", email)
-            .pipe(Effect.catch(internalServerError));
+          const identifier = yield* lookupIdentifier(identifiers, "email", email).pipe(
+            Effect.catch(internalServerError),
+          );
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified.
           if (identifier !== null && !identifier.verified) {
-            yield* verification.resendVerification(identifier.userId, email).pipe(
+            yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
               Effect.catchTags({
                 AuthError: (e) => internalServerError(e),
                 EmailVerificationError: (e) => internalServerError(e),

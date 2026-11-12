@@ -11,7 +11,7 @@
 import { Clock, Context, DateTime, Duration, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, lookupIdentifier } from "./Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -230,7 +230,7 @@ export const make = (
         // succeed without sending anything. When sign-up is enabled the link
         // is always sent (the user is created at verify time).
         const deliver = disableSignUp
-          ? (yield* identifiers.getByValue("email", email)) !== null
+          ? (yield* lookupIdentifier(identifiers, "email", email)) !== null
           : true;
 
         // Resend cooldown: reject if an outstanding token was created within
@@ -319,7 +319,7 @@ export const make = (
         // Consume the token (one-time use)
         yield* store.delete(tokenHash);
 
-        const identifier = yield* identifiers.getByValue("email", magicLink.email);
+        const identifier = yield* lookupIdentifier(identifiers, "email", magicLink.email);
         let user = identifier === null ? null : yield* users.get(identifier.userId);
         if (identifier !== null && user === null) {
           // Dangling identifier (owner row is gone) — fail rather than

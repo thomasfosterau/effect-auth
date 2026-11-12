@@ -20,6 +20,7 @@ import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
   IdentifierStore,
+  lookupIdentifier,
   makeIdentifier,
   refusalAuthError,
 } from "./Identifier.ts";
@@ -384,7 +385,7 @@ export const make = (
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
         const deliver = hidesAccount(purpose)
-          ? (yield* identifiers.getByValue("phone", phoneNumber)) !== null
+          ? (yield* lookupIdentifier(identifiers, "phone", phoneNumber)) !== null
           : true;
 
         // Resend cooldown: reject if an outstanding OTP was created within
@@ -446,7 +447,7 @@ export const make = (
 
         yield* verifyOtp(phoneNumber, otp, "sign-in");
 
-        const identifier = yield* identifiers.getByValue("phone", phoneNumber);
+        const identifier = yield* lookupIdentifier(identifiers, "phone", phoneNumber);
         let user = identifier === null ? null : yield* users.get(identifier.userId);
         if (identifier !== null && user === null) {
           return yield* new PhoneOtpError({ message: "Account is unavailable" });
@@ -491,7 +492,7 @@ export const make = (
         yield* verifyOtp(phoneNumber, otp, "phone-verification");
 
         // Attach (or verify) the phone identifier for this user.
-        const existing = yield* identifiers.getByValue("phone", phoneNumber);
+        const existing = yield* lookupIdentifier(identifiers, "phone", phoneNumber);
         if (existing !== null && existing.userId !== userId) {
           return yield* new PhoneOtpError({ message: "This phone number is already in use" });
         }

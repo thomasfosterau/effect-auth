@@ -33,7 +33,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, lookupIdentifier } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
@@ -512,7 +512,7 @@ export const make = (
 
       const email = profile.email.trim().toLowerCase();
 
-      const identifier = yield* identifiers.getByValue("email", email);
+      const identifier = yield* lookupIdentifier(identifiers, "email", email);
       let user = identifier === null ? null : yield* users.get(identifier.userId);
       if (identifier !== null && user === null) {
         return yield* new SsoError({ message: "Account is unavailable" });

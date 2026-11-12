@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import { KeyValueStore } from "effect/persistence";
+import { readdir, readFile } from "node:fs/promises";
+import * as path from "node:path";
 import {
   IdentifierStore,
+  claimIdentifier,
+  lookupIdentifier,
+  resolveUserByIdentifier,
   type Identifier,
   makeIdentifier,
   memoryIdentifierStore,
@@ -12,6 +17,7 @@ import {
   replaceIdentifier,
 } from "./Identifier.ts";
 import { IdentifierStoreKV } from "./KeyValueStores.ts";
+import { looseCollationIdentifierStore } from "./testing/LooseCollation.ts";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -457,5 +463,89 @@ describe("primaryEmailValue", () => {
   it("returns the email value string for a verified email", () => {
     const email = mkIdentifier({ type: "email", value: "alice@example.com", verified: true });
     expect(primaryEmailValue([email])).toBe("alice@example.com");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// lookupIdentifier — exact matches only (#602)
+// ---------------------------------------------------------------------------
+
+/** A user lookup that finds every id. */
+const getUser = (id: string) =>
+  Effect.succeed({ id, createdAt: now, updatedAt: now, attributes: {} });
+
+/** Bob's address, in a store that compares like a `_ai_ci` column. */
+const seeded = () => {
+  const records = MutableHashMap.empty<string, Identifier>();
+  const bob = mkIdentifier({ id: "id-bob", userId: "user-bob", value: "bob@example.com" });
+  MutableHashMap.set(records, bob.id, bob);
+  return { bob, store: looseCollationIdentifierStore(records) };
+};
+
+describe("lookupIdentifier", () => {
+  it("passes an exact match through", async () => {
+    const { bob, store } = seeded();
+    expect(await Effect.runPromise(lookupIdentifier(store, "email", "bob@example.com"))).toEqual(
+      bob,
+    );
+  });
+
+  it("treats a record the store matched by case, accent or width as a miss", async () => {
+    const { bob, store } = seeded();
+    // The store itself answers with Bob's record, as a `_ai_ci` column would.
+    expect(await Effect.runPromise(store.getByValue("email", "bob@exämple.com"))).toEqual(bob);
+    const lookups = await Effect.runPromise(
+      Effect.forEach(
+        ["bob@exämple.com", "BOB@example.com", "ｂｏｂ@example.com"],
+        (value) => lookupIdentifier(store, "email", value),
+        { concurrency: 1 },
+      ),
+    );
+    expect(lookups).toEqual([null, null, null]);
+  });
+
+  it("treats a record of another type as a miss", async () => {
+    const store: typeof IdentifierStore.Service = {
+      ...memoryIdentifierStore(),
+      getByValue: () => Effect.succeed(mkIdentifier({ type: "username", value: "bob" })),
+    };
+    expect(await Effect.runPromise(lookupIdentifier(store, "email", "bob"))).toBeNull();
+  });
+
+  it("keeps resolveUserByIdentifier and claimIdentifier off the look-alike's owner", async () => {
+    const { store } = seeded();
+
+    expect(
+      await Effect.runPromise(resolveUserByIdentifier(store, getUser, "email", "bob@exämple.com")),
+    ).toBeNull();
+    // The look-alike is not reported as Bob's: it is a value of its own.
+    const claimed = await Effect.runPromise(
+      claimIdentifier(
+        store,
+        mkIdentifier({ id: "id-eve", userId: "user-eve", value: "bob@exämple.com" }),
+      ),
+    );
+    expect(claimed.userId).toBe("user-eve");
+  });
+
+  it("is the only way a core service reads an identifier by value", async () => {
+    // Stores implement `getByValue`; everything else goes through
+    // `lookupIdentifier`, so a loosely comparing store never redirects a flow.
+    const root = import.meta.dirname;
+    const sources = (await readdir(root, { recursive: true })).filter((file) =>
+      file.endsWith(".ts"),
+    );
+    const callers = sources.filter(
+      (file) =>
+        !file.endsWith(".test.ts") &&
+        !file.startsWith(`testing${path.sep}`) &&
+        !file.startsWith(`sql${path.sep}`) &&
+        file !== "Identifier.ts" &&
+        file !== "KeyValueStores.ts",
+    );
+    const texts = await Promise.all(callers.map((file) => readFile(path.join(root, file), "utf8")));
+    const offenders = callers.filter((_, index) => /\.getByValue\(/.test(texts[index] ?? ""));
+    expect(callers.length).toBeGreaterThan(50);
+    expect(offenders).toEqual([]);
   });
 });

@@ -560,7 +560,10 @@ global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
 (`Identifier.ts`; KV, sql and alchemy implementations). Consequences:
 
 - **Resolution**: every "who owns this handle" goes through
-  `IdentifierStore.getByValue` (helper: `resolveUserByIdentifier`). The
+  `IdentifierStore.getByValue`, read through `lookupIdentifier` (helper:
+  `resolveUserByIdentifier`), which treats a record whose value differs from
+  the one asked for as a miss, so a store that compares loosely (a MySQL
+  `_ai_ci` collation) never resolves another account (#602). The
   removed members: `User.email`/`emailVerified`, `UserServiceStore.getByEmail`,
   `UserService.getUserByEmail`/`markEmailVerified`, every feature store's
   `getUserByEmail`, and `UsernameStore` outright.
