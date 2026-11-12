@@ -8,6 +8,10 @@
 
 - `OrganizationService.listOrganizations(userId)` (and so `GET /organizations`) lists only the organizations the user is an _active_ member of: a deactivated membership no longer shows its organization, since its holder can no longer read it.
 
+**Security fix (#576):** `PATCH /organizations/active` records only an organization the caller is an active member of. Before, any signed-in user could write any id, another tenant's or one that does not exist, into their session's `activeOrganizationId`, which a host that reads the attribute back as the working organization would trust. A non-member, a deactivated member and an unknown id now get the same `403` and body; `data: null` still clears it without a check.
+
+- New: `OrganizationService.requireMembership(userId, organizationId)` fails with an `OrganizationError` unless the user is an active member, alike for a non-member and an organization that does not exist.
+
 **Breaking:**
 
 - `OrganizationService.getFullOrganization(organizationId)` is now `getFullOrganization(actorId, organizationId)`. It requires the actor's active membership and fails with an `OrganizationError` for a non-member and for an organization that does not exist alike.

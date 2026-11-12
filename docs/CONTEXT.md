@@ -154,6 +154,9 @@ does, or a verified matching address, and only for a User who owns the invited e
 **Active organization**:
 The Organization the user is currently working in: `session.attributes.activeOrganizationId`,
 set at `createSession` or by updating the session's attributes. Not a separate entity.
+`PATCH /organizations/active` sets it only to an organization the user is an active Member
+of (#576); clearing it needs no check.
+_Avoid_: treating it as proof of membership — the membership can end after it is set.
 
 **Team**:
 A sub-grouping of Members **within** an Organization, supporting a single-parent tree

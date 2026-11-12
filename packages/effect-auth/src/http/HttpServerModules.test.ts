@@ -841,6 +841,52 @@ describe("HTTP organization endpoints", () => {
     ]);
   });
 
+  it("sets the active organization only to one the caller is an active member of (#576)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("former", "former@test.com");
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const formerSid = fx.makeSession("former");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+    const former = await fx.handler(addMemberRequest(org.id, "former", "member", ownerSid));
+    const formerId = (await jsonBody(former, MemberBody)).data.id;
+    expect((await fx.handler(patchMember(formerId, { status: "inactive" }, ownerSid))).status).toBe(
+      200,
+    );
+
+    const setActive = (organizationId: string | null, sessionId: string) =>
+      fx.handler(
+        apiReq(
+          "PATCH",
+          "/organizations/active",
+          { data: organizationId === null ? null : { type: "organizations", id: organizationId } },
+          sessionId,
+        ),
+      );
+    const activeOf = (sessionId: string) =>
+      Option.getOrUndefined(MutableHashMap.get(fx.sessions, hashToken(sessionId)))?.attributes[
+        "activeOrganizationId"
+      ];
+
+    // A stranger, a deactivated member and an unknown id get the same `403`,
+    // and the session keeps no attribute.
+    const unknown = await statusAndBody(await setActive("no-such-organization", ownerSid));
+    expect(unknown.status).toBe(403);
+    expect(await statusAndBody(await setActive(org.id, strangerSid))).toEqual(unknown);
+    expect(await statusAndBody(await setActive(org.id, formerSid))).toEqual(unknown);
+    expect(activeOf(ownerSid)).toBeUndefined();
+    expect(activeOf(strangerSid)).toBeUndefined();
+    expect(activeOf(formerSid)).toBeUndefined();
+
+    // An active member sets it; clearing it needs no membership.
+    expect((await setActive(org.id, ownerSid)).status).toBe(204);
+    expect(activeOf(ownerSid)).toBe(org.id);
+    expect((await setActive(null, strangerSid)).status).toBe(204);
+    expect(activeOf(strangerSid)).toBeNull();
+  });
+
   it("requires authentication", async () => {
     const fx = makeFixture();
     const res = await fx.handler(

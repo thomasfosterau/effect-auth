@@ -913,7 +913,9 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  *   (`role:manage`).
  * - `DELETE /organizations/:id`: `organization:delete`; `204`.
  * - `PATCH /organizations/active`: record the session's active organization
- *   (a linkage to it, or `null` to clear it); `204`.
+ *   (a linkage to it, or `null` to clear it); `204`. Only an organization
+ *   the caller is an active member of: a non-member and an unknown id get
+ *   the same `403` (#576).
  * - `GET /organizations/:id/members` · `POST /organizations/:id/members`: its
  *   memberships (any member, refused as `GET /organizations/:id` is, #717),
  *   and add one directly (`member:create`).

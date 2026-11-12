@@ -41,7 +41,12 @@
  * `sessionManager.createSession(userId, { activeOrganizationId: org.id })`
  * or by updating `session.attributes.activeOrganizationId` through your
  * session store - and read it back from `session.attributes` when handling
- * requests.
+ * requests. The HTTP tier's `PATCH /organizations/active` records only an
+ * organization the caller is an active member of
+ * ({@link OrganizationService.requireMembership}, #576); a host that writes
+ * the attribute itself checks the same. Membership can end after it is set,
+ * so it names the organization the user picked, never proof they belong to
+ * it: authorize every request against the membership, not the attribute.
  *
  * @module organization
  */
@@ -1313,6 +1318,17 @@ export class OrganizationService extends Context.Service<
       userId: string,
       organizationId: string,
       permission: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Fail with `OrganizationError` unless the user is an active member of the
+     * organization (any role), the check every member-only read makes. A
+     * non-member, a deactivated member and an organization that does not
+     * exist are refused alike (#576, #717).
+     */
+    readonly requireMembership: (
+      userId: string,
+      organizationId: string,
     ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
   }
 >()("@effect-auth/OrganizationService") {
@@ -2646,6 +2662,11 @@ export const make = (
       requirePermission: Effect.fn("OrganizationService.requirePermission")(
         (userId: string, organizationId: string, permission: string) =>
           requireMemberPermission(userId, organizationId, permission).pipe(Effect.asVoid),
+      ),
+
+      requireMembership: Effect.fn("OrganizationService.requireMembership")(
+        (userId: string, organizationId: string) =>
+          requireMembership(userId, organizationId).pipe(Effect.asVoid),
       ),
     };
   });
