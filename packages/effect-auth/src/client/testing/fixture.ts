@@ -197,6 +197,11 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const sentChangeEmail: Array<{ readonly newEmail: string; readonly token: string }> = [];
   const sentDeleteTokens: string[] = [];
   const sentPhoneOtps: Array<{ readonly phoneNumber: string; readonly otp: string }> = [];
+  const sentInvitations: Array<{
+    readonly invitationId: string;
+    readonly email: string;
+    readonly token: string;
+  }> = [];
 
   const anonymousUserStore: typeof Auth.AnonymousUserStore.Service = {
     createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
@@ -456,7 +461,17 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   );
   const organizationLayer = Layer.mergeAll(
     organizationBase,
-    Auth.OrganizationService.layer().pipe(Layer.provide(organizationBase)),
+    Auth.OrganizationService.layer({
+      sendInvitationEmail: ({ invitation, token }) =>
+        Effect.sync(
+          () =>
+            void sentInvitations.push({
+              invitationId: invitation.id,
+              email: invitation.email,
+              token,
+            }),
+        ),
+    }).pipe(Layer.provide(organizationBase)),
   );
 
   // The feature set mounts device authorization, whose user-code limit needs a
@@ -531,6 +546,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     sentDeleteTokens,
     /** Phone OTPs the server "texted". */
     sentPhoneOtps,
+    /** Organization invitations the server "emailed", with their secret tokens (newest last). */
+    sentInvitations,
     /** Domain claims the organization module stored. */
     domainRecords,
     /** Add a domain here to make the stub DNS verifier accept it. */

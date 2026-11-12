@@ -49,12 +49,18 @@
 import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { proveAddress } from "./FirstProof.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
+import { SessionService } from "./SessionService.ts";
+import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
@@ -139,12 +145,22 @@ export type InvitationStatus = "pending" | "accepted" | "rejected" | "canceled";
 
 /**
  * An email invitation to join an organization.
+ *
+ * The invitation link carries a secret token (#586): only the token's SHA-256
+ * digest is stored, and presenting the token is what proves the invitee holds
+ * the invited address. The id alone accepts nothing.
  */
 export interface Invitation {
   readonly id: string;
   readonly organizationId: string;
   /** Normalized (trimmed, lowercased) invitee email */
   readonly email: string;
+  /**
+   * SHA-256 hex digest (`hashToken`) of the invitation's secret token. The
+   * raw token reaches the invitee once, through
+   * {@link OrganizationConfig.sendInvitationEmail}; a resend replaces it.
+   */
+  readonly tokenHash: string;
   /** Role the invitee receives upon acceptance */
   readonly role: string;
   readonly status: InvitationStatus;
@@ -573,12 +589,22 @@ export interface OrganizationConfig {
    * Static role → permission map (default: {@link defaultOrganizationRoles}).
    * A per-organization {@link OrgRole} of the same name replaces the entry
    * here for that organization.
+   *
+   * A member grants a role (adds, invites or promotes someone to it) only
+   * when their own role carries every permission that role carries (#585),
+   * so give the owner role the application permissions (or `"*:*"`) your
+   * custom roles carry, or owners cannot hand those roles out.
    */
   readonly roles?: Record<string, ReadonlyArray<string>>;
-  /** Optional invitation email delivery */
+  /**
+   * Invitation email delivery. The email's link carries `delivery.token`,
+   * the invitation's secret, which the invitee presents to accept or reject
+   * it (#586); the token is never stored and is handed to nothing else.
+   * Without this callback no token can reach an invitee, so
+   * `inviteMember` and `resendInvitation` refuse.
+   */
   readonly sendInvitationEmail?: (
-    invitation: Invitation,
-    organization: Organization,
+    delivery: InvitationDelivery,
   ) => Effect.Effect<void, OrganizationError>;
   /**
    * Called after a member is deactivated, with the updated (inactive)
@@ -665,6 +691,40 @@ export interface AttestDomainOptions {
 export interface InviteMemberInput {
   readonly email: string;
   readonly role: string;
+}
+
+/**
+ * What {@link OrganizationConfig.sendInvitationEmail} delivers: the stored
+ * invitation, its organization, and the raw secret token for the link.
+ */
+export interface InvitationDelivery {
+  readonly invitation: Invitation;
+  readonly organization: Organization;
+  /** The invitation's secret token (256 bits, base64url); put it in the link. */
+  readonly token: string;
+}
+
+/**
+ * The invitee's answer to an invitation: its id and the secret token the
+ * invitation email carried.
+ */
+export interface InvitationResponseInput {
+  readonly invitationId: string;
+  readonly token: string;
+}
+
+/**
+ * Input for accepting an invitation.
+ */
+export interface AcceptInvitationInput extends InvitationResponseInput {
+  /**
+   * The stored id (the token's digest, as `validateSession` answers it) of
+   * the session the acceptance arrives over. When the
+   * token is the first proof of the invited address (the account's matching
+   * email identifier is unverified), every other session of the account is
+   * revoked and this one kept; without it, all are revoked.
+   */
+  readonly currentSessionId?: string | undefined;
 }
 
 /**
@@ -787,10 +847,12 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Invite a user (by email) to the organization. Requires the
-     * `invitation:create` permission. Rejects duplicate pending invitations for
-     * the same email + organization and enforces `membershipLimit`. When
-     * `sendInvitationEmail` is configured it is invoked with the created
-     * invitation.
+     * `invitation:create` permission, a `role` the organization defines, and
+     * that the inviter holds every permission that role carries (no granting
+     * beyond your own permissions, #585). Rejects duplicate pending invitations for
+     * the same email + organization and enforces `membershipLimit`. Mints the
+     * invitation's secret token, stores its digest and hands the raw token to
+     * `sendInvitationEmail`, which must be configured (#586).
      */
     readonly inviteMember: (
       inviterId: string,
@@ -799,23 +861,33 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
-     * Accept a pending invitation. Validates that the invitation is pending,
-     * unexpired, and addressed to one of the user's email identifiers.
-     * Creates the membership and marks
-     * the invitation accepted.
+     * Accept a pending invitation with the secret token its email carried
+     * (#586): the invitation must be pending and unexpired, the token must
+     * match its digest (a wrong token answers "Invitation not found"), and it
+     * must be addressed to one of the user's email identifiers. Creates the
+     * membership and marks the invitation accepted.
+     *
+     * The token proves the address, so acceptance works for apps that run
+     * without email verification. When the matching identifier is not
+     * verified yet, the token is its first proof: like a magic link or an
+     * email OTP (#440), the account's password is cleared and its other
+     * sessions are revoked (all of them without `currentSessionId`) before
+     * the identifier is marked verified, so whoever signed up with the
+     * address unproven no longer holds the account.
      */
     readonly acceptInvitation: (
       userId: string,
-      invitationId: string,
+      input: AcceptInvitationInput,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
      * Reject a pending invitation addressed to one of the user's email
-     * identifiers.
+     * identifiers, with the secret token its email carried: declining is the
+     * addressee's act too, so the id alone rejects nothing (#586).
      */
     readonly rejectInvitation: (
       userId: string,
-      invitationId: string,
+      input: InvitationResponseInput,
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
@@ -842,9 +914,10 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     /**
-     * Resend a pending invitation: the same row and id, its `expiresAt` pushed
-     * out by the configured invitation TTL from now, and
-     * `sendInvitationEmail` invoked again. Requires the `invitation:create`
+     * Resend a pending invitation: the same row and id, a fresh secret token
+     * (the link sent earlier stops working), its `expiresAt` pushed out by the
+     * configured invitation TTL from now, and `sendInvitationEmail` invoked
+     * again. Requires the `invitation:create`
      * permission, like issuing one. Unknown, accepted, rejected and canceled
      * invitations are refused with an `OrganizationError` rather than silently
      * re-issued.
@@ -857,7 +930,9 @@ export class OrganizationService extends Context.Service<
     /**
      * Add a user to the organization directly (no invitation). Requires the
      * `member:create` permission and enforces `membershipLimit`. Omitting
-     * `role` uses the organization's `defaultRole` (default `"member"`).
+     * `role` uses the organization's `defaultRole` (default `"member"`). The
+     * role (named or default) must be defined, and the actor must hold every
+     * permission it carries (#585).
      */
     readonly addMember: (
       actorId: string,
@@ -867,8 +942,9 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
-     * Remove a member. Requires the `member:delete` permission. An owner can
-     * only be removed by another owner, and the last owner can never be
+     * Remove a member. Requires the `member:delete` permission and that the
+     * actor holds every permission the member's role carries (#585). An owner
+     * can only be removed by another owner, and the last owner can never be
      * removed. Cascades: the member's memberships in the organization's teams
      * are removed as well.
      */
@@ -879,8 +955,11 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
-     * Change a member's role. Requires the `member:update` permission. The last
-     * active owner cannot be demoted, and an inactive member's role is not
+     * Change a member's role. Requires the `member:update` permission, a
+     * `role` the organization defines, and that the actor holds every
+     * permission of both the member's current role and the new one (#585):
+     * an admin can neither promote anyone, themselves included, to owner nor
+     * demote an owner. The last active owner cannot be demoted, and an inactive member's role is not
      * editable - reactivate them first, or the restore would overwrite the
      * change.
      */
@@ -893,8 +972,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Suspend a membership without deleting it. Requires the `member:update`
-     * permission; an owner may only be deactivated by another owner, and the
-     * last active owner never can.
+     * permission and that the actor holds every permission the member's role
+     * carries (#585); an owner may only be deactivated by another owner, and
+     * the last active owner never can.
      *
      * The row survives (history, team memberships and the member's role, kept
      * in `previousRole`), the member is demoted to the organization's
@@ -912,7 +992,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Restore a deactivated membership, putting back the role it held when it
-     * was deactivated. Requires the `member:update` permission. No capacity
+     * was deactivated. Requires the `member:update` permission and that the
+     * actor holds every permission of the role it restores (#585), so only
+     * someone holding what the owner role carries brings back an owner. No capacity
      * check: the row never stopped occupying a seat, so reactivating it adds
      * nothing to `membershipLimit`.
      */
@@ -1191,6 +1273,10 @@ export class OrganizationService extends Context.Service<
 >()("@effect-auth/OrganizationService") {
   /**
    * Construct a Layer providing this service.
+   *
+   * Requires `OrganizationStore`, `IdentifierStore`, `EmailPasswordStore` and
+   * `SessionService`: accepting an invitation is a first proof of the invited
+   * address, which clears an unproven account's password and sessions (#586).
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
@@ -1218,7 +1304,11 @@ export const make = (
 ): Effect.Effect<
   typeof OrganizationService.Service,
   never,
-  OrganizationStore | IdentifierStore | SecureRandom.SecureRandom
+  | OrganizationStore
+  | IdentifierStore
+  | EmailPasswordStore
+  | SessionService
+  | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
@@ -1230,6 +1320,8 @@ export const make = (
 
     const store = yield* OrganizationStore;
     const identifiers = yield* IdentifierStore;
+    const passwords = yield* EmailPasswordStore;
+    const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
 
     /**
@@ -1289,6 +1381,68 @@ export const make = (
         (permissions) =>
           permissions !== null &&
           permissions.some((granted) => grantSatisfies(granted, permission)),
+      );
+
+    /**
+     * The permissions a role carries, failing for a role nothing defines: a
+     * role string no {@link OrgRole} or `config.roles` entry resolves is never
+     * stored on a membership or an invitation, nor made the default (#585).
+     */
+    const requireDefinedRole = (organizationId: string, role: string) =>
+      resolveRolePermissions(organizationId, role).pipe(
+        Effect.filterOrFail(
+          P.isNotNull,
+          () =>
+            new OrganizationError({
+              message: `Role '${role}' is not defined for this organization`,
+            }),
+        ),
+      );
+
+    /**
+     * No granting beyond your own permissions (#585): refuse unless the
+     * actor's role grants every one of `permissions`, the permissions some
+     * role carries. `subject` names that role in the refusal.
+     */
+    const requireHoldsAll = (
+      organizationId: string,
+      actor: Member,
+      permissions: ReadonlyArray<string>,
+      subject: string,
+    ) =>
+      Effect.gen(function* () {
+        const held = (yield* resolveRolePermissions(organizationId, actor.role)) ?? [];
+        const unheld = Arr.findFirst(
+          permissions,
+          (permission) => !held.some((granted) => grantSatisfies(granted, permission)),
+        );
+        if (Option.isSome(unheld)) {
+          return yield* new OrganizationError({
+            message: `${subject} carries '${unheld.value}', which your role does not grant`,
+          });
+        }
+        return yield* Effect.void;
+      });
+
+    /**
+     * Refuse to hand out `role` (on a membership or an invitation) unless it
+     * is defined and the actor holds every permission it carries: the owner
+     * role and custom roles alike.
+     */
+    const requireGrantable = (organizationId: string, actor: Member, role: string) =>
+      Effect.flatMap(requireDefinedRole(organizationId, role), (permissions) =>
+        requireHoldsAll(organizationId, actor, permissions, `The '${role}' role`),
+      );
+
+    /**
+     * Refuse to act on a member (change, deactivate, reactivate or remove
+     * them) unless the actor holds every permission `role` carries: the
+     * member's current role, or the `previousRole` a reactivation restores.
+     * A role nothing defines carries no permissions, so it never blocks.
+     */
+    const requireOutranks = (organizationId: string, actor: Member, role: string) =>
+      Effect.flatMap(resolveRolePermissions(organizationId, role), (permissions) =>
+        requireHoldsAll(organizationId, actor, permissions ?? [], `This member's '${role}' role`),
       );
 
     /** Load an organization, failing when it does not exist. */
@@ -1519,24 +1673,45 @@ export const make = (
       });
 
     /**
-     * Load a pending invitation addressed to one of `userId`'s email
-     * identifiers, enforcing expiry. (Matching mirrors the pre-identifier
-     * behavior: the identifier does not need to be verified.)
+     * Mint an invitation's secret token and deliver it, returning the digest
+     * to store. Refuses when no `sendInvitationEmail` is configured: the token
+     * would reach nobody, and the invitation could never be accepted.
      */
-    const getPendingInvitationFor = (invitationId: string, userId: string) =>
+    const issueInvitationToken = Effect.fn("issueInvitationToken")(function* () {
+      const send = config.sendInvitationEmail;
+      if (send === undefined) {
+        return yield* new OrganizationError({
+          message: "Invitations are not enabled: configure sendInvitationEmail",
+        });
+      }
+      const token = yield* randomBase64UrlToken(crypto);
+      const deliver = (invitation: Invitation, organization: Organization) =>
+        send({ invitation, organization, token });
+      return { tokenHash: hashToken(token), deliver };
+    });
+
+    /**
+     * Load a pending invitation the user answers with its secret token: the
+     * token must match the stored digest (a mismatch answers "not found", so
+     * the id alone confirms nothing), and the invitation must be addressed to
+     * one of `userId`'s email identifiers, which is returned with it.
+     * Enforces expiry.
+     */
+    const getPendingInvitationFor = (input: InvitationResponseInput, userId: string) =>
       Effect.gen(function* () {
-        const invitation = yield* store.getInvitation(invitationId);
-        if (!invitation) {
+        const invitation = yield* store.getInvitation(input.invitationId);
+        if (!invitation || !constantTimeHashEqual(hashToken(input.token), invitation.tokenHash)) {
           return yield* new OrganizationError({ message: "Invitation not found" });
         }
         if (invitation.status !== "pending") {
           return yield* new OrganizationError({ message: "Invitation is no longer pending" });
         }
-        const userIdentifiers = yield* identifiers.listByUser(userId);
-        const ownsEmail = userIdentifiers.some(
-          (id) => id.type === "email" && id.value === normalizeEmail(invitation.email),
+        const email = normalizeEmail(invitation.email);
+        const identifier = Arr.findFirst(
+          yield* identifiers.listByUser(userId),
+          (id) => id.type === "email" && id.value === email,
         );
-        if (!ownsEmail) {
+        if (Option.isNone(identifier)) {
           return yield* new OrganizationError({
             message: "This invitation is addressed to a different email",
           });
@@ -1544,7 +1719,7 @@ export const make = (
         if ((yield* Clock.currentTimeMillis) > invitation.expiresAt) {
           return yield* new OrganizationError({ message: "Invitation has expired" });
         }
-        return invitation;
+        return { invitation, identifier: identifier.value };
       });
 
     return {
@@ -1687,8 +1862,13 @@ export const make = (
         organizationId: string,
         input: InviteMemberInput,
       ) {
-        yield* requireMemberPermission(inviterId, organizationId, "invitation:create");
+        const inviter = yield* requireMemberPermission(
+          inviterId,
+          organizationId,
+          "invitation:create",
+        );
         const organization = yield* getOrganizationOrFail(organizationId);
+        yield* requireGrantable(organizationId, inviter, input.role);
         yield* ensureMembershipCapacity(organizationId);
 
         const email = normalizeEmail(input.email);
@@ -1707,10 +1887,12 @@ export const make = (
           });
         }
 
+        const { tokenHash, deliver } = yield* issueInvitationToken();
         const invitation: Invitation = {
           id: yield* generateId(),
           organizationId,
           email,
+          tokenHash,
           role: input.role,
           status: "pending",
           inviterId,
@@ -1719,19 +1901,15 @@ export const make = (
         };
 
         const created = yield* store.createInvitation(invitation);
-
-        if (config.sendInvitationEmail) {
-          yield* config.sendInvitationEmail(created, organization);
-        }
-
+        yield* deliver(created, organization);
         return created;
       }),
 
       acceptInvitation: Effect.fn("OrganizationService.acceptInvitation")(function* (
         userId: string,
-        invitationId: string,
+        input: AcceptInvitationInput,
       ) {
-        const invitation = yield* getPendingInvitationFor(invitationId, userId);
+        const { invitation, identifier } = yield* getPendingInvitationFor(input, userId);
 
         const existingMember = yield* store.getMember(invitation.organizationId, userId);
         if (existingMember) {
@@ -1742,6 +1920,18 @@ export const make = (
 
         yield* ensureMembershipCapacity(invitation.organizationId);
 
+        // The token proves the address (#586). For an unverified identifier
+        // it is the first proof, so it goes through proveAddress (#440): the
+        // password an unproven sign-up set is cleared and every session but
+        // the prover's is revoked before the address counts as verified.
+        if (!identifier.verified) {
+          yield* proveAddress(
+            { identifiers, passwords, sessions },
+            identifier,
+            input.currentSessionId,
+          );
+        }
+
         const member = yield* createMembership(invitation.organizationId, userId, invitation.role);
         yield* store.updateInvitation({ ...invitation, status: "accepted" });
         return member;
@@ -1749,9 +1939,9 @@ export const make = (
 
       rejectInvitation: Effect.fn("OrganizationService.rejectInvitation")(function* (
         userId: string,
-        invitationId: string,
+        input: InvitationResponseInput,
       ) {
-        const invitation = yield* getPendingInvitationFor(invitationId, userId);
+        const { invitation } = yield* getPendingInvitationFor(input, userId);
         return yield* store.updateInvitation({ ...invitation, status: "rejected" });
       }),
 
@@ -1787,17 +1977,16 @@ export const make = (
         yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
         const organization = yield* getOrganizationOrFail(invitation.organizationId);
 
-        // The same row and id: an already-delivered link keeps working, and an
-        // expired-but-pending invitation is revived rather than duplicated.
+        // The same row and id, so an expired-but-pending invitation is revived
+        // rather than duplicated; only the digest is stored, so the token is
+        // minted afresh and the link delivered earlier stops working.
+        const { tokenHash, deliver } = yield* issueInvitationToken();
         const refreshed = yield* store.updateInvitation({
           ...invitation,
+          tokenHash,
           expiresAt: (yield* Clock.currentTimeMillis) + invitationExpiresIn,
         });
-
-        if (config.sendInvitationEmail) {
-          yield* config.sendInvitationEmail(refreshed, organization);
-        }
-
+        yield* deliver(refreshed, organization);
         return refreshed;
       }),
 
@@ -1823,8 +2012,10 @@ export const make = (
         userId: string,
         role?: string,
       ) {
-        yield* requireMemberPermission(actorId, organizationId, "member:create");
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:create");
         const organization = yield* getOrganizationOrFail(organizationId);
+        const granted = role ?? defaultRoleOf(organization);
+        yield* requireGrantable(organizationId, actor, granted);
 
         const existing = yield* store.getMember(organizationId, userId);
         if (existing) {
@@ -1834,7 +2025,7 @@ export const make = (
         }
 
         yield* ensureMembershipCapacity(organizationId);
-        return yield* createMembership(organizationId, userId, role ?? defaultRoleOf(organization));
+        return yield* createMembership(organizationId, userId, granted);
       }),
 
       removeMember: Effect.fn("OrganizationService.removeMember")(function* (
@@ -1845,6 +2036,7 @@ export const make = (
         const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
 
         const target = yield* getMemberOrFail(organizationId, memberUserId);
+        yield* requireOutranks(organizationId, actor, target.role);
 
         if (target.role === creatorRole) {
           if (actor.role !== creatorRole) {
@@ -1876,7 +2068,7 @@ export const make = (
         memberUserId: string,
         role: string,
       ) {
-        yield* requireMemberPermission(actorId, organizationId, "member:update");
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:update");
 
         const target = yield* getMemberOrFail(organizationId, memberUserId);
 
@@ -1885,6 +2077,9 @@ export const make = (
             message: "Reactivate the member before changing their role",
           });
         }
+
+        yield* requireOutranks(organizationId, actor, target.role);
+        yield* requireGrantable(organizationId, actor, role);
 
         if (target.role === creatorRole && role !== creatorRole) {
           const owners = yield* countOwners(organizationId);
@@ -1910,6 +2105,7 @@ export const make = (
         if (!isActiveMember(target)) {
           return yield* new OrganizationError({ message: "Member is already inactive" });
         }
+        yield* requireOutranks(organizationId, actor, target.role);
 
         // Same shape as removal: owners are each other's peers, and the last
         // one standing keeps the organization administrable.
@@ -1946,7 +2142,7 @@ export const make = (
         organizationId: string,
         memberUserId: string,
       ) {
-        yield* requireMemberPermission(actorId, organizationId, "member:update");
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:update");
         const target = yield* getMemberOrFail(organizationId, memberUserId);
 
         if (isActiveMember(target)) {
@@ -1954,11 +2150,11 @@ export const make = (
         }
 
         const { previousRole, ...rest } = target;
-        return yield* store.updateMember({
-          ...rest,
-          status: "active",
-          role: previousRole ?? target.role,
-        });
+        const restored = previousRole ?? target.role;
+        // Restoring a role is granting it back: a deactivated owner returns
+        // only through someone who holds every permission the owner role carries.
+        yield* requireOutranks(organizationId, actor, restored);
+        return yield* store.updateMember({ ...rest, status: "active", role: restored });
       }),
 
       setDefaultRole: Effect.fn("OrganizationService.setDefaultRole")(function* (
@@ -1971,12 +2167,7 @@ export const make = (
 
         // Fail closed on a role nothing defines: a default nobody can resolve
         // would hand every new member an empty permission set silently.
-        const permissions = yield* resolveRolePermissions(organizationId, role);
-        if (permissions === null) {
-          return yield* new OrganizationError({
-            message: `Role '${role}' is not defined for this organization`,
-          });
-        }
+        yield* requireDefinedRole(organizationId, role);
 
         return yield* store.updateOrganization({ ...organization, defaultRole: role });
       }),

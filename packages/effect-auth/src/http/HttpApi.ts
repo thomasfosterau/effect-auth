@@ -1012,7 +1012,8 @@ export const organizationMembersGroup = Group.make(
  * `invitations`: one invitation, by id.
  *
  * - `PATCH /invitations/:id` with a `status`: `accepted` or `rejected` by the
- *   invitee (an acceptance includes the new membership), `canceled` by a member
+ *   invitee, with the invitation email's secret as the `token` attribute
+ *   (an acceptance includes the new membership), `canceled` by a member
  *   holding `invitation:cancel`. A refused acceptance or rejection answers
  *   `400`, a refused cancellation `403`.
  * - `POST /invitations/:id/deliveries`: send a pending invitation again, with

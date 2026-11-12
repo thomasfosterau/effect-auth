@@ -1,0 +1,7 @@
+---
+"@thomasfosterau/effect-auth": minor
+---
+
+Security fix (#585): organization members can no longer grant beyond their own permissions. An admin could make themselves (or anyone) owner through `updateMemberRole`, `addMember` or `inviteMember`, then demote or remove the original owners, and could bring back a deactivated owner with `reactivateMember`. Now an actor assigns a role (`addMember`, including the organization's `defaultRole` when no role is named, `inviteMember`, `updateMemberRole`) only when their own role carries every permission that role carries, and changes, deactivates, reactivates or removes a member only when it carries every permission of that member's role (the `previousRole` for a reactivation). This covers the owner role and custom roles alike; a wildcard grant (`team:*`) is satisfied only by a wildcard at least as wide (`team:*` or `*:*`). A role name that neither an `OrgRole` nor `config.roles` defines is now rejected by `addMember`, `inviteMember` and `updateMemberRole` (`setDefaultRole` already rejected one). Over HTTP, each refusal answers `403`.
+
+Migration: a role that carries application permissions (`posts:write`, …) can now be granted only by a member whose role carries them too. With the default roles the owner carries only the organization permissions, so if your custom roles carry application permissions, add them (or `"*:*"`) to the owner role in `OrganizationService.layer({ roles })`. Define a custom role (`upsertOrgRole`) before you assign it.
