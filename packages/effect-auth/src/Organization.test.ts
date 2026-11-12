@@ -438,7 +438,7 @@ describe("OrganizationService", () => {
           logo: "https://example.com/logo.png",
           metadata: { plan: "pro" },
         });
-        const full = yield* service.getFullOrganization(organization.id);
+        const full = yield* service.getFullOrganization("user-1", organization.id);
         const listed = yield* service.listOrganizations("user-1");
         return { organization, full, listed };
       }),
@@ -453,6 +453,49 @@ describe("OrganizationService", () => {
     expect(result.full.members[0].role).toBe("owner");
     expect(result.listed).toHaveLength(1);
     expect(result.listed[0].id).toBe(result.organization.id);
+  });
+
+  it("reads an organization and its members only as an active member (#717)", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        yield* service.addMember("owner-1", organization.id, "former-1", "member");
+        yield* service.deactivateMember("owner-1", organization.id, "former-1");
+        yield* service.createOrganization("stranger-1", { name: "Other", slug: "other" });
+
+        const refusal = (actorId: string, organizationId: string) =>
+          Effect.flip(service.getFullOrganization(actorId, organizationId));
+        return {
+          owner: yield* service.getFullOrganization("owner-1", organization.id),
+          member: yield* service.getFullOrganization("member-1", organization.id),
+          stranger: yield* refusal("stranger-1", organization.id),
+          deactivated: yield* refusal("former-1", organization.id),
+          unknown: yield* refusal("owner-1", "no-such-organization"),
+          listedForMember: yield* service.listOrganizations("member-1"),
+          listedForDeactivated: yield* service.listOrganizations("former-1"),
+        };
+      }),
+    );
+
+    // The listing shows only what its holder may read.
+    expect(result.listedForMember.map((organization) => organization.slug)).toEqual(["acme"]);
+    expect(result.listedForDeactivated).toEqual([]);
+    expect(result.owner.members.map((member) => member.userId)).toEqual([
+      "owner-1",
+      "member-1",
+      "former-1",
+    ]);
+    // Any active member reads it, whatever the role carries.
+    expect(result.member).toEqual(result.owner);
+    // A stranger, a deactivated member and an unknown id are refused alike,
+    // so the refusal tells no one which ids exist.
+    expect(result.stranger._tag).toBe("OrganizationError");
+    expect(result.deactivated).toEqual(result.stranger);
+    expect(result.unknown).toEqual(result.stranger);
   });
 
   it("rejects a duplicate slug", async () => {
@@ -523,7 +566,9 @@ describe("OrganizationService", () => {
           service.deleteOrganization("member-1", organization.id),
         );
         yield* service.deleteOrganization("owner-1", organization.id);
-        const afterDelete = yield* Effect.result(service.getFullOrganization(organization.id));
+        const afterDelete = yield* Effect.result(
+          service.getFullOrganization("owner-1", organization.id),
+        );
 
         return { nonMemberUpdate, memberUpdate, ownerUpdate, memberDelete, afterDelete };
       }),
@@ -582,7 +627,7 @@ describe("OrganizationService", () => {
         );
 
         const afterAccept = yield* service.listUserInvitations("invitee@example.com");
-        const full = yield* service.getFullOrganization(organization.id);
+        const full = yield* service.getFullOrganization("owner-1", organization.id);
 
         return { invitation, duplicate, userInvitations, member, accepted, afterAccept, full };
       }),
@@ -873,7 +918,7 @@ describe("OrganizationService", () => {
 
         // An owner can remove members
         yield* service.removeMember("admin-1", organization.id, "member-1");
-        const full = yield* service.getFullOrganization(organization.id);
+        const full = yield* service.getFullOrganization("admin-1", organization.id);
 
         return {
           memberPromotes,
@@ -985,7 +1030,7 @@ describe("OrganizationService", () => {
         const demoteLastFounder = yield* Effect.result(
           service.updateMemberRole("founder-1", organization.id, "founder-1", "collaborator"),
         );
-        const full = yield* service.getFullOrganization(organization.id);
+        const full = yield* service.getFullOrganization("founder-1", organization.id);
 
         return { collaboratorInvites, collaboratorRemoves, demoteLastFounder, full };
       }),
@@ -1595,7 +1640,7 @@ describe("OrganizationService - no granting beyond your own permissions (#585)",
         const other = yield* refusal(
           service.updateMemberRole("admin-1", organization.id, "member-1", "owner"),
         );
-        const full = yield* service.getFullOrganization(organization.id);
+        const full = yield* service.getFullOrganization("owner-1", organization.id);
         return { self, other, full };
       }),
     );
@@ -1940,7 +1985,10 @@ describe("OrganizationService - member status", () => {
         );
         const listingDenied = yield* Effect.result(service.listTeams("admin-1", organization.id));
         // ... but the row, and the team membership, are still there.
-        const stillInTheOrganization = yield* service.getFullOrganization(organization.id);
+        const stillInTheOrganization = yield* service.getFullOrganization(
+          "owner-1",
+          organization.id,
+        );
         const stillInTheTeam = yield* service.listTeamMembers("owner-1", team.id);
 
         const reactivated = yield* service.reactivateMember("owner-1", organization.id, "admin-1");
@@ -2318,7 +2366,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
           service.acceptInvitation("invitee-user", { invitationId: invitation.id, token: "" }),
         );
         const reject = yield* Effect.flip(service.rejectInvitation("invitee-user", forged));
-        const full = yield* service.getFullOrganization(invitation.organizationId);
+        const full = yield* service.getFullOrganization("owner-1", invitation.organizationId);
         return { accept, empty, reject, full };
       }),
     );
@@ -2999,7 +3047,7 @@ describe("OrganizationService - JIT provisioning", () => {
         const provisioned = yield* service.provisionJitMembership("user-1", "NEW@Acme.test");
         const second = yield* service.provisionJitMembership("user-1", "new@acme.test");
         const unrelatedDomain = yield* service.provisionJitMembership("user-2", "x@other.test");
-        const members = yield* service.getFullOrganization(organization.id);
+        const members = yield* service.getFullOrganization("owner-1", organization.id);
 
         return { optedOut, provisioned, second, unrelatedDomain, members };
       }),
@@ -3026,7 +3074,7 @@ describe("OrganizationService - JIT provisioning", () => {
         yield* service.updateOrganization("owner-1", organization.id, { jitProvisioning: true });
 
         const pending = yield* service.provisionJitMembership("user-1", "new@acme.test");
-        const members = yield* service.getFullOrganization(organization.id);
+        const members = yield* service.getFullOrganization("owner-1", organization.id);
         return { pending, members };
       }),
     );

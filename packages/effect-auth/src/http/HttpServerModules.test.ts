@@ -487,6 +487,9 @@ const collectionBody = <F extends Schema.Struct.Fields>(attributes: F) =>
     data: Schema.Array(Schema.Struct({ id: Schema.String, attributes: Schema.Struct(attributes) })),
   });
 
+/** A response's status and raw body, to compare two refusals byte for byte. */
+const statusAndBody = async (res: Response) => ({ status: res.status, body: await res.text() });
+
 /** `POST /organizations` as `sessionId`; answers the new organization's id. */
 const createOrganization = async (
   fx: ReturnType<typeof makeFixture>,
@@ -677,9 +680,9 @@ describe("HTTP organization endpoints", () => {
     // The member id is the stored one.
     expect(memberList.data[0]?.id).toBe(fx.members[0]?.id);
 
-    // An unknown organization answers 404.
+    // An unknown organization answers 403, as a stranger's read does (#717).
     expect((await fx.handler(apiReq("GET", "/organizations/nope", undefined, sid))).status).toBe(
-      404,
+      403,
     );
 
     // List shows the org.
@@ -774,6 +777,114 @@ describe("HTTP organization endpoints", () => {
     );
     expect(res.status).toBe(403);
     expect(res.headers.get("content-type")).toContain("application/vnd.api+json");
+  });
+
+  it("reads an organization and its members only as an active member (#717)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("member", "member@test.com");
+    fx.seedUser("former", "former@test.com");
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const memberSid = fx.makeSession("member");
+    const formerSid = fx.makeSession("former");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+    await createOrganization(fx, strangerSid, "Other", "other");
+    expect((await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid))).status).toBe(
+      201,
+    );
+    const former = await fx.handler(addMemberRequest(org.id, "former", "member", ownerSid));
+    const formerId = (await jsonBody(former, MemberBody)).data.id;
+    expect((await fx.handler(patchMember(formerId, { status: "inactive" }, ownerSid))).status).toBe(
+      200,
+    );
+
+    const read = (path: string, sessionId: string) =>
+      fx.handler(apiReq("GET", path, undefined, sessionId));
+    const organizationPath = `/organizations/${org.id}`;
+    const membersPath = `/organizations/${org.id}/members`;
+
+    // Any active member reads both, whatever the role carries.
+    const ownerRead = await read(organizationPath, ownerSid);
+    expect(ownerRead.status).toBe(200);
+    const memberRead = await read(organizationPath, memberSid);
+    expect((await jsonBody(memberRead, resourceBody({}))).data.id).toBe(org.id);
+    const ownerMembers = await read(membersPath, ownerSid);
+    expect((await jsonBody(ownerMembers, collectionBody({}))).data).toHaveLength(3);
+    const memberMembers = await read(membersPath, memberSid);
+    expect((await jsonBody(memberMembers, collectionBody({}))).data).toHaveLength(3);
+
+    // A stranger and a deactivated member get exactly what an unknown id
+    // gets, so neither the organization, its members nor the id leak.
+    const unknown = await statusAndBody(
+      await read("/organizations/no-such-organization", ownerSid),
+    );
+    expect(unknown.status).toBe(403);
+    expect(await statusAndBody(await read(organizationPath, strangerSid))).toEqual(unknown);
+    expect(await statusAndBody(await read(organizationPath, formerSid))).toEqual(unknown);
+
+    const unknownMembers = await statusAndBody(
+      await read("/organizations/no-such-organization/members", ownerSid),
+    );
+    expect(unknownMembers).toEqual(unknown);
+    expect(unknownMembers.body).not.toContain("owner");
+    expect(await statusAndBody(await read(membersPath, strangerSid))).toEqual(unknown);
+    expect(await statusAndBody(await read(membersPath, formerSid))).toEqual(unknown);
+
+    // Nor does a deactivated member's own listing show the organization.
+    const formerList = await read("/organizations", formerSid);
+    expect((await jsonBody(formerList, collectionBody({}))).data).toEqual([]);
+    const memberList = await read("/organizations", memberSid);
+    expect((await jsonBody(memberList, collectionBody({}))).data.map((o) => o.id)).toEqual([
+      org.id,
+    ]);
+  });
+
+  it("sets the active organization only to one the caller is an active member of (#576)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("former", "former@test.com");
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const formerSid = fx.makeSession("former");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+    const former = await fx.handler(addMemberRequest(org.id, "former", "member", ownerSid));
+    const formerId = (await jsonBody(former, MemberBody)).data.id;
+    expect((await fx.handler(patchMember(formerId, { status: "inactive" }, ownerSid))).status).toBe(
+      200,
+    );
+
+    const setActive = (organizationId: string | null, sessionId: string) =>
+      fx.handler(
+        apiReq(
+          "PATCH",
+          "/organizations/active",
+          { data: organizationId === null ? null : { type: "organizations", id: organizationId } },
+          sessionId,
+        ),
+      );
+    const activeOf = (sessionId: string) =>
+      Option.getOrUndefined(MutableHashMap.get(fx.sessions, hashToken(sessionId)))?.attributes[
+        "activeOrganizationId"
+      ];
+
+    // A stranger, a deactivated member and an unknown id get the same `403`,
+    // and the session keeps no attribute.
+    const unknown = await statusAndBody(await setActive("no-such-organization", ownerSid));
+    expect(unknown.status).toBe(403);
+    expect(await statusAndBody(await setActive(org.id, strangerSid))).toEqual(unknown);
+    expect(await statusAndBody(await setActive(org.id, formerSid))).toEqual(unknown);
+    expect(activeOf(ownerSid)).toBeUndefined();
+    expect(activeOf(strangerSid)).toBeUndefined();
+    expect(activeOf(formerSid)).toBeUndefined();
+
+    // An active member sets it; clearing it needs no membership.
+    expect((await setActive(org.id, ownerSid)).status).toBe(204);
+    expect(activeOf(ownerSid)).toBe(org.id);
+    expect((await setActive(null, strangerSid)).status).toBe(204);
+    expect(activeOf(strangerSid)).toBeNull();
   });
 
   it("requires authentication", async () => {
@@ -977,12 +1088,11 @@ describe("HTTP organization endpoints", () => {
 
     // A stranger and a member without the permission get exactly what an
     // unknown organization id gets, so the answer reveals no ids.
-    const answer = async (res: Response) => ({ status: res.status, body: await res.text() });
-    const unknown = await answer(await list("no-such-organization", ownerSid));
+    const unknown = await statusAndBody(await list("no-such-organization", ownerSid));
     expect(unknown.status).toBe(403);
     expect(unknown.body).not.toContain("new@test.com");
-    expect(await answer(await list(org.id, strangerSid))).toEqual(unknown);
-    expect(await answer(await list(org.id, memberSid))).toEqual(unknown);
+    expect(await statusAndBody(await list(org.id, strangerSid))).toEqual(unknown);
+    expect(await statusAndBody(await list(org.id, memberSid))).toEqual(unknown);
   });
 
   it("answers an invitation by id from a verified address, and only from one (#673)", async () => {

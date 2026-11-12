@@ -2405,9 +2405,6 @@ const refusedForbidden = organizationRefusal((message) => new S.Forbidden({ mess
 /** A refused organization operation, answered `400`. */
 const refusedBadRequest = organizationRefusal((message) => new S.BadRequest({ message }));
 
-/** An organization operation on one that does not exist, answered `404`. */
-const refusedNotFound = organizationRefusal((message) => new S.NotFound({ message }));
-
 /** A store (or hook) failure, answered `500`. */
 const storeFailure = <A, E extends Cause.YieldableError, R>(
   self: Effect.Effect<A, E, R>,
@@ -2610,9 +2607,13 @@ export const organizationsGroupLayer = (
   const cfg = resolveCookieConfig(config, multiSession);
   const actor = (request: HttpServerRequest.HttpServerRequest) => organizationActor(request, cfg);
 
-  /** The organization `id` names with its members, as the signed-in actor; `404` when none. */
+  /**
+   * The organization `id` names with its members, as the signed-in actor: a
+   * member's read (#717). A stranger and an unknown id both answer the same
+   * `403`, as the domain, role and team listings do.
+   */
   const fullOrganization = (request: HttpServerRequest.HttpServerRequest, id: string) =>
-    Effect.flatMap(actor(request), ({ org }) => refusedNotFound(org.getFullOrganization(id)));
+    asOrganizationActor(request, cfg, (org, actorId) => org.getFullOrganization(actorId, id));
 
   return HttpApiBuilder.group(AuthApi, "organizations", (handlers) =>
     handlers
@@ -2640,12 +2641,17 @@ export const organizationsGroupLayer = (
       )
       .handle("setActive", ({ payload, request }) =>
         Effect.gen(function* () {
-          const { resolved } = yield* actor(request);
+          const { org, actorId, resolved } = yield* actor(request);
+          const organizationId = payload.data?.id ?? null;
+          // Only an organization the actor is an active member of (#576): a
+          // stranger, a deactivated member and an unknown id get the same
+          // `403`. Clearing it needs no check.
+          if (organizationId !== null) {
+            yield* refusedForbidden(org.requireMembership(actorId, organizationId));
+          }
           const sessionManager = yield* SessionService;
           yield* sessionManager
-            .setSessionAttributes(resolved.session.id, {
-              activeOrganizationId: payload.data?.id ?? null,
-            })
+            .setSessionAttributes(resolved.session.id, { activeOrganizationId: organizationId })
             .pipe(
               Effect.catchTags({
                 SessionNotFoundError: (e) => internalServerError(e),
