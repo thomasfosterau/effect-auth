@@ -693,6 +693,15 @@ describe("a relayed response carrying Set-Cookie is no-store (#628)", () => {
     );
   });
 
+  it.each([
+    ["an API key", { "x-api-key": "key_live_1" }],
+    ["a bearer token", { authorization: "Bearer token" }],
+  ])("marks a response whose Set-Cookie it strips for %s no-store", (_name, headers) => {
+    const response = relayed(clearing("public, max-age=60"), headers);
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60, no-store");
+  });
+
   it("leaves a response without Set-Cookie as it is", () => {
     const upstream = new Response("{}", { headers: { "cache-control": "max-age=60" } });
     expect(relayed(upstream)).toBe(upstream);

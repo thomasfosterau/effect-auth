@@ -1796,6 +1796,8 @@ const answerSignIn = (
       return yield* signedIn({ ...outcome, session });
     }
     if (outcome.secondFactor !== undefined) {
+      // The challenge's id is the token that redeems the second factor (#628).
+      yield* noStore;
       return {
         data: R.SecondFactorChallenge.make({
           id: outcome.secondFactor.token,
@@ -2222,6 +2224,9 @@ export const googleOneTapNoncesGroupLayer = () =>
     handlers.handle("create", () =>
       Effect.gen(function* () {
         const oneTap = yield* resolveGoogleOneTap;
+        // The single-use nonce is this caller's alone: a cached answer would
+        // hand it to the next caller (#628).
+        yield* noStore;
         const nonce = yield* oneTap.service.createNonce().pipe(
           Effect.catchTags({
             GoogleOneTapError: (e) => internalServerError(e),
@@ -3761,6 +3766,9 @@ export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
     handlers.handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const sso = yield* resolveSso;
+        // The single-use callback state is this caller's alone: a cached
+        // answer would hand it to the next caller (#628).
+        yield* noStore;
         const result = yield* asSsoRequest(
           sso.service.signIn(ssoSelector(payload.data.attributes)),
         );
@@ -3905,6 +3913,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("deviceCode", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
+          // RFC 8628 §3.2: the answer carries the device code, the secret
+          // the device polls with (#628).
+          yield* noStore;
           return yield* device.service
             .begin({
               ...(payload.clientId !== undefined && { clientId: payload.clientId }),
@@ -4122,6 +4133,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcConsent", ({ payload, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
+          // The redirect carries the authorization code (#628).
+          yield* noStore;
           const resolved = yield* requireSession(request, cfg);
           const result = yield* oidc.service
             .consent(resolved.user.id, payload.consentCode, payload.accept)
@@ -5176,6 +5189,24 @@ const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>) =>
     }),
   ).layer;
 
+/** The token endpoints, by path template: RFC 6749 §5.1 / §5.2 and RFC 8628 §3.5. */
+const TOKEN_ENDPOINTS: ReadonlyArray<string> = ["/oauth2/token", "/device/token"];
+
+/**
+ * A token endpoint's every answer is `no-store`, an error included (RFC 6749
+ * §5.2), as router middleware: it marks the response once the router has
+ * matched the endpoint and before the endpoint decodes its payload, so the
+ * `400` for a malformed request carries it too, which the handlers' own
+ * `noStore` never sees.
+ */
+const tokenEndpointsNoStore = HttpRouter.middleware((effect) =>
+  Effect.gen(function* () {
+    const { route } = yield* HttpRouter.RouteContext;
+    if (Arr.contains(TOKEN_ENDPOINTS, openApiTemplate(route.path))) yield* noStore;
+    return yield* effect;
+  }),
+).layer;
+
 /** The rules `ipRateLimit` puts in force: none for `false`, else its own or the defaults. */
 const endpointRules = (
   ipRateLimit: HttpIPRateLimitConfig | false | undefined,
@@ -5552,6 +5583,7 @@ const serve = (
   // endpoint the router matched rather than the raw path (#582).
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
+    Layer.provide(tokenEndpointsNoStore),
     Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
     Layer.provide(PlatformLayer),
   );

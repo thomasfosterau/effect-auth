@@ -76,7 +76,7 @@ import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import type * as Types from "../Types.ts";
 import { MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi/schema";
-import { noStoreWithSetCookie } from "./CacheControl.ts";
+import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
 import { CurrentApiKeyDocument, SessionDocument } from "./HttpApi.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Resources from "./Resources.ts";
@@ -131,6 +131,28 @@ const discardBody = (response: Response): Effect.Effect<void> => {
         }),
       );
 };
+
+/**
+ * A read's answer to a response it does not read: `onUnauthorized` for a
+ * `401`, a {@link RemoteSessionError} naming `read` and the status for any
+ * other. The body is cancelled first either way.
+ */
+const unreadAnswer = <A>(
+  response: Response,
+  read: string,
+  onUnauthorized: A,
+): Effect.Effect<A, RemoteSessionError> =>
+  Effect.andThen(
+    discardBody(response),
+    response.status === 401
+      ? Effect.succeed(onUnauthorized)
+      : Effect.fail(
+          new RemoteSessionError({
+            message: `${read} returned ${response.status}`,
+            status: response.status,
+          }),
+        ),
+  );
 
 const asFetch =
   (fetcher: FetcherLike) =>
@@ -641,16 +663,10 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
       // 401 is "ran, nobody was signed in" — an expected answer, not a fault.
       // Its Set-Cookie still matters: it is how a stale cache cookie is cleared.
-      if (response.status === 401) {
-        yield* discardBody(response);
-        return { session: Option.none(), setCookie };
-      }
-
       if (response.status !== 200) {
-        yield* discardBody(response);
-        return yield* new RemoteSessionError({
-          message: `Session read returned ${response.status}`,
-          status: response.status,
+        return yield* unreadAnswer(response, "Session read", {
+          session: Option.none(),
+          setCookie,
         });
       }
 
@@ -699,17 +715,8 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
       // A machine caller is never handed a cookie, so none is replayed here.
       // 401 is "ran, the key does not resolve": anonymous, never the cookie.
-      if (response.status === 401) {
-        yield* discardBody(response);
-        return emptyResult;
-      }
-
       if (response.status !== 200) {
-        yield* discardBody(response);
-        return yield* new RemoteSessionError({
-          message: `API key read returned ${response.status}`,
-          status: response.status,
-        });
+        return yield* unreadAnswer(response, "API key read", emptyResult);
       }
 
       const body = yield* Effect.tryPromise({
@@ -776,7 +783,9 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
  * therefore receives its session cookie on first sign-in (#619). A relayed
  * response that keeps its `Set-Cookie` carries `Cache-Control: no-store`
  * (#628): `no-store` is appended to an upstream `Cache-Control` that lacks it,
- * and one that has it is kept as it is.
+ * and one that has it is kept as it is. A response whose `Set-Cookie` is
+ * stripped is `no-store` the same way: it answered one machine caller's
+ * credential, so a shared cache must not hand it to another.
  *
  * Exported so an app relaying through its own code path gets the same rule.
  *
@@ -799,6 +808,7 @@ export const relayResponse = (
 
   const headers = new Headers(upstream.headers);
   headers.delete("set-cookie");
+  headers.set("cache-control", mergeNoStore(headers.get("cache-control")));
   return new Response(upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
