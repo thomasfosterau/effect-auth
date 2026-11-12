@@ -601,8 +601,46 @@ const readmeDefineSchemaExample = (): string => {
  */
 const drizzleApplicationsPin = "1.0.0-rc.5-ab785fc";
 
-/** A file inside the scratch project's drizzle-orm. */
-const insideDrizzleOrm = /(?:^|\/)node_modules\/drizzle-orm\//;
+/** The file a `tsc` error line is located in: the part before `(line,col): error TS…`. */
+const errorLocation = (line: string): string =>
+  /^(.*?)\(\d+,\d+\): error TS\d+:/.exec(line)?.[1] ?? "";
+
+/**
+ * An error located in a file inside the scratch project's drizzle-orm. Only the
+ * location counts: an error in our own declarations whose message names a
+ * drizzle-orm type (`import("…/node_modules/drizzle-orm/…")`) is ours, and an
+ * unlocated error is never tolerated.
+ */
+const insideDrizzleOrm = (line: string): boolean =>
+  /(?:^|\/)node_modules\/drizzle-orm\//.test(errorLocation(line));
+
+/**
+ * The classifier's own cases, checked before it is trusted: a mistake here
+ * would silently tolerate the class of failure #735 is about.
+ */
+const insideDrizzleOrmCases: ReadonlyArray<readonly [line: string, tolerated: boolean]> = [
+  [
+    "node_modules/drizzle-orm/pg-core/policies.d.ts(12,3): error TS2420: Class 'PgPolicy' incorrectly implements interface 'PgPolicyConfig'.",
+    true,
+  ],
+  [
+    "node_modules/@thomasfosterau/effect-auth-drizzle/dist/Database.d.ts(40,5): error TS2344: Type 'X' does not satisfy the constraint 'import(\"/tmp/p/node_modules/drizzle-orm/pg-core/table\").PgTable'.",
+    false,
+  ],
+  [
+    "drizzle-consumer.ts(3,1): error TS2305: Module '\"drizzle-orm\"' has no exported member 'PgDatabase' (see node_modules/drizzle-orm/index.d.ts).",
+    false,
+  ],
+  ["error TS5083: Cannot read file 'node_modules/drizzle-orm/tsconfig.json'.", false],
+];
+
+for (const [line, tolerated] of insideDrizzleOrmCases) {
+  if (insideDrizzleOrm(line) !== tolerated) {
+    throw new Error(
+      `insideDrizzleOrm misclassifies (expected tolerated=${String(tolerated)}): ${line}`,
+    );
+  }
+}
 
 /**
  * Run the workspace's `tsc` in `project` and return its error lines. A failed
@@ -645,10 +683,10 @@ const typeCheckDrizzleConsumer = (project: string): void => {
   writeFileSync(join(project, "drizzle-consumer.ts"), drizzleConsumer);
   writeFileSync(join(project, "tsconfig.json"), drizzleConsumerTsconfig);
   const errors = tscErrors(project);
-  for (const line of errors.filter((candidate) => insideDrizzleOrm.test(candidate))) {
+  for (const line of errors.filter((candidate) => insideDrizzleOrm(candidate))) {
     console.log(`  tolerated, inside drizzle-orm's own declarations: ${line}`);
   }
-  const ours = errors.filter((line) => !insideDrizzleOrm.test(line));
+  const ours = errors.filter((line) => !insideDrizzleOrm(line));
   if (ours.length > 0) {
     throw new Error(
       `the drizzle consumer fixtures fail to type-check against the packed declarations:\n${ours.join("\n")}`,
