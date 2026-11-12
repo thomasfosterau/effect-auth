@@ -175,6 +175,8 @@ export interface PhoneOtpSignInOptions {
 export interface PhoneOtpAuthResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
@@ -489,9 +491,12 @@ export const make = (
           yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
         }
 
-        const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
+        const { session, token } = yield* sessionManager.createSession(
+          user.id,
+          options?.sessionAttributes,
+        );
 
-        return { user, session } satisfies PhoneOtpAuthResult;
+        return { user, session, token } satisfies PhoneOtpAuthResult;
       }),
 
       verifyPhoneNumber: Effect.fn("PhoneOtpService.verifyPhoneNumber")(function* (

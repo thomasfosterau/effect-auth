@@ -105,13 +105,17 @@ describe("LastLoginMethodPlugin", () => {
     expect(signedIn.method).toBe("email-password");
     // ...and the plugin persisted it onto both stored sessions.
     assert(signedUp.session !== undefined && signedIn.session !== undefined, "both issue sessions");
+    // The plugin addresses each session by its stored id, the token's digest.
+    expect(signedIn.session.id).toBe(hashToken(signedIn.token ?? ""));
     expect(
-      Option.getOrUndefined(MutableHashMap.get(sessions, hashToken(signedUp.session.id)))
-        ?.attributes["method"],
+      Option.getOrUndefined(MutableHashMap.get(sessions, signedUp.session.id))?.attributes[
+        "method"
+      ],
     ).toBe("email-password");
     expect(
-      Option.getOrUndefined(MutableHashMap.get(sessions, hashToken(signedIn.session.id)))
-        ?.attributes["method"],
+      Option.getOrUndefined(MutableHashMap.get(sessions, signedIn.session.id))?.attributes[
+        "method"
+      ],
     ).toBe("email-password");
   });
 

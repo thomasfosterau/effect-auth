@@ -32,7 +32,8 @@ export interface FirstProofServices {
  * its account's password and revoke the account's sessions; the caller mints
  * the prover's session afterwards. A prover who presented the proof over one
  * of the account's sessions (an invitation accepted while signed in) passes
- * that session's raw token as `proverSessionId`, and it alone survives.
+ * that session's stored id (the token's digest, as `validateSession`
+ * answers it) as `proverSessionId`, and it alone survives.
  * Returns what `setVerified` returns (`null` when the identifier was deleted
  * meanwhile).
  */

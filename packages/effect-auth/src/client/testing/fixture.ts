@@ -518,9 +518,13 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     options.organization === true ? organizationLayer : Layer.empty,
   );
 
+  // The fixture runs one in-process client, with no client address, so the
+  // per-address IP limit `Http.make` applies by default is off (#583): it would
+  // refuse every address-less request to a limited endpoint.
   const { handler } = Http.make({
     services,
     cookie: { secure: false },
+    ipRateLimit: false,
     ...(options.multiSession !== undefined && { multiSession: options.multiSession }),
   });
 

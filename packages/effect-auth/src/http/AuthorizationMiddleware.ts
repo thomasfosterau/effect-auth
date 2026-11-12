@@ -182,7 +182,7 @@
  *     const now = new Date()
  *     users.set(userId, { id: userId, name: userId, createdAt: now, updatedAt: now, attributes: {} })
  *     const sessionService = yield* SessionService
- *     return (yield* sessionService.createSession(userId)).id
+ *     return (yield* sessionService.createSession(userId)).token
  *   }).pipe(Effect.provide(myServiceLayer))
  *
  * const aliceToken = await Effect.runPromise(signIn("alice"))

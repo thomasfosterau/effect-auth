@@ -59,7 +59,11 @@ export const User = Schema.Struct({
 export type User = typeof User.Type;
 
 /**
- * Represents an active session.
+ * Represents an active session. Its `id` is the stored id: the SHA-256 digest
+ * of the session token (`hashToken`), never the token itself, so a session
+ * record is safe to log, serialize into a page or send to a browser. The raw
+ * token exists only in the {@link IssuedSession} a sign-in returns, and in
+ * the credential the client presents (#581).
  */
 export const Session = Schema.Struct({
   id: Schema.String,
@@ -79,6 +83,20 @@ export const SessionWithUser = Schema.Struct({
   user: User,
 });
 export type SessionWithUser = typeof SessionWithUser.Type;
+
+/**
+ * A session just issued: the stored record (its `id` the digest the store keys
+ * it by) and the raw bearer `token` the client presents. `SessionService`'s
+ * `createSession` returns it, and every sign-in result carries both fields.
+ * The token is a credential: the HTTP tier puts it only in the httpOnly
+ * session cookie and, in bearer mode, the `set-auth-token` header, never in a
+ * response body (#581).
+ */
+export const IssuedSession = Schema.Struct({
+  session: Session,
+  token: Schema.String,
+});
+export type IssuedSession = typeof IssuedSession.Type;
 
 /**
  * Configuration for session management.

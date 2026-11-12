@@ -322,10 +322,14 @@ const make = (
           });
         }
 
-        const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+        const { session, token } = yield* sessionManager.createSession(
+          user.id,
+          input.sessionAttributes,
+        );
         return yield* hooks.afterSignIn({
           user,
           session,
+          token,
           identifier: handle,
           method: "username",
           ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),

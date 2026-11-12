@@ -1990,14 +1990,15 @@ const inviteeEmail = () =>
 
 /**
  * An organization with an admin invitation to `invitee@example.com`, whose
- * holder has a password and two sessions; runs `program` with them.
+ * holder has a password and two sessions; runs `program` with them (each
+ * session's stored id and its raw token).
  */
 const withInvitation = <A, E>(
   verified: boolean,
   program: (
     service: typeof OrganizationService.Service,
     invitation: Invitation,
-    sessionIds: readonly [string, string],
+    sessions: readonly [IssuedSession, IssuedSession],
   ) => Effect.Effect<A, E, BaseServices | ProofServices>,
 ) => {
   seedEmail("invitee-user", "invitee@example.com", verified);
@@ -2015,19 +2016,28 @@ const withInvitation = <A, E>(
       const sessions = yield* SessionService;
       const first = yield* sessions.createSession("invitee-user");
       const second = yield* sessions.createSession("invitee-user");
-      return yield* program(service, invitation, [first.id, second.id]);
+      return yield* program(service, invitation, [
+        { id: first.session.id, token: first.token },
+        { id: second.session.id, token: second.token },
+      ]);
     }),
   );
 };
 
-/** Whether each raw session token still validates. */
-const alive = (sessionIds: ReadonlyArray<string>) =>
+/** A session the fixture issued: its stored id (the token's digest) and its raw token. */
+interface IssuedSession {
+  readonly id: string;
+  readonly token: string;
+}
+
+/** Whether each session's raw token still validates. */
+const alive = (issued: ReadonlyArray<IssuedSession>) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
     return yield* Effect.forEach(
-      sessionIds,
-      (id) =>
-        Effect.match(sessions.validateSession(id), {
+      issued,
+      ({ token }) =>
+        Effect.match(sessions.validateSession(token), {
           onFailure: () => false,
           onSuccess: () => true,
         }),
@@ -2065,7 +2075,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
       Effect.gen(function* () {
         const member = yield* service.acceptInvitation("invitee-user", {
           ...answer(invitation),
-          currentSessionId: current,
+          currentSessionId: current.id,
         });
         return { member, sessions: yield* alive([current, other]) };
       }),
@@ -2080,10 +2090,10 @@ describe("OrganizationService - invitation tokens (#586)", () => {
   });
 
   it("revokes every session of an unverified address accepted without a current session", async () => {
-    const result = await withInvitation(false, (service, invitation, sessionIds) =>
+    const result = await withInvitation(false, (service, invitation, issued) =>
       Effect.gen(function* () {
         yield* service.acceptInvitation("invitee-user", answer(invitation));
-        return yield* alive(sessionIds);
+        return yield* alive(issued);
       }),
     );
 
@@ -2091,10 +2101,10 @@ describe("OrganizationService - invitation tokens (#586)", () => {
   });
 
   it("leaves a verified address's password and sessions alone", async () => {
-    const result = await withInvitation(true, (service, invitation, sessionIds) =>
+    const result = await withInvitation(true, (service, invitation, issued) =>
       Effect.gen(function* () {
         yield* service.acceptInvitation("invitee-user", answer(invitation));
-        return yield* alive(sessionIds);
+        return yield* alive(issued);
       }),
     );
 

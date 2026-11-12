@@ -491,15 +491,15 @@ describe("AdminService", () => {
           // prove the plugin blocks validation even when a session exists.
           yield* service.banUser(admin, "user-1");
           const bannedSession = yield* sessionManager.createSession("user-1");
-          const blocked = yield* Effect.result(sessionManager.validateSession(bannedSession.id));
+          const blocked = yield* Effect.result(sessionManager.validateSession(bannedSession.token));
 
           yield* service.unbanUser(admin, "user-1");
-          const allowed = yield* sessionManager.validateSession(bannedSession.id);
+          const allowed = yield* sessionManager.validateSession(bannedSession.token);
 
           // A ban that has already lapsed does not block validation
           yield* service.banUser(admin, "user-1", { expiresIn: -1000 });
           const lapsedSession = yield* sessionManager.createSession("user-1");
-          const lapsed = yield* Effect.result(sessionManager.validateSession(lapsedSession.id));
+          const lapsed = yield* Effect.result(sessionManager.validateSession(lapsedSession.token));
 
           return { blocked, allowed, lapsed };
         }),
@@ -564,18 +564,20 @@ describe("AdminService", () => {
     seedUser("user-1", "user@example.com");
 
     const before = DateTime.toEpochMillis(DateTime.nowUnsafe());
-    const session = await runService(
+    const { session, token } = await runService(
       testContext,
       { impersonationSessionDuration: 15 * 60 * 1000 },
       (service) => service.impersonateUser(admin, "user-1"),
     );
+    // The record carries the stored id; the token travels beside it (#581).
+    expect(session.id).toBe(hashToken(token));
 
     expect(session.userId).toBe("user-1");
     expect(session.attributes["impersonatedBy"]).toBe("admin-1");
     const impersonationExpiresAt = session.attributes["impersonationExpiresAt"];
     assert(P.isNumber(impersonationExpiresAt));
     expect(impersonationExpiresAt).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
-    expect(MutableHashMap.has(sessions, hashToken(session.id))).toBe(true);
+    expect(MutableHashMap.has(sessions, session.id)).toBe(true);
 
     const missingTarget = await runService(testContext, {}, (service) =>
       Effect.result(service.impersonateUser(admin, "ghost")),

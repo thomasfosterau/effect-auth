@@ -410,7 +410,7 @@ const makeFixture = () => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   );
-  const { handler } = HttpServer.make({ services, cookie: { secure: false } });
+  const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
 
   /** The token the invitation's latest email carried. */
   const tokenFor = (invitationId: string): string =>
@@ -1378,6 +1378,8 @@ describe("HTTP impersonation endpoints", () => {
     expect(started.status).toBe(201);
     const token = sessionCookieOf(started);
     assert(token !== undefined && token !== "", "the impersonation's session is the cookie");
+    // The token reaches the browser in the cookie only, never the body (#581).
+    expect(await started.clone().text()).not.toContain(token);
     const document = await jsonBody(
       started,
       Schema.Struct({

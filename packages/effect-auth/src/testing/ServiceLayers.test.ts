@@ -11,9 +11,9 @@ describe("sessionServiceLayer", () => {
     const program = Effect.fn("sessionRoundTrip")(function* () {
       const sessions = yield* SessionService;
       const created = yield* sessions.createSession(ada.id);
-      expect((yield* sessions.validateSession(created.id)).user.id).toBe(ada.id);
-      yield* sessions.invalidateSession(created.id);
-      const failure = yield* Effect.flip(sessions.validateSession(created.id));
+      expect((yield* sessions.validateSession(created.token)).user.id).toBe(ada.id);
+      yield* sessions.invalidateSession(created.token);
+      const failure = yield* Effect.flip(sessions.validateSession(created.token));
       expect(failure._tag).toBe("SessionNotFoundError");
     });
     await Effect.runPromise(
@@ -25,7 +25,7 @@ describe("sessionServiceLayer", () => {
     const program = Effect.fn("unseededUser")(function* () {
       const sessions = yield* SessionService;
       const created = yield* sessions.createSession("stranger");
-      const failure = yield* Effect.flip(sessions.validateSession(created.id));
+      const failure = yield* Effect.flip(sessions.validateSession(created.token));
       expect(failure._tag).toBe("UserNotFoundError");
     });
     await Effect.runPromise(

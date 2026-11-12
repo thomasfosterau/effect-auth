@@ -695,7 +695,8 @@ export interface InvitationResponseInput {
  */
 export interface AcceptInvitationInput extends InvitationResponseInput {
   /**
-   * The raw token of the session the acceptance arrives over. When the
+   * The stored id (the token's digest, as `validateSession` answers it) of
+   * the session the acceptance arrives over. When the
    * token is the first proof of the invited address (the account's matching
    * email identifier is unverified), every other session of the account is
    * revoked and this one kept; without it, all are revoked.

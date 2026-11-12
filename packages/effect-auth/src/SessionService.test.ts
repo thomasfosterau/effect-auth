@@ -1,7 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
-import { Hooks } from "./Hooks.ts";
+import { Hooks, makePlugin, type SessionRef } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
@@ -90,7 +90,7 @@ const sessionConfig: SessionConfig = {
 
 describe("SessionService", () => {
   it("should create a new session", async () => {
-    const session = await Effect.runPromise(
+    const { session, token } = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const manager = yield* make(sessionConfig);
@@ -100,7 +100,9 @@ describe("SessionService", () => {
       ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
     );
 
-    expect(session.id).toBeDefined();
+    // The record carries the stored id; the token travels beside it (#581).
+    expect(session.id).toBe(hashToken(token));
+    expect(token).toMatch(/^[0-9a-f]{40}$/);
     expect(session.userId).toBe("user1");
     expect(session.expiresAt).toBeInstanceOf(Date);
     expect(session.attributes.ip).toBe("127.0.0.1");
@@ -115,7 +117,7 @@ describe("SessionService", () => {
         Effect.gen(function* () {
           const manager = yield* make(sessionConfig);
           const session = yield* manager.createSession("user1");
-          return yield* manager.validateSession(session.id);
+          return yield* manager.validateSession(session.token);
         }),
         Context.merge(SessionStoreTest, UserStoreTest),
       ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
@@ -140,7 +142,7 @@ describe("SessionService", () => {
               },
             });
             const session = yield* manager.createSession("user1");
-            return yield* manager.validateSession(session.id);
+            return yield* manager.validateSession(session.token);
           }),
           Context.merge(SessionStoreTest, UserStoreTest),
         ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
@@ -163,8 +165,8 @@ describe("SessionService", () => {
           Effect.gen(function* () {
             const manager = yield* make(sessionConfig);
             const session = yield* manager.createSession("user1");
-            yield* manager.invalidateSession(session.id);
-            return yield* manager.validateSession(session.id);
+            yield* manager.invalidateSession(session.token);
+            return yield* manager.validateSession(session.token);
           }),
           Context.merge(SessionStoreTest, UserStoreTest),
         ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
@@ -178,34 +180,105 @@ describe("SessionService", () => {
     expect(result.failure._tag).toBe("SessionNotFoundError");
   });
 
-  it("create→validate round-trip: store keyed by hash, cookie carries raw token", async () => {
+  it("create→validate round-trip: store keyed by hash, only the token is the credential", async () => {
     MutableHashMap.clear(mockSessionStore.sessions);
 
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const manager = yield* make(sessionConfig);
-          const session = yield* manager.createSession("user1");
-
-          const rawToken = session.id;
+          const { session, token } = yield* manager.createSession("user1");
           const storedKeys = Array.from(MutableHashMap.keys(mockSessionStore.sessions));
-
-          // The store must not contain the raw token — only its hash.
-          const validated = yield* manager.validateSession(rawToken);
-
-          return { rawToken, storedKeys, validated };
+          const validated = yield* manager.validateSession(token);
+          // The stored id is not a credential: presenting it finds nothing.
+          const byStoredId = yield* Effect.result(manager.validateSession(session.id));
+          return { token, session, storedKeys, validated, byStoredId };
         }),
         Context.merge(SessionStoreTest, UserStoreTest),
       ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
     );
 
-    // Raw token is not a key in the store — only the hash is.
-    expect(result.storedKeys).not.toContain(result.rawToken);
-    expect(result.storedKeys).toHaveLength(1);
-    expect(result.storedKeys[0]).toBe(hashToken(result.rawToken));
-    // Validation succeeds and returns the raw token as session.id.
-    expect(result.validated.session.id).toBe(result.rawToken);
+    // The raw token is not a key in the store, only its hash is.
+    expect(result.storedKeys).not.toContain(result.token);
+    expect(result.storedKeys).toEqual([hashToken(result.token)]);
+    // Validation answers the session under its stored id, never the token (#581).
+    expect(result.validated.session.id).toBe(hashToken(result.token));
+    expect(result.validated.session.id).toBe(result.session.id);
     expect(result.validated.user.id).toBe("user1");
+    expect(Result.isFailure(result.byStoredId)).toBe(true);
+  });
+
+  it("revokeOtherSessions keeps the session with the given stored id", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const kept = yield* manager.createSession("user1");
+          const other = yield* manager.createSession("user1");
+          yield* manager.revokeOtherSessions("user1", kept.session.id);
+          return {
+            kept: yield* Effect.result(manager.validateSession(kept.token)),
+            other: yield* Effect.result(manager.validateSession(other.token)),
+          };
+        }),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+    );
+
+    expect(Result.isSuccess(result.kept)).toBe(true);
+    expect(Result.isFailure(result.other)).toBe(true);
+  });
+
+  it("setSessionAttributes addresses the session by its stored id", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const { session, token } = yield* manager.createSession("user1");
+          const updated = yield* manager.setSessionAttributes(session.id, { theme: "dark" });
+          const byToken = yield* Effect.result(
+            manager.setSessionAttributes(token, { theme: "light" }),
+          );
+          return { session, updated, byToken };
+        }),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+    );
+
+    expect(result.updated.id).toBe(result.session.id);
+    expect(result.updated.attributes["theme"]).toBe("dark");
+    // The raw token names no stored session.
+    assert(Result.isFailure(result.byToken));
+    expect(result.byToken.failure._tag).toBe("SessionNotFoundError");
+  });
+
+  it("afterSignOut observes the stored id, never the token", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+    const seen: Array<string> = [];
+    const hooks = makePlugin({
+      afterSignOut: Hooks.tap((ref: SessionRef) =>
+        Effect.sync(() => void seen.push(ref.sessionId)),
+      ),
+    }).pipe(Layer.provide(Hooks.Default));
+
+    const { session, token } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const issued = yield* manager.createSession("user1");
+          yield* manager.invalidateSession(issued.token);
+          return issued;
+        }),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(hooks, PlatformCrypto.layer))),
+    );
+
+    expect(seen).toEqual([session.id]);
+    expect(seen).not.toContain(token);
   });
 
   describe("updateAge write-throttle", () => {
@@ -228,8 +301,8 @@ describe("SessionService", () => {
           Effect.gen(function* () {
             const manager = yield* make(sessionConfig);
             const session = yield* manager.createSession("user1");
-            yield* manager.validateSession(session.id);
-            yield* manager.validateSession(session.id);
+            yield* manager.validateSession(session.token);
+            yield* manager.validateSession(session.token);
           }),
           Context.merge(
             Context.make(SessionStore, trackingStore),
@@ -266,9 +339,9 @@ describe("SessionService", () => {
             const session = yield* manager.createSession("user1");
             // First validate: session was just created (lastActivityAt = now), so
             // timeSinceUpdate ≈ 0 which is < updateAge → write is skipped.
-            yield* manager.validateSession(session.id);
+            yield* manager.validateSession(session.token);
             // Second validate immediately: still within updateAge → write skipped.
-            yield* manager.validateSession(session.id);
+            yield* manager.validateSession(session.token);
           }),
           Context.merge(
             Context.make(SessionStore, trackingStore),
@@ -327,8 +400,8 @@ describe("SessionService", () => {
             const manager = yield* make(configWithShortUpdateAge);
             const session = yield* manager.createSession("user1");
             // First validate: created just now, timeSinceUpdate ≈ 0 < 100ms → skip.
-            yield* manager.validateSession(session.id);
-            return session.id;
+            yield* manager.validateSession(session.token);
+            return session.token;
           }),
           Context.merge(
             Context.make(SessionStore, timedStore),
@@ -413,7 +486,7 @@ describe("SessionService", () => {
                 },
               });
               const session = yield* manager.createSession("user1");
-              return yield* manager.validateSession(session.id);
+              return yield* manager.validateSession(session.token);
             }),
             Context.merge(
               Context.make(SessionStore, timedStore),
@@ -444,9 +517,9 @@ describe("SessionService", () => {
 
           yield* manager.invalidateUserSessions("user1");
 
-          const result1 = yield* Effect.result(manager.validateSession(session1.id));
-          const result2 = yield* Effect.result(manager.validateSession(session2.id));
-          const result3 = yield* manager.validateSession(session3.id);
+          const result1 = yield* Effect.result(manager.validateSession(session1.token));
+          const result2 = yield* Effect.result(manager.validateSession(session2.token));
+          const result3 = yield* manager.validateSession(session3.token);
 
           return { result1, result2, result3 };
         }),

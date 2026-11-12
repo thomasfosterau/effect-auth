@@ -161,6 +161,8 @@ export interface EmailOtpSignInOptions {
 export interface EmailOtpAuthResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
@@ -514,11 +516,15 @@ export const make = (
           yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
         }
 
-        const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
+        const { session, token } = yield* sessionManager.createSession(
+          user.id,
+          options?.sessionAttributes,
+        );
 
         return {
           user,
           session,
+          token,
         } satisfies EmailOtpAuthResult;
       }),
 

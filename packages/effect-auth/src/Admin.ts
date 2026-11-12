@@ -295,12 +295,15 @@ export class AdminService extends Context.Service<
      * the session's actual lifetime follows the session configuration; the
      * `impersonationExpiresAt` attribute is advisory and can be enforced by the
      * application (e.g. via an `afterValidateSession` hook).
+     *
+     * Answers the issued session and its raw token, as
+     * `SessionService.createSession` does.
      */
     readonly impersonateUser: (
       actor: Types.User,
       userId: string,
     ) => Effect.Effect<
-      Types.Session,
+      Types.IssuedSession,
       AdminError | Errors.AuthError | Errors.UserNotFoundError | HookError
     >;
 

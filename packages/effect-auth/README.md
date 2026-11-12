@@ -63,9 +63,9 @@ const AuthLive = Auth.SessionService.layer(sessionConfig).pipe(
 
 const program = Effect.gen(function* () {
   const service = yield* Auth.SessionService;
-  // `session.id` is the raw token: put it in the cookie.
-  const session = yield* service.createSession("user-123", { ip: "127.0.0.1" });
-  const { user } = yield* service.validateSession(session.id);
+  // `token` is the raw token: put it in the cookie. `session.id` is its hash.
+  const { token } = yield* service.createSession("user-123", { ip: "127.0.0.1" });
+  const { user } = yield* service.validateSession(token);
   return user.id;
 });
 
@@ -324,9 +324,9 @@ The store-contract conformance suites (`sessionStoreConformance`, `userStoreConf
 ```ts
 const program = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
-  const session = yield* sessions.createSession(ada.id);
-  yield* sessions.validateSession(session.id);
-  yield* sessions.invalidateSession(session.id); // validateSession now fails
+  const { token } = yield* sessions.createSession(ada.id);
+  yield* sessions.validateSession(token);
+  yield* sessions.invalidateSession(token); // validateSession now fails
 });
 await Effect.runPromise(
   program.pipe(Effect.provide(Testing.sessionServiceLayer({ users: [ada] }))),
@@ -545,8 +545,8 @@ const begin = Effect.gen(function* () {
 const callback = (state: string, code: string) =>
   Effect.gen(function* () {
     const oauth = yield* Auth.OAuth.OAuthService;
-    const { user, session } = yield* oauth.signInWithCallback(state, code);
-    return { userId: user.id, sessionToken: session.id };
+    const { user, token } = yield* oauth.signInWithCallback(state, code);
+    return { userId: user.id, sessionToken: token };
   });
 
 // Link another provider to a signed-in user, or refresh a stored access token.
@@ -701,26 +701,43 @@ export { strict };
 Per-IP rate limits (and any hook of your own that reads `ClientIP`) need the visitor's address. Behind Cloudflare the socket address is Cloudflare's, so tell the handler which single header carries the visitor's address:
 
 ```typescript
+import { Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Http from "@thomasfosterau/effect-auth/http";
 
-// `services` is the layer graph from the sections above.
+// `services` is the layer graph from the sections above, with a `RateLimiter`
+// (`RateLimiterLive` above) merged in.
 const { handler } = Http.make({
-  services,
+  services: Layer.merge(services, RateLimiterLive),
   trustedProxy: Auth.ClientIP.cloudflare, // trusts CF-Connecting-IP alone
-  ipRateLimit: {},
 });
 
 // Behind another edge, name its header instead: Auth.ClientIP.trustedHeader("x-real-ip").
 ```
 
-This is correct only when the app is reachable solely through Cloudflare. A request that bypasses the edge can set `CF-Connecting-IP` to any value and choose its own key. Only that one header is read; `X-Forwarded-For` and the rest are ignored. A value is taken only when it is exactly one IPv4 or IPv6 address. A missing, empty or malformed value, or a comma-separated list, falls back to the socket address. The first entry of a list is never used. Behind Cloudflare that fallback is an edge address shared by many visitors, so it is a fallback, not a per-visitor key. Under `Http.make` serving Web `Request`s (Workers, for example) there is no socket address. So `ipRateLimit` needs a `trustedProxy`: without one, `Http.make` throws `ClientAddressConfigError` at build, unless `allowMissingClientIp: true` is set. When the header is unusable, the request resolves no address, and a request to a rate-limited endpoint is refused with `429`. It is never let through unlimited and never counted under a bucket shared with other callers. An accepted IPv6 address is canonicalised (RFC 5952), and an IPv4-mapped address becomes dotted IPv4, so one visitor has one key.
+This is correct only when the app is reachable solely through Cloudflare. A request that bypasses the edge can set `CF-Connecting-IP` to any value and choose its own key. Only that one header is read; `X-Forwarded-For` and the rest are ignored. A value is taken only when it is exactly one IPv4 or IPv6 address. A missing, empty or malformed value, or a comma-separated list, falls back to the socket address. The first entry of a list is never used. Behind Cloudflare that fallback is an edge address shared by many visitors, so it is a fallback, not a per-visitor key. Under `Http.make` serving Web `Request`s (Workers, for example) there is no socket address. So the IP limit, which is on unless `ipRateLimit: false`, needs a `trustedProxy`: without one, `Http.make` throws `ClientAddressConfigError` at build, unless `allowMissingClientIp: true` is set. When the header is unusable, the request resolves no address, and a request to a rate-limited endpoint is refused with `429`. It is never let through unlimited and never counted under a bucket shared with other callers. An accepted IPv6 address is canonicalised (RFC 5952), and an IPv4-mapped address becomes dotted IPv4, so one visitor has one key.
 
-Without `trustedProxy`, forwarded headers are ignored and the socket address is used as-is. Under `Http.make` there is no socket address, so `ipRateLimit` without `trustedProxy` is a build error. Set `allowMissingClientIp: true` to accept refusing address-less requests on rate-limited endpoints instead. Dynamic client registration is keyed the same way, by the address this `trustedProxy` resolves: with registration enabled and neither option set, `Http.make` fails at startup with `ClientAddressConfigError`.
+Without `trustedProxy`, forwarded headers are ignored and the socket address is used as-is. Under `Http.make` there is no socket address, so the IP limit without `trustedProxy` is a build error. Set `allowMissingClientIp: true` to accept refusing address-less requests on rate-limited endpoints instead. Dynamic client registration is keyed the same way, by the address this `trustedProxy` resolves: with registration enabled and neither option set, `Http.make` fails at startup with `ClientAddressConfigError`.
 
 **`IPRateLimitPlugin` refuses every request without a client address.** The plugin limits authentication attempts (every `beforeAuthenticate`: one `signin` bucket for the first-factor methods, a `second-factor` bucket for second-factor redemptions), sign-up and password-reset requests per address. A request it cannot key is refused with `RateLimitError` (`429` over HTTP), never let through: a request whose address cannot be resolved, and any hook run with no `ClientIP` service in scope, such as a direct `EmailPasswordService.signIn` call from server code. So under `Http.make` the plugin needs `trustedProxy`. When the `Hooks` in `services` include it and `make` has neither `trustedProxy` nor `allowMissingClientIp: true`, `make` throws `ClientAddressConfigError`. With `allowMissingClientIp: true` and no `trustedProxy`, every sign-in, sign-up and password-reset request is refused with `429` (#389).
 
-The limits also need a `RateLimiter` in the handler's `services`: `ipRateLimit`, the dynamic registration limit and the device user-code limit (5 approve/deny attempts per user code per 15 minutes). The device limit counts as configured whenever a `DeviceAuthorizationService` is in `services`; build it with `allowMissingRateLimiter: true` to run approve and deny without the limit instead. Without a `RateLimiter`, `Http.make` throws `RateLimiterConfigError`, so the app fails to start rather than run a limit as a no-op. `make` builds `services` once to check this and the handler reuses that build. Any other failure of the `services` build also makes `make` throw (the OIDC layer's `ClientAddressConfigError`, for example). Before it throws, `make` releases what the build acquired: a finalizer that does asynchronous work finishes after `make` has thrown, and a finalizer that fails is logged as an error. `make` waits for the build only. A fiber the build forks with `Effect.forkChild` is interrupted when the layer that forks it finishes building. Under `Layer.merge` or `Layer.mergeAll` that is the merged layer's own build, which can end ahead of the whole `services` build, so a fiber that has not started by then never runs. One forked into the layer's scope (`Effect.forkScoped`) keeps running after `make` returns and stops on `dispose`; one forked with `Effect.forkDetach` keeps running, and `dispose` does not stop it. Outside `Http.make`, the exported group layers (`Http.groupLayers`, or a group such as `Http.authGroupLayer` on its own) answer `429` when a configured limit finds no `RateLimiter` in scope (#389).
+The limits also need a `RateLimiter` in the handler's `services`: the IP limit (unless `ipRateLimit: false`), the dynamic registration limit and the device user-code limit (5 approve/deny attempts per user code per 15 minutes). The device limit counts as configured whenever a `DeviceAuthorizationService` is in `services`; build it with `allowMissingRateLimiter: true` to run approve and deny without the limit instead. Without a `RateLimiter`, `Http.make` throws `RateLimiterConfigError`, so the app fails to start rather than run a limit as a no-op. `make` builds `services` once to check this and the handler reuses that build. Any other failure of the `services` build also makes `make` throw (the OIDC layer's `ClientAddressConfigError`, for example). Before it throws, `make` releases what the build acquired: a finalizer that does asynchronous work finishes after `make` has thrown, and a finalizer that fails is logged as an error. `make` waits for the build only. A fiber the build forks with `Effect.forkChild` is interrupted when the layer that forks it finishes building. Under `Layer.merge` or `Layer.mergeAll` that is the merged layer's own build, which can end ahead of the whole `services` build, so a fiber that has not started by then never runs. One forked into the layer's scope (`Effect.forkScoped`) keeps running after `make` returns and stops on `dispose`; one forked with `Effect.forkDetach` keeps running, and `dispose` does not stop it. Outside `Http.make`, the exported group layers (`Http.groupLayers`, or a group such as `Http.authGroupLayer` on its own) answer `429` when a configured limit finds no `RateLimiter` in scope (#389).
+
+### Per-endpoint IP limits: `ipRateLimit`, on by default
+
+`Http.make` and `Http.makeAsync` limit every sensitive endpoint per client address before any auth logic runs (#583): the `defaultEndpointRules`, which cover sign-in, sign-up, every send (OTP, magic link, password reset, email verification), every redemption, second-factor verification, the authenticated endpoints that hash a password or check a second factor (change password, MFA enrolment and removal, backup-code regeneration), the One Tap nonce, the device grant, SSO sign-in and its callbacks, `POST /oauth2/token` and `POST /register`. A request over a limit is answered `429` with `Retry-After`. The limit is on whenever `ipRateLimit` is omitted, so the handler refuses to start without what it needs: a `RateLimiter` in `services` (`RateLimiterConfigError`) and a client address source, `trustedProxy` or `allowMissingClientIp: true` (`ClientAddressConfigError`).
+
+- `ipRateLimit: { rules: [...] }` replaces the defaults with your own rules. A rule names an endpoint by its path template as the OpenAPI document writes it (`"/sessions"`, `"/sso/saml/acs/{providerId}"`), or by a `RegExp` tested against that template, and optionally by its `methods`.
+- `ipRateLimit: false` turns the limit off, and is the only way to. Use it when something in front of the handler (an edge rate limiter, a WAF rule) already limits per address, or in tests.
+
+Rules are matched against the endpoint the router matched, never the raw request path. The router is case-insensitive and ignores trailing and duplicate slashes and percent-encoding, so `/Sessions/`, `//sessions` and `/%73essions` all reach `POST /sessions`, and all count in its bucket (#582).
+
+```typescript
+import * as Http from "@thomasfosterau/effect-auth/http";
+
+// A handler behind an edge that already limits per address, and nothing else.
+const { handler } = Http.make({ services, ipRateLimit: false });
+```
 
 ### Services that build asynchronously: `Http.makeAsync`
 
@@ -739,9 +756,8 @@ import * as Http from "@thomasfosterau/effect-auth/http";
 
 // `services` connects to a database while it builds.
 const { handler, dispose } = await Http.makeAsync({
-  services,
+  services, // with a RateLimiter merged in
   trustedProxy: Auth.ClientIP.cloudflare,
-  ipRateLimit: {},
 });
 ```
 
@@ -749,7 +765,7 @@ To keep `Http.make` and have it refuse a build it cannot finish, set `strict: tr
 
 ```typescript
 // Throws ServicesBuildPendingError if `services` cannot finish building synchronously.
-const { handler } = Http.make({ services, strict: true });
+const { handler } = Http.make({ services, trustedProxy: Auth.ClientIP.cloudflare, strict: true });
 ```
 
 ## Abuse protection
@@ -887,6 +903,8 @@ The included HTTP API speaks [JSON:API](https://jsonapi.org/) through `@thomasfo
 #### JSON:API resources
 
 These take and answer `application/vnd.api+json` (a request with another media type is `415`, an `Accept` that excludes it `406`) and fail with JSON:API error documents (`Http.JsonApiErrors`: `status`, `detail` the message, `meta` carrying the `message` and, when there is one, the stable `code`). The resources are declared once, in `Http.Resources`.
+
+No response body carries a session token (#581). Every `sessions`, `device-sessions` and `impersonations` resource is named by the session's stored id, the SHA-256 digest of its token, which is not a credential: `GET /sessions/:id`, `DELETE /sessions/:id` and the `device-sessions` actions take it. The token itself reaches the client only in the `HttpOnly` session cookie and, when `cookie.bearerMode` is on (`"always"`, or `"opt-in"` for a request sending `x-use-bearer: 1`), in the `set-auth-token` response header, which a native client stores and presents as `Authorization: Bearer <token>`.
 
 | Endpoint                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1100,7 +1118,7 @@ await client.signUp({ email: "ada@example.com", password: "correct horse battery
 console.log(server.sessions.size); // 1
 ```
 
-`makeServerFixture(options?)` mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`, `sentInvitations` with each invitation's token), for assertions.
+`makeServerFixture(options?)` serves with the per-address IP limit off (`ipRateLimit: false`), since its one client has no address, and mounts optional modules only when asked: `features` (username and anonymous sign-in, multi-factor, account management, phone OTP, device authorization, with an in-memory `RateLimiter`), `organization`, and `multiSession`. It returns the `handler` plus the in-memory state and the messages the server "sent" (`sentChangeEmail`, `sentDeleteTokens`, `sentPhoneOtps`, `sentInvitations` with each invitation's token), for assertions.
 
 ### API
 
@@ -1336,12 +1354,12 @@ const start = (email: string) =>
 const finish = (providerId: string, samlResponse: string, relayState: string) =>
   Effect.gen(function* () {
     const sso = yield* SsoService;
-    const { user, session, isNewUser } = yield* sso.handleSamlCallback(
+    const { user, token, isNewUser } = yield* sso.handleSamlCallback(
       providerId,
       samlResponse,
       relayState,
     );
-    return { userId: user.id, sessionToken: session.id, isNewUser };
+    return { userId: user.id, sessionToken: token, isNewUser };
   });
 
 export { register, start, finish };

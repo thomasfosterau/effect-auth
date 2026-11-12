@@ -189,14 +189,17 @@ const makeStores = (
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
-        id: `s-${userId}`,
-        userId,
-        expiresAt: DateTime.toDateUtc(
-          DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
-        ),
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
+        session: {
+          id: `s-${userId}`,
+          userId,
+          expiresAt: DateTime.toDateUtc(
+            DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 }),
+          ),
+          createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          attributes: {},
+        },
+        token: `token-${userId}`,
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -1208,8 +1211,13 @@ const makeHttpFixture = () => {
   return {
     seedUser,
     makeSession,
-    handler: HttpServer.make({ services: withSso, cookie: { secure: false } }).handler,
-    handlerWithoutSso: HttpServer.make({ services: withoutSso, cookie: { secure: false } }).handler,
+    handler: HttpServer.make({ services: withSso, cookie: { secure: false }, ipRateLimit: false })
+      .handler,
+    handlerWithoutSso: HttpServer.make({
+      services: withoutSso,
+      cookie: { secure: false },
+      ipRateLimit: false,
+    }).handler,
     providers,
     identifierRecords,
     samlRequests,

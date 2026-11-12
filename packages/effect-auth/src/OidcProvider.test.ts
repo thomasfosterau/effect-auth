@@ -905,6 +905,13 @@ const REGISTRATION_ADDRESS_ERROR =
   /Dynamic client registration \(POST \/register\) is rate limited per client address/;
 
 /**
+ * The handler options of {@link makeHttpFixture}: the registration limit is the
+ * one under test, and `Http.make`'s per-endpoint IP limit (on by default, #583)
+ * is not.
+ */
+const WITHOUT_IP_LIMIT = { cookie: { secure: false }, ipRateLimit: false } as const;
+
+/**
  * A web handler wired with the OIDC provider endpoints over in-memory stores.
  * Pass `dynamicRegistration` to mount the RFC 7591/7592 endpoints.
  */
@@ -1128,12 +1135,11 @@ const makeHttpFixture = (
     servicesWithRateLimiter: withOidcLimiter,
     handler: HttpServer.make({
       services: limited ? withOidcLimiter : withOidc,
-      cookie: { secure: false },
+      ...WITHOUT_IP_LIMIT,
       ...(addressSource !== undefined && { trustedProxy: addressSource }),
       ...(options.allowMissingClientIp === true && { allowMissingClientIp: true }),
     }).handler,
-    handlerWithoutOidc: HttpServer.make({ services: withoutOidc, cookie: { secure: false } })
-      .handler,
+    handlerWithoutOidc: HttpServer.make({ services: withoutOidc, ...WITHOUT_IP_LIMIT }).handler,
   };
 };
 
@@ -2505,6 +2511,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     const constructed = HttpServer.makeAsync({
       services: fx.servicesWithRateLimiter,
       cookie: { secure: false },
+      ipRateLimit: false,
     });
     await expect(constructed).rejects.toThrow(ClientAddressConfigError);
     await expect(constructed).rejects.toThrow(REGISTRATION_ADDRESS_ERROR);

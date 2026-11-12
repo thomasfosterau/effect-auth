@@ -8,6 +8,8 @@ import * as RemoteSession from "./RemoteSession.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import * as SessionContext from "../SessionContext.ts";
 import { CurrentUser } from "../SessionContext.ts";
+import { hashToken } from "../TokenHash.ts";
+import { makeServerFixture } from "../client/testing/fixture.ts";
 
 // ---------------------------------------------------------------------------
 // A stand-in auth service
@@ -521,5 +523,49 @@ describe("RemoteSession.layerFetcher", () => {
     const call = calls[0];
     assert(call !== undefined);
     expect(call.url).toBe("https://auth.internal/api/auth/sessions/current");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Against the real handler: the session the edge resolves carries no token
+// ---------------------------------------------------------------------------
+
+describe("RemoteSession over a real Http.make handler (#581)", () => {
+  it("resolves the session under its digest; the cookie's token is in no body", async () => {
+    const server = makeServerFixture();
+    const signUp = await server.handler(
+      new Request("http://auth.internal/users", {
+        method: "POST",
+        headers: { "content-type": JSON_API },
+        body: toJson({
+          data: {
+            type: "users",
+            attributes: { email: "edge@example.com", password: "pw-12345678" },
+          },
+        }),
+      }),
+    );
+    expect(signUp.status).toBe(201);
+    const token = /conduit_session=([^;]+)/.exec(signUp.headers.get("set-cookie") ?? "")?.[1];
+    assert(token !== undefined, "sign-up set the session cookie");
+
+    const bodies: Array<string> = [];
+    const client = RemoteSession.make({
+      fetcher: async (request) => {
+        const response = await server.handler(request);
+        bodies.push(await response.clone().text());
+        return response;
+      },
+      baseUrl: "http://auth.internal",
+      prefix: "",
+    });
+    const result = await Effect.runPromise(
+      client.read(inbound({ cookie: `conduit_session=${token}` })),
+    );
+
+    assert(Option.isSome(result.session));
+    expect(result.session.value.session.id).toBe(hashToken(token));
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).not.toContain(token);
   });
 });
