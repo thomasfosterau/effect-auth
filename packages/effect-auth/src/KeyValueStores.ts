@@ -61,7 +61,11 @@ import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { type PendingMultiFactor, PendingMultiFactorStore } from "./multifactor/MultiFactor.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "./multifactor/WebAuthn.ts";
+import {
+  ChallengeStore,
+  isWebAuthnCeremony,
+  type WebAuthnChallenge,
+} from "./multifactor/WebAuthn.ts";
 import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import type { OtpFailures } from "./Types.ts";
 
@@ -192,20 +196,29 @@ export const OAuthStateStoreKV: Layer.Layer<OAuthStateStore, never, KeyValueStor
 // WebAuthn ChallengeStore
 // ---------------------------------------------------------------------------
 
-/** JSON-safe encoding of a {@link WebAuthnChallenge} (bytes as base64). */
+/**
+ * JSON-safe encoding of a {@link WebAuthnChallenge} (bytes as base64). An
+ * entry written before ceremonies were recorded (#591) has no `ceremony`.
+ */
 interface StoredChallenge {
   readonly challenge: string;
+  readonly ceremony?: unknown;
   readonly expiresAt: number;
   readonly userId?: string;
 }
 
 const challengeKey = (challenge: Uint8Array) => `webauthn-challenge:${toBase64(challenge)}`;
 
-const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge => ({
-  challenge: fromBase64(stored.challenge),
-  expiresAt: stored.expiresAt,
-  ...(stored.userId !== undefined ? { userId: stored.userId } : {}),
-});
+/** A stored challenge without a known ceremony reads as missing, so no ceremony redeems it. */
+const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge | null =>
+  isWebAuthnCeremony(stored.ceremony)
+    ? {
+        challenge: fromBase64(stored.challenge),
+        ceremony: stored.ceremony,
+        expiresAt: stored.expiresAt,
+        ...(stored.userId !== undefined ? { userId: stored.userId } : {}),
+      }
+    : null;
 
 /**
  * Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
@@ -223,6 +236,7 @@ export const challengeStoreKV: Effect.Effect<
           challengeKey(challenge.challenge),
           {
             challenge: toBase64(challenge.challenge),
+            ceremony: challenge.ceremony,
             expiresAt: challenge.expiresAt,
             ...(challenge.userId !== undefined ? { userId: challenge.userId } : {}),
           } satisfies StoredChallenge,

@@ -211,6 +211,14 @@ export const schemaStatements: readonly string[] = [
     last_failure_at BIGINT NOT NULL,
     PRIMARY KEY (email, purpose)
   )`,
+  // The ceremony each WebAuthn challenge was issued for (#591), a table of
+  // its own for the same reason. A challenge with no row here reads as
+  // missing, so one written before the table existed is redeemable by neither
+  // ceremony.
+  `CREATE TABLE IF NOT EXISTS auth_webauthn_challenge_ceremonies (
+    challenge TEXT PRIMARY KEY,
+    ceremony TEXT NOT NULL
+  )`,
 ];
 
 const CREATE_TABLE = /create\s+table\s+if\s+not\s+exists\s+(\w+)/i;

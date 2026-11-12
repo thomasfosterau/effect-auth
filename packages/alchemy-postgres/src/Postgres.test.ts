@@ -13,6 +13,7 @@ import { Config, DateTime, Effect, Redacted } from "effect";
 import * as Option from "effect/Option";
 import { assert, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
 import * as Postgres from "./Postgres.ts";
 
 const databaseUrl = Option.getOrUndefined(
@@ -55,5 +56,25 @@ describe.skipIf(databaseUrl === undefined)("effect-auth on Postgres over @effect
   it("purges expired rows", async () => {
     const result = await Effect.runPromise(Postgres.purgeExpired(url()));
     expect(result).toBeDefined();
+  });
+
+  // The WebAuthn challenge store keeps each challenge's ceremony in a table of
+  // its own (#591); the core's suite pins it over this driver too.
+  describe("ChallengeStore conformance", () => {
+    it.for(Testing.challengeStoreConformance().cases)("$name", async (testCase) => {
+      const outcome = await Effect.runPromise(
+        Postgres.migrate(url()).pipe(
+          Effect.andThen(
+            testCase.run.pipe(
+              Effect.provide(
+                Postgres.layer({ connectionString: Redacted.value(url()) }, { maxConnections: 1 }),
+              ),
+            ),
+          ),
+        ),
+      );
+      // A case succeeds with no value; a contract mismatch rejects.
+      expect(outcome).toBeUndefined();
+    });
   });
 });
