@@ -651,6 +651,73 @@ describe("RemoteSession relay", () => {
   });
 });
 
+/** Relay `upstream` to a caller sending `headers`. */
+const relayed = (upstream: Response, headers: Record<string, string> = {}) =>
+  RemoteSession.relayResponse(
+    upstream,
+    SessionResolution.detectCredential(SessionResolution.fromRequest(inbound(headers))),
+  );
+
+/** A sign-out answer clearing the session cookie, under `cacheControl` if given. */
+const clearing = (cacheControl?: string) =>
+  new Response(null, {
+    status: 204,
+    headers: {
+      ...(cacheControl !== undefined && { "cache-control": cacheControl }),
+      "set-cookie": "__Host-conduit_session=; Path=/; Max-Age=0; HttpOnly; Secure",
+    },
+  });
+
+describe("a relayed response carrying Set-Cookie is no-store (#628)", () => {
+  it("marks a relayed session cookie no-store, first sign-in and cookie-bearing alike", () => {
+    expect(relayed(signInResponse()).headers.get("cache-control")).toBe("no-store");
+    expect(relayed(signInResponse(), withSession).headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("marks a relayed cookie-clearing sign-out no-store", () => {
+    const response = relayed(clearing());
+    expect(response.status).toBe(204);
+    expect(response.headers.getSetCookie()).toHaveLength(1);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("appends no-store to an upstream Cache-Control that lacks it, keeping its directives", () => {
+    expect(relayed(clearing("private, max-age=60")).headers.get("cache-control")).toBe(
+      "private, max-age=60, no-store",
+    );
+  });
+
+  it("keeps an upstream Cache-Control that already has no-store", () => {
+    expect(relayed(clearing("private, No-Store")).headers.get("cache-control")).toBe(
+      "private, No-Store",
+    );
+  });
+
+  it("leaves a response without Set-Cookie as it is", () => {
+    const upstream = new Response("{}", { headers: { "cache-control": "max-age=60" } });
+    expect(relayed(upstream)).toBe(upstream);
+  });
+
+  it("a session read over relay carries no-store with its refreshed cookie", async () => {
+    const refreshed = "__Host-conduit_session_data=fresh; Path=/; HttpOnly";
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+    const request = new Request("https://app.example.com/auth/sessions/current", {
+      headers: withSession,
+    });
+    const response = await Effect.runPromise(client.relay(request, "/sessions/current"));
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("withSetCookie marks the outgoing response no-store when it replays a cookie", () => {
+    const response = RemoteSession.withSetCookie(
+      new Response("{}", { headers: { "cache-control": "private" } }),
+      ["__Host-conduit_session_data=; Path=/; Max-Age=0"],
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+});
+
 describe("RemoteSession.withSetCookie", () => {
   it("replays relayed cookies onto an outgoing response", () => {
     const response = RemoteSession.withSetCookie(

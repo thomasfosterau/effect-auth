@@ -76,6 +76,7 @@ import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import type * as Types from "../Types.ts";
 import { MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi/schema";
+import { noStoreWithSetCookie } from "./CacheControl.ts";
 import { CurrentApiKeyDocument, SessionDocument } from "./HttpApi.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Resources from "./Resources.ts";
@@ -772,7 +773,10 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
  * rule: `Set-Cookie` is relayed to every caller without a machine credential,
  * and stripped when the inbound request carried an API key or a bearer token
  * (with or without a session cookie beside it). A browser with no cookie yet
- * therefore receives its session cookie on first sign-in (#619).
+ * therefore receives its session cookie on first sign-in (#619). A relayed
+ * response that keeps its `Set-Cookie` carries `Cache-Control: no-store`
+ * (#628): `no-store` is appended to an upstream `Cache-Control` that lacks it,
+ * and one that has it is kept as it is.
  *
  * Exported so an app relaying through its own code path gets the same rule.
  *
@@ -791,7 +795,7 @@ export const relayResponse = (
   // machine credential is its credential, so the session state has nowhere
   // useful to go. A cookie is not required: a first sign-in has none yet.
   const mayReceiveCookies = !inbound.hasApiKey && !inbound.hasBearer;
-  if (mayReceiveCookies) return upstream;
+  if (mayReceiveCookies) return noStoreWithSetCookie(upstream);
 
   const headers = new Headers(upstream.headers);
   headers.delete("set-cookie");
@@ -1011,7 +1015,8 @@ export const resolveAtEdgeFailOpen = (
 };
 
 /**
- * Replay relayed `Set-Cookie` lines onto an outgoing response.
+ * Replay relayed `Set-Cookie` lines onto an outgoing response, marking it
+ * `Cache-Control: no-store` as {@link relayResponse} does (#628).
  *
  * @since 0.1.0
  * @category constructors
@@ -1020,9 +1025,11 @@ export const withSetCookie = (response: Response, setCookie: ReadonlyArray<strin
   if (Arr.isReadonlyArrayEmpty(setCookie)) return response;
   const headers = new Headers(response.headers);
   setCookie.forEach((cookie) => headers.append("set-cookie", cookie));
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return noStoreWithSetCookie(
+    new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    }),
+  );
 };
