@@ -2,7 +2,7 @@
  * Account lockout plugin (transform hook with short-circuit).
  *
  * Guards `beforeAuthenticate`, which every credential-verifying flow fires.
- * Each password, username, passkey and second-factor attempt is counted
+ * Each password, username and second-factor attempt is counted
  * before the credential is checked, and once `maxAttempts` attempts have been
  * counted without a session being issued, the account is locked for
  * `lockoutDurationMs`: `beforeAuthenticate` fails fast with
@@ -18,6 +18,11 @@
  *   attempt `IPRateLimitPlugin` counts, and `RateLimitPlugin` /
  *   `IPRateLimitPlugin` count every attempt. A session one of them issues
  *   clears the lock like any other the user earned.
+ * - **Passkeys are exempt too** (#698). A WebAuthn assertion is a signature
+ *   no attacker can guess, and a credential id is not secret (a bound
+ *   challenge lists it), so counting passkey attempts would let anyone who
+ *   holds one lock the account. Passkey verification stays under
+ *   `IPRateLimitPlugin`.
  * - **Unkeyed attempts pass** (an unknown challenge or token names no
  *   account): there is nothing to count them under.
  *
@@ -79,11 +84,19 @@ import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
 import {
   type AuthenticateAttempt,
+  type AuthenticationMethod,
   authenticationSubject,
   isPossessionMethod,
   makePlugin,
 } from "../Hooks.ts";
 import * as Types from "../Types.ts";
+
+/**
+ * Whether the lock leaves `method` alone: a possession proof (#678) or a
+ * passkey (#698).
+ */
+const isLockExempt = (method: AuthenticationMethod): boolean =>
+  isPossessionMethod(method) || method === "passkey";
 
 /** Per-identifier lockout state. `lockedUntil` is epoch-ms when present. */
 export interface AccountLockoutRecord {
@@ -229,12 +242,12 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
 
   /**
    * The counter an attempt draws on, or `null` for one the lock does not
-   * cover: a possession proof (a one-time code or a magic link, #678) or an
-   * unkeyed attempt, which names no account.
+   * cover: a possession proof (a one-time code or a magic link, #678; a
+   * passkey, #698) or an unkeyed attempt, which names no account.
    */
   const counterFor = (attempt: AuthenticateAttempt): Counter | null => {
     const subject = authenticationSubject(attempt);
-    if (subject === undefined || isPossessionMethod(attempt.method)) return null;
+    if (subject === undefined || isLockExempt(attempt.method)) return null;
     return attempt.method === "second-factor"
       ? {
           key: secondFactorKey(subject),
