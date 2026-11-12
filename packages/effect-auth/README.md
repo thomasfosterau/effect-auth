@@ -93,6 +93,12 @@ const customSessionLayer = Layer.effect(
 export { customSessionLayer };
 ```
 
+### The session hooks
+
+No hook ever sees a raw session token (#581, #669). `beforeValidateSession` (fired by `SessionService.validateSession`), `beforeSignOut` (fired by `invalidateSession`, so by every sign-out) and `afterSignOut` receive a `SessionRef`, `{ sessionId }`, whose `sessionId` is the session's stored id: `hashToken(token)`, the SHA-256 digest that `session.id` carries everywhere else. A plugin can log it or match it against `session.id` without ever holding the credential.
+
+The two `before*` session hooks are observe-or-deny. A plugin refuses the validation or the sign-out by failing, and the operation stops with that error (the session is not deleted on a refused sign-out). Otherwise the services read nothing back: the token the client presented decides which session is looked up or deleted, so a hook cannot rewrite it or redirect the operation to another session.
+
 ## What's included
 
 - **Sessions:** active and idle expiry with renewal, hashed session ids, an optional HMAC-signed session-data cookie (`cookie.cache`), multi-session, trusted devices.
@@ -107,7 +113,7 @@ export { customSessionLayer };
 - **Authorization:** one policy kernel (`Policy`, `Entity`, `Condition`, `Authorizer`) with RBAC as authoring sugar, schema-embedded field guards (`protectedField`), zero-IO guards and role ladders.
 - **Abuse protection:** rate limiting with presets and an optional `effect/persistence` backend (`rateLimiterPersistenceLayer`), per-IP limits, account lockout (`AccountLockoutPlugin`), captcha (Turnstile, reCAPTCHA, hCaptcha).
 - **HTTP API:** a typed `effect/http-api` contract served as a mountable Web handler (`Http.make`, or `Http.makeAsync` for services that build asynchronously), with session cookies, trusted-origin CSRF checks, a derived typed client and an OpenAPI 3.1 document (`Http.getOpenApiSpec()`, or `Http.make({ docs: true })` for a Scalar reference page).
-- **Hooks:** `before*` / `after*` hook points, composed as plugins with `composePlugins`; first-party plugins include audit logging and a last-login-method hint. Every credential-verifying flow fires `beforeAuthenticate` (see [Abuse protection](#abuse-protection)).
+- **Hooks:** `before*` / `after*` hook points, composed as plugins with `composePlugins`; first-party plugins include audit logging and a last-login-method hint. Every credential-verifying flow fires `beforeAuthenticate` (see [Abuse protection](#abuse-protection)). No hook ever sees a raw session token: the session hooks get the stored id, its digest (see [The session hooks](#the-session-hooks)).
 
 ## Authorization
 
