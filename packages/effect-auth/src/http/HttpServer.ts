@@ -1450,9 +1450,11 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
             if (session === undefined) {
               return yield* new S.NotFound({ message: "Session not found" });
             }
-            return Handlers.data(sessionResource(session), {
-              included: withUser ? [yield* loadUserResource(resolved.user)] : undefined,
-            });
+            return withUser
+              ? Handlers.data(sessionResource(session), {
+                  included: [yield* loadUserResource(resolved.user)],
+                })
+              : Handlers.data(sessionResource(session));
           }
           // On a store validation (cache miss) refresh the signed cache cookie
           // so subsequent reads within `maxAge` skip the store.
@@ -1478,9 +1480,9 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
           const user = cacheHit
             ? userResource(resolved.user)
             : yield* loadUserResource(resolved.user);
-          return Handlers.data(sessionResource(resolved.session), {
-            included: withUser ? [user] : undefined,
-          });
+          return withUser
+            ? Handlers.data(sessionResource(resolved.session), { included: [user] })
+            : Handlers.data(sessionResource(resolved.session));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("delete", ({ params, request }) =>
