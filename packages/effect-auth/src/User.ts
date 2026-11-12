@@ -2,6 +2,7 @@ import { Context, DateTime, Effect, HashSet, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
+import { AccountDeletion } from "./AccountDeletion.ts";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
@@ -118,7 +119,7 @@ export interface UpdateUserInput {
 /**
  * Reads and updates users: profile fields and the attribute bag, refusing writes to {@link UserServiceConfig.serverOnlyAttributes}.
  *
- * Requires `UserServiceStore`.
+ * Requires `UserServiceStore`; `deleteUser` also needs `AccountDeletion` (`accountDeletionLayer`) where the layer is built, and fails without it.
  */
 export class UserService extends Context.Service<
   UserService,
@@ -146,16 +147,15 @@ export class UserService extends Context.Service<
     ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     /**
-     * Delete the user row, and only the row: `UserServiceStore.delete`. It
-     * does not touch the user's sessions, identifiers or credentials, so it
-     * is not how an account is deleted. Delete an account with
-     * `AccountManagementService.confirmAccountDeletion` or
-     * `AdminService.removeUser`, which purge everything the account holds
-     * before the row (#601). `UserService` stays below the flows that hold
-     * credentials (the credential stores' modules import this one), so it
-     * cannot reach their stores itself; an API key whose owner was deleted
-     * here fails `ApiKeyService.verify`, and a session fails
-     * `validateSession`, but their rows stay until removed.
+     * Delete the user and everything the account holds (#601), through the
+     * `AccountDeletion` service in the context (`accountDeletionLayer`): the
+     * user's credentials and tokens, the unspent magic links and one-time
+     * codes sent to its addresses, its sessions, its identifiers, and the
+     * user row last.
+     *
+     * Without an `AccountDeletion` where this layer is built it fails with
+     * `AuthError` and deletes nothing: it never deletes the user row alone,
+     * which would leave every credential naming a user who no longer exists.
      */
     readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 
@@ -191,6 +191,7 @@ export const make = (
 ): Effect.Effect<typeof UserService.Service, never, UserServiceStore> =>
   Effect.gen(function* () {
     const store = yield* UserServiceStore;
+    const accountDeletion = yield* Effect.serviceOption(AccountDeletion);
     const serverOnlyAttributes = config?.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
     const serverOnly = HashSet.fromIterable(serverOnlyAttributes);
 
@@ -243,6 +244,17 @@ export const make = (
         return yield* store.update(updated);
       }),
 
-      deleteUser: Effect.fn("UserService.deleteUser")((userId: string) => store.delete(userId)),
+      deleteUser: Effect.fn("UserService.deleteUser")((userId: string) =>
+        Option.match(accountDeletion, {
+          onNone: () =>
+            Effect.fail(
+              new Errors.AuthError({
+                message:
+                  "UserService.deleteUser deletes an account through AccountDeletion: provide accountDeletionLayer where UserService is built",
+              }),
+            ),
+          onSome: (deletion) => deletion.deleteUser(userId),
+        }),
+      ),
     };
   });

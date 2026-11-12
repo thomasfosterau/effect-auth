@@ -23,11 +23,15 @@ import type * as Errors from "./Errors.ts";
 import type { Identifier, IdentifierStore } from "./Identifier.ts";
 import type { EmailPasswordStore } from "./email/EmailPassword.ts";
 import type { SessionService } from "./SessionService.ts";
-import { deleteCredentials, type UserCredentialStores, userCredentialStores } from "./UserPurge.ts";
+import {
+  deleteCredentials,
+  type UserCredentialStores,
+  userCredentialStores,
+} from "./UserCredentials.ts";
 
 /**
  * The credential stores {@link proveAddress} sweeps on a first proof, each
- * through its per-user delete (`UserPurge.ts`, which deleting a user shares).
+ * through its per-user delete (`UserCredentials.ts`, which deleting a user shares).
  * Each is optional: an app without passkeys provides no `CredentialStore`,
  * and its absence means the account cannot hold that kind of credential.
  */

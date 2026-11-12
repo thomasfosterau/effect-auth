@@ -3,129 +3,129 @@
  *
  * Every path that deletes a user (`AccountManagementService`'s confirmed
  * deletion, `AdminService.removeUser`, `AnonymousService` once an anonymous
- * user is linked) goes through {@link purgeUser}, which removes the user's
- * credentials and tokens through each store's per-user delete, then their
- * sessions, then their identifiers, and only then the user row. The stores
+ * user is linked, and `UserService.deleteUser` through the `AccountDeletion`
+ * service) goes through {@link purgeUser}. It removes the user's credentials
+ * and tokens through each store's per-user delete (`UserCredentials.ts`), the
+ * unspent magic links and one-time codes sent to the user's addresses, then
+ * the sessions, then the identifiers, and only then the user row. The stores
  * keep no foreign keys, so nothing else removes those rows.
  *
- * The credential stores are optional, as in the first proof of an address
- * (`FirstProof.ts`, which sweeps a subset of the same stores through
- * {@link deleteCredentials}): a caller resolves them once with
- * {@link userCredentialStores} where it resolves its other stores, and an app
- * without a store holds no credential of that kind.
+ * The stores are optional: a caller resolves them once with
+ * {@link userPurgeStores} where it resolves its other stores, and an app
+ * without a store holds nothing of that kind.
  *
  * @internal
  */
 import { Effect } from "effect";
 import * as Option from "effect/Option";
-import { ApiKeyStore } from "./ApiKey.ts";
+import * as R from "effect/Record";
+import { type EmailOtpPurpose, EmailOtpStore } from "./email/EmailOtp.ts";
 import type * as Errors from "./Errors.ts";
-import type { IdentifierStore } from "./Identifier.ts";
-import { EmailVerificationStore } from "./email/EmailVerification.ts";
-import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
-import { CredentialStore } from "./multifactor/WebAuthn.ts";
-import { OAuthAccountStore } from "./oauth/OAuthAccount.ts";
-import { OidcConsentStore, OidcTokenStore } from "./OidcProvider.ts";
-import { PasswordResetStore } from "./password/PasswordReset.ts";
-import { TrustedDeviceStore } from "./TrustedDevice.ts";
-
-/** A store's per-user delete. */
-interface PerUser {
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
+import type { Identifier, IdentifierStore } from "./Identifier.ts";
+import { MagicLinkStore } from "./MagicLink.ts";
+import { type PhoneOtpPurpose, PhoneOtpStore } from "./PhoneOtp.ts";
+import {
+  deleteCredentials,
+  type UserCredentialStores,
+  userCredentialStores,
+} from "./UserCredentials.ts";
 
 /**
- * The user-keyed credential and token stores, each `undefined` when the app
- * provides none. `multiFactor` is keyed by user id, so its `delete` is the
- * per-user delete.
+ * The stores that key a pending sign-in proof by address rather than by user:
+ * a magic link or a one-time code sent to an address the deleted user held.
+ * Left in place, it would still be redeemable once the address is claimed
+ * again, and sign its holder into the new account.
  */
-export interface UserCredentialStores {
-  readonly oauthAccounts?: PerUser | undefined;
-  readonly passkeys?: PerUser | undefined;
-  readonly apiKeys?: PerUser | undefined;
-  readonly multiFactor?: Pick<typeof MultiFactorStore.Service, "delete"> | undefined;
-  readonly trustedDevices?: PerUser | undefined;
-  /** The access and refresh tokens the core's OIDC provider issued. */
-  readonly oidcTokens?: PerUser | undefined;
-  /** The consents the user granted the OIDC provider's clients. */
-  readonly oidcConsents?: PerUser | undefined;
-  readonly passwordResets?: PerUser | undefined;
-  readonly emailVerifications?: PerUser | undefined;
-  /**
-   * `AccountManagementStore`'s pending email-change and deletion tokens. Not
-   * resolved by {@link userCredentialStores} (`AccountManagement.ts` imports
-   * this module); a caller that has the store passes it.
-   */
-  readonly accountTokens?: PerUser | undefined;
+export interface AddressProofStores {
+  readonly magicLinks?: Pick<typeof MagicLinkStore.Service, "deleteByEmail"> | undefined;
+  readonly emailOtps?: Pick<typeof EmailOtpStore.Service, "delete"> | undefined;
+  readonly phoneOtps?: Pick<typeof PhoneOtpStore.Service, "delete"> | undefined;
 }
 
+/** Every stored purpose of a code, so the purge leaves none behind. */
+const emailOtpPurposes = R.keys({
+  "sign-in": true,
+  "email-verification": true,
+  "forget-password": true,
+} satisfies Record<EmailOtpPurpose, true>);
+const phoneOtpPurposes = R.keys({
+  "sign-in": true,
+  "phone-verification": true,
+} satisfies Record<PhoneOtpPurpose, true>);
+
+/** The stores {@link purgeUser} clears that are present in the context. */
+export type UserPurgeStores = UserCredentialStores & AddressProofStores;
+
 /**
- * The {@link UserCredentialStores} present in the context. Resolve it where
- * the other stores are resolved (at layer construction), so service methods
- * keep `R = never`.
+ * The {@link UserPurgeStores} present in the context. Resolve it where the
+ * other stores are resolved (at layer construction), so service methods keep
+ * `R = never`.
  */
-export const userCredentialStores: Effect.Effect<UserCredentialStores> = Effect.map(
+export const userPurgeStores: Effect.Effect<UserPurgeStores> = Effect.map(
   Effect.all(
     {
-      oauthAccounts: Effect.serviceOption(OAuthAccountStore),
-      passkeys: Effect.serviceOption(CredentialStore),
-      apiKeys: Effect.serviceOption(ApiKeyStore),
-      multiFactor: Effect.serviceOption(MultiFactorStore),
-      trustedDevices: Effect.serviceOption(TrustedDeviceStore),
-      oidcTokens: Effect.serviceOption(OidcTokenStore),
-      oidcConsents: Effect.serviceOption(OidcConsentStore),
-      passwordResets: Effect.serviceOption(PasswordResetStore),
-      emailVerifications: Effect.serviceOption(EmailVerificationStore),
+      credentials: userCredentialStores,
+      magicLinks: Effect.serviceOption(MagicLinkStore),
+      emailOtps: Effect.serviceOption(EmailOtpStore),
+      phoneOtps: Effect.serviceOption(PhoneOtpStore),
     },
     { concurrency: 1 },
   ),
   (found) => ({
-    oauthAccounts: Option.getOrUndefined(found.oauthAccounts),
-    passkeys: Option.getOrUndefined(found.passkeys),
-    apiKeys: Option.getOrUndefined(found.apiKeys),
-    multiFactor: Option.getOrUndefined(found.multiFactor),
-    trustedDevices: Option.getOrUndefined(found.trustedDevices),
-    oidcTokens: Option.getOrUndefined(found.oidcTokens),
-    oidcConsents: Option.getOrUndefined(found.oidcConsents),
-    passwordResets: Option.getOrUndefined(found.passwordResets),
-    emailVerifications: Option.getOrUndefined(found.emailVerifications),
+    ...found.credentials,
+    magicLinks: Option.getOrUndefined(found.magicLinks),
+    emailOtps: Option.getOrUndefined(found.emailOtps),
+    phoneOtps: Option.getOrUndefined(found.phoneOtps),
   }),
 );
 
-const perUser = (
-  store: PerUser | undefined,
-  userId: string,
-): Effect.Effect<void, Errors.AuthError> =>
-  store === undefined ? Effect.void : store.deleteByUserId(userId);
-
 /**
- * Delete everything `userId` holds in `stores`, one store after another. Each
- * per-user delete is idempotent, so a run that fails part-way can be retried.
+ * Delete the unspent magic links and one-time codes sent to `identifier`'s
+ * address. The codes' failure budgets (#590) stay: they belong to the
+ * address, not to the account, and a deletion must not reset them.
  */
-export const deleteCredentials = (
-  stores: UserCredentialStores,
-  userId: string,
-): Effect.Effect<void, Errors.AuthError> =>
-  Effect.all(
-    [
-      perUser(stores.oauthAccounts, userId),
-      perUser(stores.passkeys, userId),
-      perUser(stores.apiKeys, userId),
-      stores.multiFactor === undefined ? Effect.void : stores.multiFactor.delete(userId),
-      perUser(stores.trustedDevices, userId),
-      perUser(stores.oidcTokens, userId),
-      perUser(stores.oidcConsents, userId),
-      perUser(stores.passwordResets, userId),
-      perUser(stores.emailVerifications, userId),
-      perUser(stores.accountTokens, userId),
-    ],
-    { concurrency: 1, discard: true },
-  );
+const deleteAddressProofs = (
+  stores: AddressProofStores,
+  identifier: Identifier,
+): Effect.Effect<void, Errors.AuthError> => {
+  const { magicLinks, emailOtps, phoneOtps } = stores;
+  if (identifier.type === "email") {
+    return Effect.all(
+      [
+        magicLinks === undefined ? Effect.void : magicLinks.deleteByEmail(identifier.value),
+        emailOtps === undefined
+          ? Effect.void
+          : Effect.forEach(
+              emailOtpPurposes,
+              (purpose) => emailOtps.delete(identifier.value, purpose),
+              {
+                concurrency: 1,
+                discard: true,
+              },
+            ),
+      ],
+      { concurrency: 1, discard: true },
+    );
+  }
+  if (identifier.type === "phone" && phoneOtps !== undefined) {
+    return Effect.forEach(
+      phoneOtpPurposes,
+      (purpose) => phoneOtps.delete(identifier.value, purpose),
+      {
+        concurrency: 1,
+        discard: true,
+      },
+    );
+  }
+  return Effect.void;
+};
 
 /** What {@link purgeUser} writes through. */
-export interface UserPurgeServices extends UserCredentialStores {
+export interface UserPurgeServices extends UserPurgeStores {
   /** `undefined` only where users hold no identifiers (anonymous users). */
-  readonly identifiers: Pick<typeof IdentifierStore.Service, "deleteByUser"> | undefined;
+  readonly identifiers:
+    | Pick<typeof IdentifierStore.Service, "listByUser" | "deleteByUser">
+    | undefined;
   /** Revoke every session of the user (`SessionService.invalidateUserSessions`). */
   readonly revokeSessions: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   /** Delete the user row. */
@@ -134,8 +134,9 @@ export interface UserPurgeServices extends UserCredentialStores {
 
 /**
  * Delete `userId` and everything the account holds: its credentials and
- * tokens ({@link deleteCredentials}), then its sessions, then its
- * identifiers (releasing its addresses and handles), and the user row last.
+ * tokens (`deleteCredentials`), the unspent magic links and one-time codes
+ * sent to its addresses, then its sessions, then its identifiers (releasing
+ * its addresses and handles), and the user row last.
  *
  * The steps run in order in the caller's fiber, so the user row goes only
  * once everything else has: a failure part-way leaves the user (with part of
@@ -151,7 +152,15 @@ export const purgeUser = (
 ): Effect.Effect<void, Errors.AuthError> =>
   Effect.gen(function* () {
     yield* deleteCredentials(services, userId);
+    const { identifiers } = services;
+    if (identifiers !== undefined) {
+      yield* Effect.forEach(
+        yield* identifiers.listByUser(userId),
+        (identifier) => deleteAddressProofs(services, identifier),
+        { concurrency: 1, discard: true },
+      );
+    }
     yield* services.revokeSessions(userId);
-    if (services.identifiers !== undefined) yield* services.identifiers.deleteByUser(userId);
+    if (identifiers !== undefined) yield* identifiers.deleteByUser(userId);
     yield* services.deleteUser(userId);
   });

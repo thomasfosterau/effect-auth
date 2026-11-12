@@ -944,16 +944,17 @@ The listing must name keys as the `KeyValueStore` sees them: behind a `KeyValueS
 
 ## Deleting a user
 
-Deleting a user deletes everything the account holds (#601). The three paths that delete a user, `AccountManagementService.confirmAccountDeletion` (after its `beforeDelete` hook), `AdminService.removeUser` and `AnonymousService.linkAccount` (the guest it upgrades), run one purge, in this order:
+Deleting a user deletes everything the account holds (#601). Every path that deletes a user runs one purge: `AccountManagementService.confirmAccountDeletion` (after its `beforeDelete` hook; `POST /account-deletions/redemptions`), `AdminService.removeUser` (`DELETE /admin/users/:id`), `AnonymousService.linkAccount` (the guest it upgrades), and `UserService.deleteUser`, which delegates to the `AccountDeletion` service (provide `accountDeletionLayer` beside `UserService`; without it `deleteUser` fails with `AuthError` and deletes nothing). SCIM's `DELETE /Users/:id` deactivates a user and deletes nothing. The purge runs in this order:
 
 1. the credentials and tokens, through each user-keyed store's per-user delete: OAuth links (`OAuthAccountStore.deleteByUserId`, their provider tokens with them), passkeys (`CredentialStore.deleteByUserId`), API keys (`ApiKeyStore.deleteByUserId`), the TOTP enrolment and backup codes (`MultiFactorStore.delete`), trusted devices, the OIDC provider's access and refresh tokens and the user's consents (`OidcTokenStore` / `OidcConsentStore.deleteByUserId`), pending password resets and email verifications, and pending account-management tokens;
-2. the sessions;
-3. the identifiers, so the user's addresses and handles can be claimed again (`removeUser` used to leave them);
-4. the user row (`UserServiceStore.delete`), last.
+2. the unspent magic links and email and phone one-time codes sent to the user's addresses (`MagicLinkStore.deleteByEmail`, `EmailOtpStore.delete` / `PhoneOtpStore.delete` for every purpose), which are keyed by address: left in place, one would sign its holder into whatever account claims the address next. The codes' failure budgets stay with the address;
+3. the sessions;
+4. the identifiers, so the user's addresses and handles can be claimed again (`removeUser` used to leave them): the same email signs up as a new account, and nothing sent to the deleted one (a reset or verification link, a magic link, a code) works for it;
+5. the user row (`UserServiceStore.delete`), last.
 
 Each store is used when it is in the context the service's layer is built in, as for the first proof of an address: an app without passkeys provides no `CredentialStore`, and its users hold none. The library adds no foreign keys. Because the user row goes last, a failure part-way leaves the user (with some of what it held already gone), never rows that name a user who no longer exists; every step is idempotent, so calling `removeUser` again finishes the job (a self-service deletion needs a new token, since its own was deleted in step 1). The steps run in the caller's fiber with no transaction of their own: on `./sql`, wrap the call in `sql.withTransaction` (the stores' statements join it; on D1 that is a batch) to make the deletion atomic, and on effect-auth-drizzle use an Effect driver's `db.transaction`.
 
-`ApiKeyService.verify` (and `verifyWithRateLimit`) also refuses a key whose owner `UserStore` no longer finds, answering `Invalid API key` as for an unknown key, so a key that outlived its user by any route never authenticates; `ApiKeyService` therefore requires `UserStore`. `UserService.deleteUser` is not an account deletion: it deletes the user row only (`UserService` sits below the modules that own the credential stores, so it cannot reach them). The rows it leaves stop working (a session fails `validateSession`, an API key fails `verify`), but they stay until something removes them.
+`ApiKeyService.verify` (and `verifyWithRateLimit`) also refuses a key whose owner `UserStore` no longer finds, answering `Invalid API key` as for an unknown key, so a key that outlived its user (a user row deleted straight through `UserServiceStore.delete`) never authenticates; `ApiKeyService` therefore requires `UserStore`.
 
 JWTs already issued (`Jwt`) cannot be revoked and expire on their own. Short-lived records that carry a user id but are redeemed through a check that loads the user (pending multi-factor and OTP-second-factor challenges, approved device codes, OIDC authorization codes) are left to expire.
 

@@ -35,7 +35,7 @@ import { AccountManagementStore } from "./AccountManagement.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
-import { purgeUser, userCredentialStores } from "./UserPurge.ts";
+import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { normalizeEmail, normalizeUsername } from "./utils.ts";
 import {
   createUserWithIdentifier,
@@ -425,7 +425,7 @@ export const make = (
     const crypto = yield* SecureRandom.SecureRandom;
     const accountTokens = yield* Effect.serviceOption(AccountManagementStore);
     const purgeServices = {
-      ...(yield* userCredentialStores),
+      ...(yield* userPurgeStores),
       accountTokens: Option.getOrUndefined(accountTokens),
       identifiers: identifierStore,
       revokeSessions: sessionManager.invalidateUserSessions,

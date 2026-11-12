@@ -16,7 +16,7 @@ import { migrate, schemaStatements } from "./Schema.ts";
 import * as Sql from "./Stores.ts";
 import { layer } from "./Stores.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
-import { purgeUser, userCredentialStores } from "../UserPurge.ts";
+import { purgeUser, userPurgeStores } from "../UserPurge.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal test-only SqlClient over better-sqlite3.
@@ -442,7 +442,7 @@ const storeContract = (engine: StoreEngine): void => {
           });
           const purge = purgeUser(
             {
-              ...(yield* userCredentialStores),
+              ...(yield* userPurgeStores),
               identifiers,
               revokeSessions: sessions.deleteByUserId,
               deleteUser: () => Effect.fail(new Auth.AuthError({ message: "user delete failed" })),

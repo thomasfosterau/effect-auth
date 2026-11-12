@@ -200,8 +200,11 @@ directories, each with its own `index.ts` barrel and matching
 - **Account lifecycle** (root): `AuthLifecycle.ts` (sign-up/sign-in
   orchestration), `AccountManagement.ts` (email change / account deletion),
   `UserPurge.ts` (internal: the one purge every user deletion runs, each
-  user-keyed store's per-user delete, then sessions, identifiers and the user
-  row last, #601; `FirstProof.ts` sweeps a subset of the same stores).
+  user-keyed store's per-user delete from `UserCredentials.ts`, the
+  address-keyed magic links and codes, then sessions, identifiers and the user
+  row last, #601; `FirstProof.ts` sweeps a subset of the same stores),
+  `AccountDeletion.ts` (the tag `UserService.deleteUser` delegates to; its
+  layer is `AccountManagement.ts`'s `accountDeletionLayer`).
 - **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
   `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,

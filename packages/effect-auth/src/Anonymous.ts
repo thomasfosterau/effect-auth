@@ -24,7 +24,7 @@ import type * as Types from "./Types.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import { SessionService } from "./SessionService.ts";
 import { type HookError } from "./Hooks.ts";
-import { purgeUser, userCredentialStores } from "./UserPurge.ts";
+import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 
 /**
  * Persistence for anonymous users. The implementer generates an id and sets
@@ -110,7 +110,7 @@ const make = (
     const store = yield* AnonymousUserStore;
     const sessionManager = yield* SessionService;
     const purgeServices = {
-      ...(yield* userCredentialStores),
+      ...(yield* userPurgeStores),
       accountTokens: Option.getOrUndefined(yield* Effect.serviceOption(AccountManagementStore)),
       identifiers: Option.getOrUndefined(yield* Effect.serviceOption(IdentifierStore)),
       revokeSessions: sessionManager.invalidateUserSessions,
