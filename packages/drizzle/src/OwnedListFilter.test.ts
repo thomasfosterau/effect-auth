@@ -314,17 +314,24 @@ describe("ownedListFilter's rendered SQL", () => {
       kind: "member",
       userId: "bob",
       following: Auth.OwnedAccess.subquery(following),
+      groups: Auth.OwnedAccess.nobody,
     });
     expect(rendered?.sql).toContain('"posts"."owner_id" in (select "owner_id" from "follows"');
     expect(rendered?.params).toEqual(["public", false, "bob", "followers", "bob", false]);
   });
 
   it("drops the followers arm for nobody, and for a follow set it cannot render (fail closed)", () => {
-    const nobody = render({ kind: "member", userId: "bob", following: Auth.OwnedAccess.nobody });
+    const nobody = render({
+      kind: "member",
+      userId: "bob",
+      following: Auth.OwnedAccess.nobody,
+      groups: Auth.OwnedAccess.nobody,
+    });
     const foreign = render({
       kind: "member",
       userId: "bob",
       following: Auth.OwnedAccess.subquery(["alice", "carol"]),
+      groups: Auth.OwnedAccess.nobody,
     });
     Arr.forEach([nobody, foreign], (rendered) => {
       expect(rendered?.sql).not.toContain("followers");

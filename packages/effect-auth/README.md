@@ -229,6 +229,40 @@ otherwise; the `Guard` module docs have the full example. After the write, repor
 `Auth.recordWrite({ principal, action, resource })`, naming whichever principal passed:
 `AuditPlugin` logs it as `auth.write`, so unattended writes are audited alongside a person's.
 
+### Owned and reference material
+
+`Auth.OwnedAccess.make({ guards, viewPrivate })` decides reads of a member's own material: a
+`visibility` of `public | followers | group | private`, narrowed by two publication flags (`draft`
+and `unapproved`, a moderated row whose state is anything but approved), with `canView(row)` for one
+row, `readScope` for a list's `WHERE`, and the `policies` (plus the `binding` they compile against
+with `ReadScope.compile`) both are decided by. `Auth.ReferenceAccess.make({ guards, viewPrivate })`
+decides ownerless corpus rows on the same axis: read by a `followersOf` account and its followers,
+or by a group's members, with no draft or moderation axis; its `readScope` has the owned shape, so
+one renderer filters both kinds.
+
+| Row                                | Who may read it                                                    |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| `public`, published                | everyone, anonymous included                                       |
+| `followers`, published             | the owner (reference: the `followersOf` account) and its followers |
+| `group`, published                 | the owner (owned rows) and the members of its group                |
+| `private`, a draft, or unapproved  | the owner and the `viewPrivate` axis                               |
+| no owner (`ownerId: undefined`)    | nobody's own: public and published, or the `viewPrivate` axis      |
+| `group` with no group              | read as `private`                                                  |
+| reference row with no `visibility` | everyone: the view has no visibility axis                          |
+
+Followers and group members are external facts, read through the `IsFollower` and `IsMember`
+seams. Both fail closed: an unprovided seam answers "no" (`isFollowerNever` / `isMemberNever` make
+it explicit), and neither is ever asked about a missing owner, followers-of account or group. A
+`false` from `canView` is a 404, never a 403.
+
+`Auth.Cacheability.publiclyServeable(Auth.OwnedAccess.serveableAxes)` decides whether a
+representation may sit in a viewer-less cache: `visibility` must be `public`, `draft` and
+`unapproved` absent or `false`, `moderationState` absent or `"approved"`, and `deletedAt` absent
+(`null` included). The four role questions a content application asks — view private material,
+view deleted rows, moderate, write the corpus — are `Ladder` axes handed to `Guard`'s gates and
+predicates, and each fails closed on a role outside the ladder; the `OwnedAccess` module docs show
+the pattern.
+
 ## Testing
 
 `@thomasfosterau/effect-auth/testing` runs an Effect as a fixture principal in one call, so an app tests its own guards and policies without HTTP. It is not re-exported from the package root and does not load the HTTP tier.
@@ -793,7 +827,8 @@ The package root also carries these namespaces, each a module whose member names
 | `Auth.Rbac`                                                                                   | Role/permission configuration compiled to kernel policies and the principal → role entity graph                                                            |
 | `Auth.System`                                                                                 | Non-human principals: `declaration`, `provide`, `grant`, `ref`                                                                                             |
 | `Auth.Guard`                                                                                  | Zero-IO gates, predicates and capability hooks over a resolved viewer (`Unauthorized` / `Forbidden` are also flat)                                         |
-| `Auth.OwnedAccess`                                                                            | Owned-material visibility: `make` (per-row `canView`, per-request `readScope`), the `IsFollower` seam                                                      |
+| `Auth.OwnedAccess`                                                                            | Owned-material visibility: `make` (per-row `canView`, per-request `readScope`), the `IsFollower` and `IsMember` seams                                      |
+| `Auth.ReferenceAccess`                                                                        | Ownerless reference rows on the same visibility axis: `make` (per-row `canView`, the owned `readScope` shape)                                              |
 | `Auth.Cacheability`                                                                           | Whether a representation may be served from a viewer-less cache; `publicReach` / `publicReachByType` derive which types are public, for a drift-guard test |
 | `Auth.Ladder`, `Auth.LadderSchema`                                                            | The ordered role ladder and its rungs as a `Schema`                                                                                                        |
 | `Auth.OrganizationEntities`                                                                   | Organizations, members and roles as kernel entities                                                                                                        |

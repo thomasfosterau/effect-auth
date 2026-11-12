@@ -170,11 +170,7 @@ describe("Cacheability.publicReach (#191)", () => {
     when: Condition.eq(Condition.principal, resource("owner")),
   });
   const speciesBinding: ReadScope.Binding = { resourceType: "Species", attributes: {} };
-  const ownedBinding: ReadScope.Binding = {
-    resourceType: "Owned",
-    attributes: { owner: { entity: guards.principalType }, visibility: "Text", draft: "Boolean" },
-    setFacts: { follows: { attribute: "owner", set: "following" } },
-  };
+  const ownedBinding = owned.binding;
   const bindings: ReadonlyArray<ReadScope.Binding> = [
     speciesBinding,
     ownedBinding,
@@ -210,10 +206,12 @@ describe("Cacheability.publicReach (#191)", () => {
   it("gives the filter for a partly public type, admitting only public published rows", () => {
     const reach = Cacheability.publicReach(policies, ownedBinding);
     assert(Predicate.isTagged(reach, "Some"));
-    const admits = (visibility: string | null, draft: boolean | null) =>
-      ReadScope.matches(reach.scope, { owner: "u-member", visibility, draft });
+    const admits = (visibility: string | null, draft: boolean | null, unapproved = false) =>
+      ReadScope.matches(reach.scope, { owner: "u-member", visibility, draft, unapproved });
     expect(admits("public", false)).toBe(true);
     expect(admits("public", true)).toBe(false);
+    expect(admits("public", false, true)).toBe(false);
+    expect(admits("group", false)).toBe(false);
     expect(admits("followers", false)).toBe(false);
     expect(admits("private", false)).toBe(false);
     expect(admits(null, false)).toBe(false);

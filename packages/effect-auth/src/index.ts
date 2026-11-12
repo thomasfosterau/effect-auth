@@ -372,10 +372,19 @@ export * as Guard from "./Guard.ts";
 export { Unauthorized, Forbidden } from "./Guard.ts";
 /**
  * Owned-material read access (`Auth.OwnedAccess.make({ guards, viewPrivate })`):
- * three-state visibility plus drafts, the fail-closed `IsFollower` seam, the
- * per-row `canView` predicate and the per-request `readScope` a list renders.
+ * four-state visibility (`public | followers | group | private`) narrowed by
+ * the draft and moderation axes, the fail-closed `IsFollower` and `IsMember`
+ * seams, the per-row `canView` predicate and the per-request `readScope` a
+ * list renders.
  */
 export * as OwnedAccess from "./OwnedAccess.ts";
+/**
+ * Reference-material read access (`Auth.ReferenceAccess.make({ guards,
+ * viewPrivate })`): ownerless corpus rows on the same visibility axis, read by
+ * a followers-of account and its followers or a group's members, with the
+ * owned read scope's shape.
+ */
+export * as ReferenceAccess from "./ReferenceAccess.ts";
 /**
  * The read scope (ADR-0020): a declarative policy set compiled over an unbound
  * row into `AllowAll | Deny | Filter(predicate)`, a bound-scalar predicate a

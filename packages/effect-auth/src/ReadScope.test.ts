@@ -33,15 +33,7 @@ const owned = OwnedAccess.make({ guards, viewPrivate: Axes.viewPrivate });
 const read = Entity.ref("Action", "read");
 const anonymous = Entity.entity(Entity.ref("Anonymous", "anonymous"));
 
-const binding: ReadScope.Binding = {
-  resourceType: "Owned",
-  attributes: {
-    owner: { entity: guards.principalType },
-    visibility: "Text",
-    draft: "Boolean",
-  },
-  setFacts: { follows: { attribute: "owner", set: "following" } },
-};
+const { binding } = owned;
 
 /** A row of the corpus, as a database holds it: `null` is a NULL column. */
 type CorpusRow = {
@@ -49,17 +41,25 @@ type CorpusRow = {
   readonly owner: string | null;
   readonly visibility: string | null;
   readonly draft: boolean | null;
+  readonly unapproved: boolean | null;
+  readonly group: string | null;
 };
 
 const users = ["u-admin", "u-moderator", "u-member", "u-other", "u-stranger"] as const;
 const corpus: ReadonlyArray<CorpusRow> = Arr.flatMap([...users, null], (owner) =>
-  Arr.flatMap(["public", "followers", "private", "unknown", null], (visibility) =>
-    Arr.map([false, true, null], (draft) => ({
-      id: `${owner ?? "none"}/${visibility ?? "none"}/${String(draft)}`,
-      owner,
-      visibility,
-      draft,
-    })),
+  Arr.flatMap(["public", "followers", "group", "private", "unknown", null], (visibility) =>
+    Arr.flatMap([false, true, null], (draft) =>
+      Arr.flatMap([false, true, null], (unapproved) =>
+        Arr.map(["g-club", "g-other", null], (group) => ({
+          id: `${owner ?? "none"}/${visibility ?? "none"}/${String(draft)}/${String(unapproved)}/${group ?? "none"}`,
+          owner,
+          visibility,
+          draft,
+          unapproved,
+          group,
+        })),
+      ),
+    ),
   ),
 );
 
@@ -76,6 +76,10 @@ const viewers: ReadonlyArray<AppUser | null> = [
 /** Who follows whom: `u-other` follows `u-member` and `u-admin`. */
 const followsEdge = (follower: string, owner: string): boolean =>
   follower === "u-other" && (owner === "u-member" || owner === "u-admin");
+
+/** Who belongs to which group: `u-other` and `u-stranger` are in `g-club`. */
+const memberEdge = (account: string, group: string): boolean =>
+  group === "g-club" && (account === "u-other" || account === "u-stranger");
 
 const principalOf = (viewer: AppUser | null): Entity.Entity =>
   viewer === null ? anonymous : guards.principal(viewer);
@@ -94,16 +98,19 @@ const kernelAllows = (
         : { owner: Entity.entityValue(Entity.ref(guards.principalType, row.owner)) }),
       ...(row.visibility === null ? {} : { visibility: row.visibility }),
       ...(row.draft === null ? {} : { draft: row.draft }),
+      ...(row.unapproved === null ? {} : { unapproved: row.unapproved }),
+      ...(row.group === null ? {} : { group: row.group }),
     },
   });
   const follows = viewer !== null && row.owner !== null && followsEdge(viewer.id, row.owner);
+  const member = viewer !== null && row.group !== null && memberEdge(viewer.id, row.group);
   return Policy.decidePure(
     policies,
     Policy.request({
       principal: principal.ref,
       action: read,
       resource: resource.ref,
-      context: { follows },
+      context: { follows, member },
     }),
     Entity.slice([principal, resource]),
   ).allowed;
@@ -132,12 +139,17 @@ const exact = (compiled: ReadScope.Compiled): ReadScope.ReadScope => {
 const scopeAllows = (scope: ReadScope.ReadScope, viewer: AppUser | null, row: CorpusRow): boolean =>
   ReadScope.matches(
     scope,
-    { owner: row.owner, visibility: row.visibility, draft: row.draft },
+    {
+      owner: row.owner,
+      visibility: row.visibility,
+      draft: row.draft,
+      unapproved: row.unapproved,
+      group: row.group,
+    },
     (set, value) =>
-      set === "following" &&
       viewer !== null &&
       Predicate.isString(value) &&
-      followsEdge(viewer.id, value),
+      (set === "following" ? followsEdge(viewer.id, value) : memberEdge(viewer.id, value)),
   );
 
 /** Require the compiled scope and the kernel to agree on every row, for every viewer. */
@@ -188,11 +200,17 @@ describe("ReadScope.compile", () => {
     expect(exact(compileFor(policies, { id: "u-member", role: "user" }))).toEqual(ReadScope.deny);
   });
 
-  it("compiles the follower arm to a named set, never to members", () => {
+  it("compiles the follower and group arms to named sets, never to members", () => {
     const scope = exact(compileFor(owned.policies, { id: "u-other", role: "contributor" }));
     assert(Predicate.isTagged(scope, "Filter"));
-    expect(scope.sets).toEqual(["following"]);
-    expect(ReadScope.attributes(scope.predicate)).toEqual(["draft", "owner", "visibility"]);
+    expect(scope.sets).toEqual(["following", "groups"]);
+    expect(ReadScope.attributes(scope.predicate)).toEqual([
+      "draft",
+      "group",
+      "owner",
+      "unapproved",
+      "visibility",
+    ]);
     // The follow set travels by name; no member id is inlined as a literal.
     expect(literalTexts(scope.predicate)).not.toContain("u-member");
   });
@@ -275,7 +293,7 @@ describe("ReadScope.withoutSets", () => {
     expect(
       ReadScope.matches(
         narrowed,
-        { owner: "u-member", visibility: "followers", draft: false },
+        { owner: "u-member", visibility: "followers", draft: false, unapproved: false },
         () => true,
       ),
     ).toBe(false);

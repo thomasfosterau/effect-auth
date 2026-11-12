@@ -449,7 +449,7 @@ describe("a system principal is denied under every library policy set with no gr
     draft = false,
   ) =>
     Entity.entity(Entity.ref("Owned", id), {
-      attributes: { owner: Entity.entityValue(owner), visibility, draft },
+      attributes: { owner: Entity.entityValue(owner), visibility, draft, unapproved: false },
     });
 
   it("OwnedAccess.policies: no action on a public, followers, private or draft row", async () => {
@@ -592,7 +592,12 @@ describe("a system principal is denied under every library policy set with no gr
 describe("with an explicit grant, a system principal gets exactly that (#377)", () => {
   const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
   const row = Entity.entity(Entity.ref("Owned", "row-1"), {
-    attributes: { owner: Entity.entityValue(billing), visibility: "public", draft: false },
+    attributes: {
+      owner: Entity.entityValue(billing),
+      visibility: "public",
+      draft: false,
+      unapproved: false,
+    },
   });
   const purge = System.grant("billing-cron", {
     id: "billing-cron:purge-owned",

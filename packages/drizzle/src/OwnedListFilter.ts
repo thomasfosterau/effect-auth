@@ -19,6 +19,14 @@
  * both over one corpus in a real Postgres and requires them to agree on every
  * row.
  *
+ * It renders the `public`, `followers` and `private` states and the draft
+ * axis only. It has no `group` arm and no moderation column yet, so a `group`
+ * row lists only for its owner, and an unapproved row is not told apart from
+ * a published one: keep moderated or group-shared material out of this
+ * renderer, or filter it with `ReadScope.compile` over
+ * `Auth.OwnedAccess.policies` and `binding`. The scope's `groups` set is
+ * ignored.
+ *
  * ### The follow set is a subquery, not a list
  *
  * The viewer's follow set reaches the `WHERE` as `owner IN (SELECT …)` — the
