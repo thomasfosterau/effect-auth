@@ -398,8 +398,12 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(OAuthStateStore)({
           create: (state) =>
             Effect.sync(() => (MutableHashMap.set(states, state.state, state), state)),
-          get: (state) => Effect.succeed(Option.getOrNull(MutableHashMap.get(states, state))),
-          delete: (state) => Effect.sync(() => void MutableHashMap.remove(states, state)),
+          consume: (state) =>
+            Effect.sync(() => {
+              const entry = Option.getOrNull(MutableHashMap.get(states, state));
+              MutableHashMap.remove(states, state);
+              return entry;
+            }),
         }),
         Layer.succeed(OAuthUserStore)(oauthUserStore(world)),
         Layer.succeed(SamlVerifier)(stubSamlVerifier(requests)),
