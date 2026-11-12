@@ -276,6 +276,54 @@ describe("HTTP domain claims (#598)", () => {
     expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(true);
   });
 
+  it("refuses an unknown claim id exactly as another tenant's claim and a member without domain:manage (#718)", async () => {
+    const { server, browser } = withServer();
+    const owner = await signUp(server, browser, "owner@acme.test");
+    const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
+    const claim = await owner.client.organization.addDomain(org.id, { domain: "acme.test" });
+    const member = await signUp(server, browser, "member@acme.test");
+    const memberSession = await member.client.getSession();
+    assert(memberSession !== null, "the member is signed in");
+    await owner.client.organization.addMember(org.id, {
+      userId: memberSession.user.id,
+      role: "member",
+    });
+    // The stranger owns another tenant, so holds `domain:manage` there.
+    const stranger = await signUp(server, browser, "owner@other.test");
+    await stranger.client.organization.create({ name: "Other", slug: "other" });
+
+    const answer = async (response: Promise<Response>) => {
+      const res = await response;
+      return { status: res.status, body: await res.text() };
+    };
+    const remove = (fetch: typeof globalThis.fetch, id: string) =>
+      answer(del(fetch, `/organization-domains/${id}`));
+    const verify = (fetch: typeof globalThis.fetch, id: string) =>
+      answer(
+        fetch(`${BASE}/organization-domains/${id}/verifications`, {
+          method: "POST",
+          headers: { accept: "application/vnd.api+json" },
+        }),
+      );
+
+    const unknownRemove = await remove(owner.fetch, "no-such-claim");
+    expect(unknownRemove.status).toBe(403);
+    expect(unknownRemove.body).toContain("Missing permission 'domain:manage'");
+    expect(await remove(stranger.fetch, claim.id)).toEqual(unknownRemove);
+    expect(await remove(member.fetch, claim.id)).toEqual(unknownRemove);
+    const unknownVerify = await verify(owner.fetch, "no-such-claim");
+    expect(unknownVerify).toEqual(unknownRemove);
+    expect(await verify(stranger.fetch, claim.id)).toEqual(unknownVerify);
+    expect(await verify(member.fetch, claim.id)).toEqual(unknownVerify);
+    expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(true);
+
+    // The owner, holding the permission, verifies and releases the claim.
+    MutableHashSet.add(server.publishedDnsDomains, "acme.test");
+    expect((await verify(owner.fetch, claim.id)).status).toBe(200);
+    expect((await remove(owner.fetch, claim.id)).status).toBe(204);
+    expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(false);
+  });
+
   it("verifies a tenant's claim only through its published DNS record", async () => {
     const { server, browser } = withServer();
     const owner = await signUp(server, browser, "owner@acme.test");

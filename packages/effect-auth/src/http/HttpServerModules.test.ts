@@ -490,6 +490,24 @@ const collectionBody = <F extends Schema.Struct.Fields>(attributes: F) =>
 /** A response's status and raw body, to compare two refusals byte for byte. */
 const statusAndBody = async (res: Response) => ({ status: res.status, body: await res.text() });
 
+/**
+ * The `403` body an id that names no record gets, after checking that every
+ * other request gets exactly it, status and body (#718).
+ */
+const sameRefusal = async (
+  fx: { readonly handler: (request: Request) => Promise<Response> },
+  unknown: Request,
+  others: ReadonlyArray<Request>,
+) => {
+  const expected = await statusAndBody(await fx.handler(unknown));
+  expect(expected.status).toBe(403);
+  const answers = await Promise.all(
+    others.map(async (request) => statusAndBody(await fx.handler(request))),
+  );
+  expect(answers).toEqual(others.map(() => expected));
+  return expected.body;
+};
+
 /** `POST /organizations` as `sessionId`; answers the new organization's id. */
 const createOrganization = async (
   fx: ReturnType<typeof makeFixture>,
@@ -930,13 +948,13 @@ describe("HTTP organization endpoints", () => {
     });
 
     // A stranger may neither change nor read back a membership, even by a
-    // no-op patch; an unknown id is 404.
+    // no-op patch; an unknown id is refused alike (#718).
     expect((await fx.handler(patchMember(member.id, {}, strangerSid))).status).toBe(403);
     expect((await fx.handler(patchMember(member.id, { role: "owner" }, strangerSid))).status).toBe(
       403,
     );
     expect((await fx.handler(patchMember("unknown", { role: "member" }, ownerSid))).status).toBe(
-      404,
+      403,
     );
     expect(
       (
@@ -1301,7 +1319,7 @@ describe("HTTP organization endpoints", () => {
     expect(
       (await fx.handler(apiReq("GET", "/organization-members/nope/teams", undefined, memberSid)))
         .status,
-    ).toBe(404);
+    ).toBe(403);
 
     // Rename.
     const renamed = await fx.handler(
@@ -1319,7 +1337,7 @@ describe("HTTP organization endpoints", () => {
     // Remove the team member by its id, then the team.
     expect(
       (await fx.handler(apiReq("DELETE", "/team-members/nope", undefined, ownerSid))).status,
-    ).toBe(404);
+    ).toBe(403);
     const removed = await fx.handler(
       apiReq("DELETE", `/team-members/${teamMember.id}`, undefined, ownerSid),
     );
@@ -1395,7 +1413,7 @@ describe("HTTP organization endpoints", () => {
     expect(
       (await fx.handler(apiReq("DELETE", `/organization-roles/${role.id}`, undefined, ownerSid)))
         .status,
-    ).toBe(404);
+    ).toBe(403);
     expect((await fx.handler(createTeamRequest(org.id, "Rogue", memberSid))).status).toBe(403);
   });
 
@@ -1477,6 +1495,145 @@ describe("HTTP organization endpoints", () => {
       apiReq("DELETE", `/teams/${team.id}`, undefined, memberSid),
     );
     expect(deniedDelete.status).toBe(403);
+  });
+
+  it("refuses an unknown id exactly as another tenant's record and a member without the permission (#718)", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("member", "member@test.com");
+    fx.seedUser("staff", "staff@test.com");
+    fx.seedUser("stranger", "stranger@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const memberSid = fx.makeSession("member");
+    const strangerSid = fx.makeSession("stranger");
+    const org = await createOrganization(fx, ownerSid);
+    // The stranger owns another tenant, so holds every permission there.
+    await createOrganization(fx, strangerSid, "Other", "other");
+    expect((await fx.handler(addMemberRequest(org.id, "member", "member", ownerSid))).status).toBe(
+      201,
+    );
+    const staff = await fx.handler(addMemberRequest(org.id, "staff", "member", ownerSid));
+    const staffId = (await jsonBody(staff, MemberBody)).data.id;
+    const team = (
+      await jsonBody(await fx.handler(createTeamRequest(org.id, "Engineering", ownerSid)), IdData)
+    ).data;
+    const addToTeam = (teamId: string, sessionId: string) =>
+      apiReq(
+        "POST",
+        `/teams/${teamId}/members`,
+        {
+          data: {
+            type: "team-members",
+            relationships: { user: { data: { type: "users", id: "staff" } } },
+          },
+        },
+        sessionId,
+      );
+    const teamMember = await fx.handler(addToTeam(team.id, ownerSid));
+    const teamMemberId = (await jsonBody(teamMember, IdData)).data.id;
+    const role = (
+      await jsonBody(
+        await fx.handler(createRoleRequest(org.id, "auditor", [], ownerSid)),
+        OwnedBody,
+      )
+    ).data;
+    const invite = async (email: string) => {
+      const res = await fx.handler(
+        apiReq(
+          "POST",
+          `/organizations/${org.id}/invitations`,
+          { data: { type: "invitations", attributes: { email, role: "member" } } },
+          ownerSid,
+        ),
+      );
+      return (await jsonBody(res, IdData)).data.id;
+    };
+    const invitationId = await invite("invitee@test.com");
+    const canceledId = await invite("gone@test.com");
+    expect((await fx.handler(transitionInvitation(canceledId, "canceled", ownerSid))).status).toBe(
+      200,
+    );
+
+    const unknownId = "no-such-id";
+    /** The unknown id (as the owner), the stranger and the plain member, alike. */
+    const alike = (request: (id: string, sessionId: string) => Request, id: string) =>
+      sameRefusal(fx, request(unknownId, ownerSid), [
+        request(id, strangerSid),
+        request(id, memberSid),
+      ]);
+    const remove = (path: string) => (id: string, sessionId: string) =>
+      apiReq("DELETE", `${path}/${id}`, undefined, sessionId);
+    const read = (path: (id: string) => string) => (id: string, sessionId: string) =>
+      apiReq("GET", path(id), undefined, sessionId);
+    const missing = (permission: string) => `Missing permission '${permission}'`;
+
+    // Memberships.
+    const memberPatch = (id: string, sessionId: string) =>
+      patchMember(id, { role: "member" }, sessionId);
+    expect(await alike(memberPatch, staffId)).toContain(missing("member:update"));
+    expect(await alike((id, sid) => patchMember(id, {}, sid), staffId)).toContain(
+      missing("member:update"),
+    );
+    expect(await alike(remove("/organization-members"), staffId)).toContain(
+      missing("member:delete"),
+    );
+    // Any member reads a membership's teams, so only the stranger is refused.
+    const memberTeams = read((id) => `/organization-members/${id}/teams`);
+    expect(
+      await sameRefusal(fx, memberTeams(unknownId, memberSid), [memberTeams(staffId, strangerSid)]),
+    ).toContain("You are not a member of this organization");
+    expect((await fx.handler(memberTeams(staffId, memberSid))).status).toBe(200);
+
+    // Custom role definitions.
+    const rolePatch = (id: string, sessionId: string) =>
+      patchRole(id, { permissions: [] }, sessionId);
+    expect(await alike(rolePatch, role.id)).toContain(missing("role:manage"));
+    expect(await alike(remove("/organization-roles"), role.id)).toContain(missing("role:manage"));
+
+    // Teams and team memberships.
+    const teamPatch = (id: string, sessionId: string) =>
+      apiReq("PATCH", `/teams/${id}`, { data: { type: "teams", id, attributes: {} } }, sessionId);
+    expect(await alike(teamPatch, team.id)).toContain(missing("team:update"));
+    expect(await alike(remove("/teams"), team.id)).toContain(missing("team:delete"));
+    expect(await alike(addToTeam, team.id)).toContain(missing("team:manage-members"));
+    expect(await alike(remove("/team-members"), teamMemberId)).toContain(
+      missing("team:manage-members"),
+    );
+    const teamMembers = read((id) => `/teams/${id}/members`);
+    expect(
+      await sameRefusal(fx, teamMembers(unknownId, memberSid), [teamMembers(team.id, strangerSid)]),
+    ).toContain("You are not a member of this organization");
+    expect((await fx.handler(teamMembers(team.id, memberSid))).status).toBe(200);
+
+    // Invitations: neither a pending nor a canceled one tells a stranger or a
+    // plain member anything an unknown id does not.
+    const cancel = (id: string, sessionId: string) =>
+      transitionInvitation(id, "canceled", sessionId);
+    const deliver = (id: string, sessionId: string) =>
+      apiReq("POST", `/invitations/${id}/deliveries`, undefined, sessionId);
+    expect(await alike(cancel, invitationId)).toContain(missing("invitation:cancel"));
+    expect(await alike(cancel, canceledId)).toContain(missing("invitation:cancel"));
+    expect(await alike(deliver, invitationId)).toContain(missing("invitation:create"));
+    expect(await alike(deliver, canceledId)).toContain(missing("invitation:create"));
+    // A permitted member still learns that an invitation is no longer pending.
+    const recancel = await statusAndBody(await fx.handler(cancel(canceledId, ownerSid)));
+    expect(recancel.status).toBe(403);
+    expect(recancel.body).toContain("no longer pending");
+    const redeliver = await statusAndBody(await fx.handler(deliver(canceledId, ownerSid)));
+    expect(redeliver.status).toBe(403);
+    expect(redeliver.body).toContain("no longer pending");
+
+    // Nothing was changed, and a permitted member still succeeds.
+    expect(fx.members.find((m) => m.id === staffId)?.role).toBe("member");
+    expect((await fx.handler(deliver(invitationId, ownerSid))).status).toBe(202);
+    expect((await fx.handler(cancel(invitationId, ownerSid))).status).toBe(200);
+    expect((await fx.handler(rolePatch(role.id, ownerSid))).status).toBe(200);
+    expect((await fx.handler(remove("/organization-roles")(role.id, ownerSid))).status).toBe(204);
+    expect((await fx.handler(teamPatch(team.id, ownerSid))).status).toBe(200);
+    expect((await fx.handler(remove("/team-members")(teamMemberId, ownerSid))).status).toBe(204);
+    expect((await fx.handler(remove("/teams")(team.id, ownerSid))).status).toBe(204);
+    expect((await fx.handler(patchMember(staffId, { role: "admin" }, ownerSid))).status).toBe(200);
+    expect((await fx.handler(remove("/organization-members")(staffId, ownerSid))).status).toBe(204);
   });
 
   it("refuses domain requests when no OrganizationDomainStore is wired", async () => {
