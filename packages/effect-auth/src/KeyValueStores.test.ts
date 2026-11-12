@@ -130,6 +130,7 @@ describe("KeyValueStores", () => {
     it("roundtrips challenge bytes", async () => {
       const challenge: WebAuthnChallenge = {
         challenge: new Uint8Array([1, 2, 3, 255, 0, 42]),
+        ceremony: "authentication",
         expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
         userId: "user-1",
       };
@@ -152,6 +153,7 @@ describe("KeyValueStores", () => {
     it("stores anonymous challenges (no userId)", async () => {
       const challenge: WebAuthnChallenge = {
         challenge: new Uint8Array([9, 9, 9]),
+        ceremony: "authentication",
         expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
       };
       const loaded = await run(
@@ -163,6 +165,32 @@ describe("KeyValueStores", () => {
       );
       expect(loaded).not.toBeNull();
       expect(loaded?.userId).toBeUndefined();
+      expect(loaded?.ceremony).toBe("authentication");
+    });
+
+    it("reads an entry with no known ceremony as missing (#591)", async () => {
+      // An entry written before ceremonies were recorded, and one with a
+      // ceremony the core does not know: neither ceremony may redeem them.
+      const expiresAt = DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000;
+      const loaded = await Effect.runPromise(
+        Effect.gen(function* () {
+          const kv = yield* KeyValueStore.KeyValueStore;
+          const store = yield* ChallengeStore;
+          yield* kv.set(
+            "webauthn-challenge:AQID",
+            `{"challenge":"AQID","expiresAt":${expiresAt},"userId":"victim"}`,
+          );
+          yield* kv.set(
+            "webauthn-challenge:BAUG",
+            `{"challenge":"BAUG","ceremony":"login","expiresAt":${expiresAt}}`,
+          );
+          return [
+            yield* store.get(new Uint8Array([1, 2, 3])),
+            yield* store.get(new Uint8Array([4, 5, 6])),
+          ];
+        }).pipe(Effect.provide(Layer.provideMerge(layerKV, KeyValueStore.layerMemory))),
+      );
+      expect(loaded).toEqual([null, null]);
     });
   });
 

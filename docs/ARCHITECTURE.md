@@ -273,11 +273,12 @@ Two mechanisms, by boundary (DESIGN.md D4):
 - All bearer tokens — magic-link tokens, email-verification tokens, password-reset tokens, device authorization codes, API keys, and OIDC codes/tokens — are stored as SHA-256 digests (via the shared `hashToken` primitive in `TokenHash.ts`). Only the raw token is delivered to the user; the digest is the store key. OTPs follow the same pattern.
 - Lookups and comparisons use constant-time equality (`constantTimeHashEqual`) to prevent timing side-channels.
 - All token flows are single-use with expiry; anti-enumeration responses on send/request endpoints.
-- WebAuthn: 256-bit challenges with expiry, origin + RP ID verification, counter-based replay protection (ES256/RS256/EdDSA).
+- WebAuthn: 256-bit challenges with expiry, each bound to the ceremony it was issued for (and a registration challenge to its user, #591); origin, RP ID and same-origin verification; user verification enforced when `userVerification: "required"`; the attested credential id stored, never one already registered; counter-based replay protection (ES256 on P-256, RS256, EdDSA).
 
 ### Authorization Security
 
 - Explicit permission checks, role-based access control (RBAC) with hierarchy, OAuth-style scopes; policies fail closed.
+- Authority-bearing user attributes are written only through privileged doors. `UserService.updateUserAttributes` refuses `UserServiceConfig.serverOnlyAttributes` (default `["role"]`); `EmailPasswordService.signUp` and `AuthLifecycleService.signUp` never store those, the ban keys, the SCIM keys or `isAnonymous` from their input (`SIGN_UP_PROTECTED_ATTRIBUTES`); and `POST /users` keeps only the attribute keys `Http.make`'s `signUpAttributes` allows (default none), within `SIGN_UP_ATTRIBUTES_MAX_BYTES` (#580).
 
 ### Timing and enumeration
 

@@ -15,7 +15,7 @@
  *
  * Concurrency: single-row upserts (`rateLimit.set`, `oauthAccount`,
  * `multiFactor`) and counters (`rateLimit.increment`,
- * `emailOtp.incrementAttempts`) use a single `ON CONFLICT … DO UPDATE` /
+ * `emailOtp.incrementAttempts`, `emailOtp.recordFailure`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
  * races. One-time consumes (`oauthState.consume`, #685) are a single
  * `DELETE … RETURNING`, so a state is handed out at most once. Multi-step
@@ -585,36 +585,59 @@ export const makeEmailVerificationStore: Effect.Effect<
 
 interface ChallengeRow {
   readonly challenge: string;
+  readonly ceremony: string;
   readonly expires_at: number;
   readonly user_id: string | null;
 }
 
-const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge =>
-  row.user_id == null
-    ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
-    : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
+/** A row whose ceremony is not one the core knows reads as missing. */
+const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge | null => {
+  const { ceremony } = row;
+  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return null;
+  const challenge = fromBase64(row.challenge);
+  return row.user_id == null
+    ? { challenge, ceremony, expiresAt: row.expires_at }
+    : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+};
 
-/** `Auth.MultiFactor.ChallengeStore` over the `auth_webauthn_challenges` table; requires `SqlClient`. */
+/**
+ * `Auth.MultiFactor.ChallengeStore` over `auth_webauthn_challenges` and the
+ * ceremony each challenge was issued for, in
+ * `auth_webauthn_challenge_ceremonies` (#591); requires `SqlClient`. A
+ * challenge with no ceremony row reads as missing.
+ */
 export const makeChallengeStore: Effect.Effect<
   typeof Auth.MultiFactor.ChallengeStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
+  // The ceremony row goes first: a delete interrupted between the statements
+  // leaves a challenge row that no ceremony can redeem.
+  const remove = (label: string, encoded: string) =>
+    Effect.gen(function* () {
+      yield* asVoid(
+        label,
+        sql`DELETE FROM auth_webauthn_challenge_ceremonies WHERE challenge = ${encoded}`,
+      );
+      yield* asVoid(label, sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`);
+    });
   return {
     create: (challenge) =>
       withTx(
         "challenge.create",
         Effect.gen(function* () {
           const encoded = toBase64(challenge.challenge);
-          yield* asVoid(
-            "challenge.create",
-            sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`,
-          );
+          yield* remove("challenge.create", encoded);
           yield* asVoid(
             "challenge.create",
             sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
                   VALUES (${encoded}, ${challenge.expiresAt}, ${challenge.userId ?? null})`,
+          );
+          yield* asVoid(
+            "challenge.create",
+            sql`INSERT INTO auth_webauthn_challenge_ceremonies (challenge, ceremony)
+                  VALUES (${encoded}, ${challenge.ceremony})`,
           );
           return challenge;
         }),
@@ -622,13 +645,13 @@ export const makeChallengeStore: Effect.Effect<
     get: (challenge) =>
       firstRow(
         "challenge.get",
-        sql<ChallengeRow>`SELECT * FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
+        sql<ChallengeRow>`SELECT c.challenge, k.ceremony, c.expires_at, c.user_id
+          FROM auth_webauthn_challenges c
+          JOIN auth_webauthn_challenge_ceremonies k ON k.challenge = c.challenge
+          WHERE c.challenge = ${toBase64(challenge)}`,
       ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
     delete: (challenge) =>
-      asVoid(
-        "challenge.delete",
-        sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
-      ),
+      withTx("challenge.delete", remove("challenge.delete", toBase64(challenge))),
   } satisfies typeof Auth.MultiFactor.ChallengeStore.Service;
 });
 
@@ -1023,7 +1046,21 @@ const rowToEmailOtp = (row: EmailOtpRow): Auth.Email.EmailOtpRecord => ({
   expiresAt: row.expires_at,
 });
 
-/** `Auth.Email.EmailOtpStore` over the `auth_email_otps` table; requires `SqlClient`. */
+interface EmailOtpFailuresRow {
+  readonly failures: number;
+  readonly last_failure_at: number;
+}
+
+const rowToOtpFailures = (row: EmailOtpFailuresRow): Auth.OtpFailures => ({
+  count: row.failures,
+  lastFailureAt: row.last_failure_at,
+});
+
+/**
+ * `Auth.Email.EmailOtpStore` over the `auth_email_otps` table, with each
+ * pair's failure budget (#590) in `auth_email_otp_failures`; requires
+ * `SqlClient`.
+ */
 export const makeEmailOtpStore: Effect.Effect<
   typeof Auth.Email.EmailOtpStore.Service,
   never,
@@ -1080,6 +1117,35 @@ export const makeEmailOtpStore: Effect.Effect<
         }
         return attempts;
       }),
+    getFailures: (email, purpose) =>
+      firstRow(
+        "emailOtp.getFailures",
+        sql<EmailOtpFailuresRow>`SELECT failures, last_failure_at FROM auth_email_otp_failures
+          WHERE email = ${email} AND purpose = ${purpose}`,
+      ).pipe(Effect.map((row) => (row ? rowToOtpFailures(row) : null))),
+    recordFailure: (email, purpose, at) =>
+      Effect.gen(function* () {
+        // One upsert + RETURNING: concurrent wrong codes are all counted.
+        const row = yield* firstRow(
+          "emailOtp.recordFailure",
+          sql<EmailOtpFailuresRow>`
+            INSERT INTO auth_email_otp_failures (email, purpose, failures, last_failure_at)
+              VALUES (${email}, ${purpose}, 1, ${at})
+            ON CONFLICT (email, purpose) DO UPDATE
+              SET failures = auth_email_otp_failures.failures + 1,
+                  last_failure_at = excluded.last_failure_at
+            RETURNING failures, last_failure_at`,
+        );
+        if (row === null) {
+          return yield* new Auth.AuthError({ message: "OTP failure count not returned" });
+        }
+        return rowToOtpFailures(row);
+      }),
+    clearFailures: (email, purpose) =>
+      asVoid(
+        "emailOtp.clearFailures",
+        sql`DELETE FROM auth_email_otp_failures WHERE email = ${email} AND purpose = ${purpose}`,
+      ),
   } satisfies typeof Auth.Email.EmailOtpStore.Service;
 });
 

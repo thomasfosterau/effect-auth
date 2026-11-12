@@ -33,6 +33,70 @@ export class UserServiceStore extends Context.Service<
  */
 export const DEFAULT_SERVER_ONLY_ATTRIBUTES: ReadonlyArray<string> = ["role"];
 
+/**
+ * The ban-state attribute keys `AdminService.banUser` / `unbanUser` write and
+ * `isBanned` reads: `banned`, `banReason`, `banExpires`.
+ *
+ * @since 0.1.0
+ * @category constants
+ */
+export const BAN_ATTRIBUTES: ReadonlyArray<string> = ["banned", "banReason", "banExpires"];
+
+/**
+ * Attribute keys a sign-up never takes from its input, on top of
+ * {@link UserServiceConfig.serverOnlyAttributes}, whatever an HTTP
+ * `signUpAttributes` allow-list names (#580): the ban state
+ * ({@link BAN_ATTRIBUTES}), the SCIM provisioning keys (`scimUserName`,
+ * `scimDeactivated`, `scimExternalId`, which `ScimService` alone writes) and
+ * the anonymous-user marker (`isAnonymous`, which `AnonymousService` alone
+ * writes). Each is state another, privileged flow owns, so a caller who could
+ * preset it at sign-up could forge it.
+ *
+ * @since 0.1.0
+ * @category constants
+ */
+export const SIGN_UP_PROTECTED_ATTRIBUTES: ReadonlyArray<string> = [
+  ...BAN_ATTRIBUTES,
+  "scimUserName",
+  "scimDeactivated",
+  "scimExternalId",
+  "isAnonymous",
+];
+
+/**
+ * A copy of `attributes` without the keys a sign-up never takes from its
+ * input: `serverOnly` (the configured
+ * {@link UserServiceConfig.serverOnlyAttributes}) and
+ * {@link SIGN_UP_PROTECTED_ATTRIBUTES}. `EmailPasswordService.signUp` and
+ * `AuthLifecycleService.signUp` apply it to every new user (#580).
+ *
+ * @since 0.1.0
+ * @category utils
+ */
+export const withoutSignUpProtectedAttributes = (
+  attributes: Types.Attributes,
+  serverOnly: ReadonlyArray<string>,
+): Types.Attributes =>
+  R.filter(
+    attributes,
+    (_, key) => !serverOnly.includes(key) && !SIGN_UP_PROTECTED_ATTRIBUTES.includes(key),
+  );
+
+/**
+ * The entries of `attributes` whose key `keys` names, or `undefined` when
+ * none is: how `POST /users` applies its `signUpAttributes` allow-list (#580).
+ *
+ * @since 0.1.0
+ * @category utils
+ */
+export const onlyAttributes = (
+  attributes: Types.Attributes,
+  keys: ReadonlyArray<string>,
+): Types.Attributes | undefined => {
+  const kept = R.filter(attributes, (_, key) => keys.includes(key));
+  return R.isEmptyRecord(kept) ? undefined : kept;
+};
+
 export interface UserServiceConfig {
   /**
    * Attribute keys `updateUserAttributes` refuses to write, whoever calls it

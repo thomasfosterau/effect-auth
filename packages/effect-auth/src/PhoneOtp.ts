@@ -13,7 +13,7 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import { Clock, Context, Data, DateTime, Duration, Effect, Layer, Order } from "effect";
+import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
@@ -31,14 +31,13 @@ import {
   type NewUserIdentifier,
   UserStore,
 } from "./UserStore.ts";
+import * as OtpCode from "./OtpCode.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
-import { randomBase64UrlToken } from "./RandomToken.ts";
 
 /** Error raised by phone OTP verification failures. */
 export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
@@ -61,7 +60,10 @@ export interface PhoneOtpRecord {
 
 /**
  * Persistence for phone OTPs, keyed by the (normalized phoneNumber, purpose)
- * pair; `upsert` replaces any existing record for the pair.
+ * pair; `upsert` replaces any existing record for the pair. Each pair also
+ * has a failure budget (`getFailures`, `recordFailure`, `clearFailures`) that
+ * outlives its OTP records, so a resend never resets the wrong codes counted
+ * against the number (#590).
  */
 export class PhoneOtpStore extends Context.Service<
   PhoneOtpStore,
@@ -79,6 +81,31 @@ export class PhoneOtpStore extends Context.Service<
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
     ) => Effect.Effect<number, Errors.AuthError>;
+    /**
+     * The pair's failure budget (#590), or `null` when it has none. It is
+     * kept apart from the OTP record: `upsert` and `delete` leave it as it
+     * was.
+     */
+    readonly getFailures: (
+      phoneNumber: string,
+      purpose: PhoneOtpPurpose,
+    ) => Effect.Effect<Types.OtpFailures | null, Errors.AuthError>;
+    /**
+     * Count one wrong code against the pair, at `at` (epoch ms), and return
+     * the budget after it: `count` from 1, `lastFailureAt` set to `at`. One
+     * atomic step where the backend allows, so concurrent wrong codes are all
+     * counted.
+     */
+    readonly recordFailure: (
+      phoneNumber: string,
+      purpose: PhoneOtpPurpose,
+      at: number,
+    ) => Effect.Effect<Types.OtpFailures, Errors.AuthError>;
+    /** Forget the pair's failure budget (after a successful verification); a no-op when it has none. */
+    readonly clearFailures: (
+      phoneNumber: string,
+      purpose: PhoneOtpPurpose,
+    ) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/PhoneOtpStore") {}
 
@@ -114,27 +141,30 @@ export class PhoneOtpUserStore extends Context.Service<
   }
 >()("@effect-auth/PhoneOtpUserStore") {}
 
-/** Why an OTP verification failed: no record, a wrong code, expiry or the attempt limit. */
-type VerifyFailure = "missing" | "mismatch" | "expired" | "attempts";
-
-/** The generic answer to a failed verification. */
-const invalidOtpMessage = "Invalid or expired OTP";
-
-/** The message each verification failure answers where existence isn't hidden. */
-const failureMessages: Record<VerifyFailure, string> = {
-  missing: invalidOtpMessage,
-  mismatch: invalidOtpMessage,
-  expired: "OTP has expired",
-  attempts: "Too many attempts",
-};
-
 /**
  * Configuration for {@link PhoneOtpService}.
  */
 export interface PhoneOtpConfig {
   readonly otpLength?: number; // Default: 6 digits
   readonly expiresIn?: number; // Default: 5 minutes
-  readonly maxAttempts?: number; // Default: 3
+  /**
+   * Wrong codes one OTP accepts before it is deleted. Default 3. A resend
+   * issues a new OTP with its own attempts; what bounds the guesses at a
+   * number across resends is {@link PhoneOtpConfig.backoff}.
+   */
+  readonly maxAttempts?: number;
+  /**
+   * The failure backoff (#590): every wrong code is also counted against the
+   * phone number + purpose pair, and a resend never resets that count. Once
+   * it reaches `freeFailures` (default 5), `send` fails with
+   * {@link Errors.ResendTooSoonError} until `baseDelay` (default one minute),
+   * doubled for each further wrong code and capped at `maxDelay` (default one
+   * day), has passed since the latest one. A successful verification resets
+   * the count. There is no lockout: once the delay has passed a send succeeds,
+   * so an attacker can slow a number's owner down, not lock them out. It
+   * applies alike to a number with and without an account.
+   */
+  readonly backoff?: Types.OtpBackoffConfig | undefined;
   /**
    * Refuse to create a user at `sign-in`. Off by default. When set, `sign-in`
    * hides whether a number has an account: see {@link PhoneOtpService} `send`
@@ -144,9 +174,10 @@ export interface PhoneOtpConfig {
   /**
    * Minimum interval (ms) between successive send requests for the same phone
    * number + purpose pair. When an outstanding OTP created within this window
-   * already exists, `send` fails with {@link Errors.ResendTooSoonError}. Off
-   * by default; recommend 60_000 (60 s) for SMS to limit carrier cost and
-   * DoS exposure. Complements the global RateLimit. It applies to every
+   * already exists, `send` fails with {@link Errors.ResendTooSoonError}.
+   * Default 60 000 (60 s), which also limits carrier cost and DoS exposure;
+   * `0` turns it off. Complements the global RateLimit and
+   * {@link PhoneOtpConfig.backoff}. It applies to every
    * number alike, whether or not it has an account, so the error reveals
    * nothing about which numbers are registered. With sign-up disabled, a
    * `sign-in` request for a number with no account stores an undelivered
@@ -197,9 +228,10 @@ export class PhoneOtpService extends Context.Service<
      * attempts exactly as a code's record does. `signIn` then sees the same
      * record states for a number with and without an account.
      *
-     * When `resendCooldown` is configured and an outstanding OTP for the phone +
-     * purpose was created within the cooldown window, fails with
-     * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     * When an outstanding OTP for the phone + purpose was created within the
+     * `resendCooldown` window, or the pair's wrong codes put it in the
+     * `backoff` delay, fails with {@link Errors.ResendTooSoonError} containing
+     * the remaining wait time.
      * The marker record makes the cooldown apply to a number with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown number.
@@ -218,7 +250,8 @@ export class PhoneOtpService extends Context.Service<
      * whether the code was wrong, had expired or reached `maxAttempts`, so the
      * answer is the same for a number with and without an outstanding code.
      * With sign-up enabled, an expired code answers `"OTP has expired"` and
-     * the attempt limit answers `"Too many attempts"`.
+     * the attempt limit answers `"Too many attempts"`. A wrong code counts
+     * against the number's `backoff`; a correct one resets it.
      */
     readonly signIn: (
       phoneNumber: string,
@@ -275,10 +308,8 @@ export const make = (
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
-    const otpLength = config.otpLength ?? 6;
-    const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
-    const maxAttempts = config.maxAttempts ?? 3;
-    const disableSignUp = config.disableSignUp ?? false;
+    const codes = OtpCode.resolveCodeConfig(config);
+    const { disableSignUp } = codes;
 
     const store = yield* PhoneOtpStore;
     const userStore = yield* PhoneOtpUserStore;
@@ -288,25 +319,6 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
-
-    /** Generate a numeric OTP with crypto-secure, unbiased randomness. */
-    const generateOtp = (length: number): Effect.Effect<string> =>
-      Effect.map(
-        Effect.replicateEffect(
-          crypto.intBetween(0, 10, { halfOpen: true }),
-          // The iteration count of `for (let i = 0; i < length; i++)`.
-          Math.max(0, Math.ceil(length)),
-          { concurrency: 1 },
-        ),
-        (digits) => digits.map((digit) => digit.toString()).join(""),
-      );
-
-    /**
-     * The secret behind an unknown number's marker record: 32 random bytes,
-     * base64url-encoded. It is hashed into the marker record and then
-     * discarded.
-     */
-    const generateMarkerSecret: Effect.Effect<string> = randomBase64UrlToken(crypto);
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined
@@ -320,61 +332,19 @@ export const make = (
     const hidesAccount = (purpose: PhoneOtpPurpose): boolean =>
       purpose === "sign-in" && disableSignUp;
 
-    /**
-     * Fail a verification. Where `send` hides whether the number has an
-     * account, every reason answers the generic message. The marker record
-     * already gives a known and an unknown number the same record states; the
-     * generic message also makes one that holds a record answer as one that
-     * holds none, so expiry and the attempt limit can't show whether a code
-     * was requested for it. The reason stays on the span for operators.
-     */
-    const rejectOtp = (purpose: PhoneOtpPurpose, reason: VerifyFailure) =>
-      Effect.annotateCurrentSpan("auth.otp.failure", reason).pipe(
-        Effect.andThen(
-          Effect.fail(
-            new PhoneOtpError({
-              message: hidesAccount(purpose) ? invalidOtpMessage : failureMessages[reason],
-            }),
-          ),
-        ),
-      );
+    const rejectOtp = OtpCode.makeReject(hidesAccount, (message) => new PhoneOtpError({ message }));
 
     const verifyOtp = (
       phoneNumber: string,
       otp: string,
       purpose: PhoneOtpPurpose,
     ): Effect.Effect<void, PhoneOtpError | Errors.AuthError> =>
-      Effect.gen(function* () {
-        if (!phoneNumber || !otp) {
-          return yield* rejectOtp(purpose, "missing");
-        }
-
-        const record = yield* store.get(phoneNumber, purpose);
-        if (!record) {
-          return yield* rejectOtp(purpose, "missing");
-        }
-
-        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
-          yield* store.delete(phoneNumber, purpose);
-          return yield* rejectOtp(purpose, "expired");
-        }
-
-        if (record.attempts >= maxAttempts) {
-          yield* store.delete(phoneNumber, purpose);
-          return yield* rejectOtp(purpose, "attempts");
-        }
-
-        if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
-          const attempts = yield* store.incrementAttempts(phoneNumber, purpose);
-          if (attempts >= maxAttempts) {
-            yield* store.delete(phoneNumber, purpose);
-            return yield* rejectOtp(purpose, "attempts");
-          }
-          return yield* rejectOtp(purpose, "mismatch");
-        }
-
-        // Consume the OTP (one-time use).
-        return yield* store.delete(phoneNumber, purpose);
+      OtpCode.verifyCode(store, {
+        address: phoneNumber,
+        code: otp,
+        purpose,
+        maxAttempts: codes.maxAttempts,
+        reject: rejectOtp,
       });
 
     return {
@@ -393,40 +363,16 @@ export const make = (
           ? (yield* lookupIdentifier(identifiers, "phone", phoneNumber)) !== null
           : true;
 
-        // Resend cooldown: reject if an outstanding OTP was created within
-        // the configured window. It runs for a number with no account too,
-        // whose earlier request stored an undelivered record below, so a known
-        // and an unknown number get the same answer inside the window.
-        if (config.resendCooldown !== undefined) {
-          const existing = yield* store.get(phoneNumber, purpose);
-          if (existing !== null) {
-            const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
-            if (elapsed < config.resendCooldown) {
-              return yield* new Errors.ResendTooSoonError({
-                message: "Please wait before requesting another OTP",
-                retryAfter: Duration.millis(config.resendCooldown - elapsed),
-              });
-            }
-          }
-        }
+        // Resend cooldown and failure backoff (#590). Both run for a number
+        // with no account too, whose earlier request stored an undelivered
+        // marker record below and whose wrong codes are counted alike, so a
+        // known and an unknown number get the same answer.
+        yield* OtpCode.gateSend(store, phoneNumber, purpose, codes);
 
-        // A number with no account gets a marker record, whose hash is of a
-        // random 32-byte secret rather than of a code: no `otpLength`-digit
-        // guess can match it, and the secret is never sent. It is written
-        // whether or not a cooldown is set, with the same attempts and expiry
-        // as a code's record, so both branches do the same store work here
-        // and verification later sees the same record states. Both values are
-        // drawn on every send, so the random work is the same too.
-        const otp = yield* generateOtp(otpLength);
-        const markerSecret = yield* generateMarkerSecret;
-        const record: PhoneOtpRecord = {
-          phoneNumber,
-          otpHash: hashToken(deliver ? otp : markerSecret),
-          purpose,
-          attempts: 0,
-          createdAt: yield* Clock.currentTimeMillis,
-          expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
-        };
+        // A number with no account gets a marker record that no code
+        // redeems (see `issueCode`).
+        const { code: otp, record: fields } = yield* OtpCode.issueCode(crypto, codes, deliver);
+        const record: PhoneOtpRecord = { phoneNumber, purpose, ...fields };
 
         yield* store.upsert(record);
 
