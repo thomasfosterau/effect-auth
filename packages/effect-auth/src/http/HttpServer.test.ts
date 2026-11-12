@@ -3935,6 +3935,7 @@ const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, m
   ["POST", "/sso/saml/acs/acme", 20],
   ["POST", "/oauth2/token", 60],
   ["POST", "/register", 10],
+  ["GET", "/api-keys/current", 300],
 ];
 
 /**

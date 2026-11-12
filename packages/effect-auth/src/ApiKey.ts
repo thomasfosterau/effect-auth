@@ -16,14 +16,14 @@
  * @module api-key
  */
 
-import { Clock, Context, Data, Effect, Layer } from "effect";
+import { Clock, Context, Data, type Duration, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { Base64Url } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
+import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
@@ -150,15 +150,44 @@ export interface ApiKeyCreateResult {
 }
 
 /**
+ * Why a key was refused, as {@link ApiKeyVerifyResult.reason} names it:
+ *
+ * - `invalid`: no key has that digest.
+ * - `disabled`, `expired`: the key exists but is switched off or past its `expiresAt`.
+ * - `exhausted`: the key has no `remaining` uses left.
+ * - `missing-permissions`: the key lacks a required permission.
+ * - `rate-limited`: the key is over its own `rateLimit` (`verifyWithRateLimit` only).
+ */
+export type ApiKeyRefusal =
+  | "invalid"
+  | "disabled"
+  | "expired"
+  | "exhausted"
+  | "missing-permissions"
+  | "rate-limited";
+
+/**
  * Result of verifying an API key. Verification failures are reported as
- * `{ valid: false, error }` rather than typed failures so callers can treat
- * a bad key as a normal (unauthenticated) outcome.
+ * `{ valid: false, error, reason }` rather than typed failures so callers can
+ * treat a bad key as a normal (unauthenticated) outcome.
  */
 export interface ApiKeyVerifyResult {
   readonly valid: boolean;
   readonly apiKey?: ApiKey;
+  /** A refusal's message, for the server log; an HTTP answer never carries it. */
   readonly error?: string;
+  /** A refusal's cause, to branch on (the HTTP tier's `429` for `rate-limited`). */
+  readonly reason?: ApiKeyRefusal | undefined;
+  /** For a `rate-limited` refusal: how long until the key's own limit lets it through. */
+  readonly retryAfter?: Duration.Duration | undefined;
 }
+
+/** A refused verification: its message for the log, and its reason. */
+const refused = (error: string, reason: ApiKeyRefusal): ApiKeyVerifyResult => ({
+  valid: false,
+  error,
+  reason,
+});
 
 /**
  * Fields of an API key that may be changed after creation.
@@ -212,12 +241,16 @@ export class ApiKeyService extends Context.Service<
      * Like `verify`, but when the key carries a `rateLimit` configuration a
      * token is consumed from the {@link RateLimiter} bucket keyed
      * `api-key:${apiKey.id}` before the remaining checks run. When the limit
-     * is exhausted the result is `{ valid: false, error: "Rate limit exceeded" }`.
+     * is exhausted the result is `{ valid: false, error: "Rate limit exceeded",
+     * reason: "rate-limited", retryAfter }`. An unknown key is refused as
+     * `invalid` before any bucket is touched, so only a real key is ever
+     * `rate-limited`. The limiter is the one the layer resolved when it was
+     * built, so the call needs nothing from its context.
      */
     readonly verifyWithRateLimit: (
       plaintextKey: string,
       requiredPermissions?: Record<string, readonly string[]>,
-    ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError, RateLimitStore>;
+    ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError>;
 
     /**
      * Fetch a key by id, failing with {@link ApiKeyError} when it does not exist.
@@ -341,11 +374,11 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
 
         if (!apiKey.enabled) {
-          return { valid: false, error: "API key is disabled" } satisfies ApiKeyVerifyResult;
+          return refused("API key is disabled", "disabled");
         }
 
         if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
-          return { valid: false, error: "API key has expired" } satisfies ApiKeyVerifyResult;
+          return refused("API key has expired", "expired");
         }
 
         // Lazily apply quota refills before checking remaining
@@ -371,17 +404,11 @@ export const make = (
         }
 
         if (key.remaining !== undefined && key.remaining <= 0) {
-          return {
-            valid: false,
-            error: "API key has no remaining uses",
-          } satisfies ApiKeyVerifyResult;
+          return refused("API key has no remaining uses", "exhausted");
         }
 
         if (requiredPermissions && !hasRequiredPermissions(key.permissions, requiredPermissions)) {
-          return {
-            valid: false,
-            error: "API key is missing required permissions",
-          } satisfies ApiKeyVerifyResult;
+          return refused("API key is missing required permissions", "missing-permissions");
         }
 
         const updated = yield* store.update({
@@ -458,7 +485,7 @@ export const make = (
       ) {
         const apiKey = yield* lookup(plaintextKey);
         if (!apiKey) {
-          return { valid: false, error: "Invalid API key" } satisfies ApiKeyVerifyResult;
+          return refused("Invalid API key", "invalid");
         }
         return yield* verifyRecord(apiKey, requiredPermissions);
       }),
@@ -469,18 +496,21 @@ export const make = (
       ) {
         const apiKey = yield* lookup(plaintextKey);
         if (!apiKey) {
-          return { valid: false, error: "Invalid API key" } satisfies ApiKeyVerifyResult;
+          return refused("Invalid API key", "invalid");
         }
 
         if (apiKey.rateLimit) {
           const limited = yield* rateLimiter
             .consumeToken(`api-key:${apiKey.id}`, apiKey.rateLimit satisfies RateLimitConfig)
             .pipe(
-              Effect.as(false),
-              Effect.catchTag("RateLimitError", () => Effect.succeed(true)),
+              Effect.as(null),
+              Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
             );
-          if (limited) {
-            return { valid: false, error: "Rate limit exceeded" } satisfies ApiKeyVerifyResult;
+          if (limited !== null) {
+            return {
+              ...refused("Rate limit exceeded", "rate-limited"),
+              retryAfter: limited.retryAfter,
+            } satisfies ApiKeyVerifyResult;
           }
         }
 

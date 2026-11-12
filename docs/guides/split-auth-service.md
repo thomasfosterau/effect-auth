@@ -126,6 +126,30 @@ the request is, never what it may do. Without it, a key-bearing request reads as
 session and a policy like "an API key may act as this user, but may not mint another API key"
 silently stops holding at your edge.
 
+### An API key resolves to its user, not to a session
+
+A request carrying an API key (`x-api-key`, or the headers in `credentials.apiKeyHeaders`)
+is resolved through the auth service's `GET /api-keys/current` (#730), not the session
+read. The result is `{ session: None, user, apiKey, credentialClass: "machine" }`:
+`apiKey` holds the key's public fields (id, name, permissions, expiry, `remaining`,
+metadata, enabled, never its hash), and `user` is who it acts as. The key wins over a
+cookie the request also carries: the cookie is not forwarded on that call, so it can never
+answer for the key. A `401` (an unknown, disabled, expired or exhausted key, all answered
+alike) is anonymous. Any other answer, the `404` of an auth service with no `ApiKeyService`
+in its `services` included, fails `resolveAtEdge` closed and degrades
+`resolveAtEdgeFailOpen` to anonymous; neither falls back to the cookie.
+
+**Each resolution consumes one use of the key**: it is a verification, so `remaining`
+decrements and `lastUsedAt` moves, once per request you resolve. A key with
+`remaining: 100` serves 100 resolved requests. A non-consuming check is
+[#645](https://github.com/thomasfosterau/effect-auth/issues/645). The key's own
+`rateLimit` applies too: over it, the auth service answers `429` with `Retry-After`, which
+reaches you as a `RemoteSessionError` with `status: 429`.
+
+The endpoint checks no permissions; check the key's `permissions` through the policy
+kernel. Configure the header once and pass it to both sides: `cookie.apiKeyHeaders` on the
+auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`.
+
 ### Header forwarding is the library's job
 
 The forwarded set is an **allow-list**: the credential (`cookie`, `authorization`,

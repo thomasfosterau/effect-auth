@@ -108,6 +108,7 @@ export {
   type ApiKeyCreateOptions,
   type ApiKeyCreateResult,
   type ApiKeyVerifyResult,
+  type ApiKeyRefusal,
   type ApiKeyUpdate,
   ApiKeyService,
   hashApiKey,

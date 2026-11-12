@@ -324,7 +324,26 @@ describe("RemoteSession.resolveAtEdge", () => {
   });
 
   it("a machine caller is not cookieless, so its key still resolves", async () => {
-    const { calls, fetcher } = spy(() => okSession());
+    // What `GET /api-keys/current` answers: the key, its user included (#730).
+    const keyDocument = {
+      data: {
+        type: "api-keys",
+        id: "key-1",
+        attributes: {
+          start: "abcdef",
+          enabled: true,
+          metadata: {},
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+        relationships: { user: { data: { type: "users", id: "user-42" } } },
+      },
+      included: sessionDocument().included,
+    };
+    const { calls, fetcher } = spy(
+      () =>
+        new Response(toJson(keyDocument), { status: 200, headers: { "content-type": JSON_API } }),
+    );
     const client = RemoteSession.make({ fetcher });
 
     const result = await Effect.runPromise(
@@ -332,9 +351,12 @@ describe("RemoteSession.resolveAtEdge", () => {
     );
 
     expect(result.outcome).toBe("resolved");
+    expect(result.user?.id).toBe("user-42");
+    expect(result.apiKey?.id).toBe("key-1");
     expect(calls).toHaveLength(1);
     const call = calls[0];
     assert(call !== undefined);
+    expect(call.url).toBe("https://auth.internal/api/auth/api-keys/current");
     expect(call.headers["x-api-key"]).toBe("key_live_1");
     // And it is carried as a machine credential, so the policy kernel sees the
     // same class the HTTP middleware would have provided.
