@@ -583,36 +583,59 @@ export const makeEmailVerificationStore: Effect.Effect<
 
 interface ChallengeRow {
   readonly challenge: string;
+  readonly ceremony: string;
   readonly expires_at: number;
   readonly user_id: string | null;
 }
 
-const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge =>
-  row.user_id == null
-    ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
-    : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
+/** A row whose ceremony is not one the core knows reads as missing. */
+const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge | null => {
+  const { ceremony } = row;
+  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return null;
+  const challenge = fromBase64(row.challenge);
+  return row.user_id == null
+    ? { challenge, ceremony, expiresAt: row.expires_at }
+    : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+};
 
-/** `Auth.MultiFactor.ChallengeStore` over the `auth_webauthn_challenges` table; requires `SqlClient`. */
+/**
+ * `Auth.MultiFactor.ChallengeStore` over `auth_webauthn_challenges` and the
+ * ceremony each challenge was issued for, in
+ * `auth_webauthn_challenge_ceremonies` (#591); requires `SqlClient`. A
+ * challenge with no ceremony row reads as missing.
+ */
 export const makeChallengeStore: Effect.Effect<
   typeof Auth.MultiFactor.ChallengeStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
+  // The ceremony row goes first: a delete interrupted between the statements
+  // leaves a challenge row that no ceremony can redeem.
+  const remove = (label: string, encoded: string) =>
+    Effect.gen(function* () {
+      yield* asVoid(
+        label,
+        sql`DELETE FROM auth_webauthn_challenge_ceremonies WHERE challenge = ${encoded}`,
+      );
+      yield* asVoid(label, sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`);
+    });
   return {
     create: (challenge) =>
       withTx(
         "challenge.create",
         Effect.gen(function* () {
           const encoded = toBase64(challenge.challenge);
-          yield* asVoid(
-            "challenge.create",
-            sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`,
-          );
+          yield* remove("challenge.create", encoded);
           yield* asVoid(
             "challenge.create",
             sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
                   VALUES (${encoded}, ${challenge.expiresAt}, ${challenge.userId ?? null})`,
+          );
+          yield* asVoid(
+            "challenge.create",
+            sql`INSERT INTO auth_webauthn_challenge_ceremonies (challenge, ceremony)
+                  VALUES (${encoded}, ${challenge.ceremony})`,
           );
           return challenge;
         }),
@@ -620,13 +643,13 @@ export const makeChallengeStore: Effect.Effect<
     get: (challenge) =>
       firstRow(
         "challenge.get",
-        sql<ChallengeRow>`SELECT * FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
+        sql<ChallengeRow>`SELECT c.challenge, k.ceremony, c.expires_at, c.user_id
+          FROM auth_webauthn_challenges c
+          JOIN auth_webauthn_challenge_ceremonies k ON k.challenge = c.challenge
+          WHERE c.challenge = ${toBase64(challenge)}`,
       ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
     delete: (challenge) =>
-      asVoid(
-        "challenge.delete",
-        sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
-      ),
+      withTx("challenge.delete", remove("challenge.delete", toBase64(challenge))),
   } satisfies typeof Auth.MultiFactor.ChallengeStore.Service;
 });
 

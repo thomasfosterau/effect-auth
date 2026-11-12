@@ -63,6 +63,7 @@ import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
 import { type PendingMultiFactor, PendingMultiFactorStore } from "../multifactor/MultiFactor.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "../multifactor/WebAuthn.ts";
 import {
   type Member,
   type OrgRole,
@@ -985,6 +986,126 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
             "the first count of a challenge recreated under the same token",
             yield* store.recordFailedAttempt(pending.token),
             1,
+          );
+        }),
+    },
+  ]);
+
+// ---------------------------------------------------------------------------
+// ChallengeStore (WebAuthn)
+// ---------------------------------------------------------------------------
+
+/** Fresh challenge bytes: a random UUID's text, so cases never collide. */
+const challengeBytes = (): Uint8Array => new TextEncoder().encode(uuid());
+
+/** A challenge with its bytes as a plain array, so two compare by content. */
+const challengeView = (challenge: WebAuthnChallenge | null) =>
+  challenge === null ? null : { ...challenge, challenge: Arr.fromIterable(challenge.challenge) };
+
+/**
+ * The WebAuthn `ChallengeStore` contract: a challenge round-trips with its
+ * bytes, its ceremony, its expiry and its user (absent for a discoverable
+ * authentication challenge), a miss is `null`, `create` under bytes already
+ * stored replaces that challenge (ceremony and user included), and `delete`
+ * removes it (a no-op for unknown bytes). The ceremony is what keeps an
+ * authentication challenge from being redeemed as a registration (#591), so a
+ * store that drops or defaults it fails here.
+ *
+ * @since 0.3.0
+ * @category suites
+ */
+export const challengeStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | ChallengeStore> =>
+  suite<E, R, ChallengeStore>("ChallengeStore", options, [
+    {
+      name: "create returns the challenge, get reads it back with its ceremony, and a miss is null",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ChallengeStore;
+          const userId = yield* newUser();
+          const challenges: ReadonlyArray<WebAuthnChallenge> = [
+            {
+              challenge: challengeBytes(),
+              ceremony: "registration",
+              expiresAt: at(60_000).getTime(),
+              userId,
+            },
+            {
+              challenge: challengeBytes(),
+              ceremony: "authentication",
+              expiresAt: at(60_000).getTime(),
+              userId,
+            },
+            {
+              challenge: challengeBytes(),
+              ceremony: "authentication",
+              expiresAt: at(60_000).getTime(),
+            },
+          ];
+          yield* Effect.forEach(
+            challenges,
+            (challenge) =>
+              Effect.gen(function* () {
+                yield* expectEqual(
+                  `create (${challenge.ceremony})`,
+                  challengeView(yield* store.create(challenge)),
+                  challengeView(challenge),
+                );
+                yield* expectEqual(
+                  `get (${challenge.ceremony}, ${challenge.userId === undefined ? "no user" : "bound"})`,
+                  challengeView(yield* store.get(challenge.challenge)),
+                  challengeView(challenge),
+                );
+              }),
+            { concurrency: 1, discard: true },
+          );
+          yield* expectEqual("get of unknown bytes", yield* store.get(challengeBytes()), null);
+        }),
+    },
+    {
+      name: "create under stored bytes replaces the challenge, its ceremony and its user",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ChallengeStore;
+          const bytes = challengeBytes();
+          yield* store.create({
+            challenge: bytes,
+            ceremony: "registration",
+            expiresAt: at(60_000).getTime(),
+            userId: yield* newUser(),
+          });
+          const replacement: WebAuthnChallenge = {
+            challenge: bytes,
+            ceremony: "authentication",
+            expiresAt: at(90_000).getTime(),
+          };
+          yield* store.create(replacement);
+          yield* expectEqual(
+            "get after the replacement",
+            challengeView(yield* store.get(bytes)),
+            challengeView(replacement),
+          );
+        }),
+    },
+    {
+      name: "delete removes the challenge, and is a no-op for unknown bytes",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ChallengeStore;
+          const challenge: WebAuthnChallenge = {
+            challenge: challengeBytes(),
+            ceremony: "registration",
+            expiresAt: at(60_000).getTime(),
+            userId: yield* newUser(),
+          };
+          yield* store.create(challenge);
+          yield* store.delete(challenge.challenge);
+          yield* store.delete(challengeBytes());
+          yield* expectEqual(
+            "get of the deleted challenge",
+            yield* store.get(challenge.challenge),
+            null,
           );
         }),
     },

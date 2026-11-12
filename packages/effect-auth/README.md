@@ -304,7 +304,7 @@ await Effect.runPromise(
 
 `expectRefusesAnonymous`, `expectRefusesBelow` and `expectAllowsOwner` check one case each.
 
-The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`, and `organizationStoreConformance` for the `OrganizationStore` records the HTTP API addresses by id: memberships, team memberships and custom roles) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
+The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`, `challengeStoreConformance` for the WebAuthn `ChallengeStore` (each challenge keeps its ceremony), and `organizationStoreConformance` for the `OrganizationStore` records the HTTP API addresses by id: memberships, team memberships and custom roles) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
 
 `memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`, which it also provides with its `KeyValueStoreKeys` listing so `purgeExpiredKV` runs against it. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
 
@@ -453,14 +453,18 @@ const beginRegistration = Effect.gen(function* () {
     displayName: "User Name",
   });
 });
+// `userId` is the signed-in user, from the session, never from the request: the
+// challenge must be a registration challenge issued to that same user, so an
+// authentication challenge, or another user's, is refused.
 const finishRegistration = (
+  userId: string,
   challenge: Uint8Array,
   response: Auth.MultiFactor.RegistrationResponse,
 ) =>
   Effect.gen(function* () {
     const webAuthn = yield* Auth.MultiFactor.WebAuthnService;
-    const { credential } = yield* webAuthn.verifyRegistration(challenge, response);
-    return credential; // now stored and usable for sign-in
+    const { credential } = yield* webAuthn.verifyRegistration(userId, challenge, response);
+    return credential; // stored under the attested credential id, usable for sign-in
   });
 
 // Authentication: the browser signs the challenge with `navigator.credentials.get()`.
@@ -470,13 +474,21 @@ const finishAuthentication = (
 ) =>
   Effect.gen(function* () {
     const webAuthn = yield* Auth.MultiFactor.WebAuthnService;
-    const { credential } = yield* webAuthn.verifyAuthentication(challenge, response);
-    return credential.userId; // create a session for this user
+    // `userVerified` is the UV flag (a PIN or biometric, not only presence);
+    // `backupEligible` / `backupState` say whether this is a synced passkey.
+    const { credential, userVerified } = yield* webAuthn.verifyAuthentication(challenge, response);
+    return { userId: credential.userId, userVerified }; // create a session for this user
   });
 
 const { challenge } = await Effect.runPromise(Effect.provide(beginRegistration, WebAuthnLive));
 export { challenge, finishRegistration, finishAuthentication };
 ```
+
+What the service enforces:
+
+- **A challenge is bound to its ceremony.** Each stored `WebAuthnChallenge` carries `ceremony: "registration" | "authentication"`; `verifyRegistration` refuses an authentication challenge and `verifyAuthentication` a registration one, leaving it in place. A registration challenge is also bound to the user it was issued to, which must be the `userId` passed to `verifyRegistration`. A `ChallengeStore` must persist the ceremony; a stored challenge without a known one reads as `null` (`Testing.challengeStoreConformance` pins the contract).
+- **`userVerification: "required"` is enforced**, not only advertised: a registration or assertion without the UV flag is refused. Under `"preferred"` (the default) or `"discouraged"`, both results report `userVerified`, with the backup flags `backupEligible` and `backupState`, for the host to act on (for example, to require a second factor when `userVerified` is `false`).
+- **The stored credential is the attested one.** Its id is the credential id inside the attestation, which must equal `response.credentialId`; an id already registered, to any user, is refused rather than overwritten. ES256 keys must be on P-256, and a `clientDataJSON` with `crossOrigin: true` is refused.
 
 ## OAuth 2.0 social login
 
@@ -1132,7 +1144,7 @@ Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 o
 
 - `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes the `auth_magic_links` and `auth_email_otps` rows whose `expires_at` has passed (read from the `Clock`) and reports how many went from each. No store deletes them on its own: a code or link nobody redeems stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address, so without a purge those tables grow with every distinct address a caller tries. Schedule it from the host: a cron trigger on Workers, a timer or job on a long-lived server. The services already refuse an expired row, so a purge changes no outcome.
 
-Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
+Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
 
 ### Authorization
 

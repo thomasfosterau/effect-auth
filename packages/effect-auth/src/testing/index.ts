@@ -45,6 +45,7 @@ export {
   type ConformanceSuite,
   type UserStoreConformanceOptions,
   apiKeyStoreConformance,
+  challengeStoreConformance,
   identifierStoreConformance,
   organizationStoreConformance,
   pendingMultiFactorStoreConformance,

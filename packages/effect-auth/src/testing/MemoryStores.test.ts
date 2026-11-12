@@ -48,6 +48,7 @@ register(Testing.identifierStoreConformance(), () =>
   Layer.succeed(IdentifierStore, memoryIdentifierStore()),
 );
 register(Testing.pendingMultiFactorStoreConformance(), () => Testing.memoryStores);
+register(Testing.challengeStoreConformance(), () => Testing.memoryStores);
 
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 24 * 60 * 60 * 1000, idlePeriod: 60 * 60 * 1000 },

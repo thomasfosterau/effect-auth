@@ -144,12 +144,14 @@ describe("D1-backed effect-auth storage", () => {
         const challenges = yield* Auth.MultiFactor.ChallengeStore;
         yield* challenges.create({
           challenge: bytes,
+          ceremony: "registration",
           expiresAt: (yield* Clock.currentTimeMillis) + 60_000,
           userId: "user-1",
         });
         // A second create replaces the row — the DELETE + INSERT pair.
         yield* challenges.create({
           challenge: bytes,
+          ceremony: "authentication",
           expiresAt: (yield* Clock.currentTimeMillis) + 90_000,
         });
         const challenge = yield* challenges.get(bytes);
@@ -179,6 +181,7 @@ describe("D1-backed effect-auth storage", () => {
       }),
     );
     expect(Array.from(result.challenge?.challenge ?? [])).toEqual([0, 1, 2, 250, 255]);
+    expect(result.challenge?.ceremony).toBe("authentication");
     expect(result.challenge?.userId).toBeUndefined();
     expect(result.state?.codeVerifier).toBe("cv");
     expect(result.attempts).toBe(1);
@@ -342,6 +345,7 @@ describe("D1-backed effect-auth storage: conformance", () => {
       Testing.identifierStoreConformance({ seedUser }),
       Testing.apiKeyStoreConformance({ seedUser }),
       Testing.pendingMultiFactorStoreConformance({ seedUser }),
+      Testing.challengeStoreConformance(),
     ],
     (suite) => {
       describe(suite.contract, () => {

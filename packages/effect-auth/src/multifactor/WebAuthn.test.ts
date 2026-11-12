@@ -219,7 +219,7 @@ describe("WebAuthn Service", () => {
             clientDataJSON: new Uint8Array([]),
           };
 
-          yield* service.verifyRegistration(challenge, mockResponse);
+          yield* service.verifyRegistration(testUser.id, challenge, mockResponse);
         }),
         dependencies,
       ).pipe(Effect.flip),
@@ -241,7 +241,7 @@ describe("WebAuthn Service", () => {
             clientDataJSON: new Uint8Array([]),
           };
 
-          yield* service.verifyRegistration(fakeChallenge, mockResponse);
+          yield* service.verifyRegistration(testUser.id, fakeChallenge, mockResponse);
         }),
         dependencies,
       ).pipe(Effect.flip),
@@ -284,7 +284,9 @@ describe("WebAuthn Service", () => {
           };
 
           // Expect this to fail with ChallengeExpiredError
-          const result = yield* Effect.flip(service.verifyRegistration(challenge, mockResponse));
+          const result = yield* Effect.flip(
+            service.verifyRegistration(testUser.id, challenge, mockResponse),
+          );
 
           expect(result).toBeInstanceOf(ChallengeExpiredError);
           // Challenge should be deleted after expiration check
@@ -619,11 +621,13 @@ const OkpJwk = Schema.Struct({ x: Schema.String });
 /**
  * Generate a keypair and its COSE-key CBOR bytes for the given algorithm.
  * `algorithmLabel` overrides the advertised COSE `alg` value, for tests that
- * need a key labelled with an algorithm effect-auth does not support.
+ * need a key labelled with an algorithm effect-auth does not support, and
+ * `curve` the advertised EC2 `crv` (P-256, 1, by default).
  */
 const buildKey = async (
   alg: Alg,
   algorithmLabel: number = alg,
+  curve = 1,
 ): Promise<{ privateKey: CryptoKey; cose: number[] }> => {
   const keyPair = await globalThis.crypto.subtle.generateKey(keyGenParams(alg), true, [
     "sign",
@@ -644,7 +648,7 @@ const buildKey = async (
       cose: cborMap([
         [cborUint(1), cborUint(2)],
         [cborUint(3), cborNegInt(algorithmLabel)],
-        [cborNegInt(-1), cborUint(1)],
+        [cborNegInt(-1), cborUint(curve)],
         [cborNegInt(-2), cborBytes(x)],
         [cborNegInt(-3), cborBytes(y)],
       ]),
@@ -702,13 +706,19 @@ class SignAssertionError extends Data.TaggedError("SignAssertionError")<{
 
 const encodeClientDataJSON = Schema.encodeSync(
   Schema.fromJsonString(
-    Schema.Struct({ type: Schema.String, challenge: Schema.String, origin: Schema.String }),
+    Schema.Struct({
+      type: Schema.String,
+      challenge: Schema.String,
+      origin: Schema.String,
+      crossOrigin: Schema.optional(Schema.Boolean),
+    }),
   ),
 );
 
 const clientDataJSON = (
   type: "webauthn.create" | "webauthn.get",
   challenge: Uint8Array,
+  crossOrigin?: boolean,
 ): Uint8Array =>
   new Uint8Array(
     Buffer.from(
@@ -716,13 +726,28 @@ const clientDataJSON = (
         type,
         challenge: Buffer.from(challenge).toString("base64url"),
         origin: "https://example.com",
+        ...(crossOrigin === undefined ? {} : { crossOrigin }),
       }),
       "utf8",
     ),
   );
 
-/** Assemble a `none`-format attestation object embedding the COSE key. */
-const attestationObject = async (cose: number[], credentialId: Uint8Array): Promise<Uint8Array> => {
+/** Authenticator-data flag bits (WebAuthn §6.1). */
+const UP = 0x01;
+const UV = 0x04;
+const BE = 0x08;
+const BS = 0x10;
+const AT = 0x40;
+
+/**
+ * Assemble a `none`-format attestation object embedding the COSE key, with the
+ * authenticator-data `flags` (UP | UV | AT by default).
+ */
+const attestationObject = async (
+  cose: number[],
+  credentialId: Uint8Array,
+  flags = UP | UV | AT,
+): Promise<Uint8Array> => {
   const acd = concatBytes(
     new Uint8Array(16), // aaguid
     new Uint8Array([(credentialId.length >> 8) & 0xff, credentialId.length & 0xff]),
@@ -731,7 +756,7 @@ const attestationObject = async (cose: number[], credentialId: Uint8Array): Prom
   );
   const authData = concatBytes(
     await getRpIdHash(),
-    new Uint8Array([0x45]), // UP | UV | AT
+    new Uint8Array([flags]),
     new Uint8Array([0, 0, 0, 0]), // counter 0
     acd,
   );
@@ -821,13 +846,13 @@ describe.each<{ name: string; alg: Alg }>([
 
           // Registration.
           const reg = yield* service.generateRegistrationChallenge(testUser);
-          const registration = yield* service.verifyRegistration(reg.challenge, {
+          const registration = yield* service.verifyRegistration(testUser.id, reg.challenge, {
             credentialId,
             attestationObject: attestationObj,
             clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
           });
           expect(registration.credential.algorithm).toBe(alg);
-          expect(registration.verified).toBe(true);
+          expect(registration.userVerified).toBe(true);
 
           // Authentication with a fresh (incremented) counter.
           const auth = yield* service.generateAuthenticationChallenge(testUser.id);
@@ -863,7 +888,7 @@ describe.each<{ name: string; alg: Alg }>([
         Effect.gen(function* () {
           const service = yield* WebAuthn.make(config);
           const reg = yield* service.generateRegistrationChallenge(testUser);
-          yield* service.verifyRegistration(reg.challenge, {
+          yield* service.verifyRegistration(testUser.id, reg.challenge, {
             credentialId,
             attestationObject: attestationObj,
             clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
@@ -905,7 +930,7 @@ describe.each<{ name: string; alg: Alg }>([
 
           // Registration (bound challenge — userId known at registration time).
           const reg = yield* service.generateRegistrationChallenge(testUser);
-          const registration = yield* service.verifyRegistration(reg.challenge, {
+          const registration = yield* service.verifyRegistration(testUser.id, reg.challenge, {
             credentialId,
             attestationObject: attestationObj,
             clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
@@ -955,7 +980,7 @@ describe.each<{ name: string; alg: Alg }>([
 
           // Register under testUser, then try a bound challenge for a DIFFERENT user.
           const reg = yield* service.generateRegistrationChallenge(testUser);
-          yield* service.verifyRegistration(reg.challenge, {
+          yield* service.verifyRegistration(testUser.id, reg.challenge, {
             credentialId,
             attestationObject: attestationObj,
             clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
@@ -1003,7 +1028,7 @@ describe("WebAuthn algorithm support", () => {
           const service = yield* WebAuthn.make(config);
           const reg = yield* service.generateRegistrationChallenge(testUser);
           return yield* Effect.flip(
-            service.verifyRegistration(reg.challenge, {
+            service.verifyRegistration(testUser.id, reg.challenge, {
               credentialId,
               attestationObject: attestationObj,
               clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
@@ -1025,7 +1050,7 @@ describe("WebAuthn algorithm support", () => {
           const service = yield* WebAuthn.make(config);
           const reg = yield* service.generateRegistrationChallenge(testUser);
           return yield* Effect.flip(
-            service.verifyRegistration(reg.challenge, {
+            service.verifyRegistration(testUser.id, reg.challenge, {
               credentialId: globalThis.crypto.getRandomValues(new Uint8Array(20)),
               attestationObject: new Uint8Array([0xff, 0xff, 0xff]),
               clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
@@ -1049,7 +1074,7 @@ describe("WebAuthn algorithm support", () => {
         Effect.gen(function* () {
           const service = yield* WebAuthn.make(config);
           const reg = yield* service.generateRegistrationChallenge(testUser);
-          yield* service.verifyRegistration(reg.challenge, {
+          yield* service.verifyRegistration(testUser.id, reg.challenge, {
             credentialId,
             attestationObject: attestationObj,
             clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
@@ -1076,5 +1101,365 @@ describe("WebAuthn algorithm support", () => {
     );
     assert.instanceOf(err, WebAuthnVerificationError);
     expect(err.message).toBe("Failed to parse authenticator data");
+  });
+});
+// --- Ceremony binding, user verification and the stored credential (#591) ----
+
+/** Run `program` over a fresh service with `overrides` on the shared config. */
+const withService = <A, E>(
+  program: (service: typeof WebAuthn.WebAuthnService.Service) => Effect.Effect<A, E>,
+  overrides: Partial<WebAuthnConfig> = {},
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.flatMap(WebAuthn.make({ ...config, ...overrides }), program),
+      dependencies,
+    ),
+  );
+
+/** A signed assertion over `challenge` with authenticator-data `flags`. */
+const assertion = (
+  privateKey: CryptoKey,
+  credentialId: Uint8Array,
+  challenge: Uint8Array,
+  options: { readonly flags?: number | undefined; readonly counter?: number | undefined } = {},
+) =>
+  Effect.gen(function* () {
+    const rpIdHash = yield* Effect.tryPromise({
+      try: getRpIdHash,
+      catch: (cause) => new SignAssertionError({ cause }),
+    });
+    const authenticatorData = concatBytes(
+      rpIdHash,
+      new Uint8Array([options.flags ?? UP | UV]),
+      signCounter(options.counter ?? 1),
+    );
+    const clientData = clientDataJSON("webauthn.get", challenge);
+    const signature = yield* Effect.tryPromise({
+      try: () => signAssertion(-7, privateKey, authenticatorData, clientData),
+      catch: (cause) => new SignAssertionError({ cause }),
+    });
+    return { credentialId, authenticatorData, clientDataJSON: clientData, signature };
+  }).pipe(Effect.orDie);
+
+describe("WebAuthn ceremony binding (#591)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
+  });
+
+  it("refuses an authentication challenge redeemed as a registration, and keeps it", async () => {
+    // The attack: a login challenge bound to the victim, answered with an
+    // attestation over the attacker's own key.
+    const { cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const login = yield* service.generateAuthenticationChallenge(testUser.id);
+        return yield* Effect.flip(
+          service.verifyRegistration(testUser.id, login.challenge, {
+            credentialId,
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", login.challenge),
+          }),
+        );
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Challenge was issued for authentication, not registration");
+    expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
+    expect(MutableHashMap.size(mockChallengeStore.challenges)).toBe(1);
+  });
+
+  it("refuses a registration challenge redeemed as an authentication", async () => {
+    const { privateKey, cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        yield* service.verifyRegistration(testUser.id, reg.challenge, {
+          credentialId,
+          attestationObject: attestationObj,
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        });
+        const second = yield* service.generateRegistrationChallenge(testUser);
+        const response = yield* assertion(privateKey, credentialId, second.challenge);
+        return yield* Effect.flip(service.verifyAuthentication(second.challenge, response));
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Challenge was issued for registration, not authentication");
+  });
+
+  it("files the credential under the signed-in user only on that user's challenge", async () => {
+    const { cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* Effect.flip(
+          service.verifyRegistration("attacker-456", reg.challenge, {
+            credentialId,
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+          }),
+        );
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Challenge was not issued to this user");
+    expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
+  });
+
+  it("refuses a cross-origin ceremony", async () => {
+    const { cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* Effect.flip(
+          service.verifyRegistration(testUser.id, reg.challenge, {
+            credentialId,
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", reg.challenge, true),
+          }),
+        );
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Cross-origin ceremonies are not accepted");
+  });
+});
+
+describe("WebAuthn user verification (#591)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
+  });
+
+  it('refuses a registration without UV when userVerification is "required"', async () => {
+    const { cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId, UP | AT);
+
+    const err = await withService(
+      (service) =>
+        Effect.gen(function* () {
+          const reg = yield* service.generateRegistrationChallenge(testUser);
+          expect(reg.authenticatorSelection.userVerification).toBe("required");
+          return yield* Effect.flip(
+            service.verifyRegistration(testUser.id, reg.challenge, {
+              credentialId,
+              attestationObject: attestationObj,
+              clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+            }),
+          );
+        }),
+      { userVerification: "required" },
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("User verification is required");
+    expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
+  });
+
+  it('refuses an assertion without UV when userVerification is "required"', async () => {
+    const { privateKey, cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const err = await withService(
+      (service) =>
+        Effect.gen(function* () {
+          const reg = yield* service.generateRegistrationChallenge(testUser);
+          yield* service.verifyRegistration(testUser.id, reg.challenge, {
+            credentialId,
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+          });
+          const login = yield* service.generateAuthenticationChallenge(testUser.id);
+          const response = yield* assertion(privateKey, credentialId, login.challenge, {
+            flags: UP,
+          });
+          return yield* Effect.flip(service.verifyAuthentication(login.challenge, response));
+        }),
+      { userVerification: "required" },
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("User verification is required");
+  });
+
+  it('reports UV and the backup flags under "preferred"', async () => {
+    const { privateKey, cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId, UP | BE | AT);
+
+    const result = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        const registration = yield* service.verifyRegistration(testUser.id, reg.challenge, {
+          credentialId,
+          attestationObject: attestationObj,
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        });
+        const login = yield* service.generateAuthenticationChallenge();
+        const response = yield* assertion(privateKey, credentialId, login.challenge, {
+          flags: UP | UV | BE | BS,
+        });
+        const authentication = yield* service.verifyAuthentication(login.challenge, response);
+        return { registration, authentication };
+      }),
+    );
+    expect(result.registration).toMatchObject({
+      userVerified: false,
+      backupEligible: true,
+      backupState: false,
+    });
+    expect(result.authentication).toMatchObject({
+      userVerified: true,
+      backupEligible: true,
+      backupState: true,
+    });
+  });
+
+  it("refuses a backup state on a credential that is not backup eligible", async () => {
+    const { cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId, UP | UV | BS | AT);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* Effect.flip(
+          service.verifyRegistration(testUser.id, reg.challenge, {
+            credentialId,
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+          }),
+        );
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Backup state set on a credential that is not backup eligible");
+  });
+});
+
+describe("WebAuthn registration stores the attested credential (#591)", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
+  });
+
+  it("refuses a response whose credential id is not the attested one", async () => {
+    const { cose } = await buildKey(-7);
+    const attestedId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, attestedId);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* Effect.flip(
+          service.verifyRegistration(testUser.id, reg.challenge, {
+            credentialId: globalThis.crypto.getRandomValues(new Uint8Array(20)),
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+          }),
+        );
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Credential ID does not match the attested credential");
+    expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
+  });
+
+  it("stores the credential under the attested id", async () => {
+    const { cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const registration = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* service.verifyRegistration(testUser.id, reg.challenge, {
+          credentialId,
+          attestationObject: attestationObj,
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        });
+      }),
+    );
+    expect(registration.credential.id).toBe(Buffer.from(credentialId).toString("base64url"));
+    expect(
+      Option.isSome(
+        MutableHashMap.get(mockCredentialStore.credentials, registration.credential.id),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses an id already registered to another user, leaving that user's credential", async () => {
+    // The attacker replays the victim's credential id with their own key: in a
+    // set-style store (a Map, a KV) the create would overwrite the victim's row.
+    const victimKey = await buildKey(-7);
+    const attackerKey = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const victimAttestation = await attestationObject(victimKey.cose, credentialId);
+    const attackerAttestation = await attestationObject(attackerKey.cose, credentialId);
+    const attacker: WebAuthnUser = { id: "attacker-456", name: "a@example.com", displayName: "A" };
+
+    const outcome = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        const registered = yield* service.verifyRegistration(testUser.id, reg.challenge, {
+          credentialId,
+          attestationObject: victimAttestation,
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        });
+        const attackerReg = yield* service.generateRegistrationChallenge(attacker);
+        const refusal = yield* Effect.flip(
+          service.verifyRegistration(attacker.id, attackerReg.challenge, {
+            credentialId,
+            attestationObject: attackerAttestation,
+            clientDataJSON: clientDataJSON("webauthn.create", attackerReg.challenge),
+          }),
+        );
+        return { registered, refusal };
+      }),
+    );
+    assert.instanceOf(outcome.refusal, WebAuthnVerificationError);
+    expect(outcome.refusal.message).toBe("Credential is already registered");
+    const stored = Option.getOrUndefined(
+      MutableHashMap.get(mockCredentialStore.credentials, outcome.registered.credential.id),
+    );
+    expect(stored?.userId).toBe(testUser.id);
+    expect(stored?.publicKey).toEqual(outcome.registered.credential.publicKey);
+  });
+
+  it("refuses an ES256 key on a curve other than P-256", async () => {
+    // A P-256 key advertised on P-384 (COSE crv 2).
+    const { cose } = await buildKey(-7, -7, 2);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const err = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* Effect.flip(
+          service.verifyRegistration(testUser.id, reg.challenge, {
+            credentialId,
+            attestationObject: attestationObj,
+            clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+          }),
+        );
+      }),
+    );
+    assert.instanceOf(err, WebAuthnVerificationError);
+    expect(err.message).toBe("Invalid credential public key");
+    expect(MutableHashMap.size(mockCredentialStore.credentials)).toBe(0);
   });
 });

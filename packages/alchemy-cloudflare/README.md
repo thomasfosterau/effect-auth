@@ -124,9 +124,11 @@ a write that returns no rows is buffered, a statement that returns rows (a
 `SELECT`, or a write with `RETURNING`) is sent in one batch with the writes
 buffered before it, and `COMMIT` sends the rest as one batch. So:
 
-- `ChallengeStore.create`, `OAuthStateStore.create` and `EmailOtpStore.upsert`
-  (each a `DELETE` followed by an `INSERT`) and `PendingMultiFactorStore.delete`
-  (two `DELETE`s) are **atomic** on D1: one batch each.
+- `ChallengeStore.create` (two `DELETE`s, then the challenge's and its
+  ceremony's `INSERT`s), `OAuthStateStore.create` and `EmailOtpStore.upsert`
+  (each a `DELETE` followed by an `INSERT`), and `ChallengeStore.delete` and
+  `PendingMultiFactorStore.delete` (two `DELETE`s each) are **atomic** on D1:
+  one batch each.
 - `IdentifierStore.replace`, which email change uses, sends its claim of the
   new address and its release of the old one (a `DELETE … RETURNING` guarded on
   the old address) in one batch, so they commit together. Of two concurrent

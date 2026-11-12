@@ -277,6 +277,7 @@ const storeContract = (engine: StoreEngine): void => {
         "auth_sessions",
         "auth_user_roles",
         "auth_users",
+        "auth_webauthn_challenge_ceremonies",
         "auth_webauthn_challenges",
         "auth_webauthn_credentials",
       ]);
@@ -544,12 +545,14 @@ const storeContract = (engine: StoreEngine): void => {
           const store = yield* Auth.MultiFactor.ChallengeStore;
           yield* store.create({
             challenge: bytes,
+            ceremony: "registration",
             expiresAt: (yield* Clock.currentTimeMillis) + 60_000,
             userId: "user-1",
           });
           // create replaces an existing row for the same challenge
           yield* store.create({
             challenge: bytes,
+            ceremony: "authentication",
             expiresAt: (yield* Clock.currentTimeMillis) + 90_000,
           });
           const loaded = yield* store.get(bytes);
@@ -559,8 +562,30 @@ const storeContract = (engine: StoreEngine): void => {
         }),
       );
       expect(Array.from(result.loaded?.challenge ?? [])).toEqual([0, 1, 2, 250, 255]);
+      expect(result.loaded?.ceremony).toBe("authentication");
       expect(result.loaded?.userId).toBeUndefined();
       expect(result.missing).toBeNull();
+    });
+
+    it("ChallengeStore reads a challenge with no known ceremony as missing (#591)", async () => {
+      // A row written before `auth_webauthn_challenge_ceremonies` existed, and
+      // one whose ceremony the core does not know: neither ceremony redeems them.
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const store = yield* Auth.MultiFactor.ChallengeStore;
+          const expiresAt = (yield* Clock.currentTimeMillis) + 60_000;
+          yield* sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
+            VALUES ('AQID', ${expiresAt}, 'victim'), ('BAUG', ${expiresAt}, NULL)`;
+          yield* sql`INSERT INTO auth_webauthn_challenge_ceremonies (challenge, ceremony)
+            VALUES ('BAUG', 'login')`;
+          return [
+            yield* store.get(new Uint8Array([1, 2, 3])),
+            yield* store.get(new Uint8Array([4, 5, 6])),
+          ];
+        }),
+      );
+      expect(result).toEqual([null, null]);
     });
 
     it("CredentialStore roundtrips credentials incl. transports and getByCredentialId", async () => {
@@ -1508,6 +1533,7 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.userStoreConformance({ seedUser }),
       Testing.identifierStoreConformance({ seedUser }),
       Testing.apiKeyStoreConformance({ seedUser }),
+      Testing.challengeStoreConformance(),
     ];
     Arr.forEach(suites, (suite) => {
       describe(`${suite.contract} conformance`, () => {
