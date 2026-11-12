@@ -1,6 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Clock, Context, Effect, MutableHashMap, Result } from "effect";
-import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -12,6 +11,7 @@ import {
   type ApiKeyConfig,
 } from "./ApiKey.ts";
 import * as ApiKey from "./ApiKey.ts";
+import { memoryApiKeyStore } from "./testing/index.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
 import * as RateLimit from "./RateLimit.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -22,38 +22,7 @@ import * as Policy from "./Policy.ts";
 const apiKeys = MutableHashMap.empty<string, ApiKeyRecord>();
 const rateLimitEntries = MutableHashMap.empty<string, RateLimitEntry>();
 
-const apiKeyStore = {
-  create: (apiKey: ApiKeyRecord) =>
-    Effect.sync(() => {
-      MutableHashMap.set(apiKeys, apiKey.id, apiKey);
-      return apiKey;
-    }),
-
-  get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(apiKeys, id))),
-
-  getByHash: (keyHash: string) =>
-    Effect.sync(() => {
-      return Option.getOrNull(
-        Arr.findFirst(MutableHashMap.values(apiKeys), (apiKey) => apiKey.keyHash === keyHash),
-      );
-    }),
-
-  update: (apiKey: ApiKeyRecord) =>
-    Effect.sync(() => {
-      MutableHashMap.set(apiKeys, apiKey.id, apiKey);
-      return apiKey;
-    }),
-
-  delete: (id: string) =>
-    Effect.sync(() => {
-      MutableHashMap.remove(apiKeys, id);
-    }),
-
-  listByUserId: (userId: string) =>
-    Effect.sync(() =>
-      Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((apiKey) => apiKey.userId === userId),
-    ),
-};
+const apiKeyStore = memoryApiKeyStore(apiKeys);
 
 const rateLimitStore = {
   get: (key: string) =>

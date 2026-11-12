@@ -308,6 +308,20 @@ The store-contract conformance suites (`sessionStoreConformance`, `userStoreConf
 
 `memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`, which it also provides with its `KeyValueStoreKeys` listing so `purgeExpiredKV` runs against it. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
 
+`sessionServiceLayer({ users, config? })` provides `SessionService` (plus its `SessionStore` and `UserStore`) over a `UserStore` seeded with `users` (any iterable of `User`, e.g. `fixtureUser()`s), an empty session store and `Hooks.Default`. `config` defaults to `defaultSessionConfig`: a 24 hour `activePeriod` and a 1 hour `idlePeriod`. `apiKeyServiceLayer({ keys?, config? })` provides `ApiKeyService` (plus its `ApiKeyStore` and `RateLimitStore`) over a `memoryApiKeyStore` seeded with `keys` and an in-memory `RateLimiter`, so `verifyWithRateLimit` works; `config` is `ApiKeyService.layer`'s own. Each build starts from fresh state, and `memoryApiKeyStore(keys?)` is also exported on its own (and part of `memoryStores`).
+
+```ts
+const program = Effect.gen(function* () {
+  const sessions = yield* Auth.SessionService;
+  const session = yield* sessions.createSession(ada.id);
+  yield* sessions.validateSession(session.id);
+  yield* sessions.invalidateSession(session.id); // validateSession now fails
+});
+await Effect.runPromise(
+  program.pipe(Effect.provide(Testing.sessionServiceLayer({ users: [ada] }))),
+);
+```
+
 ## Passwords
 
 ```typescript
