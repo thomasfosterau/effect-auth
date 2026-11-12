@@ -7,8 +7,8 @@ name: CI
 # audit, then the alchemy runtime suites. The task graph lives in
 # vite.config.ts / vite.tasks.ts, not in GitHub Actions `needs:`.
 #
-# `ci` is the one job to require in branch protection: it passes only when
-# every matrix leg of `test` passed.
+# Branch protection requires each matrix leg by name: `ci (node lts)` and
+# `ci (node latest)`. There is no aggregate job.
 
 on:
   pull_request:
@@ -24,7 +24,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  test:
+  ci:
     name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -86,19 +86,3 @@ jobs:
 
       - name: CI
         run: vp run ci
-
-  ci:
-    name: ci
-    needs: [test]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Every matrix leg passed
-        env:
-          TEST_RESULT: ${{ needs.test.result }}
-        run: |
-          echo "test: $TEST_RESULT"
-          test "$TEST_RESULT" = "success"
