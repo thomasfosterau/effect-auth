@@ -2724,11 +2724,14 @@ export const organizationsGroupLayer = (
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("listInvitations", ({ params, request }) =>
-        Effect.gen(function* () {
-          const { org } = yield* actor(request);
-          const invitations = yield* storeFailure(org.listInvitations(params.id));
-          return Handlers.collection(invitations.map(invitationResource));
-        }).pipe(JsonApiErrors.mapHttpErrors),
+        // `invitation:create`, as `invite` takes (#715): a stranger, a member
+        // without it and an unknown id all answer the same `403`.
+        asOrganizationActor(request, cfg, (org, actorId) =>
+          org.listInvitations(actorId, params.id),
+        ).pipe(
+          Effect.map((invitations) => Handlers.collection(invitations.map(invitationResource))),
+          JsonApiErrors.mapHttpErrors,
+        ),
       )
       .handle("invite", ({ params, payload, request }) =>
         Effect.gen(function* () {
@@ -3064,18 +3067,10 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
           const { status, token } = payload.data.attributes ?? {};
           const answer = { invitationId: params.id, token };
           if (status === "accepted") {
-            const member = yield* refusedBadRequest(
+            const { member, invitation } = yield* refusedBadRequest(
               org.acceptInvitation(actorId, { ...answer, currentSessionId: resolved.session.id }),
             );
-            const invitations = yield* storeFailure(org.listInvitations(member.organizationId));
-            const accepted = Arr.findFirst(
-              invitations,
-              (invitation) => invitation.id === params.id,
-            );
-            if (Option.isNone(accepted)) {
-              return yield* new S.NotFound({ message: "Invitation not found" });
-            }
-            return Handlers.data(invitationResource(accepted.value), {
+            return Handlers.data(invitationResource(invitation), {
               meta: { membership: memberResource(member) },
             });
           }

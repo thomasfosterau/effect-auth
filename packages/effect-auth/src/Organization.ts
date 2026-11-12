@@ -753,6 +753,17 @@ export interface FullOrganization {
 }
 
 /**
+ * What accepting an invitation answers: the membership it created and the
+ * invitation as stored after the answer (status `accepted`). The invitation
+ * comes back here because the invitee cannot read it through
+ * `listInvitations`, which takes `invitation:create` (#715).
+ */
+export interface AcceptedInvitation {
+  readonly member: Member;
+  readonly invitation: Invitation;
+}
+
+/**
  * Organization service
  */
 export class OrganizationService extends Context.Service<
@@ -869,11 +880,13 @@ export class OrganizationService extends Context.Service<
      * sessions are revoked (all of them without `currentSessionId`) before
      * the identifier is marked verified, so whoever signed up with the
      * address unproven no longer holds the account.
+     *
+     * Answers the new membership with the accepted invitation (#715).
      */
     readonly acceptInvitation: (
       userId: string,
       input: AcceptInvitationInput,
-    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+    ) => Effect.Effect<AcceptedInvitation, OrganizationError | Errors.AuthError>;
 
     /**
      * Reject a pending invitation addressed to one of the user's email
@@ -896,11 +909,17 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
-     * List all invitations for an organization (any status).
+     * List all invitations for an organization (any status). Requires the
+     * `invitation:create` permission, as issuing one does (#715): the list
+     * carries every invitee's email, role and inviter. A non-member, a
+     * member without the permission and an organization that does not exist
+     * are refused with the same `OrganizationError`, so the refusal does not
+     * tell which organization ids exist.
      */
     readonly listInvitations: (
+      actorId: string,
       organizationId: string,
-    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+    ) => Effect.Effect<ReadonlyArray<Invitation>, OrganizationError | Errors.AuthError>;
 
     /**
      * List pending, unexpired invitations addressed to an email.
@@ -2028,8 +2047,8 @@ export const make = (
         }
 
         const member = yield* createMembership(invitation.organizationId, userId, invitation.role);
-        yield* store.updateInvitation({ ...invitation, status: "accepted" });
-        return member;
+        const accepted = yield* store.updateInvitation({ ...invitation, status: "accepted" });
+        return { member, invitation: accepted };
       }),
 
       rejectInvitation: Effect.fn("OrganizationService.rejectInvitation")(function* (
@@ -2086,8 +2105,12 @@ export const make = (
       }),
 
       listInvitations: Effect.fn("OrganizationService.listInvitations")(function* (
+        actorId: string,
         organizationId: string,
       ) {
+        // The permission that issues invitations reads them (#715). An unknown
+        // organization has no member, so it is refused exactly as a stranger is.
+        yield* requireMemberPermission(actorId, organizationId, "invitation:create");
         return yield* store.listInvitationsByOrganization(organizationId);
       }),
 

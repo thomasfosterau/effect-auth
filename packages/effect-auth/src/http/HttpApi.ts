@@ -915,7 +915,9 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  * - `GET /organizations/:id/members` · `POST /organizations/:id/members`: its
  *   memberships, and add one directly (`member:create`).
  * - `GET /organizations/:id/invitations` · `POST /organizations/:id/invitations`:
- *   its invitations, and invite someone by email (`invitation:create`).
+ *   its invitations, and invite someone by email (both `invitation:create`;
+ *   a non-member and an unknown id get the same `403` as a member without
+ *   it, #715).
  * - `GET /organizations/:id/domains` · `POST /organizations/:id/domains`: its
  *   email-domain claims (any member), and claim one (`domain:manage`).
  * - `GET /organizations/:id/roles` · `POST /organizations/:id/roles`: its
