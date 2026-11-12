@@ -1,5 +1,29 @@
 # @thomasfosterau/effect-auth-argon2
 
+## 0.2.0
+
+### Minor Changes
+
+- 32194a7: Bound the costs `verify` will run for a stored hash (#752, security). This is a breaking change on 0.x: some stored hashes that verified before are now refused, the constructors can throw, and there are new exports.
+  
+  `verify` read `m`, `t` and `p` from the stored PHC string and ran any positive value, so a corrupt or attacker-written hash (through a store-level compromise or a bring-your-own store bug) could demand gigabytes of memory or billions of iterations on the next sign-in; since the wasm memory is kept for the isolate's life, on Workers that killed the isolate for every request it served. `verify` now refuses, with a `HashingError` and before the kernel runs:
+  
+  - a stored hash over a ceiling set by three new options: `maxMemoryKiB` (default `131072`, 128 MiB), `maxIterations` (default `10`) and `maxParallelism` (default `8`), named as in `@thomasfosterau/argon2`'s `verify`. The defaults sit above `serverProfile`, so every hash this package writes verifies; a hash written elsewhere with higher costs needs the ceiling raised;
+  - a stored hash whose parameter segment repeats a name or carries one other than `m`, `t` and `p` (`m=4294967295,m=256` used to read as `m=256`), so the ceiling always judges the costs the kernel would run;
+  - a stored hash longer than 512 characters, before it is copied into wasm memory (an honest one is at most about 210).
+  
+  `argon2Hasher` and `argon2HasherLayer` now throw a `RangeError` when a cost (`memoryCost`, `timeCost`, `parallelism`) or a limit is not a positive integer, or when the configured costs exceed the ceiling, since that hasher would write hashes it refuses to verify; raise the ceiling with the costs. New exports: `Argon2VerifyLimits`, `defaultVerifyLimits`, `resolveVerifyLimits`.
+
+### Patch Changes
+
+- 3233b1c: Hash and verify on Cloudflare Workers (#744). The hasher ran on `hash-wasm`, which compiles its wasm lazily on the first hash; workerd refuses wasm compilation inside a request, so every sign-up and sign-in on a deployed Worker failed with `CompileError: WebAssembly.compile(): Wasm code generation disallowed by embedder`. The backend is now the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2` 0.1.1, embedded as a base64 string and compiled once at module scope, and `hash-wasm` is no longer a dependency. The API, the PHC format and the defaults (`m=19456,t=2,p=1`, 16-byte salt, 32-byte digest) are unchanged, and hashes written by 0.1.x verify.
+  
+  A Worker needs a compatibility date of 2025-06-01 or later, or the `allow_eval_during_startup` flag on an older one: before that date workerd refuses wasm compilation at startup too, and the Worker fails to start. Before 2026-08-04 it also needs `nodejs_compat`: this package imports no `node:` module, but `@thomasfosterau/effect-auth`'s root imports `node:crypto` (the README used to say no flag was needed). It needs no bundler configuration, since the wasm is not a `.wasm` import. The embedded wasm is `@thomasfosterau/argon2`'s (MIT); the RustCrypto crates it is compiled from are MIT OR Apache-2.0. A stored hash whose salt is longer than 48 bytes or whose digest is longer than 64 bytes, which this package never wrote, is now a `HashingError` instead of verifying.
+- Updated dependencies [6a451ad]
+- Updated dependencies [6a451ad]
+- Updated dependencies [6a451ad]
+  - @thomasfosterau/effect-auth@0.5.1
+
 ## 0.1.4
 
 ### Patch Changes
