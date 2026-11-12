@@ -576,6 +576,12 @@ export const makeEmailVerificationStore: Effect.Effect<
         "emailVerification.deleteByUserId",
         sql`DELETE FROM auth_email_verifications WHERE user_id = ${userId}`,
       ),
+    getLatestByUserId: (userId) =>
+      firstRow(
+        "emailVerification.getLatestByUserId",
+        sql<EmailVerificationRow>`SELECT * FROM auth_email_verifications WHERE user_id = ${userId}
+            ORDER BY created_at DESC LIMIT 1`,
+      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
   } satisfies typeof Auth.Email.EmailVerificationStore.Service;
 });
 

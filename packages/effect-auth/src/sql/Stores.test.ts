@@ -172,6 +172,19 @@ const sqlite: StoreEngine = {
 // boot skips initdb and the migrations and stays well inside the hook timeout.
 // ---------------------------------------------------------------------------
 
+/** An email verification for `userId` created at `createdAt`, live for a day. */
+const verificationAt = (
+  token: string,
+  userId: string,
+  createdAt: number,
+): Auth.Email.EmailVerification => ({
+  token,
+  userId,
+  email: `${userId}@example.com`,
+  createdAt,
+  expiresAt: createdAt + 86_400_000,
+});
+
 /** The auth tables, in schema order, read from the DDL the stores ship with. */
 const authTables: ReadonlyArray<string> = schemaStatements.flatMap((statement) => {
   const name = /^CREATE TABLE IF NOT EXISTS (\w+)/.exec(statement)?.[1];
@@ -537,6 +550,24 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.deleted).toBeNull();
       expect(result.two).toBeNull();
       expect(result.three?.userId).toBe("user-2");
+    });
+
+    it("EmailVerificationStore reads a user's newest verification, and null for none (#682)", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.Email.EmailVerificationStore;
+          yield* store.create(verificationAt("ev-old", "user-1", 1_000));
+          yield* store.create(verificationAt("ev-new", "user-1", 3_000));
+          yield* store.create(verificationAt("ev-mid", "user-1", 2_000));
+          yield* store.create(verificationAt("ev-other", "user-2", 9_000));
+          return {
+            latest: yield* store.getLatestByUserId("user-1"),
+            none: yield* store.getLatestByUserId("user-3"),
+          };
+        }),
+      );
+      expect(result.latest?.token).toBe("ev-new");
+      expect(result.none).toBeNull();
     });
 
     it("ChallengeStore roundtrips challenge bytes (base64 TEXT)", async () => {

@@ -258,10 +258,12 @@ export const make = (
 
               // Unverified duplicate: resend to the holder (also invalidates
               // stale tokens, matching FIX 5 behaviour).
+              // Inside the resend cooldown the holder's outstanding link stands,
+              // and the answer is the same (#682).
               if (sendOnSignUp) {
-                yield* verification.resendVerification(existing.id, identifier.value, {
-                  offResponsePath: true,
-                });
+                yield* verification
+                  .resendVerification(existing.id, identifier.value, { offResponsePath: true })
+                  .pipe(Effect.catchTag("ResendTooSoonError", () => Effect.void));
               }
 
               // The caller has proven nothing about the address, so the answer
@@ -341,8 +343,11 @@ export const make = (
 
               // FIX 5: use resendVerification (which invalidates prior tokens
               // via deleteByUserId) instead of createVerification.
+              // Inside the resend cooldown the outstanding link stands (#682).
               if (sendOnSignIn) {
-                yield* verification.resendVerification(user.id, identifier.value);
+                yield* verification
+                  .resendVerification(user.id, identifier.value)
+                  .pipe(Effect.catchTag("ResendTooSoonError", () => Effect.void));
               }
 
               return {
