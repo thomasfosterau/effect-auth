@@ -37,7 +37,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
-import { SqlClient } from "effect/sql";
+import { SqlClient, Statement } from "effect/sql";
 import * as Auth from "../index.ts";
 
 // ---------------------------------------------------------------------------
@@ -1202,42 +1202,114 @@ export interface PurgeExpiredResult {
  * now: the limiter then treats the key exactly as one it has never seen, so the
  * next request opens a fresh window either way. A row inside its window or
  * still blocked stays. Each table is one `DELETE`. Expiry is read from the
- * `Clock`.
+ * `Clock`. {@link purgeExpiredWith} is the same purge with a cap on the rows
+ * each table loses per run.
  */
 export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> =
   SqlClient.SqlClient.use((sql) =>
-    Clock.currentTimeMillis.pipe(
-      Effect.flatMap((now) =>
-        Effect.all(
-          {
-            magicLinks: allRows(
-              "purgeExpired.magicLinks",
-              sql<{
-                token: string;
-              }>`DELETE FROM auth_magic_links WHERE expires_at < ${now} RETURNING token`,
-            ),
-            emailOtps: allRows(
-              "purgeExpired.emailOtps",
-              sql<{
-                email: string;
-              }>`DELETE FROM auth_email_otps WHERE expires_at < ${now} RETURNING email`,
-            ),
-            rateLimits: allRows(
-              "purgeExpired.rateLimits",
-              sql<{
-                key: string;
-              }>`DELETE FROM auth_rate_limits WHERE reset_at <= ${now} AND (blocked_until IS NULL OR blocked_until <= ${now}) RETURNING key`,
-            ),
-          },
-          { concurrency: 1 },
-        ),
-      ),
-      Effect.map(({ magicLinks, emailOtps, rateLimits }) => ({
-        magicLinks: magicLinks.length,
-        emailOtps: emailOtps.length,
-        rateLimits: rateLimits.length,
-      })),
-    ),
+    Clock.currentTimeMillis.pipe(Effect.flatMap((now) => purgeTables(sql, now, undefined))),
+  );
+
+/** Options for {@link purgeExpiredWith}. */
+export interface PurgeExpiredOptions {
+  /**
+   * The most rows the run deletes from each table (#729): at most `limit`
+   * magic links, `limit` email OTPs and `limit` rate-limit rows. A positive
+   * integer; omitted, every expired row goes, as {@link purgeExpired} does.
+   */
+  readonly limit?: number | undefined;
+}
+
+/**
+ * {@link purgeExpired} with options; requires `SqlClient`.
+ *
+ * With `limit`, each table's `DELETE` takes at most `limit` of its expired
+ * rows (`DELETE … WHERE key IN (SELECT key … WHERE <expired> LIMIT n)`, which
+ * SQLite, D1 and PostgreSQL all run), so one run's work is bounded: a Workers
+ * cron tick with a CPU budget calls it once per tick, or loops until every
+ * count in the result is `0`. Which expired rows a capped run takes is
+ * unspecified. Omitting `limit` is {@link purgeExpired} exactly. A `limit`
+ * that is not a positive integer fails with `AuthError` before any statement
+ * runs.
+ *
+ * @example
+ * ```ts
+ * import * as Sql from "@thomasfosterau/effect-auth/sql"
+ *
+ * // One bounded tick: at most 500 rows from each table.
+ * const tick = Sql.purgeExpiredWith({ limit: 500 })
+ * ```
+ */
+export const purgeExpiredWith = (
+  options?: PurgeExpiredOptions,
+): Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> => {
+  const limit = options?.limit;
+  if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0)) {
+    return Effect.fail(
+      new Auth.AuthError({
+        message: `purgeExpired limit must be a positive integer, got ${String(limit)}`,
+      }),
+    );
+  }
+  return SqlClient.SqlClient.use((sql) =>
+    Clock.currentTimeMillis.pipe(Effect.flatMap((now) => purgeTables(sql, now, limit))),
+  );
+};
+
+/**
+ * One table's purge: every row matching `expired`, or with `limit` at most
+ * that many of them, chosen by `key` (a column list, so a composite key
+ * compares as a row value). Returns how many rows went.
+ */
+const purgeTable = (
+  sql: SqlClient.SqlClient,
+  options: {
+    readonly label: string;
+    readonly table: string;
+    readonly key: string;
+    readonly expired: Statement.Fragment;
+    readonly limit: number | undefined;
+  },
+): Effect.Effect<number, Auth.AuthError> => {
+  const table = sql.literal(options.table);
+  const key = sql.literal(options.key);
+  const statement =
+    options.limit === undefined
+      ? sql`DELETE FROM ${table} WHERE ${options.expired} RETURNING ${key}`
+      : sql`DELETE FROM ${table} WHERE (${key}) IN (SELECT ${key} FROM ${table} WHERE ${options.expired} LIMIT ${options.limit}) RETURNING ${key}`;
+  return allRows(options.label, statement).pipe(Effect.map((rows) => rows.length));
+};
+
+const purgeTables = (
+  sql: SqlClient.SqlClient,
+  now: number,
+  limit: number | undefined,
+): Effect.Effect<PurgeExpiredResult, Auth.AuthError> =>
+  Effect.all(
+    {
+      magicLinks: purgeTable(sql, {
+        label: "purgeExpired.magicLinks",
+        table: "auth_magic_links",
+        key: "token",
+        expired: sql`expires_at < ${now}`,
+        limit,
+      }),
+      emailOtps: purgeTable(sql, {
+        label: "purgeExpired.emailOtps",
+        table: "auth_email_otps",
+        key: "email, purpose",
+        expired: sql`expires_at < ${now}`,
+        limit,
+      }),
+      rateLimits: purgeTable(sql, {
+        label: "purgeExpired.rateLimits",
+        table: "auth_rate_limits",
+        key: "key",
+        expired: sql`reset_at <= ${now} AND (blocked_until IS NULL OR blocked_until <= ${now})`,
+        limit,
+      }),
+    },
+    { concurrency: 1 },
   );
 
 // ---------------------------------------------------------------------------

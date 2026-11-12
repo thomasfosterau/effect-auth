@@ -35,7 +35,7 @@ import { conformance } from "./Conformance.ts";
  */
 class PurgeRateLimits extends Context.Service<
   PurgeRateLimits,
-  Effect.Effect<void, Auth.AuthError>
+  (options?: RateLimitStore.PurgeExpiredOptions) => Effect.Effect<void, Auth.AuthError>
 >()("@thomasfosterau/effect-auth-drizzle/testing/AuthStoresContract/PurgeRateLimits") {}
 
 /** Every store the suite exercises. */
@@ -64,8 +64,10 @@ export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, 
     IdentifierStore.layer(tables),
     Layer.effect(
       PurgeRateLimits,
-      Effect.map(Effect.context<DrizzleDatabase>(), (context) =>
-        RateLimitStore.purgeExpired(tables).pipe(Effect.provide(context)),
+      Effect.map(
+        Effect.context<DrizzleDatabase>(),
+        (context) => (options?: RateLimitStore.PurgeExpiredOptions) =>
+          RateLimitStore.purgeExpired(tables, options).pipe(Effect.provide(context)),
       ),
     ),
   );
@@ -287,14 +289,58 @@ const rateLimitCases = (label: string, run: Run): void => {
           const read = Effect.forEach(entries, (entry) => store.get(entry.key), {
             concurrency: 1,
           });
-          yield* yield* PurgeRateLimits;
+          const purge = yield* PurgeRateLimits;
+          yield* purge();
           const first = yield* read;
-          yield* yield* PurgeRateLimits;
+          yield* purge();
           return { first, second: yield* read };
         }).pipe(Effect.provide(TestClock.layer())),
       );
       expect(result.first).toEqual([null, null, null, entries[3], entries[4]]);
       expect(result.second).toEqual(result.first);
+    });
+
+    it("purgeExpired with a limit deletes at most that many rows per call, and repeated calls drain every spent row (#729)", async () => {
+      // The same fixed instant as the case above, so only this case's spent
+      // rows are spent at it.
+      const now = millis(0);
+      const spent = Array.from({ length: 5 }, (_, i): Auth.RateLimitEntry => ({
+        key: `ip:${uuid()}`,
+        count: 1,
+        resetAt: now - 60_000,
+        ...(i % 2 === 0 ? {} : { blockedUntil: now - 1 }),
+      }));
+      const kept: ReadonlyArray<Auth.RateLimitEntry> = [
+        { key: `ip:${uuid()}`, count: 2, resetAt: now + 60_000 },
+        { key: `ip:${uuid()}`, count: 9, resetAt: now - 60_000, blockedUntil: now + 60_000 },
+      ];
+      const all = [...spent, ...kept];
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          const purge = yield* PurgeRateLimits;
+          yield* Effect.forEach(all, (entry) => store.set(entry.key, entry, 60), {
+            concurrency: 1,
+            discard: true,
+          });
+          const spentLeft = Effect.map(
+            Effect.forEach(spent, (entry) => store.get(entry.key), { concurrency: 1 }),
+            (rows) => rows.filter((row) => row !== null).length,
+          );
+          const ticks = yield* Effect.forEach(
+            [1, 2, 3, 4],
+            () => Effect.andThen(purge({ limit: 2 }), spentLeft),
+            { concurrency: 1 },
+          );
+          const left = yield* Effect.forEach(all, (entry) => store.get(entry.key), {
+            concurrency: 1,
+          });
+          return { ticks, left };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.ticks).toEqual([3, 1, 0, 0]);
+      expect(result.left).toEqual([...spent.map(() => null), ...kept]);
     });
   });
 };

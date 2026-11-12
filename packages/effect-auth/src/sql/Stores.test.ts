@@ -965,6 +965,102 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.left).toEqual([null, null, null, entries[3], entries[4]]);
     });
 
+    it("purgeExpiredWith({ limit }) deletes at most limit rows per table per call, and repeated calls drain every expired row (#729)", async () => {
+      const now = 1_000_000;
+      const stale = Arr.makeBy(5, (i): Auth.RateLimitEntry => ({
+        key: `bounded-stale-${i}`,
+        count: 1,
+        resetAt: now - 60_000,
+        ...(i % 2 === 0 ? {} : { blockedUntil: now - 1 }),
+      }));
+      const kept: ReadonlyArray<Auth.RateLimitEntry> = [
+        { key: "bounded-open", count: 2, resetAt: now + 1 },
+        { key: "bounded-blocked", count: 9, resetAt: now - 60_000, blockedUntil: now + 1 },
+      ];
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          const links = yield* Auth.MagicLinkStore;
+          const otps = yield* Auth.Email.EmailOtpStore;
+          yield* Effect.forEach([...stale, ...kept], (entry) => store.set(entry.key, entry, 60), {
+            concurrency: 1,
+            discard: true,
+          });
+          yield* Effect.forEach(
+            Arr.range(0, 2),
+            (i) =>
+              links.create({
+                token: `bounded-link-${i}`,
+                email: `link-${i}@example.com`,
+                createdAt: 0,
+                expiresAt: now - 1,
+              }),
+            { concurrency: 1, discard: true },
+          );
+          // Two purposes for one address: the OTP key is (email, purpose).
+          yield* Effect.forEach(
+            ["sign-in", "forget-password", "email-verification"] as const,
+            (purpose) =>
+              otps.upsert({
+                email: "bounded@example.com",
+                otpHash: "hash",
+                purpose,
+                attempts: 0,
+                createdAt: 0,
+                expiresAt: now - 1,
+              }),
+            { concurrency: 1, discard: true },
+          );
+          const ticks = yield* Effect.forEach(
+            Arr.range(1, 4),
+            () => Sql.purgeExpiredWith({ limit: 2 }),
+            { concurrency: 1 },
+          );
+          const left = yield* Effect.forEach([...stale, ...kept], (entry) => store.get(entry.key), {
+            concurrency: 1,
+          });
+          return { ticks, left };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.ticks).toEqual([
+        { magicLinks: 2, emailOtps: 2, rateLimits: 2 },
+        { magicLinks: 1, emailOtps: 1, rateLimits: 2 },
+        { magicLinks: 0, emailOtps: 0, rateLimits: 1 },
+        { magicLinks: 0, emailOtps: 0, rateLimits: 0 },
+      ]);
+      expect(result.left).toEqual([...stale.map(() => null), ...kept]);
+    });
+
+    it("purgeExpiredWith() with no limit is purgeExpired, and a limit that is not a positive integer fails (#729)", async () => {
+      const now = 1_000_000;
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const store = yield* Auth.RateLimitStore;
+          yield* Effect.forEach(
+            Arr.range(0, 4),
+            (i) =>
+              store.set(
+                `unbounded-${i}`,
+                { key: `unbounded-${i}`, count: 1, resetAt: now - 1 },
+                60,
+              ),
+            { concurrency: 1, discard: true },
+          );
+          const unbounded = yield* Sql.purgeExpiredWith();
+          const refused = yield* Effect.forEach(
+            [0, -1, 1.5, Number.NaN],
+            (limit) => Effect.flip(Sql.purgeExpiredWith({ limit })),
+            { concurrency: 1 },
+          );
+          return { unbounded, refused: refused.map((error) => error._tag) };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.unbounded).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 5 });
+      expect(result.refused).toEqual(["AuthError", "AuthError", "AuthError", "AuthError"]);
+    });
+
     it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {
       const record: Auth.MultiFactor.MultiFactorRecord = {
         userId: "user-1",
