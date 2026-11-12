@@ -36,7 +36,10 @@
  *
  * @module session-resolution
  */
-import { Array as Arr, Cause, Effect, HashMap, Option, Predicate } from "effect";
+import { Cause, Effect, HashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { identity } from "effect/Function";
 import type { CredentialClass } from "./Authorizer.ts";
 import * as Observability from "./Observability.ts";
@@ -99,7 +102,7 @@ type HeaderRecord = Record<string, string | ReadonlyArray<string> | undefined>;
 // A Web `Headers` (native or polyfilled) has a `get` method; a plain header
 // record has no `get` key (it is not an HTTP header name).
 const isWebHeaders = (headers: Headers | HeaderRecord): headers is Headers =>
-  Predicate.hasProperty(headers, "get");
+  P.hasProperty(headers, "get");
 
 const headerGetter = (
   headers: Headers | HeaderRecord,
@@ -107,7 +110,7 @@ const headerGetter = (
   if (isWebHeaders(headers)) return (name) => headers.get(name);
   return (name) => {
     const value = headers[name.toLowerCase()];
-    return Predicate.isString(value) || Predicate.isUndefined(value) ? value : value[0];
+    return P.isString(value) || P.isUndefined(value) ? value : value[0];
   };
 };
 
@@ -409,7 +412,7 @@ export interface ResolveOptions<E, R> {
 }
 
 const isPresent = (credential: CredentialPresence | boolean): boolean =>
-  Predicate.isBoolean(credential) ? credential : credential.present;
+  P.isBoolean(credential) ? credential : credential.present;
 
 const report = (outcome: AuthOutcome): Effect.Effect<void> =>
   Effect.andThen(
@@ -485,7 +488,8 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Option } from "effect"
+ * import { Effect } from "effect"
+ * import * as Option from "effect/Option"
  * import { SessionCookies, SessionResolution, type SessionWithUser } from "@thomasfosterau/effect-auth"
  *
  * const now = new Date()

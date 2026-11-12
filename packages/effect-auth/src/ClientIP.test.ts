@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Option, Record as Rec } from "effect";
+import { Effect } from "effect";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import { HttpServerRequest } from "effect/http";
 import {
   ClientIP,
@@ -382,7 +384,7 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
     const headers = new Headers();
     headers.append("cf-connecting-ip", "203.0.113.7");
     headers.append("cf-connecting-ip", "6.6.6.6");
-    expect(resolveClientIP(edge(Rec.fromEntries(headers)), ClientIP.cloudflare)).toBe("10.0.0.50");
+    expect(resolveClientIP(edge(R.fromEntries(headers)), ClientIP.cloudflare)).toBe("10.0.0.50");
   });
 
   it("reads only an own header property, never an inherited one", () => {

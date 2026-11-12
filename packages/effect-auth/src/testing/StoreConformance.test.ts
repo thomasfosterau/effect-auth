@@ -4,15 +4,9 @@
  * the same suites over SQLite and PostgreSQL (`packages/effect-auth/src/sql/Stores.test.ts`).
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Effect,
-  Layer,
-  MutableHashMap,
-  MutableHashSet,
-  Option,
-  Result,
-} from "effect";
+import { Effect, Layer, MutableHashMap, MutableHashSet, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { KeyValueStore } from "effect/persistence";
 import * as ApiKey from "../ApiKey.ts";
 import * as Errors from "../Errors.ts";

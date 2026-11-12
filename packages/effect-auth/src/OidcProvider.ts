@@ -17,21 +17,12 @@
  *
  * @module oidc-provider
  */
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Data,
-  Effect,
-  HashMap,
-  Layer,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Record as Rec,
-  Redacted,
-  String as Str,
-} from "effect";
+import { Clock, Context, Data, Effect, HashMap, Layer, MutableHashMap, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Str from "effect/String";
 import { Digest, SecureRandom } from "effect/crypto";
 import { Base64Url, Hex } from "effect/encoding";
 import { AuthError } from "./Errors.ts";
@@ -668,7 +659,7 @@ const secretEquals = (a: string, b: string): boolean =>
 /** Append query parameters to a URL that may already carry a query string. */
 const buildRedirect = (base: string, params: Record<string, string | undefined>): string => {
   const url = new URL(base);
-  Rec.toEntries(params).forEach(([key, value]) => {
+  R.toEntries(params).forEach(([key, value]) => {
     if (value !== undefined) url.searchParams.set(key, value);
   });
   return url.toString();
@@ -1071,7 +1062,7 @@ export const make = (
           description: "A valid initial access token is required to register a client",
         });
         if (token === undefined) return yield* invalid;
-        const ok = Predicate.isFunction(required)
+        const ok = P.isFunction(required)
           ? yield* required(token)
           : secretEquals(token, Redacted.value(required));
         if (!ok) return yield* invalid;
@@ -1167,7 +1158,7 @@ export const make = (
       Effect.gen(function* () {
         if (dcr?.policy === undefined) return allowRegistration;
         const verdict = yield* dcr.policy(metadata);
-        const disposition: OidcRegistrationDisposition = Predicate.isBoolean(verdict)
+        const disposition: OidcRegistrationDisposition = P.isBoolean(verdict)
           ? { allow: verdict }
           : verdict;
         if (!disposition.allow) {

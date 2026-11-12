@@ -12,7 +12,10 @@
  * every flow that resolves "who owns this email/username/phone" goes through
  * the {@link IdentifierStore}.
  */
-import { Array as Arr, Context, Data, Effect, MutableHashMap, Option, Order, Schema } from "effect";
+import { Context, Data, Effect, MutableHashMap, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Errors from "./Errors.ts";
 import * as Types from "./Types.ts";
 

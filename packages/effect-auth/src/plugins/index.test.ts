@@ -1,4 +1,5 @@
-import { Array as Arr, Order, Struct } from "effect";
+import { Order, Struct } from "effect";
+import * as Arr from "effect/Array";
 import { describe, it, expect, expectTypeOf } from "vite-plus/test";
 import * as Auth from "../index.ts";
 import * as PluginsCluster from "./index.ts";

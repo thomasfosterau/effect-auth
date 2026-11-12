@@ -1,18 +1,9 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Effect,
-  Exit,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Predicate,
-  Schema,
-  Struct,
-  Types,
-} from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Path, Struct, Types } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Entity from "../Entity.ts";
@@ -161,7 +152,7 @@ describe("makeAuthorizationMiddleware – deny path", () => {
     const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(runGate(Guard, { principal: bob }).pipe(Effect.flip));
     expect(error._tag).toBe("Forbidden");
-    expect(Predicate.isString(error.message)).toBe(true);
+    expect(P.isString(error.message)).toBe(true);
     expect(error).not.toHaveProperty("decision");
     expect(error).not.toHaveProperty("determining");
     expect(error).not.toHaveProperty("outcomes");

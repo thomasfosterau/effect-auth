@@ -1,5 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Exit, Layer, Option, Predicate, Redacted } from "effect";
+import { DateTime, Effect, Exit, Layer, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import type * as Types from "../Types.ts";
@@ -427,8 +430,7 @@ const viewerRole = Effect.map(
   SessionContext.currentUserOption,
   Option.match({
     onNone: () => "anonymous",
-    onSome: (user) =>
-      Predicate.isString(user.attributes.email) ? user.attributes.email : "unknown",
+    onSome: (user) => (P.isString(user.attributes.email) ? user.attributes.email : "unknown"),
   }),
 );
 

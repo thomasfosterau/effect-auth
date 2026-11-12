@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, Logger, MutableHashMap, Schema } from "effect";
+import { DateTime, Effect, Layer, Logger, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import {
   EmailSender,
   SmsSender,

@@ -10,7 +10,8 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { DateTime, Effect, Layer, Predicate } from "effect";
+import { DateTime, Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { defineSchema } from "./Columns.ts";
@@ -190,7 +191,7 @@ const withDatabase = async <A>(
 
 describe("promoted attributes", () => {
   it("rejects a promoted column that does not read back as an attribute value", () => {
-    expect(Predicate.isFunction(promotedRejects)).toBe(true);
+    expect(P.isFunction(promotedRejects)).toBe(true);
   });
 
   it("presents each promoted column in user.attributes, with no attribute bag at all", async () => {

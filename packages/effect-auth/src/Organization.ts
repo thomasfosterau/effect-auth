@@ -43,18 +43,9 @@
  * @module organization
  */
 
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Data,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Order,
-  Result,
-} from "effect";
+import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";

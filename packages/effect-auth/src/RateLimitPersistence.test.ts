@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Duration, Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import * as RateLimitPersistence from "./RateLimitPersistence.ts";
 import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.ts";

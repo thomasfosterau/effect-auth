@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Clock, DateTime, Effect, Layer, Order } from "effect";
+import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import * as Arr from "effect/Array";
 import { TestClock } from "effect/testing";
 import { KeyValueStore } from "effect/persistence";
 import * as PlatformCrypto from "./PlatformCrypto.ts";

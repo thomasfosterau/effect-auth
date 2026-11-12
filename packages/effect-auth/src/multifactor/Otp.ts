@@ -1,4 +1,8 @@
-import { Array as Arr, Clock, Data, Effect, Option, Predicate, String as Str } from "effect";
+import { Clock, Data, Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Str from "effect/String";
 import { SecureRandom } from "effect/crypto";
 import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
@@ -180,7 +184,7 @@ export const generateHotp = (
     const algorithm = config?.algorithm ?? "sha1";
 
     // Validate and decode secret if it's a string
-    if (Predicate.isString(secret)) {
+    if (P.isString(secret)) {
       const trimmed = secret.trim();
       if (Str.isEmpty(trimmed)) {
         return yield* new Errors.HashingError({
@@ -190,7 +194,7 @@ export const generateHotp = (
     }
 
     // Decode secret if it's a string
-    const secretBuffer = Predicate.isString(secret) ? yield* decodeBase32(secret) : secret;
+    const secretBuffer = P.isString(secret) ? yield* decodeBase32(secret) : secret;
 
     // Validate buffer is not empty
     if (secretBuffer.byteLength === 0) {
@@ -344,7 +348,7 @@ export const generateOtpUri = (params: OtpUriParams): string => {
   const { type, label, issuer, secret, counter, period, digits, algorithm } = params;
 
   // Validate secret is a valid base32 string
-  if (!Predicate.isString(secret)) {
+  if (!P.isString(secret)) {
     throw new OtpUriError({ message: "Secret must be a string" });
   }
   const trimmed = secret.trim();

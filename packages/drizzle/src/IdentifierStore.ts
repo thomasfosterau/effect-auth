@@ -28,17 +28,10 @@
  */
 
 import { and, asc, eq, inArray, or } from "drizzle-orm";
-import {
-  Array as Arr,
-  Effect,
-  Exit,
-  HashMap,
-  Layer,
-  Option,
-  Record as Rec,
-  Request,
-  RequestResolver,
-} from "effect";
+import { Effect, Exit, HashMap, Layer, Request, RequestResolver } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   type IdentifierColumns,
@@ -263,7 +256,7 @@ export const makeByValueResolver = (
       Effect.gen(function* () {
         const byType = Arr.groupBy(entries, (entry): string => entry.request.type);
 
-        const clauses = Rec.collect(byType, (_type, group) =>
+        const clauses = R.collect(byType, (_type, group) =>
           and(
             eq(column.type, group[0].request.type),
             inArray(column.value, Arr.dedupe(group.map((entry) => entry.request.value))),
@@ -323,14 +316,14 @@ export const makeByUserResolver = (
             .execute(),
         );
 
-        const byUser = Rec.map(
+        const byUser = R.map(
           Arr.groupBy(rows, (row) => row.userId),
           (userRows) => userRows.map(toIdentifier),
         );
 
         Arr.forEach(entries, (entry) =>
           entry.completeUnsafe(
-            Exit.succeed(Option.getOrElse(Rec.get(byUser, entry.request.userId), () => [])),
+            Exit.succeed(Option.getOrElse(R.get(byUser, entry.request.userId), () => [])),
           ),
         );
       }),

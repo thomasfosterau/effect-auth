@@ -1,6 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import {
-  Array as Arr,
   Cause,
   Config,
   ConfigProvider,
@@ -9,8 +8,9 @@ import {
   MutableHashSet,
   Order,
   Redacted,
-  Schema,
 } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import { jwtServiceConfig } from "./Jwt.ts";
 import { trustedDeviceConfig } from "./TrustedDevice.ts";

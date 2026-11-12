@@ -7,7 +7,10 @@
  * either as a raw space-delimited string or as any iterable of scope strings.
  */
 
-import { Array as Arr, Effect, Predicate, String as Str } from "effect";
+import { Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Str from "effect/String";
 import * as Errors from "../Errors.ts";
 
 /**
@@ -25,7 +28,7 @@ export const formatScopes = (scopes: Iterable<string>): string => [...scopes].jo
 // The granted scopes, deduplicated in first-seen order (the order
 // `grantedScopes` reports them in).
 const toScopeList = (granted: string | Iterable<string>): ReadonlyArray<string> =>
-  Arr.dedupe(Predicate.isString(granted) ? parseScopes(granted) : granted);
+  Arr.dedupe(P.isString(granted) ? parseScopes(granted) : granted);
 
 /**
  * Check whether the granted scopes include the required scope.

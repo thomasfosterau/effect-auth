@@ -1,5 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Order, Predicate, Record as Rec } from "effect";
+import { Effect, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Rbac from "./Rbac.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
@@ -43,7 +46,7 @@ describe("RBAC as policy-kernel sugar", () => {
       const built = Rbac.policies(config);
 
       expect(built).toHaveLength(3);
-      expect(built.every((policy) => Predicate.isTagged(policy, "DeclarativePolicy"))).toBe(true);
+      expect(built.every((policy) => P.isTagged(policy, "DeclarativePolicy"))).toBe(true);
       expect(built.every((policy) => policy.effect === "permit")).toBe(true);
       expect(
         Arr.sort(
@@ -176,12 +179,8 @@ describe("RBAC as policy-kernel sugar", () => {
     it("declares every non-wildcard resource type and action", () => {
       const declared = Rbac.model(config);
 
-      expect(Arr.sort(Rec.keys(declared.entities), Order.String)).toEqual([
-        "Role",
-        "User",
-        "posts",
-      ]);
-      expect(Arr.sort(Rec.keys(declared.actions), Order.String)).toEqual(["read", "update"]);
+      expect(Arr.sort(R.keys(declared.entities), Order.String)).toEqual(["Role", "User", "posts"]);
+      expect(Arr.sort(R.keys(declared.actions), Order.String)).toEqual(["read", "update"]);
       expect(declared.actions["read"]).toEqual({
         appliesTo: { principal: ["User"], resource: ["posts"] },
       });

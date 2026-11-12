@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect } from "effect";
+import { Effect } from "effect";
+import * as Arr from "effect/Array";
 import { ARGON2ID } from "./index.ts";
 import * as Argon2 from "./index.ts";
 import { Password } from "@thomasfosterau/effect-auth";

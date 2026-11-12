@@ -9,7 +9,9 @@
 
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
-import { Array as Arr, Effect, Order, Predicate } from "effect";
+import { Effect, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import { SqlClient } from "effect/sql";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
 import { Condition, Entity, Policy, ReadScope } from "../index.ts";
@@ -130,7 +132,7 @@ const compiled = (viewer: string | null): ReadScope.ReadScope => {
     action: Entity.ref("Action", "read"),
     slice: Entity.slice([principal]),
   });
-  assert(Predicate.isTagged(result, "Exact"));
+  assert(P.isTagged(result, "Exact"));
   return result.scope;
 };
 
@@ -203,8 +205,7 @@ const expected = (scope: ReadScope.ReadScope, viewer: string | null, withSets: b
         ReadScope.matches(
           withSets ? scope : ReadScope.withoutSets(scope, () => false),
           { owner: row.owner, visibility: row.visibility, draft: row.draft, score: row.score },
-          (_set, value) =>
-            viewer !== null && Predicate.isString(value) && followsEdge(viewer, value),
+          (_set, value) => viewer !== null && P.isString(value) && followsEdge(viewer, value),
         ),
       ),
       (row) => row.id,
@@ -223,10 +224,10 @@ describe("readScopeWhere over PostgreSQL (PGlite)", () => {
   it("is AllowAll-with-forbids for the moderator and a bounded filter for everyone else", () => {
     // The moderator's permit is unconditional, so only the forbid remains.
     const moderator = compiled("u-moderator");
-    assert(Predicate.isTagged(moderator, "Filter"));
+    assert(P.isTagged(moderator, "Filter"));
     expect(ReadScope.attributes(moderator.predicate)).toEqual(["score"]);
     const member = compiled("u-member");
-    assert(Predicate.isTagged(member, "Filter"));
+    assert(P.isTagged(member, "Filter"));
     expect(member.sets).toEqual(["following"]);
   });
 

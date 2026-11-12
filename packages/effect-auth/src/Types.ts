@@ -6,7 +6,7 @@
  * type, runtime validation, and JSON serialization used by stores and the
  * HTTP protocol layer. Configuration shapes remain plain interfaces.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 /**
  * Any JSON value: `null`, a number, a boolean, a string, a readonly array of

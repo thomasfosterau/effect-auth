@@ -1,19 +1,10 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
-import {
-  Array as Arr,
-  Context,
-  DateTime,
-  Duration,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Result,
-  Tracer,
-} from "effect";
+import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Result, Tracer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -835,7 +826,7 @@ describe("EmailOtpService", () => {
       Arr.forEach([known[1], unknown[1]], (result) => {
         expect(result._tag).toBe("Failure");
         assert(Result.isFailure(result));
-        assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
+        assert(P.isTagged(result.failure, "ResendTooSoonError"));
         expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
         expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
       });

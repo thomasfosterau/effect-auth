@@ -12,18 +12,11 @@
  * every viewer.
  */
 import { describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Context,
-  DateTime,
-  Effect,
-  Exit,
-  Layer,
-  Logger,
-  Option,
-  Record as Rec,
-  Schema,
-} from "effect";
+import { Context, DateTime, Effect, Exit, Layer, Logger } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -225,7 +218,7 @@ describe("guards and the policy kernel", () => {
   });
 
   it("each gate and its predicate agree on every viewer and every axis", () => {
-    Arr.forEach(Rec.values(Axes), (axis) => {
+    Arr.forEach(R.values(Axes), (axis) => {
       Arr.forEach(viewers, (viewer) => {
         const gateAdmits = Exit.isSuccess(runGate(guards.requireRoleAtLeast(axis), viewer));
         expect(run(guards.hasRoleAtLeast(axis), viewer)).toBe(gateAdmits);
@@ -266,7 +259,7 @@ describe("guards and the policy kernel", () => {
     const doc = Entity.entity(Entity.ref("Owned", "doc-1"), {
       attributes: { owner: Entity.entityValue(Entity.ref("User", member.id)) },
     });
-    Arr.forEach(Rec.values(Axes), (axis) => {
+    Arr.forEach(R.values(Axes), (axis) => {
       Arr.forEach(viewers, (viewer) => {
         if (viewer === null) return;
         expect(decideWithAuthorizer(viewer, guards.policies.roleAtLeast(axis), doc)).toBe(

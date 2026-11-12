@@ -1,5 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { ConfigProvider, Data, Effect, Layer, Predicate, Redacted, Schema } from "effect";
+import { ConfigProvider, Data, Effect, Layer, Redacted } from "effect";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 import { defaultRender, layer, layerConfig, resendEmailSender } from "./index.ts";
 
@@ -23,10 +25,10 @@ const stubFetch = (
 ): { readonly fetch: typeof fetch; readonly calls: CapturedRequest[] } => {
   const calls: CapturedRequest[] = [];
   const fetchStub: typeof fetch = async (input, init) => {
-    const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
+    const url = P.isString(input) ? input : input instanceof URL ? input.href : input.url;
     const request = { url, init: init ?? {} };
     calls.push(request);
-    return Predicate.isFunction(response) ? response(request) : response;
+    return P.isFunction(response) ? response(request) : response;
   };
   return { fetch: fetchStub, calls };
 };

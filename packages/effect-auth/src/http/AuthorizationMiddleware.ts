@@ -204,7 +204,8 @@
  * @module http/authorization-middleware
  */
 
-import { Context, Effect, Layer, Predicate } from "effect";
+import { Context, Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { HttpApiMiddleware } from "effect/http-api";
 import { HttpRouter, HttpServerRequest } from "effect/http";
 import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../Authorizer.ts";
@@ -254,7 +255,7 @@ const resolveAuthorizeInput = <R>(
   input: AuthorizationMiddlewareInput<R>,
   request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<AuthorizeInput, never, R> => {
-  if (!Predicate.isFunction(input)) return Effect.succeed(input);
+  if (!P.isFunction(input)) return Effect.succeed(input);
   const result = input(request);
   return Effect.isEffect(result) ? result : Effect.succeed(result);
 };

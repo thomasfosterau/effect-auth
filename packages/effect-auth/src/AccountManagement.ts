@@ -12,7 +12,8 @@
  * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
-import { Array as Arr, Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";

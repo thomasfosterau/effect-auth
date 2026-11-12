@@ -9,7 +9,9 @@
  *
  * @module resend/resend
  */
-import { Array as Arr, Config, Data, Effect, Layer, Match, Redacted, Schema } from "effect";
+import { Config, Data, Effect, Layer, Match, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { AuthError, EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------

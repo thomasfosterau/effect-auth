@@ -4,17 +4,12 @@
  *
  * @module saml/verifier
  */
-import {
-  Array as Arr,
-  Clock,
-  DateTime,
-  Effect,
-  Layer,
-  Option,
-  Predicate,
-  Record as Rec,
-  String as Str,
-} from "effect";
+import { Clock, DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Str from "effect/String";
 import { Base64 } from "effect/encoding";
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from "@node-saml/node-saml";
 import type { Profile } from "@node-saml/node-saml";
@@ -47,8 +42,7 @@ const REQUEST_ONLY_IDP_CERT = "request-generation-only";
 const fail = (message: string, cause?: unknown): Effect.Effect<never, SamlError> =>
   Effect.fail(new SamlError({ message, ...(cause !== undefined && { cause }) }));
 
-const messageOf = (cause: unknown): string =>
-  Predicate.isError(cause) ? cause.message : String(cause);
+const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message : String(cause));
 
 // -----------------------------------------------------------------------------
 // Pre-flight checks on the raw document
@@ -153,7 +147,7 @@ interface XmlNode {
 }
 
 const isXmlNode = (value: XmlValue | XmlAttributes | undefined): value is XmlNode =>
-  Predicate.isObject(value);
+  P.isObject(value);
 
 /** Text-only elements (and stray nested lists) carry no attributes or children. */
 const emptyNode: XmlNode = {};
@@ -202,20 +196,17 @@ const NAME_KEYS = [
 type AttributeValue = string | ReadonlyArray<string>;
 
 const isAttributeValue = <A>(value: A): value is A & AttributeValue =>
-  Predicate.isString(value) || (Array.isArray(value) && value.every(Predicate.isString));
+  P.isString(value) || (Array.isArray(value) && value.every(P.isString));
 
 /** Narrow node-saml's loose `attributes` bag to strings and string arrays. */
 const normalizeAttributes = (profile: Profile): Readonly<Record<string, AttributeValue>> => {
   const raw = profile["attributes"];
-  return Predicate.isObject(raw) ? Rec.filter(raw, isAttributeValue) : {};
+  return P.isObject(raw) ? R.filter(raw, isAttributeValue) : {};
 };
 
 /** The value itself, or an array's first element, when it is a non-empty string. */
 const firstNonEmpty = (value: AttributeValue | undefined): Option.Option<string> =>
-  Option.filter(
-    Option.fromUndefinedOr(Predicate.isString(value) ? value : value?.[0]),
-    Str.isNonEmpty,
-  );
+  Option.filter(Option.fromUndefinedOr(P.isString(value) ? value : value?.[0]), Str.isNonEmpty);
 
 const pick = (
   attributes: Readonly<Record<string, AttributeValue>>,
@@ -450,7 +441,7 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     if (Arr.dedupe([...signedValues, ...documentValues]).length > 1) {
       return yield* fail("SAML response InResponseTo disagrees with the signed assertion");
     }
-    const responseInResponseTo = Predicate.isString(profile["inResponseTo"])
+    const responseInResponseTo = P.isString(profile["inResponseTo"])
       ? profile["inResponseTo"]
       : Arr.head(documentValues).pipe(Option.getOrUndefined);
     const inResponseTo = confirmation.inResponseTo ?? responseInResponseTo;

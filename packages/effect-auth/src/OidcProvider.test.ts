@@ -1,6 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import {
-  Array as Arr,
   Clock,
   DateTime,
   Effect,
@@ -8,12 +7,13 @@ import {
   Layer,
   MutableHashMap,
   MutableHashSet,
-  Option,
   Path,
-  Record as Rec,
   Redacted,
-  Schema,
 } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
@@ -1215,7 +1215,7 @@ const get = (
   options: { sessionId?: string; bearer?: string } = {},
 ): Request => {
   const url = new URL(`http://idp.test${path}`);
-  Arr.forEach(Rec.toEntries(query), ([k, v]) => {
+  Arr.forEach(R.toEntries(query), ([k, v]) => {
     url.searchParams.set(k, v);
   });
   return new Request(url, {

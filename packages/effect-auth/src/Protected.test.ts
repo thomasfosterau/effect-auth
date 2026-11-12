@@ -1,5 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Result, Schema } from "effect";
+import { Effect, Layer, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
 import { CurrentPrincipal, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";

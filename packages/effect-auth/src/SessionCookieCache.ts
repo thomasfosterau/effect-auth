@@ -43,18 +43,11 @@
  * Without `encrypt`, the cookie is signed but NOT encrypted: session and user
  * data (including any PII in `attributes`) is readable by the browser.
  */
-import {
-  Array as Arr,
-  Data,
-  DateTime,
-  Effect,
-  HashSet,
-  Option,
-  Record as Rec,
-  Redacted,
-  Result,
-  Schema,
-} from "effect";
+import { Data, DateTime, Effect, HashSet, Redacted, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { Base64Url } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
@@ -188,7 +181,7 @@ export const sessionCacheGateAttributes: Effect.Effect<HashSet.HashSet<string>> 
 );
 
 const holdsGateAttribute = (user: Types.User, gate: HashSet.HashSet<string>): boolean =>
-  Arr.some(Rec.keys<string, Types.Json>(user.attributes), (key) => HashSet.has(gate, key));
+  Arr.some(R.keys<string, Types.Json>(user.attributes), (key) => HashSet.has(gate, key));
 
 // `Schema.Unknown` passes the payload through untouched, so encoding is exactly
 // `JSON.stringify`; decoding parses and validates in one step.

@@ -1,17 +1,10 @@
 import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  DateTime,
-  Effect,
-  Predicate,
-  Redacted,
-  Result,
-  Schema,
-} from "effect";
+import { Clock, Context, DateTime, Effect, Redacted, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { SecureRandom } from "effect/crypto";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
@@ -570,10 +563,7 @@ describe("RemoteJwksVerifier", () => {
     await new Promise<void>((resolve) => server.listen(0, () => resolve()));
     const addr = server.address();
     // A server listening on a TCP port reports an `AddressInfo`.
-    assert(
-      Predicate.isNotNull(addr) && !Predicate.isString(addr),
-      "the JWKS server listens on a port",
-    );
+    assert(P.isNotNull(addr) && !P.isString(addr), "the JWKS server listens on a port");
     jwksUrl = `http://127.0.0.1:${addr.port}/.well-known/jwks.json`;
   });
 

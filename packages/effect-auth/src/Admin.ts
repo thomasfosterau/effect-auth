@@ -21,17 +21,9 @@
  * @module admin
  */
 
-import {
-  Clock,
-  Context,
-  Data,
-  DateTime,
-  Effect,
-  Layer,
-  Match,
-  Predicate,
-  Record as Rec,
-} from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer, Match } from "effect";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
@@ -189,10 +181,7 @@ export interface AdminConfig {
 
 /** A copy of `attributes` without the ban keys (`banned`, `banReason`, `banExpires`). */
 const withoutBanAttributes = (attributes: Types.Attributes): Types.Attributes =>
-  Rec.filter(
-    attributes,
-    (_, key) => key !== "banned" && key !== "banReason" && key !== "banExpires",
-  );
+  R.filter(attributes, (_, key) => key !== "banned" && key !== "banReason" && key !== "banExpires");
 
 /**
  * Whether a user is an administrator under the given config: either their id
@@ -205,7 +194,7 @@ export const isAdmin = (user: Types.User, config: AdminConfig = {}): boolean => 
     return true;
   }
   const role = user.attributes["role"];
-  return Predicate.isString(role) && adminRoles.includes(role);
+  return P.isString(role) && adminRoles.includes(role);
 };
 
 /**
@@ -220,7 +209,7 @@ export const isBanned = (user: Types.User): Effect.Effect<boolean> => {
     return Effect.succeed(false);
   }
   const banExpires = user.attributes["banExpires"];
-  if (!Predicate.isNumber(banExpires)) {
+  if (!P.isNumber(banExpires)) {
     return Effect.succeed(true);
   }
   return Effect.map(Clock.currentTimeMillis, (now) => banExpires > now);
@@ -560,7 +549,7 @@ export const make = (
         // `attributes.role` — it is checked against the configured roles.
         const role = attributes["role"];
         if (role !== undefined) {
-          if (!Predicate.isString(role)) {
+          if (!P.isString(role)) {
             return yield* new AdminError({ message: "role must be a string" });
           }
           yield* requireRole(role);

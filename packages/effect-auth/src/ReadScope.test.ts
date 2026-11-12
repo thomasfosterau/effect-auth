@@ -8,7 +8,11 @@
  * is held to the same corpus in effect-auth/sql's `ReadScope.test.ts`.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Context, Match, Option, Predicate, Record as Rec } from "effect";
+import { Context, Match } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -86,7 +90,7 @@ const principalOf = (viewer: AppUser | null): Entity.Entity =>
 
 /** A row's present columns as entity attributes: a NULL column is an absent attribute. */
 const rowAttributes = (row: CorpusRow): Readonly<Record<string, Entity.AttributeValue>> =>
-  Rec.filter(
+  R.filter(
     {
       owner:
         row.owner === null ? null : Entity.entityValue(Entity.ref(guards.principalType, row.owner)),
@@ -95,7 +99,7 @@ const rowAttributes = (row: CorpusRow): Readonly<Record<string, Entity.Attribute
       unapproved: row.unapproved,
       group: row.group,
     },
-    Predicate.isNotNull,
+    P.isNotNull,
   );
 
 /** A relation fact: false for anonymous or a NULL column. */
@@ -142,8 +146,8 @@ const compileFor = (
 
 const exact = (compiled: ReadScope.Compiled): ReadScope.ReadScope => {
   assert(
-    Predicate.isTagged(compiled, "Exact"),
-    `inexact: ${Predicate.isTagged(compiled, "Inexact") ? compiled.reasons.join("; ") : ""}`,
+    P.isTagged(compiled, "Exact"),
+    `inexact: ${P.isTagged(compiled, "Inexact") ? compiled.reasons.join("; ") : ""}`,
   );
   return compiled.scope;
 };
@@ -160,7 +164,7 @@ const scopeAllows = (scope: ReadScope.ReadScope, viewer: AppUser | null, row: Co
     },
     (set, value) =>
       viewer !== null &&
-      Predicate.isString(value) &&
+      P.isString(value) &&
       (set === "following" ? followsEdge(viewer.id, value) : memberEdge(viewer.id, value)),
   );
 
@@ -184,8 +188,8 @@ const literalTexts = (predicate: ReadScope.Predicate): ReadonlyArray<string> =>
     And: ({ predicates }) => Arr.flatMap(predicates, literalTexts),
     Or: ({ predicates }) => Arr.flatMap(predicates, literalTexts),
     Not: ({ predicate: inner }) => literalTexts(inner),
-    Eq: ({ value }) => (Predicate.isString(value.value) ? [value.value] : []),
-    Compare: ({ value }) => (Predicate.isString(value.value) ? [value.value] : []),
+    Eq: ({ value }) => (P.isString(value.value) ? [value.value] : []),
+    Compare: ({ value }) => (P.isString(value.value) ? [value.value] : []),
     IsNull: () => [],
     InSet: () => [],
   });
@@ -214,7 +218,7 @@ describe("ReadScope.compile", () => {
 
   it("compiles the follower and group arms to named sets, never to members", () => {
     const scope = exact(compileFor(owned.policies, { id: "u-other", role: "contributor" }));
-    assert(Predicate.isTagged(scope, "Filter"));
+    assert(P.isTagged(scope, "Filter"));
     expect(scope.sets).toEqual(["following", "groups"]);
     expect(ReadScope.attributes(scope.predicate)).toEqual([
       "draft",
@@ -270,7 +274,7 @@ describe("ReadScope.compile", () => {
       ],
       { id: "u-member", role: "user" },
     );
-    assert(Predicate.isTagged(compiled, "Inexact"));
+    assert(P.isTagged(compiled, "Inexact"));
     expect(compiled.reasons.join("\n")).toContain("tagged");
   });
 

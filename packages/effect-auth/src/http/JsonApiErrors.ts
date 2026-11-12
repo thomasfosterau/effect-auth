@@ -15,7 +15,8 @@
  *
  * @module http/JsonApiErrors
  */
-import { Effect, Match, Schema } from "effect";
+import { Effect, Match } from "effect";
+import * as Schema from "effect/Schema";
 import { ApiError } from "@thomasfosterau/effect-jsonapi";
 import * as S from "./HttpApiSchema.ts";
 

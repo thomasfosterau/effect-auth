@@ -53,15 +53,11 @@
  * @internal
  */
 
-import {
-  Array as Arr,
-  Config,
-  ConfigProvider,
-  Option,
-  Redacted,
-  Schema,
-  String as Str,
-} from "effect";
+import { Config, ConfigProvider, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 
 const setButEmpty = (name: string) =>
   Config.fail(

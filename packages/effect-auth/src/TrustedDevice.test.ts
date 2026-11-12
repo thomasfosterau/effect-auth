@@ -1,5 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Array as Arr, Context, DateTime, Effect, MutableHashMap, Option, Redacted } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";

@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Predicate, Result } from "effect";
+import { Effect, Result } from "effect";
+import * as P from "effect/Predicate";
 import * as Otp from "./Otp.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 
@@ -21,7 +22,7 @@ describe("OTP Secret Generation", () => {
   it("should generate base32-encoded secret", async () => {
     const secret = await Effect.runPromise(Otp.generateBase32Secret(PlatformCrypto.instance, 20));
 
-    expect(Predicate.isString(secret)).toBe(true);
+    expect(P.isString(secret)).toBe(true);
     expect(secret.length).toBeGreaterThan(0);
     // Base32 should only contain A-Z and 2-7
     expect(/^[A-Z2-7]+$/.test(secret)).toBe(true);

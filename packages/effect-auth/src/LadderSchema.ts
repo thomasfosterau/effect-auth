@@ -8,7 +8,7 @@
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Schema } from "effect"
+ * import * as Schema from "effect/Schema"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"])
@@ -22,7 +22,7 @@
  *
  * @module ladder-schema
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import type * as Ladder from "./Ladder.ts";
 
 /**

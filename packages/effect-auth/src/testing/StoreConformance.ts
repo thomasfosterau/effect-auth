@@ -53,18 +53,12 @@
  *
  * @module testing
  */
-import {
-  Array as Arr,
-  Data,
-  DateTime,
-  Effect,
-  Exit,
-  Option,
-  Order,
-  Predicate,
-  Record as Rec,
-  Schema,
-} from "effect";
+import { Data, DateTime, Effect, Exit, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
@@ -145,10 +139,10 @@ class Mismatch extends Data.TaggedError("Mismatch")<{ readonly message: string }
 const canonical = (value: unknown): unknown => {
   if (value instanceof Date) return { $date: value.getTime() };
   if (Array.isArray(value)) return value.map(canonical);
-  if (Predicate.isObject(value)) {
-    return Rec.fromEntries(
+  if (P.isObject(value)) {
+    return R.fromEntries(
       Arr.sort(
-        Rec.toEntries(value).filter(([, field]) => field !== undefined),
+        R.toEntries(value).filter(([, field]) => field !== undefined),
         Order.mapInput(Order.String, ([key]: readonly [string, unknown]) => key),
       ).map(([key, field]) => [key, canonical(field)]),
     );
@@ -189,9 +183,7 @@ const expectFailure = <A, E, R>(
     }
     const error = Exit.findErrorOption(exit);
     const actual =
-      Option.isSome(error) &&
-      Predicate.isObjectOrArray(error.value) &&
-      Predicate.hasProperty(error.value, "_tag")
+      Option.isSome(error) && P.isObjectOrArray(error.value) && P.hasProperty(error.value, "_tag")
         ? String(error.value._tag)
         : "a defect";
     return expectThat(`${what}: expected ${tag}, failed with ${actual}`, actual === tag);

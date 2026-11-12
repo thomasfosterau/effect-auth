@@ -1,18 +1,10 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { TestClock } from "effect/testing";
-import {
-  Array as Arr,
-  Context,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Order,
-  Predicate,
-  Record as Rec,
-  Result,
-} from "effect";
+import { Context, DateTime, Effect, Layer, MutableHashMap, Order, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -297,9 +289,9 @@ describe("AdminService", () => {
       }),
     );
 
-    Arr.forEach(Rec.values(result), (outcome) => {
+    Arr.forEach(R.values(result), (outcome) => {
       expect(outcome._tag).toBe("Failure");
-      assert(Predicate.isTagged(outcome, "Failure"));
+      assert(P.isTagged(outcome, "Failure"));
       expect(outcome.failure._tag).toBe("AdminError");
     });
   });
@@ -429,7 +421,7 @@ describe("AdminService", () => {
 
     expect(banned.attributes["banReason"]).toBe("No reason");
     const banExpires = banned.attributes["banExpires"];
-    assert(Predicate.isNumber(banExpires));
+    assert(P.isNumber(banExpires));
     expect(banExpires).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
     expect(Effect.runSync(isBanned(banned))).toBe(true);
   });
@@ -581,7 +573,7 @@ describe("AdminService", () => {
     expect(session.userId).toBe("user-1");
     expect(session.attributes["impersonatedBy"]).toBe("admin-1");
     const impersonationExpiresAt = session.attributes["impersonationExpiresAt"];
-    assert(Predicate.isNumber(impersonationExpiresAt));
+    assert(P.isNumber(impersonationExpiresAt));
     expect(impersonationExpiresAt).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
     expect(MutableHashMap.has(sessions, hashToken(session.id))).toBe(true);
 

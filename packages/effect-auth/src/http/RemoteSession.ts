@@ -52,16 +52,12 @@
  *
  * @module remote-session
  */
-import {
-  Array as Arr,
-  Data,
-  Effect,
-  Layer,
-  Option,
-  Predicate,
-  Record as Rec,
-  Schema,
-} from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
@@ -107,7 +103,7 @@ const promiseOrDie = <A>(evaluate: () => Promise<A>): Effect.Effect<A> =>
 const asFetch =
   (fetcher: FetcherLike) =>
   (request: Request): Promise<Response> =>
-    Predicate.isFunction(fetcher) ? fetcher(request) : fetcher.fetch(request);
+    P.isFunction(fetcher) ? fetcher(request) : fetcher.fetch(request);
 
 /**
  * An `HttpClient` layer backed by an arbitrary fetch-alike instead of
@@ -251,7 +247,7 @@ export const forwardedHeaders = (inbound: Request | Headers, policy?: HeaderPoli
     const value = source.get(name);
     if (value !== null) out.set(name, value);
   });
-  Rec.toEntries(policy?.set ?? {}).forEach(([name, value]) => out.set(name, value));
+  R.toEntries(policy?.set ?? {}).forEach(([name, value]) => out.set(name, value));
   return out;
 };
 
@@ -443,7 +439,8 @@ export interface RemoteSessionClient {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Option } from "effect"
+ * import { Effect } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Http from "@thomasfosterau/effect-auth/http"
  *
  * // A stand-in for the auth worker behind the service binding (`env.AUTH` on
@@ -694,7 +691,8 @@ export const resolveAtEdge = (
  * @example A Worker front door
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Option } from "effect"
+ * import { Effect } from "effect"
+ * import * as Option from "effect/Option"
  * import { SessionCookies } from "@thomasfosterau/effect-auth"
  * import * as Http from "@thomasfosterau/effect-auth/http"
  *

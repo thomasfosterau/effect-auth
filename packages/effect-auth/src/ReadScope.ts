@@ -45,7 +45,9 @@
  *
  * @module read-scope
  */
-import { Array as Arr, Match, Order, Predicate as P, Struct } from "effect";
+import { Match, Order, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";

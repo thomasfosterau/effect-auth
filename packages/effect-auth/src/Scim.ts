@@ -58,22 +58,13 @@
  *
  * @module scim
  */
-import {
-  Array as Arr,
-  Clock,
-  Context,
-  Data,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Order,
-  Predicate,
-  Record as Rec,
-  Schema,
-  String as Str,
-} from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import { SecureRandom } from "effect/crypto";
 import { flow } from "effect/Function";
 import * as Errors from "./Errors.ts";
@@ -672,9 +663,7 @@ const parseBooleanString = (value: string): Option.Option<boolean> => {
 /** SCIM sends booleans as JSON booleans; Entra ID sometimes sends strings. */
 const asBoolean = flow(
   Schema.decodeUnknownOption(Schema.Union([Schema.Boolean, Schema.String])),
-  Option.flatMap((value) =>
-    Predicate.isBoolean(value) ? Option.some(value) : parseBooleanString(value),
-  ),
+  Option.flatMap((value) => (P.isBoolean(value) ? Option.some(value) : parseBooleanString(value))),
   Option.getOrNull,
 );
 
@@ -692,11 +681,9 @@ const asString = flow(
 const stringEntries = (value: unknown): ReadonlyArray<string> => {
   const entries: ReadonlyArray<unknown> = Array.isArray(value) ? value : [value];
   return Arr.flatMap(entries, (entry) =>
-    Predicate.isString(entry)
+    P.isString(entry)
       ? [entry]
-      : Predicate.isObjectOrArray(entry) &&
-          Predicate.hasProperty(entry, "value") &&
-          Predicate.isString(entry.value)
+      : P.isObjectOrArray(entry) && P.hasProperty(entry, "value") && P.isString(entry.value)
         ? [entry.value]
         : [],
   );
@@ -782,7 +769,7 @@ export const make = (
       const emails = emailIdentifiers(all);
       const pinned = user.attributes[SCIM_USERNAME_ATTRIBUTE];
       const userName =
-        Predicate.isString(pinned) && emails.some((e) => e.value === pinned)
+        P.isString(pinned) && emails.some((e) => e.value === pinned)
           ? pinned
           : (primaryEmail(all)?.value ?? emails[0]?.value ?? user.id);
       const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
@@ -790,7 +777,7 @@ export const make = (
         id: user.id,
         userName,
         ...(user.name !== undefined && { displayName: user.name }),
-        ...(Predicate.isString(externalId) && { externalId }),
+        ...(P.isString(externalId) && { externalId }),
         emails: emails.map((identifier) =>
           identifier.value === userName
             ? { value: identifier.value, primary: true, type: "work" }
@@ -1081,8 +1068,8 @@ export const make = (
         // Expand it so both dialects go through one code path.
         const expanded: ReadonlyArray<PatchEntry> =
           operation.path === undefined || operation.path.trim() === ""
-            ? Predicate.isObject(operation.value)
-              ? Rec.collect(operation.value, (path, value) => ({ path, value }))
+            ? P.isObject(operation.value)
+              ? R.collect(operation.value, (path, value) => ({ path, value }))
               : []
             : [{ path: operation.path.trim(), value: operation.value }];
 
@@ -1144,7 +1131,7 @@ export const make = (
 
     /** Apply a path-less PATCH operation (an attribute map) to a team. */
     const patchTeamAttributes = (groupId: string, team: Team, { value }: ScimPatchOperation) => {
-      if (!Predicate.isObject(value)) {
+      if (!P.isObject(value)) {
         return Effect.fail(badRequest("PATCH operation has no usable path", "invalidPath"));
       }
       const displayName = asString(value["displayName"]);

@@ -10,7 +10,10 @@
  * covered with a recording `fetch` instead.
  */
 import * as Auth from "../index.ts";
-import { Array as Arr, DateTime, Effect, MutableHashSet, Order, Predicate, Schema } from "effect";
+import { DateTime, Effect, MutableHashSet, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { assert, describe, expect, it } from "vite-plus/test";
 import {
   AuthClientError,
@@ -201,7 +204,7 @@ describe("multi-session", () => {
       Arr.sort(
         Arr.filter(
           list.map((entry) => entry.user.email),
-          Predicate.isString,
+          P.isString,
         ),
         Order.String,
       ),

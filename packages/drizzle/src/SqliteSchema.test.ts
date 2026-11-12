@@ -16,7 +16,9 @@
 import Database from "better-sqlite3";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { Array as Arr, DateTime, Effect, Layer, Schema } from "effect";
+import { DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { assert, afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";

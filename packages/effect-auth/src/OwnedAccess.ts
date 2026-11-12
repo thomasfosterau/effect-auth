@@ -75,7 +75,8 @@
  *
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Option } from "effect"
+ * import { Context } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string }
@@ -112,7 +113,9 @@
  *
  * @module owned-access
  */
-import { Context, Effect, Layer, Option, Predicate } from "effect";
+import { Context, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import type { ServeableAxis } from "./Cacheability.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
@@ -353,7 +356,7 @@ const ask = <I, S>(
   subject: string | undefined,
   question: (seam: S, subject: string) => Effect.Effect<boolean>,
 ): Effect.Effect<boolean> =>
-  Predicate.isString(subject)
+  P.isString(subject)
     ? Effect.flatMap(Effect.serviceOption(key), (seam) =>
         Option.isSome(seam) ? question(seam.value, subject) : Effect.succeed(false),
       )
@@ -466,7 +469,8 @@ const questionsFor = (row: OwnedRow): RelationQuestions => {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Layer, Option } from "effect"
+ * import { Context, Effect, Layer } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string }
@@ -583,13 +587,13 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
         // which could otherwise equal a row owned by an id that happens to
         // match the anonymous sentinel. No owner is no attribute, never an
         // empty or sentinel id.
-        ...(Predicate.isString(row.ownerId)
+        ...(P.isString(row.ownerId)
           ? { owner: Entity.entityValue(Entity.ref(guards.principalType, row.ownerId)) }
           : {}),
         visibility: row.visibility,
         draft: row.draft === true,
         unapproved: row.unapproved === true,
-        ...(Predicate.isString(row.groupId) ? { group: row.groupId } : {}),
+        ...(P.isString(row.groupId) ? { group: row.groupId } : {}),
       },
     });
     return Policy.decidePure(

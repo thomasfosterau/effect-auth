@@ -5,21 +5,11 @@
  * and related data structures.
  */
 
-import {
-  Array as Arr,
-  Clock,
-  Config,
-  Context,
-  Data,
-  DateTime,
-  Effect,
-  Formatter,
-  Layer,
-  Predicate,
-  Record as Rec,
-  Redacted,
-  Schema,
-} from "effect";
+import { Clock, Config, Context, Data, DateTime, Effect, Formatter, Layer, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
@@ -429,7 +419,7 @@ const readJson = (response: Response): Effect.Effect<Schema.Json> =>
   readBody(response).pipe(Effect.flatMap(decodeJson), Effect.orDie);
 
 /** Whether a JSON value is an object (not an array or `null`). */
-const isJsonObject = (json: Schema.Json): json is Types.JsonObject => Predicate.isObject(json);
+const isJsonObject = (json: Schema.Json): json is Types.JsonObject => P.isObject(json);
 
 /**
  * Verify and decode an OIDC `id_token` (compact JWS) against a provider's
@@ -524,7 +514,7 @@ const idTokenClaimFailure = (
   }
   const nowSec = now / 1000;
   const exp = payload["exp"];
-  if (Predicate.isNumber(exp) && nowSec > exp) {
+  if (P.isNumber(exp) && nowSec > exp) {
     return "id_token expired";
   }
   if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
@@ -602,7 +592,7 @@ const verifyIdTokenClaims = (
  * Facebook's) in decimal, and anything else, a missing id included, as `""`.
  */
 const idString = (id: unknown): string =>
-  Predicate.isString(id) ? id : Predicate.isNumber(id) || Predicate.isBigInt(id) ? `${id}` : "";
+  P.isString(id) ? id : P.isNumber(id) || P.isBigInt(id) ? `${id}` : "";
 
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
 const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
@@ -611,10 +601,10 @@ const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
     {},
     claims,
     { id: idString(claims["sub"] ?? claims["id"]) },
-    Predicate.isString(email) ? { email } : {},
-    Predicate.isBoolean(email_verified) ? { email_verified } : {},
-    Predicate.isString(name) ? { name } : {},
-    Predicate.isString(picture) ? { picture } : {},
+    P.isString(email) ? { email } : {},
+    P.isBoolean(email_verified) ? { email_verified } : {},
+    P.isString(name) ? { name } : {},
+    P.isString(picture) ? { picture } : {},
   );
 };
 
@@ -773,7 +763,7 @@ export const provider = (
         if (nonce) {
           params.set("nonce", nonce);
         }
-        Arr.forEach(Rec.toEntries(config.authorizationParams ?? {}), ([key, value]) =>
+        Arr.forEach(R.toEntries(config.authorizationParams ?? {}), ([key, value]) =>
           params.set(key, value),
         );
 
@@ -1717,7 +1707,7 @@ export interface OAuthClientConfig {
 }
 
 /** Coerce a value to `string` — returns `undefined` for non-strings. */
-export const str = (v: unknown): string | undefined => (Predicate.isString(v) ? v : undefined);
+export const str = (v: unknown): string | undefined => (P.isString(v) ? v : undefined);
 
 /**
  * Safely traverse a nested object by a chain of keys. Returns `undefined`
@@ -1728,8 +1718,7 @@ export const str = (v: unknown): string | undefined => (Predicate.isString(v) ? 
  */
 export const nested = (v: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>(
-    (acc, key) =>
-      Predicate.isObjectOrArray(acc) && Predicate.hasProperty(acc, key) ? acc[key] : undefined,
+    (acc, key) => (P.isObjectOrArray(acc) && P.hasProperty(acc, key) ? acc[key] : undefined),
     v,
   );
 

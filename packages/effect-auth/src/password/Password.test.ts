@@ -1,5 +1,6 @@
 import { describe, it, expect, assert } from "vite-plus/test";
-import { Array as Arr, Context, Effect, Result } from "effect";
+import { Context, Effect, Result } from "effect";
+import * as Arr from "effect/Array";
 import { PasswordHasher, scryptHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 

@@ -2,7 +2,8 @@
  * Rate limiting types for effect-auth
  */
 
-import { Clock, Context, Duration, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Duration, Effect, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { RateLimitError, type AuthError } from "./Errors.ts";
 import * as Obs from "./Observability.ts";
 
@@ -101,7 +102,7 @@ const recordRateLimitHit =
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     self.pipe(
       Effect.tapError((e) =>
-        Predicate.isTagged(e, "RateLimitError")
+        P.isTagged(e, "RateLimitError")
           ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
           : Effect.void,
       ),

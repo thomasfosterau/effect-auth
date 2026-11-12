@@ -23,7 +23,8 @@ import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import type { EffectPgDatabase } from "drizzle-orm-effect/effect-postgres";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import * as EffectPglite from "drizzle-orm-effect/effect-pglite";
-import { Context, DateTime, Effect, Latch, Layer, Predicate } from "effect";
+import { Context, DateTime, Effect, Latch, Layer } from "effect";
+import * as P from "effect/Predicate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer, effectDatabaseLayer, type EffectDrizzleDatabase } from "./Database.ts";
@@ -102,7 +103,7 @@ beforeEach(async () => {
 
 describe("databaseLayer doors", () => {
   it("accepts each documented handle shape", () => {
-    expect(Predicate.isFunction(doorAccepts)).toBe(true);
+    expect(P.isFunction(doorAccepts)).toBe(true);
   });
 
   it("binds a drizzle Effect driver, with no Promise boundary", async () => {

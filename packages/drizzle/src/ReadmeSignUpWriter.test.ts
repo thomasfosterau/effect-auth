@@ -10,7 +10,8 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
-import { Array as Arr, DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import { readFile } from "node:fs/promises";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";

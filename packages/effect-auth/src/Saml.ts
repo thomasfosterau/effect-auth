@@ -43,7 +43,8 @@
  *
  * @module saml
  */
-import { Clock, Context, Data, Effect, MutableHashMap, Option } from "effect";
+import { Clock, Context, Data, Effect, MutableHashMap } from "effect";
+import * as Option from "effect/Option";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */

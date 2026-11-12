@@ -87,7 +87,7 @@
  * ```
  */
 
-import { Record as Rec } from "effect";
+import * as R from "effect/Record";
 import {
   getTableColumns,
   type AnyColumn,
@@ -300,8 +300,8 @@ export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSch
   // `ColumnKey`, a string key of `spec.table` (or absent, for an optional field).
   const names = spec.columns as Readonly<Record<string, string>>;
   // An optional field left unmapped (`users.attributes`) is simply absent.
-  const columns = Rec.map(
-    Rec.filter(names, (key) => key !== undefined),
+  const columns = R.map(
+    R.filter(names, (key) => key !== undefined),
     (key) => source[key],
   );
   return {
@@ -333,7 +333,7 @@ export const defineSchema = <
     sessions: resolveTable<SessionColumns>(spec.sessions),
     users: {
       ...resolveTable<UserColumns>(spec.users),
-      promoted: Rec.map(spec.users.promoted ?? {}, (key) => userColumns[key]),
+      promoted: R.map(spec.users.promoted ?? {}, (key) => userColumns[key]),
     },
     identifiers: resolveTable<IdentifierColumns>(spec.identifiers),
   };
@@ -403,7 +403,7 @@ export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
   schema: TableSchema<TColumns>,
   values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K]> }>,
 ): Table["$inferInsert"] =>
-  Rec.mapKeys(
+  R.mapKeys(
     values,
     // SAFETY: `values` is keyed by `TColumns`' fields, which are `names`' keys.
     (field) => schema.names[field as keyof TColumns & string],

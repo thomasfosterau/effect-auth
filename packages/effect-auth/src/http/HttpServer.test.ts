@@ -9,7 +9,6 @@ import {
   onTestFinished,
 } from "vite-plus/test";
 import {
-  Array as Arr,
   Clock,
   Data,
   DateTime,
@@ -21,14 +20,15 @@ import {
   Logger,
   MutableHashMap,
   MutableHashSet,
-  Option,
   Order,
   Path,
-  Predicate,
   Redacted,
   Result,
-  Schema,
 } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
@@ -998,7 +998,7 @@ const authRequest = (
   headers: Record<string, string> = {},
 ): Request => {
   const { rememberMe, token, ...rest } = fields;
-  const id = Predicate.isString(token) ? token : "";
+  const id = P.isString(token) ? token : "";
   const signIn = (credential: { readonly [key: string]: Schema.Json }) =>
     writeRequest(
       "POST",
@@ -3119,7 +3119,7 @@ describe("bearer mode", () => {
     );
     expect(res.status).toBe(201);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
-    expect(Predicate.isString(token)).toBe(true);
+    expect(P.isString(token)).toBe(true);
     expect(token?.length).toBeGreaterThan(0);
   });
 
@@ -3148,7 +3148,7 @@ describe("bearer mode", () => {
     );
     expect(res.status).toBe(201);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
-    expect(Predicate.isString(token)).toBe(true);
+    expect(P.isString(token)).toBe(true);
     expect(token?.length).toBeGreaterThan(0);
   });
 
@@ -3160,7 +3160,7 @@ describe("bearer mode", () => {
     );
     expect(signUpRes.status).toBe(201);
     const signUpToken = signUpRes.headers.get(BEARER_TOKEN_HEADER);
-    expect(Predicate.isString(signUpToken)).toBe(true);
+    expect(P.isString(signUpToken)).toBe(true);
     expect(signUpToken?.length).toBeGreaterThan(0);
 
     // Token from sign-up is usable as a bearer token
@@ -3204,7 +3204,7 @@ describe("bearer mode", () => {
     const verifyRes = await handler(authRequest("magic-link", { token }, { "x-use-bearer": "1" }));
     expect(verifyRes.status).toBe(201);
     const bearerToken = verifyRes.headers.get(BEARER_TOKEN_HEADER);
-    expect(Predicate.isString(bearerToken)).toBe(true);
+    expect(P.isString(bearerToken)).toBe(true);
     expect(bearerToken?.length).toBeGreaterThan(0);
 
     // Use the bearer token to fetch session
@@ -3670,7 +3670,7 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
 
 /** A thrown or rejected value, checked to be the `Error` every refusal here is. */
 const thrownError = <A>(thrown: A): A & Error => {
-  assert(Predicate.isError(thrown), "expected an Error");
+  assert(P.isError(thrown), "expected an Error");
   return thrown;
 };
 

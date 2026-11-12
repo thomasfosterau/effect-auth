@@ -57,7 +57,8 @@
  *
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Layer, Option, Result } from "effect"
+ * import { Context, Effect, Layer, Result } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string }
@@ -119,7 +120,8 @@
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Layer, Option, Result } from "effect"
+ * import { Context, Effect, Layer, Result } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string; readonly name: string }
@@ -158,7 +160,10 @@
  *
  * @module guard
  */
-import { Context, Data, Effect, Option, Predicate, Schema } from "effect";
+import { Context, Data, Effect } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";
 import type * as Errors from "./Errors.ts";
@@ -366,7 +371,7 @@ export interface GuardOptions<Id, User extends ViewerShape, Rung extends string>
   readonly ownedType?: string;
 }
 
-const axisName = (min: string | Ladder.Axis): string => (Predicate.isString(min) ? min : min.name);
+const axisName = (min: string | Ladder.Axis): string => (P.isString(min) ? min : min.name);
 
 /** Thrown by {@link make} for a `principalType` it refuses. */
 class ReservedPrincipalTypeError extends Data.TaggedError("ReservedPrincipalTypeError")<{

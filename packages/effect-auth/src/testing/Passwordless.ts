@@ -5,7 +5,9 @@
  * Never published (`tsconfig.json` excludes this file; the rest of `src/testing/`
  * is the public `./testing` subpath).
  */
-import { Array as Arr, DateTime, Effect, Predicate } from "effect";
+import { DateTime, Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
 import { vi } from "vite-plus/test";
 
@@ -18,7 +20,7 @@ export const observable = (
         readonly failure: { readonly _tag: string; readonly message: string };
       },
 ) =>
-  Predicate.isTagged(result, "Failure")
+  P.isTagged(result, "Failure")
     ? { _tag: "Failure", error: result.failure._tag, message: result.failure.message }
     : { _tag: "Success" };
 

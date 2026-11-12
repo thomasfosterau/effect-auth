@@ -1,15 +1,9 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  Exit,
-  Logger,
-  Option,
-  Predicate,
-  Result,
-  Schema,
-} from "effect";
+import { Context, Effect, Exit, Logger, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Condition from "./Condition.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -176,7 +170,7 @@ describe("a system principal is denied by default", () => {
     expect(failure._tag).toBe("Failure");
     assert(Result.isFailure(failure));
     expect(failure.failure._tag).toBe("AuthorizationDeniedError");
-    assert(Predicate.isTagged(failure.failure, "AuthorizationDeniedError"));
+    assert(P.isTagged(failure.failure, "AuthorizationDeniedError"));
     expect(failure.failure.message).toContain('System::"billing-cron"');
     expect(failure.failure.message).toContain("default-deny");
     expect(failure.failure.decision.determining).toEqual([]);

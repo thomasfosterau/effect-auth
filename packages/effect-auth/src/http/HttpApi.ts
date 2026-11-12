@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
 import { Document, Endpoint, Group, MediaType, Middleware } from "@thomasfosterau/effect-jsonapi";
 import * as S from "./HttpApiSchema.ts";

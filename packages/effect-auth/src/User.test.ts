@@ -1,5 +1,6 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, DateTime, Effect, MutableHashMap, Option, Result } from "effect";
+import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
+import * as Option from "effect/Option";
 import { UserServiceStore } from "./User.ts";
 import * as User from "./User.ts";
 import {

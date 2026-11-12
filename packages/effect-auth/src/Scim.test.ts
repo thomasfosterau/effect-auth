@@ -1,15 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import {
-  Array as Arr,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Order,
-  Schema,
-  Struct,
-} from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Order, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";

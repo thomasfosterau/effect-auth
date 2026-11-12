@@ -1,5 +1,4 @@
 import {
-  Array as Arr,
   Cause,
   Clock,
   Context,
@@ -11,14 +10,15 @@ import {
   FileSystem,
   Layer,
   Match,
-  Option,
   Path,
-  Predicate,
   Result,
   Scheduler,
   Scope,
-  String as Str,
 } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Str from "effect/String";
 import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
 import type { AuthError, UserNotFoundError } from "../Errors.ts";
@@ -715,7 +715,7 @@ const bearerToken = (request: HttpServerRequest.HttpServerRequest): string | und
  */
 const registrationEndpointOf = (service: typeof OidcProviderService.Service): string => {
   const endpoint = service.getAuthorizationServerMetadata()["registration_endpoint"];
-  return Predicate.isString(endpoint) ? endpoint : "";
+  return P.isString(endpoint) ? endpoint : "";
 };
 
 /**
@@ -2515,7 +2515,7 @@ export const organizationsGroupLayer = (
             defaultRole === undefined ||
             Arr.some(
               [fields.name, fields.slug, fields.logo, fields.metadata, fields.jitProvisioning],
-              Predicate.isNotUndefined,
+              P.isNotUndefined,
             )
               ? yield* refusedForbidden(
                   org.updateOrganization(resolved.user.id, params.id, updates),
@@ -4527,7 +4527,7 @@ const matchesEndpointRule = (
   method: string,
 ): boolean => {
   if (rule.methods !== undefined && !rule.methods.includes(method.toUpperCase())) return false;
-  return Predicate.isString(rule.path) ? rule.path === pathname : rule.path.test(pathname);
+  return P.isString(rule.path) ? rule.path === pathname : rule.path.test(pathname);
 };
 
 /**
@@ -4536,7 +4536,7 @@ const matchesEndpointRule = (
  * never earns a caller a fresh bucket.
  */
 const ruleKey = (rule: EndpointRateLimitRule): string =>
-  Predicate.isString(rule.path) ? rule.path : `pattern:${rule.path.source}`;
+  P.isString(rule.path) ? rule.path : `pattern:${rule.path.source}`;
 
 const findEndpointRule = (
   rules: ReadonlyArray<EndpointRateLimitRule>,

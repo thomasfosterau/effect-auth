@@ -18,7 +18,7 @@
  *
  * @module http/Resources
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 import { Attributes } from "../Types.ts";
 

@@ -9,18 +9,10 @@
  *
  * @module authorizer
  */
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  HashMap,
-  Layer,
-  Match,
-  MutableHashSet,
-  Option,
-  Predicate,
-  Result,
-} from "effect";
+import { Context, Effect, HashMap, Layer, Match, MutableHashSet, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
@@ -143,9 +135,7 @@ export const memoryEntityResolver = (
 };
 
 const operandRefs = (operand: Condition.Operand): ReadonlyArray<Entity.EntityRef> =>
-  Predicate.isTagged(operand, "Lit") && Entity.isEntityValue(operand.value)
-    ? [operand.value.__entity]
-    : [];
+  P.isTagged(operand, "Lit") && Entity.isEntityValue(operand.value) ? [operand.value.__entity] : [];
 
 const conditionRefs = (condition: Condition.Condition): ReadonlyArray<Entity.EntityRef> =>
   Match.valueTags(condition, {
@@ -174,10 +164,10 @@ export const requestRefs = <E, R>(
     request.action,
     request.resource,
     ...Arr.flatMap(policies, (policy) => {
-      if (!Predicate.isTagged(policy, "DeclarativePolicy")) return [];
+      if (!P.isTagged(policy, "DeclarativePolicy")) return [];
       return [
         ...Arr.filterMap([policy.principal, policy.action, policy.resource], (scope) =>
-          Predicate.isTagged(scope, "eq") || Predicate.isTagged(scope, "in")
+          P.isTagged(scope, "eq") || P.isTagged(scope, "in")
             ? Result.succeed(scope.ref)
             : Result.failVoid,
         ),
@@ -206,7 +196,7 @@ export interface AuthorizeInput {
 }
 
 const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
-  Predicate.isString(action) ? Entity.ref("Action", action) : action;
+  P.isString(action) ? Entity.ref("Action", action) : action;
 
 /**
  * The audit record of a system principal's decision. A background job has no
@@ -325,7 +315,7 @@ const make = <E = unknown>(
 
     if (config.model !== undefined) {
       const declarative = config.policies.filter((policy): policy is Policy.DeclarativePolicy =>
-        Predicate.isTagged(policy, "DeclarativePolicy"),
+        P.isTagged(policy, "DeclarativePolicy"),
       );
       const issues = AuthorizationModel.validatePolicies(config.model, declarative);
       if (Arr.isReadonlyArrayNonEmpty(issues)) {

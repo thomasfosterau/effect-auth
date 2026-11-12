@@ -16,7 +16,11 @@
  *
  * @module authorization-model
  */
-import { Array as Arr, Match, Predicate, Record as Rec, Result, Schema } from "effect";
+import { Match, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type { DeclarativePolicy, Scope } from "./Policy.ts";
@@ -67,8 +71,8 @@ export const make = (model: Model): Model => model;
  * action policies (action groups) work without hand-maintaining them.
  */
 export const actionEntities = (model: Model): ReadonlyArray<Entity.Entity> => {
-  const groups = Arr.dedupe(Arr.flatMap(Rec.values(model.actions), (decl) => decl.memberOf ?? []));
-  const declared = Rec.toEntries(model.actions).map(([id, decl]) =>
+  const groups = Arr.dedupe(Arr.flatMap(R.values(model.actions), (decl) => decl.memberOf ?? []));
+  const declared = R.toEntries(model.actions).map(([id, decl]) =>
     Entity.entity(Entity.ref("Action", id), {
       parents: (decl.memberOf ?? []).map((group) => Entity.ref("Action", group)),
     }),
@@ -95,7 +99,7 @@ const knownEntityType = (model: Model, type: string): boolean =>
 const knownActionId = (model: Model, id: string): boolean => {
   if (id in model.actions) return true;
   // Action groups referenced via memberOf are legal `in` targets.
-  return Arr.some(Rec.values(model.actions), (decl) => (decl.memberOf ?? []).includes(id));
+  return Arr.some(R.values(model.actions), (decl) => (decl.memberOf ?? []).includes(id));
 };
 
 const validateScope = (
@@ -163,14 +167,14 @@ const conditionOperands = (condition: Condition.Condition): ReadonlyArray<Condit
 
 const conditionRefs = (condition: Condition.Condition): ReadonlyArray<Entity.EntityRef> =>
   Arr.filterMap(conditionOperands(condition), (operand) =>
-    Predicate.isTagged(operand, "Lit") && Entity.isEntityValue(operand.value)
+    P.isTagged(operand, "Lit") && Entity.isEntityValue(operand.value)
       ? Result.succeed(operand.value.__entity)
       : Result.failVoid,
   );
 
 const attrOperands = (condition: Condition.Condition): ReadonlyArray<Condition.Attr> =>
   Arr.filter(conditionOperands(condition), (operand): operand is Condition.Attr =>
-    Predicate.isTagged(operand, "Attr"),
+    P.isTagged(operand, "Attr"),
   );
 
 const pinnedType = (scope: Scope): string | null =>

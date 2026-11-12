@@ -37,16 +37,11 @@
  *
  * @module policy-store
  */
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  Match,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Schema,
-} from "effect";
+import { Context, Effect, Match, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
@@ -80,7 +75,7 @@ export const inSlot: TemplateScope = { _tag: "inSlot" };
 
 /** Is this template scope a slot awaiting a link value? */
 export const isSlot = (scope: TemplateScope): boolean =>
-  Predicate.isTagged(scope, "eqSlot") || Predicate.isTagged(scope, "inSlot");
+  P.isTagged(scope, "eqSlot") || P.isTagged(scope, "inSlot");
 
 /**
  * A policy with slots. Same shape as {@link Policy.DeclarativePolicy} except

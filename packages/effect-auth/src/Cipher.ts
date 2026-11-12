@@ -10,7 +10,8 @@
  */
 
 import * as crypto from "node:crypto";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Result } from "effect";
+import * as Schema from "effect/Schema";
 import { AuthError } from "./Errors.ts";
 import * as Types from "./Types.ts";
 

@@ -59,7 +59,9 @@
  * @module rbac
  */
 
-import { Array as Arr, Data, Layer, Record as Rec } from "effect";
+import { Data, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import { Authorizer, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
@@ -144,7 +146,7 @@ const isMap = <V>(source: StringKeyed<V>): source is ReadonlyMap<string, V> =>
   source instanceof Map;
 
 const entries = <V>(source: StringKeyed<V>): ReadonlyArray<readonly [string, V]> =>
-  isMap(source) ? Arr.fromIterable(source) : Rec.toEntries(source);
+  isMap(source) ? Arr.fromIterable(source) : R.toEntries(source);
 
 const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
   isMap(source) ? source.get(key) : source[key];

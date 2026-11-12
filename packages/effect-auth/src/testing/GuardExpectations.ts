@@ -19,7 +19,10 @@
  *
  * @module testing
  */
-import { Array as Arr, type Context, Data, Effect, Exit, Option, Predicate } from "effect";
+import { type Context, Data, Effect, Exit } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Ladder from "../Ladder.ts";
 import type * as SessionContext from "../SessionContext.ts";
 import { runAsViewer, type ViewerFixture } from "./RunAs.ts";
@@ -77,9 +80,7 @@ const outcomeOf = <A, E>(exit: Exit.Exit<A, E>): string => {
   const error = Exit.findErrorOption(exit);
   if (Option.isNone(error)) return "defect";
   const value: unknown = error.value;
-  return Predicate.isObjectOrArray(value) &&
-    Predicate.hasProperty(value, "_tag") &&
-    Predicate.isString(value._tag)
+  return P.isObjectOrArray(value) && P.hasProperty(value, "_tag") && P.isString(value._tag)
     ? value._tag
     : "failure";
 };
@@ -117,7 +118,7 @@ const check = <Id, User extends ViewerFixture, A, E, R>(
     { concurrency: 1 },
   ).pipe(
     Effect.flatMap((results) => {
-      const mismatches = Arr.filter(results, Predicate.isNotUndefined);
+      const mismatches = Arr.filter(results, P.isNotUndefined);
       return Arr.isReadonlyArrayEmpty(mismatches)
         ? Effect.void
         : Effect.fail(
@@ -250,7 +251,8 @@ export interface GuardedOptions<User, Rung extends string> extends RungOptions<U
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Context, Effect, Option } from "effect"
+ * import { Context, Effect } from "effect"
+ * import * as Option from "effect/Option"
  * import * as Auth from "@thomasfosterau/effect-auth"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *

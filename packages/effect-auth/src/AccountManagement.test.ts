@@ -1,5 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Array as Arr, DateTime, Effect, Layer, MutableHashMap, Option, Order } from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import {
   AccountManagementService,
   AccountManagementStore,

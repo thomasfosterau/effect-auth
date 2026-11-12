@@ -1,15 +1,9 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import {
-  Array as Arr,
-  DateTime,
-  Effect,
-  Layer,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Redacted,
-  Schema,
-} from "effect";
+import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
@@ -103,13 +97,13 @@ const withFetch = async <A>(
   const calls: Captured[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (input, init) => {
-    const url = Predicate.isString(input) ? input : input instanceof URL ? input.href : input.url;
+    const url = P.isString(input) ? input : input instanceof URL ? input.href : input.url;
     const body = init?.body;
     calls.push({
       url,
       method: init?.method ?? "GET",
       headers: new Headers(init?.headers),
-      body: Predicate.isString(body) ? body : null,
+      body: P.isString(body) ? body : null,
     });
     return Promise.resolve(handler(url, init));
   };
@@ -949,7 +943,7 @@ describe("OAuthService encryptTokens", () => {
     const newAccessToken = await withFetch(
       (_url, init) => {
         const body = init?.body;
-        if (Predicate.isString(body)) {
+        if (P.isString(body)) {
           capturedRefreshToken = new URLSearchParams(body).get("refresh_token");
         }
         return json(tokenResp);
@@ -1043,7 +1037,7 @@ describe("OAuthService encryptTokens", () => {
     await withFetch(
       (_url, init) => {
         const body = init?.body;
-        if (Predicate.isString(body)) {
+        if (P.isString(body)) {
           capturedRefreshToken = new URLSearchParams(body).get("refresh_token");
         }
         return json(tokenResp);

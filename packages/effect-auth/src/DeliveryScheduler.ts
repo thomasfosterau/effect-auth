@@ -12,7 +12,8 @@
  *
  * @module deliveryScheduler
  */
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import type { DeliveryPurpose } from "./Delivery.ts";
 import { Hooks } from "./Hooks.ts";
 import * as Obs from "./Observability.ts";

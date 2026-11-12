@@ -16,7 +16,9 @@
  * @module api-key
  */
 
-import { Array as Arr, Clock, Context, Data, Effect, Layer, Record as Rec } from "effect";
+import { Clock, Context, Data, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { Base64Url } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
@@ -276,7 +278,7 @@ const hasRequiredPermissions = (
   granted: Record<string, readonly string[]> | undefined,
   required: Record<string, readonly string[]>,
 ): boolean =>
-  Arr.every(Rec.toEntries(required), ([resource, actions]) => {
+  Arr.every(R.toEntries(required), ([resource, actions]) => {
     if (Arr.isReadonlyArrayEmpty(actions)) {
       return true;
     }

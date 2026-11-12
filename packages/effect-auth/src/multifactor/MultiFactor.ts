@@ -12,7 +12,8 @@
  * @module multi-factor
  */
 
-import { Array as Arr, Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import { Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import * as Arr from "effect/Array";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
