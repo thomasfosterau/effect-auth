@@ -156,8 +156,9 @@ const pastLimit =
 
 /**
  * Read a non-2xx response's body as a bounded excerpt: the stream is read
- * only until it passes the limit and is then cancelled, and no `secrets`
- * survive into the result.
+ * only until it passes the limit and is then cancelled (by
+ * {@link discardBody}, so a cancel that fails never replaces the result), and
+ * no `secrets` survive into the result.
  */
 const readErrorBody = (
   response: Response,
@@ -168,6 +169,7 @@ const readErrorBody = (
   const longest = Math.max(0, ...secrets.map((secret) => secret.length));
   return Stream.fromReadableStream({
     evaluate: () => body,
+    releaseLockOnEnd: true,
     onError: (cause) =>
       new AuthError({
         message: `Failed to read the Resend API's error response (status ${response.status})`,
@@ -188,6 +190,7 @@ const readErrorBody = (
         longest,
       ),
     ),
+    Effect.ensuring(discardBody(response)),
   );
 };
 
@@ -206,7 +209,12 @@ const isRedirect = (response: Response): boolean =>
   response.status === 0 ||
   response.type === "opaqueredirect";
 
-/** Cancel a body without reading it; a body that fails to cancel is dropped all the same. */
+/**
+ * Cancel a body without reading (the rest of) it: under workerd an unread
+ * body holds the request's I/O open until it is cancelled. A body that fails
+ * to cancel is dropped all the same, so the cancel never replaces the
+ * outcome.
+ */
 const discardBody = (response: Response): Effect.Effect<void> => {
   const body = response.body;
   return body === null
@@ -214,8 +222,7 @@ const discardBody = (response: Response): Effect.Effect<void> => {
     : Effect.ignore(
         Effect.tryPromise({
           try: () => body.cancel(),
-          catch: (cause) =>
-            new AuthError({ message: "Failed to discard a redirect's body", cause }),
+          catch: (cause) => new AuthError({ message: "Failed to discard a response body", cause }),
         }),
       );
 };
@@ -301,7 +308,8 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
           cause: { status: response.status, body },
         });
       }
-      return yield* Effect.void;
+      // Resend's 2xx body (the email id) is not read, so it is cancelled.
+      return yield* discardBody(response);
     }).pipe(
       Effect.withSpan("effect-auth-resend.send", {
         attributes: { purpose: message.purpose },

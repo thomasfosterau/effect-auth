@@ -114,6 +114,23 @@ const promiseOrDie = <A>(evaluate: () => Promise<A>): Effect.Effect<A> =>
     Effect.catchTag("PromiseRejection", (rejection) => Effect.die(rejection.cause)),
   );
 
+/**
+ * Cancel a response body the read does not consume: under workerd an unread
+ * body holds the request's I/O open until it is cancelled. A cancel that
+ * fails is dropped, so it never replaces the read's own answer.
+ */
+const discardBody = (response: Response): Effect.Effect<void> => {
+  const body = response.body;
+  return body === null
+    ? Effect.void
+    : Effect.ignore(
+        Effect.tryPromise({
+          try: () => body.cancel(),
+          catch: (cause) => new PromiseRejection({ cause }),
+        }),
+      );
+};
+
 const asFetch =
   (fetcher: FetcherLike) =>
   (request: Request): Promise<Response> =>
@@ -623,9 +640,13 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
       // 401 is "ran, nobody was signed in" — an expected answer, not a fault.
       // Its Set-Cookie still matters: it is how a stale cache cookie is cleared.
-      if (response.status === 401) return { session: Option.none(), setCookie };
+      if (response.status === 401) {
+        yield* discardBody(response);
+        return { session: Option.none(), setCookie };
+      }
 
       if (response.status !== 200) {
+        yield* discardBody(response);
         return yield* new RemoteSessionError({
           message: `Session read returned ${response.status}`,
           status: response.status,
@@ -677,9 +698,13 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
       // A machine caller is never handed a cookie, so none is replayed here.
       // 401 is "ran, the key does not resolve": anonymous, never the cookie.
-      if (response.status === 401) return emptyResult;
+      if (response.status === 401) {
+        yield* discardBody(response);
+        return emptyResult;
+      }
 
       if (response.status !== 200) {
+        yield* discardBody(response);
         return yield* new RemoteSessionError({
           message: `API key read returned ${response.status}`,
           status: response.status,

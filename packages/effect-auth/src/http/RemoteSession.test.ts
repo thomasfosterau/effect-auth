@@ -262,6 +262,74 @@ describe("RemoteSession session reads", () => {
   });
 });
 
+/** What a {@link trackedBody} whose cancel fails throws. */
+class CancelFailed extends Error {}
+
+/**
+ * A body that never ends, recording whether it was cancelled; with
+ * `cancelFails`, its cancel throws, so `body.cancel()` rejects.
+ */
+const trackedBody = (
+  cancelFails: boolean,
+): { readonly stream: ReadableStream<Uint8Array>; readonly cancelled: () => boolean } => {
+  let cancelled = false;
+  return {
+    stream: new ReadableStream<Uint8Array>({
+      cancel: () => {
+        cancelled = true;
+        if (cancelFails) throw new CancelFailed("cancel failed");
+      },
+    }),
+    cancelled: () => cancelled,
+  };
+};
+
+describe("RemoteSession cancels every response body it does not read", () => {
+  const reads = [
+    ["read", (client: RemoteSession.RemoteSessionClient) => client.read],
+    [
+      "readApiKey",
+      (client: RemoteSession.RemoteSessionClient) => {
+        assert(client.readApiKey !== undefined, "make builds readApiKey");
+        return client.readApiKey;
+      },
+    ],
+  ] as const;
+
+  describe.each(reads)("%s", (_name, readOf) => {
+    it.each([false, true])(
+      "a 401 is anonymous, its body cancelled (the cancel fails: %s)",
+      async (cancelFails) => {
+        const body = trackedBody(cancelFails);
+        const { fetcher } = spy(() => new Response(body.stream, { status: 401 }));
+        const read = readOf(RemoteSession.make({ fetcher }));
+
+        const result = await Effect.runPromise(
+          read(inbound({ "x-api-key": "key", ...withSession })),
+        );
+        expect(Option.isNone(result.session)).toBe(true);
+        expect(body.cancelled()).toBe(true);
+      },
+    );
+
+    it.each([false, true])(
+      "a non-200 is a RemoteSessionError, its body cancelled (the cancel fails: %s)",
+      async (cancelFails) => {
+        const body = trackedBody(cancelFails);
+        const { fetcher } = spy(() => new Response(body.stream, { status: 503 }));
+        const read = readOf(RemoteSession.make({ fetcher }));
+
+        const error = await Effect.runPromise(
+          Effect.flip(read(inbound({ "x-api-key": "key", ...withSession }))),
+        );
+        expect(error._tag).toBe("RemoteSessionError");
+        expect(error.status).toBe(503);
+        expect(body.cancelled()).toBe(true);
+      },
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The edge, end to end
 // ---------------------------------------------------------------------------
