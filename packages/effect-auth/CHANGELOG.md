@@ -1,5 +1,13 @@
 # @thomasfosterau/effect-auth
 
+## 0.5.1
+
+### Patch Changes
+
+- 6a451ad: Cancel every response body that is not read, since under workerd an unread body holds the request's I/O open until it is cancelled: the Resend and Twilio senders now cancel a 2xx body (they already cancelled a redirect's), and cancel an error body they stopped reading at the excerpt limit without letting a failed cancel turn the `AuthError` into a defect; `Http.RemoteSession`'s `read` and `readApiKey` cancel the body of a `401` and of any other non-`200` answer. A cancel that fails is dropped and never replaces the outcome.
+- 6a451ad: `generateJwsKeyPair` now throws an `AuthError` when the exported public JWK lacks a member its key needs (`kty`, `crv`, `x`, and `y` for ES256), rather than return a key no verifier can use; `JwtService` reports it as the `JwtError` it raises for any key-generation failure (#748).
+- 6a451ad: More answers are `Cache-Control: no-store` (#628 follow-ups): `POST /device/code` (the device code), the second-factor challenge a `POST /sessions` answers, `POST /oauth2/consent` (the redirect carries the authorization code), and the per-caller single-use `POST /sso-authorizations` state and `POST /google-one-tap-nonces` nonce. Under `Http.make`, every answer of `POST /oauth2/token` and `POST /device/token` is `no-store`, including the `400` for a payload that does not decode (RFC 6749 §5.2). `Http.RemoteSession.relayResponse` marks a response `no-store` when it strips its `Set-Cookie` for an API-key or bearer caller.
+
 ## 0.5.0
 
 ### Minor Changes
