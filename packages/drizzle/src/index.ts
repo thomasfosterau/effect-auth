@@ -4,7 +4,7 @@
  *
  * Implements `SessionStore`, `UserStore` and `IdentifierStore` — the three
  * stores every sign-in flow touches — plus `EmailPasswordStore` (with
- * `PasswordResetUserStore`), `ApiKeyStore`, `RateLimitStore` and the email
+ * `PasswordResetUserStore`), `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the email
  * verification and password reset token stores, against drizzle table objects
  * you can hand straight to `drizzle-kit`. One module per store, plus a batched
  * `Request`/`RequestResolver` read interface for application code.
@@ -14,7 +14,8 @@
  * Each store is a namespace with the same two entry points, `make` and `layer`:
  *
  * - `SessionStore` / `UserStore` / `IdentifierStore` — the store modules.
- * - `EmailPasswordStore` (`layer`, `passwordResetUserLayer`), `ApiKeyStore`,
+ * - `EmailPasswordStore` (`layer`, `passwordResetUserLayer`), `UserServiceStore`
+ *   (`UserService`, `AccountManagementService`, `AdminService`), `ApiKeyStore`,
  *   `RateLimitStore` (`purgeExpired` deletes its spent rows) and `TokenStore` (`emailVerificationLayer`,
  *   `passwordResetLayer`, `layer` for both) — the stores beyond sign-in.
  * - `SingleTableIdentifierStore` — the opt-in `IdentifierStore` whose email
@@ -118,4 +119,5 @@ export * as SessionStore from "./SessionStore.ts";
 export * as SingleTableIdentifierStore from "./SingleTableIdentifierStore.ts";
 export * as Sqlite from "./SqliteSchema.ts";
 export * as TokenStore from "./TokenStore.ts";
+export * as UserServiceStore from "./UserServiceStore.ts";
 export * as UserStore from "./UserStore.ts";

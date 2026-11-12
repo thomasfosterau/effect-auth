@@ -3,8 +3,9 @@
 Storage layers for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth), built on
 [Drizzle ORM](https://orm.drizzle.team) — **PostgreSQL, SQLite and MySQL**.
 
-Implements the three stores every sign-in flow touches, and the four that
-sign-up, password reset, email verification, API keys and rate limiting need:
+Implements the three stores every sign-in flow touches, and the five that
+sign-up, password reset, email verification, user management (`UserService`,
+account management, admin), API keys and rate limiting need:
 
 | effect-auth tag                                      | Table                     | What it holds                                          |
 | ---------------------------------------------------- | ------------------------- | ------------------------------------------------------ |
@@ -12,6 +13,7 @@ sign-up, password reset, email verification, API keys and rate limiting need:
 | `UserStore`                                          | `effect_auth_users`       | User records                                           |
 | `IdentifierStore`                                    | `effect_auth_identifiers` | Email / username / phone claims, unique per pair       |
 | `Email.EmailPasswordStore`, `PasswordResetUserStore` | `effect_auth_users`       | New users, and their `password_hash`                   |
+| `UserServiceStore`                                   | `effect_auth_users`       | User reads, profile / attribute updates and deletes    |
 | `ApiKeyStore`                                        | `effect_auth_api_keys`    | API keys by the SHA-256 hash of the key                |
 | `RateLimitStore`                                     | `effect_auth_rate_limits` | One fixed-window counter per rate-limit key            |
 | `EmailVerificationStore`, `PasswordResetStore`       | `effect_auth_tokens`      | Pending verification and reset tokens, by hash         |
@@ -83,7 +85,7 @@ Drizzle.IdentifierStore.layer(); // Layer<IdentifierStore, never, DrizzleDatabas
 ```
 
 The stores beyond sign-in have layers of their own, described in
-[Sign-up, API keys, rate limits and tokens](#sign-up-api-keys-rate-limits-and-tokens).
+[Sign-up, user management, API keys, rate limits and tokens](#sign-up-user-management-api-keys-rate-limits-and-tokens).
 
 …as are the underlying `Effect`s, if you would rather assemble the store objects
 yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
@@ -815,9 +817,9 @@ address.
   store holds only email identifiers, so these are refused. Those flows report
   the refusal as an `AuthError`: the store cannot serve them at all.
 
-## Sign-up, API keys, rate limits and tokens
+## Sign-up, user management, API keys, rate limits and tokens
 
-Four more stores run on the same `DrizzleDatabase` and the same dialect
+Five more stores run on the same `DrizzleDatabase` and the same dialect
 `tables` (each defaults to `Pg.tables`; pass `Sqlite.tables`, `MySql.tables` or
 a `defineTables(...)` result to match your handle). They are not part of
 `Drizzle.layer()`: merge the ones your application uses.
@@ -827,6 +829,7 @@ const stores = Layer.mergeAll(
   Drizzle.layer(tables), //                          Session, User, Identifier
   Drizzle.EmailPasswordStore.layer(tables), //        EmailPasswordService
   Drizzle.EmailPasswordStore.passwordResetUserLayer(tables), // PasswordResetService
+  Drizzle.UserServiceStore.layer(tables), //          UserService, AccountManagement, Admin
   Drizzle.TokenStore.layer(tables), //                EmailVerificationStore + PasswordResetStore
   Drizzle.ApiKeyStore.layer(tables), //               ApiKeyService
   Drizzle.RateLimitStore.layer(tables), //            RateLimiter, IP/RateLimit plugins
@@ -853,6 +856,16 @@ store each).
     It does not write the address onto the row, so a
     [single-table](#single-table-identifiers-opt-in) users table whose
     `email` is NOT NULL still needs the writer shown there.
+- **`UserServiceStore`** works on the users table too, and takes a
+  `defineSchema` mapping like `EmailPasswordStore` (`passwordHash` need not be
+  mapped; it never touches it). `get` reads through `UserStore`'s projection
+  (`null` on a miss). `update` is one `UPDATE` that writes the user whole —
+  `name` and `image` (`NULL` when absent), `updatedAt` and the attributes — and
+  returns the user it was given; an update of a missing user writes nothing.
+  Promoted attributes go to their columns (`NULL` when the user no longer has
+  one) and the rest replace the bag; attributes a table with no mapped bag
+  cannot hold fail with `AuthError`. `delete` removes the user row only.
+  These are the semantics of core's `/sql` `UserServiceStore`.
 - **`ApiKeyStore`** keeps `keyHash`, the SHA-256 digest `ApiKeyService`
   computes (unique index), never the key. Optional fields absent from a key are
   `NULL` and read back absent; instants are timestamps in the table and epoch
