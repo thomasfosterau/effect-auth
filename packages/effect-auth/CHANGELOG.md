@@ -1,5 +1,63 @@
 # @thomasfosterau/effect-auth
 
+## 0.5.0
+
+### Minor Changes
+
+- efad4fb: Resolve an API key over the HTTP tier and across a service binding (#730).
+  
+  - **New endpoint, `GET /api-keys/current`.** It is JSON:API and mounted with the `api-keys` group; without an `ApiKeyService` it answers `404`.
+    - It reads the key from an API-key header, never from the URL: `cookie.apiKeyHeaders` on `Http.make`, default `x-api-key`.
+    - It verifies the key with `ApiKeyService.verifyWithRateLimit` and no required permissions.
+    - It answers the `api-keys` resource, never its hash or plaintext, with its `user` in `included` and `Cache-Control: no-store`.
+    - The key wins over any cookie or bearer token on the request.
+    - An unknown, disabled, expired or exhausted key gets one identical `401`, and the reason is logged server-side only.
+    - Only a real key over its own `rateLimit` gets `429` with `Retry-After`.
+  - **Each resolution consumes one use of the key**: `remaining` decrements and `lastUsedAt` moves. A non-consuming check is #645.
+  - **New default rate-limit rule.** `defaultEndpointRules` gains one for the endpoint: 300 requests a minute per client address, then a 5-minute block.
+    - It counts every request before the key is read, refused and resolved ones alike.
+    - A request it refuses spends no use of the key.
+    - Override it with a rule ahead of `...defaultEndpointRules`; the first match wins.
+  - **Behaviour change in `RemoteSession`.** `resolveAtEdge` and `resolveAtEdgeFailOpen` now resolve a request that carries an API key through `GET /api-keys/current`, to `{ session: None, user, apiKey, credentialClass: "machine" }`.
+    - The cookie is not forwarded on that call.
+    - A request carrying a key **and** a session cookie or bearer token used to resolve through the cookie or token. It now resolves the key.
+    - If the auth service has no `ApiKeyService`, that call answers `404`. `resolveAtEdge` then fails closed with a `RemoteSessionError` (`status: 404`), and `resolveAtEdgeFailOpen` degrades to anonymous. Neither falls back to the cookie.
+    - A key over its own per-key limit reaches the edge as a `RemoteSessionError` with `status: 429`: `resolveAtEdge` fails with it, and `resolveAtEdgeFailOpen` degrades to anonymous.
+    - New API: `RemoteSessionResult.user` / `apiKey`, a `RemoteApiKey` type, `RemoteSessionClient.readApiKey` and `fromApiKeyDocument`.
+  - **Fix in `ApiKeyService.verifyWithRateLimit`.** It now runs the enabled, expiry, remaining-uses and permission checks before it consumes the key's per-key rate-limit token.
+    - A disabled, expired, exhausted or under-permitted key is refused with that reason even when it is over its limit. It used to be refused as `Rate limit exceeded`, which told a revoked-but-real key apart from an unknown one.
+    - A refused attempt no longer spends a token from the key's bucket.
+  - **A banned or SCIM-deactivated owner's key is refused (#755, in part).** `ApiKeyService.verify` and `verifyWithRateLimit` answer `Invalid API key` (`reason: "invalid"`) for a key whose owner is currently banned (`isBanned`: `banned`, an unlapsed `banExpires`) or SCIM-deactivated (`isScimDeactivated`), as they already did for an owner that no longer exists (#601).
+    - It is decided at lookup, before the per-key limit and before a use is spent. So such a key gets the unknown-key `401` from `GET /api-keys/current` whether or not it is over its limit, and a refused call spends neither a use nor a bucket token.
+    - `isBanned`, `isScimDeactivated` and `SCIM_DEACTIVATED_ATTRIBUTE` now live in a new internal `UserStanding.ts` and are re-exported, unchanged, from `Admin.ts`, `Scim.ts` and the root.
+  - **Type narrowing in `ApiKeyService.verifyWithRateLimit`.** It now declares `R = never` instead of `RateLimitStore`, as every service method does; it never read the store from its context.
+    - Callers keep compiling.
+    - It breaks only a hand-written `ApiKeyService` implementation whose `verifyWithRateLimit` requires `RateLimitStore`.
+  - **Smaller additions:**
+    - `ApiKeyVerifyResult` gains `reason` (`ApiKeyRefusal`) and, for `rate-limited`, `retryAfter`.
+    - `SessionResolution.ResolveWithOptions` gains an optional `resolved` predicate.
+    - `./client/testing`'s `makeServerFixture` gains `apiKeys`, `layer`, `cookie` and `rateLimitStore` options, and returns `apiKeyRecords`.
+    - `Http.ResolvedCookieConfig` (exported, marked internal) gains a required `apiKeyHeaders` field. `resolveCookieConfig` fills it in; only a hand-built value of the type needs it added.
+- c0f9b73: Bounded purges for a cron with a CPU budget (#729). `@thomasfosterau/effect-auth/sql` adds `purgeExpiredWith({ limit })`: `purgeExpired` with each table's `DELETE` capped at `limit` rows (magic links, email OTPs and rate-limit rows alike), reporting the counts so a caller can loop until they are `0`. `RateLimitStore.purgeExpired(tables, { limit })` in `@thomasfosterau/effect-auth-drizzle` caps its `DELETE` the same way on PostgreSQL, SQLite and MySQL (through a derived table, which MySQL accepts inside `IN`) and still returns nothing. Omitting `limit` keeps the unbounded purge; a `limit` that is not a positive integer fails with `AuthError`.
+- ca639d5: Deleting a user now deletes everything the account holds (#601). `AccountManagementService.confirmAccountDeletion`, `AdminService.removeUser`, `AnonymousService.linkAccount` and `UserService.deleteUser` run one purge: every user-keyed credential and token store present where the service's layer is built deletes that user's rows (OAuth links and their provider tokens, passkeys, API keys, the TOTP enrolment and backup codes, trusted devices, OIDC-provider tokens and consents, pending password resets, email verifications and account-management tokens), the unspent magic links and email / phone one-time codes sent to the user's addresses are deleted (keyed by address, they would otherwise sign their holder into the next account to claim it), then the sessions are revoked, then the identifiers are deleted (`removeUser` used to leave them, so the address stayed claimed; it can now sign up again), and the user row goes last, so a failure leaves the user rather than rows naming a missing one. No foreign keys are added; wrap the call in your stores' transaction (`sql.withTransaction` on `./sql`) to make it atomic. `ApiKeyService.verify` and `verifyWithRateLimit` now answer `Invalid API key` for a key whose owner no longer exists.
+  
+  Breaking for bring-your-own stores and for layer wiring:
+  
+  - `ApiKeyStore`, `OAuthAccountStore`, `MultiFactor.CredentialStore` and `OidcConsentStore` gain a required `deleteByUserId(userId)`, which deletes that user's rows only (a no-op for a user with none). `MultiFactorStore.delete(userId)` is its per-user delete, unchanged.
+  - **`ApiKeyService` now requires `UserStore`** in its layer's context (it reads the key's owner on every verify). `Testing.apiKeyServiceLayer` takes `users` (seed the owners of the keys a test verifies) and provides `UserStore`.
+  - **`UserService.deleteUser` now deletes the whole account**, through the new `AccountDeletion` service: provide `accountDeletionLayer` (it needs `UserServiceStore`, `IdentifierStore` and `SessionService`, and clears whichever credential stores are in its context) where `UserService` is built. Without it, `deleteUser` fails with `AuthError` and deletes nothing; it no longer deletes the user row alone.
+  - `./sql`: `UserServiceStore.delete` also deletes the user's `auth_user_roles` rows, in one transaction; the API key, OAuth account and passkey stores implement `deleteByUserId`.
+  - `./testing`: `memoryStores` also provides `UserServiceStore`, `CredentialStore` and `AccountManagementStore` (`memoryUserServiceStore`, `memoryCredentialStore`, `memoryAccountManagementStore`), and new conformance suites check every per-user delete: `oauthAccountStoreConformance`, `credentialStoreConformance`, `multiFactorStoreConformance`, `trustedDeviceStoreConformance`, `oidcTokenStoreConformance`, `oidcConsentStoreConformance`, `emailVerificationStoreConformance`, `passwordResetStoreConformance`, `accountManagementStoreConformance`, and a case in `apiKeyStoreConformance`.
+  
+  `@thomasfosterau/effect-auth-drizzle`: `ApiKeyStore` implements `deleteByUserId` (one `DELETE`), as the core contract now requires.
+- 6f37516: `redeemOneTimeTokenForSession` now refuses a token whose subject `UserStore` no longer finds (a deleted user), with the same `OneTimeTokenError` as an unknown token, instead of minting a session for it; it therefore requires `UserStore` (which `SessionService.layer` already needs). The "Deleting a user" README section now lists one-time tokens and by-email organization invitations among the records left to expire, and says what happens to a store missing from the deleting layer's context and to a deletion that fails after the identifiers are gone (#601).
+
+### Patch Changes
+
+- 1f75f76: Every response carrying `Set-Cookie` is now sent with `Cache-Control: no-store` (#628), whether `Http.make` serves it or `Http.RemoteSession.relayResponse` / `withSetCookie` relays it: sign-in, sign-up, sign-out and the other cookie-clearing answers, and the `GET /sessions/current` that refreshes the session-data cache cookie. An existing `Cache-Control` with `no-store` is kept; one without it keeps its directives and gets `no-store` appended. The responses that hand a credential over without a cookie are `no-store` too: `GET /sessions/:id`, `POST /tokens`, `POST /api-keys`, `POST /oauth-clients`, `POST /multi-factor-enrollments`, `POST /backup-code-sets`, `POST /device/token`, `POST /oauth2/token`, `GET /oauth2/userinfo` and `POST /register`.
+- 05f7c10: `Http.RemoteSession`: a first sign-in through `relay` now signs the browser in (#619). `relayResponse` (and `relay`, which applies it) used to pass `Set-Cookie` on only when the inbound request already carried a session or cache cookie, so a browser signing in for the first time got a `201` with its session cookie stripped and the new session orphaned. `Set-Cookie` is now relayed to every caller without a machine credential: a request with no credential at all, or with a session cookie only. It is still stripped when the inbound request carries an API key or an `Authorization: Bearer` token, alone or beside a session cookie, since such a caller authenticates with that key or token and a cookie would only plant session state in whatever jar its HTTP client keeps; a bearer client gets its token through `bearerMode`'s `set-auth-token` header. A request carrying a session cookie and a bearer token, which previously received `Set-Cookie`, no longer does.
+- 90e1793: The core's crypto now runs on Cloudflare Workers (#748). Workers apps gain working JWTs and OIDC: ES256, `JwtService`'s default, failed to sign and verify on every compatibility date (workerd's `node:crypto` rejects a `KeyObject` beside `dsaEncoding` with `ERR_INVALID_ARG_TYPE`), which broke `JwtService`, the OIDC provider's `id_token`s, ES256 `id_token` verification in `OAuthService` and `appleClientSecret`; `signJws` and `verifyJws` now pass the PEM or the JWK instead, and sign and verify exactly as before on Node (the same tokens, the same refusals). `generateJwsKeyPair`, and so `JwtService`'s first key, failed from compatibility date 2025-12-03, where workerd's JWK export carries absent members as `undefined`; those are dropped. Apps on a compatibility date before 2024-09-23 also gain the default PBKDF2 and scrypt password hashers, AES-256-GCM (`aes256GcmCipher`, the session cookie cache) and the WebAuthn signature checks, which read the `Buffer` global that `nodejs_compat` sets only from that date and now import it from `node:buffer`. The README's new Runtimes section states the supported floor: `nodejs_compat` and a compatibility date of 2023-01-01 or later, tested inside a real workerd.
+
 ## 0.4.0
 
 ### Minor Changes
