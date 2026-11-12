@@ -10,7 +10,7 @@
  * covered with a recording `fetch` instead.
  */
 import * as Auth from "../index.ts";
-import { DateTime, Effect, MutableHashSet, Order } from "effect";
+import { DateTime, Effect, MutableHashMap, MutableHashSet, Order } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -649,6 +649,45 @@ describe("organizations", () => {
       AuthClientError,
     );
     expect(signIn.status).toBe(401);
+  });
+
+  it("accepts and rejects an invitation by id from a verified address, without the token (#673)", async () => {
+    const { server, browser } = withServer({ organization: true });
+    const owner = browser();
+    const invitee = browser();
+
+    await owner.signUp({ email: "boss@client.test", password: PW });
+    const org = await owner.organization.create({ name: "Hooli", slug: "hooli" });
+    const account = await invitee.signUp({ email: "dash@client.test", password: PW });
+    const first = await owner.organization.invite(org.id, {
+      email: "dash@client.test",
+      role: "member",
+    });
+
+    // Unverified, the id alone accepts nothing.
+    const unverified = await rejectionOf(
+      invitee.organization.acceptInvitation(first.id),
+      AuthClientError,
+    );
+    expect(unverified.status).toBe(400);
+
+    // Once the address is verified, it is the proof.
+    const email = Arr.findFirst(
+      Arr.fromIterable(server.identifierRecords),
+      ([, identifier]) => identifier.value === "dash@client.test",
+    );
+    assert(Option.isSome(email), "the invitee has an email identifier");
+    const [id, identifier] = email.value;
+    MutableHashMap.set(server.identifierRecords, id, { ...identifier, verified: true });
+
+    const member = await invitee.organization.acceptInvitation(first.id);
+    expect(member).toMatchObject({ userId: signedInUser(account).id, role: "member" });
+
+    const second = await owner.organization.invite(org.id, {
+      email: "dash@client.test",
+      role: "member",
+    });
+    expect((await invitee.organization.rejectInvitation(second.id)).status).toBe("rejected");
   });
 
   it("refuses an admin granting the owner role, to themselves included (#585)", async () => {

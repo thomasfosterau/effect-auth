@@ -3046,13 +3046,10 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const { org, actorId, resolved } = yield* actor(request);
+          // Without the emailed token, the service takes a verified matching
+          // address as the proof (#673).
           const { status, token } = payload.data.attributes ?? {};
-          if ((status === "accepted" || status === "rejected") && token === undefined) {
-            return yield* new S.BadRequest({
-              message: "Answering an invitation takes the token its email carried",
-            });
-          }
-          const answer = { invitationId: params.id, token: token ?? "" };
+          const answer = { invitationId: params.id, token };
           if (status === "accepted") {
             const member = yield* refusedBadRequest(
               org.acceptInvitation(actorId, { ...answer, currentSessionId: resolved.session.id }),
