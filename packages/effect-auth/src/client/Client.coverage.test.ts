@@ -539,6 +539,39 @@ describe("organizations", () => {
     expect(lastOwner.status).toBe(403);
   });
 
+  it("refuses an admin granting the owner role, to themselves included (#585)", async () => {
+    const { browser } = withServer({ organization: true });
+    const owner = browser();
+    const admin = browser();
+
+    await owner.signUp({ email: "founder@client.test", password: PW });
+    const adminUser = await admin.signUp({ email: "admin@client.test", password: PW });
+    const org = await owner.organization.create({ name: "Hooli", slug: "hooli" });
+    const membership = await owner.organization.addMember(org.id, {
+      userId: signedInUser(adminUser).id,
+      role: "admin",
+    });
+
+    const promoteSelf = await rejectionOf(
+      admin.organization.updateMemberRole(membership.id, { role: "owner" }),
+      AuthClientError,
+    );
+    expect(promoteSelf.status).toBe(403);
+    const inviteOwner = await rejectionOf(
+      admin.organization.invite(org.id, { email: "second@client.test", role: "owner" }),
+      AuthClientError,
+    );
+    expect(inviteOwner.status).toBe(403);
+    const undefinedRole = await rejectionOf(
+      owner.organization.updateMemberRole(membership.id, { role: "superadmin" }),
+      AuthClientError,
+    );
+    expect(undefinedRole.status).toBe(403);
+
+    const roles = (await owner.organization.get(org.id)).members.map((m) => m.role);
+    expect(roles.toSorted()).toEqual(["admin", "owner"]);
+  });
+
   it("sets a default role that addMember and the org view both use", async () => {
     const { browser } = withServer({ organization: true });
     const owner = browser();

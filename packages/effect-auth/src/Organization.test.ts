@@ -28,6 +28,7 @@ import {
 } from "./Organization.ts";
 import * as OrganizationModule from "./Organization.ts";
 import * as Testing from "./testing/index.ts";
+import type { AuthError } from "./Errors.ts";
 
 const organizations = MutableHashMap.empty<string, Organization>();
 const members = MutableHashMap.empty<string, Member>();
@@ -1190,7 +1191,14 @@ describe("OrganizationService", () => {
           name: "Acme",
           slug: "acme",
         });
+        // A role must be defined to be granted (#585), so the member gets
+        // `auditor` while it exists, and keeps it once the definition is gone.
+        yield* service.upsertOrgRole("owner-1", organization.id, {
+          role: "auditor",
+          permissions: [],
+        });
         yield* service.addMember("owner-1", organization.id, "ghost-1", "auditor");
+        yield* service.deleteOrgRole("owner-1", organization.id, "auditor");
 
         const beforeDefinition = yield* service.checkPermission(
           "ghost-1",
@@ -1221,15 +1229,14 @@ describe("OrganizationService", () => {
   });
 
   it("honors wildcard permissions in custom role definitions", async () => {
-    const result = await runService({}, (service) =>
+    // Granting `superuser` takes an owner who holds `*:*` itself (#585).
+    const config: OrganizationConfig = { roles: { ...defaultOrganizationRoles, owner: ["*:*"] } };
+    const result = await runService(config, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
           name: "Acme",
           slug: "acme",
         });
-        yield* service.addMember("owner-1", organization.id, "lead-1", "lead");
-        yield* service.addMember("owner-1", organization.id, "root-1", "superuser");
-
         yield* service.upsertOrgRole("owner-1", organization.id, {
           role: "lead",
           permissions: ["team:*"],
@@ -1238,6 +1245,8 @@ describe("OrganizationService", () => {
           role: "superuser",
           permissions: ["*:*"],
         });
+        yield* service.addMember("owner-1", organization.id, "lead-1", "lead");
+        yield* service.addMember("owner-1", organization.id, "root-1", "superuser");
 
         const leadCreatesTeams = yield* service.checkPermission(
           "lead-1",
@@ -1408,6 +1417,203 @@ describe("OrganizationService", () => {
     expect(result.second.updatedAt).toBeGreaterThanOrEqual(result.first.updatedAt);
     expect(result.listed).toHaveLength(1);
     expect(result.listed[0].permissions).toEqual(["team:create", "team:delete"]);
+  });
+});
+
+/** An organization owned by `owner-1`, with `admin-1` as an admin. */
+const withAdmin = <A, E>(
+  config: OrganizationConfig,
+  program: (
+    service: typeof OrganizationService.Service,
+    organization: Organization,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore>,
+) =>
+  runService(config, (service) =>
+    Effect.gen(function* () {
+      const organization = yield* service.createOrganization("owner-1", {
+        name: "Acme",
+        slug: "acme",
+      });
+      yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
+      return yield* program(service, organization);
+    }),
+  );
+
+/** The `OrganizationError` message `effect` was refused with. */
+const refusal = <A, R>(
+  effect: Effect.Effect<A, OrganizationModule.OrganizationError | AuthError, R>,
+) =>
+  Effect.map(Effect.flip(effect), (error) => {
+    expect(error._tag).toBe("OrganizationError");
+    return error.message;
+  });
+
+describe("OrganizationService - no granting beyond your own permissions (#585)", () => {
+  beforeEach(resetStores);
+
+  it("refuses an admin promoting themselves, or anyone, to owner", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        const self = yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "admin-1", "owner"),
+        );
+        const other = yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "member-1", "owner"),
+        );
+        const full = yield* service.getFullOrganization(organization.id);
+        return { self, other, full };
+      }),
+    );
+
+    expect(result.self).toBe(
+      "The 'owner' role carries 'organization:delete', which your role does not grant",
+    );
+    expect(result.other).toBe(result.self);
+    expect(result.full.members.filter((member) => member.role === "owner")).toHaveLength(1);
+  });
+
+  it("refuses an admin adding or inviting someone as owner", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        const added = yield* refusal(
+          service.addMember("admin-1", organization.id, "user-2", "owner"),
+        );
+        const invited = yield* refusal(
+          service.inviteMember("admin-1", organization.id, {
+            email: "second@example.com",
+            role: "owner",
+          }),
+        );
+        // At or below their own permissions, both still work.
+        const peer = yield* service.addMember("admin-1", organization.id, "user-3", "admin");
+        return { added, invited, peer };
+      }),
+    );
+
+    expect(result.added).toContain("The 'owner' role carries");
+    expect(result.invited).toContain("The 'owner' role carries");
+    expect(MutableHashMap.size(invitations)).toBe(0);
+    expect(result.peer.role).toBe("admin");
+  });
+
+  it("refuses an admin changing an owner's role", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "owner-2", "owner");
+        return yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "owner-2", "member"),
+        );
+      }),
+    );
+
+    expect(result).toBe(
+      "This member's 'owner' role carries 'organization:delete', which your role does not grant",
+    );
+  });
+
+  it("refuses an admin reactivating a deactivated owner", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "owner-2", "owner");
+        yield* service.deactivateMember("owner-1", organization.id, "owner-2");
+        const byAdmin = yield* refusal(
+          service.reactivateMember("admin-1", organization.id, "owner-2"),
+        );
+        const byOwner = yield* service.reactivateMember("owner-1", organization.id, "owner-2");
+        return { byAdmin, byOwner };
+      }),
+    );
+
+    expect(result.byAdmin).toContain("This member's 'owner' role carries");
+    expect(result.byOwner.role).toBe("owner");
+  });
+
+  it("applies to custom roles: no granting, changing or removing above your own permissions", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.upsertOrgRole("owner-1", organization.id, {
+          role: "billing",
+          permissions: ["role:manage"],
+        });
+        yield* service.addMember("owner-1", organization.id, "billing-1", "billing");
+        const grant = yield* refusal(
+          service.addMember("admin-1", organization.id, "user-2", "billing"),
+        );
+        const change = yield* refusal(
+          service.updateMemberRole("admin-1", organization.id, "billing-1", "member"),
+        );
+        const deactivate = yield* refusal(
+          service.deactivateMember("admin-1", organization.id, "billing-1"),
+        );
+        const remove = yield* refusal(
+          service.removeMember("admin-1", organization.id, "billing-1"),
+        );
+        return { grant, change, deactivate, remove };
+      }),
+    );
+
+    expect(result.grant).toBe(
+      "The 'billing' role carries 'role:manage', which your role does not grant",
+    );
+    expect(result.change).toContain("This member's 'billing' role carries 'role:manage'");
+    expect(result.deactivate).toBe(result.change);
+    expect(result.remove).toBe(result.change);
+  });
+
+  it("matches wildcards: a `team:*` role takes a granter holding `team:*` or `*:*`", async () => {
+    const config: OrganizationConfig = {
+      roles: { ...defaultOrganizationRoles, owner: ["*:*"], lead: ["team:*"], root: ["*:*"] },
+    };
+    const result = await withAdmin(config, (service, organization) =>
+      Effect.gen(function* () {
+        // The admin holds every team:<action> by name, but not the wildcard.
+        const byAdmin = yield* refusal(
+          service.addMember("admin-1", organization.id, "lead-1", "lead"),
+        );
+        yield* service.addMember("owner-1", organization.id, "root-1", "root");
+        const byRoot = yield* service.addMember("root-1", organization.id, "lead-1", "lead");
+        return { byAdmin, byRoot };
+      }),
+    );
+
+    expect(result.byAdmin).toBe("The 'lead' role carries 'team:*', which your role does not grant");
+    expect(result.byRoot.role).toBe("lead");
+  });
+
+  it("rejects a role string nothing defines, on every write path", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        const add = yield* refusal(
+          service.addMember("owner-1", organization.id, "user-2", "superadmin"),
+        );
+        const invite = yield* refusal(
+          service.inviteMember("owner-1", organization.id, {
+            email: "x@example.com",
+            role: "superadmin",
+          }),
+        );
+        const update = yield* refusal(
+          service.updateMemberRole("owner-1", organization.id, "member-1", "superadmin"),
+        );
+        return { add, invite, update };
+      }),
+    );
+
+    const undefinedRole = "Role 'superadmin' is not defined for this organization";
+    expect(result).toEqual({ add: undefinedRole, invite: undefinedRole, update: undefinedRole });
+  });
+
+  it("checks the organization's default role when addMember names none", async () => {
+    const result = await withAdmin({}, (service, organization) =>
+      Effect.gen(function* () {
+        yield* service.setDefaultRole("owner-1", organization.id, "owner");
+        return yield* refusal(service.addMember("admin-1", organization.id, "user-2"));
+      }),
+    );
+
+    expect(result).toContain("The 'owner' role carries");
   });
 });
 

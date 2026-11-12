@@ -46,6 +46,7 @@
 import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
@@ -551,6 +552,11 @@ export interface OrganizationConfig {
    * Static role → permission map (default: {@link defaultOrganizationRoles}).
    * A per-organization {@link OrgRole} of the same name replaces the entry
    * here for that organization.
+   *
+   * A member grants a role (adds, invites or promotes someone to it) only
+   * when their own role carries every permission that role carries (#585),
+   * so give the owner role the application permissions (or `"*:*"`) your
+   * custom roles carry, or owners cannot hand those roles out.
    */
   readonly roles?: Record<string, ReadonlyArray<string>>;
   /** Optional invitation email delivery */
@@ -749,7 +755,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Invite a user (by email) to the organization. Requires the
-     * `invitation:create` permission. Rejects duplicate pending invitations for
+     * `invitation:create` permission, a `role` the organization defines, and
+     * that the inviter holds every permission that role carries (no granting
+     * beyond your own permissions, #585). Rejects duplicate pending invitations for
      * the same email + organization and enforces `membershipLimit`. When
      * `sendInvitationEmail` is configured it is invoked with the created
      * invitation.
@@ -819,7 +827,9 @@ export class OrganizationService extends Context.Service<
     /**
      * Add a user to the organization directly (no invitation). Requires the
      * `member:create` permission and enforces `membershipLimit`. Omitting
-     * `role` uses the organization's `defaultRole` (default `"member"`).
+     * `role` uses the organization's `defaultRole` (default `"member"`). The
+     * role (named or default) must be defined, and the actor must hold every
+     * permission it carries (#585).
      */
     readonly addMember: (
       actorId: string,
@@ -829,8 +839,9 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
-     * Remove a member. Requires the `member:delete` permission. An owner can
-     * only be removed by another owner, and the last owner can never be
+     * Remove a member. Requires the `member:delete` permission and that the
+     * actor holds every permission the member's role carries (#585). An owner
+     * can only be removed by another owner, and the last owner can never be
      * removed. Cascades: the member's memberships in the organization's teams
      * are removed as well.
      */
@@ -841,8 +852,11 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
-     * Change a member's role. Requires the `member:update` permission. The last
-     * active owner cannot be demoted, and an inactive member's role is not
+     * Change a member's role. Requires the `member:update` permission, a
+     * `role` the organization defines, and that the actor holds every
+     * permission of both the member's current role and the new one (#585):
+     * an admin can neither promote anyone, themselves included, to owner nor
+     * demote an owner. The last active owner cannot be demoted, and an inactive member's role is not
      * editable - reactivate them first, or the restore would overwrite the
      * change.
      */
@@ -855,8 +869,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Suspend a membership without deleting it. Requires the `member:update`
-     * permission; an owner may only be deactivated by another owner, and the
-     * last active owner never can.
+     * permission and that the actor holds every permission the member's role
+     * carries (#585); an owner may only be deactivated by another owner, and
+     * the last active owner never can.
      *
      * The row survives (history, team memberships and the member's role, kept
      * in `previousRole`), the member is demoted to the organization's
@@ -874,7 +889,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Restore a deactivated membership, putting back the role it held when it
-     * was deactivated. Requires the `member:update` permission. No capacity
+     * was deactivated. Requires the `member:update` permission and that the
+     * actor holds every permission of the role it restores (#585), so only
+     * someone holding what the owner role carries brings back an owner. No capacity
      * check: the row never stopped occupying a seat, so reactivating it adds
      * nothing to `membershipLimit`.
      */
@@ -1194,6 +1211,68 @@ export const make = (
         (permissions) =>
           permissions !== null &&
           permissions.some((granted) => grantSatisfies(granted, permission)),
+      );
+
+    /**
+     * The permissions a role carries, failing for a role nothing defines: a
+     * role string no {@link OrgRole} or `config.roles` entry resolves is never
+     * stored on a membership or an invitation, nor made the default (#585).
+     */
+    const requireDefinedRole = (organizationId: string, role: string) =>
+      resolveRolePermissions(organizationId, role).pipe(
+        Effect.filterOrFail(
+          P.isNotNull,
+          () =>
+            new OrganizationError({
+              message: `Role '${role}' is not defined for this organization`,
+            }),
+        ),
+      );
+
+    /**
+     * No granting beyond your own permissions (#585): refuse unless the
+     * actor's role grants every one of `permissions`, the permissions some
+     * role carries. `subject` names that role in the refusal.
+     */
+    const requireHoldsAll = (
+      organizationId: string,
+      actor: Member,
+      permissions: ReadonlyArray<string>,
+      subject: string,
+    ) =>
+      Effect.gen(function* () {
+        const held = (yield* resolveRolePermissions(organizationId, actor.role)) ?? [];
+        const unheld = Arr.findFirst(
+          permissions,
+          (permission) => !held.some((granted) => grantSatisfies(granted, permission)),
+        );
+        if (Option.isSome(unheld)) {
+          return yield* new OrganizationError({
+            message: `${subject} carries '${unheld.value}', which your role does not grant`,
+          });
+        }
+        return yield* Effect.void;
+      });
+
+    /**
+     * Refuse to hand out `role` (on a membership or an invitation) unless it
+     * is defined and the actor holds every permission it carries: the owner
+     * role and custom roles alike.
+     */
+    const requireGrantable = (organizationId: string, actor: Member, role: string) =>
+      Effect.flatMap(requireDefinedRole(organizationId, role), (permissions) =>
+        requireHoldsAll(organizationId, actor, permissions, `The '${role}' role`),
+      );
+
+    /**
+     * Refuse to act on a member (change, deactivate, reactivate or remove
+     * them) unless the actor holds every permission `role` carries: the
+     * member's current role, or the `previousRole` a reactivation restores.
+     * A role nothing defines carries no permissions, so it never blocks.
+     */
+    const requireOutranks = (organizationId: string, actor: Member, role: string) =>
+      Effect.flatMap(resolveRolePermissions(organizationId, role), (permissions) =>
+        requireHoldsAll(organizationId, actor, permissions ?? [], `This member's '${role}' role`),
       );
 
     /** Load an organization, failing when it does not exist. */
@@ -1546,8 +1625,13 @@ export const make = (
         organizationId: string,
         input: InviteMemberInput,
       ) {
-        yield* requireMemberPermission(inviterId, organizationId, "invitation:create");
+        const inviter = yield* requireMemberPermission(
+          inviterId,
+          organizationId,
+          "invitation:create",
+        );
         const organization = yield* getOrganizationOrFail(organizationId);
+        yield* requireGrantable(organizationId, inviter, input.role);
         yield* ensureMembershipCapacity(organizationId);
 
         const email = normalizeEmail(input.email);
@@ -1682,8 +1766,10 @@ export const make = (
         userId: string,
         role?: string,
       ) {
-        yield* requireMemberPermission(actorId, organizationId, "member:create");
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:create");
         const organization = yield* getOrganizationOrFail(organizationId);
+        const granted = role ?? defaultRoleOf(organization);
+        yield* requireGrantable(organizationId, actor, granted);
 
         const existing = yield* store.getMember(organizationId, userId);
         if (existing) {
@@ -1693,7 +1779,7 @@ export const make = (
         }
 
         yield* ensureMembershipCapacity(organizationId);
-        return yield* createMembership(organizationId, userId, role ?? defaultRoleOf(organization));
+        return yield* createMembership(organizationId, userId, granted);
       }),
 
       removeMember: Effect.fn("OrganizationService.removeMember")(function* (
@@ -1704,6 +1790,7 @@ export const make = (
         const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
 
         const target = yield* getMemberOrFail(organizationId, memberUserId);
+        yield* requireOutranks(organizationId, actor, target.role);
 
         if (target.role === creatorRole) {
           if (actor.role !== creatorRole) {
@@ -1735,7 +1822,7 @@ export const make = (
         memberUserId: string,
         role: string,
       ) {
-        yield* requireMemberPermission(actorId, organizationId, "member:update");
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:update");
 
         const target = yield* getMemberOrFail(organizationId, memberUserId);
 
@@ -1744,6 +1831,9 @@ export const make = (
             message: "Reactivate the member before changing their role",
           });
         }
+
+        yield* requireOutranks(organizationId, actor, target.role);
+        yield* requireGrantable(organizationId, actor, role);
 
         if (target.role === creatorRole && role !== creatorRole) {
           const owners = yield* countOwners(organizationId);
@@ -1769,6 +1859,7 @@ export const make = (
         if (!isActiveMember(target)) {
           return yield* new OrganizationError({ message: "Member is already inactive" });
         }
+        yield* requireOutranks(organizationId, actor, target.role);
 
         // Same shape as removal: owners are each other's peers, and the last
         // one standing keeps the organization administrable.
@@ -1805,7 +1896,7 @@ export const make = (
         organizationId: string,
         memberUserId: string,
       ) {
-        yield* requireMemberPermission(actorId, organizationId, "member:update");
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:update");
         const target = yield* getMemberOrFail(organizationId, memberUserId);
 
         if (isActiveMember(target)) {
@@ -1813,11 +1904,11 @@ export const make = (
         }
 
         const { previousRole, ...rest } = target;
-        return yield* store.updateMember({
-          ...rest,
-          status: "active",
-          role: previousRole ?? target.role,
-        });
+        const restored = previousRole ?? target.role;
+        // Restoring a role is granting it back: a deactivated owner returns
+        // only through someone who holds every permission the owner role carries.
+        yield* requireOutranks(organizationId, actor, restored);
+        return yield* store.updateMember({ ...rest, status: "active", role: restored });
       }),
 
       setDefaultRole: Effect.fn("OrganizationService.setDefaultRole")(function* (
@@ -1830,12 +1921,7 @@ export const make = (
 
         // Fail closed on a role nothing defines: a default nobody can resolve
         // would hand every new member an empty permission set silently.
-        const permissions = yield* resolveRolePermissions(organizationId, role);
-        if (permissions === null) {
-          return yield* new OrganizationError({
-            message: `Role '${role}' is not defined for this organization`,
-          });
-        }
+        yield* requireDefinedRole(organizationId, role);
 
         return yield* store.updateOrganization({ ...organization, defaultRole: role });
       }),
