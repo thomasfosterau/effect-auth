@@ -209,6 +209,8 @@ export interface AuthResult {
    */
   readonly identifier?: { readonly type: IdentifierType; readonly value: string };
   readonly session?: Types.Session;
+  /** The raw session token, present with `session`: the credential the client presents; `session.id` is its digest. */
+  readonly token?: string | undefined;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
   /**
@@ -266,7 +268,7 @@ export interface ChangePasswordInput {
   readonly newPassword: string;
   /** Revoke the user's other sessions after the change (keeps `currentSessionId`). */
   readonly revokeOtherSessions?: boolean;
-  /** The session to keep when `revokeOtherSessions` is set; omit to revoke all. */
+  /** The stored id (`session.id`) of the session to keep when `revokeOtherSessions` is set; omit to revoke all. */
   readonly currentSessionId?: string;
 }
 
@@ -496,10 +498,14 @@ export const make = (
             return yield* hooks.afterSignUp({ user, identifier: handle, method: "email-password" });
           }
 
-          const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const { session, token } = yield* sessionManager.createSession(
+            user.id,
+            input.sessionAttributes,
+          );
           const signUpResult = {
             user,
             session,
+            token,
             identifier: handle,
             method: "email-password" as const,
           };
@@ -592,10 +598,14 @@ export const make = (
             });
           }
 
-          const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const { session, token } = yield* sessionManager.createSession(
+            user.id,
+            input.sessionAttributes,
+          );
           const signInResult = {
             user,
             session,
+            token,
             identifier: handle,
             method: "email-password" as const,
             ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),

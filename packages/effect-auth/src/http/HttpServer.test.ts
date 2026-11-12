@@ -31,6 +31,7 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
+import { Base64Url } from "effect/encoding";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
 import * as HttpClient from "./HttpClient.ts";
@@ -2101,19 +2102,16 @@ describe("email OTP", () => {
   });
 });
 
-describe("multi-factor", () => {
-  const totpFor = (secret: string) => Effect.runPromise(generateTotp(secret));
-  // The previous time step's code (within the default ±1 window). Confirming
-  // enrollment with it leaves the current step's code unused, so the replay
-  // guard doesn't reject the later challenge redemption.
-  const previousTotpFor = (secret: string) =>
-    Effect.runPromise(
-      generateHotp(
-        secret,
-        Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000 / 30) - 1,
-      ),
-    );
+const totpFor = (secret: string) => Effect.runPromise(generateTotp(secret));
+// The previous time step's code (within the default ±1 window). Confirming
+// enrollment with it leaves the current step's code unused, so the replay
+// guard doesn't reject the later challenge redemption.
+const previousTotpFor = (secret: string) =>
+  Effect.runPromise(
+    generateHotp(secret, Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000 / 30) - 1),
+  );
 
+describe("multi-factor", () => {
   it("enables, confirms, gates sign-in, and redeems a TOTP challenge", async () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
@@ -3245,6 +3243,214 @@ describe("bearer mode", () => {
     expect(sessionRes.status).toBe(200);
     const body = await sessionBody(sessionRes, UserEmailBody);
     expect(body.user.email).toBe("ml@test.com");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The session token never reaches a response body (#581)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a session-issuing response: the raw token its `Set-Cookie` carries, the
+ * serialized body, and the primary resource's id. The body is searched as
+ * text, so a token anywhere in it (an id, an attribute, `meta`, `included`)
+ * is caught.
+ */
+const issuedResponse = async (res: Response) => {
+  const token = sessionIdFromSetCookie(res.headers.get("set-cookie"));
+  const text = await res.text();
+  const id = Schema.decodeUnknownSync(
+    Schema.Struct({ data: Schema.Struct({ id: Schema.String }) }),
+  )(parseJson(text)).data.id;
+  return { token, text, id };
+};
+
+/** No trace of `token` in `text`; the session is named by its digest. */
+const expectNoToken = (issued: { token: string; text: string; id: string }) => {
+  expect(issued.token.length).toBeGreaterThan(0);
+  expect(issued.text).not.toContain(issued.token);
+  expect(issued.id).toBe(hashToken(issued.token));
+};
+
+describe("the session token never reaches a response body (#581)", () => {
+  it("cookie mode: a sign-up answers the session by its digest only", async () => {
+    const handler = handlerFor();
+    const res = await handler(authRequest("sign-up", { email: "leak@test.com", password: PW }));
+    expect(res.status).toBe(201);
+    expect(res.headers.get(BEARER_TOKEN_HEADER)).toBeNull();
+    expectNoToken(await issuedResponse(res));
+  });
+
+  it("cookie mode: a password sign-in answers the session by its digest only", async () => {
+    const handler = handlerFor();
+    await signUp(handler, "leak@test.com");
+    const res = await handler(authRequest("password", { email: "leak@test.com", password: PW }));
+    expect(res.status).toBe(201);
+    expectNoToken(await issuedResponse(res));
+  });
+
+  it("GET /sessions/current, its id route and the list name the session by its digest", async () => {
+    const handler = handlerFor();
+    const token = await signUp(handler, "leak@test.com");
+
+    const current = await handler(getRequest(CURRENT_SESSION, asCookie(token)));
+    expect(current.status).toBe(200);
+    const text = await current.text();
+    expect(text).not.toContain(token);
+    const read = Schema.decodeUnknownSync(SessionDocumentBody)(parseJson(text));
+    expect(read.data.id).toBe(hashToken(token));
+
+    // The digest is the session's one id: the list, `GET /sessions/:id` and
+    // `DELETE /sessions/:id` all take it.
+    const list = await handler(getRequest("/sessions", asCookie(token)));
+    const listText = await list.text();
+    expect(listText).not.toContain(token);
+    expect(Schema.decodeUnknownSync(CollectionBody)(parseJson(listText)).data[0]?.id).toBe(
+      read.data.id,
+    );
+    const byId = await handler(getRequest(`/sessions/${read.data.id}`, asCookie(token)));
+    expect(byId.status).toBe(200);
+    expect(await byId.text()).not.toContain(token);
+
+    const signOut = await handler(deleteRequest(`/sessions/${read.data.id}`, asCookie(token)));
+    expect(signOut.status).toBe(204);
+    expect(signOut.headers.get("set-cookie")).toMatch(/conduit_session=;/);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(token)))).status).toBe(401);
+  });
+
+  it("the digest in a body is not a credential", async () => {
+    const handler = handlerFor();
+    const token = await signUp(handler, "leak@test.com");
+    const digest = hashToken(token);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(digest)))).status).toBe(401);
+    expect(
+      (await handler(getRequest(CURRENT_SESSION, { authorization: `Bearer ${digest}` }))).status,
+    ).toBe(401);
+  });
+
+  it("an email-verification redemption that signs in answers the digest only", async () => {
+    const fixture = makeFixture({ lifecycle: { requireEmailVerification: true } });
+    const handler = handlerFor(fixture);
+    const signedUp = await handler(
+      authRequest("sign-up", { email: "leak@test.com", password: PW }),
+    );
+    expect(signedUp.status).toBe(202);
+    const verificationToken = fixture.sentVerificationTokens.at(-1);
+    assert(verificationToken !== undefined, "sign-up sent a verification");
+
+    const res = await handler(authRequest("verify-email", { token: verificationToken }));
+    expect(res.status).toBe(201);
+    expectNoToken(await issuedResponse(res));
+  });
+
+  it("a magic-link sign-in answers the digest only", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    await signUp(handler, "leak@test.com");
+    await handler(authRequest("send-magic-link", { email: "leak@test.com" }));
+    const link = fixture.sentMagicLinkTokens.at(-1);
+    assert(link !== undefined, "a magic link was sent");
+
+    const res = await handler(authRequest("magic-link", { token: link }));
+    expect(res.status).toBe(201);
+    expectNoToken(await issuedResponse(res));
+  });
+
+  it("a second-factor redemption answers the digest only", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    const sid = await signUp(handler, "leak@test.com");
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
+    const { secret } = await metaBody(enable, Schema.Struct({ secret: Schema.String }));
+    const confirm = await handler(
+      authRequest("confirm-mfa", { code: await previousTotpFor(secret) }, asCookie(sid)),
+    );
+    expect(confirm.status).toBe(200);
+    const gated = await handler(authRequest("password", { email: "leak@test.com", password: PW }));
+    expect(gated.status).toBe(202);
+    const { secondFactor } = await authBody(
+      gated,
+      Schema.Struct({ secondFactor: Schema.Struct({ token: Schema.String }) }),
+    );
+
+    const res = await handler(
+      authRequest("verify-totp", { token: secondFactor.token, code: await totpFor(secret) }),
+    );
+    expect(res.status).toBe(201);
+    expectNoToken(await issuedResponse(res));
+  });
+
+  it("a cache-served session read carries no token, and the cache cookie holds none", async () => {
+    const handler = handlerFor(makeFixture(), {
+      cache: { secret: "cache-secret-cache-secret-1234567" },
+    });
+    const token = await signUp(handler, "leak@test.com");
+    const miss = await handler(getRequest(CURRENT_SESSION, asCookie(token)));
+    expect(miss.status).toBe(200);
+    expect(await miss.text()).not.toContain(token);
+    const data = dataCookieFromSetCookie(miss.headers.get("set-cookie"));
+    assert(data !== null, "a store read issues the cache cookie");
+    // The signed (unencrypted) payload is base64url JSON: no token in it.
+    const payload = data.slice(0, data.lastIndexOf("."));
+    const decoded = Base64Url.decodeString(payload);
+    assert(Result.isSuccess(decoded), "the cache payload is base64url");
+    expect(decoded.success).not.toContain(token);
+
+    const hit = await handler(getRequest(CURRENT_SESSION, bothCookies(token, data)));
+    expect(hit.status).toBe(200);
+    const hitText = await hit.text();
+    expect(hitText).not.toContain(token);
+    expect(Schema.decodeUnknownSync(SessionDocumentBody)(parseJson(hitText)).data.id).toBe(
+      hashToken(token),
+    );
+  });
+
+  it("bearer mode: the token is in the set-auth-token header only, and it is the credential", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
+    const res = await handler(
+      authRequest("sign-up", { email: "leak@test.com", password: PW }, { "x-use-bearer": "1" }),
+    );
+    expect(res.status).toBe(201);
+    const issued = await issuedResponse(res);
+    expectNoToken(issued);
+    // The header carries the same token the cookie does, and nothing else does.
+    expect(res.headers.get(BEARER_TOKEN_HEADER)).toBe(issued.token);
+
+    const current = await handler(
+      getRequest(CURRENT_SESSION, { authorization: `Bearer ${issued.token}` }),
+    );
+    expect(current.status).toBe(200);
+    const text = await current.text();
+    expect(text).not.toContain(issued.token);
+    expect(Schema.decodeUnknownSync(SessionDocumentBody)(parseJson(text)).data.id).toBe(issued.id);
+  });
+
+  it("bearer mode always: the header is set, the body still names the digest", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: true });
+    const res = await handler(authRequest("sign-up", { email: "leak@test.com", password: PW }));
+    expect(res.status).toBe(201);
+    const issued = await issuedResponse(res);
+    expectNoToken(issued);
+    expect(res.headers.get(BEARER_TOKEN_HEADER)).toBe(issued.token);
+  });
+
+  it("multi-session: the device list names each account by its digest", async () => {
+    const handler = handlerFor(makeFixture(), { multiSession: {} });
+    const first = await handler(authRequest("sign-up", { email: "one@test.com", password: PW }));
+    const firstToken = sessionIdFromSetCookie(first.headers.get("set-cookie"));
+    const list = /conduit_session_multi=([^;]+)/.exec(first.headers.get("set-cookie") ?? "")?.[1];
+    assert(list !== undefined, "sign-up writes the device list");
+    const res = await handler(
+      getRequest("/device-sessions", {
+        cookie: `conduit_session=${firstToken}; conduit_session_multi=${list}`,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain(firstToken);
+    const listed = Schema.decodeUnknownSync(CollectionBody)(parseJson(text)).data;
+    expect(listed.map((resource) => resource.id)).toEqual([hashToken(firstToken)]);
+    expect(listed[0]?.attributes["active"]).toBe(true);
   });
 });
 

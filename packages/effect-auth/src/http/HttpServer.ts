@@ -231,6 +231,9 @@ export interface CookieConfig {
    * every session-issuing endpoint (sign-in, sign-up, magic-link verify,
    * OTP verify, OAuth callback, …) in addition to the normal `Set-Cookie`.
    *
+   * Whatever the mode, no response body carries the token: every session
+   * resource is named by its stored id, the token's digest (#581).
+   *
    * - `false` (default): sessions are issued only via httpOnly cookies.
    *   The httpOnly flag prevents client-side JavaScript from reading the
    *   token — the strongest option for browser clients.
@@ -1276,7 +1279,11 @@ const userIdentifiers = (
       );
   });
 
-/** The `sessions` resource of a stored session. */
+/**
+ * The `sessions` resource of a session. Its `id` is the stored id, the digest
+ * of the token; every `Types.Session` the services answer carries that id, so
+ * no response body ever holds the token itself (#581).
+ */
 const sessionResource = (session: Types.Session): R.Session =>
   R.Session.make({
     id: session.id,
@@ -1598,6 +1605,8 @@ const hookFailures = {
 interface SignInOutcome {
   readonly user: Types.User;
   readonly session?: Types.Session | undefined;
+  /** The raw token of `session`: only ever set as a cookie or the bearer header. */
+  readonly token?: string | undefined;
   readonly needsEmailVerification: boolean;
   readonly secondFactor?: { readonly token: string; readonly expiresAt: number } | undefined;
   readonly rememberMe?: boolean | undefined;
@@ -1616,16 +1625,17 @@ type Pending = typeof PendingDocument.Type;
 /**
  * Attach a new session to the response a JSON:API handler is about to send:
  * the cookies and, in bearer mode, the `set-auth-token` header, as
- * {@link withSessionCookie} does for a JSON body.
+ * {@link withSessionCookie} does for a JSON body. Those headers are the only
+ * places the token goes; the body names the session by its stored id.
  */
 const issueSession = (
-  session: Types.Session,
+  issued: Types.IssuedSession,
   cfg: ResolvedCookieConfig,
   method: string | undefined,
   rememberMe: boolean | undefined,
 ): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
   HttpEffect.appendPreResponseHandler((request, response) =>
-    decorateSessionResponse(response, session, cfg, method, rememberMe).pipe(
+    decorateSessionResponse(response, issued, cfg, method, rememberMe).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, request),
     ),
   );
@@ -1660,9 +1670,10 @@ const answerSignIn = (
 > =>
   Effect.gen(function* () {
     const meta = { needsEmailVerification: outcome.needsEmailVerification };
-    if (outcome.session !== undefined) {
-      yield* issueSession(outcome.session, cfg, outcome.method, outcome.rememberMe);
-      return yield* signedIn({ ...outcome, session: outcome.session });
+    const { session, token } = outcome;
+    if (session !== undefined && token !== undefined) {
+      yield* issueSession({ session, token }, cfg, outcome.method, outcome.rememberMe);
+      return yield* signedIn({ ...outcome, session });
     }
     if (outcome.secondFactor !== undefined) {
       return {
@@ -1746,7 +1757,7 @@ const invalidCode = (e: { readonly message: string }) =>
 /** The outcome of a passwordless sign-in, which never awaits a verification. */
 const passwordless =
   (method: string) =>
-  (result: { readonly user: Types.User; readonly session: Types.Session }): SignInOutcome => ({
+  (result: { readonly user: Types.User } & Types.IssuedSession): SignInOutcome => ({
     ...result,
     needsEmailVerification: false,
     method,
@@ -1863,9 +1874,10 @@ const verifySecondFactor = (
     return {
       user,
       session: result.session,
+      token: result.token,
       needsEmailVerification: false,
       method: "multi-factor",
-    } satisfies SignInOutcome;
+    } satisfies SignInOutcome & Types.IssuedSession;
   });
 
 /**
@@ -1926,7 +1938,7 @@ export const secondFactorChallengesGroupLayer = (
         payload.data.attributes,
       ).pipe(
         Effect.flatMap((outcome) =>
-          Effect.flatMap(issueSession(outcome.session, cfg, outcome.method, undefined), () =>
+          Effect.flatMap(issueSession(outcome, cfg, outcome.method, undefined), () =>
             signedIn(outcome),
           ),
         ),
@@ -2028,9 +2040,10 @@ export const emailVerificationsGroupLayer = (
               }),
             );
           // `201` with the session when verification signs the user in.
-          if (result.session === undefined) return yield* Effect.void;
-          yield* issueSession(result.session, cfg, "email-password", undefined);
-          return yield* signedIn({ ...result, session: result.session, method: "email-password" });
+          const { session, token } = result;
+          if (session === undefined || token === undefined) return yield* Effect.void;
+          yield* issueSession({ session, token }, cfg, "email-password", undefined);
+          return yield* signedIn({ ...result, session, method: "email-password" });
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -2418,11 +2431,9 @@ export const deviceSessionsGroupLayer = (
           return Handlers.collection(
             valid.map(({ session }) =>
               R.DeviceSession.make({
-                // `validateSession` answers the session under its token; the
-                // wire names it by the stored id, its hash.
-                id: hashToken(session.id),
+                id: session.id,
                 attributes: {
-                  active: session.id === active,
+                  active: active !== undefined && session.id === hashToken(active),
                   expiresAt: session.expiresAt,
                   createdAt: session.createdAt,
                   lastActivityAt: session.lastActivityAt,
@@ -3235,21 +3246,20 @@ export const impersonationsGroupLayer = (
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const { admin, actor } = yield* adminActor(request, cfg);
-          const session = yield* Effect.catchTags(
+          const issued = yield* Effect.catchTags(
             admin.impersonateUser(actor, payload.data.relationships.user.data.id),
             { ...hookFailures, ...adminFailures },
           );
+          const { session } = issued;
           const userService = yield* UserService;
           const user = yield* userService
             .getUser(session.userId)
             .pipe(Effect.catch(internalServerError));
           // The session cookie becomes the impersonation's session.
-          yield* issueSession(session, cfg, undefined, undefined);
+          yield* issueSession(issued, cfg, undefined, undefined);
           return Handlers.data(
             R.Impersonation.make({
-              // `createSession` answers the session under its token; the wire
-              // names it by the stored id, its hash.
-              id: hashToken(session.id),
+              id: session.id,
               attributes: { expiresAt: session.expiresAt, createdAt: session.createdAt },
               relationships: {
                 user: { data: R.User.ref(session.userId) },
@@ -3266,13 +3276,13 @@ export const impersonationsGroupLayer = (
           if (params.id !== CURRENT) {
             return yield* new S.NotFound({ message: "Impersonation not found" });
           }
-          const resolved = yield* requireSession(request, cfg);
+          const { resolved, token } = yield* resolveSession(request, cfg);
           if (!P.isString(resolved.session.attributes["impersonatedBy"])) {
             return yield* new S.NotFound({ message: "This session is not an impersonation" });
           }
           const sessionManager = yield* SessionService;
-          yield* storeFailure(sessionManager.invalidateSession(resolved.session.id));
-          return yield* clearSessionCookies(request, cfg, resolved.session.id);
+          yield* storeFailure(sessionManager.invalidateSession(token));
+          return yield* clearSessionCookies(request, cfg, token);
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -3647,7 +3657,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg, "device");
+          return yield* withSessionCookie(body, result, cfg, "device");
         }),
       )
       .handle("ssoCallback", ({ payload }) =>
@@ -3688,7 +3698,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg, "sso");
+          return yield* withSessionCookie(body, result, cfg, "sso");
         }),
       )
       // SAML assertion consumer service. The IdP form-POSTs here through the
@@ -3734,7 +3744,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg, "sso");
+          return yield* withSessionCookie(body, result, cfg, "sso");
         }),
       )
       .handle("samlMetadata", ({ params }) =>
@@ -4458,45 +4468,44 @@ export const scimGroupLayer = () =>
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
-/** Resolve and validate the request's session or fail with 401. */
 /**
- * Resolve the authenticated session, preferring the signed cache cookie (no
- * store read) when the cache is enabled and the cookie is valid; otherwise
- * validating against the session store. `cacheHit` lets callers decide whether
- * to (re)issue the cache cookie.
+ * Resolve the authenticated session or fail with 401, preferring the signed
+ * cache cookie (no store read) when the cache is enabled and the cookie is
+ * valid; otherwise validating against the session store. `cacheHit` lets
+ * callers decide whether to (re)issue the cache cookie; `token` is the raw
+ * token the request presented, for the calls that need the credential itself
+ * (signing it out). The resolved session carries only its stored id.
  */
 const resolveSession = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
 ): Effect.Effect<
-  { readonly resolved: Types.SessionWithUser; readonly cacheHit: boolean },
+  {
+    readonly resolved: Types.SessionWithUser;
+    readonly cacheHit: boolean;
+    readonly token: string;
+  },
   S.Unauthorized,
   SessionService | Hooks
 > =>
   Effect.gen(function* () {
-    if (cfg.cache !== undefined) {
-      const primaryId = sessionIdFromRequest(request, cfg);
-      if (primaryId !== undefined) {
-        const cached = request.cookies[dataCookieName(cfg)];
-        if (cached !== undefined) {
-          const gate = yield* sessionCacheGateAttributes;
-          const resolved = decodeSessionCacheCookie(
-            cached,
-            cfg.cache,
-            yield* Clock.currentTimeMillis,
-            primaryId,
-            gate,
-          );
-          if (resolved !== null) return { resolved, cacheHit: true };
-        }
-      }
-    }
-    const sessionId = sessionIdFromRequest(request, cfg);
-    if (sessionId === undefined) {
+    const token = sessionIdFromRequest(request, cfg);
+    if (token === undefined) {
       return yield* new S.Unauthorized({ message: "Not authenticated" });
     }
+    const cached = cfg.cache === undefined ? undefined : request.cookies[dataCookieName(cfg)];
+    if (cfg.cache !== undefined && cached !== undefined) {
+      const resolved = decodeSessionCacheCookie(
+        cached,
+        cfg.cache,
+        yield* Clock.currentTimeMillis,
+        hashToken(token),
+        yield* sessionCacheGateAttributes,
+      );
+      if (resolved !== null) return { resolved, cacheHit: true, token };
+    }
     const sessionManager = yield* SessionService;
-    const resolved = yield* sessionManager.validateSession(sessionId).pipe(
+    const resolved = yield* sessionManager.validateSession(token).pipe(
       Effect.catchTag("UserBannedError", (e) =>
         resolveMessage(e.code, e.message).pipe(
           Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
@@ -4504,7 +4513,7 @@ const resolveSession = (
       ),
       Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
     );
-    return { resolved, cacheHit: false };
+    return { resolved, cacheHit: false, token };
   });
 
 const requireSession = (
@@ -4529,9 +4538,9 @@ const requireInteractiveCredential = (
     : Effect.fail(new S.Forbidden({ message: "This operation requires an interactive session" }));
 
 /**
- * Attach the session cookie to a JSON `AuthSuccess` response when a session is
- * present. When the last-login-method hint is enabled and `method` is given,
- * also (re)writes the non-httpOnly `${name}_last_method` cookie.
+ * Attach a new session to a JSON `AuthSuccess` response (whose body names no
+ * session at all). When the last-login-method hint is enabled and `method` is
+ * given, also (re)writes the non-httpOnly `${name}_last_method` cookie.
  *
  * When `rememberMe` is `false`, a browser-session cookie is emitted (no
  * `Max-Age`/`Expires`) so the cookie is cleared when the browser closes.
@@ -4540,25 +4549,25 @@ const requireInteractiveCredential = (
  */
 const withSessionCookie = (
   body: S.AuthSuccess,
-  session: Types.Session | undefined,
+  issued: Types.IssuedSession,
   cfg: ResolvedCookieConfig,
   method?: string,
   rememberMe?: boolean,
 ) =>
   Effect.gen(function* () {
     const json = yield* HttpServerResponse.json(body);
-    if (session === undefined) return json;
-    return yield* decorateSessionResponse(json, session, cfg, method, rememberMe);
+    return yield* decorateSessionResponse(json, issued, cfg, method, rememberMe);
   }).pipe(Effect.orDie);
 
 /**
  * Carry a new session on `response`: the session cookie (a browser-session one
  * when `rememberMe` is `false`), the device's multi-session list, the
  * last-login-method hint and, in bearer mode, the `set-auth-token` header.
+ * These headers are the only places the raw token is written (#581).
  */
 const decorateSessionResponse = (
   json: HttpServerResponse.HttpServerResponse,
-  session: Types.Session,
+  { session, token }: Types.IssuedSession,
   cfg: ResolvedCookieConfig,
   method?: string,
   rememberMe?: boolean,
@@ -4568,13 +4577,13 @@ const decorateSessionResponse = (
       rememberMe === false
         ? sessionOnlyCookieOptions(cfg)
         : sessionCookieOptions(cfg, session.expiresAt);
-    let response = yield* HttpServerResponse.setCookie(json, cfg.name, session.id, cookieOpts);
+    let response = yield* HttpServerResponse.setCookie(json, cfg.name, token, cookieOpts);
     // Multi-session: append the new session to the device's session list (the
     // primary cookie remains the active session), capped to `maximumSessions`.
     if (cfg.multiSession !== undefined) {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const existing = readDeviceSessionIds(request, cfg).filter((id) => id !== session.id);
-      const ids = [...existing, session.id].slice(-cfg.multiSession.maximumSessions);
+      const existing = readDeviceSessionIds(request, cfg).filter((id) => id !== token);
+      const ids = [...existing, token].slice(-cfg.multiSession.maximumSessions);
       response = yield* HttpServerResponse.setCookie(
         response,
         multiCookieName(cfg),
@@ -4603,7 +4612,7 @@ const decorateSessionResponse = (
         emitBearer = request.headers["x-use-bearer"] === "1";
       }
       if (emitBearer) {
-        response = HttpServerResponse.setHeader(response, "set-auth-token", session.id);
+        response = HttpServerResponse.setHeader(response, BEARER_TOKEN_HEADER, token);
       }
     }
     return response;

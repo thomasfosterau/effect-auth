@@ -69,7 +69,12 @@ export type HookError =
   | Errors.CaptchaError
   | Errors.PwnedPasswordError;
 
-/** A reference to a session, used by sign-out / validation hooks. */
+/**
+ * A reference to a session, used by sign-out / validation hooks. The `before*`
+ * transforms see the token the client presented (they run before it is
+ * looked up); `afterSignOut` sees the session's stored id, its digest, so an
+ * observer that logs it never records a credential (#581).
+ */
 export interface SessionRef {
   readonly sessionId: string;
 }

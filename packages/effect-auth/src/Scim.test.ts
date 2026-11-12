@@ -132,7 +132,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
           attributes: {},
         };
         MutableHashMap.set(sessions, session.id, session);
-        return session;
+        return { session, token: `token-${session.id}` };
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: (sessionId) =>

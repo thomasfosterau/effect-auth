@@ -111,6 +111,8 @@ export interface OtpSecondFactorVerifyOptions {
 export interface OtpSecondFactorVerifyResult {
   readonly userId: string;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /**
@@ -242,7 +244,7 @@ export const make = (
         // Consume the pending challenge (one-time use)
         yield* store.delete(pendingToken);
 
-        const session = yield* sessionManager.createSession(
+        const { session, token } = yield* sessionManager.createSession(
           record.userId,
           options?.sessionAttributes,
         );
@@ -250,6 +252,7 @@ export const make = (
         return {
           userId: record.userId,
           session,
+          token,
         } satisfies OtpSecondFactorVerifyResult;
       }),
     };

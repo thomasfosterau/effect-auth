@@ -99,15 +99,15 @@ const program = Effect.gen(function* () {
   const auth = yield* Auth.Email.EmailPasswordService;
   yield* auth.signUp({ email: "ada@example.com", password: "correct horse battery staple" });
 
-  const { session, secondFactor } = yield* auth.signIn({
+  const { token, secondFactor } = yield* auth.signIn({
     email: "ada@example.com",
     password: "correct horse battery staple",
   });
-  if (session === undefined) return `second factor required until ${secondFactor?.expiresAt}`;
+  if (token === undefined) return `second factor required until ${secondFactor?.expiresAt}`;
 
-  // `session.id` is the raw token for the cookie; the store only sees its hash.
+  // `token` is the raw token for the cookie; `session.id` is its hash, the stored id.
   const sessionService = yield* Auth.SessionService;
-  const { user } = yield* sessionService.validateSession(session.id);
+  const { user } = yield* sessionService.validateSession(token);
   return `signed in as ${user.id}`;
 });
 

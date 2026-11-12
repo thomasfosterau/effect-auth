@@ -183,6 +183,8 @@ export interface MultiFactorChallenge {
 export interface MultiFactorVerifyResult {
   readonly userId: string;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
 }
 
 /** Options for completing a second-factor challenge: attributes for the session it issues. */
@@ -623,7 +625,7 @@ export const make = (
             // Consume the pending token (one-time use)
             yield* pendingStore.delete(pendingToken);
 
-            const session = yield* sessionManager.createSession(
+            const { session, token } = yield* sessionManager.createSession(
               pending.userId,
               options?.sessionAttributes,
             );
@@ -631,6 +633,7 @@ export const make = (
             return {
               userId: pending.userId,
               session,
+              token,
             } satisfies MultiFactorVerifyResult;
           }).pipe(
             Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type: "totp" } }),
@@ -659,7 +662,7 @@ export const make = (
             // Consume the pending token (one-time use)
             yield* pendingStore.delete(pendingToken);
 
-            const session = yield* sessionManager.createSession(
+            const { session, token } = yield* sessionManager.createSession(
               pending.userId,
               options?.sessionAttributes,
             );
@@ -667,6 +670,7 @@ export const make = (
             return {
               userId: pending.userId,
               session,
+              token,
             } satisfies MultiFactorVerifyResult;
           }).pipe(
             Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type: "backup-code" } }),

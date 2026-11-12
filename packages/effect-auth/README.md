@@ -63,9 +63,9 @@ const AuthLive = Auth.SessionService.layer(sessionConfig).pipe(
 
 const program = Effect.gen(function* () {
   const service = yield* Auth.SessionService;
-  // `session.id` is the raw token: put it in the cookie.
-  const session = yield* service.createSession("user-123", { ip: "127.0.0.1" });
-  const { user } = yield* service.validateSession(session.id);
+  // `token` is the raw token: put it in the cookie. `session.id` is its hash.
+  const { token } = yield* service.createSession("user-123", { ip: "127.0.0.1" });
+  const { user } = yield* service.validateSession(token);
   return user.id;
 });
 
@@ -313,9 +313,9 @@ The store-contract conformance suites (`sessionStoreConformance`, `userStoreConf
 ```ts
 const program = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
-  const session = yield* sessions.createSession(ada.id);
-  yield* sessions.validateSession(session.id);
-  yield* sessions.invalidateSession(session.id); // validateSession now fails
+  const { token } = yield* sessions.createSession(ada.id);
+  yield* sessions.validateSession(token);
+  yield* sessions.invalidateSession(token); // validateSession now fails
 });
 await Effect.runPromise(
   program.pipe(Effect.provide(Testing.sessionServiceLayer({ users: [ada] }))),
@@ -534,8 +534,8 @@ const begin = Effect.gen(function* () {
 const callback = (state: string, code: string) =>
   Effect.gen(function* () {
     const oauth = yield* Auth.OAuth.OAuthService;
-    const { user, session } = yield* oauth.signInWithCallback(state, code);
-    return { userId: user.id, sessionToken: session.id };
+    const { user, token } = yield* oauth.signInWithCallback(state, code);
+    return { userId: user.id, sessionToken: token };
   });
 
 // Link another provider to a signed-in user, or refresh a stored access token.
@@ -862,6 +862,8 @@ Errors are tagged (`Data.TaggedError`) and carry a stable `code`; the shared one
 ### The HTTP API is JSON:API
 
 The included HTTP API speaks [JSON:API](https://jsonapi.org/) through `@thomasfosterau/effect-jsonapi`, an optional peer that only the `./http` subpath needs (#205). Its resource groups answer `application/vnd.api+json` documents and JSON:API error documents (`Http.JsonApiErrors`, whose `meta` carries the `message` and, when there is one, the stable `code`); the resources are declared once in `Http.Resources`. The conversion is landing group by group; these are converted so far:
+
+No response body carries a session token (#581). Every `sessions`, `device-sessions` and `impersonations` resource is named by the session's stored id, the SHA-256 digest of its token, which is not a credential: `GET /sessions/:id`, `DELETE /sessions/:id` and the `device-sessions` actions take it. The token itself reaches the client only in the `HttpOnly` session cookie and, when `cookie.bearerMode` is on (`"always"`, or `"opt-in"` for a request sending `x-use-bearer: 1`), in the `set-auth-token` response header, which a native client stores and presents as `Authorization: Bearer <token>`.
 
 | Request                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1291,12 +1293,12 @@ const start = (email: string) =>
 const finish = (providerId: string, samlResponse: string, relayState: string) =>
   Effect.gen(function* () {
     const sso = yield* SsoService;
-    const { user, session, isNewUser } = yield* sso.handleSamlCallback(
+    const { user, token, isNewUser } = yield* sso.handleSamlCallback(
       providerId,
       samlResponse,
       relayState,
     );
-    return { userId: user.id, sessionToken: session.id, isNewUser };
+    return { userId: user.id, sessionToken: token, isNewUser };
   });
 
 export { register, start, finish };

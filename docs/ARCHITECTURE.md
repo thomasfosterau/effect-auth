@@ -64,8 +64,8 @@ import * as Auth from "@thomasfosterau/effect-auth";
 
 const program = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
-  const session = yield* sessions.createSession(userId);
-  return yield* sessions.validateSession(session.id);
+  const { token } = yield* sessions.createSession(userId);
+  return yield* sessions.validateSession(token);
 });
 
 const layer = Auth.SessionService.layer(sessionConfig).pipe(
@@ -266,6 +266,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 ### Session Security
 
 - 160-bit cryptographically secure session IDs; active + idle timeouts; automatic renewal; whole-user invalidation; optional signed session-data cookie with a short TTL.
+- The raw session token reaches the client only in the `HttpOnly` session cookie and, in opt-in bearer mode, the `set-auth-token` response header. Every session the services answer (`Session.id`) and every response body names a session by its stored id, the token's SHA-256 digest, which is not a credential (#581). `SessionService.createSession` returns `{ session, token }`, and each sign-in result carries `token` beside `session`; nothing overloads `Session.id` with the token, so a session record is safe to log, cache, broadcast between tabs or serialize into a server-rendered page.
 
 ### Token & Challenge Security
 

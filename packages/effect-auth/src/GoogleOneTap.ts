@@ -103,6 +103,8 @@ export interface GoogleOneTapConfig {
 export interface GoogleOneTapSignInResult {
   readonly user: Types.User;
   readonly session: Types.Session;
+  /** The raw session token, the credential the client presents; `session.id` is its digest. */
+  readonly token: string;
   readonly isNewUser: boolean;
   /** The verified id_token claims (sub, email, name, picture, ...). */
   readonly claims: Types.JsonObject;
@@ -273,8 +275,8 @@ export const make = (
           yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
         }
 
-        const session = yield* sessionManager.createSession(user.id);
-        return { user, session, isNewUser, claims };
+        const { session, token } = yield* sessionManager.createSession(user.id);
+        return { user, session, token, isNewUser, claims };
       }),
     };
   });

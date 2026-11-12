@@ -106,6 +106,8 @@ export interface AuthLifecycleResult {
    */
   readonly identifier?: { readonly type: IdentifierType; readonly value: string } | undefined;
   readonly session?: Types.Session;
+  /** The raw session token, present with `session`: the credential the client presents; `session.id` is its digest. */
+  readonly token?: string | undefined;
   readonly needsEmailVerification: boolean;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
@@ -300,7 +302,7 @@ export const make = (
           user: result.user,
           ...(result.identifier !== undefined && { identifier: result.identifier }),
           ...(!needsEmailVerification &&
-            result.session !== undefined && { session: result.session }),
+            result.session !== undefined && { session: result.session, token: result.token }),
           needsEmailVerification,
         } satisfies AuthLifecycleResult;
       }),
@@ -339,7 +341,10 @@ export const make = (
 
         return {
           user: signInResult.user,
-          ...(signInResult.session !== undefined && { session: signInResult.session }),
+          ...(signInResult.session !== undefined && {
+            session: signInResult.session,
+            token: signInResult.token,
+          }),
           ...(signInResult.secondFactor !== undefined && {
             secondFactor: signInResult.secondFactor,
           }),
@@ -396,7 +401,7 @@ export const make = (
           } satisfies AuthLifecycleResult;
         }
 
-        const session = yield* sessionManager.createSession(
+        const { session, token } = yield* sessionManager.createSession(
           verificationRecord.userId,
           input.sessionAttributes,
         );
@@ -404,6 +409,7 @@ export const make = (
         return {
           user: verifiedUser,
           session,
+          token,
           needsEmailVerification: false,
         } satisfies AuthLifecycleResult;
       }),
