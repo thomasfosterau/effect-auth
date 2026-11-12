@@ -527,8 +527,10 @@ const begin = Effect.gen(function* () {
 });
 
 // Step 2: the provider redirects back with `code` and `state`. This resolves or
-// creates the user (auto-linking on a provider-verified email), links the
-// account and issues a session.
+// creates the user, links the account and issues a session. A first sign-in
+// whose email matches an existing user auto-links only when both the provider
+// and this application verified the address; otherwise it fails with
+// `EmailInUseError` (#588).
 const callback = (state: string, code: string) =>
   Effect.gen(function* () {
     const oauth = yield* Auth.OAuth.OAuthService;
@@ -550,6 +552,8 @@ const refresh = (userId: string) =>
 
 export { OAuthLive, begin, callback, link, refresh };
 ```
+
+Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true`, the local email identifier is verified, and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match fails with `EmailInUseError` and changes nothing. An unverified local address may have been claimed by someone who signed up with it and a password, so its real holder proves it first (the verification link, a magic link or an email OTP, which clear the earlier sign-up's password and sessions) and then signs in with the provider.
 
 ## Email verification
 
