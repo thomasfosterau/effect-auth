@@ -1,5 +1,23 @@
 # @thomasfosterau/effect-auth
 
+## 0.4.0
+
+### Minor Changes
+
+- 2a2252c: The optional peer `@thomasfosterau/effect-jsonapi` moves to `^0.22.0` (was `^0.21.0`), so an application on effect-jsonapi 0.22 no longer gets a peer mismatch (#723). It is still needed only by `./http` (and `./client/testing` through it); `./http` now requires 0.22, so an application on 0.21 upgrades effect-jsonapi with this release. effect-jsonapi 0.22 itself requires `effect ^4.1.0`, the floor effect-auth already declares.
+  
+  What a consumer of the HTTP API sees:
+  
+  - A `400` the JSON:API tier answers for a request it could not decode (a malformed query or body, answered by effect-jsonapi's `SchemaErrors` middleware) no longer repeats its `detail` in `meta`: the error object is `{ status: "400", code: "bad_request", title: "Bad Request", detail: "Request query failed validation" }`, without `meta: { detail: … }`. Read `errors[].detail`, which was already there.
+  - Every other effect-auth error body is unchanged: the JSON:API errors keep `detail` and `meta: { message, code? }`, and the `406` / `415` content-negotiation errors keep the codes `not_acceptable` / `unsupported_media_type` they already carried.
+- 6b7ffa8: **Security hardening (#718):** a record looked up by its id no longer reveals that it exists before the permission check. Before, an unknown id answered differently from another tenant's record, so a caller holding a foreign id could confirm it was real, and a stranger could learn whether an invitation was still pending.
+  
+  - `PATCH` / `DELETE /organization-members/:id`, `GET /organization-members/:id/teams`, `DELETE /organization-domains/:id`, `POST /organization-domains/:id/verifications`, `PATCH` / `DELETE /organization-roles/:id` and `DELETE /team-members/:id` answer an unknown id with the same `403` and body as another tenant's record and a member without the permission: `Missing permission '<permission>' in this organization` (`member:update`, `member:delete`, `domain:manage`, `role:manage`, `team:manage-members`), or `You are not a member of this organization` for a membership's teams, which any member may read. An unknown id no longer answers `404`. The operator's `DELETE /admin/organization-domains/:id` still answers an unknown id `404`, after the admin check.
+  - The team operations (`updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember`, and so `PATCH` / `DELETE /teams/:id` and `POST /teams/:id/members`) refuse an unknown team with the `Missing permission` error a stranger gets, and `listTeamMembers` (`GET /teams/:id/members`) with the `You are not a member` one, instead of `Team not found`.
+  - `cancelInvitation` and `resendInvitation` (`PATCH /invitations/:id` to `canceled`, `POST /invitations/:id/deliveries`) check `invitation:cancel` / `invitation:create` first: an unknown id, a stranger and a member without the permission get the same `Missing permission` error and `403`, whatever the invitation's status, instead of `Invitation not found` or `Invitation is no longer pending`. A permitted member still gets `Invitation is no longer pending` for one that is not.
+  
+  No public signature changes; the `404` and the `not found` messages these routes documented do.
+
 ## 0.3.0
 
 ### Minor Changes
