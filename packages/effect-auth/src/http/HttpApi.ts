@@ -56,7 +56,7 @@ const SignInMeta = Schema.Struct({
  * a union tagged by `method`. It is write-only: no answer carries it back.
  *
  * - `password`: email and password (`captchaToken` for the captcha plugin).
- * - `username`: username and password.
+ * - `username`: username and password (`captchaToken` for the captcha plugin).
  * - `email-otp` / `phone-otp`: a one-time code sent through
  *   `POST /otp-challenges`.
  * - `magic-link`: the token from a magic-link email.
@@ -75,6 +75,7 @@ export const SignInCredential = Schema.Union([
     method: Schema.Literal("username"),
     username: Schema.String,
     password: Schema.String,
+    captchaToken: Schema.optional(Schema.String),
   }),
   Schema.Struct({ method: Schema.Literal("email-otp"), email: Schema.String, otp: Schema.String }),
   Schema.Struct({

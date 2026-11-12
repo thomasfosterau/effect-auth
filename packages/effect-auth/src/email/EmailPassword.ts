@@ -166,7 +166,7 @@ export interface SignInInput {
   readonly email: string;
   readonly password: string;
   readonly sessionAttributes?: Types.Attributes;
-  /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignIn` hook. */
+  /** Optional captcha token, consumed by the `CaptchaPlugin` on the `beforeAuthenticate` hook. */
   readonly captchaToken?: string;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
@@ -549,6 +549,12 @@ export const make = (
             email,
           );
           const user = resolvedUser?.user ?? null;
+          yield* hooks.beforeAuthenticate({
+            method: "email-password",
+            identifier: { type: "email", value: email },
+            userId: user?.id,
+            captchaToken: input.captchaToken,
+          });
           const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
           // Always verify against a real or decoy hash so timing is constant
           // regardless of whether the account exists.

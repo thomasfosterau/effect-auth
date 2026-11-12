@@ -1002,8 +1002,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         await jsonApi<void>("DELETE", "/sessions/current");
       }),
     signInAnonymous: () => signInWith({ method: "anonymous" }),
-    signInUsername: ({ username, password, rememberMe }) =>
-      signInWith({ method: "username", username, password }, rememberMe),
+    signInUsername: ({ username, password, captchaToken, rememberMe }) =>
+      signInWith(
+        {
+          method: "username",
+          username,
+          password,
+          ...(captchaToken !== undefined && { captchaToken }),
+        },
+        rememberMe,
+      ),
     getSession,
     sendVerificationEmail: ({ email }) =>
       jsonApi<void>("POST", "/email-verifications", {

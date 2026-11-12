@@ -19,7 +19,7 @@ import {
   UserStore,
 } from "./UserStore.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
-import { type HookError } from "./Hooks.ts";
+import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
@@ -133,7 +133,7 @@ export interface MagicLinkResult {
 /**
  * Magic link service.
  *
- * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `SecureRandom`.
+ * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks` and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
@@ -203,6 +203,7 @@ export const make = (
   | UserStore
   | SessionService
   | EmailPasswordStore
+  | Hooks
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
@@ -215,6 +216,7 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
@@ -316,9 +318,6 @@ export const make = (
           });
         }
 
-        // Consume the token (one-time use)
-        yield* store.delete(tokenHash);
-
         const { identifier, user: owner } = yield* findIdentifierOwner(
           identifiers,
           users.get,
@@ -326,6 +325,17 @@ export const make = (
           magicLink.email,
           () => new Errors.MagicLinkError({ message: "Account is unavailable" }),
         );
+        // The gate runs before the token is spent, so a refused attempt
+        // leaves the link usable once the refusal lifts.
+        yield* hooks.beforeAuthenticate({
+          method: "magic-link",
+          identifier: { type: "email", value: magicLink.email },
+          userId: owner?.id,
+        });
+
+        // Consume the token (one-time use)
+        yield* store.delete(tokenHash);
+
         let user = owner;
         if (!user) {
           if (disableSignUp) {

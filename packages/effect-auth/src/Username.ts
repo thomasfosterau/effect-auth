@@ -7,8 +7,8 @@
  * Sign-up validates + reserves the username then delegates credential
  * creation to {@link EmailPasswordService}; sign-in resolves the user by
  * username identifier and verifies the password with the same
- * anti-enumeration error and the same `SecondFactorGate` seam as
- * email/password sign-in.
+ * anti-enumeration error, the same `beforeAuthenticate` hook and the same
+ * `SecondFactorGate` seam as email/password sign-in.
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
@@ -76,6 +76,8 @@ export interface UsernameSignInInput {
   readonly username: string;
   readonly password: string;
   readonly sessionAttributes?: Types.Attributes;
+  /** Optional captcha token, consumed by the `CaptchaPlugin` on the `beforeAuthenticate` hook. */
+  readonly captchaToken?: string | undefined;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
    * (a browser-session cookie). See `SignInInput.rememberMe` for details.
@@ -266,6 +268,14 @@ const make = (
 
         const identifier = yield* lookupIdentifier(identifiers, "username", username);
         const user = identifier === null ? null : yield* users.get(identifier.userId);
+        // The same gate as email and password sign-in: lockout, rate limits
+        // and captcha key on the resolved user (#592).
+        yield* hooks.beforeAuthenticate({
+          method: "username",
+          identifier: { type: "username", value: username },
+          userId: user?.id,
+          captchaToken: input.captchaToken,
+        });
         const passwordHash =
           user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
         // Always verify against a real or decoy hash so timing is constant

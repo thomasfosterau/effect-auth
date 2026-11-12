@@ -24,7 +24,9 @@ import { SessionStore } from "./SessionStore.ts";
 import { SessionService, make as makeSessionService } from "./SessionService.ts";
 import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
-import { Hooks } from "./Hooks.ts";
+import { type AuthenticateAttempt, Hooks } from "./Hooks.ts";
+import { RateLimitError } from "./Errors.ts";
+import { authenticateGate } from "./testing/AuthenticateGate.ts";
 import type * as Types from "./Types.ts";
 import {
   observable,
@@ -249,6 +251,34 @@ describe("PhoneOtpService", () => {
       { type: "phone", value: "+15551231111", verified: true, verifiedAt: expect.any(Date) },
     ]);
     expect(result.session.userId).toBe(result.user.id);
+  });
+
+  it("runs beforeAuthenticate with the resolved user before the code is checked (#592)", async () => {
+    const testContext = await makeTestContext();
+    const user = seedPhoneUser("+15551234444", true);
+    const seen: Array<AuthenticateAttempt> = [];
+
+    const refused = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
+        yield* service.send("+15551234444", "sign-in");
+        return yield* Effect.flip(service.signIn("+15551234444", recorded(sentOtps).otp));
+      }).pipe(Effect.provide(testContext), Effect.provide(authenticateGate(seen, true))),
+    );
+
+    expect(refused).toBeInstanceOf(RateLimitError);
+    expect(seen).toEqual([
+      {
+        method: "phone-otp",
+        identifier: { type: "phone", value: "+15551234444" },
+        userId: user.id,
+      },
+    ]);
+    // Refused before the code was checked: the code is neither spent nor counted.
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(records, "+15551234444:sign-in"))?.attempts,
+    ).toBe(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
   it("signs in an existing user without creating a new one", async () => {
@@ -590,6 +620,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
       | IdentifierStore
       | UserStore
       | SessionService
+      | Hooks
       | SecureRandom.SecureRandom
     >,
   ) =>

@@ -48,6 +48,7 @@ import type * as Errors from "./Errors.ts";
 import type { AuthResult, SignInInput, SignUpInput } from "./email/EmailPassword.ts";
 import type { EntityRef } from "./Entity.ts";
 import type { EmailVerificationResult } from "./email/EmailVerification.ts";
+import type { IdentifierType } from "./Identifier.ts";
 import type { PasswordResetResult } from "./password/PasswordReset.ts";
 import type * as Types from "./Types.ts";
 
@@ -96,6 +97,92 @@ export interface CreateVerificationArgs {
 export interface VerifyEmailArgs {
   readonly token: string;
 }
+
+/**
+ * The credential-verifying flows that fire the `beforeAuthenticate` hook:
+ * password sign-in by email (`"email-password"`) or by username
+ * (`"username"`), one-time-code sign-in by email (`"email-otp"`) or SMS
+ * (`"phone-otp"`), magic-link sign-in (`"magic-link"`), and the redemption
+ * of a second-factor challenge (`"second-factor"`: TOTP, a backup code, or
+ * the OTP second factor).
+ */
+export type AuthenticationMethod =
+  | "email-password"
+  | "username"
+  | "email-otp"
+  | "phone-otp"
+  | "magic-link"
+  | "second-factor";
+
+/**
+ * The handle an authentication attempt names: a login identifier (`email`,
+ * `username`, `phone`, normalized as the identifier store keys it), or, for a
+ * second-factor redemption, which names no handle, the challenge's user
+ * (`type: "user"`, `value` the user id).
+ */
+export interface AuthenticationIdentifier {
+  readonly type: IdentifierType | "user";
+  readonly value: string;
+}
+
+/**
+ * Named arguments for the `beforeAuthenticate` hook: one attempt to verify a
+ * credential, fired by every credential-verifying flow (see
+ * {@link AuthenticationMethod}) before the credential is checked and before
+ * anything is consumed or created. A plugin denies the attempt by failing
+ * (`AccountLockedError`, `RateLimitError`, `CaptchaError`, ...).
+ *
+ * The flows read nothing back from it: it is a gate, not a rewrite. Input
+ * rewriting stays on `beforeSignIn`, for email and password.
+ */
+export interface AuthenticateAttempt {
+  readonly method: AuthenticationMethod;
+  /** The handle the attempt names, normalized. */
+  readonly identifier: AuthenticationIdentifier;
+  /**
+   * The user the handle resolves to, when one does. Absent for a handle no
+   * account holds, so a plugin that keys on it falls back to `identifier`
+   * (see {@link authenticationSubject}) and treats a known and an unknown
+   * handle alike.
+   */
+  readonly userId?: string | undefined;
+  /**
+   * The captcha token the caller sent, for the password methods
+   * (`"email-password"`, `"username"`); the other flows carry none.
+   */
+  readonly captchaToken?: string | undefined;
+}
+
+/**
+ * The key a per-account plugin counts an {@link AuthenticateAttempt} under:
+ * `user:<id>` when the handle resolved to a user, so every handle of one
+ * account (email, username, phone) shares one count, else `<type>:<value>`
+ * for the handle itself, so a handle no account holds is counted the way a
+ * known one is.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { authenticationSubject } from "@thomasfosterau/effect-auth"
+ *
+ * const known = authenticationSubject({
+ *   method: "username",
+ *   identifier: { type: "username", value: "ada" },
+ *   userId: "u-1",
+ * })
+ * assert.equal(known, "user:u-1")
+ *
+ * const unknown = authenticationSubject({
+ *   method: "email-password",
+ *   identifier: { type: "email", value: "nobody@example.com" },
+ * })
+ * assert.equal(unknown, "email:nobody@example.com")
+ * ```
+ */
+export const authenticationSubject = (attempt: AuthenticateAttempt): string =>
+  attempt.userId === undefined
+    ? `${attempt.identifier.type}:${attempt.identifier.value}`
+    : `user:${attempt.userId}`;
 
 /** A reference to an email address, used by password-reset hooks. */
 export interface EmailRef {
@@ -163,6 +250,7 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   afterSignUp: identity,
   beforeSignIn: identity,
   afterSignIn: identity,
+  beforeAuthenticate: identity,
   beforeSignOut: identity,
   afterSignOut: identity,
   beforeCreateSession: identity,
@@ -223,8 +311,22 @@ export class Hooks extends Context.Service<
   {
     readonly beforeSignUp: Transform<SignUpInput>;
     readonly afterSignUp: Tap<AuthResult>;
+    /**
+     * Rewrites an email-and-password sign-in's input (`NormalizeEmailPlugin`)
+     * before anything else runs. Only `EmailPasswordService.signIn` fires it;
+     * a plugin that guards sign-in belongs on `beforeAuthenticate`, which
+     * every credential-verifying flow fires.
+     */
     readonly beforeSignIn: Transform<SignInInput>;
     readonly afterSignIn: Tap<AuthResult>;
+    /**
+     * Fired by every credential-verifying flow once it has resolved the
+     * handle to a user (where one exists) and before it checks the
+     * credential; see {@link AuthenticateAttempt}. Failing denies the
+     * attempt. `AccountLockoutPlugin`, `CaptchaPlugin`, `RateLimitPlugin` and
+     * `IPRateLimitPlugin` guard it.
+     */
+    readonly beforeAuthenticate: Transform<AuthenticateAttempt>;
     readonly beforeSignOut: Transform<SessionRef>;
     readonly afterSignOut: Tap<SessionRef>;
     readonly beforeCreateSession: Transform<CreateSessionArgs>;
@@ -347,6 +449,12 @@ const wrapHooks = (
     afterSignUp: wrapHook("afterSignUp", inner.afterSignUp, impls.afterSignUp, isolateTaps),
     beforeSignIn: wrapHook("beforeSignIn", inner.beforeSignIn, impls.beforeSignIn, false),
     afterSignIn: wrapHook("afterSignIn", inner.afterSignIn, impls.afterSignIn, isolateTaps),
+    beforeAuthenticate: wrapHook(
+      "beforeAuthenticate",
+      inner.beforeAuthenticate,
+      impls.beforeAuthenticate,
+      false,
+    ),
     beforeSignOut: wrapHook("beforeSignOut", inner.beforeSignOut, impls.beforeSignOut, false),
     afterSignOut: wrapHook("afterSignOut", inner.afterSignOut, impls.afterSignOut, isolateTaps),
     beforeCreateSession: wrapHook(

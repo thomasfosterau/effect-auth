@@ -36,7 +36,7 @@ import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
-import { type HookError } from "./Hooks.ts";
+import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 
@@ -180,7 +180,7 @@ export interface PhoneOtpAuthResult {
 /**
  * Sign-in and phone-number verification by SMS one-time code. Codes are stored hashed, with an attempt limit.
  *
- * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore` and `SessionService`.
+ * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
  */
 export class PhoneOtpService extends Context.Service<
   PhoneOtpService,
@@ -268,6 +268,7 @@ export const make = (
   | PhoneOtpUserStore
   | IdentifierStore
   | UserStore
+  | Hooks
   | SessionService
   | SecureRandom.SecureRandom
 > =>
@@ -282,6 +283,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
 
@@ -446,8 +448,6 @@ export const make = (
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
 
-        yield* verifyOtp(phoneNumber, otp, "sign-in");
-
         const { identifier, user: owner } = yield* findIdentifierOwner(
           identifiers,
           users.get,
@@ -455,6 +455,14 @@ export const make = (
           phoneNumber,
           () => new PhoneOtpError({ message: "Account is unavailable" }),
         );
+        yield* hooks.beforeAuthenticate({
+          method: "phone-otp",
+          identifier: { type: "phone", value: phoneNumber },
+          userId: owner?.id,
+        });
+
+        yield* verifyOtp(phoneNumber, otp, "sign-in");
+
         let user = owner;
         if (!user) {
           if (disableSignUp) {

@@ -1711,7 +1711,11 @@ const signInWithPassword = (
 
 /** Sign in with a username and password. */
 const signInWithUsername = (
-  credential: { readonly username: string; readonly password: string },
+  credential: {
+    readonly username: string;
+    readonly password: string;
+    readonly captchaToken?: string | undefined;
+  },
   rememberMe: boolean | undefined,
 ) =>
   Effect.gen(function* () {
@@ -1720,6 +1724,7 @@ const signInWithUsername = (
       .signIn({
         username: credential.username,
         password: credential.password,
+        captchaToken: credential.captchaToken,
         ...(rememberMe !== undefined && { rememberMe }),
       })
       .pipe(
