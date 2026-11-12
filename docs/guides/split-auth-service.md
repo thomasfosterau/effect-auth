@@ -153,7 +153,7 @@ header has no representation in a typed JSON success value. Sign-in, sign-up and
 therefore need a raw passthrough:
 
 ```ts
-// POST /session/sign-in on the app's Worker: the browser posts a JSON:API
+// POST /auth/sessions on the app's Worker: the browser posts a JSON:API
 // `sessions` document, which the auth service answers at `POST /sessions`.
 const signIn = (request: Request) => auth.relay(request, "/sessions");
 ```
@@ -202,8 +202,9 @@ const handle = (request: Request) =>
   Effect.gen(function* () {
     // Credential mutation: raw passthrough, Set-Cookie relayed.
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/session/")) {
-      return yield* auth.relay(request, url.pathname.replace("/session", ""));
+    // `/auth/sessions` on the app relays to the auth service's `/sessions`.
+    if (url.pathname.startsWith("/auth/")) {
+      return yield* auth.relay(request, url.pathname.slice("/auth".length) + url.search);
     }
 
     // Everything else: resolve, run, replay.

@@ -11,6 +11,7 @@
     "dist",
     "**/*.test.ts",
     "src/testing/Passwordless.ts",
+    "src/testing/WireFormat.ts",
     "src/sql/testing"
   ]
 }

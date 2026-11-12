@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type { SessionWithUser } from "@thomasfosterau/effect-auth";
+import { makeServerFixture } from "@thomasfosterau/effect-auth/client/testing";
 import {
   type ActionEvent,
   type CookieOptions,
@@ -14,6 +15,7 @@ import {
   type LocalsAuth,
   parseSetCookie,
   PRIVATE_CACHE_CONTROL,
+  submitCredential,
 } from "./index.ts";
 
 const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-23T00:00:00.000Z"));
@@ -500,5 +502,56 @@ describe("remote functions", () => {
       kind: "signed-in",
       location: "/elsewhere",
     });
+  });
+});
+
+/** A form post from the app's page, carried to the in-process auth handler. */
+const actionEvent = () => {
+  const cookies: Array<[string, string, CookieOptions]> = [];
+  const actionInput: ActionEvent = {
+    request: new Request("https://app.example/login", { method: "POST" }),
+    url: new URL("https://app.example/login?redirect=/dashboard"),
+    cookies: { set: (name, value, options) => void cookies.push([name, value, options]) },
+  };
+  return { cookies, actionInput };
+};
+
+describe("submitCredential against the auth handler (#205)", () => {
+  const credential = { email: "kit@example.com", password: "correct horse battery staple" };
+
+  it("signs up at POST /users and signs in at POST /sessions, relaying the session cookie", async () => {
+    const server = makeServerFixture();
+    const post = (path: string, body: (input: typeof credential) => Schema.Json) => {
+      const { cookies, actionInput } = actionEvent();
+      return submitCredential(actionInput, credential, {
+        fetch: server.handler,
+        endpoint: `http://localhost${path}`,
+        body,
+        fields: ({ email }) => ({ email }),
+        fallback: "/home",
+      }).then((answer) => ({ answer, names: cookies.map(([name]) => name) }));
+    };
+
+    const signedUp = await post("/users", (input) => ({
+      data: { type: "users", attributes: input },
+    }));
+    expect(signedUp.answer).toEqual({ kind: "signed-in", location: "/dashboard" });
+    expect(signedUp.names).toContain("conduit_session");
+
+    const signIn = (password: string) =>
+      post("/sessions", ({ email }) => ({
+        data: {
+          type: "sessions",
+          attributes: { credential: { method: "password", email, password } },
+        },
+      }));
+    const loggedIn = await signIn(credential.password);
+    expect(loggedIn.answer).toEqual({ kind: "signed-in", location: "/dashboard" });
+    expect(loggedIn.names).toContain("conduit_session");
+
+    // A refused credential maps the JSON:API error document's status.
+    const refused = await signIn("wrong password, entirely");
+    expect(refused.answer).toMatchObject({ kind: "failed", failure: { kind: "invalid" } });
+    expect(refused.names).toEqual([]);
   });
 });

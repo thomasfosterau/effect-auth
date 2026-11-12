@@ -119,7 +119,7 @@ From here: mount the HTTP API with `Http.make({ services })` from the `@thomasfo
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) (module map and security model), [design decisions](docs/DESIGN.md), [ADRs](docs/adr/README.md) and the [domain vocabulary](docs/CONTEXT.md).
-- Guides in [docs/guides/](docs/guides/): bring your own store, the browser client, MCP provider, SCIM, auth as a separate service, rate limits and sessions on Cloudflare Durable Objects, migrating from Better Auth, migrating to the authorization kernel.
+- Guides in [docs/guides/](docs/guides/): bring your own store, the browser client, MCP provider, SCIM, auth as a separate service, rate limits and sessions on Cloudflare Durable Objects, migrating from Better Auth, migrating to the authorization kernel, [migrating to the JSON:API HTTP tier](docs/guides/jsonapi-migration.md).
 - [Observability](docs/OBSERVABILITY.md): spans and metrics.
 
 ## Development
