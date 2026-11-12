@@ -1,5 +1,35 @@
 # @thomasfosterau/effect-auth-drizzle
 
+## 0.3.0
+
+### Minor Changes
+
+- c0f9b73: Bounded purges for a cron with a CPU budget (#729). `@thomasfosterau/effect-auth/sql` adds `purgeExpiredWith({ limit })`: `purgeExpired` with each table's `DELETE` capped at `limit` rows (magic links, email OTPs and rate-limit rows alike), reporting the counts so a caller can loop until they are `0`. `RateLimitStore.purgeExpired(tables, { limit })` in `@thomasfosterau/effect-auth-drizzle` caps its `DELETE` the same way on PostgreSQL, SQLite and MySQL (through a derived table, which MySQL accepts inside `IN`) and still returns nothing. Omitting `limit` keeps the unbounded purge; a `limit` that is not a positive integer fails with `AuthError`.
+- ca639d5: Deleting a user now deletes everything the account holds (#601). `AccountManagementService.confirmAccountDeletion`, `AdminService.removeUser`, `AnonymousService.linkAccount` and `UserService.deleteUser` run one purge: every user-keyed credential and token store present where the service's layer is built deletes that user's rows (OAuth links and their provider tokens, passkeys, API keys, the TOTP enrolment and backup codes, trusted devices, OIDC-provider tokens and consents, pending password resets, email verifications and account-management tokens), the unspent magic links and email / phone one-time codes sent to the user's addresses are deleted (keyed by address, they would otherwise sign their holder into the next account to claim it), then the sessions are revoked, then the identifiers are deleted (`removeUser` used to leave them, so the address stayed claimed; it can now sign up again), and the user row goes last, so a failure leaves the user rather than rows naming a missing one. No foreign keys are added; wrap the call in your stores' transaction (`sql.withTransaction` on `./sql`) to make it atomic. `ApiKeyService.verify` and `verifyWithRateLimit` now answer `Invalid API key` for a key whose owner no longer exists.
+  
+  Breaking for bring-your-own stores and for layer wiring:
+  
+  - `ApiKeyStore`, `OAuthAccountStore`, `MultiFactor.CredentialStore` and `OidcConsentStore` gain a required `deleteByUserId(userId)`, which deletes that user's rows only (a no-op for a user with none). `MultiFactorStore.delete(userId)` is its per-user delete, unchanged.
+  - **`ApiKeyService` now requires `UserStore`** in its layer's context (it reads the key's owner on every verify). `Testing.apiKeyServiceLayer` takes `users` (seed the owners of the keys a test verifies) and provides `UserStore`.
+  - **`UserService.deleteUser` now deletes the whole account**, through the new `AccountDeletion` service: provide `accountDeletionLayer` (it needs `UserServiceStore`, `IdentifierStore` and `SessionService`, and clears whichever credential stores are in its context) where `UserService` is built. Without it, `deleteUser` fails with `AuthError` and deletes nothing; it no longer deletes the user row alone.
+  - `./sql`: `UserServiceStore.delete` also deletes the user's `auth_user_roles` rows, in one transaction; the API key, OAuth account and passkey stores implement `deleteByUserId`.
+  - `./testing`: `memoryStores` also provides `UserServiceStore`, `CredentialStore` and `AccountManagementStore` (`memoryUserServiceStore`, `memoryCredentialStore`, `memoryAccountManagementStore`), and new conformance suites check every per-user delete: `oauthAccountStoreConformance`, `credentialStoreConformance`, `multiFactorStoreConformance`, `trustedDeviceStoreConformance`, `oidcTokenStoreConformance`, `oidcConsentStoreConformance`, `emailVerificationStoreConformance`, `passwordResetStoreConformance`, `accountManagementStoreConformance`, and a case in `apiKeyStoreConformance`.
+  
+  `@thomasfosterau/effect-auth-drizzle`: `ApiKeyStore` implements `deleteByUserId` (one `DELETE`), as the core contract now requires.
+- 53ebf83: Drop drizzle-orm 0.4x: the `drizzle-orm` peer range is now `>=1.0.0-rc.5 <2`, and the published declarations are built against drizzle-orm 1.0 (#735). Before, the `.d.ts` was emitted against 0.45, so on 1.0 the exported tables (`Pg.identifiersTable` and the rest) failed `defineSchema`'s column mapping and the application's own queries, and `databaseLayer` named database classes 1.0 does not export, so it accepted anything. `databaseLayer` now takes 1.0's `PgAsyncDatabase`, `SQLiteAsyncDatabase` and `MySqlAsyncDatabase` (and the transaction handles that extend them), and the row and insert types read through `InferSelectModel` / `InferInsertModel`. Applications on 0.44 or 0.45 stay on 0.2.x, or move to drizzle-orm 1.0.
+- ce9e0fa: Add `UserServiceStore`, the drizzle-backed `Auth.UserServiceStore` that `UserService`, `AccountManagementService` and `AdminService` need, so `Http.make`'s services can run on Drizzle (#728). `UserServiceStore.layer(schema)` takes a dialect's tables or a `defineSchema` mapping; `get` reads through `UserStore`'s projection, `update` writes the user's name, image, `updatedAt` and attributes (promoted attributes to their own columns) in one `UPDATE`, and `delete` removes the user row, with the semantics of core's `/sql` store. Merge it beside `Drizzle.layer()` like the other stores beyond sign-in.
+
+### Patch Changes
+
+- Updated dependencies [efad4fb]
+- Updated dependencies [c0f9b73]
+- Updated dependencies [ca639d5]
+- Updated dependencies [1f75f76]
+- Updated dependencies [6f37516]
+- Updated dependencies [05f7c10]
+- Updated dependencies [90e1793]
+  - @thomasfosterau/effect-auth@0.5.0
+
 ## 0.2.1
 
 ### Patch Changes

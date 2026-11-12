@@ -1,5 +1,18 @@
 # @thomasfosterau/effect-auth-alchemy-cloudflare
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [efad4fb]
+- Updated dependencies [c0f9b73]
+- Updated dependencies [ca639d5]
+- Updated dependencies [1f75f76]
+- Updated dependencies [6f37516]
+- Updated dependencies [05f7c10]
+- Updated dependencies [90e1793]
+  - @thomasfosterau/effect-auth@0.5.0
+
 ## 0.1.3
 
 ### Patch Changes

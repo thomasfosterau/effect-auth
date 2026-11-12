@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "An experimental Auth library for Effect: the headless core, plus the HTTP tier, the browser client, SQL storage and SAML as opt-in subpaths.",
   "keywords": [
     "auth",
