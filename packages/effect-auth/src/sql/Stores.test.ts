@@ -262,6 +262,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(tables).toEqual([
         "auth_account_lockouts",
         "auth_api_keys",
+        "auth_email_otp_failures",
         "auth_email_otps",
         "auth_email_verifications",
         "auth_identifiers",
@@ -1508,6 +1509,7 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.userStoreConformance({ seedUser }),
       Testing.identifierStoreConformance({ seedUser }),
       Testing.apiKeyStoreConformance({ seedUser }),
+      Testing.emailOtpStoreConformance(),
     ];
     Arr.forEach(suites, (suite) => {
       describe(`${suite.contract} conformance`, () => {

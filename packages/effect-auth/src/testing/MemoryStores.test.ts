@@ -21,6 +21,7 @@ import { UserStore } from "../UserStore.ts";
 import { EmailOtpStore } from "../email/EmailOtp.ts";
 import { purgeExpiredKV } from "../KeyValueStores.ts";
 import { MagicLinkStore } from "../MagicLink.ts";
+import { PhoneOtpStore } from "../PhoneOtp.ts";
 import * as Testing from "./index.ts";
 
 const register = <E, R>(
@@ -52,6 +53,11 @@ register(Testing.identifierStoreConformance(), () =>
   Layer.succeed(IdentifierStore, memoryIdentifierStore()),
 );
 register(Testing.pendingMultiFactorStoreConformance(), () => Testing.memoryStores);
+// `memoryStores` serves `EmailOtpStore` from `EmailOtpStoreKV`.
+register(Testing.emailOtpStoreConformance(), () => Testing.memoryStores);
+register(Testing.phoneOtpStoreConformance(), () =>
+  Layer.succeed(PhoneOtpStore, Testing.memoryPhoneOtpStore()),
+);
 
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 24 * 60 * 60 * 1000, idlePeriod: 60 * 60 * 1000 },

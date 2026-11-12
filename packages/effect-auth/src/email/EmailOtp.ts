@@ -8,7 +8,7 @@
  *
  * @module email-otp
  */
-import { Clock, Context, Data, DateTime, Duration, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore } from "../Identifier.ts";
@@ -21,12 +21,12 @@ import {
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { deliverCode } from "../CodeDelivery.ts";
 import type { HookError } from "../Hooks.ts";
+import * as OtpCode from "../OtpCode.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { randomBase64UrlToken } from "../RandomToken.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { proveAddress } from "../FirstProof.ts";
-import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 
@@ -76,6 +76,9 @@ export interface EmailOtpCreateUserInput {
 /**
  * Storage interface for email OTPs. There is at most one active OTP per
  * email + purpose pair; `upsert` replaces any existing record for the pair.
+ * Each pair also has a failure budget (`getFailures`, `recordFailure`,
+ * `clearFailures`) that outlives its OTP records, so a resend never resets the
+ * wrong codes counted against the address (#590).
  */
 export class EmailOtpStore extends Context.Service<
   EmailOtpStore,
@@ -93,6 +96,31 @@ export class EmailOtpStore extends Context.Service<
       email: string,
       purpose: EmailOtpPurpose,
     ) => Effect.Effect<number, Errors.AuthError>;
+    /**
+     * The pair's failure budget (#590), or `null` when it has none. It is
+     * kept apart from the OTP record: `upsert` and `delete` leave it as it
+     * was.
+     */
+    readonly getFailures: (
+      email: string,
+      purpose: EmailOtpPurpose,
+    ) => Effect.Effect<Types.OtpFailures | null, Errors.AuthError>;
+    /**
+     * Count one wrong code against the pair, at `at` (epoch ms), and return
+     * the budget after it: `count` from 1, `lastFailureAt` set to `at`. One
+     * atomic step where the backend allows (an `ON CONFLICT … DO UPDATE …
+     * RETURNING`), so concurrent wrong codes are all counted.
+     */
+    readonly recordFailure: (
+      email: string,
+      purpose: EmailOtpPurpose,
+      at: number,
+    ) => Effect.Effect<Types.OtpFailures, Errors.AuthError>;
+    /** Forget the pair's failure budget (after a successful verification); a no-op when it has none. */
+    readonly clearFailures: (
+      email: string,
+      purpose: EmailOtpPurpose,
+    ) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/EmailOtpStore") {}
 
@@ -121,7 +149,24 @@ export class EmailOtpUserStore extends Context.Service<
 export interface EmailOtpConfig {
   readonly otpLength?: number; // Default: 6 digits
   readonly expiresIn?: number; // Default: 5 minutes
-  readonly maxAttempts?: number; // Default: 3
+  /**
+   * Wrong codes one OTP accepts before it is deleted. Default 3. A resend
+   * issues a new OTP with its own attempts; what bounds the guesses at an
+   * address across resends is {@link EmailOtpConfig.backoff}.
+   */
+  readonly maxAttempts?: number;
+  /**
+   * The failure backoff (#590): every wrong code is also counted against the
+   * email + purpose pair, and a resend never resets that count. Once it
+   * reaches `freeFailures` (default 5), `send` fails with
+   * {@link Errors.ResendTooSoonError} until `baseDelay` (default one minute),
+   * doubled for each further wrong code and capped at `maxDelay` (default one
+   * day), has passed since the latest one. A successful verification resets
+   * the count. There is no lockout: once the delay has passed a send succeeds,
+   * so an attacker can slow an address's owner down, not lock them out. It
+   * applies alike to an email with and without an account.
+   */
+  readonly backoff?: Types.OtpBackoffConfig | undefined;
   /**
    * Refuse to create a user at `"sign-in"`. Off by default. When set,
    * `"sign-in"` hides whether an email has an account, as `"forget-password"`
@@ -131,8 +176,9 @@ export interface EmailOtpConfig {
   /**
    * Minimum interval (ms) between successive send requests for the same email
    * + purpose pair. When an outstanding OTP created within this window already
-   * exists, `send` fails with {@link Errors.ResendTooSoonError}. Off by
-   * default. Complements the global RateLimit. It applies to every email
+   * exists, `send` fails with {@link Errors.ResendTooSoonError}. Default
+   * 60 000 (60 s); `0` turns it off. Complements the global RateLimit and
+   * {@link EmailOtpConfig.backoff}. It applies to every email
    * alike, whether or not it has an account, so the error reveals nothing
    * about which emails are registered. Where `send` hides whether an account
    * exists (`"sign-in"` with sign-up disabled, and `"forget-password"`), a
@@ -196,9 +242,10 @@ export class EmailOtpService extends Context.Service<
      * attempts exactly as a code's record does. `signIn` and `check` then
      * see the same record states for an email with and without an account.
      *
-     * When `resendCooldown` is configured and an outstanding OTP for the email +
-     * purpose was created within the cooldown window, fails with
-     * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     * When an outstanding OTP for the email + purpose was created within the
+     * `resendCooldown` window, or the pair's wrong codes put it in the
+     * `backoff` delay, fails with {@link Errors.ResendTooSoonError} containing
+     * the remaining wait time.
      * The marker record makes the cooldown apply to an email with no account
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown email.
@@ -217,7 +264,8 @@ export class EmailOtpService extends Context.Service<
      * whether the code was wrong, had expired or reached `maxAttempts`, so the
      * answer is the same for an email with and without an outstanding code.
      * With sign-up enabled, an expired code answers `"OTP has expired"` and
-     * the attempt limit answers `"Too many attempts"`.
+     * the attempt limit answers `"Too many attempts"`. A wrong code counts
+     * against the email's `backoff`; a correct one resets it.
      */
     readonly signIn: (
       email: string,
@@ -251,20 +299,6 @@ export class EmailOtpService extends Context.Service<
     Layer.effect(EmailOtpService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-/** Why an OTP verification failed: no record, a wrong code, expiry or the attempt limit. */
-type VerifyFailure = "missing" | "mismatch" | "expired" | "attempts";
-
-/** The generic answer to a failed verification. */
-const invalidOtpMessage = "Invalid or expired OTP";
-
-/** The message each verification failure answers where existence isn't hidden. */
-const failureMessages: Record<VerifyFailure, string> = {
-  missing: invalidOtpMessage,
-  mismatch: invalidOtpMessage,
-  expired: "OTP has expired",
-  attempts: "Too many attempts",
-};
-
 /**
  * SHA-256 hex digest of an OTP; an alias of {@link hashToken}.
  *
@@ -274,23 +308,12 @@ export const hashOtp = hashToken;
 
 /**
  * Generate a numeric OTP with crypto-secure randomness (one unbiased
- * `randomIntBetween` draw per digit — no modulo bias).
+ * `intBetween` draw per digit — no modulo bias).
  */
-export const generateOtp = (
+export const generateOtp: (
   crypto: typeof SecureRandom.SecureRandom.Service,
   length: number,
-): Effect.Effect<string> =>
-  Effect.replicateEffect(crypto.intBetween(0, 10, { halfOpen: true }), length, {
-    concurrency: 1,
-  }).pipe(Effect.map((digits) => digits.join("")));
-
-/**
- * The secret behind an unknown address's marker record: 32 random bytes,
- * base64url-encoded. It is hashed into the marker record and then discarded.
- */
-const generateMarkerSecret = (
-  crypto: typeof SecureRandom.SecureRandom.Service,
-): Effect.Effect<string> => randomBase64UrlToken(crypto);
+) => Effect.Effect<string> = OtpCode.generateOtp;
 
 /**
  * Create an email OTP service
@@ -309,10 +332,8 @@ export const make = (
   | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
-    const otpLength = config.otpLength ?? 6;
-    const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
-    const maxAttempts = config.maxAttempts ?? 3;
-    const disableSignUp = config.disableSignUp ?? false;
+    const codes = OtpCode.resolveCodeConfig(config);
+    const { disableSignUp } = codes;
 
     const store = yield* EmailOtpStore;
     const userStore = yield* EmailOtpUserStore;
@@ -330,67 +351,24 @@ export const make = (
     const hidesAccount = (purpose: EmailOtpPurpose): boolean =>
       (purpose === "sign-in" && disableSignUp) || purpose === "forget-password";
 
-    /**
-     * Fail a verification. Where `send` hides whether the email has an
-     * account, every reason answers the generic message. The marker record
-     * already gives a known and an unknown email the same record states; the
-     * generic message also makes one that holds a record answer as one that
-     * holds none, so expiry and the attempt limit can't show whether a code
-     * was requested for it. The reason stays on the span for operators.
-     */
-    const rejectOtp = (purpose: EmailOtpPurpose, reason: VerifyFailure) =>
-      Effect.annotateCurrentSpan("auth.otp.failure", reason).pipe(
-        Effect.andThen(
-          Effect.fail(
-            new EmailOtpError({
-              message: hidesAccount(purpose) ? invalidOtpMessage : failureMessages[reason],
-            }),
-          ),
-        ),
-      );
+    const rejectOtp = OtpCode.makeReject(hidesAccount, (message) => new EmailOtpError({ message }));
 
     /**
      * Core verification: expiry, attempt limiting, constant-time hash
-     * comparison, and one-time-use consumption on success.
+     * comparison, one-time-use consumption on success, and the failure
+     * budget (#590).
      */
     const verifyOtp = (
       email: string,
       otp: string,
       purpose: EmailOtpPurpose,
     ): Effect.Effect<void, EmailOtpError | Errors.AuthError> =>
-      Effect.gen(function* () {
-        if (!email || !otp) {
-          return yield* rejectOtp(purpose, "missing");
-        }
-
-        const record = yield* store.get(email, purpose);
-        if (!record) {
-          return yield* rejectOtp(purpose, "missing");
-        }
-
-        // Check expiration
-        if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
-          yield* store.delete(email, purpose);
-          return yield* rejectOtp(purpose, "expired");
-        }
-
-        // Defensive: a record that already exhausted its attempts is unusable.
-        if (record.attempts >= maxAttempts) {
-          yield* store.delete(email, purpose);
-          return yield* rejectOtp(purpose, "attempts");
-        }
-
-        if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
-          const attempts = yield* store.incrementAttempts(email, purpose);
-          if (attempts >= maxAttempts) {
-            yield* store.delete(email, purpose);
-            return yield* rejectOtp(purpose, "attempts");
-          }
-          return yield* rejectOtp(purpose, "mismatch");
-        }
-
-        // Consume the OTP (one-time use)
-        return yield* store.delete(email, purpose);
+      OtpCode.verifyCode(store, {
+        address: email,
+        code: otp,
+        purpose,
+        maxAttempts: codes.maxAttempts,
+        reject: rejectOtp,
       });
 
     return {
@@ -412,40 +390,16 @@ export const make = (
           ? (yield* identifiers.getByValue("email", email)) !== null
           : true;
 
-        // Resend cooldown: reject if an outstanding OTP was created within
-        // the configured window. It runs for an address with no account too,
-        // whose earlier request stored an undelivered record below, so a known
-        // and an unknown address get the same answer inside the window.
-        if (config.resendCooldown !== undefined) {
-          const existing = yield* store.get(email, purpose);
-          if (existing !== null) {
-            const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
-            if (elapsed < config.resendCooldown) {
-              return yield* new Errors.ResendTooSoonError({
-                message: "Please wait before requesting another OTP",
-                retryAfter: Duration.millis(config.resendCooldown - elapsed),
-              });
-            }
-          }
-        }
+        // Resend cooldown and failure backoff (#590). Both run for an
+        // address with no account too, whose earlier request stored an
+        // undelivered marker record below and whose wrong codes are counted
+        // alike, so a known and an unknown address get the same answer.
+        yield* OtpCode.gateSend(store, email, purpose, codes);
 
-        // An address with no account gets a marker record, whose hash is of a
-        // random 32-byte secret rather than of a code: no `otpLength`-digit
-        // guess can match it, and the secret is never sent. It is written
-        // whether or not a cooldown is set, with the same attempts and expiry
-        // as a code's record, so both branches do the same store work here
-        // and verification later sees the same record states. Both values are
-        // drawn on every send, so the random work is the same too.
-        const otp = yield* generateOtp(crypto, otpLength);
-        const markerSecret = yield* generateMarkerSecret(crypto);
-        const record: EmailOtpRecord = {
-          email,
-          otpHash: hashToken(deliver ? otp : markerSecret),
-          purpose,
-          attempts: 0,
-          createdAt: yield* Clock.currentTimeMillis,
-          expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
-        };
+        // An address with no account gets a marker record that no code
+        // redeems (see `issueCode`).
+        const { code: otp, record: fields } = yield* OtpCode.issueCode(crypto, codes, deliver);
+        const record: EmailOtpRecord = { email, purpose, ...fields };
 
         // One active OTP per email + purpose: replaces any outstanding one.
         yield* store.upsert(record);

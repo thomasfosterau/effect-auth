@@ -12,6 +12,7 @@ import * as ApiKey from "../ApiKey.ts";
 import * as Errors from "../Errors.ts";
 import { type Identifier, IdentifierStore } from "../Identifier.ts";
 import { IdentifierStoreKV } from "../KeyValueStores.ts";
+import { PhoneOtpStore } from "../PhoneOtp.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
@@ -171,6 +172,25 @@ describe("a broken store fails its suite", () => {
     });
     expect(failed.map((failure) => failure.name)).toEqual([
       "create returns the key, and get and getByHash read it back with every field",
+    ]);
+  });
+
+  it("a PhoneOtpStore whose upsert resets the failure budget fails the #590 case", async () => {
+    const failed = await failures(Testing.phoneOtpStoreConformance(), () => {
+      const failures = MutableHashMap.empty<string, Types.OtpFailures>();
+      const inner = Testing.memoryPhoneOtpStore(MutableHashMap.empty(), failures);
+      // The pre-#590 shape: the count lives with the code, so a resend clears it.
+      return Layer.succeed(PhoneOtpStore, {
+        ...inner,
+        upsert: (record) =>
+          Effect.andThen(
+            Effect.sync(() => MutableHashMap.clear(failures)),
+            inner.upsert(record),
+          ),
+      });
+    });
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
     ]);
   });
 

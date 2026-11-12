@@ -27,11 +27,17 @@ import { hashToken } from "./TokenHash.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
 import {
+  advanceTime,
+  bruteForce,
+  sendTwice,
+  day,
+  defaultBackoffDay,
   observable,
   type RecordState,
   runVerifySequence,
   verifySequences,
   wrongCode,
+  recordingOtpFailures,
   zeroCrypto,
 } from "./testing/Passwordless.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
@@ -50,6 +56,8 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
 const users = MutableHashMap.empty<string, Types.User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const records = MutableHashMap.empty<string, PhoneOtpRecord>();
+/** Each phone number + purpose pair's failure budget (#590). */
+const otpFailures = MutableHashMap.empty<string, Types.OtpFailures>();
 const sessions = MutableHashMap.empty<string, Types.Session>();
 let seq = 0;
 
@@ -88,6 +96,7 @@ const phoneOtpStore: typeof PhoneOtpStore.Service = {
       MutableHashMap.set(records, key(phone, purpose), updated);
       return updated.attempts;
     }),
+  ...recordingOtpFailures<PhoneOtpPurpose>(otpFailures, storeOps),
 };
 
 /** The `identifier` each `createUser` call was given. */
@@ -201,6 +210,7 @@ describe("PhoneOtpService", () => {
     MutableHashMap.clear(users);
     MutableHashMap.clear(identifierRecords);
     MutableHashMap.clear(records);
+    MutableHashMap.clear(otpFailures);
     MutableHashMap.clear(sessions);
     sentOtps.length = 0;
     storeOps.length = 0;
@@ -426,17 +436,29 @@ describe("PhoneOtpService", () => {
     ).toBe(hashToken(recorded(sentOtps).otp));
   });
 
-  it("does not apply the cooldown when resendCooldown is not configured", async () => {
+  it("applies a 60 s cooldown by default, and none with resendCooldown: 0 (#590)", async () => {
     const testContext = await makeTestContext();
-    await Effect.runPromise(
+    const { defaulted, disabled } = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
-        yield* service.send("+15559990003", "sign-in");
-        yield* service.send("+15559990003", "sign-in");
+        const defaultService = yield* PhoneOtp.make({ sendOtp: recordingSend });
+        const disabledService = yield* PhoneOtp.make({ sendOtp: recordingSend, resendCooldown: 0 });
+        return {
+          defaulted: yield* sendTwice(defaultService.send("+15559990003", "sign-in")),
+          disabled: yield* sendTwice(disabledService.send("+15559990004", "sign-in")),
+        };
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
-    expect(sentOtps).toHaveLength(2);
-    expect(MutableHashMap.has(records, "+15559990003:sign-in")).toBe(true);
+    expect(Result.isSuccess(defaulted[0])).toBe(true);
+    const refused = defaulted[1];
+    assert(Result.isFailure(refused) && P.isTagged(refused.failure, "ResendTooSoonError"));
+    expect(Duration.toMillis(refused.failure.retryAfter)).toBeGreaterThan(0);
+    expect(Duration.toMillis(refused.failure.retryAfter)).toBeLessThanOrEqual(60_000);
+    expect(disabled.every(Result.isSuccess)).toBe(true);
+    expect(sentOtps.map((sent) => sent.phoneNumber)).toEqual([
+      "+15559990003",
+      "+15559990004",
+      "+15559990004",
+    ]);
   });
 
   // #415: with sign-up disabled, an unknown number must hit the cooldown exactly
@@ -538,6 +560,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
     MutableHashMap.clear(users);
     MutableHashMap.clear(identifierRecords);
     MutableHashMap.clear(records);
+    MutableHashMap.clear(otpFailures);
     MutableHashMap.clear(sessions);
     sentOtps.length = 0;
     storeOps.length = 0;
@@ -652,7 +675,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
     ]);
   });
 
-  it("does the same store work to send to a known and an unknown number without a cooldown", async () => {
+  it("does the same store work to send to a known and an unknown number", async () => {
     const { knownOps, unknownOps } = await runPromise(
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ disableSignUp: true, sendOtp: recordingSend });
@@ -664,7 +687,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
     );
 
     expect(unknownOps).toEqual(knownOps);
-    expect(knownOps).toEqual(["upsert"]);
+    expect(knownOps).toEqual(["get", "getFailures", "upsert"]);
     expect(recordOf("+15559990101")()).toEqual(recordOf(member)());
   });
 
@@ -740,5 +763,104 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
       answer("OTP has expired"),
       answer("Invalid or expired OTP"),
     ]);
+  });
+});
+
+// #590: as for email OTPs, the wrong codes a number accepts are bounded across
+// resends by a count per number + purpose that a resend never resets.
+const runInContext = <A, E>(
+  program: Effect.Effect<
+    A,
+    E,
+    | PhoneOtpStore
+    | PhoneOtpUserStore
+    | IdentifierStore
+    | UserStore
+    | SessionService
+    | SecureRandom.SecureRandom
+  >,
+) =>
+  makeTestContext().then((context) =>
+    Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(TestHooks))),
+  );
+
+/** The #590 attack against `phoneNumber` for a day, with the default policy. */
+const attackNumber = (phoneNumber: string, disableSignUp = false) =>
+  Effect.gen(function* () {
+    const service = yield* PhoneOtp.make({ disableSignUp, sendOtp: recordingSend });
+    return yield* bruteForce({
+      send: service.send(phoneNumber, "sign-in"),
+      guess: service.signIn(phoneNumber, wrongCode),
+      maxAttempts: 3,
+      horizon: day,
+      maxSends: 1000,
+    });
+  });
+
+describe("PhoneOtpService failure backoff across resends (#590)", () => {
+  const member = "+15559990200";
+
+  beforeEach(() => {
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(records);
+    MutableHashMap.clear(otpFailures);
+    MutableHashMap.clear(sessions);
+    sentOtps.length = 0;
+    storeOps.length = 0;
+    seq = 0;
+    createdWith.length = 0;
+    seedPhoneUser(member, true);
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("bounds the wrong codes at one number in a day, however often it resends", async () => {
+    // Before #590 all 1000 sends issued a code at once: 3000 guesses.
+    expect(await runInContext(attackNumber(member))).toEqual(defaultBackoffDay);
+  });
+
+  it("delays a known and an unknown number alike when sign-up is disabled", async () => {
+    const { known, unknown } = await runInContext(
+      Effect.gen(function* () {
+        // Each number has its own count, so the second run starts afresh.
+        return {
+          known: yield* attackNumber(member, true),
+          unknown: yield* attackNumber("+15559990201", true),
+        };
+      }),
+    );
+
+    expect(unknown).toEqual(known);
+    expect(known).toEqual(defaultBackoffDay);
+    expect(sentOtps.every((sent) => sent.phoneNumber === member)).toBe(true);
+  });
+
+  it("never locks the owner out: after the delay a code signs in and resets the count", async () => {
+    const afterSignIn = await runInContext(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
+        yield* bruteForce({
+          send: service.send(member, "sign-in"),
+          guess: service.signIn(member, wrongCode),
+          maxAttempts: 3,
+          horizon: 10 * 60_000,
+          maxSends: 3,
+        });
+        const refused = yield* Effect.flip(service.send(member, "sign-in"));
+        assert(P.isTagged(refused, "ResendTooSoonError"));
+        yield* advanceTime(Duration.toMillis(refused.retryAfter));
+
+        yield* service.send(member, "sign-in");
+        const { user } = yield* service.signIn(member, recorded(sentOtps, 3).otp);
+        expect(user.id).toBe("user-1");
+        return Option.getOrNull(MutableHashMap.get(otpFailures, `sign-in:${member}`));
+      }),
+    );
+
+    expect(afterSignIn).toBeNull();
   });
 });
