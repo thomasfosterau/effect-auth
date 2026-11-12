@@ -2226,6 +2226,8 @@ describe("multi-factor", () => {
     // `202`: the challenge to redeem, and no user until it is redeemed.
     expect(gated.status).toBe(202);
     expect(gated.headers.get("set-cookie")).toBeNull();
+    // The challenge's id redeems the second factor (#628).
+    expect(gated.headers.get("cache-control")).toBe("no-store");
     const gatedBody = await authBody(
       gated,
       Schema.Struct({
@@ -3137,10 +3139,17 @@ describe("every response carrying Set-Cookie is no-store (#628)", () => {
 
   it("a device token response, already no-store, keeps one directive", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
+    const issued = await handler(jsonRequest("/device/code", {}));
+    // The device code is the secret the device polls with.
+    expect(cacheControl(issued)).toBe("no-store");
     const code = await jsonBody(
-      await handler(jsonRequest("/device/code", {})),
+      issued,
       Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
     );
+    // A malformed poll's 400 never reaches the handler, and is no-store too.
+    const malformed = await handler(jsonRequest("/device/token", {}));
+    expect(malformed.status).toBe(400);
+    expect(cacheControl(malformed)).toBe("no-store");
     const sid = await signUp(handler, "ns@test.com");
     await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
     const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));

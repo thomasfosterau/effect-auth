@@ -12,7 +12,8 @@
  * `fetch` handler. The tokens the worker signs are verified here in Node
  * with the pre-#748 `KeyObject` form, and the worker verifies tokens Node
  * signed, so the two runtimes agree byte for byte where the algorithm is
- * deterministic.
+ * deterministic. The worker's global outbound is a network service that
+ * allows nothing, so no step can reach the internet.
  */
 import { spawn } from "node:child_process";
 import * as crypto from "node:crypto";
@@ -32,6 +33,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { aes256GcmCipher, hashToken, type JwsAlgorithm } from "./index.ts";
 import { pbkdf2Hasher } from "./password/index.ts";
+import * as Rfc7515 from "./testing/Rfc7515.ts";
 
 /** The `workerd` package's entry: the platform binary's path and its newest compatibility date. */
 const Workerd = Schema.Struct({ default: Schema.String, compatibilityDate: Schema.String });
@@ -219,7 +221,34 @@ const der = () => {
   };
 };
 
-const run = async () => ({
+// ES256 signatures a JOSE verifier must refuse: DER (crypto.sign's default
+// encoding), and r || s one byte short or long.
+const es256Malformed = () => {
+  const { publicKeyJwk, privateKeyPem } = generateJwsKeyPair("ES256");
+  const data = enc("header.payload-malformed");
+  const signature = signJws("ES256", data, privateKeyPem);
+  return {
+    der: verifyJws("ES256", data, new Uint8Array(crypto.sign("sha256", data, privateKeyPem)), publicKeyJwk),
+    short: verifyJws("ES256", data, signature.subarray(0, 63), publicKeyJwk),
+    long: verifyJws("ES256", data, new Uint8Array([...signature, 0]), publicKeyJwk),
+  };
+};
+
+// A compact JWS Node sends, verified against its public JWK: RFC 7515
+// Appendix A.3, a signature neither runtime produced.
+const verifyCompact = ({ jws, jwk }) => {
+  const [header, payload, signature] = jws.split(".");
+  return verifyJws("ES256", enc(header + "." + payload), unb64(signature), jwk);
+};
+
+// globalOutbound is a network service that allows nothing, so even the
+// worker's own listener, which answers /ping, is out of reach.
+const offline = async (probe) => {
+  const response = await fetch(probe + "/ping");
+  return response.status;
+};
+
+const run = async (probe) => ({
   bufferGlobal: typeof globalThis.Buffer,
   es256: await attempt(() => jws("ES256")),
   eddsa: await attempt(() => jws("EdDSA")),
@@ -237,6 +266,8 @@ const run = async () => ({
   hmac: await attempt(() => ({ sha1: b64(hmac("sha1", "key", "data")), sha256: b64(sha256("data")) })),
   aes: await attempt(aes),
   der: await attempt(der),
+  es256Malformed: await attempt(es256Malformed),
+  offline: await attempt(() => offline(probe)),
 });
 
 /** Verify what Node made: JWS signatures, an AES-GCM ciphertext and a PBKDF2 hash. */
@@ -252,7 +283,12 @@ const check = async (input) => ({
 export default {
   async fetch(request) {
     const url = new URL(request.url);
-    const body = url.pathname === "/check" ? await check(await request.json()) : await run();
+    if (url.pathname === "/ping") return new Response("pong");
+    if (url.pathname === "/verify") return Response.json(verifyCompact(await request.json()));
+    const body =
+      url.pathname === "/check"
+        ? await check(await request.json())
+        : await run(url.searchParams.get("probe"));
     return Response.json(body);
   },
 };
@@ -281,12 +317,13 @@ const bundleWorker = async (): Promise<string> => {
 };
 
 const workerService = (name: DateName): string =>
-  `(name = "${name}", worker = (modules = [(name = "worker.js", esModule = embed "worker.js")], compatibilityDate = "${DATES[name]}", compatibilityFlags = ["nodejs_compat"]))`;
+  `(name = "${name}", worker = (modules = [(name = "worker.js", esModule = embed "worker.js")], compatibilityDate = "${DATES[name]}", compatibilityFlags = ["nodejs_compat"], globalOutbound = "offline"))`;
 
 const CONFIG = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     ${DATE_NAMES.map(workerService).join(",\n    ")},
+    (name = "offline", network = (allow = [])),
   ],
   sockets = [
     ${DATE_NAMES.map((name) => `(name = "${name}", address = "127.0.0.1:0", http = (), service = "${name}")`).join(",\n    ")},
@@ -417,6 +454,10 @@ const Run = Schema.Struct({
     }),
   ),
   der: Attempt(Schema.Struct({ es256: Schema.Boolean, eddsa: Schema.Boolean })),
+  es256Malformed: Attempt(
+    Schema.Struct({ der: Schema.Boolean, short: Schema.Boolean, long: Schema.Boolean }),
+  ),
+  offline: Attempt(Schema.Finite),
 });
 
 /** A JWS Node signed, as the worker's `/check` reads it. */
@@ -440,6 +481,10 @@ const encodeCheckInput = Schema.encodeSync(
 );
 
 const decodeJwk = Schema.decodeUnknownSync(Jwk);
+
+const encodeCompactJws = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Struct({ jws: Schema.String, jwk: Jwk })),
+);
 
 const Check = Schema.Struct({
   jws: Schema.Array(Schema.Boolean),
@@ -498,7 +543,8 @@ const nodeSigned = (algorithm: JwsAlgorithm) => {
 describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
   let run: typeof Run.Type;
   beforeAll(async () => {
-    run = await callWorker(Run, date, "/run");
+    // The worker probes its own listener, which answers whenever it is reachable.
+    run = await callWorker(Run, date, `/run?probe=http://127.0.0.1:${ports[date]}`);
   }, 60_000);
 
   it("runs with or without the Buffer global", () => {
@@ -583,6 +629,19 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     });
     const opened = await Effect.runPromise(aes256GcmCipher("workerd-secret").decrypt(aes.sealed));
     expect(opened).toBe("refresh-token-123");
+  });
+
+  it("verifies a DER, a 63-byte and a 65-byte ES256 signature to false", () => {
+    expect(valueOf(run.es256Malformed)).toEqual({ der: false, short: false, long: false });
+  });
+
+  it("verifies RFC 7515 Appendix A.3's ES256 JWS with its published public JWK", async () => {
+    const body = encodeCompactJws({ jws: Rfc7515.compactJws, jwk: Rfc7515.publicJwk });
+    expect(await callWorker(Schema.Boolean, date, "/verify", body)).toBe(true);
+  });
+
+  it("reaches no network, not even its own listener: the global outbound allows nothing", () => {
+    expect(run.offline.ok).toBe(false);
   });
 
   it("verifies WebAuthn DER signatures", () => {
