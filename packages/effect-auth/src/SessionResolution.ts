@@ -219,22 +219,22 @@ export interface CredentialPresence {
   readonly present: boolean;
   /** Every kind found, in the order listed on {@link CredentialKind}. */
   readonly kinds: ReadonlyArray<CredentialKind>;
-  /**
-   * A browser-borne session credential is present (a session or cache cookie).
-   *
-   * This is the half of the `Set-Cookie` relay rule that says *who the
-   * response is for* — see `Http.RemoteSession`.
-   */
+  /** A browser-borne session credential is present (a session or cache cookie). */
   readonly hasSessionCookie: boolean;
   /**
-   * A machine credential is present.
+   * An API key is present: a machine credential.
    *
-   * A relay must not hand `Set-Cookie` to a caller that has one: it would
-   * plant session state in whatever cookie jar its HTTP client happens to
-   * keep, for no benefit — the key, not a session, is its credential.
+   * A relay must not hand `Set-Cookie` to a caller that has one (or a bearer
+   * token, `hasBearer`): it would plant session state in whatever cookie
+   * jar its HTTP client happens to keep, for no benefit — the key, not a
+   * session, is its credential. Every other caller may receive it, one with no
+   * cookie yet included — see `Http.RemoteSession.relayResponse`.
    */
   readonly hasApiKey: boolean;
-  /** A bearer/token `Authorization` header is present. */
+  /**
+   * A bearer/token `Authorization` header is present: a machine credential,
+   * which withholds `Set-Cookie` from a relay as `hasApiKey` does.
+   */
   readonly hasBearer: boolean;
 }
 

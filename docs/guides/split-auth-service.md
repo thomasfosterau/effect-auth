@@ -200,14 +200,16 @@ first window — quietly, with every subsequent request paying a store read. Tha
 
 ### Never relay a cookie to a machine caller
 
-A request bearing an API key is not a browser. Handing it a `Set-Cookie` plants session
-state in whatever cookie jar its HTTP client happens to keep, for no benefit — the key,
-not a session, is its credential.
+A request bearing an API key or a bearer token is not a browser. Handing it a `Set-Cookie`
+plants session state in whatever cookie jar its HTTP client happens to keep, for no
+benefit — the key or token, not a session, is its credential.
 
-`relay` drops `Set-Cookie` unless the **inbound** request carried a browser session cookie
-and no machine credential. The mixed case, a request carrying both, is excluded too. A
-bearer-only native client gets nothing either; `bearerMode`'s `set-auth-token` header is
-the channel for that.
+`relay` drops `Set-Cookie` when the **inbound** request carries a machine credential: an
+API key or an `Authorization: Bearer` token. The mixed case, a machine credential beside a
+session cookie, is excluded too. A bearer-only native client gets nothing either;
+`bearerMode`'s `set-auth-token` header is the channel for that. Every other caller receives
+`Set-Cookie`, a browser with no cookie yet included, so the first sign-in through `relay`
+leaves the browser signed in.
 
 If you relay through your own code path, apply the same rule with
 `RemoteSession.relayResponse(upstream, credential)`.
