@@ -16,4 +16,3 @@ Migration:
 
 - Replace `getByDomain` in your `OrganizationDomainStore` with `getVerifiedByDomain`, filtering on `verificationState = 'verified'`. Replace a unique index on `domain` with one on `(organization_id, domain)`, plus, where your database has partial indexes, a unique index on `domain` over the verified rows.
 - Drop `verificationStrategy` from `addDomain` calls. A tenant that cannot publish a DNS record asks the operator, who calls `attestDomain` (or `POST /admin/organization-domains`).
-- Review the claims already `verified` with the `manual` strategy: before this release any organization admin could have made one. Delete those whose ownership you can't confirm out of band. A `manual` claim still `pending` can no longer be verified by the organization: release it and claim the domain for DNS verification, or attest it as the operator.
