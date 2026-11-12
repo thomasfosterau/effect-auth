@@ -31,7 +31,7 @@ import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
-import type * as Policy from "./Policy.ts";
+import * as Policy from "./Policy.ts";
 import * as ReadScope from "./ReadScope.ts";
 import * as ReferenceAccess from "./ReferenceAccess.ts";
 import * as SessionContext from "./SessionContext.ts";
@@ -239,36 +239,75 @@ const ownedRows: ReadonlyArray<OwnedAccess.OwnedRow> = Arr.flatMap(VISIBILITIES,
   ),
 );
 
+/** What a signed-in viewer's relations answer: whom they follow, which groups they are in. */
+interface Relations {
+  readonly follows: (account: string) => boolean;
+  readonly member: (group: string) => boolean;
+}
+
+/** The relations the seam modes give `viewerId` (the row predicate's facts). */
+const seamRelations = (viewerId: string, follower: SeamMode, member: SeamMode): Relations => ({
+  follows: (account) => answer(follower, graphFollows(viewerId, account)),
+  member: (group) => answer(member, graphMember(viewerId, group)),
+});
+
+/** The relations a `member` read scope's sets give (the list filter's facts). */
+const scopeRelations = (
+  scope: Extract<OwnedAccess.OwnedReadScope, { readonly kind: "member" }>,
+  follower: SeamMode,
+  member: SeamMode,
+): Relations => ({
+  follows: (account) => inScopeSet(scope.following, follower, graphFollows(scope.userId, account)),
+  member: (group) => inScopeSet(scope.groups, member, graphMember(scope.userId, group)),
+});
+
+/** Published: neither a draft nor unapproved (#637 section 1). */
+const isPublished = (row: OwnedAccess.OwnedRow): boolean =>
+  row.draft !== true && row.unapproved !== true;
+
+/** The one owned rule anonymous gets: public and published. */
+const ownedPublic = (row: OwnedAccess.OwnedRow): boolean =>
+  row.visibility === "public" && isPublished(row);
+
+/** An owner arm that never matches a row with no owner (section 2). */
+const ownedBy = (row: OwnedAccess.OwnedRow, accountId: string): boolean =>
+  row.ownerId !== undefined && row.ownerId === accountId;
+
+/** Who else reads a published owned row, by visibility (section 3: no group reads as private). */
+const ownedAudience: Readonly<
+  Record<OwnedAccess.Visibility, (row: OwnedAccess.OwnedRow, relations: Relations) => boolean>
+> = {
+  public: () => true,
+  followers: (row, relations) => row.ownerId !== undefined && relations.follows(row.ownerId),
+  group: (row, relations) => row.groupId !== undefined && relations.member(row.groupId),
+  private: () => false,
+};
+
+/** A signed-in viewer's owned read: the rung, the owner, or the published audience. */
+const ownedForAccount = (
+  row: OwnedAccess.OwnedRow,
+  accountId: string,
+  relations: Relations,
+): boolean =>
+  ownedBy(row, accountId) || (isPublished(row) && ownedAudience[row.visibility](row, relations));
+
 /** The owned read rule, from #637's sections 1–3. */
 const expectedOwned = (
   row: OwnedAccess.OwnedRow,
   viewer: AppUser | null,
   follower: SeamMode,
   member: SeamMode,
-): boolean => {
-  const published = row.draft !== true && row.unapproved !== true;
-  if (viewer === null) return row.visibility === "public" && published;
-  if (atViewPrivate(viewer)) return true;
-  if (row.ownerId !== undefined && row.ownerId === viewer.id) return true;
-  if (!published) return false;
-  if (row.visibility === "public") return true;
-  if (row.visibility === "followers") {
-    return row.ownerId !== undefined && answer(follower, graphFollows(viewer.id, row.ownerId));
-  }
-  if (row.visibility === "group") {
-    return row.groupId !== undefined && answer(member, graphMember(viewer.id, row.groupId));
-  }
-  return false;
-};
+): boolean =>
+  viewer === null
+    ? ownedPublic(row)
+    : atViewPrivate(viewer) ||
+      ownedForAccount(row, viewer.id, seamRelations(viewer.id, follower, member));
 
 /** The only seam questions the rules allow for an owned row. */
-const ownedAllowedQuestions = (row: OwnedAccess.OwnedRow) => {
-  const published = row.draft !== true && row.unapproved !== true;
-  return {
-    follower: published && row.visibility === "followers" ? row.ownerId : undefined,
-    member: published && row.visibility === "group" ? row.groupId : undefined,
-  };
-};
+const ownedAllowedQuestions = (row: OwnedAccess.OwnedRow) => ({
+  follower: isPublished(row) && row.visibility === "followers" ? row.ownerId : undefined,
+  member: isPublished(row) && row.visibility === "group" ? row.groupId : undefined,
+});
 
 const ownedColumns = (row: OwnedAccess.OwnedRow): ReadScope.Row => ({
   owner: row.ownerId ?? null,
@@ -284,25 +323,11 @@ const ownedScopeAdmits = (
   row: OwnedAccess.OwnedRow,
   follower: SeamMode,
   member: SeamMode,
-): boolean => {
-  const published = row.draft !== true && row.unapproved !== true;
-  if (scope.kind === "all") return true;
-  const isPublic = row.visibility === "public" && published;
-  if (scope.kind === "public") return isPublic;
-  const { userId } = scope;
-  return (
-    isPublic ||
-    (row.ownerId !== undefined && row.ownerId === userId) ||
-    (published &&
-      row.visibility === "followers" &&
-      row.ownerId !== undefined &&
-      inScopeSet(scope.following, follower, graphFollows(userId, row.ownerId))) ||
-    (published &&
-      row.visibility === "group" &&
-      row.groupId !== undefined &&
-      inScopeSet(scope.groups, member, graphMember(userId, row.groupId)))
-  );
-};
+): boolean =>
+  scope.kind === "all" ||
+  (scope.kind === "public"
+    ? ownedPublic(row)
+    : ownedForAccount(row, scope.userId, scopeRelations(scope, follower, member)));
 
 describe("owned rows: canView matches the read rule on every cell", () => {
   const cells = Arr.flatMap(ownedRows, (row) =>
@@ -430,28 +455,40 @@ const referenceRowsFor = (viewer: AppUser | null): ReadonlyArray<ReferenceAccess
     ),
   );
 
+/** Who reads a reference row with an axis, by visibility (section 4); `public` is everyone's. */
+const referenceAudience: Readonly<
+  Record<
+    OwnedAccess.Visibility,
+    (row: ReferenceAccess.ReferenceRow, accountId: string, relations: Relations) => boolean
+  >
+> = {
+  public: () => true,
+  followers: (row, accountId, relations) =>
+    row.followersOf !== undefined &&
+    (row.followersOf === accountId || relations.follows(row.followersOf)),
+  group: (row, _, relations) => row.groupId !== undefined && relations.member(row.groupId),
+  private: () => false,
+};
+
+/** Visible to anyone: no axis on the view, or public. */
+const referenceOpen = (row: ReferenceAccess.ReferenceRow): boolean =>
+  row.visibility === undefined || row.visibility === "public";
+
 /** The reference read rule, from #637's section 4. */
 const expectedReference = (
   row: ReferenceAccess.ReferenceRow,
   viewer: AppUser | null,
   follower: SeamMode,
   member: SeamMode,
-): boolean => {
-  if (row.visibility === undefined) return true;
-  if (row.visibility === "public") return true;
-  if (viewer === null) return false;
-  if (atViewPrivate(viewer)) return true;
-  if (row.visibility === "followers") {
-    return (
-      row.followersOf !== undefined &&
-      (row.followersOf === viewer.id || answer(follower, graphFollows(viewer.id, row.followersOf)))
-    );
-  }
-  if (row.visibility === "group") {
-    return row.groupId !== undefined && answer(member, graphMember(viewer.id, row.groupId));
-  }
-  return false;
-};
+): boolean =>
+  referenceOpen(row) ||
+  (viewer !== null &&
+    (atViewPrivate(viewer) ||
+      referenceAudience[row.visibility ?? "private"](
+        row,
+        viewer.id,
+        seamRelations(viewer.id, follower, member),
+      )));
 
 const referenceAllowedQuestions = (row: ReferenceAccess.ReferenceRow) => ({
   follower: row.visibility === "followers" ? row.followersOf : undefined,
@@ -464,28 +501,21 @@ const referenceColumns = (row: ReferenceAccess.ReferenceRow): ReadScope.Row => (
   group: row.groupId ?? null,
 });
 
-/** The documented meaning of an `OwnedReadScope` for reference rows. */
+/** The documented meaning of an `OwnedReadScope` for reference rows (no axis: no filter). */
 const referenceScopeAdmits = (
   scope: OwnedAccess.OwnedReadScope,
   row: ReferenceAccess.ReferenceRow,
   follower: SeamMode,
   member: SeamMode,
-): boolean => {
-  // A view with no visibility axis renders no filter.
-  if (row.visibility === undefined || scope.kind === "all") return true;
-  if (scope.kind === "public") return row.visibility === "public";
-  const { userId } = scope;
-  return (
-    row.visibility === "public" ||
-    (row.visibility === "followers" &&
-      row.followersOf !== undefined &&
-      (row.followersOf === userId ||
-        inScopeSet(scope.following, follower, graphFollows(userId, row.followersOf)))) ||
-    (row.visibility === "group" &&
-      row.groupId !== undefined &&
-      inScopeSet(scope.groups, member, graphMember(userId, row.groupId)))
-  );
-};
+): boolean =>
+  referenceOpen(row) ||
+  scope.kind === "all" ||
+  (scope.kind === "member" &&
+    referenceAudience[row.visibility ?? "private"](
+      row,
+      scope.userId,
+      scopeRelations(scope, follower, member),
+    ));
 
 describe("reference rows: canView matches the read rule on every cell", () => {
   const cells = Arr.flatMap(VIEWERS, ([name, viewer]) =>
@@ -770,5 +800,74 @@ describe("the four role axes fail closed on a role outside the ladder", () => {
     expect(guards.decideRole({ id: "m", role: "moderator" }, Axes.moderate)).toBe(true);
     expect(guards.decideRole({ id: "c", role: "contributor" }, Axes.writeCorpus)).toBe(true);
     expect(guards.decideRole({ id: "c", role: "contributor" }, Axes.viewDeleted)).toBe(false);
+  });
+});
+// ---------------------------------------------------------------------------
+// The policies, handed facts by a caller
+// ---------------------------------------------------------------------------
+
+/** Decide one read with the policies alone, the caller asserting the relation facts. */
+const decideWithFacts = (
+  policies: ReadonlyArray<Policy.DeclarativePolicy>,
+  resource: Entity.Entity,
+): boolean => {
+  const principal = guards.principal({ id: "u-stranger", role: "user" });
+  return Policy.decidePure(
+    policies,
+    Policy.request({
+      principal: principal.ref,
+      action: Entity.ref("Action", "read"),
+      resource: resource.ref,
+      context: { follows: true, member: true, unscoped: false },
+    }),
+    Entity.slice([principal, resource]),
+  ).allowed;
+};
+const entityRow = (
+  type: string,
+  attributes: Readonly<Record<string, Entity.AttributeValue>>,
+): Entity.Entity => Entity.entity(Entity.ref(type, "row"), { attributes });
+describe("the policies refuse a relation fact about a missing owner, followers-of or group", () => {
+  const published = { draft: false, unapproved: false };
+
+  it("owned rows: follows with no owner, member with no group", () => {
+    expect(
+      decideWithFacts(
+        owned.policies,
+        entityRow("Owned", { visibility: "followers", ...published }),
+      ),
+    ).toBe(false);
+    expect(
+      decideWithFacts(owned.policies, entityRow("Owned", { visibility: "group", ...published })),
+    ).toBe(false);
+    // The same facts with the subject present are what the permits admit.
+    const owner = Entity.entityValue(Entity.ref("User", OWNER));
+    expect(
+      decideWithFacts(
+        owned.policies,
+        entityRow("Owned", { visibility: "followers", ...published, owner }),
+      ),
+    ).toBe(true);
+    expect(
+      decideWithFacts(
+        owned.policies,
+        entityRow("Owned", { visibility: "group", ...published, group: GROUP }),
+      ),
+    ).toBe(true);
+  });
+
+  it("reference rows: follows with no followers-of, member with no group", () => {
+    expect(
+      decideWithFacts(reference.policies, entityRow("Reference", { visibility: "followers" })),
+    ).toBe(false);
+    expect(
+      decideWithFacts(reference.policies, entityRow("Reference", { visibility: "group" })),
+    ).toBe(false);
+    expect(
+      decideWithFacts(
+        reference.policies,
+        entityRow("Reference", { visibility: "group", group: GROUP }),
+      ),
+    ).toBe(true);
   });
 });

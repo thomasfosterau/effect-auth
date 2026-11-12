@@ -8,7 +8,7 @@
  * is held to the same corpus in effect-auth/sql's `ReadScope.test.ts`.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Context, Match, Option, Predicate } from "effect";
+import { Array as Arr, Context, Match, Option, Predicate, Record as Rec } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -84,6 +84,27 @@ const memberEdge = (account: string, group: string): boolean =>
 const principalOf = (viewer: AppUser | null): Entity.Entity =>
   viewer === null ? anonymous : guards.principal(viewer);
 
+/** A row's present columns as entity attributes: a NULL column is an absent attribute. */
+const rowAttributes = (row: CorpusRow): Readonly<Record<string, Entity.AttributeValue>> =>
+  Rec.filter(
+    {
+      owner:
+        row.owner === null ? null : Entity.entityValue(Entity.ref(guards.principalType, row.owner)),
+      visibility: row.visibility,
+      draft: row.draft,
+      unapproved: row.unapproved,
+      group: row.group,
+    },
+    Predicate.isNotNull,
+  );
+
+/** A relation fact: false for anonymous or a NULL column. */
+const relation = (
+  edge: (account: string, value: string) => boolean,
+  viewer: AppUser | null,
+  value: string | null,
+): boolean => viewer !== null && value !== null && edge(viewer.id, value);
+
 /** The kernel's decision for one row: the specification. */
 const kernelAllows = (
   policies: ReadonlyArray<Policy.DeclarativePolicy>,
@@ -91,26 +112,17 @@ const kernelAllows = (
   row: CorpusRow,
 ): boolean => {
   const principal = principalOf(viewer);
-  const resource = Entity.entity(Entity.ref("Owned", row.id), {
-    attributes: {
-      ...(row.owner === null
-        ? {}
-        : { owner: Entity.entityValue(Entity.ref(guards.principalType, row.owner)) }),
-      ...(row.visibility === null ? {} : { visibility: row.visibility }),
-      ...(row.draft === null ? {} : { draft: row.draft }),
-      ...(row.unapproved === null ? {} : { unapproved: row.unapproved }),
-      ...(row.group === null ? {} : { group: row.group }),
-    },
-  });
-  const follows = viewer !== null && row.owner !== null && followsEdge(viewer.id, row.owner);
-  const member = viewer !== null && row.group !== null && memberEdge(viewer.id, row.group);
+  const resource = Entity.entity(Entity.ref("Owned", row.id), { attributes: rowAttributes(row) });
   return Policy.decidePure(
     policies,
     Policy.request({
       principal: principal.ref,
       action: read,
       resource: resource.ref,
-      context: { follows, member },
+      context: {
+        follows: relation(followsEdge, viewer, row.owner),
+        member: relation(memberEdge, viewer, row.group),
+      },
     }),
     Entity.slice([principal, resource]),
   ).allowed;
