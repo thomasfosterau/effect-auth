@@ -1,7 +1,7 @@
 /**
  * Shared Argon2id vocabulary: the PHC algorithm identifier, the cost-parameter
- * interface, the recommended cost profiles, and the input guards the hasher
- * applies before running a KDF.
+ * interface, the recommended cost profiles, the verify ceiling, and the input
+ * guards the hasher applies before running a KDF.
  *
  * This module intentionally depends on nothing but `effect` and
  * `@thomasfosterau/effect-auth`.
@@ -17,19 +17,46 @@ import { HashingError } from "@thomasfosterau/effect-auth";
 export const ARGON2ID = "argon2id";
 
 /**
- * Argon2id cost parameters. Option names match `@node-rs/argon2` and previous
- * releases of this package, so a configuration object written for either
- * still works unchanged.
+ * The verify ceiling: the largest costs `verify` will run for a **stored**
+ * hash (#752). Names and defaults match `@thomasfosterau/argon2`'s
+ * `verify(password, hash, { maxMemoryKiB, maxIterations, maxParallelism })`.
+ */
+export interface Argon2VerifyLimits {
+  /** Largest stored `m`, in KiB. Default `131072` (128 MiB). */
+  readonly maxMemoryKiB: number;
+  /** Largest stored `t`. Default `10`. */
+  readonly maxIterations: number;
+  /** Largest stored `p`. Default `8`. */
+  readonly maxParallelism: number;
+}
+
+/**
+ * Argon2id cost parameters, plus the verify ceiling. The cost names match
+ * `@node-rs/argon2` and previous releases of this package, so a configuration
+ * object written for either still works unchanged; the ceiling's match
+ * `@thomasfosterau/argon2`'s `verify` options.
  *
- * Unset fields fall back to {@link defaultProfile}.
+ * Unset cost fields fall back to {@link defaultProfile}, unset limits to
+ * {@link defaultVerifyLimits}. The hasher throws a `RangeError` when it is
+ * built with costs over its own ceiling, since it would write hashes it then
+ * refuses to verify.
  */
 export interface Argon2Options {
   /** Memory cost in KiB. Default `19456` (19 MiB). */
-  readonly memoryCost?: number;
+  readonly memoryCost?: number | undefined;
   /** Time cost (iterations). Default `2`. */
-  readonly timeCost?: number;
+  readonly timeCost?: number | undefined;
   /** Degree of parallelism (lanes). Default `1`. */
-  readonly parallelism?: number;
+  readonly parallelism?: number | undefined;
+  /**
+   * Refuse to verify a stored hash whose `m` exceeds this many KiB. Default
+   * `131072` (128 MiB, a Workers isolate's whole memory).
+   */
+  readonly maxMemoryKiB?: number | undefined;
+  /** Refuse to verify a stored hash whose `t` exceeds this. Default `10`. */
+  readonly maxIterations?: number | undefined;
+  /** Refuse to verify a stored hash whose `p` exceeds this. Default `8`. */
+  readonly maxParallelism?: number | undefined;
 }
 
 /** A fully-resolved set of Argon2id cost parameters — an {@link Argon2Options} with no holes. */
@@ -80,6 +107,27 @@ export const resolveOptions = (options?: Argon2Options): Argon2Profile => ({
   memoryCost: options?.memoryCost ?? defaultProfile.memoryCost,
   timeCost: options?.timeCost ?? defaultProfile.timeCost,
   parallelism: options?.parallelism ?? defaultProfile.parallelism,
+});
+
+/**
+ * The default verify ceiling (m ≤ 128 MiB, t ≤ 10, p ≤ 8). It sits above
+ * {@link serverProfile}, so every hash this package writes with either
+ * profile verifies, and it keeps a corrupt or attacker-written stored hash
+ * from demanding gigabytes of memory or billions of iterations, which on
+ * Workers would exceed the isolate's 128 MiB and kill it for every request it
+ * serves.
+ */
+export const defaultVerifyLimits: Argon2VerifyLimits = {
+  maxMemoryKiB: 131072,
+  maxIterations: 10,
+  maxParallelism: 8,
+};
+
+/** Fill in any unset verify limit from {@link defaultVerifyLimits}. */
+export const resolveVerifyLimits = (options?: Argon2Options): Argon2VerifyLimits => ({
+  maxMemoryKiB: options?.maxMemoryKiB ?? defaultVerifyLimits.maxMemoryKiB,
+  maxIterations: options?.maxIterations ?? defaultVerifyLimits.maxIterations,
+  maxParallelism: options?.maxParallelism ?? defaultVerifyLimits.maxParallelism,
 });
 
 /** Salt length in bytes. Matches `@node-rs/argon2`'s default. */
