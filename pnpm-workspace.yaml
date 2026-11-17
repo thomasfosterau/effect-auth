@@ -108,7 +108,7 @@ catalog:
   # Dead-code, duplication and complexity audit: the PreToolUse fallow gate
   # (.claude/hooks/fallow-gate.sh) and `fallow audit` (AGENTS.md, Verification).
   # Config in .fallowrc.json.
-  fallow: 3.42.0
+  fallow: 3.43.1
   jsdom: ^31.0.1
   # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
   # its peer range and checks a requested version against that range, with the
