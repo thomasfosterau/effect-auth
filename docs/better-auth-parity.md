@@ -1,16 +1,6 @@
-# Better Auth Parity Plan
+# Better Auth parity
 
-Status: §2 is the decided target architecture (rev 4, 2026-08-30: authorization decisions settled).
-
-Goal: make effect-auth a suitable replacement for [Better Auth](https://www.better-auth.com/) —
-and beyond that, a **batteries-included auth library**: authorization (RBAC, ABAC,
-Cedar-style policies) as a first-class pillar alongside authentication, not an
-afterthought (§2.5).
-
-This document used to also hold the 2026-08-30 audit (§1), the issue triage (§3), the gap
-inventory versus Better Auth (§4) and the M0–M7 roadmap (§5). Those milestones have landed, so
-the sections were removed; open work is tracked in the issue tracker, and the deliberate deferrals in §2.4 stand. Section numbers are
-kept because source comments cite §2.5.
+The target architecture for making effect-auth a replacement for [Better Auth](https://www.better-auth.com/), and beyond it a batteries-included library with authorization (RBAC, ABAC, Cedar-style policies) as a first-class pillar (§2.5). Section numbers are kept because source comments cite them.
 
 ## 2. Target architecture (decided)
 
