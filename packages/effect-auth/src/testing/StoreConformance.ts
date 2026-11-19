@@ -859,6 +859,9 @@ const makeApiKey = (userId: string, full = false): ApiKey.ApiKey => ({
     : {}),
 });
 
+/** Concurrent `recordUse` calls the race case sends at one key. */
+const apiKeyRacers = 8;
+
 const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
   Arr.sort(
     keys.map((key) => key.id),
@@ -867,7 +870,8 @@ const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
 
 /**
  * The `ApiKeyStore` contract: keys round-trip with every optional field, read
- * by id and by hash, misses are `null`, `update` writes, and the per-user list
+ * by id and by hash, misses are `null`, `update` writes, `recordUse` spends
+ * atomically and moves only the usage fields (#595), and the per-user list
  * and the per-user delete (#601) touch that user's keys only.
  *
  * @since 0.1.0
@@ -967,6 +971,150 @@ export const apiKeyStoreConformance = <E = never, R = never>(
             yield* store.listByUserId(uuid()),
             [],
           );
+        }),
+    },
+    {
+      name: "recordUse spends one use and moves only the usage fields",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const key = makeApiKey(yield* newUser(), true);
+          yield* store.create(key);
+          // An owner's edit lands between a verify's read and its spend.
+          const edited: ApiKey.ApiKey = {
+            ...key,
+            name: "narrowed",
+            permissions: { projects: ["read"] },
+            expiresAt: at(12 * 60 * 60 * 1000).getTime(),
+            updatedAt: at(1500).getTime(),
+          };
+          yield* store.update(edited);
+          const usedAt = at(2000).getTime();
+          const spent: ApiKey.ApiKey = {
+            ...edited,
+            remaining: 9,
+            lastUsedAt: usedAt,
+            updatedAt: usedAt,
+          };
+          yield* expectEqual("recordUse", yield* store.recordUse(key.id, { usedAt }), spent);
+          yield* expectEqual("get after recordUse", yield* store.get(key.id), spent);
+          const unlimited = makeApiKey(key.userId);
+          yield* store.create(unlimited);
+          yield* expectEqual(
+            "recordUse of a key with no quota",
+            yield* store.recordUse(unlimited.id, { usedAt }),
+            { ...unlimited, lastUsedAt: usedAt, updatedAt: usedAt },
+          );
+        }),
+    },
+    {
+      name: "recordUse refuses an unknown, disabled, expired or exhausted key and a stale refill",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const userId = yield* newUser();
+          const base = makeApiKey(userId, true);
+          const usedAt = at(2000).getTime();
+          yield* expectEqual(
+            "recordUse of an unknown key",
+            yield* store.recordUse(uuid(), { usedAt }),
+            null,
+          );
+          const refusedKeys: ReadonlyArray<readonly [string, ApiKey.ApiKey, ApiKey.ApiKeyUse]> = [
+            [
+              "a disabled key",
+              { ...base, id: uuid(), keyHash: digest(), enabled: false },
+              { usedAt },
+            ],
+            [
+              "an expired key",
+              { ...base, id: uuid(), keyHash: digest() },
+              { usedAt: at(48 * 60 * 60 * 1000).getTime() },
+            ],
+            [
+              "an exhausted key",
+              { ...base, id: uuid(), keyHash: digest(), remaining: 0 },
+              { usedAt },
+            ],
+            [
+              "a refill computed from an old baseline",
+              { ...base, id: uuid(), keyHash: digest(), remaining: 0 },
+              {
+                usedAt,
+                refill: { from: at(-60_000).getTime(), to: at().getTime(), amount: 5, max: 10 },
+              },
+            ],
+          ];
+          yield* Effect.forEach(
+            refusedKeys,
+            ([label, key, use]) =>
+              Effect.gen(function* () {
+                yield* store.create(key);
+                yield* expectEqual(
+                  `recordUse of ${label}`,
+                  yield* store.recordUse(key.id, use),
+                  null,
+                );
+                yield* expectEqual(`get of ${label}`, yield* store.get(key.id), key);
+              }),
+            { concurrency: 1, discard: true },
+          );
+        }),
+    },
+    {
+      name: "recordUse applies a due refill once, capped at its max, before the spend",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const key: ApiKey.ApiKey = { ...makeApiKey(yield* newUser(), true), remaining: 0 };
+          yield* store.create(key);
+          const usedAt = at(130_000).getTime();
+          const refill = { from: at().getTime(), to: at(120_000).getTime(), amount: 10, max: 3 };
+          const spent: ApiKey.ApiKey = {
+            ...key,
+            remaining: 2,
+            lastRefillAt: refill.to,
+            lastUsedAt: usedAt,
+            updatedAt: usedAt,
+          };
+          yield* expectEqual(
+            "recordUse with a refill",
+            yield* store.recordUse(key.id, { usedAt, refill }),
+            spent,
+          );
+          yield* expectEqual(
+            "recordUse with the same refill again",
+            yield* store.recordUse(key.id, { usedAt, refill }),
+            null,
+          );
+          yield* expectEqual(
+            "recordUse after the refill",
+            yield* store.recordUse(key.id, { usedAt }),
+            {
+              ...spent,
+              remaining: 1,
+            },
+          );
+        }),
+    },
+    {
+      name: "concurrent recordUse of a key with uses left spends exactly that many",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const key: ApiKey.ApiKey = { ...makeApiKey(yield* newUser(), true), remaining: 3 };
+          yield* store.create(key);
+          const usedAt = at(2000).getTime();
+          const spends = yield* Effect.all(
+            Arr.makeBy(apiKeyRacers, () => store.recordUse(key.id, { usedAt })),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual(
+            "successful concurrent spends",
+            spends.filter((spent) => spent !== null).length,
+            3,
+          );
+          yield* expectEqual("remaining after them", (yield* store.get(key.id))?.remaining, 0);
         }),
     },
     perUserDeleteCase(ApiKey.ApiKeyStore, {

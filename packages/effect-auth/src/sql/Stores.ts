@@ -1805,6 +1805,32 @@ export const makeApiKeyStore: Effect.Effect<
               updated_at = ${apiKey.updatedAt}
             WHERE id = ${apiKey.id}`,
       ).pipe(Effect.as(apiKey)),
+    // One `UPDATE … RETURNING` (#595): only the usage columns move, so a
+    // concurrent owner edit survives, and the `WHERE` is the whole check, so
+    // of concurrent uses of a key with one use left exactly one matches.
+    recordUse: (id, use) => {
+      const refill = use.refill;
+      const topped =
+        refill === undefined
+          ? sql`remaining`
+          : refill.max === undefined
+            ? sql`remaining + ${refill.amount}`
+            : sql`CASE WHEN remaining + ${refill.amount} > ${refill.max} THEN ${refill.max} ELSE remaining + ${refill.amount} END`;
+      return firstRow(
+        "apiKey.recordUse",
+        sql<ApiKeyRow>`UPDATE auth_api_keys SET
+              remaining = ${topped} - 1,
+              ${refill === undefined ? sql`` : sql`last_refill_at = ${refill.to},`}
+              last_used_at = ${use.usedAt},
+              updated_at = ${use.usedAt}
+            WHERE id = ${id}
+              AND enabled = 1
+              AND (expires_at IS NULL OR expires_at >= ${use.usedAt})
+              AND (remaining IS NULL OR ${topped} > 0)
+              ${refill === undefined ? sql`` : sql`AND last_refill_at = ${refill.from}`}
+            RETURNING *`,
+      ).pipe(Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))));
+    },
     delete: (id) => asVoid("apiKey.delete", sql`DELETE FROM auth_api_keys WHERE id = ${id}`),
     listByUserId: (userId) =>
       allRows(

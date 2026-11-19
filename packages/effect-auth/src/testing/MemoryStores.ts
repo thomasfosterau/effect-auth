@@ -26,7 +26,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";
 import { type AccountToken, AccountManagementStore } from "../AccountManagement.ts";
-import { type ApiKey, ApiKeyStore } from "../ApiKey.ts";
+import { type ApiKey, ApiKeyStore, applyApiKeyUse } from "../ApiKey.ts";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
 import { type KeyValueStoreKeys, layerKV, layerMemoryKeyValueStore } from "../KeyValueStores.ts";
@@ -254,6 +254,13 @@ export const memoryApiKeyStore = (
       ),
     ),
   update: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
+  recordUse: (id, use) =>
+    Effect.sync(() => {
+      const stored = Option.getOrNull(MutableHashMap.get(keys, id));
+      const spent = stored === null ? null : applyApiKeyUse(stored, use);
+      if (spent !== null) MutableHashMap.set(keys, id, spent);
+      return spent;
+    }),
   delete: (id) => Effect.sync(() => void MutableHashMap.remove(keys, id)),
   listByUserId: (userId) =>
     Effect.sync(() =>

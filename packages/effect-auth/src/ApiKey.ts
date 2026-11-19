@@ -89,6 +89,59 @@ export interface ApiKey {
 }
 
 /**
+ * One spend of an API key, applied by {@link ApiKeyStore}'s `recordUse` (#595).
+ *
+ * `refill` is the quota top-up due at `usedAt`, computed by the service from
+ * the record it read: the store applies it only while the key's `lastRefillAt`
+ * still equals `from`, so two verifies that both saw a refill due add it once.
+ *
+ * @since 0.6.0
+ */
+export interface ApiKeyUse {
+  /** Unix ms time of the use: the new `lastUsedAt` and `updatedAt` */
+  readonly usedAt: number;
+  readonly refill?:
+    | {
+        /** The `lastRefillAt` the refill was computed from */
+        readonly from: number;
+        /** The new `lastRefillAt` */
+        readonly to: number;
+        /** Uses to add to `remaining` before the spend */
+        readonly amount: number;
+        /** Cap on `remaining` after the top-up; undefined = no cap */
+        readonly max?: number | undefined;
+      }
+    | undefined;
+}
+
+/**
+ * The record `recordUse` stores for `use` of `key`, or `null` when the key
+ * may not be spent: {@link ApiKeyStore}'s `recordUse` contract as a pure
+ * function, for a store that can run it inside one atomic step of its own
+ * (a lock, a compare-and-set loop, a single-threaded actor).
+ *
+ * @since 0.6.0
+ */
+export const applyApiKeyUse = (key: ApiKey, use: ApiKeyUse): ApiKey | null => {
+  if (!key.enabled) return null;
+  if (key.expiresAt !== undefined && use.usedAt > key.expiresAt) return null;
+  const refill = use.refill;
+  if (refill !== undefined && key.lastRefillAt !== refill.from) return null;
+  const topped =
+    refill === undefined || key.remaining === undefined
+      ? key.remaining
+      : Math.min(key.remaining + refill.amount, refill.max ?? Number.POSITIVE_INFINITY);
+  if (topped !== undefined && topped <= 0) return null;
+  return {
+    ...key,
+    ...(topped !== undefined && { remaining: topped - 1 }),
+    ...(refill !== undefined && { lastRefillAt: refill.to }),
+    lastUsedAt: use.usedAt,
+    updatedAt: use.usedAt,
+  };
+};
+
+/**
  * Storage interface for API keys
  */
 export class ApiKeyStore extends Context.Service<
@@ -97,7 +150,30 @@ export class ApiKeyStore extends Context.Service<
     readonly create: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
     readonly get: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
     readonly getByHash: (keyHash: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+    /**
+     * Replace the stored record whole. The owner's edits go through it;
+     * a verify never does, since a write from a stale read would undo a
+     * concurrent edit (#595).
+     */
     readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
+    /**
+     * Spend one use of key `id`, atomically (#595), and return the record
+     * as stored after it, or `null` when the key may not be spent. In one
+     * step: the key must exist, be enabled and not have expired at
+     * `use.usedAt` (`expiresAt >= usedAt`); a `use.refill` applies only while
+     * `lastRefillAt === refill.from`, setting `remaining` to
+     * `min(remaining + amount, max)` and `lastRefillAt` to `refill.to`; a
+     * set `remaining` must then be above zero, and drops by one; and
+     * `lastUsedAt` and `updatedAt` become `usedAt`. No other field changes,
+     * so an owner's concurrent disable, permission change or new expiry is
+     * never overwritten, and of concurrent uses of a key with one use left
+     * exactly one succeeds. On SQL this is one `UPDATE … WHERE … RETURNING`;
+     * a get followed by an `update` is the race it closes.
+     */
+    readonly recordUse: (
+      id: string,
+      use: ApiKeyUse,
+    ) => Effect.Effect<ApiKey | null, Errors.AuthError>;
     readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
     readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
     /**
@@ -338,16 +414,23 @@ const hasRequiredPermissions = (
     return Arr.every(actions, (action) => grantedActions.includes(action));
   });
 
+/** A key that passed {@link checkAt}: with its due refill, and that refill. */
+interface Passed {
+  readonly key: ApiKey;
+  readonly refill: ApiKeyUse["refill"];
+}
+
 /**
  * The enabled / expiry / remaining-uses / permission checks of a key at
- * `now`, writing nothing: a refusal, or `{ key }` with its due quota refills
- * applied (lazily, before the remaining-uses check).
+ * `now`, writing nothing: a refusal, or the key with its due quota refill
+ * applied (lazily, before the remaining-uses check) and that refill, which
+ * the spend hands to `recordUse`.
  */
 const checkAt = (
   apiKey: ApiKey,
   requiredPermissions: Record<string, readonly string[]> | undefined,
   now: number,
-): ApiKeyVerifyResult | { readonly key: ApiKey } => {
+): ApiKeyVerifyResult | Passed => {
   if (!apiKey.enabled) {
     return refused("API key is disabled", "disabled");
   }
@@ -356,7 +439,8 @@ const checkAt = (
     return refused("API key has expired", "expired");
   }
 
-  const key = withDueRefills(apiKey, now);
+  const refill = dueRefill(apiKey, now);
+  const key = withRefill(apiKey, refill);
 
   if (key.remaining !== undefined && key.remaining <= 0) {
     return refused("API key has no remaining uses", "exhausted");
@@ -366,44 +450,64 @@ const checkAt = (
     return refused("API key is missing required permissions", "missing-permissions");
   }
 
-  return { key };
+  return { key, refill };
 };
 
 /**
  * {@link checkAt} at the current time: the refusal, or the record with its due
- * refills applied and the time it was judged at.
+ * refills applied, that refill, and the time it was judged at.
  */
 const checkRecord = (
   apiKey: ApiKey,
   requiredPermissions: Record<string, readonly string[]> | undefined,
 ): Effect.Effect<
   | { readonly refused: ApiKeyVerifyResult }
-  | { readonly refused?: undefined; readonly key: ApiKey; readonly now: number }
+  | (Passed & { readonly refused?: undefined; readonly now: number })
 > =>
   Effect.map(Clock.currentTimeMillis, (now) => {
     const outcome = checkAt(apiKey, requiredPermissions, now);
-    return "key" in outcome ? { key: outcome.key, now } : { refused: outcome };
+    return "key" in outcome ? { ...outcome, now } : { refused: outcome };
   });
 
-/** A key with the quota refills due by `now` applied, capped at `refillMax`. */
-const withDueRefills = (key: ApiKey, now: number): ApiKey => {
+/** The quota refill due on `key` by `now`, or `undefined` when none is. */
+const dueRefill = (key: ApiKey, now: number): ApiKeyUse["refill"] => {
   if (
     key.remaining === undefined ||
     key.refillAmount === undefined ||
     key.refillInterval === undefined ||
     key.lastRefillAt === undefined
   ) {
-    return key;
+    return undefined;
   }
   const dueRefills = Math.floor((now - key.lastRefillAt) / key.refillInterval);
-  if (dueRefills <= 0) return key;
-  const topped = key.remaining + dueRefills * key.refillAmount;
+  if (dueRefills <= 0) return undefined;
   return {
-    ...key,
-    remaining: key.refillMax !== undefined ? Math.min(topped, key.refillMax) : topped,
-    lastRefillAt: key.lastRefillAt + dueRefills * key.refillInterval,
+    from: key.lastRefillAt,
+    to: key.lastRefillAt + dueRefills * key.refillInterval,
+    amount: dueRefills * key.refillAmount,
+    ...(key.refillMax !== undefined && { max: key.refillMax }),
   };
 };
+
+/** `key` with `refill` applied, capped at its `max`: what `recordUse` stores. */
+const withRefill = (key: ApiKey, refill: ApiKeyUse["refill"]): ApiKey => {
+  if (refill === undefined || key.remaining === undefined) return key;
+  const topped = key.remaining + refill.amount;
+  return {
+    ...key,
+    remaining: refill.max !== undefined ? Math.min(topped, refill.max) : topped,
+    lastRefillAt: refill.to,
+  };
+};
+
+/**
+ * How many times a verify re-reads and re-checks a key whose `recordUse`
+ * found it changed (#595). A loss means a concurrent verify applied the
+ * refill this one computed, or an owner edited or spent the key out: the
+ * re-read sees either a key that passes (and spends without a refill) or a
+ * refusal, so two attempts settle all but a key edited in a tight loop.
+ */
+const useAttempts = 4;
 
 /**
  * Create an API key service
@@ -446,19 +550,32 @@ export const make = (
       });
 
     /**
-     * Spend one use of a key that passed {@link checkRecord}: `remaining`
-     * decrements (when set) and `lastUsedAt` moves.
+     * Spend one use of a key that passed {@link checkRecord}, atomically
+     * (#595): `recordUse` decrements `remaining` (when set) and moves
+     * `lastUsedAt`, touching nothing an owner edits. When it finds the key
+     * changed since the read, the key is read and checked again, so a key
+     * disabled, expired, exhausted or narrowed meanwhile is refused as such.
      */
-    const spend = (key: ApiKey, now: number) =>
-      Effect.map(
-        store.update({
-          ...key,
-          ...(key.remaining !== undefined && { remaining: key.remaining - 1 }),
-          lastUsedAt: now,
-          updatedAt: now,
-        }),
-        (updated): ApiKeyVerifyResult => ({ valid: true, apiKey: updated }),
-      );
+    const spend = (
+      checked: Passed & { readonly now: number },
+      requiredPermissions: Record<string, readonly string[]> | undefined,
+      attempt = 1,
+    ): Effect.Effect<ApiKeyVerifyResult, Errors.AuthError> =>
+      Effect.gen(function* () {
+        const spent = yield* store.recordUse(checked.key.id, {
+          usedAt: checked.now,
+          ...(checked.refill !== undefined && { refill: checked.refill }),
+        });
+        if (spent !== null) return { valid: true, apiKey: spent } satisfies ApiKeyVerifyResult;
+        if (attempt >= useAttempts) {
+          return yield* new Errors.AuthError({ message: "apiKey.recordUse contended" });
+        }
+        const fresh = yield* store.get(checked.key.id);
+        if (fresh === null) return refused("Invalid API key", "invalid");
+        const again = yield* checkRecord(fresh, requiredPermissions);
+        if (again.refused !== undefined) return again.refused;
+        return yield* spend(again, requiredPermissions, attempt + 1);
+      });
 
     /** `checkRecord`, then `spend` on success. */
     const verifyRecord = (
@@ -467,7 +584,7 @@ export const make = (
     ) =>
       Effect.flatMap(checkRecord(apiKey, requiredPermissions), (checked) =>
         checked.refused === undefined
-          ? spend(checked.key, checked.now)
+          ? spend(checked, requiredPermissions)
           : Effect.succeed(checked.refused),
       );
 
@@ -585,7 +702,7 @@ export const make = (
           }
         }
 
-        return yield* spend(checked.key, checked.now);
+        return yield* spend(checked, requiredPermissions);
       }),
 
       get: Effect.fn("ApiKeyService.get")(function* (keyId: string) {

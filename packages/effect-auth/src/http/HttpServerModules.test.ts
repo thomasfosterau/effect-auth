@@ -43,6 +43,7 @@ import {
 } from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
+import { memoryApiKeyStore } from "../testing/MemoryStores.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -312,27 +313,7 @@ const makeFixture = (admin?: AdminConfig) => {
     setPasswordHash: (_userId: string, _hash: string) => Effect.void,
   };
 
-  const apiKeyStore = {
-    create: (k: ApiKey) => Effect.sync(() => (MutableHashMap.set(apiKeys, k.id, k), k)),
-    get: (id: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(apiKeys, id))),
-    getByHash: (keyHash: string) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(apiKeys)).find((k) => k.keyHash === keyHash) ?? null,
-      ),
-    update: (k: ApiKey) => Effect.sync(() => (MutableHashMap.set(apiKeys, k.id, k), k)),
-    delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(apiKeys, id)),
-    listByUserId: (userId: string) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((k) => k.userId === userId),
-      ),
-    deleteByUserId: (userId: string) =>
-      Effect.sync(() => {
-        Arr.forEach(
-          Arr.filter(Arr.fromIterable(MutableHashMap.values(apiKeys)), (k) => k.userId === userId),
-          (k) => void MutableHashMap.remove(apiKeys, k.id),
-        );
-      }),
-  };
+  const apiKeyStore = memoryApiKeyStore(apiKeys);
 
   const jwtKeyStore = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
