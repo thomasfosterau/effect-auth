@@ -189,6 +189,9 @@ export {
   type GoogleOneTapSignInResult,
   GoogleOneTapService,
 } from "./GoogleOneTap.ts";
+// Cloudflare Access: `make`, `findUser` and friends are too generic for the
+// root, so the module is reached through its namespace only.
+export * as CloudflareAccess from "./CloudflareAccess.ts";
 export {
   AnonymousUserStore,
   type AnonymousConfig,

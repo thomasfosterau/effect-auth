@@ -196,7 +196,9 @@ directories, each with its own `index.ts` barrel and matching
   `WebAuthnService.ts`), `Otp.ts` (RFC 6238/4226 TOTP/HOTP primitives).
 - **Sign-in methods** (root, not yet clustered): `Username.ts`,
   `MagicLink.ts`, `PhoneOtp.ts`, `Anonymous.ts`, `Sso.ts` (OIDC relying
-  party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
+  party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628),
+  `CloudflareAccess.ts` (verifies the identity Cloudflare Access forwards;
+  no sign-in or session of its own).
 - **Account lifecycle** (root): `AuthLifecycle.ts` (sign-up/sign-in
   orchestration), `AccountManagement.ts` (email change / account deletion),
   `UserPurge.ts` (internal: the one purge every user deletion runs, each
