@@ -1,5 +1,5 @@
 /**
- * The first proof of an address (#425, #440, #671, #694, #704).
+ * The first proof of an address.
  *
  * An email identifier is created unverified only by a sign-up that proved
  * nothing about the address, so every credential on its account may belong to
@@ -70,7 +70,7 @@ export const firstProofServices = (
   }));
 
 /**
- * Remove the phone identifiers `userId` never verified (#704): whoever added
+ * Remove the phone identifiers `userId` never verified: whoever added
  * one could sign in by phone code. A verified one was proven by its holder.
  */
 const removeUnverifiedPhones = (

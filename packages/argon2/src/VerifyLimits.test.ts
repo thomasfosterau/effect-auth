@@ -1,5 +1,5 @@
 /**
- * The verify ceiling (#752): a stored hash whose `m`, `t` or `p` exceeds
+ * The verify ceiling: a stored hash whose `m`, `t` or `p` exceeds
  * `maxMemoryKiB`, `maxIterations` or `maxParallelism` is refused with a
  * `HashingError` before the kernel is entered, so it grows no wasm memory.
  *

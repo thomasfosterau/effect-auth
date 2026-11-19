@@ -50,17 +50,17 @@
  * credential. The relay drops `Set-Cookie` whenever the *inbound* request
  * carries a machine credential, including the mixed case where it carries both
  * a cookie and a key or token. Every other caller receives it, a browser with
- * no cookie yet included, so a first sign-in through the relay signs in (#619).
+ * no cookie yet included, so a first sign-in through the relay signs in.
  *
  * ### A key resolves to its user, not to a session
  *
  * {@link resolveAtEdge} sends a key-bearing request to `GET /api-keys/current`
- * (#730) and answers `{ session: None, user, apiKey, credentialClass:
+ * and answers `{ session: None, user, apiKey, credentialClass:
  * "machine" }`; the key wins over any cookie the request also carries, which is
  * not forwarded on that call. An auth service without an `ApiKeyService`
  * answers `404`, which fails the resolution closed rather than reading the
  * cookie. Each resolution consumes one use of the key (`remaining`
- * decrements, `lastUsedAt` moves); a non-consuming check is #645.
+ * decrements, `lastUsedAt` moves).
  *
  * @module remote-session
  */
@@ -345,7 +345,7 @@ export interface RemoteSessionResult {
   readonly session: Option.Option<Types.SessionWithUser>;
   readonly setCookie: ReadonlyArray<string>;
   /**
-   * On the API-key path ({@link RemoteSessionClient.readApiKey}, #730): the
+   * On the API-key path ({@link RemoteSessionClient.readApiKey}): the
    * user the presented key acts as. `session` is `None` there, since a key is
    * not a session. Absent on a session read.
    */
@@ -551,7 +551,7 @@ export interface RemoteSessionClient {
   readonly read: (request: Request) => Effect.Effect<RemoteSessionResult, RemoteSessionError>;
   /**
    * Resolve the API key the inbound request carries over the transport
-   * (`GET /api-keys/current`, #730): `{ session: None, user, apiKey }` for a
+   * (`GET /api-keys/current`): `{ session: None, user, apiKey }` for a
    * key that resolves, `{ session: None }` with no `user` for the auth
    * service's `401` (an unknown, disabled, expired or exhausted key). Any
    * other answer (`404` when the auth service mounts no `ApiKeyService`,
@@ -560,7 +560,7 @@ export interface RemoteSessionClient {
    * cookie, so the key cannot fall back to a session.
    *
    * Each call consumes one use of the key: `remaining` decrements and
-   * `lastUsedAt` moves (a non-consuming check is #645).
+   * `lastUsedAt` moves.
    *
    * Optional only so a hand-built client keeps compiling; {@link make}
    * always provides it, and {@link resolveAtEdge} fails closed without it.
@@ -780,9 +780,9 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
  * rule: `Set-Cookie` is relayed to every caller without a machine credential,
  * and stripped when the inbound request carried an API key or a bearer token
  * (with or without a session cookie beside it). A browser with no cookie yet
- * therefore receives its session cookie on first sign-in (#619). A relayed
+ * therefore receives its session cookie on first sign-in. A relayed
  * response that keeps its `Set-Cookie` carries `Cache-Control: no-store`
- * (#628): `no-store` is appended to an upstream `Cache-Control` that lacks it,
+ *: `no-store` is appended to an upstream `Cache-Control` that lacks it,
  * and one that has it is kept as it is. A response whose `Set-Cookie` is
  * stripped is `no-store` the same way: it answered one machine caller's
  * credential, so a shared cache must not hand it to another.
@@ -856,7 +856,7 @@ const toEdge =
   });
 
 /**
- * The read an edge resolution runs (#730): a request carrying an API key is
+ * The read an edge resolution runs: a request carrying an API key is
  * resolved through `GET /api-keys/current`, whatever cookie or bearer token
  * it also carries (the key wins), and a client with no key read fails closed
  * rather than falling back to the session.
@@ -886,13 +886,13 @@ const edgeResolved = (result: RemoteSessionResult): boolean =>
  * Skips the call entirely for a cookieless request, reports the outcome, and
  * carries the `Set-Cookie` lines to replay.
  *
- * A request carrying an API key resolves the key instead (#730), through
+ * A request carrying an API key resolves the key instead, through
  * {@link RemoteSessionClient.readApiKey}: `{ session: None, user, apiKey,
  * credentialClass: "machine" }` for a key that resolves, anonymous for one the
  * auth service refuses with `401`, and a {@link RemoteSessionError} for any
  * other answer, the `404` of an auth service without an `ApiKeyService`
  * included. It never falls back to a cookie the request also carries. Each
- * resolution consumes one use of the key (a non-consuming check is #645).
+ * resolution consumes one use of the key.
  *
  * @since 0.1.0
  * @category resolution
@@ -925,7 +925,7 @@ export const resolveAtEdge = (
  * precondition, and `onDegraded` is mandatory so the degrade is never silent.
  *
  * A request carrying an API key resolves the key as {@link resolveAtEdge}
- * does (#730), consuming one use of it; a fault on that path, the `404` of an
+ * does, consuming one use of it; a fault on that path, the `404` of an
  * auth service without an `ApiKeyService` included, degrades to anonymous,
  * never to a session cookie the request also carries.
  *
@@ -1026,7 +1026,7 @@ export const resolveAtEdgeFailOpen = (
 
 /**
  * Replay relayed `Set-Cookie` lines onto an outgoing response, marking it
- * `Cache-Control: no-store` as {@link relayResponse} does (#628).
+ * `Cache-Control: no-store` as {@link relayResponse} does.
  *
  * @since 0.1.0
  * @category constructors

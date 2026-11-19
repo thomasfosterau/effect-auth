@@ -1,5 +1,5 @@
 /**
- * Test-side half of the PGlite template (#291): open databases from the
+ * Test-side half of the PGlite template: open databases from the
  * migrated data directory that `PgliteTemplate.setup.ts` built for this run.
  *
  * Never published (`tsconfig.json` excludes `src/testing/`).
@@ -53,7 +53,7 @@ const loadArtifacts = (): Promise<PgliteArtifacts> =>
  * tables applies its own DDL on top.
  *
  * Compiling the WASM module and unpacking the template dominate a boot on a
- * loaded machine (#324), so those are paid once per test file in
+ * loaded machine, so those are paid once per test file in
  * {@link loadArtifacts} and every call after the first only instantiates.
  */
 export const migratedPglite = async (): Promise<PGlite> => {

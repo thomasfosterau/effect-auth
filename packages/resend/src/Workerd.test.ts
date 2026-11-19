@@ -1,5 +1,5 @@
 /**
- * The sender inside a real workerd (#606), the runtime the package claims.
+ * The sender inside a real workerd, the runtime the package claims.
  *
  * workerd's `fetch` rejects `redirect: "error"` outright (a `TypeError` on
  * every request, a 200 included), so the sender sends `redirect: "manual"`

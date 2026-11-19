@@ -1,5 +1,5 @@
 /**
- * `ladderCheck` (#193): the role column's `CHECK` is derived from the same
+ * `ladderCheck`: the role column's `CHECK` is derived from the same
  * `Ladder` that drives the type and the runtime check, and a real Postgres
  * (PGlite) enforces it — the database-level backstop the applications
  * hand-mirrored (gardeneria `users_role_valid`).
@@ -20,7 +20,7 @@ const ddl = () => dialect.sqlToQuery(ladderCheck(users.role, Roles), "indexes").
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291). The template has no `users` table (its tables are `effect_auth_*`),
+ *. The template has no `users` table (its tables are `effect_auth_*`),
  * so this file creates the one whose `CHECK` it tests, and empties it before
  * each test.
  */

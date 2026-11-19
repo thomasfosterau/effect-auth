@@ -199,7 +199,7 @@ const ssoProviderKeys = {
 const carried = (keys: Readonly<Record<string, boolean>>): ReadonlyArray<string> =>
   sorted(R.keys(R.filter(keys, (isCarried) => isCarried)));
 
-// One declaration per entity (#205): each resource is the wire projection of
+// One declaration per entity: each resource is the wire projection of
 // a store-facing schema, so a field added to one and not the other fails here.
 describe("the JSON:API resources", () => {
   it("users carry exactly Types.User, plus the derived email fields", () => {
@@ -301,7 +301,7 @@ describe("the JSON:API resources", () => {
     );
   });
 
-  it("accepts no write to the attributes bag (#193)", () => {
+  it("accepts no write to the attributes bag", () => {
     // Only `name` and `image` are writable, and only on update.
     expect(sorted(R.keys(Resources.User.updateInput.fields))).toStrictEqual(
       sorted(["id", "name", "image"]),

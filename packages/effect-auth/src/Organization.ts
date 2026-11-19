@@ -30,7 +30,7 @@
  * (via an app-provided {@link DomainVerifier}); manual attestation is the
  * application operator's alone ({@link OrganizationService.attestDomain}, a
  * server-side call made after checking ownership out of band), never a
- * member's (#598). A *verified* domain is what lets an SSO sign-in provision
+ * member's. A *verified* domain is what lets an SSO sign-in provision
  * membership just in time, per organization and off by default
  * ({@link Organization.jitProvisioning}).
  *
@@ -43,7 +43,7 @@
  * session store - and read it back from `session.attributes` when handling
  * requests. The HTTP tier's `PATCH /organizations/active` records only an
  * organization the caller is an active member of
- * ({@link OrganizationService.requireMembership}, #576); a host that writes
+ * ({@link OrganizationService.requireMembership}); a host that writes
  * the attribute itself checks the same. Membership can end after it is set,
  * so it names the organization the user picked, never proof they belong to
  * it: authorize every request against the membership, not the attribute.
@@ -146,7 +146,7 @@ export const isActiveMember = (member: Member): boolean => member.status !== "in
 /**
  * The refusal of an operation that needs `permission` in an organization. A
  * stranger, a deactivated member, a member without the permission and an id
- * that names no record get this same error (#715, #718), so the refusal never
+ * that names no record get this same error, so the refusal never
  * confirms that an organization or a record exists.
  */
 export const missingPermission = (permission: string): OrganizationError =>
@@ -154,7 +154,7 @@ export const missingPermission = (permission: string): OrganizationError =>
 
 /**
  * The refusal of a member-only read. A stranger, a deactivated member and an
- * id that names no record get this same error (#717, #718).
+ * id that names no record get this same error.
  */
 export const notAMember = (): OrganizationError =>
   new OrganizationError({ message: "You are not a member of this organization" });
@@ -167,7 +167,7 @@ export type InvitationStatus = "pending" | "accepted" | "rejected" | "canceled";
 /**
  * An email invitation to join an organization.
  *
- * The invitation link carries a secret token (#586): only the token's SHA-256
+ * The invitation link carries a secret token: only the token's SHA-256
  * digest is stored, and presenting the token is what proves the invitee holds
  * the invited address. The id alone accepts nothing.
  */
@@ -272,7 +272,7 @@ export type DomainVerificationState = "pending" | "verified" | "failed";
  * organization can offer for its own claim. `manual` - the application
  * operator attested the claim out of band
  * ({@link OrganizationService.attestDomain}); no organization member can make
- * or verify a `manual` claim (#598).
+ * or verify a `manual` claim.
  */
 export type DomainVerificationStrategy = "dns" | "manual";
 
@@ -283,7 +283,7 @@ export type DomainVerificationStrategy = "dns" | "manual";
  * per domain is `verified` across all organizations. Several organizations
  * may hold unverified claims on the same domain, each with its own token:
  * whether another tenant claims a domain is never revealed to a tenant, and a
- * pending claim cannot squat a domain its real owner later proves (#598).
+ * pending claim cannot squat a domain its real owner later proves.
  * Only the verified claim carries authority.
  */
 export interface OrganizationDomain {
@@ -309,7 +309,7 @@ export interface OrganizationDomain {
    * Who attested a `manual` claim: the id of the platform admin whose
    * `POST /admin/organization-domains` attested it, or whatever the operator's
    * own tooling passed as {@link AttestDomainOptions.attestedBy}. Absent for
-   * `dns` claims and for an attestation made without one (#680).
+   * `dns` claims and for an attestation made without one.
    */
   readonly attestedBy?: string | undefined;
 }
@@ -415,10 +415,10 @@ export class DomainVerifier extends Context.Service<
  * Default role → permission map, mirroring better-auth's built-in
  * organization roles. Permissions are `"resource:action"` strings.
  *
- * - `owner` - `"*:*"`, every permission (#673): organization update/delete,
+ * - `owner` - `"*:*"`, every permission: organization update/delete,
  *   member, invitation, domain and team management, `role:manage` for custom
  *   organization roles and the default role, and any application permission,
- *   so an owner can grant every custom role under the grant rule (#585)
+ *   so an owner can grant every custom role under the grant rule
  * - `admin` - member, invitation, domain and team management plus organization
  *   updates, but cannot delete the organization or manage custom roles
  * - `member` - read-only participant (no management permissions; may still
@@ -599,7 +599,7 @@ export interface OrganizationConfig {
    * here for that organization.
    *
    * A member grants a role (adds, invites or promotes someone to it) only
-   * when their own role carries every permission that role carries (#585).
+   * when their own role carries every permission that role carries.
    * The default owner role is `"*:*"`; a map that narrows it leaves owners
    * unable to hand out roles carrying what it omits.
    */
@@ -607,7 +607,7 @@ export interface OrganizationConfig {
   /**
    * Invitation email delivery. The email's link carries `delivery.token`,
    * the invitation's secret, which the invitee presents to accept or reject
-   * it (#586); the token is never stored and is handed to nothing else.
+   * it; the token is never stored and is handed to nothing else.
    * Without this callback no token can reach an invitee, so
    * `inviteMember` and `resendInvitation` refuse.
    */
@@ -675,7 +675,7 @@ export interface AddOrganizationDomainInput {
    * Domain to claim; normalized (trimmed, lowercased) before storage. The
    * claim is always proved through DNS: an organization cannot choose
    * `manual` attestation, which is the operator's
-   * ({@link OrganizationService.attestDomain}, #598).
+   * ({@link OrganizationService.attestDomain}).
    */
   readonly domain: string;
 }
@@ -686,7 +686,7 @@ export interface AddOrganizationDomainInput {
 export interface AttestDomainOptions {
   /**
    * Who is attesting, recorded on the claim as
-   * {@link OrganizationDomain.attestedBy} (#680): the platform admin's user id
+   * {@link OrganizationDomain.attestedBy}: the platform admin's user id
    * over HTTP, or any identifier the operator's tooling uses for its
    * operators. Omitted, the claim records no attester.
    */
@@ -715,7 +715,7 @@ export interface InvitationDelivery {
 /**
  * The invitee's answer to an invitation: its id and, unless the user's
  * matching email identifier is verified, the secret token the invitation
- * email carried (#673).
+ * email carried.
  */
 export interface InvitationResponseInput {
   readonly invitationId: string;
@@ -777,7 +777,7 @@ export interface FullOrganization {
  * What accepting an invitation answers: the membership it created and the
  * invitation as stored after the answer (status `accepted`). The invitation
  * comes back here because the invitee cannot read it through
- * `listInvitations`, which takes `invitation:create` (#715).
+ * `listInvitations`, which takes `invitation:create`.
  */
 export interface AcceptedInvitation {
   readonly member: Member;
@@ -824,7 +824,7 @@ export class OrganizationService extends Context.Service<
     /**
      * Fetch an organization together with all of its members, as `actorId`.
      * Any active member may read it, as the team, domain and role listings
-     * (#717): the member list carries every member's user id and role. A
+     *: the member list carries every member's user id and role. A
      * non-member (a deactivated member included) and an organization that
      * does not exist are refused with the same `OrganizationError`, so the
      * refusal does not tell which organization ids exist.
@@ -840,7 +840,7 @@ export class OrganizationService extends Context.Service<
      * row, and the operation applied to it (`updateMemberRole`,
      * `removeMember`, ...) decides whether the actor may act on it. A caller
      * that answers `null` differently from that operation's refusal confirms
-     * which ids exist; the HTTP tier answers both alike (#718).
+     * which ids exist; the HTTP tier answers both alike.
      */
     readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
 
@@ -874,7 +874,7 @@ export class OrganizationService extends Context.Service<
     /**
      * List the organizations a user is an active member of. A deactivated
      * membership is left out, since its holder may not read the organization
-     * (`getFullOrganization`, #717).
+     * (`getFullOrganization`).
      */
     readonly listOrganizations: (
       userId: string,
@@ -884,10 +884,10 @@ export class OrganizationService extends Context.Service<
      * Invite a user (by email) to the organization. Requires the
      * `invitation:create` permission, a `role` the organization defines, and
      * that the inviter holds every permission that role carries (no granting
-     * beyond your own permissions, #585). Rejects duplicate pending invitations for
+     * beyond your own permissions). Rejects duplicate pending invitations for
      * the same email + organization and enforces `membershipLimit`. Mints the
      * invitation's secret token, stores its digest and hands the raw token to
-     * `sendInvitationEmail`, which must be configured (#586).
+     * `sendInvitationEmail`, which must be configured.
      */
     readonly inviteMember: (
       inviterId: string,
@@ -897,8 +897,8 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Accept a pending invitation with the secret token its email carried
-     * (#586), or by id alone from a verified matching email identifier
-     * (#673): the invitation must be pending and unexpired, a token must
+     *, or by id alone from a verified matching email identifier
+     *: the invitation must be pending and unexpired, a token must
      * match its digest (a wrong token answers "Invitation not found"), and it
      * must be addressed to one of the user's email identifiers (without a
      * token, a verified one; anyone else is told "Invitation not found").
@@ -907,12 +907,12 @@ export class OrganizationService extends Context.Service<
      * The token proves the address, so acceptance works for apps that run
      * without email verification. When the matching identifier is not
      * verified yet, the token is its first proof: like a magic link or an
-     * email OTP (#440), the account's password is cleared and its other
+     * email OTP, the account's password is cleared and its other
      * sessions are revoked (all of them without `currentSessionId`) before
      * the identifier is marked verified, so whoever signed up with the
      * address unproven no longer holds the account.
      *
-     * Answers the new membership with the accepted invitation (#715).
+     * Answers the new membership with the accepted invitation.
      */
     readonly acceptInvitation: (
       userId: string,
@@ -923,7 +923,7 @@ export class OrganizationService extends Context.Service<
      * Reject a pending invitation addressed to one of the user's email
      * identifiers, with the secret token its email carried or, without one,
      * from a verified matching identifier: declining is the addressee's act
-     * too, so the id alone rejects nothing for anyone else (#586, #673).
+     * too, so the id alone rejects nothing for anyone else.
      */
     readonly rejectInvitation: (
       userId: string,
@@ -933,7 +933,7 @@ export class OrganizationService extends Context.Service<
     /**
      * Cancel a pending invitation. The canceler needs the `invitation:cancel`
      * permission in the invitation's organization, checked before anything
-     * else (#718): an unknown id, a stranger and a member without it get the
+     * else: an unknown id, a stranger and a member without it get the
      * same `OrganizationError`, and only a permitted member learns that the
      * invitation is no longer pending.
      */
@@ -944,7 +944,7 @@ export class OrganizationService extends Context.Service<
 
     /**
      * List all invitations for an organization (any status). Requires the
-     * `invitation:create` permission, as issuing one does (#715): the list
+     * `invitation:create` permission, as issuing one does: the list
      * carries every invitee's email, role and inviter. A non-member, a
      * member without the permission and an organization that does not exist
      * are refused with the same `OrganizationError`, so the refusal does not
@@ -964,9 +964,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * List the pending, unexpired invitations addressed to `userId`'s own
-     * *verified* email identifiers (#706): what an in-app "pending
+     * *verified* email identifiers: what an in-app "pending
      * invitations" list shows, and exactly the invitations the user may
-     * answer by id without the emailed token (#673). An unverified email
+     * answer by id without the emailed token. An unverified email
      * identifier contributes nothing, since holding it proves nothing about
      * the address; its invitations stay reachable through the emailed link.
      * Invitations are returned as stored, `tokenHash` included: the HTTP tier
@@ -981,7 +981,7 @@ export class OrganizationService extends Context.Service<
      * (the link sent earlier stops working), its `expiresAt` pushed out by the
      * configured invitation TTL from now, and `sendInvitationEmail` invoked
      * again. Requires the `invitation:create` permission, like issuing one,
-     * checked before anything else (#718): an unknown id, a stranger and a
+     * checked before anything else: an unknown id, a stranger and a
      * member without it get the same `OrganizationError`. A permitted member's
      * accepted, rejected or canceled invitation is refused with an
      * `OrganizationError` rather than silently re-issued.
@@ -996,7 +996,7 @@ export class OrganizationService extends Context.Service<
      * `member:create` permission and enforces `membershipLimit`. Omitting
      * `role` uses the organization's `defaultRole` (default `"member"`). The
      * role (named or default) must be defined, and the actor must hold every
-     * permission it carries (#585).
+     * permission it carries.
      */
     readonly addMember: (
       actorId: string,
@@ -1007,7 +1007,7 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Remove a member. Requires the `member:delete` permission and that the
-     * actor holds every permission the member's role carries (#585). An owner
+     * actor holds every permission the member's role carries. An owner
      * can only be removed by another owner, and the last owner can never be
      * removed. Cascades: the member's memberships in the organization's teams
      * are removed as well.
@@ -1021,7 +1021,7 @@ export class OrganizationService extends Context.Service<
     /**
      * Change a member's role. Requires the `member:update` permission, a
      * `role` the organization defines, and that the actor holds every
-     * permission of both the member's current role and the new one (#585):
+     * permission of both the member's current role and the new one:
      * an admin can neither promote anyone, themselves included, to owner nor
      * demote an owner. The last active owner cannot be demoted, and an inactive member's role is not
      * editable - reactivate them first, or the restore would overwrite the
@@ -1037,7 +1037,7 @@ export class OrganizationService extends Context.Service<
     /**
      * Suspend a membership without deleting it. Requires the `member:update`
      * permission and that the actor holds every permission the member's role
-     * carries (#585); an owner may only be deactivated by another owner, and
+     * carries; an owner may only be deactivated by another owner, and
      * the last active owner never can.
      *
      * The row survives (history, team memberships and the member's role, kept
@@ -1057,7 +1057,7 @@ export class OrganizationService extends Context.Service<
     /**
      * Restore a deactivated membership, putting back the role it held when it
      * was deactivated. Requires the `member:update` permission and that the
-     * actor holds every permission of the role it restores (#585), so only
+     * actor holds every permission of the role it restores, so only
      * someone holding what the owner role carries brings back an owner. No capacity
      * check: the row never stopped occupying a seat, so reactivating it adds
      * nothing to `membershipLimit`.
@@ -1117,7 +1117,7 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Attempt to verify a domain claim through DNS. Requires the
-     * `domain:manage` permission, which is never itself the proof (#598).
+     * `domain:manage` permission, which is never itself the proof.
      *
      * Asks the ambient {@link DomainVerifier} whether the domain publishes the
      * claim's token; without that service the call fails. A failed DNS check
@@ -1136,7 +1136,7 @@ export class OrganizationService extends Context.Service<
 
     /**
      * The application operator's attestation that `organizationId` controls
-     * `domain`, made after checking ownership out of band (#598). No actor and
+     * `domain`, made after checking ownership out of band. No actor and
      * no organization permission is involved: this is a server-side call for
      * the operator's own tooling, or the platform-admin endpoint
      * `POST /admin/organization-domains` (admin-gated). Never expose it
@@ -1146,7 +1146,7 @@ export class OrganizationService extends Context.Service<
      * `manual` strategy: its existing claim is attested in place (keeping its
      * id and dropping its DNS token), or a new one is created. The claim
      * records the attestation time as `verifiedAt` and `options.attestedBy`,
-     * when given, as {@link OrganizationDomain.attestedBy} (#680). A claim
+     * when given, as {@link OrganizationDomain.attestedBy}. A claim
      * already verified is answered unchanged, its attester included. Refused
      * for an unknown organization, an invalid domain, a domain another
      * organization holds verified (release that claim first with
@@ -1161,7 +1161,7 @@ export class OrganizationService extends Context.Service<
 
     /**
      * The application operator's release of `organizationId`'s claim on
-     * `domain`, whatever its state, for disputes (#680): releasing a verified
+     * `domain`, whatever its state, for disputes: releasing a verified
      * claim frees the domain for another organization to prove or be attested
      * for. Like {@link attestDomain}, a server-side call with no actor and no
      * organization permission, also reached through the platform-admin
@@ -1210,7 +1210,7 @@ export class OrganizationService extends Context.Service<
      * Rename a team. Requires the `team:update` permission in the team's
      * organization. As in every team operation, an unknown team id is refused
      * with the same `OrganizationError` a stranger and a member without the
-     * permission get (#718).
+     * permission get.
      */
     readonly updateTeam: (
       actorUserId: string,
@@ -1259,7 +1259,7 @@ export class OrganizationService extends Context.Service<
     /**
      * List a team's members. Any active member of the team's organization may
      * do so; a stranger and an unknown team id get the same `OrganizationError`
-     * (#717, #718).
+     *.
      */
     readonly listTeamMembers: (
       actorUserId: string,
@@ -1287,7 +1287,7 @@ export class OrganizationService extends Context.Service<
      * `OrganizationError`: owner semantics stay static, so a tenant can never
      * lock itself out of role management.
      *
-     * The grant rule applies (#585, #673): the actor's role must carry every
+     * The grant rule applies: the actor's role must carry every
      * permission in the new definition and every permission the name
      * resolves to now (its custom definition, else its static entry), and an
      * actor may not redefine their own role.
@@ -1303,7 +1303,7 @@ export class OrganizationService extends Context.Service<
      * `config.roles` entry (if any) for members still holding the role.
      * Requires the `role:manage` permission; deleting the protected owner
      * role is refused, and deleting a role that was never defined is a no-op.
-     * The grant rule applies (#673): the actor's role must carry every
+     * The grant rule applies: the actor's role must carry every
      * permission the definition held and every permission of the static
      * entry it falls back to, and an actor may not delete their own role.
      */
@@ -1350,7 +1350,7 @@ export class OrganizationService extends Context.Service<
      * Fail with `OrganizationError` unless the user is an active member of the
      * organization (any role), the check every member-only read makes. A
      * non-member, a deactivated member and an organization that does not
-     * exist are refused alike (#576, #717).
+     * exist are refused alike.
      */
     readonly requireMembership: (
       userId: string,
@@ -1364,7 +1364,7 @@ export class OrganizationService extends Context.Service<
    * Requires `OrganizationStore`, `IdentifierStore`, `EmailPasswordStore` and
    * `SessionService`: accepting an invitation is a first proof of the invited
    * address, which clears an unproven account's password, credentials and
-   * sessions (#586, #694).
+   * sessions.
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
@@ -1385,7 +1385,7 @@ const validDomain = (input: string): Effect.Effect<string, OrganizationError> =>
 };
 
 /**
- * Refuse a custom-role write against the actor's own role (#673): a
+ * Refuse a custom-role write against the actor's own role: a
  * `role:manage` holder never widens, narrows or removes what it acts with.
  */
 const ensureNotOwnRole = (
@@ -1493,7 +1493,7 @@ export const make = (
     /**
      * The permissions a role carries, failing for a role nothing defines: a
      * role string no {@link OrgRole} or `config.roles` entry resolves is never
-     * stored on a membership or an invitation, nor made the default (#585).
+     * stored on a membership or an invitation, nor made the default.
      */
     const requireDefinedRole = (organizationId: string, role: string) =>
       resolveRolePermissions(organizationId, role).pipe(
@@ -1507,7 +1507,7 @@ export const make = (
       );
 
     /**
-     * No granting beyond your own permissions (#585): refuse unless the
+     * No granting beyond your own permissions: refuse unless the
      * actor's role grants every one of `permissions`, the permissions some
      * role carries. `subject` names that role in the refusal.
      */
@@ -1566,7 +1566,7 @@ export const make = (
 
     /**
      * Refuse to redefine or delete `role` unless the actor holds every
-     * permission it currently resolves to, custom or static (#673): a
+     * permission it currently resolves to, custom or static: a
      * custom-role write takes those away from every member holding it.
      */
     const requireHoldsCurrent = (organizationId: string, actor: Member, role: string) =>
@@ -1630,7 +1630,7 @@ export const make = (
     /**
      * Load a team, failing with `refusal` when it does not exist: the error
      * the caller's check gives a stranger, so an unknown team id and another
-     * tenant's team are refused alike (#718).
+     * tenant's team are refused alike.
      */
     const getTeamOr = (teamId: string, refusal: OrganizationError) =>
       Effect.gen(function* () {
@@ -1642,7 +1642,7 @@ export const make = (
     /**
      * Load a team and enforce a permission in *its* organization, returning the
      * team so callers can use its `organizationId`. An unknown team id gets
-     * the refusal a stranger or a member without the permission gets (#718).
+     * the refusal a stranger or a member without the permission gets.
      */
     const requireTeamPermission = (userId: string, teamId: string, permission: string) =>
       Effect.gen(function* () {
@@ -1719,7 +1719,7 @@ export const make = (
 
     /**
      * This organization's own claim on a normalized domain, `null` when it has
-     * none. Other organizations' claims are never consulted (#598).
+     * none. Other organizations' claims are never consulted.
      */
     const ownClaimOn = (
       domainStore: typeof OrganizationDomainStore.Service,
@@ -1826,8 +1826,8 @@ export const make = (
      * The proof an answer to `invitation` brings, with the user's email
      * identifier it is addressed to (if any). With a token, the token: it
      * must match the stored digest, and a mismatch answers "not found", so
-     * the id alone confirms nothing (#586). Without one, a verified matching
-     * identifier is the proof (#673): a user the invitation is not addressed
+     * the id alone confirms nothing. Without one, a verified matching
+     * identifier is the proof: a user the invitation is not addressed
      * to still learns nothing ("not found"), and an unverified match is told
      * to bring the token, which then serves as the address's first proof.
      */
@@ -1984,7 +1984,7 @@ export const make = (
         actorId: string,
         organizationId: string,
       ) {
-        // Any member reads it (#717). An unknown organization has no member, so
+        // Any member reads it. An unknown organization has no member, so
         // it is refused exactly as a stranger is.
         yield* requireMembership(actorId, organizationId);
         const organization = yield* getOrganizationOrFail(organizationId);
@@ -2017,7 +2017,7 @@ export const make = (
         userId: string,
       ) {
         const memberships = yield* store.listMembersByUser(userId);
-        // Only active memberships (#717): a deactivated member may not read the
+        // Only active memberships: a deactivated member may not read the
         // organization, so the listing does not show it either.
         const organizations = yield* Effect.forEach(
           Arr.filter(memberships, isActiveMember),
@@ -2092,12 +2092,12 @@ export const make = (
 
         yield* ensureMembershipCapacity(invitation.organizationId);
 
-        // The token proves the address (#586). For an unverified identifier
-        // it is the first proof, so it goes through proveAddress (#440): the
+        // The token proves the address. For an unverified identifier
+        // it is the first proof, so it goes through proveAddress: the
         // password an unproven sign-up set is cleared and every session but
         // the prover's is revoked before the address counts as verified.
         // An answer without the token arrives only from a verified
-        // identifier (#673), so it never reaches proveAddress.
+        // identifier, so it never reaches proveAddress.
         if (!identifier.verified) {
           yield* proveAddress(firstProof, identifier, input.currentSessionId);
         }
@@ -2119,7 +2119,7 @@ export const make = (
         cancelerId: string,
         invitationId: string,
       ) {
-        // The permission first (#718): an unknown id, a stranger and a member
+        // The permission first: an unknown id, a stranger and a member
         // without it are refused alike, and only a permitted member learns
         // that an invitation is no longer pending.
         const invitation = yield* store.getInvitation(invitationId);
@@ -2136,7 +2136,7 @@ export const make = (
         actorId: string,
         invitationId: string,
       ) {
-        // The permission first, as for `cancelInvitation` (#718).
+        // The permission first, as for `cancelInvitation`.
         const invitation = yield* store.getInvitation(invitationId);
         if (!invitation) return yield* missingPermission("invitation:create");
         yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
@@ -2162,7 +2162,7 @@ export const make = (
         actorId: string,
         organizationId: string,
       ) {
-        // The permission that issues invitations reads them (#715). An unknown
+        // The permission that issues invitations reads them. An unknown
         // organization has no member, so it is refused exactly as a stranger is.
         yield* requireMemberPermission(actorId, organizationId, "invitation:create");
         return yield* store.listInvitationsByOrganization(organizationId);
@@ -2482,7 +2482,7 @@ export const make = (
         const domain = yield* validDomain(input.domain);
         // Only this organization's own claims are consulted: a refusal over
         // another tenant's claim would confirm it exists, and would let a
-        // pending claim squat the domain (#598).
+        // pending claim squat the domain.
         if ((yield* ownClaimOn(domainStore, organizationId, domain)) !== null) {
           return yield* new OrganizationError({
             message: "This organization has already claimed that domain",
@@ -2531,7 +2531,7 @@ export const make = (
 
         if (domain.verificationState === "verified") return domain;
 
-        // `domain:manage` is never the proof (#598): only the operator attests
+        // `domain:manage` is never the proof: only the operator attests
         // a `manual` claim, through `attestDomain`.
         if (domain.verificationStrategy === "manual") {
           return yield* new OrganizationError({
@@ -2626,7 +2626,7 @@ export const make = (
         yield* getOrganizationOrFail(organizationId);
         yield* ensureNotOwnerRole(input.role);
         yield* ensureNotOwnRole(actor, input.role, "redefine");
-        // The grant rule (#585, #673): the new definition is a grant, and
+        // The grant rule: the new definition is a grant, and
         // whatever the name carries now (custom or static) is taken away.
         yield* requireHoldsAll(
           organizationId,
@@ -2659,7 +2659,7 @@ export const make = (
         const existing = yield* store.getOrgRole(organizationId, role);
         if (existing === null) return;
         // Deleting takes away the custom definition and brings back the
-        // static entry, if any: the actor must hold both (#673).
+        // static entry, if any: the actor must hold both.
         yield* requireHoldsCurrent(organizationId, actor, role);
         yield* requireHoldsAll(
           organizationId,

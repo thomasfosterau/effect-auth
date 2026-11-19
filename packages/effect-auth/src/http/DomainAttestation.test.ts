@@ -1,8 +1,8 @@
 /**
- * Domain claims over HTTP (#598): an organization proves a domain through DNS
+ * Domain claims over HTTP: an organization proves a domain through DNS
  * only, and manual attestation is the operator's, at the admin-gated
  * `POST /admin/organization-domains`, as is the release of any claim at
- * `DELETE /admin/organization-domains/:id` (#680). Runs the real `Http.make`
+ * `DELETE /admin/organization-domains/:id`. Runs the real `Http.make`
  * handler of the `./client/testing` fixture.
  */
 import { MutableHashMap, MutableHashSet } from "effect";
@@ -99,7 +99,7 @@ const signUp = async (
   return session;
 };
 
-describe("HTTP domain claims (#598)", () => {
+describe("HTTP domain claims", () => {
   it("refuses a tenant's manual claim, and never verifies a claim on domain:manage alone", async () => {
     const { server, browser } = withServer();
     const owner = await signUp(server, browser, "owner@attacker.test");
@@ -199,7 +199,7 @@ describe("HTTP domain claims (#598)", () => {
     expect(MutableHashMap.size(server.domainRecords)).toBe(0);
   });
 
-  it("records the attesting admin on the claim, as its attester (#680)", async () => {
+  it("records the attesting admin on the claim, as its attester", async () => {
     const { server, browser } = withServer();
     const owner = await signUp(server, browser, "owner@acme.test");
     const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
@@ -230,7 +230,7 @@ describe("HTTP domain claims (#598)", () => {
     expect("attestedBy" in proved).toBe(false);
   });
 
-  it("lets a platform admin release any organization's claim, settling a dispute (#680)", async () => {
+  it("lets a platform admin release any organization's claim, settling a dispute", async () => {
     const { server, browser } = withServer();
     const first = await signUp(server, browser, "owner@first.test");
     const firstOrg = await first.client.organization.create({ name: "First", slug: "first" });
@@ -275,7 +275,7 @@ describe("HTTP domain claims (#598)", () => {
     expect(await refusal(operator.client.admin.releaseDomain("nope"))).toBe(404);
   });
 
-  it("refuses the release endpoint to anyone but a platform admin (#680)", async () => {
+  it("refuses the release endpoint to anyone but a platform admin", async () => {
     const { server, browser } = withServer();
     const owner = await signUp(server, browser, "owner@acme.test");
     const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
@@ -295,7 +295,7 @@ describe("HTTP domain claims (#598)", () => {
     expect(MutableHashMap.has(server.domainRecords, claim.id)).toBe(true);
   });
 
-  it("refuses an unknown claim id exactly as another tenant's claim and a member without domain:manage (#718)", async () => {
+  it("refuses an unknown claim id exactly as another tenant's claim and a member without domain:manage", async () => {
     const { server, browser } = withServer();
     const owner = await signUp(server, browser, "owner@acme.test");
     const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });

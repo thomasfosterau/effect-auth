@@ -70,7 +70,7 @@ interface Observed {
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291) and emptied before each test. The stores run on it through
+ * and emptied before each test. The stores run on it through
  * `PgliteClient.layer({ liveClient })`, which borrows the instance and leaves
  * closing it to `afterAll`.
  */
@@ -250,7 +250,7 @@ const purge = (outcome: "fail" | "commit"): Promise<Held> =>
     ),
   );
 
-describe("the user purge inside a drizzle Effect transaction (#601)", () => {
+describe("the user purge inside a drizzle Effect transaction", () => {
   it("rolls the whole purge back when the transaction fails after it", async () => {
     expect(await purge("fail")).toEqual({ user: true, identifiers: 1, apiKeys: 1, sessions: 1 });
   });

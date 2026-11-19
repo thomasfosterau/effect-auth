@@ -24,7 +24,7 @@
  * prefix, e.g. `NAME_FILE=...`, so the secret is unset).
  *
  * A value that is present but whitespace-only (`"   "`, a lone newline) counts
- * as empty (owner decision on #252); a secret with surrounding spaces but
+ * as empty; a secret with surrounding spaces but
  * non-space content is accepted unchanged and is not trimmed. No error message
  * ever contains a secret value.
  *
@@ -33,7 +33,7 @@
  *
  * Residual blind spot: `NAME=""` set together with `NAME_FILE=...` (or any
  * other `NAME_*` variable) reads as unset, because the provider then reports a
- * `Record` or `Array` node at `NAME`. The owner accepted this on #252;
+ * `Record` or `Array` node at `NAME`. This is accepted;
  * `ConfigEmptyEnv.test.ts` pins it so a future fix flips it deliberately.
  *
  * Further blind spots and misclassifications (documented, not fixed):

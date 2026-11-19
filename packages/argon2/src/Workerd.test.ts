@@ -1,5 +1,5 @@
 /**
- * The hasher inside a real workerd (#744), the runtime the package claims.
+ * The hasher inside a real workerd, the runtime the package claims.
  *
  * workerd refuses to generate wasm code while it serves a request
  * (`CompileError: WebAssembly.compile(): Wasm code generation disallowed by
@@ -14,7 +14,7 @@
  * and at 2023-01-01 with `allow_eval_during_startup`, and hashes and verifies
  * inside `fetch`; it also pins that the 2023 date without the flag refuses
  * the worker at startup, and that a stored hash over the verify ceiling
- * (#752) is refused inside `fetch` while the isolate keeps serving.
+ * is refused inside `fetch` while the isolate keeps serving.
  */
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

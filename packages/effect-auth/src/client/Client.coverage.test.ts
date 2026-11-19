@@ -165,7 +165,7 @@ describe("phone OTP", () => {
   });
 });
 
-describe("captcha tokens on the sends (#678)", () => {
+describe("captcha tokens on the sends", () => {
   it("puts captchaToken in the otp-challenges attributes only when given", async () => {
     const { calls, fetch } = recordingFetch({});
     const client = createAuthClient({ baseUrl: BASE, fetch });
@@ -597,7 +597,7 @@ describe("organizations", () => {
     expect(lastOwner.status).toBe(403);
   });
 
-  it("accepts an invitation only with its emailed token, as a first proof of the address (#586)", async () => {
+  it("accepts an invitation only with its emailed token, as a first proof of the address", async () => {
     const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const invitee = browser();
@@ -651,7 +651,7 @@ describe("organizations", () => {
     expect(signIn.status).toBe(401);
   });
 
-  it("accepts and rejects an invitation by id from a verified address, without the token (#673)", async () => {
+  it("accepts and rejects an invitation by id from a verified address, without the token", async () => {
     const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const invitee = browser();
@@ -690,7 +690,7 @@ describe("organizations", () => {
     expect((await invitee.organization.rejectInvitation(second.id)).status).toBe("rejected");
   });
 
-  it("lists the signed-in user's own pending invitations, decoded as views (#706)", async () => {
+  it("lists the signed-in user's own pending invitations, decoded as views", async () => {
     const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const invitee = browser();
@@ -742,7 +742,7 @@ describe("organizations", () => {
     expect(refused.status).toBe(401);
   });
 
-  it("refuses an admin granting the owner role, to themselves included (#585)", async () => {
+  it("refuses an admin granting the owner role, to themselves included", async () => {
     const { browser } = withServer({ organization: true });
     const owner = browser();
     const admin = browser();
@@ -1137,7 +1137,7 @@ describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
       organizationId: "o1",
     });
     expect(registered).toMatchObject({ id: "p1", protocol: "saml", organizationId: "o1" });
-    // The organization travels as the relationship, never as an attribute (#642).
+    // The organization travels as the relationship, never as an attribute.
     expect(calls[0]?.body).toMatchObject({
       data: {
         type: "sso-providers",

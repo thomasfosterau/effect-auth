@@ -1,10 +1,10 @@
 /**
- * The `beforeAuthenticate` gate end to end (#592): username sign-in runs the
+ * The `beforeAuthenticate` gate end to end: username sign-in runs the
  * lockout, rate-limit and captcha plugins email sign-in runs, lockout keys on
  * the account and clears only when a session is issued, and second-factor
  * redemptions are counted per user across challenges.
  *
- * And its follow-ups (#678): magic link and one-time codes are exempt from
+ * And its follow-ups: magic link and one-time codes are exempt from
  * the account lock without becoming a way past their own bounds, the captcha
  * guards the sends, unknown challenges and tokens still reach the per-IP
  * limit, and an impersonation never clears a lockout.
@@ -119,7 +119,7 @@ const signInByUsername = (secret: string, captchaToken?: string) =>
 const lockout = (config: AccountLockoutConfig) =>
   AccountLockoutPlugin({ lockoutDurationMs: 60_000, ...config });
 
-describe("beforeAuthenticate on username sign-in (#592)", () => {
+describe("beforeAuthenticate on username sign-in", () => {
   it("locks the account after maxAttempts wrong username passwords", async () => {
     const outcomes = await Effect.runPromise(
       Effect.gen(function* () {
@@ -205,7 +205,7 @@ describe("beforeAuthenticate on username sign-in (#592)", () => {
   });
 });
 
-describe("lockout clears only when a session is issued (#592)", () => {
+describe("lockout clears only when a session is issued", () => {
   /** Enrol Ada in TOTP and answer with her secret. */
   const enrolAda = Effect.fn("enrolAda")(function* () {
     const user = yield* signUpAda();
@@ -291,7 +291,7 @@ describe("lockout clears only when a session is issued (#592)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #678: the passwordless flows, the send gate, unkeyed attempts, impersonation
+// The passwordless flows, the send gate, unkeyed attempts, impersonation
 // ---------------------------------------------------------------------------
 
 const phoneNumber = "+15550100";
@@ -380,7 +380,7 @@ const lockAda = Effect.fn("lockAda")(function* (maxAttempts: number) {
 const lockoutRecord = (userId: string) =>
   Effect.flatMap(AccountLockoutStore, (store) => store.get(`lockout:user:${userId}`));
 
-describe("magic link and one-time codes under an account lock (#678)", () => {
+describe("magic link and one-time codes under an account lock", () => {
   beforeEach(() => {
     outbox.length = 0;
   });
@@ -461,7 +461,7 @@ describe("magic link and one-time codes under an account lock (#678)", () => {
     expect(result.rounds).toEqual([
       // Three wrong codes spend the code (the per-code limit).
       { sent: "ok", guesses: refused },
-      // Five wrong codes put the address into its backoff (#590) ...
+      // Five wrong codes put the address into its backoff ...
       { sent: "ok", guesses: refused },
       // ... so no fresh code is issued, and a guess meets no code at all.
       { sent: "ResendTooSoonError", guesses: refused },
@@ -515,7 +515,7 @@ describe("magic link and one-time codes under an account lock (#678)", () => {
   });
 });
 
-describe("the captcha guards the code and link sends (#678)", () => {
+describe("the captcha guards the code and link sends", () => {
   beforeEach(() => {
     outbox.length = 0;
   });
@@ -586,7 +586,7 @@ describe("the captcha guards the code and link sends (#678)", () => {
   });
 });
 
-describe("unknown challenges and tokens reach the per-IP limit (#678)", () => {
+describe("unknown challenges and tokens reach the per-IP limit", () => {
   it("counts an unknown second-factor challenge", async () => {
     const answers = await Effect.runPromise(
       Effect.gen(function* () {
@@ -650,7 +650,7 @@ describe("unknown challenges and tokens reach the per-IP limit (#678)", () => {
   });
 });
 
-describe("an impersonation leaves the target's lockout standing (#678)", () => {
+describe("an impersonation leaves the target's lockout standing", () => {
   it("keeps the account locked after an admin impersonates it", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {

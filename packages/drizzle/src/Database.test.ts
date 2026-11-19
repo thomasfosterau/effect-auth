@@ -57,7 +57,7 @@ const doorAccepts = (
   effectPg: EffectPgDatabase,
   promisePg: PgliteDatabase,
 ): ReadonlyArray<unknown> => [
-  // #181: a real `drizzle-orm/effect-postgres` handle fits the Effect door.
+  // A real `drizzle-orm/effect-postgres` handle fits the Effect door.
   effectDatabaseLayer(effectPg),
   effectDatabaseLayer(Effect.succeed<EffectDrizzleDatabase>(effectPg)),
   // The Promise-shaped door still takes a handle, and now also an Effect of one.
@@ -74,11 +74,11 @@ const doorAccepts = (
  * Effect-driver test borrows it, and the overlapping-requests suite uses it as
  * the empty default its reference falls back to. It is a separate PGlite
  * instance with its own Postgres backend, started from the run's migrated
- * template (#291) rather than from `initdb`.
+ * template rather than from `initdb`.
  *
  * Each instance is opened in a hook of its own, never three in one hook: a
  * PGlite boot is the costly part on a loaded machine, and three boots in one
- * hook ran past Vitest's 10 s default hook timeout (#324).
+ * hook ran past Vitest's 10 s default hook timeout.
  */
 let primary: PGlite;
 
@@ -142,7 +142,7 @@ describe("databaseLayer doors", () => {
 describe("overlapping requests", () => {
   /**
    * One instance per "request", each opened in a hook of its own, so that a
-   * hook boots one database and the two requests stay independent (#324).
+   * hook boots one database and the two requests stay independent.
    */
   let first: PGlite;
   let second: PGlite;

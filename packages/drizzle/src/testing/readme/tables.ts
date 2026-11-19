@@ -1,5 +1,5 @@
 /**
- * The scope the README's sign-up writer examples (#406) are compiled in: the
+ * The scope the README's sign-up writer examples are compiled in: the
  * application's users table, NOT NULL and nullable, and its drizzle `db`.
  * `ReadmeSignUpWriter.test.ts` sets `db` and checks that the README shows the
  * writers in `NotNullWriter.ts` and `NullableWriter.ts` verbatim.

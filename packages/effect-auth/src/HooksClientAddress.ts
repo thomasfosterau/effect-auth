@@ -1,7 +1,7 @@
 /**
  * Internal: records on a `Hooks` implementation which of its plugins key a limit
  * on the client address, so `Http.make` can check at build that the handler has
- * an address source (#389). No entry point exports this module, and the API
+ * an address source. No entry point exports this module, and the API
  * reference leaves it out (`docgen.json` excludes it).
  *
  * The record is a symbol-keyed property. A plugin built with `makePlugin` copies

@@ -1,6 +1,6 @@
 /**
  * PHC strings written by `hash-wasm` 4.13.0, the backend this package used
- * through 0.1.x (#744). Each was generated once by calling hash-wasm's
+ * through 0.1.x. Each was generated once by calling hash-wasm's
  * `argon2id` / `argon2i` / `argon2d` with a fixed ASCII salt and
  * `outputType: "encoded"`, and committed so the tests prove those stored
  * hashes still verify, and that the new kernel derives the same strings,

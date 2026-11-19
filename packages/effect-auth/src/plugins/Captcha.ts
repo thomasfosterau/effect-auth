@@ -11,7 +11,7 @@
  *   (`"email-password"` and `"username"`), the token from
  *   `SignInInput.captchaToken` / `UsernameSignInInput.captchaToken` (the
  *   `password` and `username` sign-in credentials).
- * - `"sendCode"` (#678): `beforeSendCode`, every send of an email or SMS
+ * - `"sendCode"`: `beforeSendCode`, every send of an email or SMS
  *   one-time code and of a magic link, the token from the send's
  *   `SendCodeOptions.captchaToken` (the `captchaToken` attribute of
  *   `POST /otp-challenges`). A send is the step that costs money, so it is

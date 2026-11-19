@@ -223,7 +223,7 @@ describe("PasswordResetService", () => {
     expect(MutableHashMap.size(resetTokens)).toBe(1);
   });
 
-  it("sends nothing for a look-alike address a loose store matches to another account (#602)", async () => {
+  it("sends nothing for a look-alike address a loose store matches to another account", async () => {
     const testContext = await makeTestContext();
     const bob: User = {
       id: "user-bob",

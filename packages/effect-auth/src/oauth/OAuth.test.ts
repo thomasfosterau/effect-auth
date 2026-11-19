@@ -1216,7 +1216,7 @@ describe("OAuthService unlinkAccount guard", () => {
 // trustedProviders, updateUserInfoOnLink)
 // ---------------------------------------------------------------------------
 
-/** An OAuth sign-in refused over a claimed email (#588): a conflict on the address, nothing linked, minted or revoked, the password and the address as they were. */
+/** An OAuth sign-in refused over a claimed email: a conflict on the address, nothing linked, minted or revoked, the password and the address as they were. */
 const refusedClaim = (localVerified: boolean) => ({
   failure: expect.objectContaining({ _tag: "EmailInUseError", email: "user@example.com" }),
   accounts: 0,
@@ -1498,7 +1498,7 @@ describe("OAuthService linking controls", () => {
    * existing user holding `user@example.com` (verified or not) with a
    * password, and report what the flow wrote: the accounts it created, the
    * sessions it minted and revoked (in order), the password left on the
-   * account and the address afterwards (#588, #671).
+   * account and the address afterwards.
    */
   const signInOverClaimedEmail = async (
     options: OAuth.OAuthServiceOptions,
@@ -1576,7 +1576,7 @@ describe("OAuthService linking controls", () => {
     address: address === null ? null : { userId: address.userId, verified: address.verified },
   });
 
-  /** A first-proof takeover (#440, #671): the squatter's password and sessions cleared, then the link and the prover's session. */
+  /** A first-proof takeover: the squatter's password and sessions cleared, then the link and the prover's session. */
   const provenClaim = {
     failure: null,
     accounts: 1,
@@ -1603,7 +1603,7 @@ describe("OAuthService linking controls", () => {
     });
   });
 
-  it("a provider-verified email proves an unverified local address: the squatter's password and sessions are cleared before the link (#671)", async () => {
+  it("a provider-verified email proves an unverified local address: the squatter's password and sessions are cleared before the link", async () => {
     // The squatter signed up with the victim's address and a password; the
     // victim's provider verified it. That is the address's first proof: the
     // victim lands in the account, and the squatter keeps nothing.
@@ -1618,7 +1618,7 @@ describe("OAuthService linking controls", () => {
     expect(aftermath(outcome)).toEqual(provenClaim);
   });
 
-  it("trustedProviders: refuses to link an unverified provider email to a verified local address (#588)", async () => {
+  it("trustedProviders: refuses to link an unverified provider email to a verified local address", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail(
@@ -1629,7 +1629,7 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(true));
   });
 
-  it("trustedProviders: an unverified provider email never takes over an unverified local address (#588, #671)", async () => {
+  it("trustedProviders: an unverified provider email never takes over an unverified local address", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail(
@@ -1640,7 +1640,7 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(false));
   });
 
-  it("an unverified provider email never takes over an unverified local address by default (#671)", async () => {
+  it("an unverified provider email never takes over an unverified local address by default", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail({}, { localVerified: false, providerVerified: false }),
@@ -1648,7 +1648,7 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(false));
   });
 
-  it("trustedProviders: a trusted provider proves an unverified local address with auto-link off (#671)", async () => {
+  it("trustedProviders: a trusted provider proves an unverified local address with auto-link off", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail(
@@ -1681,7 +1681,7 @@ describe("OAuthService linking controls", () => {
     ).toEqual(refusedClaim(true));
   });
 
-  it("autoLinkByVerifiedEmail: false never takes over an unverified local address for an untrusted provider (#671)", async () => {
+  it("autoLinkByVerifiedEmail: false never takes over an unverified local address for an untrusted provider", async () => {
     expect(
       aftermath(
         await signInOverClaimedEmail(
@@ -1745,7 +1745,7 @@ describe("OAuthService linking controls", () => {
     );
     expect(claimed?.userId).toBe(newUser.id);
     expect(claimed?.verified).toBe(false);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([{ type: "email", value: "user@example.com", verified: false }]);
   });
 
@@ -1796,7 +1796,7 @@ describe("OAuthService linking controls", () => {
     ]);
   });
 
-  it("refuses when the store's writer returns the existing owner, and links nothing to the owner (#380)", async () => {
+  it("refuses when the store's writer returns the existing owner, and links nothing to the owner", async () => {
     const owner = makeUser({ id: "owner-id" });
     const identifiers = makeIdentifiers();
     const accounts = MutableHashMap.empty<string, OAuthAccount>();
@@ -2156,7 +2156,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
     return store;
   };
 
-  describe("the callback state is single-use (#685)", () => {
+  describe("the callback state is single-use", () => {
     it("refuses handleCallback replayed after the first exchange failed", async () => {
       const service = await makeService(kvStateStore());
       const failed = await failingIdp(() =>
@@ -2258,7 +2258,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
   });
 });
 
-describe("OAuthService first proof over the real services (#671)", () => {
+describe("OAuthService first proof over the real services", () => {
   const github = OAuth.provider(
     "github",
     {
@@ -2340,7 +2340,7 @@ describe("OAuthService first proof over the real services (#671)", () => {
     expect(outcome.squatterPassword.failure).toMatchObject({ _tag: "InvalidCredentialsError" });
   });
 
-  it("the address's holder signing in with a provider also removes the squatter's other links, API keys, multi-factor enrolment and trusted devices, and keeps the link made now (#694)", async () => {
+  it("the address's holder signing in with a provider also removes the squatter's other links, API keys, multi-factor enrolment and trusted devices, and keeps the link made now", async () => {
     const outcome = await withFetch(
       (url) =>
         url.includes("/token")

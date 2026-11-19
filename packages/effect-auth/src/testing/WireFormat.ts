@@ -1,5 +1,5 @@
 /**
- * Test helpers for the RFC tier's wire format (#205): the endpoints whose
+ * Test helpers for the RFC tier's wire format: the endpoints whose
  * format another specification fixes answer their own media type, never a
  * JSON:API document.
  *

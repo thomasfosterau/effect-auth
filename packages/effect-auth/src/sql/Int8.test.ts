@@ -17,7 +17,7 @@ const decode = <A extends object>(row: A) =>
 
 const millis = 1_767_225_660_000;
 
-describe("bigintColumns (#766)", () => {
+describe("bigintColumns", () => {
   it("is every column the DDL declares BIGINT, and no such name has another type anywhere", () => {
     const bigint = Arr.dedupe(
       declaredColumns.filter((column) => column.type === "BIGINT").map((column) => column.name),
@@ -32,7 +32,7 @@ describe("bigintColumns (#766)", () => {
   });
 });
 
-describe("decodeBigintColumns (#766)", () => {
+describe("decodeBigintColumns", () => {
   it.for([millis, BigInt(millis), String(millis)])(
     "reads an int8 as each driver returns it: number (SQLite, D1, PGlite), bigint (@effect/sql-pg), string (node-postgres): %s",
     (value) => {

@@ -200,7 +200,7 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-/** Password hashes, so a test can see a first proof clear one (#440). */
+/** Password hashes, so a test can see a first proof clear one. */
 const passwordHashes = MutableHashMap.empty<string, string>();
 const emailPasswordStore = memoryEmailPasswordStore({
   users: MutableHashMap.empty(),
@@ -333,7 +333,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     // Anti-enumeration: succeeds without sending, and stores an undelivered
-    // marker token as it would a link's (#417).
+    // marker token as it would a link's.
     await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -353,7 +353,7 @@ describe("MagicLinkService", () => {
     ).toEqual(["stranger@example.com"]);
   });
 
-  // #417: without a cooldown, the unknown branch must do the store work the
+  // Without a cooldown, the unknown branch must do the store work the
   // known branch does, or its timing reveals the account.
   it("does the same store work to send to a known and an unknown email without a cooldown", async () => {
     const testContext = await makeTestContext();
@@ -436,7 +436,7 @@ describe("MagicLinkService", () => {
     const identifier = findEmailIdentifier("fresh@example.com");
     expect(identifier?.userId).toBe(result.user.id);
     expect(identifier?.verified).toBe(true);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "fresh@example.com", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -478,7 +478,7 @@ describe("MagicLinkService", () => {
     expect(findEmailIdentifier("known@example.com")?.verified).toBe(true);
   });
 
-  it("never signs a look-alike address into the account a loose store matches it to (#602)", async () => {
+  it("never signs a look-alike address into the account a loose store matches it to", async () => {
     const testContext = await makeTestContext();
     addUser({
       id: "user-bob",
@@ -510,7 +510,7 @@ describe("MagicLinkService", () => {
     expect(findEmailIdentifier("bob@example.com")?.userId).toBe("user-bob");
   });
 
-  it("runs beforeAuthenticate with the resolved user before the link is spent (#592)", async () => {
+  it("runs beforeAuthenticate with the resolved user before the link is spent", async () => {
     const testContext = await makeTestContext();
     addUser({
       id: "user-gated",
@@ -545,7 +545,7 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("clears a squatter's password, sessions and credentials on the address's first proof (#440, #694, #704)", async () => {
+  it("clears a squatter's password, sessions and credentials on the address's first proof", async () => {
     const testContext = await makeTestContext();
 
     // A squatter signed up with the address and a password they know, and
@@ -560,7 +560,7 @@ describe("MagicLinkService", () => {
     MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     // The squatter added a phone number they never proved, which would let
-    // them sign in by phone code; the first proof removes it (#704).
+    // them sign in by phone code; the first proof removes it.
     const squatterPhone = makeIdentifier({
       userId: "user-squat",
       type: "phone",
@@ -577,7 +577,7 @@ describe("MagicLinkService", () => {
       attributes: {},
     });
 
-    // The squatter also minted an API key, which the first proof removes (#694).
+    // The squatter also minted an API key, which the first proof removes.
     const apiKeys = memoryApiKeyStore();
     await Effect.runPromise(
       apiKeys.create({
@@ -616,7 +616,7 @@ describe("MagicLinkService", () => {
     expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
   });
 
-  it("keeps the password and sessions of an account whose address is already verified (#440)", async () => {
+  it("keeps the password and sessions of an account whose address is already verified", async () => {
     const testContext = await makeTestContext();
 
     addUser({
@@ -827,7 +827,7 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.has(magicLinkTokens, oldToken)).toBe(false);
   });
 
-  it("applies a 60 s cooldown when resendCooldown is not configured (#682)", async () => {
+  it("applies a 60 s cooldown when resendCooldown is not configured", async () => {
     const testContext = await makeTestContext();
 
     const result = await Effect.runPromise(
@@ -869,7 +869,7 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
   });
 
-  // #415: with sign-up disabled, an unknown email must hit the cooldown exactly
+  // With sign-up disabled, an unknown email must hit the cooldown exactly
   // as a known one does, or the second request's answer reveals the account.
   it("answers a known and an unknown email alike within the cooldown when sign-up is disabled", async () => {
     const testContext = await makeTestContext();

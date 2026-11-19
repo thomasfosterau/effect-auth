@@ -219,8 +219,8 @@ describe("resolveClientIP — hopCount", () => {
 });
 
 // A Web `Request` (what `Http.make` handles) has no socket address: the header's
-// last `hopCount` entries are the ones the trusted proxies wrote (#584).
-describe("resolveClientIP — hopCount without a socket address (#584)", () => {
+// last `hopCount` entries are the ones the trusted proxies wrote.
+describe("resolveClientIP — hopCount without a socket address", () => {
   const oneHop = { hopCount: 1 };
 
   it("takes the header's last entry for an honest client behind one proxy", () => {
@@ -317,7 +317,7 @@ describe("resolveClientIP — trustedProxyCidrs", () => {
   });
 
   it("resolves no address when the first untrusted entry is not an IP literal", () => {
-    // Without validation this keyed the limit on the literal `garbage` (#584).
+    // Without validation this keyed the limit on the literal `garbage`.
     expect(resolveClientIP(req("garbage, 10.0.0.100", "10.0.0.200"), trusted10)).toBeUndefined();
   });
 

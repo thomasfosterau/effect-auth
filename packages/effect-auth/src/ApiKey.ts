@@ -178,7 +178,7 @@ export class ApiKeyStore extends Context.Service<
     readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
     /**
      * Delete every key `userId` holds; a no-op when they hold none. Deleting
-     * a user calls it before the user row goes (#601), and the first proof of
+     * a user calls it before the user row goes, and the first proof of
      * an address calls it too.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
@@ -297,7 +297,7 @@ export interface ApiKeyUpdate {
 /**
  * API key service. Requires `ApiKeyStore`, `RateLimiter` and `UserStore`
  * (a key verifies only while its owner exists and is neither banned nor
- * SCIM-deactivated, #601, #755).
+ * SCIM-deactivated).
  */
 export class ApiKeyService extends Context.Service<
   ApiKeyService,
@@ -316,7 +316,7 @@ export class ApiKeyService extends Context.Service<
      * Verify a plaintext API key: sha256 hash lookup, then the owner check (a
      * key whose `userId` names no user, or a banned or SCIM-deactivated one,
      * answers `Invalid API key`, as an
-     * unknown key does, #601), then enabled / expiry /
+     * unknown key does), then enabled / expiry /
      * remaining-uses / permission checks. On success `remaining` is
      * decremented (when set) and `lastUsedAt` is updated. `requiredPermissions`
      * maps resource → actions; every listed action must be granted on the key.
@@ -329,7 +329,7 @@ export class ApiKeyService extends Context.Service<
     /**
      * Like `verify`, but when the key carries a `rateLimit` configuration a
      * token is consumed from the {@link RateLimiter} bucket keyed
-     * `api-key:${apiKey.id}` once every other check has passed (#730), and
+     * `api-key:${apiKey.id}` once every other check has passed, and
      * before the use is spent. When the limit is exhausted the result is
      * `{ valid: false, error: "Rate limit exceeded", reason: "rate-limited",
      * retryAfter }`. An unknown, disabled, expired, exhausted or
@@ -590,7 +590,7 @@ export const make = (
 
     /**
      * Hash lookup for a plaintext key, `null` when no key matches or its owner
-     * no longer exists (#601) or is banned or SCIM-deactivated (#755): a key outlives its user only when something
+     * no longer exists or is banned or SCIM-deactivated: a key outlives its user only when something
      * deleted the user row without the purge, and it must not authenticate.
      * Lookup is by exact sha256 digest, so the comparison carries no
      * secret-dependent timing.
@@ -603,7 +603,7 @@ export const make = (
               owner === null
                 ? Effect.succeed(null)
                 : // A banned or SCIM-deactivated owner's key is refused as
-                  // unknown, before the per-key limit and the spend (#730, #755).
+                  // unknown, before the per-key limit and the spend.
                   Effect.map(isInGoodStanding(owner), (good) => (good ? apiKey : null)),
             ),
       );
@@ -683,7 +683,7 @@ export const make = (
         // Every other refusal comes first, so a disabled, expired, exhausted
         // or under-permitted key is refused as such whatever its bucket holds
         // (and spends no token): only a key that would otherwise pass is ever
-        // `rate-limited` (#730).
+        // `rate-limited`.
         const checked = yield* checkRecord(apiKey, requiredPermissions);
         if (checked.refused !== undefined) return checked.refused;
 

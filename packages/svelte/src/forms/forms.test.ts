@@ -343,7 +343,7 @@ describe("MagicLinkForm", () => {
     );
   });
 
-  it("sends the captcha token the getter returns at submit time (#698)", async () => {
+  it("sends the captcha token the getter returns at submit time", async () => {
     const calls: unknown[] = [];
     const client = stub({
       magicLink: {
@@ -400,7 +400,7 @@ describe("EmailOtpForm", () => {
       },
     });
 
-  it("sends the captcha token with the code request only (#698)", async () => {
+  it("sends the captcha token with the code request only", async () => {
     const calls: unknown[] = [];
     const { container } = render(EmailOtpForm, {
       props: { captchaToken: () => "captcha-ok" },

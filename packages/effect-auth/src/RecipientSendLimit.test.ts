@@ -1,5 +1,5 @@
 /**
- * The per-recipient send cap (#684) on every send path: the email OTP (each
+ * The per-recipient send cap on every send path: the email OTP (each
  * purpose), the phone OTP (each purpose), the magic link, the password reset
  * and the email-verification resend. Each path refuses the 6th send in the
  * hour, answers a known and an unknown recipient alike, opens again when the
@@ -265,7 +265,7 @@ const entryCount = (world: World, purpose: string, recipient: string): number | 
 const ok5 = ["ok", "ok", "ok", "ok", "ok"];
 const capped = "RateLimitError: Too many messages sent to this recipient; try again later";
 
-describe.each(paths)("recipient send cap (#684): $name", (path) => {
+describe.each(paths)("recipient send cap: $name", (path) => {
   const noCooldown: Build = { resendCooldown: 0 };
 
   it("refuses the 6th send in the window with a RateLimitError carrying retryAfter", async () => {
@@ -396,7 +396,7 @@ const makeResend = (build: Build) =>
 /** A `RateLimitError` under `key`. */
 const limitedUnder = (key: string) => new RateLimitError({ message: "limited", key });
 
-describe("recipient send cap (#684): email verification resend", () => {
+describe("recipient send cap: email verification resend", () => {
   it("refuses the 6th resend, sends nothing then, and opens again after the window", async () => {
     const { result, world } = await run(() =>
       Effect.gen(function* () {

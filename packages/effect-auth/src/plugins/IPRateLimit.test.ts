@@ -120,7 +120,7 @@ describe("IPRateLimitPlugin", () => {
     return Effect.runPromise(
       Effect.gen(function* () {
         // Ten address-less sign-ins: each is refused, none is let through unlimited
-        // or counted under a bucket that other callers share (#389).
+        // or counted under a bucket that other callers share.
         yield* Effect.forEach(
           Arr.makeBy(10, () => undefined),
           (ip) => callSignIn(ip).pipe(Effect.map((result) => expect(result).toBe("limited"))),
@@ -145,7 +145,7 @@ describe("IPRateLimitPlugin", () => {
     Effect.runPromise(
       Effect.gen(function* () {
         // No ClientIP service: there is no address to key on, so each hook is
-        // refused, never let through unlimited (#389).
+        // refused, never let through unlimited.
         const hooks = yield* Hooks;
         yield* Effect.forEach(
           [
@@ -167,7 +167,7 @@ describe("IPRateLimitPlugin", () => {
       }).pipe(Effect.provide(makeHooksLayer())),
     ));
 
-  it("counts passkey attempts, which the account lock exempts, against the IP limit (#698)", () =>
+  it("counts passkey attempts, which the account lock exempts, against the IP limit", () =>
     Effect.runPromise(
       Effect.gen(function* () {
         const hooks = yield* Hooks;

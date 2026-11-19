@@ -285,7 +285,7 @@ describe("OtpSecondFactorService", () => {
     expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
-  it("compares at most maxAttempts of a concurrent burst of guesses (#593)", async () => {
+  it("compares at most maxAttempts of a concurrent burst of guesses", async () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
     // Reads that yield, as a database round trip does: every guess reads the
@@ -321,7 +321,7 @@ describe("OtpSecondFactorService", () => {
     expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
-  it("runs beforeAuthenticate unkeyed for an unknown or expired challenge (#678)", async () => {
+  it("runs beforeAuthenticate unkeyed for an unknown or expired challenge", async () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
     const seen: Array<AuthenticateAttempt> = [];

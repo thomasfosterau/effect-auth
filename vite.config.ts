@@ -43,7 +43,7 @@ export default defineConfig({
 
       // ---- @effect/tsgo preset (type-aware, through oxlint-tsgolint) -------
       // tsconfig.base.json downgrades `unstableApiUsage` to a suggestion: the
-      // HTTP tier is built on `effect/http-api` on purpose (#205), and the
+      // HTTP tier is built on `effect/http-api` on purpose, and the
       // patched `tsc` in `vp run check` owns that diagnostic. The preset would
       // re-report all ~560 call sites as warnings.
       "effecttsgo/unstable-api-usage": "off",
@@ -77,7 +77,7 @@ export default defineConfig({
       ],
       // Core and the Workers-safe adapters run outside Node, so the Node
       // `Buffer` global is off-limits outside the `node:crypto` corral and
-      // Node-only code (#481): use `effect/encoding`, `TextEncoder` and
+      // Node-only code: use `effect/encoding`, `TextEncoder` and
       // `Uint8Array`.
       "eslint/no-restricted-globals": [
         "error",
@@ -96,7 +96,7 @@ export default defineConfig({
 
       // ---- oxlint plugins: adoption allowances ----------------------------
       // Sites that predate the `suspicious` / `perf` categories and the
-      // type-aware rules (#503). Same contract as the ported-code
+      // type-aware rules. Same contract as the ported-code
       // allowances below: each rule sits at `warn` so its sites stay
       // reported, a new site is a defect, and once a count reaches zero the
       // line is deleted so the rule is back at `error`. Counts are all sites
@@ -249,7 +249,7 @@ export default defineConfig({
         // Direct `node:crypto` use is corralled in these three modules. They
         // import `Buffer` from `node:buffer` where they need it, so the
         // global stays banned here too: `nodejs_compat` sets no `Buffer`
-        // global on Workers dated before 2024-09-23 (#748).
+        // global on Workers dated before 2024-09-23.
         files: [
           "packages/effect-auth/src/password/Password.ts",
           "packages/effect-auth/src/TokenHash.ts",
@@ -260,7 +260,7 @@ export default defineConfig({
       {
         // Decoders, guards and sinks over untrusted input take `unknown`: that
         // is the convention, since narrowing the parameter would move the
-        // parse to every caller (#443). Each file's sites: the policy and
+        // parse to every caller. Each file's sites: the policy and
         // template document decoders (`PolicyStore`), the owned-read
         // subquery's raw query value (`OwnedAccess.subquery`), the role-rung
         // guard (`Admin`), the cache-safety predicate over wire attributes
@@ -323,7 +323,7 @@ export default defineConfig({
       // sibling's built `dist/` (`lint.options` above). `check:dist` and
       // `pnpm audit` need registry access; alchemy-postgres's
       // `Postgres.test.ts` skips its cases without `DATABASE_URL`, which
-      // does not yet reach the cached `test:alchemy` task (#766).
+      // does not yet reach the cached `test:alchemy` task.
       ci: {
         command: [
           "vp run build",

@@ -9,7 +9,7 @@ const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise
 
 /**
  * Cheap explicit costs (256 KiB, one pass) for the tests that check behaviour
- * rather than cost, so they don't depend on how fast the machine is (#270).
+ * rather than cost, so they don't depend on how fast the machine is.
  * The profiles stay pinned: by their values below, by the PHC header a
  * default hash carries, and by CostProfiles.test.ts, which checks the costs
  * the hasher hands the KDF without running a derivation.
@@ -178,7 +178,7 @@ describe("multi-algorithm migration", () => {
     const argonHash = (await run(argon2.hash("shared-secret"))).hash;
     // A stored PBKDF2 hash at a low iteration count: `pbkdf2Hasher` takes no
     // cost option and hashes at 600,000 iterations, but `verify` reads the
-    // count from the hash, so this exercises the same routing cheaply (#270).
+    // count from the hash, so this exercises the same routing cheaply.
     const pbkdf2Hash = await legacyPbkdf2Hash("shared-secret", 1000);
 
     // Each hash verifies through the combined verifier by algorithm detection.

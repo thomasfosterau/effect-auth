@@ -165,7 +165,7 @@ const isJson = (response: Response): boolean => {
 // --- JSON:API wire shapes ------------------------------------------------------
 //
 // The resource groups (`sessions`, `identifiers`, `users`) answer JSON:API
-// documents (#205). The client keeps its view types and maps the documents onto
+// documents. The client keeps its view types and maps the documents onto
 // them here, so callers see the same shapes as before.
 
 const JSON_API = "application/vnd.api+json";
@@ -496,7 +496,7 @@ export interface AuthClient {
     readonly revoke: (payload: Http.MultiSessionActionPayload) => Promise<Http.StatusResponse>;
   };
 
-  /** Magic links. `send` takes the captcha token the captcha plugin checks (#678). */
+  /** Magic links. `send` takes the captcha token the captcha plugin checks. */
   readonly magicLink: {
     readonly send: (payload: {
       email: string;
@@ -505,7 +505,7 @@ export interface AuthClient {
     readonly verify: (payload: { token: string }) => Promise<AuthResult>;
   };
 
-  /** Email one-time passcodes. `send` takes the captcha token the captcha plugin checks (#678). */
+  /** Email one-time passcodes. `send` takes the captcha token the captcha plugin checks. */
   readonly emailOtp: {
     readonly send: (payload: {
       email: string;
@@ -517,7 +517,7 @@ export interface AuthClient {
 
   /**
    * SMS one-time passcodes. 404 when unconfigured. `send` takes the captcha
-   * token the captcha plugin checks (#678).
+   * token the captcha plugin checks.
    */
   readonly phoneOtp: {
     readonly send: (payload: {
@@ -644,7 +644,7 @@ export interface AuthClient {
     readonly listInvitations: (organizationId: string) => Promise<Http.InvitationListView>;
     /**
      * The signed-in user's own pending, unexpired invitations
-     * (`GET /invitations`, #706): those addressed to their verified email
+     * (`GET /invitations`): those addressed to their verified email
      * addresses, which {@link acceptInvitation} and {@link rejectInvitation}
      * answer by id without a token. Rejects with a `401` when signed out.
      */
@@ -652,13 +652,13 @@ export interface AuthClient {
     /**
      * Accept an invitation addressed to the signed-in user's email, with the
      * secret `token` the invitation email's link carried. Omit the token to
-     * accept by id when the user's matching email is verified (#673), as an
+     * accept by id when the user's matching email is verified, as an
      * in-app "pending invitations" list does.
      */
     readonly acceptInvitation: (invitationId: string, token?: string) => Promise<Http.MemberView>;
     /**
      * Decline an invitation, with the secret `token` its email carried, or
-     * by id alone when the user's matching email is verified (#673).
+     * by id alone when the user's matching email is verified.
      */
     readonly rejectInvitation: (
       invitationId: string,
@@ -756,7 +756,7 @@ export interface AuthClient {
     ) => Promise<Http.OrganizationDomainView>;
     /**
      * Release, as the operator, any organization's claim on a domain, whatever
-     * its state (`DELETE /admin/organization-domains/:id`, #680): `domainId`
+     * its state (`DELETE /admin/organization-domains/:id`): `domainId`
      * is the claim's own `id`. Resolves once it is gone.
      */
     readonly releaseDomain: (domainId: string) => Promise<void>;

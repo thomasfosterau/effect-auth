@@ -1,5 +1,5 @@
 /**
- * `ownedListFilter` (#190, #221 (d)) against a real PostgreSQL engine (PGlite).
+ * `ownedListFilter` against a real PostgreSQL engine (PGlite).
  *
  * The property the applications engineered for and this renderer exists to
  * keep: **the list filter and the single-row predicate cannot disagree.** Every
@@ -86,7 +86,7 @@ const VIEWERS: ReadonlyArray<AppUser | null> = [
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291). The tables below are this file's own, applied on top; the rows are
+ *. The tables below are this file's own, applied on top; the rows are
  * only read, so nothing needs emptying between tests.
  */
 let client: PGlite;

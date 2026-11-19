@@ -507,7 +507,7 @@ describe("remote functions", () => {
   });
 });
 
-describe("against the real auth handler (#581)", () => {
+describe("against the real auth handler", () => {
   it("relays the token as a cookie only, and locals.auth carries no credential", async () => {
     const server = makeServerFixture();
     const signUp = await server.handler(
@@ -602,7 +602,7 @@ const actionEvent = () => {
   return { cookies, actionInput };
 };
 
-describe("submitCredential against the auth handler (#205)", () => {
+describe("submitCredential against the auth handler", () => {
   const credential = { email: "kit@example.com", password: "correct horse battery staple" };
 
   it("signs up at POST /users and signs in at POST /sessions, relaying the session cookie", async () => {

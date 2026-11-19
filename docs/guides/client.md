@@ -82,7 +82,7 @@ makeSessionAtoms(client, {
 
 Each feature starts with the first subscriber and stops with the last; `onFocus` and `crossTab` degrade to no-ops outside the browser.
 
-Server-side rendering has no hydration story yet: the Atoms start pending in the browser even when the server knew the session (follow-up to #206).
+Server-side rendering has no hydration story yet: the Atoms start pending in the browser even when the server knew the session.
 
 ## 3. Framework binding
 
@@ -145,9 +145,9 @@ const org = await client.organization.create({ name: "Acme", slug: "acme" });
 await client.organization.invite(org.id, { email: "new@acme.test", role: "member" });
 // As the invitee, with the token the invitation email's link carried:
 await client.organization.acceptInvitation(invitationId, token);
-// Or by id alone, once the invitee's matching email is verified (#673):
+// Or by id alone, once the invitee's matching email is verified:
 await client.organization.acceptInvitation(invitationId);
-// The signed-in user's own pending invitations, for an in-app list (#706):
+// The signed-in user's own pending invitations, for an in-app list:
 const mine = await client.organization.listMyInvitations();
 await client.organization.resendInvitation(invitationId); // same id, fresh token and expiry
 
@@ -183,7 +183,7 @@ verified.verificationState; // "verified" | "failed" — retry a failed check
 await client.organization.setActive({ organizationId: org.id }); // recorded on the session
 ```
 
-Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `listMyInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier`. An organization proves a domain only through DNS; manual attestation is the operator's, after checking ownership out of band, through the `isAdmin`-gated `client.admin.attestDomain({ organizationId, domain })` (#598). `listMyInvitations()` lists only the pending, unexpired invitations addressed to the signed-in user's verified email addresses (the ones they may answer by id), never the token or its digest; an unverified address's invitations are answered through the emailed link.
+Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `listMyInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `createRole`, `listRoles`, `updateRole`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. A record the server addresses by id (a membership, a domain claim, a role definition, a team membership) is passed by its own `id`, as the call that created or listed it answers it. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier`. An organization proves a domain only through DNS; manual attestation is the operator's, after checking ownership out of band, through the `isAdmin`-gated `client.admin.attestDomain({ organizationId, domain })`. `listMyInvitations()` lists only the pending, unexpired invitations addressed to the signed-in user's verified email addresses (the ones they may answer by id), never the token or its digest; an unverified address's invitations are answered through the emailed link.
 
 **API keys** — `apiKeys.{create,list,update,delete}` over `/api-keys`. The plaintext key comes back exactly once, from `create` (the server sends it in the create's `meta.key`). Creating one needs the session cookie: over a bearer credential it is `403`.
 

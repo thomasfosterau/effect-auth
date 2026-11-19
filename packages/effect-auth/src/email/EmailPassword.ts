@@ -119,7 +119,7 @@ export interface EmailPasswordConfig {
    * (`POST /users` through `Http.make`), both answers are the same
    * `202 Accepted`: no primary data, only `meta.needsEmailVerification`, the
    * same headers, no `Set-Cookie` and no bearer-token header. Neither names a
-   * user, real or stand-in (#205).
+   * user, real or stand-in.
    *
    * Called directly, the service still answers with the stand-in user: its
    * `email` is the submitted address, trimmed and lower-cased (after the
@@ -165,7 +165,7 @@ export interface SignUpInput {
    * hooks, every key that carries authority or another flow's state: the
    * configured `UserServiceConfig.serverOnlyAttributes` (default `["role"]`)
    * and `SIGN_UP_PROTECTED_ATTRIBUTES` (the ban, SCIM and anonymous-user
-   * keys), whoever supplied them (#580). Set those after the user exists,
+   * keys), whoever supplied them. Set those after the user exists,
    * through their privileged door (`AdminService.setRole` for `role`).
    */
   readonly attributes?: Types.Attributes;
@@ -418,7 +418,7 @@ export const make = (
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
-    // The attributes a sign-up never stores from its input (#580): the
+    // The attributes a sign-up never stores from its input: the
     // configured server-only ones (the `UserService`'s when it is in context
     // as this layer is built, else the default `["role"]`) and the ban, SCIM
     // and anonymous-user keys.
@@ -470,7 +470,7 @@ export const make = (
         Effect.gen(function* () {
           const hooked = yield* hooks.beforeSignUp(rawInput);
           // Strip after the hooks, so no input (the caller's or a hook's)
-          // presets a role, a ban or a SCIM key (#580). Those are set through
+          // presets a role, a ban or a SCIM key. Those are set through
           // their privileged door once the user exists.
           const input: SignUpInput =
             hooked.attributes === undefined

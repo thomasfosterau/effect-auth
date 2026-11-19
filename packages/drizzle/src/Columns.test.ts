@@ -153,7 +153,7 @@ const identifierId = "7a2d4b6c-1e3f-4058-9a7b-2c4d6e8f0a1b";
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291), with the application's own tables applied on top, and emptied before
+ *, with the application's own tables applied on top, and emptied before
  * each test. Each test starts with the one `account` row the others read.
  */
 let client: PGlite;

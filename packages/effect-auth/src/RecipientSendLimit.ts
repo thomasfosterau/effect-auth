@@ -1,11 +1,11 @@
 /**
- * The per-recipient send cap (#684), shared by every flow that sends a code or
+ * The per-recipient send cap, shared by every flow that sends a code or
  * a link to an address the caller names: the email and phone OTPs, the magic
  * link, the password reset and the email-verification resend. Internal: not
  * exported from any barrel.
  *
- * The per-IP limit (#582, #583) bounds what one client sends, and the OTP
- * failure backoff (#590) bounds guessing; neither bounds what one recipient
+ * The per-IP limit bounds what one client sends, and the OTP
+ * failure backoff bounds guessing; neither bounds what one recipient
  * receives from many clients. This counts sends per (recipient, purpose)
  * through the `RateLimiter` over the host's `RateLimitStore`, under the key
  * `recipient-send:<purpose>:<digest>`, where the digest is the `hashToken` of

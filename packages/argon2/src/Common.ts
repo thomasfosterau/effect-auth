@@ -18,7 +18,7 @@ export const ARGON2ID = "argon2id";
 
 /**
  * The verify ceiling: the largest costs `verify` will run for a **stored**
- * hash (#752). Names and defaults match `@thomasfosterau/argon2`'s
+ * hash. Names and defaults match `@thomasfosterau/argon2`'s
  * `verify(password, hash, { maxMemoryKiB, maxIterations, maxParallelism })`.
  */
 export interface Argon2VerifyLimits {

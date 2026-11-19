@@ -329,7 +329,7 @@ const checkDestination = (xml: string, acsUrl: string): Effect.Effect<void, Saml
  * Every non-empty `InResponseTo` in the decoded document, read from the raw
  * XML rather than from node-saml's profile. The Response element's attribute
  * is not covered by an assertion-only signature, and node-saml 5.2 stopped
- * reporting it (`profile.inResponseTo` became the signed value, #532), so a
+ * reporting it (`profile.inResponseTo` became the signed value), so a
  * rewritten attribute would otherwise go unnoticed. Conservative like the
  * pre-flight scans: decoys anywhere in the document count.
  */
@@ -435,7 +435,7 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     // Prefer the signed `InResponseTo` over the Response attribute, and reject
     // a document whose `InResponseTo` values disagree, with the signed one or
     // among themselves. The values come from the raw XML, never from
-    // node-saml's profile, whose `inResponseTo` changed meaning in 5.2 (#532).
+    // node-saml's profile, whose `inResponseTo` changed meaning in 5.2.
     const documentValues = documentInResponseTo(xml);
     const signedValues = confirmation.inResponseTo === undefined ? [] : [confirmation.inResponseTo];
     if (Arr.dedupe([...signedValues, ...documentValues]).length > 1) {

@@ -2,7 +2,7 @@
  * An in-memory {@link IdentifierStore} whose `getByValue` compares the way a
  * MySQL column under the default `utf8mb4_0900_ai_ci` collation does: case-,
  * accent- and width-insensitive. The suites use it to show that the services
- * never act on a record the store matched loosely (#602).
+ * never act on a record the store matched loosely.
  *
  * Internal test support: not exported from `./testing`.
  */

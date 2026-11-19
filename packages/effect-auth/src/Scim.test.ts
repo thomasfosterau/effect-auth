@@ -422,7 +422,7 @@ describe("ScimService — users", () => {
     ).toEqual(["ada.l@acme.test", "ada@acme.test"]);
     expect(resource.emails.filter((e) => e.primary === true)).toHaveLength(1);
     // The store was handed the userName, and only it, to create the user
-    // with (#380); the extra address is claimed afterwards.
+    // with; the extra address is claimed afterwards.
     expect(fx.createdWith).toEqual([
       { type: "email", value: "ada@acme.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -1137,7 +1137,7 @@ describe("HTTP SCIM endpoints", () => {
     expect(authorized.status).toBe(200);
   });
 
-  it("speaks application/scim+json on every route, never a JSON:API document (#205)", async () => {
+  it("speaks application/scim+json on every route, never a JSON:API document", async () => {
     const fx = await makeHttpFixture();
     const { token } = fx;
     const send = (method: string, path: string, body?: Schema.Json) =>

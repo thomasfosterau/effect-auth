@@ -183,7 +183,7 @@ const hangingFetch = (): {
   return { fetch: fetchStub, signal: () => seen };
 };
 
-describe("twilioSmsSender's outbound request (#606)", () => {
+describe("twilioSmsSender's outbound request", () => {
   it.each([300, 301, 302, 303, 307, 308, 399])(
     "fails a %i as an AuthError with only its status, the body unread",
     async (status) => {

@@ -116,7 +116,7 @@ describe("SessionService", () => {
       ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
     );
 
-    // The record carries the stored id; the token travels beside it (#581).
+    // The record carries the stored id; the token travels beside it.
     expect(session.id).toBe(hashToken(token));
     expect(token).toMatch(/^[0-9a-f]{40}$/);
     expect(session.userId).toBe("user1");
@@ -224,7 +224,7 @@ describe("SessionService", () => {
     // The raw token is not a key in the store, only its hash is.
     expect(result.storedKeys).not.toContain(result.token);
     expect(result.storedKeys).toEqual([hashToken(result.token)]);
-    // Validation answers the session under its stored id, never the token (#581).
+    // Validation answers the session under its stored id, never the token.
     expect(result.validated.session.id).toBe(hashToken(result.token));
     expect(result.validated.session.id).toBe(result.session.id);
     expect(result.validated.user.id).toBe("user1");
@@ -581,9 +581,9 @@ const denyHook = () => Effect.fail(new AuthError({ message: "denied by plugin" }
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-// #669: the session input hooks see the stored id (the token's digest), never
+// The session input hooks see the stored id (the token's digest), never
 // the raw token, and are observe-or-deny: what they return is not read back.
-describe("session input hooks (#669)", () => {
+describe("session input hooks", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockSessionStore.sessions);
   });

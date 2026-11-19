@@ -269,7 +269,7 @@ const make = (
         const identifier = yield* lookupIdentifier(identifiers, "username", username);
         const user = identifier === null ? null : yield* users.get(identifier.userId);
         // The same gate as email and password sign-in: lockout, rate limits
-        // and captcha key on the resolved user (#592).
+        // and captcha key on the resolved user.
         yield* hooks.beforeAuthenticate({
           method: "username",
           identifier: { type: "username", value: username },

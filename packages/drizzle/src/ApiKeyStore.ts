@@ -9,7 +9,7 @@
  *   The column is unique, so `getByHash` reads at most one row.
  * - `get` and `getByHash` return `null` on a miss; `delete` of a missing key is
  *   a no-op. `deleteByUserId` deletes every key of one user in one `DELETE`
- *   (core's account deletion calls it before the user row goes, #601).
+ *   (core's account deletion calls it before the user row goes).
  * - Optional fields round-trip as absent: `NULL` reads back as a missing
  *   property, never as `null`. Instants are stored as timestamps and read
  *   back as the epoch milliseconds the contract uses.

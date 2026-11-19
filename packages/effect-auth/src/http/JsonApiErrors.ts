@@ -1,5 +1,5 @@
 /**
- * The JSON:API error documents of the included HTTP API (#205).
+ * The JSON:API error documents of the included HTTP API.
  *
  * Each class is an effect-jsonapi `ApiError.make` declaration: a tagged error
  * on the Effect side whose wire encoding is a JSON:API error document with the

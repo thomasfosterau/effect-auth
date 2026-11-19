@@ -190,7 +190,7 @@ const databaseUrl = Option.getOrUndefined(
   Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
 );
 
-/** `CI` is set (GitHub Actions sets `CI=true`): the real-server case is required, never skipped (#766). */
+/** `CI` is set (GitHub Actions sets `CI=true`): the real-server case is required, never skipped. */
 const underCi = Effect.runSync(Config.Boolean("CI").pipe(Config.withDefault(false)));
 const skipWithoutServer = databaseUrl === undefined && !underCi;
 if (skipWithoutServer) {

@@ -59,7 +59,7 @@ register(Testing.emailOtpStoreConformance(), () => Testing.memoryStores);
 register(Testing.phoneOtpStoreConformance(), () =>
   Layer.succeed(PhoneOtpStore, Testing.memoryPhoneOtpStore()),
 );
-// The per-user deletes (#601). `memoryStores` serves the email-verification
+// The per-user deletes. `memoryStores` serves the email-verification
 // and password-reset stores from `layerKV`.
 register(Testing.oauthAccountStoreConformance(), () => Testing.memoryStores);
 register(Testing.credentialStoreConformance(), () => Testing.memoryStores);

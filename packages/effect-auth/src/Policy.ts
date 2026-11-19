@@ -42,7 +42,7 @@
  *
  * A request whose principal, action or resource has an empty id or an empty
  * type is refused before any policy runs: the decision is a deny with reason
- * `"invalid-request"` (#661, #666). `ReadScope.compile` agrees, compiling
+ * `"invalid-request"`. `ReadScope.compile` agrees, compiling
  * such a principal or action to `ReadScope.deny`. Such a reference also
  * equals nothing in a scope or condition (`Entity.refEquals`), and no type
  * scope (`isType`) matches it, `isType("")` included. So neither `User::""`
@@ -153,7 +153,7 @@ const scopeMatches = (slice: Entity.EntitySlice, scope: Scope, ref: Entity.Entit
     any: () => true,
     eq: (scoped) => Entity.refEquals(scoped.ref, ref),
     in: (scoped) => Entity.entityIn(slice, ref, scoped.ref),
-    // An empty type names no entity (#666): no type scope matches it.
+    // An empty type names no entity: no type scope matches it.
     is: (scoped) => Entity.namesEntity(ref) && ref.type === scoped.entityType,
   });
 
@@ -399,7 +399,7 @@ export interface PolicyOutcome {
  * it, and every policy's outcome (the trace fed to audit hooks and spans).
  *
  * `"invalid-request"` is a request that names an entity with an empty id or
- * type (principal, action or resource; #661, #666): it is denied before any policy is
+ * type (principal, action or resource): it is denied before any policy is
  * evaluated, so `determining` and `outcomes` are empty.
  */
 export interface Decision {
@@ -438,7 +438,7 @@ const combineOutcomes = (outcomes: ReadonlyArray<PolicyOutcome>): Decision => {
 /**
  * Whether a request names only entities: no empty id or type in its
  * principal, action or resource. A request that does not is refused outright
- * (#661, #666), so an empty id or type can never stand in for "no user" and
+ *, so an empty id or type can never stand in for "no user" and
  * still match type-scoped policies.
  */
 export const isWellFormed = (req: PolicyRequest): boolean =>

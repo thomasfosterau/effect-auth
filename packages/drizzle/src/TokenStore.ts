@@ -49,7 +49,7 @@ interface TokenRecord {
 /**
  * The operations of both token contracts: the four they share, and
  * `getLatestByUserId`, which `EmailVerificationStore` adds for its resend
- * cooldown (#682).
+ * cooldown.
  */
 interface TokenStoreShape<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;

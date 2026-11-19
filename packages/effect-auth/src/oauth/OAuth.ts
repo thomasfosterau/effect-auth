@@ -252,7 +252,7 @@ export class OAuthStateStore extends Context.Service<
     /** Record a pending state entry, replacing any entry with the same `state`. */
     readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
     /**
-     * Atomically fetch **and delete** a pending state entry (#685), or `null`
+     * Atomically fetch **and delete** a pending state entry, or `null`
      * when it is unknown or already consumed.
      *
      * This is the replay guard for every OAuth and OIDC SSO callback: the
@@ -855,8 +855,7 @@ export class OAuthService extends Context.Service<
      * the email verified and auto-linking applies to the provider
      * ({@link OAuthServiceOptions.autoLinkByVerifiedEmail},
      * {@link OAuthServiceOptions.trustedProviders}). When the local address is
-     * still unverified, the provider's verification is its first proof (#440,
-     * #671), as in Google One Tap and SSO: the account's password is cleared
+     * still unverified, the provider's verification is its first proof, as in Google One Tap and SSO: the account's password is cleared
      * and its sessions revoked, the address is marked verified, and then the
      * identity is linked and the prover's session minted. Any other match (an
      * unverified provider email, auto-linking off for the provider, a dangling
@@ -944,9 +943,9 @@ export interface OAuthServiceOptions {
    * When a new OAuth account arrives with a provider-verified email that
    * matches an existing user's email, link the account to that user instead of
    * creating a new one. Defaults to `true`. An unverified local address is
-   * proven first (#671): its account's password is cleared and its sessions
+   * proven first: its account's password is cleared and its sessions
    * revoked before the link. Never links when the provider reports the email
-   * unverified (#588); {@link OAuthService.signInWithCallback} refuses that
+   * unverified; {@link OAuthService.signInWithCallback} refuses that
    * match, and every match when auto-linking is off for the provider, with
    * `EmailInUseError`.
    */
@@ -974,9 +973,9 @@ export interface OAuthServiceOptions {
    * Providers that auto-link in {@link OAuthService.signInWithCallback} even
    * when {@link autoLinkByVerifiedEmail} is `false`. The same rule holds for
    * them: the provider must report `email_verified: true`, or the sign-in is
-   * refused with `EmailInUseError` (#588), and an unverified local address is
+   * refused with `EmailInUseError`, and an unverified local address is
    * proven first, clearing its account's password, credentials and sessions
-   * (#671, #694).
+   *.
    * Defaults to `[]`.
    */
   readonly trustedProviders?: readonly string[];
@@ -997,7 +996,7 @@ export interface OAuthServiceOptions {
   readonly updateUserInfoOnLink?: boolean;
 }
 
-/** The conflict an OAuth sign-in over an email another user holds fails with (#588). */
+/** The conflict an OAuth sign-in over an email another user holds fails with. */
 const emailInUse = (email: string) =>
   new EmailInUseError({ message: "This email is already associated with an account", email });
 
@@ -1083,7 +1082,7 @@ export const make = (
     };
 
     /**
-     * Spend a callback's state (#685). It is consumed atomically before
+     * Spend a callback's state. It is consumed atomically before
      * anything else, so a replayed or concurrent callback carrying the same
      * state is refused, and a failed exchange does not leave it usable.
      * Fails when the state is unknown, already used or expired.
@@ -1200,9 +1199,9 @@ export const make = (
      * The existing user a first sign-in with `providerName` auto-links to by its
      * email, or `null` when no identifier holds the address. Links only when
      * the provider verified the address and auto-linking applies to the
-     * provider (#588). An unverified local address may belong to whoever
+     * provider. An unverified local address may belong to whoever
      * signed up with it first, so the provider's verification is its first
-     * proof (#440, #671, #694): `proveAddress` clears the account's password,
+     * proof: `proveAddress` clears the account's password,
      * its other credentials (the link made now is created after) and
      * revokes its sessions before the link, as Google One Tap and SSO do.
      * Anything else (an unverified provider email, auto-linking off for the
@@ -1396,7 +1395,7 @@ export const make = (
         // Properly implement OAuth flow for account linking
         // This follows the same flow as handleCallback but links to existing user
 
-        // Spend the state first (#685): a replayed or concurrent link carrying
+        // Spend the state first: a replayed or concurrent link carrying
         // the same state is refused, and so is a retry after a failure.
         const stateEntry = yield* consumeState(state);
 

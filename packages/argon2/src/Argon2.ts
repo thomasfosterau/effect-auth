@@ -7,7 +7,7 @@
  * It has no native module and no `node:` imports, and it generates no wasm
  * code after startup, so it runs unchanged on Node, Bun, Deno, and edge
  * runtimes such as Cloudflare Workers, which refuse wasm compilation inside a
- * request (#744). Randomness comes from the platform Web Crypto API
+ * request. Randomness comes from the platform Web Crypto API
  * (`globalThis.crypto`), the same source core effect-auth's `PlatformCrypto`
  * layer uses.
  *
@@ -18,7 +18,7 @@
  * package's backend through 0.1.x), by `@node-rs/argon2`, by an older
  * configuration of this package, or by any other Argon2 implementation keep
  * verifying after a parameter change. Those costs are bounded by a verify
- * ceiling (`maxMemoryKiB`, `maxIterations`, `maxParallelism`; #752): a stored
+ * ceiling (`maxMemoryKiB`, `maxIterations`, `maxParallelism`): a stored
  * hash over it is refused before the kernel runs, so it cannot grow the wasm
  * memory or spin for billions of passes.
  *
@@ -72,7 +72,7 @@ const parsePositiveInt = (value: string | undefined): number => {
  * ten-digit `m`, `t` and `p`, a 48-byte salt (64 base64 characters) and a
  * 64-byte digest (86), the crate's maxima. 512 leaves room for any honest
  * hash and keeps a multi-megabyte stored value from being copied into linear
- * memory, which would grow it for the isolate's life (#752).
+ * memory, which would grow it for the isolate's life.
  */
 const MAX_STORED_HASH_LENGTH = 512;
 
@@ -132,7 +132,7 @@ const overCeiling = (detail: string): Effect.Effect<never, HashingError> =>
  * salt and digest are left to the kernel, which reports a malformed or
  * out-of-range one as unverifiable.
  *
- * The costs must also sit within `limits` (#752). The kernel allocates `m`
+ * The costs must also sit within `limits`. The kernel allocates `m`
  * KiB in linear memory, which never shrinks, so a stored hash with a huge `m`
  * would leave the isolate holding it (on Workers, past its 128 MiB, killing
  * it); a huge `t` or `p` would spin. Such a hash is refused here, before the

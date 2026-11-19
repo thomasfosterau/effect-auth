@@ -6,7 +6,7 @@ import * as Auth from "../index.ts";
 import * as PasswordCluster from "./index.ts";
 import * as PasswordReset from "./PasswordReset.ts";
 
-// The `password` barrel's surface (#259): `PasswordReset.make` builds a
+// The `password` barrel's surface: `PasswordReset.make` builds a
 // `PasswordResetService`, so re-exporting it would make `Auth.Password.make`
 // read as the cluster's hasher constructor.
 describe("password barrel", () => {

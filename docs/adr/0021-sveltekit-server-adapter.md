@@ -3,7 +3,7 @@
 [`docs/better-auth-parity.md` §2.4](../better-auth-parity.md#24-deliberate-deferrals-door-open-not-closed)
 deferred framework adapters: "the Web-standard handler plus `HttpApiMiddleware` already mount
 everywhere … framework support is a docs/examples problem". That argument covers _mounting_ the
-handler. #200 found that it doesn't cover what an app needs _around_ the mount point:
+handler. It doesn't cover what an app needs _around_ the mount point:
 
 - Three applications on one shape (SvelteKit on Cloudflare Workers, Effect v4, auth in its own
   internal Worker) each wrote about 170 lines of `hooks.server.ts`. Every copy resolved the session
@@ -20,7 +20,7 @@ come from drift.
 
 ## Decision
 
-The deferral is reversed for SvelteKit (the owner's decision on #200, 2026-10-09).
+The deferral is reversed for SvelteKit.
 
 - **A new server binding, `@thomasfosterau/effect-auth-sveltekit`** (`packages/sveltekit`). It
   depends on the core only, through its session-resolution seam (`SessionResolution`, which already

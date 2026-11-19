@@ -1,5 +1,5 @@
 /**
- * Deleting a user deletes what they hold (#601), end to end: every API and
+ * Deleting a user deletes what they hold, end to end: every API and
  * HTTP route that deletes a user, over the in-memory stores holding one
  * credential of every kind (and a pending magic link and one-time codes for
  * its addresses) for the user being deleted and for a bystander.
@@ -405,7 +405,7 @@ const request = (method: string, path: string, sessionToken: string, body?: Sche
     ...(body === undefined ? {} : { body: toJson(body) }),
   });
 
-describe("every path that deletes a user deletes everything the account holds (#601)", () => {
+describe("every path that deletes a user deletes everything the account holds", () => {
   it("AdminService.removeUser", async () => {
     const { run, outbox } = await harness();
     await run(
@@ -540,7 +540,7 @@ describe("every path that deletes a user deletes everything the account holds (#
   });
 });
 
-describe("a deleted user's address can be claimed again, and nothing sent before reaches the new account (#601)", () => {
+describe("a deleted user's address can be claimed again, and nothing sent before reaches the new account", () => {
   it("the email signs up again; the old reset, verification, magic link and code all fail", async () => {
     const { run, outbox } = await harness();
     await run(

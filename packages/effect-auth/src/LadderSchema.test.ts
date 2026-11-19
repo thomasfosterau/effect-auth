@@ -1,5 +1,5 @@
 /**
- * The ladder's rungs as a Schema (#193): the allowed role set is declared once
+ * The ladder's rungs as a Schema: the allowed role set is declared once
  * and drives the type and the runtime check (and, in
  * `@thomasfosterau/effect-auth-drizzle`, the DDL `CHECK`).
  */

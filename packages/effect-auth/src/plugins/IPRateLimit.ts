@@ -8,7 +8,7 @@
  * redemptions on a `second-factor` bucket, and sign-up and password-reset
  * requests on their own.
  *
- * **Unkeyed attempts count too** (#678). An unknown or expired second-factor
+ * **Unkeyed attempts count too**. An unknown or expired second-factor
  * challenge, magic-link token or passkey challenge names no account, so the
  * per-account plugins let it through; the flow still fires
  * `beforeAuthenticate` for it, and this plugin draws it from the same bucket
@@ -20,7 +20,7 @@
  * `EmailPasswordService.signIn` call from server code), or present but carrying
  * no address, the hook fails with a {@link RateLimitError} (`429` under the HTTP
  * layer). Such a request is never let through unlimited and never counted under
- * a bucket shared with other callers (#389). With this plugin installed, every
+ * a bucket shared with other callers. With this plugin installed, every
  * authentication attempt, sign-up and password-reset request therefore needs
  * an address.
  *
@@ -28,9 +28,9 @@
  * socket address, so under `Http.make` the address comes only from
  * `trustedProxy` (for example `ClientIP.cloudflare`). When the `Hooks` in
  * `services` include this plugin and `make` is given no `trustedProxy`, `make`
- * throws `ClientAddressConfigError` (#389), and `allowMissingClientIp: true`
+ * throws `ClientAddressConfigError`, and `allowMissingClientIp: true`
  * does not stand in for one: with no proxy no request has an address, so the
- * plugin would refuse every one of them (#682).
+ * plugin would refuse every one of them.
  *
  * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
  * infrastructure, so in-memory, SQL, and Redis backends all work.
@@ -138,7 +138,7 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
           const ip = Option.isSome(ipOpt) ? ipOpt.value.ip : undefined;
           // A request with no resolvable address cannot be keyed, and with no
           // ClientIP service there is no address to resolve. Refuse it rather than
-          // skip the limit or count it under a bucket other callers share (#389).
+          // skip the limit or count it under a bucket other callers share.
           if (ip === undefined) {
             return yield* new RateLimitError({
               message: Option.isNone(ipOpt)
@@ -191,7 +191,7 @@ export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
   Layer.effect(
     Hooks,
     // Record the plugin on the Hooks it builds, so Http.make can refuse it at
-    // build when the handler has no client-address source (#389).
+    // build when the handler has no client-address source.
     Effect.gen(function* () {
       return recordClientAddressKeyed(yield* Hooks, "IPRateLimitPlugin");
     }),

@@ -80,7 +80,7 @@ export class MultiFactorStore extends Context.Service<
      * Delete `userId`'s enrolment (secret and backup codes); a no-op when
      * they have none. The record is keyed by user id, so this is the store's
      * per-user delete: deleting a user calls it before the user row goes
-     * (#601), and the first proof of an address calls it too.
+     *, and the first proof of an address calls it too.
      */
     readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
     /**
@@ -127,7 +127,7 @@ export interface PendingMultiFactor {
  *
  * `recordFailedAttempt` counts one code submitted against a challenge and
  * resolves to the count so far, this one included. `MultiFactorService` calls
- * it for a challenge it just read *before* it checks the code (#593), refuses
+ * it for a challenge it just read *before* it checks the code, refuses
  * the code uncompared once the count passes `MultiFactorConfig.maxFailedAttempts`,
  * and deletes the challenge on a wrong code that reaches it; a correct code
  * spends the challenge, so only wrong ones are left counted. It must be a
@@ -434,7 +434,7 @@ export const make = (
 
     /**
      * Count a code against its pending challenge before it is checked
-     * (#593), so concurrent guesses each get their own count and at most
+     *, so concurrent guesses each get their own count and at most
      * `maxFailedAttempts` are ever compared. Past the cap the challenge is
      * deleted and the code refused uncompared, with the method's own
      * wrong-code message. Resolves to the count for {@link rejectCode}.
@@ -471,7 +471,7 @@ export const make = (
     /**
      * Run the `beforeAuthenticate` gate for a second-factor redemption by
      * the challenge's user, before the code is checked, so lockout and rate
-     * limits count attempts per user across challenges (#592).
+     * limits count attempts per user across challenges.
      */
     const authenticate = (userId: string) =>
       hooks.beforeAuthenticate({
@@ -527,7 +527,7 @@ export const make = (
      * challenge deleted at the attempt cap is unknown from then on and must
      * answer as a wrong code does. An unknown or expired token names no
      * user, so it fires the gate unkeyed before failing, for the per-IP
-     * limit (#678).
+     * limit.
      */
     const resolvePending = (pendingToken: string, invalidCode: string) =>
       Effect.gen(function* () {

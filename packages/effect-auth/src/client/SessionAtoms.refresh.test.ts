@@ -202,7 +202,7 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     registryB.dispose();
   });
 
-  it("broadcasts a session named by its digest, never the cookie's token (#581)", async () => {
+  it("broadcasts a session named by its digest, never the cookie's token", async () => {
     const server = makeServerFixture();
     const tokens: string[] = [];
     const base = makeCookieJarFetch(server.handler);

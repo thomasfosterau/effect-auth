@@ -1,5 +1,5 @@
 /**
- * The account-deletion seam (#601): delete a user and everything the account
+ * The account-deletion seam: delete a user and everything the account
  * holds. `UserService.deleteUser` delegates to it through the context.
  *
  * This module holds the service's tag only, and imports no store, so

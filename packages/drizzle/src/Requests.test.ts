@@ -55,7 +55,7 @@ const makeQueryLog = (): QueryLog => {
 
 /**
  * The file's one in-memory Postgres, opened once from the run's migrated
- * template (#291) and shared by the tests.
+ * template and shared by the tests.
  */
 let client: PGlite;
 

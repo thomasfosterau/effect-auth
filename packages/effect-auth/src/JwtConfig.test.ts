@@ -9,7 +9,7 @@ const resolve = (env: Record<string, string>) =>
 
 const issuer = { JWT_ISSUER: "https://issuer.test" };
 
-describe("jwtServiceConfig JWT_ALGORITHM (#443)", () => {
+describe("jwtServiceConfig JWT_ALGORITHM", () => {
   it("reads a supported algorithm", async () => {
     const exit = await resolve({ ...issuer, JWT_ALGORITHM: "EdDSA" });
     expect(Exit.isSuccess(exit) && exit.value.algorithm).toBe("EdDSA");

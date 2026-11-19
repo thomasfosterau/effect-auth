@@ -641,7 +641,7 @@ describe("SQLite / Requests", () => {
   });
 });
 
-// The shared IdentifierStore contract (#182), run against the multi-identifier
+// The shared IdentifierStore contract, run against the multi-identifier
 // store on SQLite as well as on PostgreSQL: a fresh database per test.
 describe("SQLite / IdentifierStore contract", () => {
   let client: Database.Database;

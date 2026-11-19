@@ -14,7 +14,7 @@ import { inject } from "vite-plus/test";
  * `initdb`. The auth schema is already applied; each call is its own instance,
  * so the file's tests share one database only through the instance it holds.
  * `parsers` overrides how a column type is read back (`Stores.test.ts` reads
- * `int8` as other Postgres drivers return it, #766).
+ * `int8` as other Postgres drivers return it).
  */
 export const migratedPglite = async (parsers?: PGliteOptions["parsers"]): Promise<PGlite> =>
   PGlite.create({

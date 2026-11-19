@@ -407,7 +407,7 @@ describe("SsoService", () => {
     );
     expect(emailIdentifier?.userId).toBe(first.user.id);
     expect(emailIdentifier?.verified).toBe(true);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "worker@acme.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -461,7 +461,7 @@ describe("SsoService", () => {
     return { ...stores, signIn };
   };
 
-  it("clears a squatter's password, sessions and credentials when the IdP proves the address (#440, #694)", async () => {
+  it("clears a squatter's password, sessions and credentials when the IdP proves the address", async () => {
     const fx = jitFixture();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
@@ -484,7 +484,7 @@ describe("SsoService", () => {
     );
     MutableHashMap.set(fx.passwordHashes, "user-squat", "squatter-hash");
 
-    // The squatter also minted an API key, which the first proof removes (#694).
+    // The squatter also minted an API key, which the first proof removes.
     const apiKeys = memoryApiKeyStore();
     await Effect.runPromise(
       apiKeys.create({
@@ -1299,7 +1299,7 @@ describe("HTTP SSO endpoints", () => {
     // Anonymous sign-in resolves the IdP URL by email domain.
     const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
     expect(signIn.status).toBe(201);
-    // The single-use state is this caller's alone (#628).
+    // The single-use state is this caller's alone.
     expect(signIn.headers.get("cache-control")).toBe("no-store");
     const { url, state } = await signInUrl(signIn);
     expect(new URL(url).origin).toBe("https://idp.acme.test");
@@ -1319,14 +1319,14 @@ describe("HTTP SSO endpoints", () => {
     );
     expect(callback.status).toBe(200);
     expect(callback.headers.get("set-cookie")).toContain("conduit_session=");
-    // The callback keeps its own JSON answer, never a JSON:API document (#205).
+    // The callback keeps its own JSON answer, never a JSON:API document.
     const callbackBody = await expectSpecJson(callback, "application/json", ["user"]);
     expect(Schema.decodeUnknownSync(UserEmailBody)(callbackBody).user.email).toBe(
       "worker@acme.test",
     );
   });
 
-  it("takes the organization as the relationship, and answers it the same way (#642)", async () => {
+  it("takes the organization as the relationship, and answers it the same way", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
@@ -1454,7 +1454,7 @@ describe("HTTP SSO endpoints — SAML", () => {
     );
     expect(acs.status).toBe(200);
     expect(acs.headers.get("set-cookie")).toContain("conduit_session=");
-    // The IdP posts a form; the answer is plain JSON, never a JSON:API document (#205).
+    // The IdP posts a form; the answer is plain JSON, never a JSON:API document.
     const acsBody = await expectSpecJson(acs, "application/json", ["user"]);
     expect(Schema.decodeUnknownSync(UserEmailBody)(acsBody).user.email).toBe("worker@acme.test");
   });
@@ -1510,7 +1510,7 @@ describe("HTTP SSO endpoints — SAML", () => {
   });
 });
 
-// --- Single-use callback state (#685) ----------------------------------------
+// --- Single-use callback state ----------------------------------------
 
 /** The IdP answers every request (the token endpoint included) with `400`. */
 const withFailingIdp = <A>(thunk: () => Promise<A>): Promise<A> => {
@@ -1549,7 +1549,7 @@ const started = async () => {
   return (code: string) => sso.handleCallback(state, code).pipe(Effect.provide(stores.layer));
 };
 
-describe("SSO callback state is single-use (#685)", () => {
+describe("SSO callback state is single-use", () => {
   it("refuses a callback replayed after it signed the user in", async () => {
     const callback = await started();
     const first = await withFetch(ACME_IDP_ROUTES, () => Effect.runPromise(callback("code-1")));

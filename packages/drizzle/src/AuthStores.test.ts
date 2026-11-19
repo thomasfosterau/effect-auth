@@ -4,12 +4,12 @@
  * (`drizzle-orm/pglite`) and through its Effect driver (`effect-pglite`, the
  * 1.0 line's `drizzle-orm/effect-*` family that `drizzle-orm/effect-postgres`
  * belongs to), so the upsert's `RETURNING` and the unique key-hash index run
- * on a real engine on both seams (#675).
+ * on a real engine on both seams.
  *
  * Then `EmailPasswordStore` over an application's own users table through
  * `defineSchema`: `password_hash` mapped, and a promoted `role` that takes the
  * column's default when sign-up names none; and `UserServiceStore` over the
- * same table, writing to renamed and promoted columns (#728).
+ * same table, writing to renamed and promoted columns.
  */
 
 import type { PGlite } from "@electric-sql/pglite";
@@ -31,7 +31,7 @@ import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291). Every case mints its own ids, so nothing is truncated between them.
+ *. Every case mints its own ids, so nothing is truncated between them.
  */
 let client: PGlite;
 

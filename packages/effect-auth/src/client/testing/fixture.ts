@@ -60,7 +60,7 @@ export interface ServerFixtureOptions {
   readonly multiSession?: { readonly maximumSessions?: number };
   /**
    * The attribute keys a sign-up may set (`Http.make`'s `signUpAttributes`).
-   * Default none: as in production, a sign-up keeps no attribute (#580).
+   * Default none: as in production, a sign-up keeps no attribute.
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
   /**
@@ -526,7 +526,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   );
 
   // The feature set mounts device authorization, whose user-code limit needs a
-  // RateLimiter (Http.make throws without one, #389), so the feature set carries
+  // RateLimiter (Http.make throws without one), so the feature set carries
   // an in-memory one. Device approve/deny are limited to 5 per user code per 15
   // minutes, as in production.
   const rateLimitStore = options.rateLimitStore ?? memoryRateLimitStore();
@@ -534,8 +534,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
 
   // API keys over an in-memory store, with the RateLimiter their per-key
-  // `rateLimit` runs on (#730), and the UserStore that `verify` reads the key's
-  // owner from (#601).
+  // `rateLimit` runs on, and the UserStore that `verify` reads the key's
+  // owner from.
   const apiKeyRecords = MutableHashMap.empty<string, Auth.ApiKey>();
   const apiKeyLayer = Auth.ApiKeyService.layer().pipe(
     Layer.provide(
@@ -547,7 +547,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     ),
   );
 
-  // The same store carries the per-recipient send caps (#684).
+  // The same store carries the per-recipient send caps.
   const services: Layer.Layer<Http.AuthServices> = Layer.mergeAll(
     core,
     options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
@@ -557,7 +557,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   ).pipe(Layer.provide(rateLimitStoreLayer));
 
   // The fixture runs one in-process client, with no client address, so the
-  // per-address IP limit `Http.make` applies by default is off (#583): it would
+  // per-address IP limit `Http.make` applies by default is off: it would
   // refuse every address-less request to a limited endpoint.
   const { handler } = Http.make({
     services,

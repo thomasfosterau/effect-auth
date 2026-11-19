@@ -129,8 +129,7 @@ cancelled unread and its `Location` is never read, so the credentials in
 An injected `fetch` receives the same options. Each request also carries the
 `AbortSignal` of the surrounding fiber, so interrupting the send (an
 `Effect.timeout`, say) cancels the request, and an error body whose stream
-fails mid-read is an `AuthError` too, never a defect. See
-[issue #606](https://github.com/thomasfosterau/effect-auth/issues/606).
+fails mid-read is an `AuthError` too, never a defect.
 
 ## API
 

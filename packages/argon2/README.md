@@ -62,7 +62,7 @@ const custom = argon2HasherLayer({ memoryCost: 32768, timeCost: 3 });
 
 ## Cloudflare Workers
 
-workerd refuses to compile WebAssembly while it serves a request (`CompileError: WebAssembly.compile(): Wasm code generation disallowed by embedder`). Releases up to 0.1.3 used [`hash-wasm`](https://github.com/Daninet/hash-wasm), which compiles lazily on the first hash, so every sign-up and sign-in failed on a deployed Worker ([#744](https://github.com/thomasfosterau/effect-auth/issues/744)). The hasher now compiles its wasm once, at module scope, while the Worker starts; inside a request it only runs it. A test serves the hasher from the real `workerd` binary and hashes and verifies inside `fetch`.
+workerd refuses to compile WebAssembly while it serves a request (`CompileError: WebAssembly.compile(): Wasm code generation disallowed by embedder`). Releases up to 0.1.3 used [`hash-wasm`](https://github.com/Daninet/hash-wasm), which compiles lazily on the first hash, so every sign-up and sign-in failed on a deployed Worker. The hasher now compiles its wasm once, at module scope, while the Worker starts; inside a request it only runs it. A test serves the hasher from the real `workerd` binary and hashes and verifies inside `fetch`.
 
 What a Worker needs:
 

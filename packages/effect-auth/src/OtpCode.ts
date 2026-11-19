@@ -1,9 +1,9 @@
 /**
  * The steps the one-time-code flows (`EmailOtp`, `PhoneOtp`) share around a
  * stored code: their defaults, the send gate (resend cooldown and the failure
- * backoff, #590), and verification. Internal: not exported from any barrel.
+ * backoff), and verification. Internal: not exported from any barrel.
  *
- * ## The failure budget (#590)
+ * ## The failure budget
  *
  * `maxAttempts` bounds the wrong codes one code accepts, but a send replaces
  * the code, so on its own it bounds nothing per address: send, guess, send
@@ -167,7 +167,7 @@ export const makeReject =
  * Verify `code` against the stored record for (address, purpose): expiry,
  * the per-code attempt limit, a constant-time hash comparison, and one-time
  * use on success. Every attempt is counted against the code before the
- * comparison (#593), and one past `maxAttempts` is refused uncompared; a
+ * comparison, and one past `maxAttempts` is refused uncompared; a
  * wrong code is also counted against the pair's failure budget, and a
  * correct one clears the budget.
  */
@@ -198,7 +198,7 @@ export const verifyCode = <P, E>(
       return yield* reject(purpose, "expired");
     }
 
-    // Count the attempt before comparing (#593): each concurrent guess gets
+    // Count the attempt before comparing: each concurrent guess gets
     // its own count from the store, so at most `maxAttempts` guesses are
     // ever compared, however many arrive at once. `null` is a code another
     // request consumed or exhausted since the read.
@@ -212,7 +212,7 @@ export const verifyCode = <P, E>(
     }
 
     if (!constantTimeHashEqual(record.otpHash, hashToken(code))) {
-      // Counted against the pair too, where a resend cannot reset it (#590).
+      // Counted against the pair too, where a resend cannot reset it.
       yield* store.recordFailure(address, purpose, now);
       if (attempts >= maxAttempts) {
         yield* store.delete(address, purpose);

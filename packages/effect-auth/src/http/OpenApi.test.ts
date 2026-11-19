@@ -279,7 +279,7 @@ describe("getOpenApiSpec", () => {
     ]);
   });
 
-  it("declares JSON:API on every resource group and never on the RFC tier (#205)", () => {
+  it("declares JSON:API on every resource group and never on the RFC tier", () => {
     const tiers = mediaTypesByTier(getOpenApiSpec());
     // The RFC tier is exactly the endpoints another specification fixes.
     expect(Arr.sort(Arr.dedupe(tiers.rfc.map(({ path }) => path)), Order.String)).toEqual(

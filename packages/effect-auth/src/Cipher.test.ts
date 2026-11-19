@@ -1,7 +1,7 @@
 /**
- * The JWS primitives against the implementation they replaced (#748).
+ * The JWS primitives against the implementation they replaced.
  *
- * Before #748, ES256 handed `crypto.sign` / `crypto.verify` a `KeyObject`
+ * Previously, ES256 handed `crypto.sign` / `crypto.verify` a `KeyObject`
  * with `dsaEncoding: "ieee-p1363"`, which workerd rejects; it now hands them
  * the PEM or the JWK. `keyObjectSign` / `keyObjectVerify` below are that
  * implementation, kept only as the reference: in Node, tokens cross both
@@ -20,7 +20,7 @@ import * as Cipher from "./Cipher.ts";
 import * as Rfc7515 from "./testing/Rfc7515.ts";
 import * as Types from "./Types.ts";
 
-/** The pre-#748 `signJws`. */
+/** The former `signJws`. */
 const keyObjectSign = (
   algorithm: "ES256" | "EdDSA",
   data: Uint8Array,
@@ -32,7 +32,7 @@ const keyObjectSign = (
     : crypto.sign("sha256", data, { key, dsaEncoding: "ieee-p1363" });
 };
 
-/** The pre-#748 `verifyJws`. */
+/** The former `verifyJws`. */
 const keyObjectVerify = (
   algorithm: Cipher.JwsAlgorithm,
   data: Uint8Array,
@@ -76,7 +76,7 @@ const fixture = (algorithm: "ES256" | "EdDSA", round: number) => ({
   data: enc(`header.payload-${algorithm}-${round}-${"x".repeat(round * 7)}`),
 });
 
-describe("signJws / verifyJws against the KeyObject implementation (#748)", () => {
+describe("signJws / verifyJws against the KeyObject implementation", () => {
   describe.each(["ES256", "EdDSA"] as const)("%s", (algorithm) => {
     it.each(ROUNDS)("round %i: a new signature verifies under the old verifier", (round) => {
       const { publicKeyJwk, privateKeyPem, data } = fixture(algorithm, round);

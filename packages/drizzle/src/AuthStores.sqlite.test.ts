@@ -1,7 +1,7 @@
 /**
  * `EmailPasswordStore`, `ApiKeyStore`, `RateLimitStore` and the token stores on
  * SQLite (better-sqlite3, in-process, a synchronous driver): the same suite as
- * the PostgreSQL file, over `Sqlite.tables` and `migrationStatements()` (#675).
+ * the PostgreSQL file, over `Sqlite.tables` and `migrationStatements()`.
  */
 
 import Database from "better-sqlite3";

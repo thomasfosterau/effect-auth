@@ -106,7 +106,7 @@ export class IdentifierStore extends Context.Service<
      * never under a case- or accent-insensitive collation, since the services
      * hand it values that are already normalized. The services read it through
      * {@link lookupIdentifier}, which treats a record whose `type` or `value`
-     * differs from the one asked for as a miss (#602).
+     * differs from the one asked for as a miss.
      */
     readonly getByValue: (
       type: IdentifierType,
@@ -210,7 +210,7 @@ export class IdentifierStore extends Context.Service<
  * `bob@exämple.com` matches `bob@example.com`) can answer with another
  * address's record. A flow that bound a token to that record's user and sent it
  * to the address the caller typed would hand that account to whoever holds the
- * typed address (#602). This helper treats such an answer as a miss and logs a
+ * typed address. This helper treats such an answer as a miss and logs a
  * warning without either value, so every store, bring-your-own ones included,
  * resolves only the identifier asked for. A flow that delivers to the
  * identifier sends to the returned `identifier.value`, which then equals
@@ -553,7 +553,7 @@ export const resolveUserByIdentifier = <E>(
  * phone OTP, SSO, Google One Tap). Both are `null` when the value is
  * unclaimed. A claimed identifier whose owner no longer exists fails with
  * `onDangling()`, so the flow never creates a second claimant for it. The
- * identifier is read through {@link lookupIdentifier} (#602).
+ * identifier is read through {@link lookupIdentifier}.
  */
 export const findIdentifierOwner = <E, E2>(
   store: typeof IdentifierStore.Service,

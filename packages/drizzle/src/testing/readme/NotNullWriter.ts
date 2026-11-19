@@ -38,5 +38,5 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
 
 import { db, notNullUsers as appUsers } from "./tables.ts";
 
-/** The README's NOT NULL writer (#406). */
+/** The README's NOT NULL writer. */
 export { createUser };

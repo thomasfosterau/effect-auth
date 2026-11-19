@@ -1,6 +1,6 @@
 # Account linking policy
 
-> **Amended (#588).** The policy service, the `SignInResolution` union and the option names below
+> **Amended.** The policy service, the `SignInResolution` union and the option names below
 > were never built. What ships is `OAuthService.signInWithCallback` with auto-linking **on** by
 > default, for verified matches only:
 >
@@ -14,13 +14,13 @@
 > - Every other match (an unverified provider email, an unverified local address, auto-linking off
 >   for the provider, a dangling identifier) fails with `EmailInUseError` (a conflict). Nothing is
 >   linked, no session is minted and the existing account is left as it is. OAuth refuses where
->   magic link, email OTP, Google One Tap and SSO run the first-proof cleanup (`FirstProof.ts`,
->   #440); it never clears a password or revokes sessions.
+>   magic link, email OTP, Google One Tap and SSO run the first-proof cleanup (`FirstProof.ts`);
+>   it never clears a password or revokes sessions.
 > - Known consequence: the real holder of an address that someone signed up with unverified cannot
 >   use OAuth sign-in until that account is removed or the address is proven another way (the
 >   verification link, a magic link or an email OTP, which run the first-proof cleanup).
-> - **Amended again (#671).** The refusal of an unverified local address above is withdrawn: one
->   first-proof policy (#440) now holds for OAuth, Google One Tap and SSO JIT alike. A
+> - **Amended again.** The refusal of an unverified local address above is withdrawn: one
+>   first-proof policy now holds for OAuth, Google One Tap and SSO JIT alike. A
 >   provider-verified email that matches an unverified local address proves that address:
 >   `signInWithCallback` runs `proveAddress` (clearing the account's password and revoking its
 >   sessions, then marking the address verified), links the provider identity and mints the

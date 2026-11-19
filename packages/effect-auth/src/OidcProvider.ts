@@ -203,7 +203,7 @@ export class OidcTokenStore extends Context.Service<
     readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
     /**
      * Delete every access and refresh token issued to `userId`, for every
-     * client. The first proof of the user's email address calls it (#704), so
+     * client. The first proof of the user's email address calls it, so
      * an earlier, unproven holder of the address keeps no OIDC-provider access.
      * No-ops silently when the user holds none.
      */
@@ -238,7 +238,7 @@ export class OidcConsentStore extends Context.Service<
     /**
      * Delete every consent `userId` granted, for every client; a no-op when
      * they granted none. Deleting a user calls it before the user row goes
-     * (#601).
+     *.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
   }
@@ -406,7 +406,7 @@ export interface OidcDynamicRegistrationConfig {
    * `Http.make` and `Http.makeAsync` resolve from their own `trustedProxy`.
    * They fail at startup with `ClientAddressConfigError` when registration is
    * enabled with no `trustedProxy` (`allowMissingClientIp: true` does not
-   * stand in for one, #682).
+   * stand in for one).
    * A registration with no address is refused with `429`, and is never counted
    * under a shared bucket.
    */

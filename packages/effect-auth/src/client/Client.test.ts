@@ -54,7 +54,7 @@ describe("createAuthClient", () => {
     expect(await client.getSession()).toBeNull();
   });
 
-  it("never sees the session token: every body names the session by its digest (#581)", async () => {
+  it("never sees the session token: every body names the session by its digest", async () => {
     const server = makeServerFixture();
     const tokens: string[] = [];
     const bodies: string[] = [];

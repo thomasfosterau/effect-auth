@@ -519,7 +519,7 @@ describe("MultiFactorService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("compares at most maxFailedAttempts of a concurrent burst of codes (#593)", async () => {
+  it("compares at most maxFailedAttempts of a concurrent burst of codes", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-burst", "burst@example.com", "correct-password");
     // Reads that yield, as a database round trip does: every code of the

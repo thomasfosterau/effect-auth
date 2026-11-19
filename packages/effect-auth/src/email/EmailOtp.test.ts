@@ -65,7 +65,7 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
 const users = MutableHashMap.empty<string, User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const otpRecords = MutableHashMap.empty<string, EmailOtpRecord>();
-/** Each email + purpose pair's failure budget (#590). */
+/** Each email + purpose pair's failure budget. */
 const otpFailures = MutableHashMap.empty<string, OtpFailures>();
 const sessions = MutableHashMap.empty<string, Session>();
 const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
@@ -203,7 +203,7 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-/** Password hashes, so a test can see a first proof clear one (#440). */
+/** Password hashes, so a test can see a first proof clear one. */
 const passwordHashes = MutableHashMap.empty<string, string>();
 const emailPasswordStore = memoryEmailPasswordStore({
   users: MutableHashMap.empty(),
@@ -342,7 +342,7 @@ describe("EmailOtpService", () => {
     const identifier = findEmailIdentifier("fresh@example.com");
     expect(identifier?.userId).toBe(result.user.id);
     expect(identifier?.verified).toBe(true);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "fresh@example.com", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -380,7 +380,7 @@ describe("EmailOtpService", () => {
     expect(result.session.userId).toBe("user-known");
   });
 
-  it("runs beforeAuthenticate with the resolved user before the code is checked (#592)", async () => {
+  it("runs beforeAuthenticate with the resolved user before the code is checked", async () => {
     const testContext = await makeTestContext();
     addUser({
       id: "user-gated",
@@ -419,7 +419,7 @@ describe("EmailOtpService", () => {
   });
 
   it.each(["forget-password", "email-verification"] as const)(
-    "check runs beforeAuthenticate for %s before the code is checked (#678)",
+    "check runs beforeAuthenticate for %s before the code is checked",
     async (purpose) => {
       const testContext = await makeTestContext();
       addUser({
@@ -460,7 +460,7 @@ describe("EmailOtpService", () => {
     },
   );
 
-  it("check keys an address with no account on the address alone (#678)", async () => {
+  it("check keys an address with no account on the address alone", async () => {
     const testContext = await makeTestContext();
     const seen: Array<AuthenticateAttempt> = [];
 
@@ -483,7 +483,7 @@ describe("EmailOtpService", () => {
     ]);
   });
 
-  it("send runs beforeSendCode with the captcha token before anything is stored (#678)", async () => {
+  it("send runs beforeSendCode with the captcha token before anything is stored", async () => {
     const testContext = await makeTestContext();
     const attempts: Array<SendCodeAttempt> = [];
     const refusing = makePlugin({
@@ -514,7 +514,7 @@ describe("EmailOtpService", () => {
     expect(sentOtps).toEqual([]);
   });
 
-  it("counts no failure against the email when beforeAuthenticate refuses a wrong code (#590, #592)", async () => {
+  it("counts no failure against the email when beforeAuthenticate refuses a wrong code", async () => {
     const testContext = await makeTestContext();
     const seen: Array<AuthenticateAttempt> = [];
 
@@ -539,7 +539,7 @@ describe("EmailOtpService", () => {
     expect(MutableHashMap.size(otpFailures)).toBe(0);
   });
 
-  it("clears a squatter's password, sessions and credentials on the address's first proof (#440, #694)", async () => {
+  it("clears a squatter's password, sessions and credentials on the address's first proof", async () => {
     const testContext = await makeTestContext();
 
     // A squatter signed up with the address and a password they know, and
@@ -562,7 +562,7 @@ describe("EmailOtpService", () => {
       attributes: {},
     });
 
-    // The squatter also minted an API key, which the first proof removes (#694).
+    // The squatter also minted an API key, which the first proof removes.
     const apiKeys = memoryApiKeyStore();
     await Effect.runPromise(
       apiKeys.create({
@@ -600,7 +600,7 @@ describe("EmailOtpService", () => {
     expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
   });
 
-  it("keeps the password and sessions of an account whose address is already verified (#440)", async () => {
+  it("keeps the password and sessions of an account whose address is already verified", async () => {
     const testContext = await makeTestContext();
 
     addUser({
@@ -739,7 +739,7 @@ describe("EmailOtpService", () => {
     const testContext = await makeTestContext();
 
     // Anti-enumeration: succeeds without sending, and stores an undelivered
-    // marker record as it would a code (#417).
+    // marker record as it would a code.
     await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -816,7 +816,7 @@ describe("EmailOtpService", () => {
     );
 
     // Anti-enumeration: both calls succeed, only the existing user gets a code,
-    // and the missing email holds an undelivered marker record (#417).
+    // and the missing email holds an undelivered marker record.
     expect(sentOtps.length).toBe(1);
     expect(sentOtps[0]?.email).toBe("member@example.com");
     expect(sentOtps[0]?.purpose).toBe("forget-password");
@@ -954,7 +954,7 @@ describe("EmailOtpService", () => {
     expect(MutableHashMap.size(otpRecords)).toBe(2);
   });
 
-  it("should apply a 60 s cooldown by default, and none with resendCooldown: 0 (#590)", async () => {
+  it("should apply a 60 s cooldown by default, and none with resendCooldown: 0", async () => {
     const testContext = await makeTestContext();
 
     const { defaulted, disabled } = await Effect.runPromise(
@@ -987,7 +987,7 @@ describe("EmailOtpService", () => {
     ]);
   });
 
-  // #415: where `send` hides whether the email has an account, an unknown email
+  // Where `send` hides whether the email has an account, an unknown email
   // must hit the cooldown exactly as a known one does, or the second request's
   // answer reveals the account.
   it.each([
@@ -1053,7 +1053,7 @@ describe("EmailOtpService", () => {
     },
   );
 
-  // #415: an unknown email's cooldown marker must never be redeemable. With
+  // An unknown email's cooldown marker must never be redeemable. With
   // `zeroCrypto` the only code `send` can draw is all zeros, so a marker that
   // held an `otpLength`-digit code would match that guess.
   it.each([
@@ -1109,11 +1109,11 @@ describe("EmailOtpService", () => {
   );
 });
 
-// #417: where `send` hides whether the email has an account, verification must
+// Where `send` hides whether the email has an account, verification must
 // answer an email that holds an outstanding code exactly as it answers one
 // that holds a marker record or nothing at all: through wrong codes, the
 // attempt limit and expiry.
-describe("EmailOtpService verification where send hides the account (#417)", () => {
+describe("EmailOtpService verification where send hides the account", () => {
   const maxAttempts = 3;
   const expiresIn = 5 * 60 * 1000;
   const hidden = [
@@ -1371,7 +1371,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
   });
 });
 
-// #590: `maxAttempts` bounds one code, and a resend issues a new one, so the
+// `maxAttempts` bounds one code, and a resend issues a new one, so the
 // wrong codes an address accepts must be bounded across resends: a failure
 // count per email + purpose that a resend never resets, delaying each send
 // once it grows, and cleared only by a successful verification.
@@ -1394,7 +1394,7 @@ const runInContext = <A, E>(
     Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(TestHooks))),
   );
 
-/** The #590 attack against `email` for `horizon` ms, with the default policy. */
+/** The repeated-send attack against `email` for `horizon` ms, with the default policy. */
 const attackEmail = (
   email: string,
   options: {
@@ -1421,7 +1421,7 @@ const attackEmail = (
     });
   });
 
-describe("EmailOtpService failure backoff across resends (#590)", () => {
+describe("EmailOtpService failure backoff across resends", () => {
   const member = "member@example.com";
 
   beforeEach(() => {
@@ -1450,7 +1450,7 @@ describe("EmailOtpService failure backoff across resends (#590)", () => {
   it("bounds the wrong codes at one email in a day, however often it resends", async () => {
     const result = await runInContext(attackEmail(member));
 
-    // Before #590 all 1000 sends issued a code at once: 3000 guesses.
+    // Without the cross-send budget, all 1000 sends issued a code at once: 3000 guesses.
     expect(result).toEqual(defaultBackoffDay);
     expect(Option.getOrUndefined(MutableHashMap.get(otpFailures, `sign-in:${member}`))).toEqual({
       count: 18,
@@ -1492,7 +1492,7 @@ describe("EmailOtpService failure backoff across resends (#590)", () => {
   it("never locks the owner out: after the delay a code signs in and resets the count", async () => {
     const { first, afterSignIn } = await runInContext(
       Effect.gen(function* () {
-        // Six sends inside the hour: the per-recipient cap (#684) is off so
+        // Six sends inside the hour: the per-recipient cap is off so
         // the run measures the backoff alone.
         const service = yield* EmailOtp.make({
           sendVerificationOtp: recordingSend,

@@ -229,7 +229,7 @@ export interface SsoSignInSelector {
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
- * (#440): the account was created by a sign-up that proved nothing about the
+ *: the account was created by a sign-up that proved nothing about the
  * address, so its password may be someone else's.
  */
 export class SsoService extends Context.Service<
@@ -289,7 +289,7 @@ export class SsoService extends Context.Service<
      * find-or-create the user by verified email, optionally add them to the
      * connection's organization, and issue a session.
      *
-     * `state` is single-use (#685): it is spent with
+     * `state` is single-use: it is spent with
      * {@link OAuthStateStore}'s atomic `consume` before the code is
      * exchanged, so a replayed callback (sequential or concurrent, after a
      * success or after a failure) fails with {@link SsoError}.
@@ -320,7 +320,7 @@ export class SsoService extends Context.Service<
      * The `RelayState` is single-use with the request it was minted with: it
      * lives only on that `AuthnRequest` record, which {@link SamlReplayStore}'s
      * atomic `consume` spends, so a replayed response fails with
-     * {@link SsoError} (#685).
+     * {@link SsoError}.
      */
     readonly handleSamlCallback: (
       providerId: string,
@@ -556,7 +556,7 @@ export const make = (
         user = created.user;
       } else if (identifier !== null && !identifier.verified) {
         // The IdP verified the address: clear what an earlier, unproven
-        // sign-up left on the account before promoting it (#440).
+        // sign-up left on the account before promoting it.
         yield* proveAddress(firstProof, identifier);
       }
 
@@ -806,7 +806,7 @@ export const make = (
       ) {
         const stateStore = yield* OAuthStateStore;
 
-        // Spend the state before anything else (#685): `consume` is an atomic
+        // Spend the state before anything else: `consume` is an atomic
         // get-and-delete, so a replayed or concurrent callback carrying the
         // same state is refused, and a failed exchange leaves nothing to retry.
         const stateEntry = yield* stateStore

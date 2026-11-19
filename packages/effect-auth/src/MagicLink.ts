@@ -112,7 +112,7 @@ export interface MagicLinkConfig {
    * Minimum interval (ms) between successive send requests for the same email.
    * When an outstanding token created within this window already exists, `send`
    * fails with {@link Errors.ResendTooSoonError}. Default `60_000` (60 s, as
-   * for the email and phone OTPs, #682); `0` turns it off. Complements the
+   * for the email and phone OTPs); `0` turns it off. Complements the
    * per-address limit on `POST /otp-challenges`. It applies
    * to every email alike, whether or not it has an account, so the error
    * reveals nothing about which emails are registered. With sign-up disabled,
@@ -122,7 +122,7 @@ export interface MagicLinkConfig {
    */
   readonly resendCooldown?: number;
   /**
-   * The per-recipient send cap (#684): at most `max` links to one email
+   * The per-recipient send cap: at most `max` links to one email
    * within `windowMs`, counted through the `RateLimitStore`. Default 5 an
    * hour; `false` turns it off. A send past it fails with
    * {@link Errors.RateLimitError}. It counts every send the resend cooldown
@@ -160,7 +160,7 @@ export interface MagicLinkResult {
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
- * (#440): the account was created by a sign-up that proved nothing about the
+ *: the account was created by a sign-up that proved nothing about the
  * address, so its password may be someone else's.
  */
 export class MagicLinkService extends Context.Service<
@@ -183,12 +183,12 @@ export class MagicLinkService extends Context.Service<
      * as well, so a repeat within the window fails the same way for a known
      * and an unknown email.
      *
-     * Past the `recipientSendLimit` cap (default 5 links per email an hour,
-     * #684), fails with {@link Errors.RateLimitError}, for a known and an
+     * Past the `recipientSendLimit` cap (default 5 links per email an hour),
+     * fails with {@link Errors.RateLimitError}, for a known and an
      * unknown email alike.
      *
      * The `beforeSendCode` hook runs first, before the address is looked up,
-     * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
+     * with `options.captchaToken` (`CaptchaPlugin` guards it).
      */
     readonly send: (
       email: string,
@@ -205,7 +205,7 @@ export class MagicLinkService extends Context.Service<
      *
      * A known token fires `beforeAuthenticate` keyed on its address before
      * it is spent; an empty, unknown or expired one fires it unkeyed (no
-     * `identifier`, #678), so `IPRateLimitPlugin` counts guessed tokens,
+     * `identifier`), so `IPRateLimitPlugin` counts guessed tokens,
      * then fails. `AccountLockoutPlugin` exempts magic links from its lock.
      */
     readonly verify: (
@@ -277,7 +277,7 @@ export const make = (
           return yield* Effect.void;
         }
 
-        // The send gate (captcha, #678) runs before the address is looked
+        // The send gate (captcha) runs before the address is looked
         // up, so it answers alike for every address.
         yield* hooks.beforeSendCode({
           method: "magic-link",
@@ -311,7 +311,7 @@ export const make = (
           }
         }
 
-        // The per-recipient cap (#684), counted whatever the lookup found.
+        // The per-recipient cap, counted whatever the lookup found.
         yield* recipientSendGate("magic-link", email);
 
         // Invalidate outstanding tokens so only the latest link is usable.
@@ -340,7 +340,7 @@ export const make = (
         // inline send would answer it later (and fail it when the vendor does)
         // than an unknown one: the send goes off the response path. With
         // sign-up enabled every address gets one, and a failed send is the
-        // caller's to see (#196).
+        // caller's to see.
         if (disableSignUp) {
           return yield* detached("magic-link", config.sendMagicLink(email, rawToken));
         }
@@ -362,7 +362,7 @@ export const make = (
         const magicLink = rawToken ? yield* store.get(tokenHash) : null;
         if (!magicLink) {
           // Unkeyed: the token names no address, but the per-IP limit still
-          // counts the guess (#678).
+          // counts the guess.
           yield* hooks.beforeAuthenticate({ method: "magic-link" });
           return yield* new Errors.MagicLinkError({
             message: "Invalid or expired magic link token",
@@ -428,7 +428,7 @@ export const make = (
         } else if (identifier !== null && !identifier.verified) {
           // The link proves ownership — promote the identifier to verified,
           // first clearing the password, credentials and sessions an earlier, unproven
-          // sign-up left on the account (#440, #694).
+          // sign-up left on the account.
           yield* proveAddress(firstProof, identifier);
         }
 

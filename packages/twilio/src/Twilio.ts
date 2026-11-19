@@ -70,7 +70,7 @@ const DEFAULT_BASE_URL = "https://api.twilio.com";
 
 /**
  * The most characters of a non-2xx response body an {@link AuthError} keeps
- * (#606), in its `cause` and in its message. A longer body is cut here and
+ *, in its `cause` and in its message. A longer body is cut here and
  * ends in {@link TRUNCATION_MARKER}.
  */
 export const MAX_ERROR_BODY_CHARS = 1024;

@@ -219,7 +219,7 @@ describe("session-binding (sid)", () => {
   });
 });
 
-describe("cache epoch (#194)", () => {
+describe("cache epoch", () => {
   const withVersion = (version: string): ResolvedSessionCache =>
     mustResolve({ enabled: true, secret: Redacted.make(SECRET), version });
 
@@ -238,7 +238,7 @@ describe("cache epoch (#194)", () => {
   });
 });
 
-describe("server-only attributes (#194)", () => {
+describe("server-only attributes", () => {
   const admin: Types.SessionWithUser = {
     session: makeSession(),
     user: makeUser({ attributes: { plan: "pro", role: "admin" } }),
@@ -268,7 +268,7 @@ describe("server-only attributes (#194)", () => {
   });
 });
 
-describe("encryption (#194)", () => {
+describe("encryption", () => {
   const encrypted = mustResolve({
     enabled: true,
     secret: Redacted.make(SECRET),

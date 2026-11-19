@@ -82,7 +82,7 @@ describe("KeyValueStores", () => {
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 600_000,
     };
 
-    it("hands a state out once: consume returns it, then null (#685)", async () => {
+    it("hands a state out once: consume returns it, then null", async () => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* OAuthStateStore;
@@ -98,7 +98,7 @@ describe("KeyValueStores", () => {
       expect(result.unknown).toBeNull();
     });
 
-    it("gives a state to only one of two concurrent consumers (#685)", async () => {
+    it("gives a state to only one of two concurrent consumers", async () => {
       // A backend whose reads suspend, so two unguarded read-then-delete
       // consumes would both read the entry before either removed it.
       const entries = MutableHashMap.empty<string, string>();
@@ -176,7 +176,7 @@ describe("KeyValueStores", () => {
       expect(loaded?.ceremony).toBe("authentication");
     });
 
-    it("reads an entry with no known ceremony as missing (#591)", async () => {
+    it("reads an entry with no known ceremony as missing", async () => {
       // An entry written before ceremonies were recorded, and one with a
       // ceremony the core does not know: neither ceremony may redeem them.
       const expiresAt = DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000;
@@ -395,7 +395,7 @@ describe("KeyValueStores", () => {
       expect(result.replaced?.attempts).toBe(0);
       expect(result.other?.otpHash).toBe("other");
       expect(result.deleted).toBeNull();
-      // A pair with no code counts nothing (#593).
+      // A pair with no code counts nothing.
       expect(result.missingIncrement).toBeNull();
     });
   });
@@ -462,7 +462,7 @@ describe("KeyValueStores", () => {
       expect(outcome.reused._tag).toBe("EmailVerificationError");
     });
 
-    it("holds a resend back for the default 60 s from the newest token, then sends (#682)", async () => {
+    it("holds a resend back for the default 60 s from the newest token, then sends", async () => {
       const sent: Array<string> = [];
       const layer = Layer.mergeAll(
         EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
@@ -603,7 +603,7 @@ describe("KeyValueStores", () => {
       ]);
     });
 
-    it("deletes rate-limit entries whose window and block have both passed (#709)", async () => {
+    it("deletes rate-limit entries whose window and block have both passed", async () => {
       const result = await runPurge(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
@@ -703,7 +703,7 @@ describe("KeyValueStores", () => {
       expect(failure.message).toBe("list failed");
     });
 
-    it("reads the store's own keys when no KeyValueStoreKeys is provided (#521)", async () => {
+    it("reads the store's own keys when no KeyValueStoreKeys is provided", async () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);

@@ -141,7 +141,7 @@ export const memoryUserStore = (
 /**
  * `UserServiceStore` over a {@link MemoryUserTable}: `delete` removes the
  * user row and its password hash, and nothing else, as the contract says;
- * the services that delete an account purge the rest first (#601).
+ * the services that delete an account purge the rest first.
  *
  * @since 0.5.0
  * @category constructors
@@ -417,9 +417,9 @@ export const memoryOtpSecondFactorStore = (
 });
 
 /**
- * `RateLimitStore` over a map, for the per-recipient send caps (#684) and the
+ * `RateLimitStore` over a map, for the per-recipient send caps and the
  * limiters in a test: `increment` starts a new window when there is none or
- * it has expired, as the contract requires (#455). Pass `entries` to read the
+ * it has expired, as the contract requires. Pass `entries` to read the
  * keys a test wrote.
  *
  * @since 0.3.0
@@ -466,7 +466,7 @@ export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeySt
 const codeKey = (address: string, purpose: string): string => `${purpose}:${address}`;
 
 /**
- * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore` (#590)
+ * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore`
  * over a `MutableHashMap` keyed by purpose and address, to spread into an
  * in-memory code store. The budget lives apart from the code records, so
  * replacing or deleting a code leaves it.

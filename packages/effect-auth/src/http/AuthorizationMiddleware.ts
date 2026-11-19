@@ -24,7 +24,7 @@
  *
  * Each guard is named by its first argument, and that name is its TypeScript
  * type: attaching one guard and providing another guard's `.layer` is a compile
- * error, not a missing-service failure at runtime (#320), unless two guards
+ * error, not a missing-service failure at runtime, unless two guards
  * share a name (see Naming on {@link makeAuthorizationMiddleware}).
  *
  * ## Static vs. per-request input

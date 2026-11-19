@@ -117,7 +117,7 @@ export interface GoogleOneTapSignInResult {
  *
  * Promoting an address held unverified to verified first clears the
  * account's password and revokes its sessions, through `EmailPasswordStore`
- * (#440): the account was created by a sign-up that proved nothing about the
+ *: the account was created by a sign-up that proved nothing about the
  * address, so its password may be someone else's.
  */
 export class GoogleOneTapService extends Context.Service<
@@ -279,7 +279,7 @@ export const make = (
           user = created.user;
         } else if (identifier !== null && !identifier.verified) {
           // Google verified the address: clear what an earlier, unproven
-          // sign-up left on the account before promoting it (#440).
+          // sign-up left on the account before promoting it.
           yield* proveAddress(firstProof, identifier);
         }
 

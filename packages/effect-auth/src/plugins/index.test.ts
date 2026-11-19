@@ -5,7 +5,7 @@ import * as Auth from "../index.ts";
 import * as PluginsCluster from "./index.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";
 
-// The `plugins` barrel's surface (#284): the last-login-method plugin's
+// The `plugins` barrel's surface: the last-login-method plugin's
 // constructor used to be a bare `make`, so through the barrel it read as
 // `Auth.Plugins.make`, a constructor for the whole cluster. Every plugin is
 // now a named `<Name>Plugin`.

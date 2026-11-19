@@ -126,7 +126,7 @@ export interface EmailChangeResult {
 /**
  * Self-service account changes: a verification-gated email change and account deletion, each confirmed by a single-use token.
  *
- * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`; account deletion also clears the user-keyed credential stores present where the layer is built (#601).
+ * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`; account deletion also clears the user-keyed credential stores present where the layer is built.
  */
 export class AccountManagementService extends Context.Service<
   AccountManagementService,
@@ -182,7 +182,7 @@ export class AccountManagementService extends Context.Service<
 
     /**
      * Confirm deletion by token: runs `beforeDelete`, then deletes the user
-     * and everything the account holds (#601): every credential and token in
+     * and everything the account holds: every credential and token in
      * the user-keyed stores present where this layer is built (OAuth links,
      * passkeys, API keys, the multi-factor enrolment, trusted devices, OIDC
      * provider tokens and consents, password-reset and email-verification
@@ -469,7 +469,7 @@ const make = (
           }
 
           // Credentials and tokens (this one included), sessions, identifiers,
-          // and the user row last (#601).
+          // and the user row last.
           yield* purgeUser(purgeServices, user.id);
 
           return { userId: user.id };
@@ -480,7 +480,7 @@ const make = (
 
 /**
  * Provides {@link AccountDeletion}: the purge every account deletion runs
- * (#601), over the stores present where it is built. It deletes the user's
+ *, over the stores present where it is built. It deletes the user's
  * credentials and tokens from every user-keyed store in the context (OAuth
  * links, passkeys, API keys, the multi-factor enrolment, trusted devices,
  * OIDC-provider tokens and consents, password-reset, email-verification and

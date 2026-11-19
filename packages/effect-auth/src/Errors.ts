@@ -576,18 +576,18 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  * source: no `trustedProxy`. A Web `Request` never carries a socket address,
  * so without a configured source the limiter could not key the request. It
  * would have to skip the request, share one bucket between callers or refuse
- * every request, and none of these is allowed (#358, #388, #682).
+ * every request, and none of these is allowed.
  *
  * Raised at build time, before any request:
  *
  * - `Http.make` throws it synchronously when `ipRateLimit` (on unless it is
- *   `false`, #583) has no `trustedProxy` (#358), when the `Hooks` in
- *   `services` include `IPRateLimitPlugin` with no `trustedProxy` (#389), and
+ *   `false`) has no `trustedProxy`, when the `Hooks` in
+ *   `services` include `IPRateLimitPlugin` with no `trustedProxy`, and
  *   when the `services` include an `OidcProviderService` with dynamic client
- *   registration enabled and there is no `trustedProxy` (#388, #398).
+ *   registration enabled and there is no `trustedProxy`.
  *   `allowMissingClientIp: true` does not stand in for a `trustedProxy`: with
  *   no proxy no request has an address, so every limited request would be
- *   refused with `429`, and the handler refuses to start instead (#682).
+ *   refused with `429`, and the handler refuses to start instead.
  *
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.
@@ -613,8 +613,8 @@ export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
 
 /**
  * A rate limit is configured with no `RateLimiter` in `services`, so it could not
- * run (#389). The limits are `Http.make`'s `ipRateLimit` (on unless it is
- * `false`, #583), the dynamic client
+ * run. The limits are `Http.make`'s `ipRateLimit` (on unless it is
+ * `false`), the dynamic client
  * registration limit (`POST /register`) and the device user-code limit on
  * approve/deny, which counts as configured whenever a
  * `DeviceAuthorizationService` is in `services` unless it was built with
@@ -633,7 +633,7 @@ export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigE
 
 /**
  * `Http.make` was called with `strict: true`, and the `services` build had not
- * finished when `make` had run it as far as it runs synchronously (#416). The
+ * finished when `make` had run it as far as it runs synchronously. The
  * build waits on asynchronous work (a database connection, `Effect.promise`),
  * on a merged layer that yields, on a forked fiber that yields before it
  * completes a `Deferred` the build awaits, or, when the build fails, on a

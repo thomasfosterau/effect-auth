@@ -48,7 +48,7 @@ export interface EmailVerificationConfig {
    * (`resendVerification`), measured from the newest token for the user.
    * Inside it, `resendVerification` fails with {@link ResendTooSoonError} and
    * sends nothing, leaving the outstanding token usable. Default `60_000`
-   * (60 s, as for the email and phone OTPs and the magic link, #682); `0`
+   * (60 s, as for the email and phone OTPs and the magic link); `0`
    * turns it off. `createVerification` (the first send, at sign-up) is never
    * held back.
    *
@@ -58,7 +58,7 @@ export interface EmailVerificationConfig {
    */
   readonly resendCooldown?: number | undefined;
   /**
-   * The per-recipient send cap (#684): at most `max` resends
+   * The per-recipient send cap: at most `max` resends
    * (`resendVerification`) to one email within `windowMs`, counted through
    * the `RateLimitStore`. Default 5 an hour; `false` turns it off. A resend
    * past it fails with `RateLimitError` and sends nothing. `createVerification`
@@ -107,7 +107,7 @@ export class EmailVerificationStore extends Context.Service<
     /**
      * The user's most recently created verification (greatest `createdAt`),
      * expired or not, or `null` when the user has none. The resend cooldown
-     * reads it (#682).
+     * reads it.
      */
     readonly getLatestByUserId: (
       userId: string,
@@ -175,9 +175,9 @@ export class EmailVerificationService extends Context.Service<
      * Invalidate any outstanding verification tokens for the user and send a
      * fresh one. Fails with {@link ResendTooSoonError}, sending nothing and
      * invalidating nothing, when the user's newest token was created within
-     * `resendCooldown` (default 60 s, #682), and with `RateLimitError`,
+     * `resendCooldown` (default 60 s), and with `RateLimitError`,
      * likewise sending and invalidating nothing, past the `recipientSendLimit`
-     * cap (default 5 resends per email an hour, #684).
+     * cap (default 5 resends per email an hour).
      */
     readonly resendVerification: (
       userId: string,
@@ -344,7 +344,7 @@ export const make = (
         email: string,
         options?: CreateVerificationOptions,
       ) {
-        // Resend cooldown (#682): inside the window the outstanding token
+        // Resend cooldown: inside the window the outstanding token
         // stays usable and nothing is sent.
         const latest = resendCooldown > 0 ? yield* store.getLatestByUserId(userId) : null;
         if (latest !== null) {
@@ -356,7 +356,7 @@ export const make = (
             });
           }
         }
-        // The per-recipient cap (#684): past it the outstanding token stays
+        // The per-recipient cap: past it the outstanding token stays
         // usable and nothing is sent.
         yield* recipientSendGate("email-verification", normalizeEmail(email));
         // Invalidate outstanding tokens so only the latest one is usable.

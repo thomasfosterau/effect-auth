@@ -1,6 +1,6 @@
 /**
  * The user-keyed credential and token stores, and their per-user deletes
- * (#601). Deleting a user (`UserPurge.ts`) clears all of them; the first
+ *. Deleting a user (`UserPurge.ts`) clears all of them; the first
  * proof of an address (`FirstProof.ts`) clears a subset.
  *
  * The stores are optional: a caller resolves them once with

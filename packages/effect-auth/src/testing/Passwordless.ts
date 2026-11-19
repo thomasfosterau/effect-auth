@@ -60,13 +60,13 @@ export const recordingOtpFailures = <P extends string>(
 export const wrongCode = "not-a-code";
 
 /**
- * The verify sequences the #417 tests compare across addresses: wrong codes
+ * The verify sequences the enumeration tests compare across addresses: wrong codes
  * up to and past the attempt limit, and a code tried after expiry.
  */
 export const verifySequences = ["wrong codes", "expired code"] as const;
 export type VerifySequence = (typeof verifySequences)[number];
 
-/** A stored OTP record as the #417 comparison sees it. */
+/** A stored OTP record as the enumeration comparison sees it. */
 export interface RecordState {
   readonly attempts: number;
   /** `expiresAt - createdAt`. */
@@ -130,7 +130,7 @@ const nowMillis = (): number => DateTime.toEpochMillis(DateTime.nowUnsafe());
 export const advanceTime = (ms: number): Effect.Effect<void> =>
   Effect.sync(() => vi.setSystemTime(nowMillis() + ms));
 
-/** A day, in ms: the {@link bruteForce} horizon the #590 tests use. */
+/** A day, in ms: the {@link bruteForce} horizon the repeated-send tests use. */
 export const day = 24 * 60 * 60 * 1000;
 
 /**
@@ -139,7 +139,7 @@ export const day = 24 * 60 * 60 * 1000;
  * codes from one minute, doubling, capped at a day): six codes, 18 guesses.
  * A code spent on its last attempt is deleted, so the cooldown never holds
  * the next send; the backoff does, after 6, 9, 12 and 15 wrong codes: 2, 16,
- * 128 and 1 024 minutes. The next wait would be the one-day cap. Before #590
+ * 128 and 1 024 minutes. The next wait would be the one-day cap. Without the cross-send budget
  * every send issued a fresh code at once, so the run reached `maxSends`.
  */
 export const defaultBackoffDay: BruteForceResult = {
@@ -159,7 +159,7 @@ export interface BruteForceResult {
 }
 
 /**
- * The #590 attack against one address: request a code, spend its
+ * The repeated-send attack against one address: request a code, spend its
  * `maxAttempts` wrong guesses, request again, for as long as `horizon` ms of
  * (faked) time allows or until `maxSends` codes were issued. A send refused
  * with `ResendTooSoonError` is waited out by moving the faked `Date` forward

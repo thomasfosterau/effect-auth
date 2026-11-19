@@ -63,7 +63,7 @@ export const migrate = (
  * `@thomasfosterau/effect-auth/sql`'s `purgeExpired`.
  *
  * Nothing else deletes them, so schedule this from the Worker (a cron
- * trigger's `scheduled` handler) to keep those tables bounded (#420, #686).
+ * trigger's `scheduled` handler) to keep those tables bounded.
  */
 export const purgeExpired = (
   database: QueryDatabaseClient,
