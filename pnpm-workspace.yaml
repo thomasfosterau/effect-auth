@@ -17,7 +17,7 @@ catalog:
   "@enfect/oxlint": ^0.10.0
   # CVE fixes in 5.1.0; never lower the floor below it.
   "@node-saml/node-saml": ^5.2.0
-  "@sveltejs/package": ^3.0.2
+  "@sveltejs/package": ^3.0.3
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/svelte": ^5.4.2
   "@types/better-sqlite3": ^9.6.0
@@ -38,7 +38,7 @@ catalog:
   fallow: 3.43.1
   jsdom: ^31.0.1
   semver: ^7.8.6
-  svelte: ^5.57.3
+  svelte: ^5.58.0
   svelte-check: ^4.7.8
   # Only for @effect/docgen, which spawns it.
   tsx: ^4.23.15
