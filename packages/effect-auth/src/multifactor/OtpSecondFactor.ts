@@ -75,6 +75,16 @@ export class OtpSecondFactorStore extends Context.Service<
     readonly update: (
       record: OtpSecondFactorRecord,
     ) => Effect.Effect<OtpSecondFactorRecord, Errors.AuthError>;
+    /**
+     * Count one attempt against the challenge, atomically, and return the new
+     * `attempts`, or `null` when there is no such challenge (#593). The
+     * service counts before it compares, so two calls must never return the
+     * same number: a get followed by an `update` would let a burst of
+     * concurrent guesses all be compared under `maxAttempts`.
+     */
+    readonly incrementAttempts: (
+      pendingToken: string,
+    ) => Effect.Effect<number | null, Errors.AuthError>;
     readonly delete: (pendingToken: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/OtpSecondFactorStore") {}
@@ -234,15 +244,18 @@ export const make = (
           userId: record.userId,
         });
 
-        if (record.attempts >= maxAttempts) {
+        // Count the attempt before comparing (#593), so concurrent guesses
+        // each get their own count and at most `maxAttempts` are compared.
+        // `null`: a concurrent request spent or exhausted the challenge.
+        const attempts = yield* store.incrementAttempts(pendingToken);
+        if (attempts === null) return yield* invalidOtp();
+        if (attempts > maxAttempts) {
           yield* store.delete(pendingToken);
           return yield* new OtpSecondFactorError({ message: "Too many attempts" });
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
-          const updated = { ...record, attempts: record.attempts + 1 };
-          yield* store.update(updated);
-          if (updated.attempts >= maxAttempts) {
+          if (attempts >= maxAttempts) {
             yield* store.delete(pendingToken);
             return yield* new OtpSecondFactorError({ message: "Too many attempts" });
           }

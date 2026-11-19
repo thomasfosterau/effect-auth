@@ -100,13 +100,16 @@ export interface PendingMultiFactor {
 /**
  * Storage interface for pending multi-factor challenges.
  *
- * `recordFailedAttempt` counts one wrong code against a challenge and
- * resolves to the count so far, this one included; `MultiFactorService` calls
- * it only for a challenge it just read, and deletes the challenge once the
- * count reaches `MultiFactorConfig.maxFailedAttempts`. Make it a single atomic
- * increment where the backend has one (the SQL store's is an
- * `INSERT … ON CONFLICT … DO UPDATE … RETURNING`), so concurrent wrong codes
- * cannot share a count. `delete` removes the challenge and its count.
+ * `recordFailedAttempt` counts one code submitted against a challenge and
+ * resolves to the count so far, this one included. `MultiFactorService` calls
+ * it for a challenge it just read *before* it checks the code (#593), refuses
+ * the code uncompared once the count passes `MultiFactorConfig.maxFailedAttempts`,
+ * and deletes the challenge on a wrong code that reaches it; a correct code
+ * spends the challenge, so only wrong ones are left counted. It must be a
+ * single atomic increment (the SQL store's is an
+ * `INSERT … ON CONFLICT … DO UPDATE … RETURNING`): two concurrent calls must
+ * never resolve to the same count, or a burst of guesses would all be
+ * compared under the cap. `delete` removes the challenge and its count.
  */
 export class PendingMultiFactorStore extends Context.Service<
   PendingMultiFactorStore,
@@ -396,13 +399,37 @@ export const make = (
     const maxFailedAttempts = config.maxFailedAttempts ?? 5;
 
     /**
-     * Count a wrong code against a pending challenge, deleting the challenge
-     * on the attempt that reaches `maxFailedAttempts`, then fail with the
-     * method's own wrong-code message.
+     * Count a code against its pending challenge before it is checked
+     * (#593), so concurrent guesses each get their own count and at most
+     * `maxFailedAttempts` are ever compared. Past the cap the challenge is
+     * deleted and the code refused uncompared, with the method's own
+     * wrong-code message. Resolves to the count for {@link rejectCode}.
      */
-    const rejectCode = (pendingToken: string, message: string) =>
+    const countAttempt = (pendingToken: string, message: string) =>
       Effect.gen(function* () {
         const attempts = yield* pendingStore.recordFailedAttempt(pendingToken);
+        if (attempts > maxFailedAttempts) {
+          yield* pendingStore.delete(pendingToken);
+          return yield* new MultiFactorError({ message });
+        }
+        // A concurrent code may have capped (or spent) the challenge between
+        // the read and the count, and `delete` drops the count with it, so a
+        // count taken after that starts again from 1. The challenge must
+        // still be there; if not, drop the stray count and refuse.
+        if ((yield* pendingStore.get(pendingToken)) === null) {
+          yield* pendingStore.delete(pendingToken);
+          return yield* new MultiFactorError({ message });
+        }
+        return attempts;
+      });
+
+    /**
+     * Refuse a wrong code, deleting the challenge when its count (from
+     * {@link countAttempt}) reached `maxFailedAttempts`, with the method's
+     * own wrong-code message.
+     */
+    const rejectCode = (pendingToken: string, attempts: number, message: string) =>
+      Effect.gen(function* () {
         if (attempts >= maxFailedAttempts) yield* pendingStore.delete(pendingToken);
         return yield* new MultiFactorError({ message });
       });
@@ -627,12 +654,13 @@ export const make = (
             const pending = yield* resolvePending(pendingToken, invalidTotpCode);
             yield* authenticate(pending.userId);
             const record = yield* getVerifiedRecord(pending.userId);
+            const attempts = yield* countAttempt(pendingToken, invalidTotpCode);
 
             const plainSecret =
               cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
             const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
             if (matchedCounter === null) {
-              return yield* rejectCode(pendingToken, invalidTotpCode);
+              return yield* rejectCode(pendingToken, attempts, invalidTotpCode);
             }
 
             // Reject replays: a code whose matched counter has already been used.
@@ -673,10 +701,11 @@ export const make = (
             const pending = yield* resolvePending(pendingToken, invalidBackupCode);
             yield* authenticate(pending.userId);
             const record = yield* getVerifiedRecord(pending.userId);
+            const attempts = yield* countAttempt(pendingToken, invalidBackupCode);
 
             const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
             if (index === -1) {
-              return yield* rejectCode(pendingToken, invalidBackupCode);
+              return yield* rejectCode(pendingToken, attempts, invalidBackupCode);
             }
 
             // Remove the used code (single use)

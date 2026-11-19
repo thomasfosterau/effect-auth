@@ -94,10 +94,17 @@ export class EmailOtpStore extends Context.Service<
       email: string,
       purpose: EmailOtpPurpose,
     ) => Effect.Effect<void, Errors.AuthError>;
+    /**
+     * Count one attempt against the pair's code, atomically, and return the
+     * new count, or `null` when the pair has no code (#593). The service
+     * counts before it compares, so of concurrent guesses each gets its own
+     * count and at most `maxAttempts` are ever compared: two calls must never
+     * return the same number. On SQL this is one `UPDATE … RETURNING`.
+     */
     readonly incrementAttempts: (
       email: string,
       purpose: EmailOtpPurpose,
-    ) => Effect.Effect<number, Errors.AuthError>;
+    ) => Effect.Effect<number | null, Errors.AuthError>;
     /**
      * The pair's failure budget (#590), or `null` when it has none. It is
      * kept apart from the OTP record: `upsert` and `delete` leave it as it

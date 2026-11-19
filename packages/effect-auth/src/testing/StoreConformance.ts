@@ -1034,6 +1034,24 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
         }),
     },
     {
+      name: "concurrent recordFailedAttempt calls on one challenge each get their own count (#593)",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* PendingMultiFactorStore;
+          const pending = makePending(yield* newUser());
+          yield* store.create(pending);
+          const counts = yield* Effect.all(
+            Arr.makeBy(attemptRacers, () => store.recordFailedAttempt(pending.token)),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual(
+            "the counts, sorted",
+            Arr.sort(counts, Order.Number),
+            Arr.makeBy(attemptRacers, (i) => i + 1),
+          );
+        }),
+    },
+    {
       name: "delete removes the challenge and its count, and is a no-op for an unknown token",
       run: (newUser) =>
         Effect.gen(function* () {
@@ -1419,6 +1437,9 @@ export const organizationStoreConformance = <E = never, R = never>(
 // EmailOtpStore / PhoneOtpStore
 // ---------------------------------------------------------------------------
 
+/** Concurrent attempt counts the race cases send at one code or challenge. */
+const attemptRacers = 8;
+
 /** The part of a one-time code store the code suites exercise. */
 interface CodeStoreShape<P, A extends CodeRecord> extends CodeStore<P, A> {
   readonly upsert: (record: A) => Effect.Effect<A, Errors.AuthError>;
@@ -1475,6 +1496,32 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
           yield* store.delete(address, purpose);
           yield* store.delete(spec.newAddress(), purpose);
           yield* expectEqual("get after delete", yield* store.get(address, purpose), null);
+          yield* expectEqual(
+            "incrementAttempts of a pair with no code",
+            yield* store.incrementAttempts(address, purpose),
+            null,
+          );
+        }),
+    },
+    {
+      name: "concurrent incrementAttempts calls on one code each get their own count (#593)",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* spec.store;
+          const address = spec.newAddress();
+          yield* store.upsert(spec.makeRecord(address, purpose));
+          const counts = yield* Effect.all(
+            Arr.makeBy(attemptRacers, () => store.incrementAttempts(address, purpose)),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual(
+            "the counts, sorted",
+            Arr.sort(
+              counts.map((count) => count ?? 0),
+              Order.Number,
+            ),
+            Arr.makeBy(attemptRacers, (i) => i + 1),
+          );
         }),
     },
     {

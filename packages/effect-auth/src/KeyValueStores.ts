@@ -33,12 +33,19 @@
  *
  * ## Atomicity caveat
  *
- * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts` / `recordFailure`,
- * `PendingMultiFactorStore.recordFailedAttempt` / the secondary index updates) are implemented as read-modify-write, which is not
+ * `RateLimitStore.increment` (and `EmailOtpStore.recordFailure` and the
+ * secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
  * the same count and only bump it once. This is acceptable for the KV
- * backend's intended use (best-effort rate limiting / attempt counting);
+ * backend's intended use (best-effort rate limiting);
  * use a backend with atomic counters when strict enforcement is required.
+ *
+ * The per-code attempt counters (`EmailOtpStore.incrementAttempts`,
+ * `PendingMultiFactorStore.recordFailedAttempt`) are the guess limit itself:
+ * the services count before they compare, and two attempts sharing a count
+ * would both be compared (#593). Each runs under a semaphore its store owns,
+ * so one process never hands out a count twice; as with `consume` below,
+ * that does not span processes sharing a backend.
  *
  * `OAuthStateStore.consume` is a security guarantee, not a counter (#685), so
  * it runs its read and remove under a semaphore the store owns: one process
@@ -588,6 +595,7 @@ export const emailOtpStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
+  const attemptsLock = Semaphore.makeUnsafe(1);
   return {
     upsert: (record) =>
       kv
@@ -596,18 +604,18 @@ export const emailOtpStoreKV: Effect.Effect<
     get: (email, purpose) => kv.read<EmailOtpRecord>(emailOtpKey(email, purpose), "emailOtp.get"),
     delete: (email, purpose) => kv.remove(emailOtpKey(email, purpose), "emailOtp.delete"),
     incrementAttempts: (email, purpose) =>
-      Effect.gen(function* () {
-        const record = yield* kv.read<EmailOtpRecord>(
-          emailOtpKey(email, purpose),
-          "emailOtp.incrementAttempts",
-        );
-        if (record == null) {
-          return yield* new Errors.AuthError({ message: "OTP record not found" });
-        }
-        const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
-        yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
-        return updated.attempts;
-      }),
+      attemptsLock.withPermit(
+        Effect.gen(function* () {
+          const record = yield* kv.read<EmailOtpRecord>(
+            emailOtpKey(email, purpose),
+            "emailOtp.incrementAttempts",
+          );
+          if (record == null) return null;
+          const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
+          yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
+          return updated.attempts;
+        }),
+      ),
     getFailures: (email, purpose) =>
       kv.read<OtpFailures>(emailOtpFailuresKey(email, purpose), "emailOtp.getFailures"),
     recordFailure: (email, purpose, at) =>
@@ -922,6 +930,7 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
+  const attemptsLock = Semaphore.makeUnsafe(1);
   const read = (token: string, label: string) =>
     kv.read<StoredPendingMultiFactor>(pendingMultiFactorKey(token), label);
   return {
@@ -942,21 +951,23 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
         }),
       ),
     recordFailedAttempt: (token) =>
-      Effect.gen(function* () {
-        const stored = yield* read(token, "pendingMultiFactor.recordFailedAttempt");
-        if (stored === null) {
-          return yield* new Errors.AuthError({
-            message: "Pending multi-factor challenge not found",
-          });
-        }
-        const failedAttempts = (stored.failedAttempts ?? 0) + 1;
-        yield* kv.write(
-          pendingMultiFactorKey(token),
-          { ...stored, failedAttempts },
-          "pendingMultiFactor.recordFailedAttempt",
-        );
-        return failedAttempts;
-      }),
+      attemptsLock.withPermit(
+        Effect.gen(function* () {
+          const stored = yield* read(token, "pendingMultiFactor.recordFailedAttempt");
+          if (stored === null) {
+            return yield* new Errors.AuthError({
+              message: "Pending multi-factor challenge not found",
+            });
+          }
+          const failedAttempts = (stored.failedAttempts ?? 0) + 1;
+          yield* kv.write(
+            pendingMultiFactorKey(token),
+            { ...stored, failedAttempts },
+            "pendingMultiFactor.recordFailedAttempt",
+          );
+          return failedAttempts;
+        }),
+      ),
     delete: (token) => kv.remove(pendingMultiFactorKey(token), "pendingMultiFactor.delete"),
   } satisfies typeof PendingMultiFactorStore.Service;
 });

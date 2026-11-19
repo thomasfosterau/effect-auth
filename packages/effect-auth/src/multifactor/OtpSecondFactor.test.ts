@@ -43,6 +43,14 @@ const otpStore = {
       return record;
     }),
 
+  incrementAttempts: (pendingToken: string) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(otpRecords, pendingToken));
+      if (record === null) return null;
+      MutableHashMap.set(otpRecords, pendingToken, { ...record, attempts: record.attempts + 1 });
+      return record.attempts + 1;
+    }),
+
   delete: (pendingToken: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(otpRecords, pendingToken);
@@ -274,6 +282,42 @@ describe("OtpSecondFactorService", () => {
     assert(Result.isFailure(r3));
     expect(r3.failure._tag).toBe("OtpSecondFactorError");
     expect(r3.failure.message).toContain("attempts");
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
+  });
+
+  it("compares at most maxAttempts of a concurrent burst of guesses (#593)", async () => {
+    const sentOtps: Array<{ user: User; otp: string }> = [];
+    const testContext = await makeTestContext();
+    // Reads that yield, as a database round trip does: every guess reads the
+    // challenge before any of them is counted.
+    const slowStore: typeof OtpSecondFactorStore.Service = {
+      ...otpStore,
+      get: (token) => Effect.flatMap(otpStore.get(token), (r) => Effect.as(Effect.yieldNow, r)),
+    };
+
+    const outcomes = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            maxAttempts: 3,
+            sendOtp: (user, otp) => Effect.sync(() => void sentOtps.push({ user, otp })),
+          }).pipe(Effect.provideService(OtpSecondFactorStore, slowStore));
+          const challenge = yield* service.begin(testUser);
+          const otp = recorded(sentOtps).otp;
+          const wrong = otp === "000000" ? "000001" : "000000";
+          // Nine wrong guesses, then the right one.
+          const guesses = [...Array.from({ length: 9 }, () => wrong), otp];
+          return yield* Effect.all(
+            guesses.map((guess) => Effect.result(service.verify(challenge.token, guess))),
+            { concurrency: "unbounded" },
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // The right guess came after the cap, so it was refused uncompared.
+    expect(outcomes.filter(Result.isSuccess)).toHaveLength(0);
     expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 

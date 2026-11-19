@@ -298,15 +298,27 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
               });
             }
 
-            // Atomic increment-or-reset: concurrent attempts each count.
-            yield* guarded(
+            // Count the attempt, atomically, and act on the count the store
+            // returns (#593): the `get` above is a cheap early refusal, but
+            // concurrent attempts all pass it before any of them counts, so
+            // only the returned record decides. The threshold handed over is
+            // one past the cap, so attempts 1..maxAttempts proceed and the
+            // first beyond it sets the lock and is refused; of a burst, at most
+            // `maxAttempts` ever reach the credential check.
+            const counted = yield* guarded(
               store.registerAttempt(counter.key, {
-                maxAttempts: counter.maxAttempts,
+                maxAttempts: counter.maxAttempts + 1,
                 lockoutDurationMs,
                 now,
               }),
               { failures: 0 },
             );
+            if (counted.lockedUntil !== undefined && counted.lockedUntil > now) {
+              return yield* new Errors.AccountLockedError({
+                message: counter.message,
+                retryAfter: Duration.millis(counted.lockedUntil - now),
+              });
+            }
 
             return attempt;
           }),

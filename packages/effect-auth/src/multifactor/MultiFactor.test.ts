@@ -516,6 +516,42 @@ describe("MultiFactorService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
+  it("compares at most maxFailedAttempts of a concurrent burst of codes (#593)", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-2fa-burst", "burst@example.com", "correct-password");
+    // Reads that yield, as a database round trip does: every code of the
+    // burst reads the challenge before any of them is counted.
+    const slowPending: typeof PendingMultiFactorStore.Service = {
+      ...pendingMultiFactorStore,
+      get: (token) =>
+        Effect.flatMap(pendingMultiFactorStore.get(token), (r) => Effect.as(Effect.yieldNow, r)),
+    };
+
+    const outcomes = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          }).pipe(Effect.provideService(PendingMultiFactorStore, slowPending));
+          const { backupCodes } = yield* service.enable("user-2fa-burst", "correct-password");
+          const challenge = yield* service.beginChallenge("user-2fa-burst");
+          // Nine wrong codes, then a right one, past the default cap of 5.
+          const codes = [...Arr.replicate("wrong-backup", 9), backupCodes[0] ?? ""];
+          return yield* Effect.all(
+            codes.map((code) => Effect.result(service.verifyBackupCode(challenge.token, code))),
+            { concurrency: "unbounded" },
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(outcomes.filter(Result.isSuccess)).toHaveLength(0);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+    expect(MutableHashMap.size(pendingChallenges)).toBe(0);
+  });
+
   it("counts TOTP and backup codes against one cap, configurable per service", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-cap2", "cap2@example.com", "correct-password");
