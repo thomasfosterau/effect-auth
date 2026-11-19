@@ -16,14 +16,6 @@
   "type": "module",
   "scripts": {
     "prepare": "vp config --no-agent && effect-tsgo patch --typescript --oxlint",
-    "build": "vp run -r build",
-    "check": "vp run -r check && vp run check:scripts",
-    "docs": "vp run --filter @thomasfosterau/effect-auth docs",
-    "check:dist": "vpx scripts/check-dist.ts",
-    "check:scripts": "tsc -p tsconfig.scripts.json",
-    "fallow": "fallow --summary",
-    "fallow:audit": "fallow audit",
-    "changeset": "changeset",
     "version": "changeset version && pnpm install --lockfile-only",
     "release": "pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks && changeset tag"
   },
@@ -46,9 +38,11 @@
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
-  "engines": {
-    "node": ">=22",
-    "pnpm": ">=11"
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "lts"
+    }
   },
   "packageManager": "pnpm@11.11.0"
 }

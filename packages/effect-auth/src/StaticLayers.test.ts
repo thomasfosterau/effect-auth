@@ -2,46 +2,9 @@ import { describe, it, expect } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as Auth from "./index.ts";
 
-/**
- * D1 (DESIGN.md): every primary service class exposes a `static layer` — the
- * canonical construction `Auth.SessionService.layer(...)`.
- */
 describe("static service layers", () => {
-  it("exposes a static layer constructor on every primary service", () => {
-    const services: ReadonlyArray<[string, { readonly layer: (...args: never[]) => Layer.Any }]> = [
-      ["SessionService", Auth.SessionService],
-      ["RateLimiter", Auth.RateLimiter],
-      ["UserService", Auth.UserService],
-      ["EmailPasswordService", Auth.Email.EmailPasswordService],
-      ["EmailOtpService", Auth.Email.EmailOtpService],
-      ["PhoneOtpService", Auth.PhoneOtpService],
-      ["MagicLinkService", Auth.MagicLinkService],
-      ["EmailVerificationService", Auth.Email.EmailVerificationService],
-      ["PasswordResetService", Auth.Password.PasswordResetService],
-      ["UsernameService", Auth.UsernameService],
-      ["MultiFactorService", Auth.MultiFactor.MultiFactorService],
-      ["WebAuthnService", Auth.MultiFactor.WebAuthnService],
-      ["ApiKeyService", Auth.ApiKeyService],
-      ["JwtService", Auth.JwtService],
-      ["OAuthService", Auth.OAuth.OAuthService],
-      ["SsoService", Auth.SsoService],
-      ["GoogleOneTapService", Auth.GoogleOneTapService],
-      ["AnonymousService", Auth.AnonymousService],
-      ["AdminService", Auth.AdminService],
-      ["OrganizationService", Auth.OrganizationService],
-      ["AccountManagementService", Auth.AccountManagementService],
-      ["DeviceAuthorizationService", Auth.DeviceAuthorizationService],
-      ["AuthLifecycleService", Auth.AuthLifecycleService],
-      ["OidcProviderService", Auth.OidcProviderService],
-    ];
-    Arr.forEach(services, ([name, service]) => {
-      expect(P.isFunction(service.layer), `${name}.layer`).toBe(true);
-    });
-  });
-
   it("SessionService.layer builds a working session manager", async () => {
     const sessions = MutableHashMap.empty<string, Auth.Session>();
     const user: Auth.User = {

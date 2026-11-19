@@ -51,6 +51,6 @@
     "effect": "catalog:peers"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+    "node": ">=22"
   }
 }

@@ -14,7 +14,7 @@ pnpm add @thomasfosterau/effect-auth effect
 
 ### Runtimes
 
-The core runs on Node.js (`^20.19.0 || ^22.18.0 || >=24.11.0`) and on Cloudflare Workers; `/saml` is Node-only. Password hashing, token digests, AES-256-GCM, HMAC and JWS signing take a few primitives from `node:crypto` (and `Buffer` from `node:buffer`), so a Worker needs:
+The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-only. Password hashing, token digests, AES-256-GCM, HMAC and JWS signing take a few primitives from `node:crypto` (and `Buffer` from `node:buffer`), so a Worker needs:
 
 - the **`nodejs_compat`** compatibility flag (on by default from compatibility date 2026-08-04), and
 - a **compatibility date of 2023-01-01 or later**.

@@ -215,7 +215,7 @@ export default defineConfig({
       },
       {
         // Code that imports nothing from `effect` at runtime: the Svelte
-        // binding (`effect` types only, AGENTS.md), the browser client's runtime is
+        // binding (`effect` types only), the browser client's runtime is
         // plain `fetch` with no Effect in the bundle (`client/Client.ts`), and
         // `./ladder` imports nothing at all because browser bundles load it
         // (`ModuleGraph.test.ts`). The
@@ -297,33 +297,40 @@ export default defineConfig({
         rules: { "effect/effect-run-in-body": "off" },
       },
     ],
-    // Type-aware rules run through oxlint-tsgolint (bundled with Vite+,
-    // patched by `@effect/tsgo`). They resolve each workspace import through
-    // its `exports`, i.e. the sibling's built `dist/`, so `vp check` runs after
-    // `vp run build` (CI's order; AGENTS.md, Verification): on an unbuilt tree
-    // every sibling import types as an error and the `effecttsgo` rules report
-    // false `missing-effect-context` errors.
-    //
-    // `typeCheck` stays off. Type checking is owned by each package's `check`
-    // task (Effect-patched tsc / svelte-check against both
-    // tsconfig.json and tsconfig.test.json). tsgolint reads only each file's
-    // nearest tsconfig.json, which here leaves out the colocated tests and the
-    // per-package vite.config.ts: measured on a built tree it reported 70+
-    // false errors (`toSorted` outside the
-    // test `lib`, the task-config types).
+    // Type-aware rules resolve siblings through their built `dist/`, so run
+    // `vp check` after `vp run build`. `typeCheck` stays off: `vp run check`
+    // owns type checking, and tsgolint (which reads only the nearest
+    // tsconfig.json) misreports the colocated tests.
     options: { typeAware: true, typeCheck: false },
   },
   run: {
     tasks: {
-      // Everything CI checks, in CI's order, as one fail-fast chain: the
-      // single `ci` workflow (.github/workflows/ci.yml) runs only `vp run ci`
-      // after `vp install --frozen-lockfile`. AGENTS.md (Verification) lists
-      // the same gates, steps 1–8, then the alchemy runtime suites. Build
-      // first: type-aware lint resolves each workspace import through the
-      // sibling's built `dist/` (`lint.options` above). `check:dist` and
-      // `pnpm audit` need registry access; alchemy-postgres's
-      // `Postgres.test.ts` skips its cases without `DATABASE_URL`, which
-      // does not yet reach the cached `test:alchemy` task.
+      build: { command: "vp run -r build" },
+      check: {
+        command: "tsc -p tsconfig.scripts.json",
+        dependsOn: [
+          "@thomasfosterau/effect-auth#check",
+          "@thomasfosterau/effect-auth-alchemy-cloudflare#check",
+          "@thomasfosterau/effect-auth-alchemy-postgres#check",
+          "@thomasfosterau/effect-auth-argon2#check",
+          "@thomasfosterau/effect-auth-drizzle#check",
+          "@thomasfosterau/effect-auth-resend#check",
+          "@thomasfosterau/effect-auth-svelte#check",
+          "@thomasfosterau/effect-auth-sveltekit#check",
+          "@thomasfosterau/effect-auth-twilio#check",
+        ],
+      },
+      docs: { command: "vp run --filter @thomasfosterau/effect-auth docs" },
+      "check:dist": { command: "vpx scripts/check-dist.ts", cache: false },
+      fallow: { command: "vp exec fallow --summary", cache: false },
+      // Run by the pre-commit hook; fallow scores complexity from the coverage map.
+      "fallow:audit": {
+        command: "vp exec fallow audit --base origin/trunk --quiet",
+        dependsOn: ["test:coverage"],
+        cache: false,
+      },
+      // Everything CI checks, fail-fast. Build first: lint reads siblings'
+      // `dist/`. `check:dist` and `pnpm audit` need the network.
       ci: {
         command: [
           "vp run build",
@@ -338,21 +345,9 @@ export default defineConfig({
         ].join(" && "),
         cache: false,
       },
-      // Every package's unit suite under one Istanbul coverage map
-      // (`coverage/coverage-final.json`), which `fallow audit` reads for exact
-      // per-function CRAP scores (`health.coverage` in .fallowrc.json).
-      // Without it fallow estimates every function as uncovered, and any
-      // function with cyclomatic complexity ≥ 5 fails the gate on its own.
-      // Run it before `fallow audit` (the PreToolUse fallow gate never
-      // refreshes the map).
-      //
-      // One vitest process runs every package's suite (`test.projects`
-      // below), so no `{ from: "dependencies" }` edge builds the siblings a
-      // suite imports through `exports` (→ `dist/`): every package's `build`
-      // is named explicitly (cached, so a warm tree pays nothing), and a new
-      // package adds itself here. The alchemy runtime suites (and the Postgres
-      // suite that needs a server) stay in their own `test:alchemy` tasks, as
-      // in `test:unit`.
+      // One Istanbul map over every package's suite, for `fallow audit`. One
+      // vitest process runs them all, so each package's `build` is listed
+      // explicitly (suites import siblings through `dist/`).
       "test:coverage": {
         command:
           "vp test run --coverage --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude 'packages/alchemy-*/src/AuthSchema.test.ts' --exclude packages/alchemy-postgres/src/Postgres.test.ts",

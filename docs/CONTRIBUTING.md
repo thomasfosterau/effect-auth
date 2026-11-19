@@ -13,7 +13,7 @@ effect-auth is a pnpm workspace of nine `@thomasfosterau/effect-auth*` packages 
 
 ## Toolchain
 
-[Vite+](https://viteplus.dev) (`vp`) manages Node, pnpm and the tools; use it rather than `node`, `npx` or bare `pnpm`. `vp install` installs dependencies and the git hooks (pre-commit formats and lints staged files), and its `prepare` step patches the native `tsc` and oxlint with `@effect/tsgo`.
+[Vite+](https://viteplus.dev) (`vp`) manages Node, pnpm and the tools; use it rather than `node`, `npx` or bare `pnpm`. `vp install` installs dependencies and the git hooks (pre-commit formats and lints staged files, then runs `vp run fallow:audit`), and its `prepare` step patches the native `tsc` and oxlint with `@effect/tsgo`.
 
 | Command                | What it does                                                                                                                                |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -28,11 +28,11 @@ effect-auth is a pnpm workspace of nine `@thomasfosterau/effect-auth*` packages 
 
 The alchemy runtime suites (`test:alchemy`) run last in `vp run ci`; alchemy-postgres's server cases need `DATABASE_URL`.
 
-[Fallow](https://github.com/fallow-rs/fallow) checks dead code, duplication, complexity and the package boundaries (`.fallowrc.json`). Use it to guide your work (`vp run test:coverage`, then `vp exec fallow audit --base origin/trunk`); its findings are advice, not law.
+[Fallow](https://github.com/fallow-rs/fallow) checks dead code, duplication, complexity and the package boundaries (`.fallowrc.json`). `vp run fallow:audit` audits your change against `origin/trunk` (after a coverage run, which it reads); `vp run fallow` summarises the whole tree. Use it to guide your work; its findings are advice, not law.
 
 ## Before pushing
 
-Run `vp run ci` (CI runs exactly that, on Node LTS and latest), then the fallow audit above. If a gate can't run where you are, say which and why in the PR body.
+Run `vp run ci` (CI runs exactly that, on Node LTS and latest). The pre-commit hook has already run the fallow audit. If a gate can't run where you are, say which and why in the PR body.
 
 ## Coding guidelines
 

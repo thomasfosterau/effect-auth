@@ -21,4 +21,4 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 
 ## Fallow
 
-Before committing, run `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk --format json --quiet --explain --gate-marker agent`. Fix a `fail` verdict; only findings your change introduces count. Useful otherwise: `vp exec fallow dead-code --trace <file>:<export>`, `vp exec fallow guard <files>`, `vp exec fallow explain <issue-type>`.
+The pre-commit hook runs `vp run fallow:audit` (a full coverage run, then the audit); fix a `fail` verdict rather than skipping the hook. Only findings your change introduces count. Useful otherwise: `vp exec fallow dead-code --trace <file>:<export>`, `vp exec fallow guard <files>`, `vp exec fallow explain <issue-type>`.

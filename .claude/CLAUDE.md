@@ -2,7 +2,7 @@
 
 Read the README, docs/CONTRIBUTING.md and AGENTS.md (imported below). This file holds only what is specific to Claude Code.
 
-- `.claude/settings.json` runs `vp fmt --write` on every file you edit, and blocks `git commit` / `git push` when `fallow audit --base origin/trunk` fails. The audit reads `coverage/coverage-final.json`, so run `vp run test:coverage` first.
+- `.claude/settings.json` runs `vp fmt --write` on every file you edit.
 - Work in git worktrees under `.claude/worktrees/`, one per branch; run `vp install` in a new one.
 - Each package's `CLAUDE.md` imports its `AGENTS.md`.
 
