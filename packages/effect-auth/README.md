@@ -115,6 +115,7 @@ The two `before*` session hooks are observe-or-deny. A plugin refuses the valida
 - **Sign-in methods:** email and password, username (case-insensitive uniqueness), magic link, email OTP, phone (SMS) OTP with a pluggable E.164 normalizer, anonymous guests (`isAnonymousUser`, upgraded on sign-up through a `linkAccount` callback), Google One Tap, the RFC 8628 device authorization grant, passkeys (WebAuthn). Every password-based method honours the multi-factor gate.
 - **Multi-factor:** TOTP with backup codes integrated into sign-in, an OTP second factor, and the RFC 6238 / RFC 4226 primitives.
 - **OAuth 2.0 social login:** 20 provider presets (Google, GitHub, Discord, Microsoft, Apple, and more) plus custom providers, PKCE, and a complete sign-in flow with verified-email account linking.
+- **Cloudflare Access:** verify the identity Access forwards (`Cf-Access-Jwt-Assertion`, optionally the `CF_Authorization` cookie) against the team's keys, and run as the matching user (see [Cloudflare Access](#cloudflare-access)).
 - **Enterprise:** OIDC and SAML SSO with per-organization connections and JIT provisioning (the SAML XML verification is the Node-only [`/saml` subpath](#saml-saml)), SCIM 2.0, and an OIDC provider with RFC 7591 dynamic client registration for MCP clients.
 - **Account management:** verification-gated email change and self-service account deletion (single-use tokens, a `beforeDelete` cleanup hook, and every credential, session and identifier of the account deleted with it; see [Deleting a user](#deleting-a-user)).
 - **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role (no member grants, defines, redefines or deletes a role, or acts on a member, beyond the permissions their own role carries, nor edits their own role; the default `owner` role is `*:*`), verified email domains with opt-in JIT provisioning; admin ban and impersonation.
@@ -605,6 +606,40 @@ export { OAuthLive, begin, callback, link, refresh };
 **The callback `state` is single-use** (#685). `handleCallback`, `signInWithCallback`, `linkAccount` and the OIDC SSO callback (`SsoService.handleCallback`, `POST /sso/callback`) spend it with `OAuthStateStore.consume`, an atomic get-and-delete, before they exchange the code. A replayed callback fails with `OAuthStateNotFoundError` (an `SsoError` for SSO, `400` over HTTP), whether the first use succeeded or failed, and of two concurrent callbacks carrying the same state only one gets past it. A store you write yourself must implement `consume` as one atomic operation (`DELETE … RETURNING`, a compare-and-swap, Redis `GETDEL`); `/sql`'s store is one `DELETE … RETURNING`. `OAuthStateStoreKV` serializes `consume` within its process only, since a `KeyValueStore` has no get-and-delete: behind several instances sharing one backend, use `/sql` or a store with a native atomic consume. The SAML `RelayState` is single-use the same way: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends.
 
 Account linking on `signInWithCallback`: when a provider identity is new and its email matches an existing user, the account is linked to that user only if the provider reports `email_verified: true` and auto-linking applies to the provider (`autoLinkByVerifiedEmail`, default `true`, or the provider is in `trustedProviders`, which auto-link even with `autoLinkByVerifiedEmail: false`). Every other match (an unverified provider email, auto-linking off for the provider) fails with `EmailInUseError` and changes nothing. When the local email identifier is still unverified, someone may have signed up with the address and a password before its holder did, so the provider's verification is the address's first proof, as in Google One Tap and SSO (#440, #671): the account's password and other credentials are cleared and its sessions revoked, the address is marked verified, and then the provider is linked and the holder's session issued. A provider that does not report the email verified never takes over an address.
+
+## Cloudflare Access
+
+An application behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) can trust the identity Access signs in at the edge instead of running a sign-in of its own. `CloudflareAccess.CloudflareAccessVerifier` verifies the application token Access forwards: RS256 only, a `kid` naming a key from the team's own key set (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, never a URL the token names), `iss` equal to the team domain, `aud` containing the application's AUD tag, `exp` required, and `exp` / `nbf` within a clock tolerance (60 s by default). The key set is cached in memory for an hour and refetched early when a token names a `kid` it does not hold (key rotation), at most once every 30 seconds, so a forged `kid` cannot turn each request into a fetch; a failed refresh keeps serving the keys already fetched. Build the layer once per process (a Worker isolate), since it holds that cache.
+
+```typescript
+import { Effect, Layer, Option } from "effect";
+import { CloudflareAccess, SessionResolution } from "@thomasfosterau/effect-auth";
+
+const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
+  teamDomain: "example-team.cloudflareaccess.com",
+  audience: "<the Access application's AUD tag>",
+  // Read the browser cookie too, for pages Access does not gate.
+  sources: ["header", "cookie"],
+});
+
+// Per request: the identity, if any, and the effect-auth user it belongs to.
+const viewer = (request: Request) =>
+  Effect.gen(function* () {
+    const access = yield* CloudflareAccess.CloudflareAccessVerifier;
+    const identity = yield* access.verifyRequest(SessionResolution.fromRequest(request));
+    if (Option.isNone(identity)) return Option.none();
+    const user = yield* CloudflareAccess.findUser(identity.value);
+    return Option.map(user, (user) => ({ identity: identity.value, user }));
+  });
+
+// Run gated code as that user: `CurrentUser`, `CurrentPrincipal` and
+// `CurrentCredential` (a service token is "machine").
+// effect.pipe(Effect.provide(CloudflareAccess.userContextLayer(identity, user)))
+```
+
+`verifyRequest` answers `Option.none()` when the request carries no token and fails with a `CloudflareAccessError` (its `reason` says which check refused it) when the token is invalid; it never reads an invalid token as anonymous. `sources` defaults to `["header"]`, which Cloudflare recommends since Access adds the header to every request it forwards. Add `"cookie"` when the identity is read on paths Access does not gate, such as an edit control on a page readers also see. The cookie is an ambient credential, so a state-changing request authenticated by it needs a CSRF defence (the trusted-origin check, a `SameSite` cookie), as a session cookie does.
+
+The identity is a `"user"` (with `email`, `subject` = Access's `sub`, `country`, `identityNonce`) or a `"service-token"` (`commonName` = its client id). `findUser` maps a user identity to the owner of a **verified** email identifier with that address, and answers `Option.none()` for a service token, an unknown or unverified address, or a banned or SCIM-deactivated user. It never creates a user or a session and never promotes an unverified address. `userContextLayer(identity, user)` provides the user through `SessionContext.userLayer`; Access issued no effect-auth session, so `CurrentSession` is not provided.
 
 ## Email verification
 
