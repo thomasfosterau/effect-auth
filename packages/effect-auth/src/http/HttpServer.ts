@@ -2563,7 +2563,7 @@ export const deviceSessionsGroupLayer = (
             yield* Effect.forEach(
               tokens,
               // A token that no longer validates is left out; a store fault
-              // is a 500, not a shorter list (#612).
+              // is a 500, not a shorter list.
               (token) =>
                 sessionManager.validateSession(token).pipe(
                   Effect.asSome,
@@ -4094,7 +4094,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oidc = yield* resolveOidcProvider;
           // Unauthenticated: redirect to the login page carrying the original
           // authorize URL so the app can resume the flow after sign-in.
-          // A store fault is a 500, never a redirect to sign in again (#612).
+          // A store fault is a 500, never a redirect to sign in again.
           const session = yield* resolveSession(request, cfg).pipe(
             Effect.catchTag("Unauthorized", () => Effect.succeed(null)),
           );
@@ -4806,7 +4806,7 @@ const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, Iden
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
 /**
- * A `validateSession` failure as the HTTP tier answers it (#612). A refusal
+ * A `validateSession` failure as the HTTP tier answers it. A refusal
  * (no such session, an expired one, a user that no longer exists, a ban, or a
  * hook that denies) is `Unauthorized`; a store or infrastructure fault stays an
  * `AuthError`, which the caller answers as a logged `500` (or, on an optional
@@ -4832,7 +4832,7 @@ export const sessionValidationFailure = (
 
 /**
  * Resolve the authenticated session or fail with 401 (a logged 500 when the
- * session or user store faults, #612), preferring the signed
+ * session or user store faults), preferring the signed
  * cache cookie (no store read) when the cache is enabled and the cookie is
  * valid; otherwise validating against the session store. `cacheHit` lets
  * callers decide whether to (re)issue the cache cookie; `token` is the raw
@@ -5042,7 +5042,7 @@ export interface HttpIPRateLimitConfig {
    */
   readonly rules?: ReadonlyArray<EndpointRateLimitRule>;
   /**
-   * What a rate-limit store error does to the request (#612).
+   * What a rate-limit store error does to the request.
    * `"fail-closed"` (default): the request is refused with a logged `500`, so
    * a limiter outage, or one an attacker can induce, never removes the limits.
    * `"fail-open"`: the error is logged and the request proceeds unlimited
@@ -5225,7 +5225,7 @@ const consumeEndpointLimit = (
   });
 
 /**
- * Log a rate-limit store error (#612): the request is refused, or under
+ * Log a rate-limit store error: the request is refused, or under
  * `onStoreError: "fail-open"` served without its limit, never silently.
  */
 const limiterStoreFault = (error: AuthError, failOpen: boolean): Effect.Effect<void> =>
@@ -5236,7 +5236,7 @@ const limiterStoreFault = (error: AuthError, failOpen: boolean): Effect.Effect<v
       )
     : Effect.logError("[effect-auth] rate-limit store error; the request is refused", error);
 
-/** The answer to a request whose limit could not be counted: a generic `500` (#612). */
+/** The answer to a request whose limit could not be counted: a generic `500`. */
 const limiterStoreFaultResponse = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe({ message: "Internal server error" }, { status: 500 });
 

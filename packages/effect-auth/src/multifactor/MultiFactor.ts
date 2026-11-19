@@ -84,7 +84,7 @@ export class MultiFactorStore extends Context.Service<
      */
     readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
     /**
-     * Spend a TOTP time step (#594): set `lastUsedCounter` to `counter` on
+     * Spend a TOTP time step: set `lastUsedCounter` to `counter` on
      * `userId`'s _verified_ record, but only while its `lastUsedCounter` is
      * absent or below `counter`, and resolve to whether it did. Must be one
      * compare-and-set (`UPDATE … WHERE last_used_counter IS NULL OR
@@ -97,7 +97,7 @@ export class MultiFactorStore extends Context.Service<
       counter: number,
     ) => Effect.Effect<boolean, Errors.AuthError>;
     /**
-     * Spend a backup code (#594): remove `codeHash` from `userId`'s
+     * Spend a backup code: remove `codeHash` from `userId`'s
      * _verified_ record and resolve to whether this call removed it. Must be
      * atomic (a compare-and-set on the stored list, retried when a
      * concurrent change to another code moved it), so of two concurrent
@@ -146,7 +146,7 @@ export class PendingMultiFactorStore extends Context.Service<
     readonly recordFailedAttempt: (token: string) => Effect.Effect<number, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it (dropping its failed-attempt count too), or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same challenge token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -549,7 +549,7 @@ export const make = (
       });
 
     /**
-     * Spend a pending challenge once its code has passed (#594). The challenge
+     * Spend a pending challenge once its code has passed. The challenge
      * is taken with the store's atomic `consume`, so of concurrent
      * redemptions of one challenge only one creates a session; the others
      * answer as a wrong code does.
@@ -718,7 +718,7 @@ export const make = (
             }
 
             // Spend the time step with one compare-and-set before the session
-            // is created (#594): of concurrent submissions of the same code,
+            // is created: of concurrent submissions of the same code,
             // across challenges too, only one passes.
             if (!(yield* store.useTotpCounter(pending.userId, matchedCounter))) {
               return yield* new MultiFactorError({
@@ -758,7 +758,7 @@ export const make = (
               return yield* rejectCode(pendingToken, attempts, invalidBackupCode);
             }
 
-            // Spend the code atomically (#594): of concurrent redemptions of
+            // Spend the code atomically: of concurrent redemptions of
             // one code, across challenges too, only one passes.
             const storedHash = record.backupCodes[index];
             if (

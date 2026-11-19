@@ -2,7 +2,7 @@
 "@thomasfosterau/effect-auth": minor
 ---
 
-Store faults now fail closed in the HTTP tier (#612). This changes what an app sees during a store outage.
+Store faults now fail closed in the HTTP tier. This changes what an app sees during a store outage.
 
 - **A session-store or user-store fault is a logged `500`, never a `401`.** Only a session that is absent, expired, banned or whose user no longer exists (or one a hook denies) is `401`. Before, any fault answered `401 Invalid or expired session` with nothing logged, which the browser client read as a sign-out. This covers `Http.make`'s handlers (`GET /sessions/current` and every authenticated route, the device-session list and switch, `GET /oauth2/authorize`) and `AuthMiddleware` in an app's own `HttpApi`, which now declares `InternalError` beside `UnauthorizedError`.
 - **`OptionalAuthMiddleware` fails on a fault instead of serving the caller as anonymous.** An absent or refused session is still anonymous. To degrade a fault to anonymous, pass `onDegraded` as `Http.optionalLayer(config, { onDegraded })`'s new second argument; it receives the fault's `Cause`, as `SessionResolution.resolveFailOpen`'s callback does. The middleware now declares `InternalError`.

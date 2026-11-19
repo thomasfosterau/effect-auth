@@ -415,7 +415,7 @@ export const make = (
         yield* proveAddress(firstProof, identifier);
         const verifiedUser = yield* userService.getUser(verificationRecord.userId);
 
-        // burnToken spends the token (once, #594) and fires the afterVerifyEmail hook.
+        // burnToken spends the token (once) and fires the afterVerifyEmail hook.
         const verificationResult = {
           userId: verificationRecord.userId,
           email: verificationRecord.email,

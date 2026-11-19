@@ -64,7 +64,7 @@ import { type CreateUserResult, UserStore } from "../UserStore.ts";
 
 /**
  * Remove `key` from `map` and return what it held, or `null`: a single-use
- * store's `consume` (#594), atomic because it runs in one synchronous step.
+ * store's `consume`, atomic because it runs in one synchronous step.
  */
 const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
   const found = Option.getOrNull(MutableHashMap.get(map, key));
@@ -348,7 +348,7 @@ export const memoryMultiFactorStore = (
   upsert: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.userId, record), record)),
   delete: (userId) => Effect.sync(() => void MutableHashMap.remove(records, userId)),
-  // Each spend is one synchronous step, so it is atomic on this map (#594).
+  // Each spend is one synchronous step, so it is atomic on this map.
   useTotpCounter: (userId, counter) =>
     Effect.sync(() => {
       const record = Option.getOrNull(MutableHashMap.get(records, userId));

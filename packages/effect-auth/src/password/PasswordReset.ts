@@ -34,7 +34,7 @@ export class PasswordResetStore extends Context.Service<
     readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -264,7 +264,7 @@ export const make = (
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);
 
-        // Spend the token atomically before the password is written (#594):
+        // Spend the token atomically before the password is written:
         // of concurrent resets with one token, only one sets a password.
         if ((yield* resetStore.consume(tokenHash)) === null) {
           return yield* new Errors.PasswordResetError({

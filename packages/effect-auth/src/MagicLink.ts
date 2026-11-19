@@ -69,7 +69,7 @@ export class MagicLinkStore extends Context.Service<
     readonly getByEmail: (email: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -393,7 +393,7 @@ export const make = (
           userId: owner?.id,
         });
 
-        // Spend the token atomically (#594): of concurrent redemptions of one
+        // Spend the token atomically: of concurrent redemptions of one
         // link, only the caller whose `consume` took the record signs in.
         if ((yield* store.consume(tokenHash)) === null) {
           return yield* new Errors.MagicLinkError({

@@ -3265,7 +3265,7 @@ describe("OrganizationStore conformance", () => {
 const failureTag = (exit: Exit.Exit<unknown, { readonly _tag: string }>): string | null =>
   Option.getOrNull(Option.map(Exit.findErrorOption(exit), (error) => error._tag));
 
-describe("OrganizationService - role names that are prototype members (#621)", () => {
+describe("OrganizationService - role names that are prototype members", () => {
   beforeEach(resetStores);
 
   const prototypeNames = ["constructor", "__proto__", "toString", "hasOwnProperty"] as const;

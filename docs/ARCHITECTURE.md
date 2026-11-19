@@ -329,7 +329,7 @@ It is **unsafe**, and an escalation, whenever anonymous is privileged in your ap
 Fail-closed is not free either: with a `SessionStore` behind a database, _any_ store fault
 becomes a site-wide 500, including on routes that never touch auth. Choose deliberately.
 
-The included HTTP tier is fail-closed (#612): `Http.make`'s handlers and `AuthMiddleware`
+The included HTTP tier is fail-closed: `Http.make`'s handlers and `AuthMiddleware`
 answer a session-store or user-store fault with a logged 500, never a 401, and
 `OptionalAuthMiddleware` does the same unless `optionalLayer` is given an `onDegraded`. The
 per-endpoint IP limit refuses a request when its store errors, unless

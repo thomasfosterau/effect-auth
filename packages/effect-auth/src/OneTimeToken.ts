@@ -58,7 +58,7 @@ export class OneTimeTokenStore extends Context.Service<
     readonly get: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -184,7 +184,7 @@ export const make = (
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
 
-        // Spend the token atomically before anything else (#594), the expiry
+        // Spend the token atomically before anything else, the expiry
         // check included, so "found but expired" and "not found" take the
         // same path, and of concurrent redemptions only one gets the record.
         const record = yield* store.consume(hashToken(rawToken));

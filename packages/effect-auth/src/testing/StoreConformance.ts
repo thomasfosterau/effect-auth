@@ -564,7 +564,7 @@ export const identifierStoreConformance = <E = never, R = never>(
         }),
     },
     {
-      name: "getByValue matches exactly: values differing only by case, accent or width are distinct (#602)",
+      name: "getByValue matches exactly: values differing only by case, accent or width are distinct",
       run: (newUser) =>
         Effect.gen(function* () {
           const store = yield* Identifier.IdentifierStore;
@@ -875,8 +875,8 @@ const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
 /**
  * The `ApiKeyStore` contract: keys round-trip with every optional field, read
  * by id and by hash, misses are `null`, `update` writes, `recordUse` spends
- * atomically and moves only the usage fields (#595), and the per-user list
- * and the per-user delete (#601) touch that user's keys only.
+ * atomically and moves only the usage fields, and the per-user list
+ * and the per-user delete touch that user's keys only.
  *
  * @since 0.1.0
  * @category suites
@@ -1146,7 +1146,7 @@ const makePending = (userId: string): PendingMultiFactor => ({
  * `null`, `recordFailedAttempt` counts each challenge's wrong codes from 1
  * without touching the challenge or another challenge's count, `delete`
  * removes the challenge with its count (a no-op for an unknown token), and
- * `consume` (#594) hands a challenge out once, with its count dropped, to
+ * `consume` hands a challenge out once, with its count dropped, to
  * exactly one of concurrent callers.
  *
  * @since 0.1.0
@@ -1188,7 +1188,7 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
         }),
     },
     {
-      name: "concurrent recordFailedAttempt calls on one challenge each get their own count (#593)",
+      name: "concurrent recordFailedAttempt calls on one challenge each get their own count",
       run: (newUser) =>
         Effect.gen(function* () {
           const store = yield* PendingMultiFactorStore;
@@ -1275,7 +1275,7 @@ const challengeView = (challenge: WebAuthnChallenge | null) =>
  * authentication challenge), a miss is `null`, `create` under bytes already
  * stored replaces that challenge (ceremony and user included), and `delete`
  * removes it (a no-op for unknown bytes). The ceremony is what keeps an
- * authentication challenge from being redeemed as a registration (#591), so a
+ * authentication challenge from being redeemed as a registration, so a
  * store that drops or defaults it fails here.
  *
  * @since 0.3.0
@@ -1689,7 +1689,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
         }),
     },
     {
-      name: "concurrent incrementAttempts calls on one code each get their own count (#593)",
+      name: "concurrent incrementAttempts calls on one code each get their own count",
       run: () =>
         Effect.gen(function* () {
           const store = yield* spec.store;
@@ -1741,7 +1741,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
         }),
     },
     {
-      name: "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
+      name: "the failure budget survives upsert, incrementAttempts and delete of the pair's record",
       run: () =>
         Effect.gen(function* () {
           const store = yield* spec.store;
@@ -1807,7 +1807,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
 /**
  * The `EmailOtpStore` contract: one record per email and purpose (`upsert`
  * replaces it, `incrementAttempts` counts from 1, `delete` removes it, a miss
- * is `null`), and a failure budget per pair (#590) that counts wrong codes
+ * is `null`), and a failure budget per pair that counts wrong codes
  * from 1 at the time given, outlives every write to the pair's record, and is
  * forgotten only by `clearFailures`.
  *
@@ -1841,7 +1841,7 @@ export const phoneOtpStoreConformance = <E = never, R = never>(
     makeRecord: (phoneNumber, purpose) => ({ phoneNumber, purpose, ...codeFields() }),
   });
 // ---------------------------------------------------------------------------
-// Single-use consumes (#594)
+// Single-use consumes
 // ---------------------------------------------------------------------------
 
 /** How the consume cases write, read and spend one single-use contract's records. */
@@ -1861,7 +1861,7 @@ interface SingleUse<S, A> {
 const consumeRacers = 8;
 
 /**
- * The cases every single-use store's `consume` shares (#594): it hands the
+ * The cases every single-use store's `consume` shares: it hands the
  * record back once and removes it, answers `null` for a spent or unknown key,
  * and of concurrent callers passing one key exactly one receives the record.
  */
@@ -1910,7 +1910,7 @@ const consumeCases = <I, S, A, E, R>(store: Context.Key<I, S>, spec: SingleUse<S
 ];
 
 // ---------------------------------------------------------------------------
-// Per-user deletes (#601)
+// Per-user deletes
 // ---------------------------------------------------------------------------
 
 /** How a per-user-delete case writes, reads and deletes one contract's records. */
@@ -1929,7 +1929,7 @@ interface PerUserDelete<S, A> {
 /**
  * The case every user-keyed credential store's contract shares: the per-user
  * delete removes that user's records only, and is a no-op for a user with
- * none. Deleting a user calls it before the user row goes (#601).
+ * none. Deleting a user calls it before the user row goes.
  */
 const perUserDeleteCase = <I, S, A, E, R>(store: Context.Key<I, S>, spec: PerUserDelete<S, A>) => ({
   name: `${spec.method ?? "deleteByUserId"} removes that user's ${spec.records} only, and is a no-op for a user with none`,
@@ -1983,7 +1983,7 @@ const makeOAuthAccount = (userId: string): OAuthAccount => ({
 });
 
 /**
- * The `OAuthAccountStore` per-user delete (#601): `deleteByUserId` removes
+ * The `OAuthAccountStore` per-user delete: `deleteByUserId` removes
  * every provider link of that user, and only theirs.
  *
  * @since 0.5.0
@@ -2010,7 +2010,7 @@ const makePasskey = (userId: string): WebAuthnCredential => ({
 });
 
 /**
- * The WebAuthn `CredentialStore` per-user delete (#601): `deleteByUserId`
+ * The WebAuthn `CredentialStore` per-user delete: `deleteByUserId`
  * removes every passkey of that user, and only theirs.
  *
  * @since 0.5.0
@@ -2036,9 +2036,9 @@ const makeEnrolment = (userId: string): MultiFactorRecord => ({
 });
 
 /**
- * The `MultiFactorStore` per-user delete (#601): the record is keyed by user
+ * The `MultiFactorStore` per-user delete: the record is keyed by user
  * id, so `delete(userId)` removes that user's enrolment, and only theirs. And
- * its compare-and-set spends (#594): `useTotpCounter` and `useBackupCode`
+ * its compare-and-set spends: `useTotpCounter` and `useBackupCode`
  * accept each TOTP step and each backup code once, to exactly one of
  * concurrent callers, and never recreate a record that is gone.
  *
@@ -2171,7 +2171,7 @@ export const multiFactorStoreConformance = <E = never, R = never>(
   ]);
 
 /**
- * The `TrustedDeviceStore` per-user delete (#601): `deleteByUserId` removes
+ * The `TrustedDeviceStore` per-user delete: `deleteByUserId` removes
  * every trusted device of that user, and only theirs.
  *
  * @since 0.5.0
@@ -2204,9 +2204,9 @@ const makeOidcToken = (userId: string): OidcToken => ({
 });
 
 /**
- * The `OidcTokenStore` per-user delete (#601, #704): `deleteByUserId` removes
+ * The `OidcTokenStore` per-user delete: `deleteByUserId` removes
  * every access and refresh token issued to that user, and only theirs. And
- * its single-use `consume` (#594), which refresh rotation spends a token
+ * its single-use `consume`, which refresh rotation spends a token
  * with: handed out once, to exactly one of concurrent callers.
  *
  * @since 0.5.0
@@ -2240,7 +2240,7 @@ export const oidcTokenStoreConformance = <E = never, R = never>(
   ]);
 
 /**
- * The `OidcConsentStore` per-user delete (#601): `deleteByUserId` removes the
+ * The `OidcConsentStore` per-user delete: `deleteByUserId` removes the
  * consents that user granted, for every client, and only theirs.
  *
  * @since 0.5.0
@@ -2273,9 +2273,9 @@ const makeUserToken = (userId: string) => ({
 });
 
 /**
- * The `EmailVerificationStore` per-user delete (#601): `deleteByUserId`
+ * The `EmailVerificationStore` per-user delete: `deleteByUserId`
  * removes that user's pending verifications, and only theirs. And its
- * single-use `consume` (#594): a token is handed out once, to exactly one of
+ * single-use `consume`: a token is handed out once, to exactly one of
  * concurrent callers.
  *
  * @since 0.5.0
@@ -2315,9 +2315,9 @@ export const emailVerificationStoreConformance = <E = never, R = never>(
   ]);
 
 /**
- * The `PasswordResetStore` per-user delete (#601): `deleteByUserId` removes
+ * The `PasswordResetStore` per-user delete: `deleteByUserId` removes
  * that user's pending resets, and only theirs. And its single-use `consume`
- * (#594): a token is handed out once, to exactly one of concurrent callers.
+ *: a token is handed out once, to exactly one of concurrent callers.
  *
  * @since 0.5.0
  * @category suites
@@ -2356,7 +2356,7 @@ export const passwordResetStoreConformance = <E = never, R = never>(
   ]);
 
 /**
- * The `AccountManagementStore` per-user delete (#601): `deleteByUserId`
+ * The `AccountManagementStore` per-user delete: `deleteByUserId`
  * removes that user's pending email-change and deletion tokens, and only
  * theirs.
  *
@@ -2381,11 +2381,11 @@ export const accountManagementStoreConformance = <E = never, R = never>(
   });
 
 // ---------------------------------------------------------------------------
-// Single-use token stores without a per-user delete (#594)
+// Single-use token stores without a per-user delete
 // ---------------------------------------------------------------------------
 
 /**
- * The `MagicLinkStore` single-use `consume` (#594): a link's token is handed
+ * The `MagicLinkStore` single-use `consume`: a link's token is handed
  * out once and removed, a spent or unknown token is `null`, and of concurrent
  * callers passing one token exactly one receives it.
  *
@@ -2417,7 +2417,7 @@ export const magicLinkStoreConformance = <E = never, R = never>(
   );
 
 /**
- * The `OneTimeTokenStore` single-use `consume` (#594): a token is handed out
+ * The `OneTimeTokenStore` single-use `consume`: a token is handed out
  * once and removed, a spent or unknown token is `null`, and of concurrent
  * callers passing one token exactly one receives it.
  *
@@ -2450,7 +2450,7 @@ export const oneTimeTokenStoreConformance = <E = never, R = never>(
   );
 
 /**
- * The `OidcCodeStore` single-use `consume` (#594): an authorization code (or
+ * The `OidcCodeStore` single-use `consume`: an authorization code (or
  * a pending consent request) is handed out once and removed, a spent or
  * unknown code is `null`, and of concurrent redemptions of one code exactly
  * one receives it (RFC 6749 §4.1.2).

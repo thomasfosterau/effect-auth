@@ -30,7 +30,7 @@ const hasher = Auth.Password.scryptHasher({ cost: 16384 });
  * (the shape most tests assert against).
  */
 
-/** Remove `key` from `map` and return what it held, or `null`: a single-use `consume` (#594). */
+/** Remove `key` from `map` and return what it held, or `null`: a single-use `consume`. */
 const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
   const found = Option.getOrNull(MutableHashMap.get(map, key));
   if (found !== null) MutableHashMap.remove(map, key);

@@ -103,7 +103,7 @@ const emailPasswordStore = {
 };
 
 // Every read yields the fiber, as a database round trip would, so concurrent
-// redemptions interleave between a read and the write that follows (#594).
+// redemptions interleave between a read and the write that follows.
 const memoryMultiFactor = memoryMultiFactorStore(multiFactorRecords);
 const multiFactorStore: typeof MultiFactorStore.Service = {
   ...memoryMultiFactor,
@@ -638,7 +638,7 @@ describe("MultiFactorService", () => {
     ).toHaveLength(8);
   });
 
-  describe("concurrent redemptions (#594)", () => {
+  describe("concurrent redemptions", () => {
     const race = async <A, E>(
       userId: string,
       redeem: (

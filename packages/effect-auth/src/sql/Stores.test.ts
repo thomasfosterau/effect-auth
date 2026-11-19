@@ -1801,7 +1801,7 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.multiFactorStoreConformance({ seedUser }),
       Testing.emailVerificationStoreConformance({ seedUser }),
       Testing.passwordResetStoreConformance({ seedUser }),
-      // The single-use consumes (#594).
+      // The single-use consumes.
       Testing.magicLinkStoreConformance(),
       Testing.pendingMultiFactorStoreConformance({ seedUser }),
     ];

@@ -1,5 +1,5 @@
 /**
- * A session-store or user-store fault is never a `401` (#612): the browser
+ * A session-store or user-store fault is never a `401`: the browser
  * client reads `401` as signed out, so a database blip would look like a mass
  * sign-out. Only a refused session (none, expired, its user gone, banned) is a
  * `401`; a fault is a logged `500`, on the required-auth middleware, on the
@@ -127,7 +127,7 @@ const get = (path: string, headers: Record<string, string> = {}) =>
 const cookie = (token: string) => ({ cookie: `conduit_session=${token}` });
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
-describe("AuthMiddleware on a store fault (#612)", () => {
+describe("AuthMiddleware on a store fault", () => {
   it("answers a logged 500, not a 401, for a session cookie", async () => {
     const { handler, logs } = app({ down: true });
     const res = await handler(get("/me", cookie(TOKEN)));
@@ -149,7 +149,7 @@ describe("AuthMiddleware on a store fault (#612)", () => {
   });
 });
 
-describe("OptionalAuthMiddleware on a store fault (#612)", () => {
+describe("OptionalAuthMiddleware on a store fault", () => {
   it("answers a logged 500 rather than serving the caller as anonymous", async () => {
     const { handler, logs } = app({ down: true });
     const res = await handler(get("/feed", cookie(TOKEN)));
@@ -188,7 +188,7 @@ describe("OptionalAuthMiddleware on a store fault (#612)", () => {
   });
 });
 
-describe("Http.make on a store fault (#612)", () => {
+describe("Http.make on a store fault", () => {
   it("answers GET /sessions/current with a logged 500, not a 401", async () => {
     const state = { down: true };
     const { logs, layer } = logCollector();

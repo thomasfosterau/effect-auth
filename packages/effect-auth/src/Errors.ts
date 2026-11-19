@@ -601,7 +601,7 @@ export class ClientAddressConfigError extends Data.TaggedError("ClientAddressCon
 
 /**
  * `SessionService.layer` (or `SessionService.make`) was given a
- * `sessionExpiresIn` that cannot work (#612): an `activePeriod` or
+ * `sessionExpiresIn` that cannot work: an `activePeriod` or
  * `idlePeriod` that is not a finite, positive number of milliseconds (`NaN`
  * from an unset `Number(env)`, for example), or an `updateAge` that is not a
  * finite number, 0 or more. The layer build dies with it, so the app fails to

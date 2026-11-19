@@ -156,7 +156,7 @@ export class OidcCodeStore extends Context.Service<
     readonly get: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
     /**
      * Atomically take the record for `codeHash`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same code, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -192,7 +192,7 @@ export class OidcTokenStore extends Context.Service<
     readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
     /**
      * Atomically take the record for `tokenHash`: delete it and return it, or
-     * return `null` when there is none (#594). Refresh rotation spends the presented token with it, so two
+     * return `null` when there is none. Refresh rotation spends the presented token with it, so two
      * concurrent refreshes cannot both rotate one token. Of two concurrent callers
      * passing the same refresh token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
@@ -1552,7 +1552,7 @@ export const make = (
                 message: "Consent request not found or expired",
               });
             }
-            // Spend the consent request atomically (#594): of concurrent
+            // Spend the consent request atomically: of concurrent
             // answers to one request, only one proceeds.
             if ((yield* codeStore.consume(pending.codeHash)) === null) {
               return yield* new OidcProviderError({
@@ -1628,7 +1628,7 @@ export const make = (
             }
             // Single use: burn the code before any further checks so a replay
             // (even with corrected parameters) always fails. `consume` is
-            // atomic (#594), so of concurrent redemptions of one code only one
+            // atomic, so of concurrent redemptions of one code only one
             // gets past here (RFC 6749 §4.1.2).
             if ((yield* codeStore.consume(record.codeHash)) === null) {
               return yield* new OidcTokenError({ error: "invalid_grant" });
@@ -1710,7 +1710,7 @@ export const make = (
             }
 
             // Rotation: burn the presented token immediately, atomically
-            // (#594). A `null` means a concurrent refresh rotated it first, so
+            //. A `null` means a concurrent refresh rotated it first, so
             // this one is refused rather than forking the family.
             if ((yield* tokenStore.consume(record.tokenHash)) === null) {
               return yield* new OidcTokenError({ error: "invalid_grant" });

@@ -153,7 +153,7 @@ const magicLinkStore = {
     }),
 
   // A read yields the fiber when `slowReads` is set, as a database round
-  // trip would, so concurrent redemptions interleave (#594).
+  // trip would, so concurrent redemptions interleave.
   get: (token: string) =>
     Effect.sync(() => {
       storeOps.push("get");
@@ -695,7 +695,7 @@ describe("MagicLinkService", () => {
     expect(MutableHashMap.size(sessions)).toBe(1);
   });
 
-  it("signs in only one of concurrent redemptions of one link (#594)", async () => {
+  it("signs in only one of concurrent redemptions of one link", async () => {
     const testContext = await makeTestContext();
     slowReads = true;
 

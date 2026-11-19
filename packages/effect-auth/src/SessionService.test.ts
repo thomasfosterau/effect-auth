@@ -737,9 +737,9 @@ const build = (sessionExpiresIn: SessionConfig["sessionExpiresIn"]) =>
     ),
   );
 
-// #612: a `sessionExpiresIn` that cannot work fails the layer build, and a
+// A `sessionExpiresIn` that cannot work fails the layer build, and a
 // best-effort session write that fails is logged, never dropped.
-describe("session config and best-effort writes (#612)", () => {
+describe("session config and best-effort writes", () => {
   it.each([
     ["a NaN activePeriod", { activePeriod: Number.NaN, idlePeriod: 1000 }, "activePeriod"],
     ["a zero activePeriod", { activePeriod: 0, idlePeriod: 1000 }, "activePeriod"],

@@ -1420,7 +1420,7 @@ export const make = (
     const roles = config.roles ?? defaultOrganizationRoles;
     // A role name is caller input: read only the record's own keys, so a role
     // named `constructor` or `__proto__` is unknown rather than a prototype
-    // member (#621).
+    // member.
     const staticRolePermissions = (role: string): ReadonlyArray<string> | null =>
       Object.hasOwn(roles, role) ? (roles[role] ?? null) : null;
 

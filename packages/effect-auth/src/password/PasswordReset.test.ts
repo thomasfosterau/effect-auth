@@ -345,7 +345,7 @@ describe("PasswordResetService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("sets one password from concurrent resets with one token (#594)", async () => {
+  it("sets one password from concurrent resets with one token", async () => {
     const testContext = await makeTestContext();
     const user: User = {
       id: "user-reset-race",

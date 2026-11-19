@@ -89,7 +89,7 @@ export interface ApiKey {
 }
 
 /**
- * One spend of an API key, applied by {@link ApiKeyStore}'s `recordUse` (#595).
+ * One spend of an API key, applied by {@link ApiKeyStore}'s `recordUse`.
  *
  * `refill` is the quota top-up due at `usedAt`, computed by the service from
  * the record it read: the store applies it only while the key's `lastRefillAt`
@@ -153,11 +153,11 @@ export class ApiKeyStore extends Context.Service<
     /**
      * Replace the stored record whole. The owner's edits go through it;
      * a verify never does, since a write from a stale read would undo a
-     * concurrent edit (#595).
+     * concurrent edit.
      */
     readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
     /**
-     * Spend one use of key `id`, atomically (#595), and return the record
+     * Spend one use of key `id`, atomically, and return the record
      * as stored after it, or `null` when the key may not be spent. In one
      * step: the key must exist, be enabled and not have expired at
      * `use.usedAt` (`expiresAt >= usedAt`); a `use.refill` applies only while
@@ -502,7 +502,7 @@ const withRefill = (key: ApiKey, refill: ApiKeyUse["refill"]): ApiKey => {
 
 /**
  * How many times a verify re-reads and re-checks a key whose `recordUse`
- * found it changed (#595). A loss means a concurrent verify applied the
+ * found it changed. A loss means a concurrent verify applied the
  * refill this one computed, or an owner edited or spent the key out: the
  * re-read sees either a key that passes (and spends without a refill) or a
  * refusal, so two attempts settle all but a key edited in a tight loop.
@@ -551,7 +551,7 @@ export const make = (
 
     /**
      * Spend one use of a key that passed {@link checkRecord}, atomically
-     * (#595): `recordUse` decrements `remaining` (when set) and moves
+     *: `recordUse` decrements `remaining` (when set) and moves
      * `lastUsedAt`, touching nothing an owner edits. When it finds the key
      * changed since the read, the key is read and checked again, so a key
      * disabled, expired, exhausted or narrowed meanwhile is refused as such.

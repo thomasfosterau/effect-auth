@@ -90,7 +90,7 @@ const makeOidcStores = () => {
   const codeStore: typeof OidcCodeStore.Service = {
     create: (c) => Effect.sync(() => (MutableHashMap.set(codes, c.codeHash, c), c)),
     // Reads yield the fiber, as a database round trip would, so concurrent
-    // redemptions interleave between a read and the spend (#594).
+    // redemptions interleave between a read and the spend.
     get: (hash) =>
       Effect.tap(
         Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
@@ -1842,7 +1842,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(afterRevoke.status).toBe(400);
   });
 
-  it("redeems an authorization code and rotates a refresh token once under concurrency (#594)", async () => {
+  it("redeems an authorization code and rotates a refresh token once under concurrency", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
     const userSid = fx.makeSession(fx.seedUser("race@idp.test"));

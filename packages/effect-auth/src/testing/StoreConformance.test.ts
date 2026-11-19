@@ -73,7 +73,7 @@ register(Testing.identifierStoreConformance(), () =>
 
 /**
  * A `OneTimeTokenStore` over a map. With `yieldBetween`, its `consume` is the
- * pre-#594 shape: a `get`, then a `delete`, with a fiber switch between them.
+ * pre-atomic shape: a `get`, then a `delete`, with a fiber switch between them.
  */
 const oneTimeTokenStore = (yieldBetween = false): typeof OneTimeTokenStore.Service => {
   const tokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
@@ -253,7 +253,7 @@ describe("a broken store fails its suite", () => {
     ]);
   });
 
-  it("a OneTimeTokenStore whose consume is a get then a delete fails the race case (#594)", async () => {
+  it("a OneTimeTokenStore whose consume is a get then a delete fails the race case", async () => {
     const failed = await failures(Testing.oneTimeTokenStoreConformance(), () =>
       Layer.succeed(OneTimeTokenStore, oneTimeTokenStore(true)),
     );

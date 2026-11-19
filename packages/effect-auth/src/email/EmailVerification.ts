@@ -95,7 +95,7 @@ export class EmailVerificationStore extends Context.Service<
     readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -161,7 +161,7 @@ export class EmailVerificationService extends Context.Service<
      * change (e.g. `markEmailVerified`) has succeeded, so a store failure
      * before that point leaves the token valid and the user can retry. Fails
      * with {@link EmailVerificationError} when the token is already spent, so
-     * of concurrent verifications of one token only one completes (#594).
+     * of concurrent verifications of one token only one completes.
      *
      * The `token` parameter is the stored hash, as returned in
      * `EmailVerification.token` by `peekToken`.
@@ -292,7 +292,7 @@ export const make = (
           });
         }
 
-        // Spend the token atomically (#594): of concurrent verifications of
+        // Spend the token atomically: of concurrent verifications of
         // one token, only one succeeds.
         if ((yield* store.consume(tokenHash)) === null) {
           return yield* new EmailVerificationError({

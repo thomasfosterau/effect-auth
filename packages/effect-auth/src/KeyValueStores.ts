@@ -53,7 +53,7 @@
  * get-and-delete, so the guarantee does not span processes sharing a backend;
  * see {@link oauthStateStoreKV}. The single-use token stores' `consume`
  * (`EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`,
- * `PendingMultiFactorStore`; #594) works the same way, with the same limit:
+ * `PendingMultiFactorStore`) works the same way, with the same limit:
  * behind several instances sharing one backend, implement those contracts
  * over a backend with an atomic get-and-delete.
  */
@@ -188,7 +188,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 };
 
 /**
- * A single-use store's `consume` (#594): its `get` and `delete` run under one
+ * A single-use store's `consume`: its `get` and `delete` run under one
  * permit of a semaphore the store owns, so within one process two concurrent
  * callers passing the same key never both receive the record. A
  * `KeyValueStore` has no get-and-delete, so the guarantee stops at the

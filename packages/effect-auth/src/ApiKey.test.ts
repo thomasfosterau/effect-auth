@@ -554,7 +554,7 @@ describe("ApiKeyService", () => {
     expect(MutableHashMap.size(rateLimitEntries)).toBe(0);
   });
 
-  describe("concurrent verifies (#595)", () => {
+  describe("concurrent verifies", () => {
     // Reads that yield, as a database round trip does, so concurrent verifies
     // interleave between the read and the spend.
     const slowReads: typeof ApiKeyStore.Service = {

@@ -117,7 +117,7 @@ describe("MySQL / TokenStore", () => {
   });
 });
 
-describe("MySQL / TokenStore consume (#594)", () => {
+describe("MySQL / TokenStore consume", () => {
   const row = [
     "digest",
     "password-reset",
@@ -185,7 +185,7 @@ describe("MySQL / UserServiceStore", () => {
   });
 });
 
-describe("MySQL / ApiKeyStore recordUse (#595)", () => {
+describe("MySQL / ApiKeyStore recordUse", () => {
   const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKeyUse) =>
     Effect.runPromise(
       Effect.gen(function* () {

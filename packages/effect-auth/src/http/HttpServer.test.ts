@@ -3769,7 +3769,7 @@ describe("the session token never reaches a response body", () => {
   });
 });
 
-/** A rate-limit store call that fails as a down store does (#612). */
+/** A rate-limit store call that fails as a down store does. */
 const limiterDown = () => Effect.fail(new Root.AuthError({ message: "rate-limit store down" }));
 
 describe("client IP at the HTTP boundary", () => {
@@ -3785,7 +3785,7 @@ describe("client IP at the HTTP boundary", () => {
       readonly trustedProxy?: TrustedProxyConfig | undefined;
       readonly allowMissingClientIp?: boolean | undefined;
       readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
-      /** Fail every rate-limit store call, as a down store does (#612). */
+      /** Fail every rate-limit store call, as a down store does. */
       readonly storeDown?: boolean | undefined;
       /** A layer merged into the services, such as a log collector. */
       readonly layer?: Layer.Layer<never> | undefined;
@@ -3904,8 +3904,8 @@ describe("client IP at the HTTP boundary", () => {
   });
 
   // A limiter-store outage, or one an attacker can induce, never removes the
-  // limit silently (#612).
-  describe("when the rate-limit store errors (#612)", () => {
+  // limit silently.
+  describe("when the rate-limit store errors", () => {
     it("refuses the request with a logged 500 by default", async () => {
       const logs: Array<{ readonly level: string; readonly message: string }> = [];
       const collector = Logger.make((options) => {

@@ -13,7 +13,7 @@ import { UserStore } from "./UserStore.ts";
 
 /**
  * The first problem with `sessionExpiresIn`, or `undefined` when it is sound
- * (#612): `activePeriod` and `idlePeriod` must be finite and positive, and
+ *: `activePeriod` and `idlePeriod` must be finite and positive, and
  * `updateAge`, when set, finite and not negative. A `NaN` period (an unset
  * `Number(env)`) would make every expiry comparison false, so sessions would
  * never expire.
@@ -39,7 +39,7 @@ const isPositivePeriod = (millis: number): boolean => Number.isFinite(millis) &&
 
 /**
  * Run a best-effort store write whose failure must not fail the request, and
- * log the failure rather than drop it (#612).
+ * log the failure rather than drop it.
  */
 const bestEffort = (
   write: Effect.Effect<unknown, Errors.AuthError>,
@@ -52,7 +52,7 @@ const bestEffort = (
 
 /**
  * Create a SessionService implementation. Dies at layer build when
- * `sessionExpiresIn` is not sound (#612), so a misconfigured app fails to
+ * `sessionExpiresIn` is not sound, so a misconfigured app fails to
  * start rather than issue sessions that never expire.
  */
 export const make = (
