@@ -1,11 +1,21 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
+import {
+  Cause,
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Logger,
+  MutableHashMap,
+  Result,
+} from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import type { SecureRandom } from "effect/crypto";
-import { AuthError } from "./Errors.ts";
+import { AuthError, SessionConfigError } from "./Errors.ts";
 import { composePlugins, Hooks, makePlugin, type PluginImpls, type SessionRef } from "./Hooks.ts";
 import { AuditPlugin } from "./plugins/Audit.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -142,12 +152,19 @@ describe("SessionService", () => {
         Effect.provide(
           Effect.gen(function* () {
             const manager = yield* make({
-              sessionExpiresIn: {
-                activePeriod: -1000, // Already expired
-                idlePeriod: -1000,
-              },
+              sessionExpiresIn: { activePeriod: 1000, idlePeriod: 1000 },
             });
             const session = yield* manager.createSession("user1");
+            // Backdate the stored session past both periods.
+            const past = DateTime.toDateUtc(
+              DateTime.makeUnsafe(DateTime.nowUnsafe().epochMilliseconds - 10_000),
+            );
+            MutableHashMap.set(mockSessionStore.sessions, session.session.id, {
+              ...session.session,
+              createdAt: past,
+              lastActivityAt: past,
+              expiresAt: past,
+            });
             return yield* manager.validateSession(session.token);
           }),
           Context.merge(SessionStoreTest, UserStoreTest),
@@ -478,7 +495,7 @@ describe("SessionService", () => {
       };
 
       // updateAge is very long (1 year), so writes are always throttled.
-      // But the session itself has a tiny activePeriod so it expires immediately.
+      // But the stored session is backdated, so it has already expired.
 
       const result = await Effect.runPromise(
         Effect.result(
@@ -486,12 +503,22 @@ describe("SessionService", () => {
             Effect.gen(function* () {
               const manager = yield* make({
                 sessionExpiresIn: {
-                  activePeriod: -1000, // already expired
-                  idlePeriod: -1000,
+                  activePeriod: 1000,
+                  idlePeriod: 1000,
                   updateAge: 365 * 24 * 60 * 60 * 1000, // 1 year — throttle always active
                 },
               });
               const session = yield* manager.createSession("user1");
+              // Backdate the stored session so it is already expired.
+              const past = DateTime.toDateUtc(
+                DateTime.makeUnsafe(DateTime.nowUnsafe().epochMilliseconds - 10_000),
+              );
+              MutableHashMap.set(sessions, session.session.id, {
+                ...session.session,
+                createdAt: past,
+                lastActivityAt: past,
+                expiresAt: past,
+              });
               return yield* manager.validateSession(session.token);
             }),
             Context.merge(
@@ -699,5 +726,78 @@ describe("session input hooks (#669)", () => {
     expect(observed.length).toBe(6);
     expect(observed.filter((value) => value.includes(token))).toEqual([]);
     expect(observed.some((value) => value.includes(hashToken(token)))).toBe(true);
+  });
+});
+
+/** Build the service with `sessionExpiresIn`, its exit kept. */
+const build = (sessionExpiresIn: SessionConfig["sessionExpiresIn"]) =>
+  Effect.runPromiseExit(
+    Effect.provide(make({ sessionExpiresIn }), Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+      Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
+    ),
+  );
+
+// #612: a `sessionExpiresIn` that cannot work fails the layer build, and a
+// best-effort session write that fails is logged, never dropped.
+describe("session config and best-effort writes (#612)", () => {
+  it.each([
+    ["a NaN activePeriod", { activePeriod: Number.NaN, idlePeriod: 1000 }, "activePeriod"],
+    ["a zero activePeriod", { activePeriod: 0, idlePeriod: 1000 }, "activePeriod"],
+    ["a negative idlePeriod", { activePeriod: 1000, idlePeriod: -1 }, "idlePeriod"],
+    ["an infinite idlePeriod", { activePeriod: 1000, idlePeriod: Infinity }, "idlePeriod"],
+    ["a negative updateAge", { activePeriod: 1000, idlePeriod: 1000, updateAge: -1 }, "updateAge"],
+    [
+      "a NaN updateAge",
+      { activePeriod: 1000, idlePeriod: 1000, updateAge: Number.NaN },
+      "updateAge",
+    ],
+  ] as const)("dies at build with SessionConfigError for %s", async (_, config, field) => {
+    const exit = await build(config);
+    assert(Exit.isFailure(exit));
+    const defect = Cause.squash(exit.cause);
+    assert(defect instanceof SessionConfigError);
+    expect(defect.message).toContain(field);
+  });
+
+  it("accepts sound periods, and an updateAge of 0", async () => {
+    const exit = await build({ activePeriod: 1000, idlePeriod: 2000, updateAge: 0 });
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
+
+  it("logs a failed refresh write and still validates the session", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+    const logs: Array<{ readonly level: string; readonly line: string }> = [];
+    const collector = Logger.make((options) => {
+      logs.push({ level: options.logLevel, line: Logger.formatJson.log(options) });
+    });
+    const failingUpdate = Context.make(SessionStore, {
+      ...mockSessionStore,
+      update: () => Effect.fail(new AuthError({ message: "store write failed" })),
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const { token } = yield* manager.createSession("user1");
+          return yield* manager.validateSession(token);
+        }),
+        Context.merge(failingUpdate, UserStoreTest),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(Hooks.Default, PlatformCrypto.layer, Logger.layer([collector])),
+        ),
+      ),
+    );
+
+    expect(result.user.id).toBe("user1");
+    expect(
+      logs.some(
+        (log) =>
+          log.level === "Warn" &&
+          log.line.includes("refreshing a session failed") &&
+          log.line.includes("store write failed"),
+      ),
+    ).toBe(true);
   });
 });
