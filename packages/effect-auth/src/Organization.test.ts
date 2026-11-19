@@ -3260,3 +3260,62 @@ describe("OrganizationStore conformance", () => {
     },
   );
 });
+
+/** The tag of an exit's typed failure, or `null` when it has none. */
+const failureTag = (exit: Exit.Exit<unknown, { readonly _tag: string }>): string | null =>
+  Option.getOrNull(Option.map(Exit.findErrorOption(exit), (error) => error._tag));
+
+describe("OrganizationService - role names that are prototype members (#621)", () => {
+  beforeEach(resetStores);
+
+  const prototypeNames = ["constructor", "__proto__", "toString", "hasOwnProperty"] as const;
+
+  it.each(prototypeNames)("denies every permission to a member whose role is %s", async (role) => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        const member = yield* service.addMember("owner-1", organization.id, "user-1");
+        // A store row written around the service (an import, a hand edit):
+        // role strings are unvalidated at rest.
+        MutableHashMap.set(members, member.id, { ...member, role });
+
+        return yield* Effect.exit(
+          Effect.all(
+            [
+              service.checkPermission("user-1", organization.id, "member:delete"),
+              service.checkPermission("user-1", organization.id, "organization:update"),
+            ],
+            { concurrency: 1 },
+          ),
+        );
+      }),
+    );
+
+    assert(Exit.isSuccess(result));
+    expect(result.value).toEqual([false, false]);
+  });
+
+  it.each(prototypeNames)("refuses %s as a default or assigned role", async (role) => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        const asDefault = yield* Effect.exit(
+          service.setDefaultRole("owner-1", organization.id, role),
+        );
+        const asAssigned = yield* Effect.exit(
+          service.addMember("owner-1", organization.id, "user-1", role),
+        );
+        return { asDefault, asAssigned };
+      }),
+    );
+
+    expect(failureTag(result.asDefault)).toBe("OrganizationError");
+    expect(failureTag(result.asAssigned)).toBe("OrganizationError");
+  });
+});

@@ -149,7 +149,7 @@ const entries = <V>(source: StringKeyed<V>): ReadonlyArray<readonly [string, V]>
   isMap(source) ? Arr.fromIterable(source) : R.toEntries(source);
 
 const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
-  isMap(source) ? source.get(key) : source[key];
+  isMap(source) ? source.get(key) : Object.hasOwn(source, key) ? source[key] : undefined;
 
 const dedupeRefs = (refs: ReadonlyArray<Entity.EntityRef>): ReadonlyArray<Entity.EntityRef> =>
   Arr.dedupeWith(refs, (a, b) => Entity.refKey(a) === Entity.refKey(b));
