@@ -329,6 +329,12 @@ It is **unsafe**, and an escalation, whenever anonymous is privileged in your ap
 Fail-closed is not free either: with a `SessionStore` behind a database, _any_ store fault
 becomes a site-wide 500, including on routes that never touch auth. Choose deliberately.
 
+The included HTTP tier is fail-closed (#612): `Http.make`'s handlers and `AuthMiddleware`
+answer a session-store or user-store fault with a logged 500, never a 401, and
+`OptionalAuthMiddleware` does the same unless `optionalLayer` is given an `onDegraded`. The
+per-endpoint IP limit refuses a request when its store errors, unless
+`ipRateLimit.onStoreError` is `"fail-open"`, which logs every request it lets through.
+
 **Fail-open must be loud.** Its failure mode is silence — an unreachable session service looks
 exactly like a site where nobody happens to be signed in, and stays that way until someone
 notices the sign-in rate. `resolveFailOpen` therefore takes a mandatory `onDegraded` callback,

@@ -3752,6 +3752,9 @@ describe("the session token never reaches a response body (#581)", () => {
   });
 });
 
+/** A rate-limit store call that fails as a down store does (#612). */
+const limiterDown = () => Effect.fail(new Root.AuthError({ message: "rate-limit store down" }));
+
 describe("client IP at the HTTP boundary", () => {
   // One sign-in attempt per window per resolved client address.
   const signInOncePerHour = {
@@ -3765,11 +3768,15 @@ describe("client IP at the HTTP boundary", () => {
       readonly trustedProxy?: TrustedProxyConfig | undefined;
       readonly allowMissingClientIp?: boolean | undefined;
       readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
+      /** Fail every rate-limit store call, as a down store does (#612). */
+      readonly storeDown?: boolean | undefined;
+      /** A layer merged into the services, such as a log collector. */
+      readonly layer?: Layer.Layer<never> | undefined;
     } = {},
   ): { readonly handler: Handler; readonly keys: MutableHashSet.MutableHashSet<string> } => {
     const entries = MutableHashMap.empty<string, RateLimitEntry>();
     const keys = MutableHashSet.empty<string>();
-    const store = {
+    const workingStore = {
       get: (key: string) =>
         Effect.sync(() => {
           MutableHashSet.add(keys, key);
@@ -3797,8 +3804,12 @@ describe("client IP at the HTTP boundary", () => {
         ),
       delete: (key: string) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
     };
+    const store: typeof RateLimitStore.Service =
+      options.storeDown === true
+        ? { get: limiterDown, set: limiterDown, increment: limiterDown, delete: limiterDown }
+        : workingStore;
     const limiter = RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
-    const services = Layer.merge(makeFixture().services, limiter);
+    const services = Layer.mergeAll(makeFixture().services, limiter, options.layer ?? Layer.empty);
     const handler = HttpServer.make({
       services,
       cookie: { secure: false },
@@ -3872,6 +3883,50 @@ describe("client IP at the HTTP boundary", () => {
 
       expect((await forwardedAttempt(handler, "203.0.113.9, garbage")).status).toBe(429);
       expect(Arr.fromIterable(keys)).toEqual([]);
+    });
+  });
+
+  // A limiter-store outage, or one an attacker can induce, never removes the
+  // limit silently (#612).
+  describe("when the rate-limit store errors (#612)", () => {
+    it("refuses the request with a logged 500 by default", async () => {
+      const logs: Array<{ readonly level: string; readonly message: string }> = [];
+      const collector = Logger.make((options) => {
+        logs.push({ level: options.logLevel, message: String(options.message) });
+      });
+      const { handler } = limitedHandler({
+        trustedProxy: { hopCount: 1 },
+        storeDown: true,
+        layer: Logger.layer([collector]),
+      });
+
+      const res = await forwardedAttempt(handler, "203.0.113.9");
+      expect(res.status).toBe(500);
+      expect(
+        logs.some((log) => log.level === "Error" && log.message.includes("rate-limit store error")),
+      ).toBe(true);
+    });
+
+    it("serves the request unlimited, logged, under onStoreError: fail-open", async () => {
+      const logs: Array<{ readonly level: string; readonly message: string }> = [];
+      const collector = Logger.make((options) => {
+        logs.push({ level: options.logLevel, message: String(options.message) });
+      });
+      const { handler } = limitedHandler({
+        trustedProxy: { hopCount: 1 },
+        storeDown: true,
+        ipRateLimit: { ...signInOncePerHour, onStoreError: "fail-open" },
+        layer: Logger.layer([collector]),
+      });
+
+      // The unknown account's refusal, not the limiter's: twice over the limit of one.
+      const first = await forwardedAttempt(handler, "203.0.113.9");
+      const second = await forwardedAttempt(handler, "203.0.113.9");
+      expect([first.status, second.status]).not.toContain(500);
+      expect([first.status, second.status]).not.toContain(429);
+      expect(logs.some((log) => log.level === "Warn" && log.message.includes("fail-open"))).toBe(
+        true,
+      );
     });
   });
 

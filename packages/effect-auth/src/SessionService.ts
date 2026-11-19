@@ -12,7 +12,48 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 
 /**
- * Create a SessionService implementation
+ * The first problem with `sessionExpiresIn`, or `undefined` when it is sound
+ * (#612): `activePeriod` and `idlePeriod` must be finite and positive, and
+ * `updateAge`, when set, finite and not negative. A `NaN` period (an unset
+ * `Number(env)`) would make every expiry comparison false, so sessions would
+ * never expire.
+ */
+const sessionConfigProblem = (
+  config: Types.SessionConfig["sessionExpiresIn"],
+): string | undefined => {
+  if (!isPositivePeriod(config.activePeriod)) {
+    return `sessionExpiresIn.activePeriod must be a finite, positive number of milliseconds (got ${String(config.activePeriod)})`;
+  }
+  if (!isPositivePeriod(config.idlePeriod)) {
+    return `sessionExpiresIn.idlePeriod must be a finite, positive number of milliseconds (got ${String(config.idlePeriod)})`;
+  }
+  const { updateAge } = config;
+  if (updateAge !== undefined && !(Number.isFinite(updateAge) && updateAge >= 0)) {
+    return `sessionExpiresIn.updateAge must be a finite number of milliseconds, 0 or more (got ${String(updateAge)})`;
+  }
+  return undefined;
+};
+
+/** A period in milliseconds that can bound a session: finite and above zero. */
+const isPositivePeriod = (millis: number): boolean => Number.isFinite(millis) && millis > 0;
+
+/**
+ * Run a best-effort store write whose failure must not fail the request, and
+ * log the failure rather than drop it (#612).
+ */
+const bestEffort = (
+  write: Effect.Effect<unknown, Errors.AuthError>,
+  what: string,
+): Effect.Effect<void> =>
+  write.pipe(
+    Effect.asVoid,
+    Effect.catch((error) => Effect.logWarning(`[effect-auth] ${what} failed`, error)),
+  );
+
+/**
+ * Create a SessionService implementation. Dies at layer build when
+ * `sessionExpiresIn` is not sound (#612), so a misconfigured app fails to
+ * start rather than issue sessions that never expire.
  */
 export const make = (
   config: Types.SessionConfig,
@@ -22,6 +63,10 @@ export const make = (
   SessionStore | UserStore | Hooks | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
+    const problem = sessionConfigProblem(config.sessionExpiresIn);
+    if (problem !== undefined) {
+      return yield* Effect.die(new Errors.SessionConfigError({ message: problem }));
+    }
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
     const hooks = yield* Hooks;
@@ -87,7 +132,7 @@ export const make = (
           const nowUtc = yield* DateTime.now;
           const now = DateTime.toDateUtc(nowUtc);
           if (session.expiresAt.getTime() < now.getTime()) {
-            yield* Effect.ignore(sessionStore.delete(tokenHash));
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
             return yield* new Errors.SessionExpiredError({
               message: "Session has expired",
               sessionId: tokenHash,
@@ -97,7 +142,7 @@ export const make = (
           // Check if session has been idle for too long
           const timeSinceLastActivity = now.getTime() - session.lastActivityAt.getTime();
           if (timeSinceLastActivity > config.sessionExpiresIn.idlePeriod) {
-            yield* Effect.ignore(sessionStore.delete(tokenHash));
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
             return yield* new Errors.SessionExpiredError({
               message: "Session expired due to inactivity",
               sessionId: tokenHash,
@@ -107,7 +152,7 @@ export const make = (
           // Check if session has exceeded its absolute maximum lifetime
           const sessionLifetime = now.getTime() - session.createdAt.getTime();
           if (sessionLifetime > config.sessionExpiresIn.activePeriod) {
-            yield* Effect.ignore(sessionStore.delete(tokenHash));
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
             return yield* new Errors.SessionExpiredError({
               message: "Session exceeded maximum lifetime",
               sessionId: tokenHash,
@@ -135,7 +180,7 @@ export const make = (
           const updateAge = config.sessionExpiresIn.updateAge ?? 0;
           const timeSinceUpdate = now.getTime() - session.lastActivityAt.getTime();
           if (timeSinceUpdate >= updateAge) {
-            yield* Effect.ignore(sessionStore.update(updatedSession));
+            yield* bestEffort(sessionStore.update(updatedSession), "refreshing a session");
           }
 
           // Get user

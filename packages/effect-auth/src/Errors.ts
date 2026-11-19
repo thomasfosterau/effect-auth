@@ -600,6 +600,18 @@ export class ClientAddressConfigError extends Data.TaggedError("ClientAddressCon
 }> {}
 
 /**
+ * `SessionService.layer` (or `SessionService.make`) was given a
+ * `sessionExpiresIn` that cannot work (#612): an `activePeriod` or
+ * `idlePeriod` that is not a finite, positive number of milliseconds (`NaN`
+ * from an unset `Number(env)`, for example), or an `updateAge` that is not a
+ * finite number, 0 or more. The layer build dies with it, so the app fails to
+ * start instead of issuing sessions that never expire.
+ */
+export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
+  readonly message: string;
+}> {}
+
+/**
  * A rate limit is configured with no `RateLimiter` in `services`, so it could not
  * run (#389). The limits are `Http.make`'s `ipRateLimit` (on unless it is
  * `false`, #583), the dynamic client

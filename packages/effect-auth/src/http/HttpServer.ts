@@ -893,8 +893,10 @@ const apiKeyResource = (k: ApiKey): R.ApiKey =>
 /**
  * Log the real error server-side and return a generic 500 body so internal
  * implementation details are never exposed to clients.
+ *
+ * @internal
  */
-const internalServerError = (
+export const internalServerError = (
   e: Cause.YieldableError,
 ): Effect.Effect<never, S.InternalServerError> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
@@ -2561,7 +2563,17 @@ export const deviceSessionsGroupLayer = (
           const valid = Arr.getSomes(
             yield* Effect.forEach(
               tokens,
-              (token) => Effect.option(sessionManager.validateSession(token)),
+              // A token that no longer validates is left out; a store fault
+              // is a 500, not a shorter list (#612).
+              (token) =>
+                sessionManager.validateSession(token).pipe(
+                  Effect.asSome,
+                  Effect.catch(sessionValidationFailure),
+                  Effect.catchTags({
+                    Unauthorized: () => Effect.succeedNone,
+                    AuthError: internalServerError,
+                  }),
+                ),
               { concurrency: 1 },
             ),
           );
@@ -2606,11 +2618,14 @@ export const deviceSessionsGroupLayer = (
             return yield* new S.BadRequest({ message: "Session is not on this device" });
           }
           const sessionManager = yield* SessionService;
-          const resolved = yield* sessionManager
-            .validateSession(token.value)
-            .pipe(
-              Effect.mapError(() => new S.BadRequest({ message: "Invalid or expired session" })),
-            );
+          const resolved = yield* sessionManager.validateSession(token.value).pipe(
+            Effect.catch(sessionValidationFailure),
+            Effect.catchTags({
+              Unauthorized: () =>
+                Effect.fail(new S.BadRequest({ message: "Invalid or expired session" })),
+              AuthError: internalServerError,
+            }),
+          );
           yield* setResponseCookie(
             cfg.name,
             token.value,
@@ -4080,8 +4095,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oidc = yield* resolveOidcProvider;
           // Unauthenticated: redirect to the login page carrying the original
           // authorize URL so the app can resume the flow after sign-in.
+          // A store fault is a 500, never a redirect to sign in again (#612).
           const session = yield* resolveSession(request, cfg).pipe(
-            Effect.catch(() => Effect.succeed(null)),
+            Effect.catchTag("Unauthorized", () => Effect.succeed(null)),
           );
           if (session === null || query.prompt === "login") {
             // prompt=none: must not show any UI — redirect back to the client with login_required.
@@ -4791,7 +4807,33 @@ const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, Iden
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
 /**
- * Resolve the authenticated session or fail with 401, preferring the signed
+ * A `validateSession` failure as the HTTP tier answers it (#612). A refusal
+ * (no such session, an expired one, a user that no longer exists, a ban, or a
+ * hook that denies) is `Unauthorized`; a store or infrastructure fault stays an
+ * `AuthError`, which the caller answers as a logged `500` (or, on an optional
+ * route, a degrade the app asked for). A fault is never a `401`: the browser
+ * client reads `401` as signed out, so a database blip would sign everyone out.
+ *
+ * @internal
+ */
+export const sessionValidationFailure = (
+  error: Effect.Error<ReturnType<(typeof SessionService.Service)["validateSession"]>>,
+): Effect.Effect<never, S.Unauthorized | AuthError> =>
+  Match.value(error).pipe(
+    Match.tag("AuthError", (fault) => Effect.fail(fault)),
+    Match.tag("UserBannedError", (banned) =>
+      resolveMessage(banned.code, banned.message).pipe(
+        Effect.flatMap((message) =>
+          Effect.fail(new S.Unauthorized({ message, code: banned.code })),
+        ),
+      ),
+    ),
+    Match.orElse(() => Effect.fail(new S.Unauthorized({ message: "Invalid or expired session" }))),
+  );
+
+/**
+ * Resolve the authenticated session or fail with 401 (a logged 500 when the
+ * session or user store faults, #612), preferring the signed
  * cache cookie (no store read) when the cache is enabled and the cookie is
  * valid; otherwise validating against the session store. `cacheHit` lets
  * callers decide whether to (re)issue the cache cookie; `token` is the raw
@@ -4807,7 +4849,7 @@ const resolveSession = (
     readonly cacheHit: boolean;
     readonly token: string;
   },
-  S.Unauthorized,
+  S.Unauthorized | S.InternalServerError,
   SessionService | Hooks
 > =>
   Effect.gen(function* () {
@@ -4827,22 +4869,23 @@ const resolveSession = (
       if (resolved !== null) return { resolved, cacheHit: true, token };
     }
     const sessionManager = yield* SessionService;
-    const resolved = yield* sessionManager.validateSession(token).pipe(
-      Effect.catchTag("UserBannedError", (e) =>
-        resolveMessage(e.code, e.message).pipe(
-          Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
-        ),
-      ),
-      Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
-    );
+    const resolved = yield* sessionManager
+      .validateSession(token)
+      .pipe(
+        Effect.catch(sessionValidationFailure),
+        Effect.catchTag("AuthError", internalServerError),
+      );
     return { resolved, cacheHit: false, token };
   });
 
 const requireSession = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
-): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionService | Hooks> =>
-  resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
+): Effect.Effect<
+  Types.SessionWithUser,
+  S.Unauthorized | S.InternalServerError,
+  SessionService | Hooks
+> => resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /**
  * Fail with `Forbidden` unless the request's credential is
@@ -4999,6 +5042,14 @@ export interface HttpIPRateLimitConfig {
    * Omit to use the built-in defaults for all sensitive endpoints.
    */
   readonly rules?: ReadonlyArray<EndpointRateLimitRule>;
+  /**
+   * What a rate-limit store error does to the request (#612).
+   * `"fail-closed"` (default): the request is refused with a logged `500`, so
+   * a limiter outage, or one an attacker can induce, never removes the limits.
+   * `"fail-open"`: the error is logged and the request proceeds unlimited
+   * (availability over abuse protection), as `AccountLockoutPlugin`'s option.
+   */
+  readonly onStoreError?: "fail-closed" | "fail-open" | undefined;
 }
 
 const MINUTE_MS = 60 * 1000;
@@ -5146,6 +5197,7 @@ const noRateLimiterResponse = (): Effect.Effect<HttpServerResponse.HttpServerRes
  */
 const consumeEndpointLimit = (
   rule: EndpointRateLimitRule,
+  failOpen: boolean,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse | undefined> =>
   Effect.gen(function* () {
     const limiter = yield* Effect.serviceOption(RateLimiter);
@@ -5165,11 +5217,29 @@ const consumeEndpointLimit = (
         Effect.as(null),
         Effect.catchTags({
           RateLimitError: (e) => Effect.succeed(e),
-          AuthError: () => Effect.succeed(null),
+          AuthError: (e) => Effect.as(limiterStoreFault(e, failOpen), "store-fault" as const),
         }),
       );
-    return denied === null ? undefined : tooManyRequests(denied.retryAfter);
+    if (denied === null) return undefined;
+    if (denied === "store-fault") return failOpen ? undefined : limiterStoreFaultResponse();
+    return tooManyRequests(denied.retryAfter);
   });
+
+/**
+ * Log a rate-limit store error (#612): the request is refused, or under
+ * `onStoreError: "fail-open"` served without its limit, never silently.
+ */
+const limiterStoreFault = (error: AuthError, failOpen: boolean): Effect.Effect<void> =>
+  failOpen
+    ? Effect.logWarning(
+        "[effect-auth] rate-limit store error; serving the request unlimited (onStoreError: fail-open)",
+        error,
+      )
+    : Effect.logError("[effect-auth] rate-limit store error; the request is refused", error);
+
+/** The answer to a request whose limit could not be counted: a generic `500` (#612). */
+const limiterStoreFaultResponse = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.jsonUnsafe({ message: "Internal server error" }, { status: 500 });
 
 /**
  * The per-endpoint IP limit, as router middleware on every auth route. It runs
@@ -5177,14 +5247,14 @@ const consumeEndpointLimit = (
  * request or runs any auth logic, and finds its rule by the matched endpoint's
  * path template and method, so no spelling of the path escapes it (#582).
  */
-const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>) =>
+const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>, failOpen: boolean) =>
   HttpRouter.middleware((effect) =>
     Effect.gen(function* () {
       const { route } = yield* HttpRouter.RouteContext;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const method = route.method === "*" ? request.method.toUpperCase() : route.method;
       const rule = findEndpointRule(rules, openApiTemplate(route.path), method);
-      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule);
+      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule, failOpen);
       return refused ?? (yield* effect);
     }),
   ).layer;
@@ -5585,7 +5655,12 @@ const serve = (
   // after `endpointRateLimit`, so a token endpoint's 429 is `no-store` too
   // (RFC 6749 §5.2; HttpServer.test.ts, "marks a rate-limited … 429 no-store").
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
+    Layer.provide(
+      endpointRateLimit(
+        endpointRules(options.ipRateLimit),
+        options.ipRateLimit !== false && options.ipRateLimit?.onStoreError === "fail-open",
+      ),
+    ),
     Layer.provide(tokenEndpointsNoStore),
     Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
     Layer.provide(PlatformLayer),

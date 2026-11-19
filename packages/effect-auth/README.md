@@ -58,6 +58,9 @@ const sessionConfig: Auth.SessionConfig = {
     idlePeriod: 1000 * 60 * 60 * 24 * 14, // 14 days idle timeout and renewal window
   },
 };
+// Both periods must be finite and positive (and `updateAge`, when set, 0 or
+// more), or the layer build dies with `SessionConfigError` (#612): a `NaN` from
+// an unset `Number(env)` would otherwise issue sessions that never expire.
 
 // Every service class exposes a static `layer`, the canonical way to provide it.
 const AuthLive = Auth.SessionService.layer(sessionConfig).pipe(
@@ -811,6 +814,7 @@ The limits also need a `RateLimiter` in the handler's `services`: the IP limit (
 
 - `ipRateLimit: { rules: [...] }` replaces the defaults with your own rules. A rule names an endpoint by its path template as the OpenAPI document writes it (`"/sessions"`, `"/sso/saml/acs/{providerId}"`), or by a `RegExp` tested against that template, and optionally by its `methods`. The first rule that matches wins, so to change one endpoint's limit and keep the rest, put your rule ahead of `...Http.defaultEndpointRules` (below).
 - `ipRateLimit: false` turns the limit off, and is the only way to. Use it when something in front of the handler (an edge rate limiter, a WAF rule) already limits per address, or in tests.
+- `ipRateLimit: { onStoreError: "fail-open" }` serves a request unlimited, with a logged warning, when the `RateLimitStore` errors. The default, `"fail-closed"`, refuses it with a logged `500` (#612), so a limiter outage, or one an attacker can induce, never removes the limits silently. This matches `AccountLockoutPlugin`'s `onStoreError`.
 
 Rules are matched against the endpoint the router matched, never the raw request path. The router is case-insensitive and ignores trailing and duplicate slashes and percent-encoding, so `/Sessions/`, `//sessions` and `/%73essions` all reach `POST /sessions`, and all count in its bucket (#582).
 
@@ -1058,6 +1062,8 @@ The included HTTP API speaks [JSON:API](https://jsonapi.org/) through `@thomasfo
 These take and answer `application/vnd.api+json` (a request with another media type is `415`, an `Accept` that excludes it `406`) and fail with JSON:API error documents (`Http.JsonApiErrors`: `status`, `detail` the message, `meta` carrying the `message` and, when there is one, the stable `code`). The resources are declared once, in `Http.Resources`.
 
 No response body carries a session token (#581). Every `sessions`, `device-sessions` and `impersonations` resource is named by the session's stored id, the SHA-256 digest of its token, which is not a credential: `GET /sessions/:id`, `DELETE /sessions/:id` and the `device-sessions` actions take it. The token itself reaches the client only in the `HttpOnly` session cookie and, when `cookie.bearerMode` is on (`"always"`, or `"opt-in"` for a request sending `x-use-bearer: 1`), in the `set-auth-token` response header, which a native client stores and presents as `Authorization: Bearer <token>`.
+
+A session-store or user-store fault is a logged `500`, never a `401` (#612): only a session that is absent, expired, banned or whose user is gone is `401`, so a database outage does not read as a mass sign-out in the browser client. The same holds for `AuthMiddleware` in an app's own `HttpApi`. `OptionalAuthMiddleware` serves an absent or refused session as anonymous and a fault as a `500`, unless `Http.optionalLayer(config, { onDegraded })` is given: then the request is served as anonymous and the fault goes to `onDegraded`, as `SessionResolution.resolveFailOpen` requires.
 
 Every response that carries `Set-Cookie` is sent with `Cache-Control: no-store` (#628): sign-in and sign-up, a sign-out or account change that clears the cookies, and `GET /sessions/current` when it refreshes the `cookie.cache` cookie, the one `GET` that sets a cookie. A `Cache-Control` that already has `no-store` is kept; one without it keeps its directives and gets `no-store` appended, which a cache honours whatever else the header says. The bodies that hand a credential over are `no-store` too, cookie or not: `GET /sessions/:id`, `POST /tokens`, `POST /api-keys`, `POST /multi-factor-enrollments`, `POST /backup-code-sets`, `POST /oauth-clients`, `POST /device/token`, `POST /oauth2/token`, `GET /oauth2/userinfo` and `POST /register`. `Http.RemoteSession.relayResponse` and `withSetCookie` apply the same rule to the responses they relay.
 
