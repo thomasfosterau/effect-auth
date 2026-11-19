@@ -15,6 +15,7 @@ import {
   PendingMultiFactorStore,
 } from "./MultiFactor.ts";
 import * as MultiFactor from "./MultiFactor.ts";
+import { memoryMultiFactorStore } from "../testing/MemoryStores.ts";
 import * as Cipher from "../Cipher.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import {
@@ -101,20 +102,12 @@ const emailPasswordStore = {
     }),
 };
 
-const multiFactorStore = {
-  get: (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId))),
-
-  upsert: (record: MultiFactorRecord) =>
-    Effect.sync(() => {
-      MutableHashMap.set(multiFactorRecords, record.userId, record);
-      return record;
-    }),
-
-  delete: (userId: string) =>
-    Effect.sync(() => {
-      MutableHashMap.remove(multiFactorRecords, userId);
-    }),
+// Every read yields the fiber, as a database round trip would, so concurrent
+// redemptions interleave between a read and the write that follows (#594).
+const memoryMultiFactor = memoryMultiFactorStore(multiFactorRecords);
+const multiFactorStore: typeof MultiFactorStore.Service = {
+  ...memoryMultiFactor,
+  get: (userId) => Effect.tap(memoryMultiFactor.get(userId), () => Effect.yieldNow),
 };
 
 const pendingMultiFactorStore = {
@@ -125,7 +118,17 @@ const pendingMultiFactorStore = {
     }),
 
   get: (token: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingChallenges, token))),
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingChallenges, token))).pipe(
+      Effect.tap(() => Effect.yieldNow),
+    ),
+
+  consume: (token: string) =>
+    Effect.sync(() => {
+      MutableHashMap.remove(pendingAttempts, token);
+      const found = Option.getOrNull(MutableHashMap.get(pendingChallenges, token));
+      MutableHashMap.remove(pendingChallenges, token);
+      return found;
+    }),
 
   recordFailedAttempt: (token: string) =>
     Effect.sync(() => {
@@ -633,6 +636,79 @@ describe("MultiFactorService", () => {
     expect(
       Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-8"))?.backupCodes,
     ).toHaveLength(8);
+  });
+
+  describe("concurrent redemptions (#594)", () => {
+    const race = async <A, E>(
+      userId: string,
+      redeem: (
+        service: Effect.Success<ReturnType<typeof MultiFactor.make>>,
+        enabled: { readonly secret: string; readonly backupCodes: ReadonlyArray<string> },
+      ) => Effect.Effect<ReadonlyArray<Effect.Effect<A, E>>, unknown>,
+    ) => {
+      const testContext = await makeTestContext();
+      await seedUser(userId, `${userId}@example.com`, "correct-password");
+      return Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* MultiFactor.make({
+              issuer: "TestApp",
+              skipVerificationOnEnable: true,
+            });
+            const enabled = yield* service.enable(userId, "correct-password");
+            const attempts = yield* redeem(service, enabled);
+            return yield* Effect.all(attempts.map(Effect.result), { concurrency: "unbounded" });
+          }),
+          testContext,
+        ).pipe(Effect.provide(Hooks.Default)),
+      );
+    };
+
+    it("accepts one TOTP code once across concurrent challenges", async () => {
+      const results = await race("user-2fa-race-totp", (service, { secret }) =>
+        Effect.gen(function* () {
+          const code = yield* generateTotp(secret);
+          const first = yield* service.beginChallenge("user-2fa-race-totp");
+          const second = yield* service.beginChallenge("user-2fa-race-totp");
+          return [service.verifyTotp(first.token, code), service.verifyTotp(second.token, code)];
+        }),
+      );
+      expect(results.filter(Result.isSuccess)).toHaveLength(1);
+      expect(MutableHashMap.size(sessions)).toBe(1);
+    });
+
+    it("accepts one backup code once across concurrent challenges", async () => {
+      const results = await race("user-2fa-race-backup", (service, { backupCodes }) =>
+        Effect.gen(function* () {
+          const first = yield* service.beginChallenge("user-2fa-race-backup");
+          const second = yield* service.beginChallenge("user-2fa-race-backup");
+          return [
+            service.verifyBackupCode(first.token, backupCodes[0] ?? ""),
+            service.verifyBackupCode(second.token, backupCodes[0] ?? ""),
+          ];
+        }),
+      );
+      expect(results.filter(Result.isSuccess)).toHaveLength(1);
+      expect(MutableHashMap.size(sessions)).toBe(1);
+      expect(
+        Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-race-backup"))
+          ?.backupCodes,
+      ).toHaveLength(9);
+    });
+
+    it("creates one session from one challenge redeemed concurrently with two codes", async () => {
+      const results = await race("user-2fa-race-pending", (service, { backupCodes }) =>
+        Effect.gen(function* () {
+          const challenge = yield* service.beginChallenge("user-2fa-race-pending");
+          return [
+            service.verifyBackupCode(challenge.token, backupCodes[0] ?? ""),
+            service.verifyBackupCode(challenge.token, backupCodes[1] ?? ""),
+          ];
+        }),
+      );
+      expect(results.filter(Result.isSuccess)).toHaveLength(1);
+      expect(MutableHashMap.size(sessions)).toBe(1);
+    });
   });
 
   it("should invalidate old backup codes on regeneration", async () => {

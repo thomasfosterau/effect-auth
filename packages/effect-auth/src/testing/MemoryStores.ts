@@ -62,6 +62,16 @@ import type * as Types from "../Types.ts";
 import { UserServiceStore } from "../User.ts";
 import { type CreateUserResult, UserStore } from "../UserStore.ts";
 
+/**
+ * Remove `key` from `map` and return what it held, or `null`: a single-use
+ * store's `consume` (#594), atomic because it runs in one synchronous step.
+ */
+const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
+  const found = Option.getOrNull(MutableHashMap.get(map, key));
+  if (found !== null) MutableHashMap.remove(map, key);
+  return found;
+};
+
 /** Removes every entry whose value matches `predicate`. */
 const removeWhere = <V>(
   map: MutableHashMap.MutableHashMap<string, V>,
@@ -338,6 +348,27 @@ export const memoryMultiFactorStore = (
   upsert: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.userId, record), record)),
   delete: (userId) => Effect.sync(() => void MutableHashMap.remove(records, userId)),
+  // Each spend is one synchronous step, so it is atomic on this map (#594).
+  useTotpCounter: (userId, counter) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, userId));
+      if (record === null || !record.verified) return false;
+      if (record.lastUsedCounter !== undefined && record.lastUsedCounter >= counter) return false;
+      MutableHashMap.set(records, userId, { ...record, lastUsedCounter: counter });
+      return true;
+    }),
+  useBackupCode: (userId, codeHash) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, userId));
+      if (record === null || !record.verified || !record.backupCodes.includes(codeHash)) {
+        return false;
+      }
+      MutableHashMap.set(records, userId, {
+        ...record,
+        backupCodes: record.backupCodes.filter((code) => code !== codeHash),
+      });
+      return true;
+    }),
 });
 
 /**
@@ -578,6 +609,7 @@ export const memoryOidcCodeStore = (
 ): typeof OidcCodeStore.Service => ({
   create: (code) => Effect.sync(() => (MutableHashMap.set(codes, code.codeHash, code), code)),
   get: (codeHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(codes, codeHash))),
+  consume: (codeHash) => Effect.sync(() => take(codes, codeHash)),
   delete: (codeHash) => Effect.sync(() => void MutableHashMap.remove(codes, codeHash)),
 });
 
@@ -593,6 +625,7 @@ export const memoryOidcTokenStore = (
 ): typeof OidcTokenStore.Service => ({
   create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.tokenHash, token), token)),
   get: (tokenHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, tokenHash))),
+  consume: (tokenHash) => Effect.sync(() => take(tokens, tokenHash)),
   delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(tokens, tokenHash)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {

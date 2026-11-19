@@ -89,12 +89,34 @@ const makeOidcStores = () => {
   };
   const codeStore: typeof OidcCodeStore.Service = {
     create: (c) => Effect.sync(() => (MutableHashMap.set(codes, c.codeHash, c), c)),
-    get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
+    // Reads yield the fiber, as a database round trip would, so concurrent
+    // redemptions interleave between a read and the spend (#594).
+    get: (hash) =>
+      Effect.tap(
+        Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
+        () => Effect.yieldNow,
+      ),
+    consume: (hash) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(codes, hash));
+        MutableHashMap.remove(codes, hash);
+        return found;
+      }),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(codes, hash)),
   };
   const tokenStore: typeof OidcTokenStore.Service = {
     create: (t) => Effect.sync(() => (MutableHashMap.set(tokens, t.tokenHash, t), t)),
-    get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
+    get: (hash) =>
+      Effect.tap(
+        Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
+        () => Effect.yieldNow,
+      ),
+    consume: (hash) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(tokens, hash));
+        MutableHashMap.remove(tokens, hash);
+        return found;
+      }),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(tokens, hash)),
     deleteByUserId: (userId) =>
       Effect.sync(() =>
@@ -1818,6 +1840,76 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(afterRevoke.status).toBe(400);
+  });
+
+  it("redeems an authorization code and rotates a refresh token once under concurrency (#594)", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const userSid = fx.makeSession(fx.seedUser("race@idp.test"));
+
+    const registered = await fx.handler(
+      registerClientRequest(
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client, clientSecret } = await registeredClient(registered);
+
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: "https://rp.test/cb",
+          scope: "openid offline_access",
+          code_challenge: pkce.codeChallenge,
+          code_challenge_method: "S256",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    const code = searchParam(locationOf(authorize), "code");
+
+    // RFC 6749 §4.1.2: of concurrent exchanges of one code, one gets tokens.
+    const exchanges = await Promise.all(
+      Arr.makeBy(3, () =>
+        fx.handler(
+          post("/oauth2/token", {
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "https://rp.test/cb",
+            code_verifier: pkce.codeVerifier,
+            client_id: client.clientId,
+            client_secret: clientSecret,
+          }),
+        ),
+      ),
+    );
+    expect(exchanges.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+      200, 400, 400,
+    ]);
+    const issued = exchanges.find((response) => response.status === 200);
+    assert(issued !== undefined);
+    const { refresh_token: refreshToken } = await jsonBody(issued, RefreshTokenBody);
+
+    // Concurrent refreshes of one token rotate it once, never forking the family.
+    const rotations = await Promise.all(
+      Arr.makeBy(3, () =>
+        fx.handler(
+          post("/oauth2/token", {
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            client_id: client.clientId,
+            client_secret: clientSecret,
+          }),
+        ),
+      ),
+    );
+    expect(rotations.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+      200, 400, 400,
+    ]);
   });
 
   it("enforces absolute (non-sliding) refresh token lifetime", async () => {

@@ -124,7 +124,7 @@ import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.t
 import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
-import { memoryOtpFailures } from "../testing/MemoryStores.ts";
+import { memoryMultiFactorStore, memoryOtpFailures } from "../testing/MemoryStores.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -335,6 +335,12 @@ const makeFixture = (
         return verification;
       }),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+    consume: (token) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(verifications, token));
+        MutableHashMap.remove(verifications, token);
+        return found;
+      }),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(verifications, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -361,6 +367,12 @@ const makeFixture = (
         return reset;
       }),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(resets, token))),
+    consume: (token) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(resets, token));
+        MutableHashMap.remove(resets, token);
+        return found;
+      }),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(resets, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -438,6 +450,12 @@ const makeFixture = (
         return token;
       }),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(magicLinks, token))),
+    consume: (token) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(magicLinks, token));
+        MutableHashMap.remove(magicLinks, token);
+        return found;
+      }),
     getByEmail: (email) =>
       Effect.sync(() => {
         return Option.getOrNull(
@@ -483,16 +501,9 @@ const makeFixture = (
   };
 
   const multiFactorRecords = MutableHashMap.empty<string, MultiFactorRecord>();
-  const multiFactorStore: typeof MultiFactorStore.Service = {
-    get: (userId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId))),
-    upsert: (record) =>
-      Effect.sync(() => {
-        MutableHashMap.set(multiFactorRecords, record.userId, record);
-        return record;
-      }),
-    delete: (userId) => Effect.sync(() => void MutableHashMap.remove(multiFactorRecords, userId)),
-  };
+  const multiFactorStore: typeof MultiFactorStore.Service =
+    memoryMultiFactorStore(multiFactorRecords);
+
   const pendingMultiFactors = MutableHashMap.empty<string, PendingMultiFactor>();
   const pendingMultiFactorAttempts = MutableHashMap.empty<string, number>();
   const pendingMultiFactorStore: typeof PendingMultiFactorStore.Service = {
@@ -503,6 +514,12 @@ const makeFixture = (
       }),
     get: (token) =>
       Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingMultiFactors, token))),
+    consume: (token) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(pendingMultiFactors, token));
+        MutableHashMap.remove(pendingMultiFactors, token);
+        return found;
+      }),
     recordFailedAttempt: (token) =>
       Effect.sync(() => {
         const attempts =

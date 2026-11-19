@@ -93,6 +93,15 @@ export class EmailVerificationStore extends Context.Service<
       verification: EmailVerification,
     ) => Effect.Effect<EmailVerification, AuthError>;
     readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
+    /**
+     * Atomically take the record for `token`: delete it and return it, or
+     * return `null` when there is none (#594). Of two concurrent callers
+     * passing the same token, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, AuthError>;
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
     /**
@@ -147,10 +156,12 @@ export class EmailVerificationService extends Context.Service<
     ) => Effect.Effect<EmailVerification, EmailVerificationError | AuthError | HookError>;
 
     /**
-     * Delete the token from the store and fire the `afterVerifyEmail` hook.
-     * Intended to be called AFTER the durable state change (e.g.
-     * `markEmailVerified`) has succeeded, so a store failure before that point
-     * leaves the token valid and the user can retry.
+     * Spend the token with the store's atomic `consume` and fire the
+     * `afterVerifyEmail` hook. Intended to be called AFTER the durable state
+     * change (e.g. `markEmailVerified`) has succeeded, so a store failure
+     * before that point leaves the token valid and the user can retry. Fails
+     * with {@link EmailVerificationError} when the token is already spent, so
+     * of concurrent verifications of one token only one completes (#594).
      *
      * The `token` parameter is the stored hash, as returned in
      * `EmailVerification.token` by `peekToken`.
@@ -158,7 +169,7 @@ export class EmailVerificationService extends Context.Service<
     readonly burnToken: (
       token: string,
       result: EmailVerificationResult,
-    ) => Effect.Effect<EmailVerificationResult, AuthError | HookError>;
+    ) => Effect.Effect<EmailVerificationResult, EmailVerificationError | AuthError | HookError>;
 
     /**
      * Invalidate any outstanding verification tokens for the user and send a
@@ -281,8 +292,13 @@ export const make = (
           });
         }
 
-        // Delete token after successful verification (one-time use)
-        yield* store.delete(tokenHash);
+        // Spend the token atomically (#594): of concurrent verifications of
+        // one token, only one succeeds.
+        if ((yield* store.consume(tokenHash)) === null) {
+          return yield* new EmailVerificationError({
+            message: "Invalid or expired verification token",
+          });
+        }
 
         const result = {
           userId: verification.userId,
@@ -315,7 +331,11 @@ export const make = (
         token: string,
         result: EmailVerificationResult,
       ) {
-        yield* store.delete(token);
+        if ((yield* store.consume(token)) === null) {
+          return yield* new EmailVerificationError({
+            message: "Invalid or expired verification token",
+          });
+        }
         return yield* hooks.afterVerifyEmail(result);
       }),
 

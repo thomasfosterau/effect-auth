@@ -138,6 +138,9 @@ const magicLinkUserStore = {
 /** The `identifier` each `createUser` call was given. */
 const createdWith: Array<MagicLinkCreateUserInput["identifier"]> = [];
 
+/** Whether `magicLinkStore.get` yields the fiber after reading. */
+let slowReads = false;
+
 /** The name of each `MagicLinkStore` call, in order. */
 const storeOps: string[] = [];
 
@@ -149,10 +152,20 @@ const magicLinkStore = {
       return token;
     }),
 
+  // A read yields the fiber when `slowReads` is set, as a database round
+  // trip would, so concurrent redemptions interleave (#594).
   get: (token: string) =>
     Effect.sync(() => {
       storeOps.push("get");
       return Option.getOrNull(MutableHashMap.get(magicLinkTokens, token));
+    }).pipe(Effect.tap(() => (slowReads ? Effect.yieldNow : Effect.void))),
+
+  consume: (token: string) =>
+    Effect.sync(() => {
+      storeOps.push("consume");
+      const found = Option.getOrNull(MutableHashMap.get(magicLinkTokens, token));
+      MutableHashMap.remove(magicLinkTokens, token);
+      return found;
     }),
 
   getByEmail: (email: string) =>
@@ -245,6 +258,7 @@ describe("MagicLinkService", () => {
     MutableHashMap.clear(passwordHashes);
     sentLinks.splice(0, sentLinks.length);
     storeOps.length = 0;
+    slowReads = false;
     createdWith.length = 0;
   });
 
@@ -678,6 +692,29 @@ describe("MagicLinkService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("MagicLinkError");
     // Only the first verification created a session.
+    expect(MutableHashMap.size(sessions)).toBe(1);
+  });
+
+  it("signs in only one of concurrent redemptions of one link (#594)", async () => {
+    const testContext = await makeTestContext();
+    slowReads = true;
+
+    const results = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("race@example.com");
+          const token = recorded(sentLinks).token;
+          return yield* Effect.all(
+            Arr.makeBy(4, () => Effect.result(service.verify(token))),
+            { concurrency: "unbounded" },
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(results.filter(Result.isSuccess)).toHaveLength(1);
     expect(MutableHashMap.size(sessions)).toBe(1);
   });
 

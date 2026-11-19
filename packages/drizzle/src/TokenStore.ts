@@ -18,6 +18,12 @@
  *   (`Auth.hashToken`); the raw token goes to the user and never reaches the
  *   store.
  * - `get` returns `null` on a miss; deletes of missing rows are no-ops.
+ * - `consume` (#594) reads the row, then deletes it and hands it back only
+ *   when that `DELETE` reports one affected row, so of concurrent consumers
+ *   of one token only one receives it. MySQL has no `RETURNING`, so every
+ *   dialect takes the driver's affected-row count rather than a
+ *   per-dialect branch; a driver that reports none fails with `AuthError`
+ *   rather than hand the token out twice.
  * - Expiry is the services' to check: an expired row is returned as found.
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
@@ -25,6 +31,9 @@
 
 import { and, desc, eq } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
 import { makeQuery } from "./internal.ts";
@@ -48,10 +57,51 @@ interface TokenRecord {
 interface TokenStoreShape<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;
   readonly get: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
+  readonly consume: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Auth.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.AuthError>;
   readonly getLatestByUserId: (userId: string) => Effect.Effect<A | null, Auth.AuthError>;
 }
+
+/** One driver's report of the rows a statement touched. */
+const AffectedRowsHeader = Schema.Union([
+  Schema.Struct({ affectedRows: Schema.Finite }),
+  Schema.Struct({ rowCount: Schema.Finite }),
+  Schema.Struct({ changes: Schema.Finite }),
+  Schema.Struct({ rowsAffected: Schema.Finite }),
+  Schema.Struct({ meta: Schema.Struct({ changes: Schema.Finite }) }),
+]);
+
+/**
+ * The number of rows a `DELETE` / `UPDATE` touched, decoded from whatever the
+ * driver's `execute()` resolved to, or `None` when it reports none (#594).
+ * The shapes differ by driver: PGlite and mysql2 carry `affectedRows` (mysql2
+ * in a `[ResultSetHeader, …]` pair), node-postgres `rowCount`, better-sqlite3
+ * `changes`, libsql `rowsAffected` and D1 `meta.changes`.
+ */
+const AffectedRows = Schema.Union([
+  AffectedRowsHeader,
+  Schema.TupleWithRest(Schema.Tuple([AffectedRowsHeader]), [Schema.Unknown]),
+]).pipe(
+  Schema.decodeTo(Schema.Finite, {
+    decode: SchemaGetter.transform((result) => {
+      const header = Array.isArray(result) ? result[0] : result;
+      return "affectedRows" in header
+        ? header.affectedRows
+        : "rowCount" in header
+          ? header.rowCount
+          : "changes" in header
+            ? header.changes
+            : "rowsAffected" in header
+              ? header.rowsAffected
+              : header.meta.changes;
+    }),
+    encode: SchemaGetter.forbidden(() => "affected-row counts are read, never written"),
+  }),
+);
+
+/** {@link AffectedRows} applied to a driver result. */
+const affectedRows = Schema.decodeUnknownOption(AffectedRows);
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));
 
@@ -94,6 +144,25 @@ const makeFor = (
         query(`${purpose}.get`, (db) =>
           db.select().from(table).where(byToken(token)).limit(1).execute(),
         ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
+
+      consume: (token) =>
+        Effect.gen(function* () {
+          const rows = yield* query(`${purpose}.consume.read`, (db) =>
+            db.select().from(table).where(byToken(token)).limit(1).execute(),
+          );
+          const row = rows[0];
+          if (row === undefined) return null;
+          const result = yield* query(`${purpose}.consume`, (db) =>
+            db.delete(table).where(byToken(token)).execute(),
+          );
+          const count = affectedRows(result);
+          if (Option.isNone(count)) {
+            return yield* new Auth.AuthError({
+              message: `drizzle ${purpose}.consume: the driver reported no affected-row count`,
+            });
+          }
+          return count.value > 0 ? toRecord(row) : null;
+        }),
 
       delete: (token) =>
         query(`${purpose}.delete`, (db) => db.delete(table).where(byToken(token)).execute()).pipe(

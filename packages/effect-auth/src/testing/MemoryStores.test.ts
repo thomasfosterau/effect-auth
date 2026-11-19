@@ -70,6 +70,9 @@ register(Testing.oidcConsentStoreConformance(), () => Testing.memoryStores);
 register(Testing.emailVerificationStoreConformance(), () => Testing.memoryStores);
 register(Testing.passwordResetStoreConformance(), () => Testing.memoryStores);
 register(Testing.accountManagementStoreConformance(), () => Testing.memoryStores);
+// The single-use consumes (#594); `memoryStores` serves `MagicLinkStore` from `layerKV`.
+register(Testing.magicLinkStoreConformance(), () => Testing.memoryStores);
+register(Testing.oidcCodeStoreConformance(), () => Testing.memoryStores);
 
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 24 * 60 * 60 * 1000, idlePeriod: 60 * 60 * 1000 },

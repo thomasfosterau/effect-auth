@@ -30,6 +30,13 @@ const oneTimeTokenStore = {
   get: (token: string) =>
     Effect.sync(() => Option.getOrNull(MutableHashMap.get(oneTimeTokens, token))),
 
+  consume: (token: string) =>
+    Effect.sync(() => {
+      const found = Option.getOrNull(MutableHashMap.get(oneTimeTokens, token));
+      MutableHashMap.remove(oneTimeTokens, token);
+      return found;
+    }),
+
   delete: (token: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(oneTimeTokens, token);

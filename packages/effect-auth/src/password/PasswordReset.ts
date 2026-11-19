@@ -32,6 +32,15 @@ export class PasswordResetStore extends Context.Service<
       reset: PasswordResetToken,
     ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
     readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
+    /**
+     * Atomically take the record for `token`: delete it and return it, or
+     * return `null` when there is none (#594). Of two concurrent callers
+     * passing the same token, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -254,9 +263,16 @@ export const make = (
         }
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);
-        yield* userStore.setPasswordHash(reset.userId, hashedPassword.hash);
 
-        yield* resetStore.delete(tokenHash);
+        // Spend the token atomically before the password is written (#594):
+        // of concurrent resets with one token, only one sets a password.
+        if ((yield* resetStore.consume(tokenHash)) === null) {
+          return yield* new Errors.PasswordResetError({
+            message: "Invalid or expired password reset token",
+          });
+        }
+
+        yield* userStore.setPasswordHash(reset.userId, hashedPassword.hash);
 
         if (revokeSessionsOnPasswordReset) {
           yield* sessionManager.invalidateUserSessions(reset.userId);

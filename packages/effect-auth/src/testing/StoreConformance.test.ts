@@ -13,6 +13,7 @@ import * as Errors from "../Errors.ts";
 import { type Identifier, IdentifierStore } from "../Identifier.ts";
 import { IdentifierStoreKV } from "../KeyValueStores.ts";
 import { OAuthAccountStore } from "../oauth/OAuthAccount.ts";
+import { type OneTimeTokenRecord, OneTimeTokenStore } from "../OneTimeToken.ts";
 import { PhoneOtpStore } from "../PhoneOtp.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
@@ -68,6 +69,33 @@ register(Testing.apiKeyStoreConformance(), () =>
 );
 register(Testing.identifierStoreConformance(), () =>
   IdentifierStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+);
+
+/**
+ * A `OneTimeTokenStore` over a map. With `yieldBetween`, its `consume` is the
+ * pre-#594 shape: a `get`, then a `delete`, with a fiber switch between them.
+ */
+const oneTimeTokenStore = (yieldBetween = false): typeof OneTimeTokenStore.Service => {
+  const tokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
+  const get = (token: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token)));
+  const remove = (token: string) => Effect.sync(() => void MutableHashMap.remove(tokens, token));
+  return {
+    create: (record) =>
+      Effect.sync(() => (MutableHashMap.set(tokens, record.token, record), record)),
+    get,
+    consume: (token) =>
+      Effect.gen(function* () {
+        const found = yield* get(token);
+        if (yieldBetween) yield* Effect.yieldNow;
+        if (found !== null) yield* remove(token);
+        return found;
+      }),
+    delete: remove,
+  };
+};
+register(Testing.oneTimeTokenStoreConformance(), () =>
+  Layer.succeed(OneTimeTokenStore, oneTimeTokenStore()),
 );
 
 describe("the suites share one store", () => {
@@ -222,6 +250,15 @@ describe("a broken store fails its suite", () => {
     });
     expect(failed.map((failure) => failure.name)).toEqual([
       "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
+    ]);
+  });
+
+  it("a OneTimeTokenStore whose consume is a get then a delete fails the race case (#594)", async () => {
+    const failed = await failures(Testing.oneTimeTokenStoreConformance(), () =>
+      Layer.succeed(OneTimeTokenStore, oneTimeTokenStore(true)),
+    );
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "concurrent consumes of one one-time token hand it to exactly one caller",
     ]);
   });
 
