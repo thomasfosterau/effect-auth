@@ -29,7 +29,9 @@ jobs:
         with:
           version-file: pnpm-workspace.yaml
           cache: true
-          run-install: true
+          # No dependency lifecycle scripts in release jobs.
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Select mode
         id: mode
         uses: changesets/action/select-mode@v2.1.2
@@ -46,6 +48,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      pnpm_config_verify_deps_before_run: "false"
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -55,7 +59,9 @@ jobs:
         with:
           version-file: pnpm-workspace.yaml
           cache: true
-          run-install: true
+          # No dependency lifecycle scripts in release jobs.
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Create or update the version PR
         id: version
         uses: changesets/action/version@v2.1.2
@@ -97,7 +103,12 @@ jobs:
         with:
           version-file: pnpm-workspace.yaml
           cache: true
-          run-install: true
+          # No dependency lifecycle scripts in release jobs.
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
+      # The build runs on the Effect-patched tsc.
+      - name: Patch the toolchain
+        run: pnpm run prepare
       # Trusted publishing needs npm >= 11.5.1.
       - name: Update npm
         run: npm install -g npm@11
