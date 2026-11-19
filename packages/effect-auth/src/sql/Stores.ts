@@ -1157,11 +1157,8 @@ export const makeEmailOtpStore: Effect.Effect<
             WHERE email = ${email} AND purpose = ${purpose}
             RETURNING attempts`,
         );
-        const attempts = rows[0]?.attempts;
-        if (attempts == null) {
-          return yield* new Auth.AuthError({ message: "OTP record not found" });
-        }
-        return attempts;
+        // No row: another request consumed or exhausted the code (#593).
+        return rows[0]?.attempts ?? null;
       }),
     getFailures: (email, purpose) =>
       firstRow(

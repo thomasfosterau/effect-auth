@@ -368,6 +368,13 @@ export const memoryOtpSecondFactorStore = (
     Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, pendingToken))),
   update: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
+  incrementAttempts: (pendingToken) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, pendingToken));
+      if (record === null) return null;
+      MutableHashMap.set(records, pendingToken, { ...record, attempts: record.attempts + 1 });
+      return record.attempts + 1;
+    }),
   delete: (pendingToken) => Effect.sync(() => void MutableHashMap.remove(records, pendingToken)),
 });
 
@@ -471,9 +478,7 @@ export const memoryPhoneOtpStore = (
   incrementAttempts: (phoneNumber, purpose) =>
     Effect.suspend(() => {
       const record = Option.getOrNull(MutableHashMap.get(records, codeKey(phoneNumber, purpose)));
-      if (record === null) {
-        return Effect.fail(new Errors.AuthError({ message: "OTP record not found" }));
-      }
+      if (record === null) return Effect.succeed(null);
       const updated: PhoneOtpRecord = { ...record, attempts: record.attempts + 1 };
       MutableHashMap.set(records, codeKey(phoneNumber, purpose), updated);
       return Effect.succeed(updated.attempts);

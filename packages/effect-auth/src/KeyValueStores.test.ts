@@ -384,9 +384,7 @@ describe("KeyValueStores", () => {
           const other = yield* store.get("otp@example.com", "forget-password");
           yield* store.delete("otp@example.com", "sign-in");
           const deleted = yield* store.get("otp@example.com", "sign-in");
-          const missingIncrement = yield* Effect.flip(
-            store.incrementAttempts("otp@example.com", "sign-in"),
-          );
+          const missingIncrement = yield* store.incrementAttempts("otp@example.com", "sign-in");
           return { loaded, attempts1, attempts2, replaced, other, deleted, missingIncrement };
         }),
       );
@@ -397,7 +395,8 @@ describe("KeyValueStores", () => {
       expect(result.replaced?.attempts).toBe(0);
       expect(result.other?.otpHash).toBe("other");
       expect(result.deleted).toBeNull();
-      expect(result.missingIncrement._tag).toBe("AuthError");
+      // A pair with no code counts nothing (#593).
+      expect(result.missingIncrement).toBeNull();
     });
   });
 

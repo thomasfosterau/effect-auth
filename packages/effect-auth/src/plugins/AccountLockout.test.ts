@@ -73,6 +73,24 @@ const makeHarness = (
 };
 
 describe("AccountLockoutPlugin", () => {
+  it("lets at most maxAttempts of a concurrent burst through (#593)", async () => {
+    const records = MutableHashMap.empty<string, AccountLockoutRecord>();
+    const inner = memoryAccountLockoutStore(records);
+    // Reads that yield, as a database round trip does: every attempt of the
+    // burst reads the counter before any of them registers.
+    const h = makeHarness(
+      { maxAttempts: 3, lockoutDurationMs: 60_000 },
+      {
+        ...inner,
+        get: (key) => Effect.flatMap(inner.get(key), (r) => Effect.as(Effect.yieldNow, r)),
+      },
+    );
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => h.attemptResult(byEmail("user@example.com"))),
+    );
+    expect(results.filter((result) => result instanceof AccountLockedError)).toHaveLength(7);
+  });
+
   it("locks the handle after maxAttempts attempts", async () => {
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
 
@@ -192,8 +210,9 @@ describe("AccountLockoutPlugin", () => {
       AccountLockedError,
     );
     expect(await Promise.all(proofs.map((proof) => h.attemptResult(proof)))).toEqual(proofs);
-    // ...and the lock on the password methods stands.
-    expect(h.failures("lockout:user:u1")).toBe(2);
+    // ...and the lock on the password methods stands: two attempts, and the
+    // refused third that set it (the lock is counted, not read, #593).
+    expect(h.failures("lockout:user:u1")).toBe(3);
   });
 
   it("lets an unkeyed attempt through without counting it (#678)", async () => {
