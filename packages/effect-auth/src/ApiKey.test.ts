@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Clock, Context, Effect, MutableHashMap, Result } from "effect";
+import { Clock, Context, Deferred, Effect, Fiber, MutableHashMap, Result } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -551,6 +552,102 @@ describe("ApiKeyService", () => {
 
     expect(result.every((outcome) => outcome.valid)).toBe(true);
     expect(MutableHashMap.size(rateLimitEntries)).toBe(0);
+  });
+
+  describe("concurrent verifies (#595)", () => {
+    // Reads that yield, as a database round trip does, so concurrent verifies
+    // interleave between the read and the spend.
+    const slowReads: typeof ApiKeyStore.Service = {
+      ...apiKeyStore,
+      get: (id) => Effect.flatMap(apiKeyStore.get(id), (key) => Effect.as(Effect.yieldNow, key)),
+      getByHash: (hash) =>
+        Effect.flatMap(apiKeyStore.getByHash(hash), (key) => Effect.as(Effect.yieldNow, key)),
+    };
+    /** A service over `store`, the rest of its context the suite's own. */
+    const serviceOver = (store: typeof ApiKeyStore.Service) =>
+      ApiKey.make().pipe(
+        Effect.provideService(ApiKeyStore, store),
+        Effect.provideService(SecureRandom.SecureRandom, PlatformCrypto.instance),
+      );
+    const withSlowReads = () => serviceOver(slowReads);
+
+    it("spends a key with one use left for exactly one of concurrent verifies", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          const { key, apiKey } = yield* service.create("user-1", { remaining: 1 });
+          const slow = yield* withSlowReads();
+          const verdicts = yield* Effect.all(
+            Arr.makeBy(4, () => slow.verify(key)),
+            {
+              concurrency: "unbounded",
+            },
+          );
+          return { verdicts, stored: yield* service.get(apiKey.id) };
+        }),
+      );
+
+      expect(result.verdicts.filter((verdict) => verdict.valid)).toHaveLength(1);
+      expect(
+        result.verdicts.filter((verdict) => !verdict.valid).map((verdict) => verdict.reason),
+      ).toEqual(["exhausted", "exhausted", "exhausted"]);
+      expect(result.stored.remaining).toBe(0);
+    });
+
+    it("keeps an owner's disable that lands while a verify is in flight", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          const { key, apiKey } = yield* service.create("user-1");
+          const read = yield* Deferred.make<void>();
+          const proceed = yield* Deferred.make<void>();
+          // The verify reads the enabled key, then waits while the owner
+          // disables it.
+          const paused = yield* serviceOver({
+            ...apiKeyStore,
+            getByHash: (hash) =>
+              apiKeyStore.getByHash(hash).pipe(
+                Effect.tap(() => Deferred.succeed(read, undefined)),
+                Effect.tap(() => Deferred.await(proceed)),
+              ),
+          });
+          const verifying = yield* Effect.forkChild(paused.verify(key));
+          yield* Deferred.await(read);
+          yield* service.update("user-1", apiKey.id, { enabled: false });
+          yield* Deferred.succeed(proceed, undefined);
+          return { verdict: yield* Fiber.join(verifying), stored: yield* service.get(apiKey.id) };
+        }),
+      );
+
+      expect(result.verdict).toMatchObject({ valid: false, reason: "disabled" });
+      expect(result.stored.enabled).toBe(false);
+    });
+
+    it("applies a due refill once across concurrent verifies", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          const { key, apiKey } = yield* service.create("user-1", {
+            remaining: 0,
+            refillAmount: 5,
+            refillInterval: 60_000,
+            refillMax: 5,
+          });
+          yield* service.update("user-1", apiKey.id, {
+            lastRefillAt: (yield* Clock.currentTimeMillis) - 60_001,
+          });
+          const slow = yield* withSlowReads();
+          const verdicts = yield* Effect.all(
+            Arr.makeBy(3, () => slow.verify(key)),
+            {
+              concurrency: "unbounded",
+            },
+          );
+          return { verdicts, stored: yield* service.get(apiKey.id) };
+        }),
+      );
+
+      expect(result.verdicts.every((verdict) => verdict.valid)).toBe(true);
+      // 0 + one refill of 5, less three uses.
+      expect(result.stored.remaining).toBe(2);
+    });
   });
 });
 

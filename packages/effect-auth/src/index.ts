@@ -110,6 +110,8 @@ export {
   type ApiKeyVerifyResult,
   type ApiKeyRefusal,
   type ApiKeyUpdate,
+  type ApiKeyUse,
+  applyApiKeyUse,
   ApiKeyService,
   hashApiKey,
 } from "./ApiKey.ts";

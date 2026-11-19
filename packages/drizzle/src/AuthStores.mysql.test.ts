@@ -11,6 +11,7 @@ import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as ApiKeyStore from "./ApiKeyStore.ts";
 import { databaseLayer } from "./Database.ts";
 import { tables } from "./MySqlSchema.ts";
 import * as RateLimitStore from "./RateLimitStore.ts";
@@ -19,13 +20,13 @@ import * as TokenStore from "./TokenStore.ts";
 import * as UserServiceStore from "./UserServiceStore.ts";
 
 /** Records each statement; every `SELECT` answers with `rows`. */
-const recording = (rows: ReadonlyArray<ReadonlyArray<unknown>>) => {
+const recording = (rows: ReadonlyArray<ReadonlyArray<unknown>>, affectedRows = 1) => {
   const sent: Array<{ readonly sql: string; readonly params: ReadonlyArray<unknown> }> = [];
   const db = drizzle(async (sql, params, method) => {
     sent.push({ sql, params });
     return method === "all"
       ? { rows: rows.map((row) => [...row]) }
-      : { rows: [{ insertId: 0, affectedRows: 1 }] };
+      : { rows: [{ insertId: 0, affectedRows }] };
   }, mysqlProxyConfig);
   return { db, sent };
 };
@@ -152,5 +153,38 @@ describe("MySQL / UserServiceStore", () => {
       "user-1",
     ]);
     expect(proxy.sent[2]?.params).toEqual(["user-1"]);
+  });
+});
+
+describe("MySQL / ApiKeyStore recordUse (#595)", () => {
+  const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKeyUse) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* Auth.ApiKeyStore;
+        return yield* store.recordUse("key-1", use);
+      }).pipe(
+        Effect.provide(ApiKeyStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
+      ),
+    );
+
+  it("is one guarded UPDATE that computes remaining in SQL, then a read of the row it matched", async () => {
+    const proxy = recording([]);
+    await recordUse(proxy, {
+      usedAt: 2000,
+      refill: { from: 0, to: 60_000, amount: 5, max: 10 },
+    });
+    expect(proxy.sent.map((statement) => statement.sql)).toEqual([
+      "update `effect_auth_api_keys` set `last_used_at` = ?, `remaining` = case when `effect_auth_api_keys`.`remaining` + ? > ? then ? else `effect_auth_api_keys`.`remaining` + ? end - 1, `last_refill_at` = ?, `updated_at` = ? where ((`effect_auth_api_keys`.`id` = ?) and (`effect_auth_api_keys`.`enabled` = ?) and ((((`effect_auth_api_keys`.`expires_at` is null)) or (`effect_auth_api_keys`.`expires_at` >= ?))) and ((((`effect_auth_api_keys`.`remaining` is null)) or (case when `effect_auth_api_keys`.`remaining` + ? > ? then ? else `effect_auth_api_keys`.`remaining` + ? end > 0))) and (`effect_auth_api_keys`.`last_refill_at` = ?))",
+      expect.stringMatching(
+        /^select .* from `effect_auth_api_keys` where `effect_auth_api_keys`\.`id` = \? limit \?$/,
+      ),
+    ]);
+    expect(proxy.sent.every((statement) => !statement.sql.includes("returning"))).toBe(true);
+  });
+
+  it("is null without a read when the UPDATE matched no row", async () => {
+    const proxy = recording([], 0);
+    expect(await recordUse(proxy, { usedAt: 2000 })).toBeNull();
+    expect(proxy.sent).toHaveLength(1);
   });
 });
