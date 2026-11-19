@@ -31,12 +31,9 @@
 
 import { and, desc, eq } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as SchemaGetter from "effect/SchemaGetter";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { affectedRows, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables, TokenPurpose, TokenRow } from "./Schema.ts";
 
@@ -62,46 +59,6 @@ interface TokenStoreShape<A extends TokenRecord> {
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.AuthError>;
   readonly getLatestByUserId: (userId: string) => Effect.Effect<A | null, Auth.AuthError>;
 }
-
-/** One driver's report of the rows a statement touched. */
-const AffectedRowsHeader = Schema.Union([
-  Schema.Struct({ affectedRows: Schema.Finite }),
-  Schema.Struct({ rowCount: Schema.Finite }),
-  Schema.Struct({ changes: Schema.Finite }),
-  Schema.Struct({ rowsAffected: Schema.Finite }),
-  Schema.Struct({ meta: Schema.Struct({ changes: Schema.Finite }) }),
-]);
-
-/**
- * The number of rows a `DELETE` / `UPDATE` touched, decoded from whatever the
- * driver's `execute()` resolved to, or `None` when it reports none (#594).
- * The shapes differ by driver: PGlite and mysql2 carry `affectedRows` (mysql2
- * in a `[ResultSetHeader, …]` pair), node-postgres `rowCount`, better-sqlite3
- * `changes`, libsql `rowsAffected` and D1 `meta.changes`.
- */
-const AffectedRows = Schema.Union([
-  AffectedRowsHeader,
-  Schema.TupleWithRest(Schema.Tuple([AffectedRowsHeader]), [Schema.Unknown]),
-]).pipe(
-  Schema.decodeTo(Schema.Finite, {
-    decode: SchemaGetter.transform((result) => {
-      const header = Array.isArray(result) ? result[0] : result;
-      return "affectedRows" in header
-        ? header.affectedRows
-        : "rowCount" in header
-          ? header.rowCount
-          : "changes" in header
-            ? header.changes
-            : "rowsAffected" in header
-              ? header.rowsAffected
-              : header.meta.changes;
-    }),
-    encode: SchemaGetter.forbidden(() => "affected-row counts are read, never written"),
-  }),
-);
-
-/** {@link AffectedRows} applied to a driver result. */
-const affectedRows = Schema.decodeUnknownOption(AffectedRows);
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));
 
@@ -152,16 +109,11 @@ const makeFor = (
           );
           const row = rows[0];
           if (row === undefined) return null;
-          const result = yield* query(`${purpose}.consume`, (db) =>
-            db.delete(table).where(byToken(token)).execute(),
+          const deleted = yield* affectedRows(
+            `${purpose}.consume`,
+            query(`${purpose}.consume`, (db) => db.delete(table).where(byToken(token)).execute()),
           );
-          const count = affectedRows(result);
-          if (Option.isNone(count)) {
-            return yield* new Auth.AuthError({
-              message: `drizzle ${purpose}.consume: the driver reported no affected-row count`,
-            });
-          }
-          return count.value > 0 ? toRecord(row) : null;
+          return deleted > 0 ? toRecord(row) : null;
         }),
 
       delete: (token) =>
