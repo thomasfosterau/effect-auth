@@ -1,218 +1,77 @@
-# pnpm workspace — the nine published packages under packages/*.
-#
-# The `catalog:` protocol pins versions that MUST be singletons across the
-# workspace. Effect especially: two copies of `effect` break Context / Layer /
-# Schema identity at runtime, so every package references `catalog:`.
-#
-# EVERY external dependency version lives here — package.json files reference
-# only `catalog:` or a named catalog (`catalog:peers`, `catalog:alchemy-peers`),
-# or `workspace:*` for internal packages.
-# `catalogMode: strict` makes `pnpm add` enforce this at add time and
-# `pnpm install` reject non-catalog specifiers. After editing this catalog,
-# ALWAYS run `pnpm install` and commit the regenerated pnpm-lock.yaml — a stale
-# lockfile fails CI at once with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
-#
-# Shape copied from effect-drizzle-ext (the library reference). Versions are
-# kept in lockstep with the consuming applications (website / gardeneria /
-# preferenceflow) wherever the two overlap — effect, drizzle-orm, vite-plus —
-# so the library builds against exactly what they run.
+# Every external version lives here (`catalogMode: strict`); package.json files
+# use `catalog:`, a named catalog or `workspace:`. `effect` must be a singleton.
 packages:
   - "packages/*"
 
 catalogMode: strict
 
 catalog:
-  # Changesets CLI v3 pairs with `changesets/action` v2 (release.yml).
   "@changesets/cli": ^3.0.3
-  # `vp run docs`: the API reference for packages/effect-auth, type-checking and
-  # running every JSDoc `@example` (`runExamples` in docgen.json). The 4.x line is
-  # the Effect-monorepo docgen (runs on `effect` and `@effect/platform-node`,
-  # which the `effect` override keeps on the singleton); it reads the existing
-  # docgen.json.
   "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.5
   "@effect/sql-pg": 4.1.4
   "@effect/sql-pglite": 4.1.4
-  # Effect Language Service as a native (TypeScript-Go) binary: the TS7 side of
-  # the 6/7 split (see `typescript` below). `effect-tsgo patch --typescript`
-  # (the root `prepare` script) overwrites the native `tsc` binary with an
-  # Effect-patched build matched by gitHead, so this pins in lockstep with
-  # `@typescript/native`. Each @effect/tsgo release ships artifacts for an
-  # explicit set of TypeScript versions and hard-errors
-  # (UnsupportedTargetPackageVersionError) on anything else, failing
-  # `pnpm install` itself: 0.67.7 supports typescript 7.0.2, oxlint
-  # 1.89.0 / 1.91.0-1.93.0 and oxlint-tsgolint 7.0.2004-7.0.2006. `prepare` patches
-  # both (`--typescript --oxlint`): the patched oxlint carries the `effecttsgo`
-  # plugin that `@effect/tsgo/oxlint-presets`' `recommended` (root
-  # vite.config.ts) names, and stock oxlint rejects that config. So
-  # `@effect/tsgo`, `@typescript/native` and `vite-plus` move as one set,
-  # kept inside that table (vite-plus 1.5.1 ships oxlint 1.91.0 and
-  # oxlint-tsgolint 7.0.2005). 0.47 is the
-  # first release with the `unstableApiUsage` rule that `tsconfig.base.json`
-  # configures; older releases reject the key with an `unknownRuleName`
-  # warning, which fails `tsc`. Read the `components` table in
-  # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
+  # Patches `@typescript/native` and vite-plus's oxlint; moves with both (see its `components` table).
   "@effect/tsgo": 0.67.7
   "@electric-sql/pglite": ^0.5.16
-  # The Effect lint rules (`effect/*`), `recommended` extended in the root
-  # vite.config.ts. A JS plugin that runs inside the oxlint vite-plus pins, but
-  # ranges its plugin API (`@oxlint/plugins ^1.85.0`), so Dependabot moves it
-  # on its own. It depends on `effect` 4.1.0
-  # exactly, but the `effect` override below puts it on the singleton, which
-  # it lints fine on.
   "@enfect/oxlint": ^0.10.0
-  # `@thomasfosterau/effect-auth/saml`'s XML-DSig and canonicalisation. 5.1.0
-  # fixed CVE-2025-54419 / CVE-2025-54369; never relax the floor below it.
+  # CVE fixes in 5.1.0; never lower the floor below it.
   "@node-saml/node-saml": ^5.2.0
   "@sveltejs/package": ^3.0.2
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/svelte": ^5.4.2
   "@types/better-sqlite3": ^9.6.0
-  # effect-auth-argon2's Argon2 kernel (#744): the RustCrypto `argon2` crate
-  # built for wasm32-unknown-unknown. Its exports take no cost parameters, so
-  # the adapter embeds this release's wasm (`src/WasmBinary.ts`), compiles it
-  # at module scope and calls its C ABI; this devDependency is the source
-  # `Wasm.test.ts` checks those bytes against, and the oracle the tests
-  # cross-verify with. Exact, because the ABI is per release.
+  # Exact: the argon2 adapter embeds this release's wasm.
   "@thomasfosterau/argon2": 0.1.1
-  # The JSON:API vocabulary of effect-auth's `./http` tier (#205): an optional
-  # peer of effect-auth, needed only by that subpath. 0.22 (#723) needs
-  # `effect ^4.1.0`, which the peers catalog already floors.
   "@thomasfosterau/effect-jsonapi": ^0.22.1
   "@types/node": ^26.6.6
   "@types/pg": ^8.15.0
-  # Types for `semver` in `scripts/check-dist.ts` (checked by `vp run check:scripts`).
   "@types/semver": ^7.8.0
-  # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
-  # bundles (see `vitest` below); vite-plus refuses to run coverage on a
-  # mismatch, so it moves with vite-plus.
+  # Must equal the vitest vite-plus bundles.
   "@vitest/coverage-istanbul": 5.1.0
-  # alchemy 2.0.0-beta.84 split the providers out of `alchemy`: each is its own
-  # `@alchemy.run/*` package on the same exact version, peering on `alchemy`
-  # at that version, so they move together (Dependabot's `alchemy` group).
-  # effect-auth-alchemy-cloudflare peers on both; the applications pin the same
-  # release.
   "@alchemy.run/cloudflare": 2.0.0-beta.85
   alchemy: 2.0.0-beta.85
   better-sqlite3: ^13.2.0
-  # The drizzle 1.0 line, at its tagged release candidate (npm's `rc` tag,
-  # which ships the Effect drivers, `drizzle-orm/effect-postgres` and friends).
-  # `packages/drizzle` builds its declarations against it; the 0.4x line is
-  # unsupported since #735. Not the commit-suffixed `1.0.0-rc.5-ab785fc` the
-  # applications and effect-drizzle-ext pin: declarations built on that build
-  # fail to type-check on the tagged rc.5, while those built on rc.5 check on
-  # both. `scripts/check-dist.ts` (`drizzleApplicationsPin`) type-checks a
-  # consumer on the applications' build as well; move that pin with them.
+  # The tagged rc; `drizzleApplicationsPin` in scripts/check-dist.ts tracks the apps' build.
   drizzle-orm: 1.0.0-rc.5
   effect: 4.1.4
-  # Dead-code, duplication and complexity audit: the PreToolUse fallow gate
-  # (.claude/hooks/fallow-gate.sh) and `fallow audit` (AGENTS.md, Verification).
-  # Config in .fallowrc.json.
   fallow: 3.43.1
   jsdom: ^31.0.1
-  # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
-  # its peer range and checks a requested version against that range, with the
-  # same semantics npm and pnpm apply to peers.
   semver: ^7.8.6
   svelte: ^5.57.3
   svelte-check: ^4.7.8
-  # Only for `@effect/docgen`, which requires `tsx` as a peer and spawns its
-  # binary to run the JSDoc examples (`vp run docs`). Scripts run with `vpx`.
+  # Only for @effect/docgen, which spawns it.
   tsx: ^4.23.15
-  # TypeScript 6/7 side by side. TS7 is the native Go compiler and ships no JS
-  # compiler API until 7.1, so everything that `require("typescript")` stays on
-  # TS6 (svelte-check, @effect/language-service, @effect/docgen, the
-  # editor): `typescript` is an alias for the TS6 JS compiler (bin `tsc6`).
-  # `@typescript/native` is TS7 (bin `tsc`) and type-checks and emits every
-  # package. Pinned exact: its gitHead must match @effect/tsgo's bundled binary.
+  # TS6 for JS-API consumers (svelte-check, docgen, editors); `@typescript/native` is TS7.
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
-  # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
-  # the same release under its aliased core package, and `vitest` must match
-  # vite-plus's exact pin because the `vitest: "catalog:"` override forces
-  # every resolution to the catalog singleton.
+  # `vite`, `vitest` and the devcontainer image tag follow vite-plus.
   vite-plus: 1.5.1
   vite: npm:@voidzero-dev/vite-plus-core@1.5.1
   vitest: 5.1.0
-  # Cloudflare's runtime, for the core's and the vendor adapters'
-  # `Workerd.test.ts` (#748, #606, #744), which run the code inside a real
-  # workerd. The same exact release alchemy's
-  # `@alchemy.run/cloudflare-runtime` resolves. `allowBuilds` keeps its
-  # postinstall off: the binary comes from the per-platform optional
-  # `@cloudflare/workerd-*` package, which needs no build step.
   workerd: 1.20261116.1
   xml-crypto: ^6.4.0
 
-# Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
-# strict catalog mode still governs them while they stay ranges (the catalog
-# pins `effect` exactly, but a published peer must be a range: the floor, not
-# the version this repo builds against). `pnpm publish` replaces
-# `catalog:peers` with these ranges in the published manifest — which is why
-# the release publishes with pnpm, not npm. `effect` here is the programme
-# floor, proven by `vp run check:dist`.
+# Published peer ranges.
 catalogs:
   peers:
-    # 0.x minors break, so the peer range is the minor line: 0.22 since #723
-    # (its negotiation error codes are underscored, `not_acceptable` /
-    # `unsupported_media_type`).
     "@thomasfosterau/effect-jsonapi": ^0.22.1
-    # The optional peer of effect-auth's `./saml` subpath, at the same
-    # CVE-fixed floor as the catalog pin above.
     "@node-saml/node-saml": ^5.2.0
-    # `^4.0.0` by policy, raised here because the packages' own code needs an
-    # Effect module that first shipped in a later minor: `effect/crypto`
-    # (`SecureRandom`, `Digest`, which the core's services yield) is new in
-    # Effect 4.1, which also removed the root `Crypto` module. Proven by
-    # building, type-checking and testing on `effect` 4.1.0 exactly.
+    # Raised from ^4.0.0: the core uses `effect/crypto`, new in 4.1.
     effect: ^4.1.0
     svelte: ^5.20.0
-  # effect-auth-drizzle's `drizzle-orm` peer, apart from `peers` because it
-  # names a prerelease. A semver range admits a prerelease only when a
-  # comparator names one on the same `major.minor.patch` tuple, so this range
-  # takes every `1.0.0-*` from `rc.5` up (the tagged `1.0.0-rc.5`, the
-  # commit-suffixed `1.0.0-rc.5-<sha>` builds, which sort after it because an
-  # alphanumeric identifier outranks a numeric one, later rcs) and every 1.x
-  # release, but no 1.0 beta and no `2.0.0-*`. The 1.0 line only (#735): the
-  # published declarations are built against it, and 0.4x's column types
-  # differ in arity and shape, so no one `.d.ts` serves both.
-  # `vp run check:dist` type-checks a consumer at the floor (`1.0.0-rc.5`,
-  # also the catalog version) and at the applications' commit build.
   drizzle-peers:
     drizzle-orm: ">=1.0.0-rc.5 <2"
-  # The two Alchemy packages' peers (effect-auth-alchemy-cloudflare and
-  # effect-auth-alchemy-postgres), kept apart from the programme floor in
-  # `peers` (today the `effect` floors are equal): `alchemy` (beta.85) itself
-  # peers on `effect ^4.1.0`, so this floor stays at 4.1 even if
-  # `peers.effect` ever drops back to `^4.0.0`. `vp run check:dist` reads each
-  # packed range, so it checks both packages at these floors and the others at
-  # `peers.effect`.
   alchemy-peers:
-    # Exact, as the applications pin them: every `@alchemy.run/*` provider
-    # peers on `alchemy` at its own exact version, and beta.85 is the first
-    # alchemy on effect 4.1's `effect/crypto` modules (beta.84 and earlier
-    # import the `effect/Crypto` that 4.1 removed).
+    # Exact, as the applications pin them; alchemy peers on effect ^4.1.0.
     "@alchemy.run/cloudflare": 2.0.0-beta.85
     alchemy: 2.0.0-beta.85
-    # effect-auth-alchemy-postgres's client. 4.1.0 is the first
-    # `@effect/sql-pg` on the `effect` 4.1 line this package floors.
     "@effect/sql-pg": ^4.1.0
     effect: ^4.1.0
 
 overrides:
-  # `effect` MUST be a singleton (see the header): force every resolution to
-  # the catalog version so a hoisting reshuffle cannot introduce a second copy.
   effect: "catalog:"
-  # Advisory floors for transitive dependencies of the dev toolchain, which
-  # `pnpm audit --audit-level high` (CI's last step) gates. No published
-  # package's `dependencies` reach them: brace-expansion 5.x and js-yaml 3.x
-  # arrive via @effect/docgen (glob / ts-morph > minimatch; @effect/markdown-toc
-  # > gray-matter) and effect-solutions; postcss / nanoid / source-map-js via
-  # vite-plus-core; launch-editor and its shell-quote via @changesets/cli.
-  # Overrides never publish, and these floors only change what this workspace
-  # installs. Scoped to the affected major so a dependent on another major
-  # keeps its own range. Drop each once its dependent ships the fix in range
-  # (the hono, @hono/node-server, lodash and sharp floors went when alchemy
-  # beta.85 stopped pulling them in).
+  # Advisory floors for transitive dev-toolchain dependencies (`pnpm audit`).
   "brace-expansion@5": ">=5.0.11"
   "js-yaml@3": ">=3.15.2"
   "nanoid@3": ">=3.3.18"
@@ -220,9 +79,7 @@ overrides:
   "launch-editor@2": ">=2.14.2"
   "shell-quote@1": ">=1.11.0"
   "source-map-js@1": ">=1.2.2"
-  # vite-plus's managed overrides (the `vp migrate` key shape under pnpm):
-  # every `vite` / `vitest` resolution is forced onto the catalog's exact pins,
-  # which must equal what vite-plus bundles.
+  # vite-plus's managed overrides.
   "vite@*": "catalog:"
   "vitest@*": "catalog:"
 
@@ -239,12 +96,7 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
-# Supply-chain delay (owner's policy, relaxed 2026-10-30): hold newly
-# published versions for 8 hours (unit: MINUTES) before pnpm installs them.
-# Dependabot's `cooldown` (whole days only) is 1 day, longer than this, so it
-# never proposes a version pnpm would still refuse. The toolchain exclusions
-# `vp migrate` proposes are deliberately not taken.
+# Supply-chain delay, in minutes.
 minimumReleaseAge: 480
 minimumReleaseAgeExclude:
-  # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
   - "@thomasfosterau/*"
