@@ -1,6 +1,6 @@
 /**
- * Attacker-influenced names that are also members of `Object.prototype`
- *. Role names, attribute paths and model ids are strings a caller or
+ * Attacker-influenced names that are also members of `Object.prototype`.
+ * Role names, attribute paths and model ids are strings a caller or
  * an imported row can choose, so every lookup keyed by one reads only the
  * record's own keys: `constructor` and `__proto__` are unknown names, never
  * the prototype's members.

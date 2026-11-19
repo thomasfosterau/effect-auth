@@ -2316,8 +2316,8 @@ export const emailVerificationStoreConformance = <E = never, R = never>(
 
 /**
  * The `PasswordResetStore` per-user delete: `deleteByUserId` removes
- * that user's pending resets, and only theirs. And its single-use `consume`
- *: a token is handed out once, to exactly one of concurrent callers.
+ * that user's pending resets, and only theirs. And its single-use `consume`:
+ * a token is handed out once, to exactly one of concurrent callers.
  *
  * @since 0.5.0
  * @category suites

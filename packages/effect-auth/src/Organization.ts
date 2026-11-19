@@ -823,8 +823,8 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Fetch an organization together with all of its members, as `actorId`.
-     * Any active member may read it, as the team, domain and role listings
-     *: the member list carries every member's user id and role. A
+     * Any active member may read it, as the team, domain and role listings:
+     * the member list carries every member's user id and role. A
      * non-member (a deactivated member included) and an organization that
      * does not exist are refused with the same `OrganizationError`, so the
      * refusal does not tell which organization ids exist.
@@ -896,9 +896,9 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
-     * Accept a pending invitation with the secret token its email carried
-     *, or by id alone from a verified matching email identifier
-     *: the invitation must be pending and unexpired, a token must
+     * Accept a pending invitation with the secret token its email carried,
+     * or by id alone from a verified matching email identifier:
+     * the invitation must be pending and unexpired, a token must
      * match its digest (a wrong token answers "Invitation not found"), and it
      * must be addressed to one of the user's email identifiers (without a
      * token, a verified one; anyone else is told "Invitation not found").
@@ -1258,8 +1258,7 @@ export class OrganizationService extends Context.Service<
 
     /**
      * List a team's members. Any active member of the team's organization may
-     * do so; a stranger and an unknown team id get the same `OrganizationError`
-     *.
+     * do so; a stranger and an unknown team id get the same `OrganizationError`.
      */
     readonly listTeamMembers: (
       actorUserId: string,

@@ -19,8 +19,8 @@ const dialect = new PgDialect();
 const ddl = () => dialect.sqlToQuery(ladderCheck(users.role, Roles), "indexes").sql;
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- *. The template has no `users` table (its tables are `effect_auth_*`),
+ * The file's one in-memory Postgres, opened from the run's migrated template.
+ * The template has no `users` table (its tables are `effect_auth_*`),
  * so this file creates the one whose `CHECK` it tests, and empties it before
  * each test.
  */

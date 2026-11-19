@@ -437,8 +437,8 @@ const combineOutcomes = (outcomes: ReadonlyArray<PolicyOutcome>): Decision => {
 
 /**
  * Whether a request names only entities: no empty id or type in its
- * principal, action or resource. A request that does not is refused outright
- *, so an empty id or type can never stand in for "no user" and
+ * principal, action or resource. A request that does not is refused outright,
+ * so an empty id or type can never stand in for "no user" and
  * still match type-scoped policies.
  */
 export const isWellFormed = (req: PolicyRequest): boolean =>

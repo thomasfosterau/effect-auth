@@ -974,8 +974,7 @@ export interface OAuthServiceOptions {
    * when {@link autoLinkByVerifiedEmail} is `false`. The same rule holds for
    * them: the provider must report `email_verified: true`, or the sign-in is
    * refused with `EmailInUseError`, and an unverified local address is
-   * proven first, clearing its account's password, credentials and sessions
-   *.
+   * proven first, clearing its account's password, credentials and sessions.
    * Defaults to `[]`.
    */
   readonly trustedProviders?: readonly string[];

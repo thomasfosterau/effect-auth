@@ -12,8 +12,8 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 
 /**
- * The first problem with `sessionExpiresIn`, or `undefined` when it is sound
- *: `activePeriod` and `idlePeriod` must be finite and positive, and
+ * The first problem with `sessionExpiresIn`, or `undefined` when it is sound:
+ * `activePeriod` and `idlePeriod` must be finite and positive, and
  * `updateAge`, when set, finite and not negative. A `NaN` period (an unset
  * `Number(env)`) would make every expiry comparison false, so sessions would
  * never expire.
@@ -210,8 +210,8 @@ export const make = (
 
       invalidateSession: Effect.fn("SessionService.invalidateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          // Every hook gets the stored id, so none can record the credential
-          //; `beforeSignOut` observes or denies, and is not read back.
+          // Every hook gets the stored id, so none can record the credential;
+          // `beforeSignOut` observes or denies, and is not read back.
           const storedId = hashToken(rawSessionId);
           yield* hooks.beforeSignOut({ sessionId: storedId });
           yield* sessionStore.delete(storedId);

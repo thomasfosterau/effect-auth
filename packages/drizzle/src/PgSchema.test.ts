@@ -42,8 +42,8 @@ const names: TableNames = {
 const customTables = defineTables(names);
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- *. The template holds this package's default `effect_auth_*` tables,
+ * The file's one in-memory Postgres, opened from the run's migrated template.
+ * The template holds this package's default `effect_auth_*` tables,
  * and the stores here are bound to the custom names, so the file drops the
  * defaults and applies its own DDL on top. Emptied before each test.
  */

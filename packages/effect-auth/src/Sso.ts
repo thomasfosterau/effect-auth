@@ -228,8 +228,8 @@ export interface SsoSignInSelector {
  * their context, as their types list, `EmailPasswordStore` among them.
  *
  * Promoting an address held unverified to verified first clears the
- * account's password and revokes its sessions, through `EmailPasswordStore`
- *: the account was created by a sign-up that proved nothing about the
+ * account's password and revokes its sessions, through `EmailPasswordStore`:
+ * the account was created by a sign-up that proved nothing about the
  * address, so its password may be someone else's.
  */
 export class SsoService extends Context.Service<

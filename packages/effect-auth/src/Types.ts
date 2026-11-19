@@ -222,8 +222,8 @@ export interface Permission {
 
 /**
  * The wrong codes counted against one (address, purpose) pair of a one-time
- * code flow (email OTP, phone OTP): the failure budget that survives resends
- *. A store keeps it apart from the code's record, so replacing,
+ * code flow (email OTP, phone OTP): the failure budget that survives resends.
+ * A store keeps it apart from the code's record, so replacing,
  * expiring or deleting the code leaves it as it was; only a successful
  * verification clears it.
  */
@@ -256,8 +256,8 @@ export interface OtpFailureBudget<P> {
 
 /**
  * How a one-time code flow (`EmailOtpConfig.backoff`, `PhoneOtpConfig.backoff`)
- * delays sends to an (address, purpose) pair that keeps receiving wrong codes
- *. Once the pair's wrong codes reach `freeFailures`, a send is refused
+ * delays sends to an (address, purpose) pair that keeps receiving wrong codes.
+ * Once the pair's wrong codes reach `freeFailures`, a send is refused
  * with `ResendTooSoonError` until `baseDelay * 2 ** (count - freeFailures)`,
  * capped at `maxDelay`, has passed since the latest wrong code. A successful
  * verification resets the count. There is no lockout: a send succeeds again

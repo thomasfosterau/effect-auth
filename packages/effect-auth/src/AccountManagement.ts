@@ -479,8 +479,8 @@ const make = (
   });
 
 /**
- * Provides {@link AccountDeletion}: the purge every account deletion runs
- *, over the stores present where it is built. It deletes the user's
+ * Provides {@link AccountDeletion}: the purge every account deletion runs,
+ * over the stores present where it is built. It deletes the user's
  * credentials and tokens from every user-keyed store in the context (OAuth
  * links, passkeys, API keys, the multi-factor enrolment, trusted devices,
  * OIDC-provider tokens and consents, password-reset, email-verification and

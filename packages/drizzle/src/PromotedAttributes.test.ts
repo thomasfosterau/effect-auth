@@ -166,8 +166,8 @@ const ids = {
 };
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- *, with this file's applications tables applied on top, and emptied
+ * The file's one in-memory Postgres, opened from the run's migrated template,
+ * with this file's applications tables applied on top, and emptied
  * before each test. The template's `effect_auth_*` tables are not used here.
  */
 let client: PGlite;

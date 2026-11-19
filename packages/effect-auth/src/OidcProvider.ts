@@ -237,8 +237,7 @@ export class OidcConsentStore extends Context.Service<
     readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
     /**
      * Delete every consent `userId` granted, for every client; a no-op when
-     * they granted none. Deleting a user calls it before the user row goes
-     *.
+     * they granted none. Deleting a user calls it before the user row goes.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
   }
@@ -1709,8 +1708,8 @@ export const make = (
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
 
-            // Rotation: burn the presented token immediately, atomically
-            //. A `null` means a concurrent refresh rotated it first, so
+            // Rotation: burn the presented token immediately, atomically.
+            // A `null` means a concurrent refresh rotated it first, so
             // this one is refused rather than forking the family.
             if ((yield* tokenStore.consume(record.tokenHash)) === null) {
               return yield* new OidcTokenError({ error: "invalid_grant" });

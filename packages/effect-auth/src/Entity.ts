@@ -257,8 +257,7 @@ export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): Attrib
  * transitive descendant of it in the slice's parent DAG? Reflexive, like
  * Cedar's `in`. Cycle-safe (a malformed cyclic hierarchy terminates and
  * never grants beyond the visited set). Never true when either side has an
- * empty type or id: such a reference names no entity, so it is in nothing
- *.
+ * empty type or id: such a reference names no entity, so it is in nothing.
  */
 export const entityIn = (s: EntitySlice, child: EntityRef, ancestor: EntityRef): boolean => {
   if (!namesEntity(child) || !namesEntity(ancestor)) return false;

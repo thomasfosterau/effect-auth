@@ -30,8 +30,8 @@ import { authStoresContract, authStoresLayer } from "./testing/AuthStoresContrac
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- *. Every case mints its own ids, so nothing is truncated between them.
+ * The file's one in-memory Postgres, opened from the run's migrated template.
+ * Every case mints its own ids, so nothing is truncated between them.
  */
 let client: PGlite;
 

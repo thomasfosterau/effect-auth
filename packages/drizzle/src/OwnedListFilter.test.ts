@@ -85,8 +85,8 @@ const VIEWERS: ReadonlyArray<AppUser | null> = [
 ];
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- *. The tables below are this file's own, applied on top; the rows are
+ * The file's one in-memory Postgres, opened from the run's migrated template.
+ * The tables below are this file's own, applied on top; the rows are
  * only read, so nothing needs emptying between tests.
  */
 let client: PGlite;

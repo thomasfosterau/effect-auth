@@ -331,8 +331,8 @@ export class OptionalAuthMiddleware extends HttpApiMiddleware.Service<
 export interface OptionalAuthOptions {
   /**
    * Serve the request as anonymous when the session or user store faults,
-   * after reporting the fault here. Without it a fault is a logged `500`
-   *: a store outage never silently turns signed-in callers into
+   * after reporting the fault here. Without it a fault is a logged `500`:
+   * a store outage never silently turns signed-in callers into
    * anonymous ones. As with `SessionResolution.resolveFailOpen`'s
    * `onDegraded`, choosing to degrade means naming where it is reported.
    */
@@ -601,8 +601,8 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *
  * Provides `MaybeCurrentSession` with `Option.some(resolved)` when
  * authenticated, or `Option.none()` when no session is present or it is
- * invalid. A session or user store fault fails the request with a logged `500`
- *, so an outage never serves signed-in callers as anonymous; pass
+ * invalid. A session or user store fault fails the request with a logged `500`,
+ * so an outage never serves signed-in callers as anonymous; pass
  * `onDegraded` to serve them as anonymous instead, reported there.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).

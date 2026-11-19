@@ -781,8 +781,8 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
  * and stripped when the inbound request carried an API key or a bearer token
  * (with or without a session cookie beside it). A browser with no cookie yet
  * therefore receives its session cookie on first sign-in. A relayed
- * response that keeps its `Set-Cookie` carries `Cache-Control: no-store`
- *: `no-store` is appended to an upstream `Cache-Control` that lacks it,
+ * response that keeps its `Set-Cookie` carries `Cache-Control: no-store`:
+ * `no-store` is appended to an upstream `Cache-Control` that lacks it,
  * and one that has it is kept as it is. A response whose `Set-Cookie` is
  * stripped is `no-store` the same way: it answered one machine caller's
  * credential, so a shared cache must not hand it to another.

@@ -79,8 +79,8 @@ export class MultiFactorStore extends Context.Service<
     /**
      * Delete `userId`'s enrolment (secret and backup codes); a no-op when
      * they have none. The record is keyed by user id, so this is the store's
-     * per-user delete: deleting a user calls it before the user row goes
-     *, and the first proof of an address calls it too.
+     * per-user delete: deleting a user calls it before the user row goes,
+     * and the first proof of an address calls it too.
      */
     readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
     /**
@@ -433,8 +433,8 @@ export const make = (
     const maxFailedAttempts = config.maxFailedAttempts ?? 5;
 
     /**
-     * Count a code against its pending challenge before it is checked
-     *, so concurrent guesses each get their own count and at most
+     * Count a code against its pending challenge before it is checked,
+     * so concurrent guesses each get their own count and at most
      * `maxFailedAttempts` are ever compared. Past the cap the challenge is
      * deleted and the code refused uncompared, with the method's own
      * wrong-code message. Resolves to the count for {@link rejectCode}.

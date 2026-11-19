@@ -4283,8 +4283,8 @@ describe("Http.make refuses to start without the IP limit's dependencies", () =>
     expect(statuses[10]).toBe(429);
   });
 
-  // A confidential client's backend calls the token endpoint from one address
-  //: a rule ahead of the defaults replaces that endpoint's limit only.
+  // A confidential client's backend calls the token endpoint from one address:
+  // a rule ahead of the defaults replaces that endpoint's limit only.
   it("lets a rules override placed ahead of the defaults replace one endpoint's limit", async () => {
     const handler = ipLimitedHandler({
       rules: [

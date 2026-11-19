@@ -470,8 +470,8 @@ const utf8 = new TextEncoder();
 
 /**
  * The sign-up input for a `POST /users` payload: of its `attributes`, only the
- * keys `allowed` names, and those within {@link SIGN_UP_ATTRIBUTES_MAX_BYTES}
- *. Any other key is dropped without an error, so the answer does not
+ * keys `allowed` names, and those within {@link SIGN_UP_ATTRIBUTES_MAX_BYTES}.
+ * Any other key is dropped without an error, so the answer does not
  * tell a caller which keys the server guards. The services strip the
  * server-only, ban and SCIM keys again, whatever `allowed` names.
  */
@@ -947,8 +947,8 @@ const asRegistration = <A, R>(
 /**
  * Per-user-code rate limit for device-authorization approve/deny endpoints
  * (RFC 8628 §5.2), through the `RateLimiter` in scope. `make` refuses to build
- * a handler whose `services` hold the device service and no `RateLimiter`
- *. Outside `make` (the exported group layers composed by hand), a
+ * a handler whose `services` hold the device service and no `RateLimiter`.
+ * Outside `make` (the exported group layers composed by hand), a
  * request with no `RateLimiter` in scope is refused with `429`, unless the
  * device service was built with `allowMissingRateLimiter: true`.
  */
@@ -3528,8 +3528,8 @@ const asApiKeyOwner = <A, R>(
   });
 
 /**
- * The one message every API key that does not resolve is answered with
- *: unknown, disabled, expired, exhausted, missing or ownerless alike,
+ * The one message every API key that does not resolve is answered with:
+ * unknown, disabled, expired, exhausted, missing or ownerless alike,
  * so the answer never tells them apart. The reason goes to the server log.
  */
 const API_KEY_REFUSED = "Invalid API key";
@@ -5011,8 +5011,8 @@ const PlatformLayer = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer)
  * endpoint, against the endpoint it matched, never against the raw request
  * path: the router is case-insensitive and ignores trailing and duplicate
  * slashes and percent-encoding, so `/Sessions/`, `//sessions` and
- * `/%73essions` all reach `POST /sessions` and all count under its rule
- *. Paths are relative to the mount `prefix`, as the endpoints are.
+ * `/%73essions` all reach `POST /sessions` and all count under its rule.
+ * Paths are relative to the mount `prefix`, as the endpoints are.
  *
  * `methods` limits the rule to specific HTTP methods (default: all methods).
  *
@@ -5426,8 +5426,8 @@ export interface AuthWebHandlerOptions {
    */
   readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
   /**
-   * Not an address source, and not an opt-out of the client-address check
-   *. Under `Http.make` a Web `Request` has no socket address, so with no
+   * Not an address source, and not an opt-out of the client-address check.
+   * Under `Http.make` a Web `Request` has no socket address, so with no
    * {@link trustedProxy} no request has an address, and a limit keyed on it
    * would refuse every request it covers with `429`. So `make` throws
    * {@link ClientAddressConfigError} (and {@link makeAsync} rejects with it)
@@ -5729,8 +5729,8 @@ const serve = (
       if (inner === "/reference") return Promise.resolve(referenceResponse());
     }
 
-    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`
-    //; the cookie writers above mark theirs, and this holds the rule
+    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`;
+    // the cookie writers above mark theirs, and this holds the rule
     // for the whole handler.
     if (inner !== null && prefix !== "") {
       url.pathname = inner || "/";

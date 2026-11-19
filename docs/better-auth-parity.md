@@ -179,6 +179,6 @@ The kernel evolves what exists today: `Policy<E, R>` values pulling the principa
 from the middleware context, deny as a typed `AuthorizationDeniedError` with the
 decision trace; constructors `Policy.make`/`Policy.permission`/`Policy.role`/
 `Policy.action`; combinators `Policy.all`/`any`/`not`/`when`. Integration points:
-org-scoped policy resolution replaces the Organization plugin's parallel role map
-; Admin and ApiKey permissions unify onto the same `PermissionRef`/`Policy`
+org-scoped policy resolution replaces the Organization plugin's parallel role map;
+Admin and ApiKey permissions unify onto the same `PermissionRef`/`Policy`
 model.

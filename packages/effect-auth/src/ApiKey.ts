@@ -550,8 +550,8 @@ export const make = (
       });
 
     /**
-     * Spend one use of a key that passed {@link checkRecord}, atomically
-     *: `recordUse` decrements `remaining` (when set) and moves
+     * Spend one use of a key that passed {@link checkRecord}, atomically:
+     * `recordUse` decrements `remaining` (when set) and moves
      * `lastUsedAt`, touching nothing an owner edits. When it finds the key
      * changed since the read, the key is read and checked again, so a key
      * disabled, expired, exhausted or narrowed meanwhile is refused as such.
