@@ -1418,6 +1418,11 @@ export const make = (
     const invitationExpiresIn = config.invitationExpiresIn ?? 48 * 60 * 60 * 1000; // 48 hours
     const creatorRole = config.creatorRole ?? "owner";
     const roles = config.roles ?? defaultOrganizationRoles;
+    // A role name is caller input: read only the record's own keys, so a role
+    // named `constructor` or `__proto__` is unknown rather than a prototype
+    // member (#621).
+    const staticRolePermissions = (role: string): ReadonlyArray<string> | null =>
+      Object.hasOwn(roles, role) ? (roles[role] ?? null) : null;
 
     const store = yield* OrganizationStore;
     const identifiers = yield* IdentifierStore;
@@ -1469,7 +1474,7 @@ export const make = (
       Effect.gen(function* () {
         const custom = yield* store.getOrgRole(organizationId, role);
         if (custom) return custom.permissions;
-        return roles[role] ?? null;
+        return staticRolePermissions(role);
       });
 
     /** Whether a member's role grants a `"resource:action"` permission. */
@@ -2656,7 +2661,12 @@ export const make = (
         // Deleting takes away the custom definition and brings back the
         // static entry, if any: the actor must hold both (#673).
         yield* requireHoldsCurrent(organizationId, actor, role);
-        yield* requireHoldsAll(organizationId, actor, roles[role] ?? [], `The '${role}' role`);
+        yield* requireHoldsAll(
+          organizationId,
+          actor,
+          staticRolePermissions(role) ?? [],
+          `The '${role}' role`,
+        );
         yield* store.deleteOrgRole(organizationId, role);
       }),
 

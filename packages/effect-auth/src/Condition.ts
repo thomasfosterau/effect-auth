@@ -286,7 +286,7 @@ const resolvePath = (
   // `null` is absent: once a segment is missing (or not a record), it stays absent.
   const resolved = Arr.reduce(path, root, (current: Entity.AttributeValue | null, segment) => {
     const record = attributeRecord(current);
-    return record !== null && segment in record ? (record[segment] ?? null) : null;
+    return record !== null && Object.hasOwn(record, segment) ? (record[segment] ?? null) : null;
   });
   return resolved === null ? err(`attribute "${describe}" is absent`) : ok(resolved);
 };

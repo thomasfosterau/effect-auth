@@ -78,7 +78,7 @@ export const actionEntities = (model: Model): ReadonlyArray<Entity.Entity> => {
     }),
   );
   const groupEntities = groups
-    .filter((group) => !(group in model.actions))
+    .filter((group) => !Object.hasOwn(model.actions, group))
     .map((group) => Entity.entity(Entity.ref("Action", group)));
   return [...declared, ...groupEntities];
 };
@@ -94,10 +94,10 @@ export interface ValidationIssue {
 }
 
 const knownEntityType = (model: Model, type: string): boolean =>
-  type === "Action" || type in model.entities;
+  type === "Action" || Object.hasOwn(model.entities, type);
 
 const knownActionId = (model: Model, id: string): boolean => {
-  if (id in model.actions) return true;
+  if (Object.hasOwn(model.actions, id)) return true;
   // Action groups referenced via memberOf are legal `in` targets.
   return Arr.some(R.values(model.actions), (decl) => (decl.memberOf ?? []).includes(id));
 };
@@ -201,12 +201,15 @@ const validateAttributes = (
   const attrs = attrOperands(condition);
   return Arr.flatMap(["principal", "resource"] as const, (slot) => {
     const type = pinnedType(policy[slot]);
-    const fields = type === null ? undefined : model.entities[type]?.attributes?.fields;
+    const fields =
+      type === null || !Object.hasOwn(model.entities, type)
+        ? undefined
+        : model.entities[type]?.attributes?.fields;
     if (fields === undefined) return [];
     return Arr.filterMap(attrs, (attr) => {
       if (attr.of !== slot) return Result.failVoid;
       const [head] = attr.path;
-      return head !== undefined && !(head in fields)
+      return head !== undefined && !Object.hasOwn(fields, head)
         ? Result.succeed({
             policyId: policy.id,
             message: `condition reads ${slot}.${attr.path.join(".")}, but "${type}" declares no attribute "${head}"`,
@@ -226,6 +229,7 @@ const validateAppliesTo = (
 ): ReadonlyArray<ValidationIssue> => {
   if (policy.action._tag !== "eq" || policy.action.ref.type !== "Action") return [];
   const actionId = policy.action.ref.id;
+  if (!Object.hasOwn(model.actions, actionId)) return [];
   const decl = model.actions[actionId];
   if (decl === undefined) return [];
 

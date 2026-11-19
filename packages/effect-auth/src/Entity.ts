@@ -186,8 +186,8 @@ export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): bool
   if (entriesA.length !== R.keys(recordB).length) return false;
   return Arr.every(
     entriesA,
-    // SAFETY: `key in recordB` holds, so the read is defined.
-    ([key, valueA]) => key in recordB && attributeValueEquals(valueA, recordB[key]),
+    // SAFETY: `recordB` owns `key`, so the read is defined.
+    ([key, valueA]) => Object.hasOwn(recordB, key) && attributeValueEquals(valueA, recordB[key]),
   );
 };
 
@@ -249,7 +249,7 @@ export const getEntity = (s: EntitySlice, r: EntityRef): Entity | null =>
 export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): AttributeValue | null => {
   const found = getEntity(s, r);
   if (found === null) return null;
-  return name in found.attributes ? (found.attributes[name] ?? null) : null;
+  return Object.hasOwn(found.attributes, name) ? (found.attributes[name] ?? null) : null;
 };
 
 /**
