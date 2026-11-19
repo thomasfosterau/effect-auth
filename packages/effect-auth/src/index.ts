@@ -1,17 +1,6 @@
 /**
- * effect-auth — public API barrel.
- *
- * No `Session` namespace, and no `session/` cluster: session management is the
- * spine nearly every feature module depends on, so `SessionService`,
- * `SessionStore`, `UserStore` and `TrustedDevice` live flat in `src/`
- * alongside the rest of it. A namespace was never an option anyway —
- * `Types.ts` already exports the flat `Session` record type/schema
- * (`export * from "./Types.ts"` below), and a sibling
- * `export * as Session from "./session/index.ts"` would silently win that
- * name collision — an explicit `export * as X` always beats an ambiguous
- * `export *`-derived binding of the same name — making `Types.Session`
- * unreachable from the root for every consumer that types a session as
- * `Auth.Session`.
+ * effect-auth's public API barrel. Session management stays flat rather than a
+ * `Session` namespace, which would shadow the flat `Session` record type.
  *
  * @module effect-auth
  */

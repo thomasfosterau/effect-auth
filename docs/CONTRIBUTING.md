@@ -41,6 +41,7 @@ Run `vp run ci` (CI runs exactly that, on Node LTS and latest). The pre-commit h
 - Services are `Context.Service` classes with a static `layer`; resolve dependencies at layer construction so methods carry `R = never`.
 - Domain errors are `Data.TaggedError`; HTTP-boundary errors are `Schema.TaggedError` classes ([DESIGN.md](DESIGN.md)).
 - Helper modules are namespace imports under their canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`, `Bool`); everything else comes from the `effect` barrel.
+- Exports follow Effect v4's layout: `index.ts` exports PascalCase namespaces (`export * as Session from "./Session.ts"`), and each module is also importable through a PascalCase subpath (`./Session`). The current flat root barrel predates this; new modules follow the layout.
 - Optional properties are `?: T | undefined` (`exactOptionalPropertyTypes` is on). Relative imports carry `.ts`.
 - Compare secrets with `constantTimeHashEqual` / `timingSafeEqualBytes`, draw randomness from `SecureRandom`, store tokens as digests, and never log a credential. Keep `node:crypto` inside `Password.ts`, `TokenHash.ts` and `Cipher.ts`.
 - Fix lint findings in code. A rule is turned off only in `vite.config.ts`, with the reason.
