@@ -8,3 +8,8 @@ rules:
     ignore:
       # Trusted publishing needs npm >= 11.5.1, newer than the runner's.
       - release.yml
+  unpinned-uses:
+    config:
+      # Exact release tags; .github/workflows/actions.lock pins their commits.
+      policies:
+        "*": ref-pin
