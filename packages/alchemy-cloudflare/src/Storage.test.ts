@@ -356,6 +356,8 @@ describe("D1-backed effect-auth storage: conformance", () => {
       Testing.multiFactorStoreConformance({ seedUser }),
       Testing.emailVerificationStoreConformance({ seedUser }),
       Testing.passwordResetStoreConformance({ seedUser }),
+      // The single-use consumes (#594).
+      Testing.magicLinkStoreConformance(),
     ],
     (suite) => {
       describe(suite.contract, () => {

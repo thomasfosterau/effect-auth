@@ -116,6 +116,35 @@ describe("MySQL / TokenStore", () => {
   });
 });
 
+describe("MySQL / TokenStore consume (#594)", () => {
+  const row = [
+    "digest",
+    "password-reset",
+    "user-1",
+    "a@example.com",
+    "2030-01-01 00:00:00.000",
+    "2030-01-01 01:00:00.000",
+  ];
+
+  it("reads the row, deletes it, and hands it back on one affected row", async () => {
+    const proxy = recording([row]);
+    const consumed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const resets = yield* Auth.Password.PasswordResetStore;
+        return yield* resets.consume("digest");
+      }).pipe(
+        Effect.provide(TokenStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
+      ),
+    );
+    expect(consumed?.token).toBe("digest");
+    expect(proxy.sent.map((statement) => statement.sql.split(" ")[0])).toEqual([
+      "select",
+      "delete",
+    ]);
+    expect(proxy.sent[1]?.sql).not.toMatch(/returning/i);
+  });
+});
+
 describe("MySQL / UserServiceStore", () => {
   it("reads, updates and deletes the user row by id, with no RETURNING", async () => {
     const proxy = recording([]);

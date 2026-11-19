@@ -277,6 +277,12 @@ const cases: ReadonlyArray<Case> = [
           create: (token) =>
             Effect.sync(() => (MutableHashMap.set(tokens, token.token, token), token)),
           get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+          consume: (token) =>
+            Effect.sync(() => {
+              const found = Option.getOrNull(MutableHashMap.get(tokens, token));
+              MutableHashMap.remove(tokens, token);
+              return found;
+            }),
           getByEmail: () => Effect.succeed(null),
           delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
           deleteByEmail: () => Effect.void,

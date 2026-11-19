@@ -67,6 +67,15 @@ export class MagicLinkStore extends Context.Service<
     readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
     readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
     readonly getByEmail: (email: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+    /**
+     * Atomically take the record for `token`: delete it and return it, or
+     * return `null` when there is none (#594). Of two concurrent callers
+     * passing the same token, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
     readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -384,8 +393,13 @@ export const make = (
           userId: owner?.id,
         });
 
-        // Consume the token (one-time use)
-        yield* store.delete(tokenHash);
+        // Spend the token atomically (#594): of concurrent redemptions of one
+        // link, only the caller whose `consume` took the record signs in.
+        if ((yield* store.consume(tokenHash)) === null) {
+          return yield* new Errors.MagicLinkError({
+            message: "Invalid or expired magic link token",
+          });
+        }
 
         let user = owner;
         if (!user) {

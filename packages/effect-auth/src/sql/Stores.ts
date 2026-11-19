@@ -18,8 +18,10 @@
  * `multiFactor`) and counters (`rateLimit.increment`,
  * `emailOtp.incrementAttempts`, `emailOtp.recordFailure`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. One-time consumes (`oauthState.consume`, #685) are a single
- * `DELETE … RETURNING`, so a state is handed out at most once. Multi-step
+ * races. One-time consumes (`oauthState.consume`, #685; the token stores'
+ * `consume`, #594) are a single `DELETE … RETURNING`, so a record is handed
+ * out at most once; `multiFactor.useTotpCounter` / `useBackupCode` are
+ * compare-and-set `UPDATE … RETURNING`s. Multi-step
  * writes (challenge, oauthState.create, emailOtp.upsert,
  * pendingMultiFactor.delete, and identifier.replace's claim-then-release) run
  * inside `sql.withTransaction`.
@@ -596,6 +598,13 @@ export const makeEmailVerificationStore: Effect.Effect<
         "emailVerification.get",
         sql<EmailVerificationRow>`SELECT * FROM auth_email_verifications WHERE token = ${token}`,
       ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
+    // One `DELETE ... RETURNING` (#594): of concurrent consumers of one
+    // token, only the one whose delete removed the row gets it back.
+    consume: (token) =>
+      firstRow(
+        "emailVerification.consume",
+        sql<EmailVerificationRow>`DELETE FROM auth_email_verifications WHERE token = ${token} RETURNING *`,
+      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
     delete: (token) =>
       asVoid(
         "emailVerification.delete",
@@ -998,6 +1007,12 @@ export const makePasswordResetStore: Effect.Effect<
         "passwordReset.get",
         sql<PasswordResetRow>`SELECT * FROM auth_password_resets WHERE token = ${token}`,
       ).pipe(Effect.map((row) => (row ? rowToPasswordReset(row) : null))),
+    // One `DELETE ... RETURNING` (#594).
+    consume: (token) =>
+      firstRow(
+        "passwordReset.consume",
+        sql<PasswordResetRow>`DELETE FROM auth_password_resets WHERE token = ${token} RETURNING *`,
+      ).pipe(Effect.map((row) => (row ? rowToPasswordReset(row) : null))),
     delete: (token) =>
       asVoid("passwordReset.delete", sql`DELETE FROM auth_password_resets WHERE token = ${token}`),
     deleteByUserId: (userId) =>
@@ -1048,6 +1063,12 @@ export const makeMagicLinkStore: Effect.Effect<
       firstRow(
         "magicLink.getByEmail",
         sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE email = ${email}`,
+      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+    // One `DELETE ... RETURNING` (#594).
+    consume: (token) =>
+      firstRow(
+        "magicLink.consume",
+        sql<MagicLinkRow>`DELETE FROM auth_magic_links WHERE token = ${token} RETURNING *`,
       ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
     delete: (token) =>
       asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
@@ -1383,6 +1404,9 @@ const rowToMultiFactor = (
     catch: (cause) => new Auth.AuthError({ message: "multiFactor decode failed", cause }),
   });
 
+/** How many times `useBackupCode` re-reads after losing its compare-and-set to a concurrent change. */
+const backupCodeRetries = 8;
+
 /** `Auth.MultiFactor.MultiFactorStore` over the `auth_multi_factor` table; requires `SqlClient`. */
 export const makeMultiFactorStore: Effect.Effect<
   typeof Auth.MultiFactor.MultiFactorStore.Service,
@@ -1412,6 +1436,62 @@ export const makeMultiFactorStore: Effect.Effect<
       ).pipe(Effect.as(record)),
     delete: (userId) =>
       asVoid("multiFactor.delete", sql`DELETE FROM auth_multi_factor WHERE user_id = ${userId}`),
+    // One compare-and-set (#594): the counter moves only forward, on a
+    // verified record that still exists.
+    useTotpCounter: (userId, counter) =>
+      firstRow(
+        "multiFactor.useTotpCounter",
+        sql<{ user_id: string }>`UPDATE auth_multi_factor SET last_used_counter = ${counter}
+            WHERE user_id = ${userId} AND verified = 1
+              AND (last_used_counter IS NULL OR last_used_counter < ${counter})
+            RETURNING user_id`,
+      ).pipe(Effect.map((row) => row !== null)),
+    // A compare-and-set on the stored list (#594): the write lands only if
+    // the list is still the one read. A concurrent change (another code
+    // spent) moves it, and the read is retried while the code is still there.
+    useBackupCode: (userId, codeHash) => {
+      const attempt = (left: number): Effect.Effect<boolean, Auth.AuthError> =>
+        firstRow(
+          "multiFactor.useBackupCode",
+          sql<{ backup_codes: string }>`SELECT backup_codes FROM auth_multi_factor
+              WHERE user_id = ${userId} AND verified = 1`,
+        ).pipe(
+          Effect.flatMap((row) =>
+            row === null
+              ? Effect.succeed(null)
+              : Effect.try({
+                  try: () => ({
+                    stored: row.backup_codes,
+                    codes: decodeStringList(row.backup_codes),
+                  }),
+                  catch: (cause) =>
+                    new Auth.AuthError({ message: "multiFactor decode failed", cause }),
+                }),
+          ),
+          Effect.flatMap((read) => {
+            if (read === null || !read.codes.includes(codeHash)) return Effect.succeed(false);
+            const { stored, codes } = read;
+            const next = encodeStringList(codes.filter((code) => code !== codeHash));
+            return firstRow(
+              "multiFactor.useBackupCode",
+              sql<{ user_id: string }>`UPDATE auth_multi_factor SET backup_codes = ${next}
+                  WHERE user_id = ${userId} AND verified = 1 AND backup_codes = ${stored}
+                  RETURNING user_id`,
+            ).pipe(
+              Effect.flatMap((updated) =>
+                updated !== null
+                  ? Effect.succeed(true)
+                  : left > 0
+                    ? attempt(left - 1)
+                    : Effect.fail(
+                        new Auth.AuthError({ message: "multiFactor.useBackupCode contended" }),
+                      ),
+              ),
+            );
+          }),
+        );
+      return attempt(backupCodeRetries);
+    },
   } satisfies typeof Auth.MultiFactor.MultiFactorStore.Service;
 });
 
@@ -1466,6 +1546,24 @@ export const makePendingMultiFactorStore: Effect.Effect<
             : Effect.fail(
                 new Auth.AuthError({ message: "Pending multi-factor challenge not found" }),
               ),
+        ),
+      ),
+    // The challenge goes in one `DELETE ... RETURNING` (#594), so of
+    // concurrent consumers only one gets it back; its count follows, as in
+    // `delete`.
+    consume: (token) =>
+      tx(
+        "pendingMultiFactor.consume",
+        Effect.tap(
+          firstRow(
+            "pendingMultiFactor.consume",
+            sql<PendingMultiFactorRow>`DELETE FROM auth_pending_multi_factor WHERE token = ${token} RETURNING *`,
+          ).pipe(Effect.map((row) => (row ? rowToPendingMultiFactor(row) : null))),
+          () =>
+            asVoid(
+              "pendingMultiFactor.consume",
+              sql`DELETE FROM auth_pending_multi_factor_attempts WHERE token = ${token}`,
+            ),
         ),
       ),
     // The challenge goes first: interrupted in between (D1 has no

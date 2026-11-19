@@ -148,6 +148,13 @@ const emailVerificationStore = {
   get: (token: string) =>
     Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
 
+  consume: (token: string) =>
+    Effect.sync(() => {
+      const found = Option.getOrNull(MutableHashMap.get(verifications, token));
+      MutableHashMap.remove(verifications, token);
+      return found;
+    }),
+
   delete: (token: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(verifications, token);

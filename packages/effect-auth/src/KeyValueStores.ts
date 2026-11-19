@@ -51,7 +51,11 @@
  * it runs its read and remove under a semaphore the store owns: one process
  * never hands the same state out twice. A `KeyValueStore` offers no
  * get-and-delete, so the guarantee does not span processes sharing a backend;
- * see {@link oauthStateStoreKV}.
+ * see {@link oauthStateStoreKV}. The single-use token stores' `consume`
+ * (`EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`,
+ * `PendingMultiFactorStore`; #594) works the same way, with the same limit:
+ * behind several instances sharing one backend, implement those contracts
+ * over a backend with an atomic get-and-delete.
  */
 import {
   Clock,
@@ -182,6 +186,24 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 
   return { read, write, remove, readIndex, indexAdd, indexRemove };
 };
+
+/**
+ * A single-use store's `consume` (#594): its `get` and `delete` run under one
+ * permit of a semaphore the store owns, so within one process two concurrent
+ * callers passing the same key never both receive the record. A
+ * `KeyValueStore` has no get-and-delete, so the guarantee stops at the
+ * process (see the module docs).
+ */
+const consumeUnder =
+  <A>(
+    get: (key: string) => Effect.Effect<A | null, Errors.AuthError>,
+    remove: (key: string) => Effect.Effect<void, Errors.AuthError>,
+  ) =>
+  (lock: Semaphore.Semaphore) =>
+  (key: string): Effect.Effect<A | null, Errors.AuthError> =>
+    lock.withPermit(
+      get(key).pipe(Effect.tap((found) => (found === null ? Effect.void : remove(key)))),
+    );
 
 // ---------------------------------------------------------------------------
 // OAuthStateStore
@@ -368,7 +390,7 @@ export const emailVerificationStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
-  return {
+  const self = {
     create: (verification) =>
       Effect.gen(function* () {
         yield* kv.write(
@@ -432,6 +454,10 @@ export const emailVerificationStoreKV: Effect.Effect<
         const live = Arr.filter(records, P.isNotNullish);
         return Arr.isReadonlyArrayNonEmpty(live) ? Arr.max(live, verificationByCreatedAt) : null;
       }),
+  } satisfies Omit<typeof EmailVerificationStore.Service, "consume">;
+  return {
+    ...self,
+    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
   } satisfies typeof EmailVerificationStore.Service;
 });
 
@@ -462,7 +488,7 @@ export const passwordResetStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
-  return {
+  const self = {
     create: (reset) =>
       Effect.gen(function* () {
         yield* kv.write(passwordResetTokenKey(reset.token), reset, "passwordReset.create");
@@ -493,6 +519,10 @@ export const passwordResetStoreKV: Effect.Effect<
         );
         yield* kv.remove(passwordResetUserKey(userId), "passwordReset.deleteByUserId");
       }),
+  } satisfies Omit<typeof PasswordResetStore.Service, "consume">;
+  return {
+    ...self,
+    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
   } satisfies typeof PasswordResetStore.Service;
 });
 
@@ -523,7 +553,7 @@ export const magicLinkStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = KeyValueStore.KeyValueStore.useSync((store) => {
   const kv = jsonKv(store);
-  return {
+  const self = {
     create: (token) =>
       Effect.gen(function* () {
         yield* kv.write(magicLinkTokenKey(token.token), token, "magicLink.create");
@@ -561,6 +591,10 @@ export const magicLinkStoreKV: Effect.Effect<
         );
         yield* kv.remove(magicLinkEmailKey(email), "magicLink.deleteByEmail");
       }),
+  } satisfies Omit<typeof MagicLinkStore.Service, "consume">;
+  return {
+    ...self,
+    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
   } satisfies typeof MagicLinkStore.Service;
 });
 
@@ -933,7 +967,7 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   const attemptsLock = Semaphore.makeUnsafe(1);
   const read = (token: string, label: string) =>
     kv.read<StoredPendingMultiFactor>(pendingMultiFactorKey(token), label);
-  return {
+  const self = {
     create: (pending) =>
       kv
         .write(
@@ -969,6 +1003,10 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
         }),
       ),
     delete: (token) => kv.remove(pendingMultiFactorKey(token), "pendingMultiFactor.delete"),
+  } satisfies Omit<typeof PendingMultiFactorStore.Service, "consume">;
+  return {
+    ...self,
+    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
   } satisfies typeof PendingMultiFactorStore.Service;
 });
 

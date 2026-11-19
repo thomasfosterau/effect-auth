@@ -29,6 +29,14 @@ const hasher = Auth.Password.scryptHasher({ cost: 16384 });
  * default so the base fixture keeps answering 404 for unconfigured features
  * (the shape most tests assert against).
  */
+
+/** Remove `key` from `map` and return what it held, or `null`: a single-use `consume` (#594). */
+const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
+  const found = Option.getOrNull(MutableHashMap.get(map, key));
+  if (found !== null) MutableHashMap.remove(map, key);
+  return found;
+};
+
 export interface ServerFixtureOptions {
   /**
    * Mount the optional auth features: username + anonymous sign-in,
@@ -127,6 +135,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
     create: (v) => Effect.sync(() => (MutableHashMap.set(verifications, v.token, v), v)),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+    consume: (token) => Effect.sync(() => take(verifications, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(verifications, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -149,6 +158,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const passwordResetStore: typeof Auth.Password.PasswordResetStore.Service = {
     create: (reset) => Effect.sync(() => (MutableHashMap.set(resets, reset.token, reset), reset)),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(resets, token))),
+    consume: (token) => Effect.sync(() => take(resets, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(resets, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -245,6 +255,26 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     upsert: (record) =>
       Effect.sync(() => (MutableHashMap.set(multiFactorRecords, record.userId, record), record)),
     delete: (userId) => Effect.sync(() => void MutableHashMap.remove(multiFactorRecords, userId)),
+    useTotpCounter: (userId, counter) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId));
+        if (record === null || !record.verified) return false;
+        if (record.lastUsedCounter !== undefined && record.lastUsedCounter >= counter) return false;
+        MutableHashMap.set(multiFactorRecords, userId, { ...record, lastUsedCounter: counter });
+        return true;
+      }),
+    useBackupCode: (userId, codeHash) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId));
+        if (record === null || !record.verified || !record.backupCodes.includes(codeHash)) {
+          return false;
+        }
+        MutableHashMap.set(multiFactorRecords, userId, {
+          ...record,
+          backupCodes: record.backupCodes.filter((code) => code !== codeHash),
+        });
+        return true;
+      }),
   };
 
   const pendingMultiFactors = MutableHashMap.empty<string, Auth.MultiFactor.PendingMultiFactor>();
@@ -260,6 +290,11 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
           Option.getOrElse(MutableHashMap.get(pendingMultiFactorAttempts, token), () => 0) + 1;
         MutableHashMap.set(pendingMultiFactorAttempts, token, attempts);
         return attempts;
+      }),
+    consume: (token) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(pendingMultiFactorAttempts, token);
+        return take(pendingMultiFactors, token);
       }),
     delete: (token) =>
       Effect.sync(() => {

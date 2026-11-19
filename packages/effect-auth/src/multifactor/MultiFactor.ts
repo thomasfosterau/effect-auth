@@ -83,6 +83,31 @@ export class MultiFactorStore extends Context.Service<
      * (#601), and the first proof of an address calls it too.
      */
     readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+    /**
+     * Spend a TOTP time step (#594): set `lastUsedCounter` to `counter` on
+     * `userId`'s _verified_ record, but only while its `lastUsedCounter` is
+     * absent or below `counter`, and resolve to whether it did. Must be one
+     * compare-and-set (`UPDATE … WHERE last_used_counter IS NULL OR
+     * last_used_counter < ? RETURNING`), so of two concurrent submissions of
+     * one code only one is accepted, and it never recreates a record a
+     * concurrent `delete` removed.
+     */
+    readonly useTotpCounter: (
+      userId: string,
+      counter: number,
+    ) => Effect.Effect<boolean, Errors.AuthError>;
+    /**
+     * Spend a backup code (#594): remove `codeHash` from `userId`'s
+     * _verified_ record and resolve to whether this call removed it. Must be
+     * atomic (a compare-and-set on the stored list, retried when a
+     * concurrent change to another code moved it), so of two concurrent
+     * redemptions of one code only one gets `true`, and it never recreates a
+     * record a concurrent `delete` removed.
+     */
+    readonly useBackupCode: (
+      userId: string,
+      codeHash: string,
+    ) => Effect.Effect<boolean, Errors.AuthError>;
   }
 >()("@effect-auth/MultiFactorStore") {}
 
@@ -119,6 +144,15 @@ export class PendingMultiFactorStore extends Context.Service<
     ) => Effect.Effect<PendingMultiFactor, Errors.AuthError>;
     readonly get: (token: string) => Effect.Effect<PendingMultiFactor | null, Errors.AuthError>;
     readonly recordFailedAttempt: (token: string) => Effect.Effect<number, Errors.AuthError>;
+    /**
+     * Atomically take the record for `token`: delete it and return it (dropping its failed-attempt count too), or
+     * return `null` when there is none (#594). Of two concurrent callers
+     * passing the same challenge token, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (token: string) => Effect.Effect<PendingMultiFactor | null, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/PendingMultiFactorStore") {}
@@ -515,6 +549,19 @@ export const make = (
       });
 
     /**
+     * Spend a pending challenge once its code has passed (#594). The challenge
+     * is taken with the store's atomic `consume`, so of concurrent
+     * redemptions of one challenge only one creates a session; the others
+     * answer as a wrong code does.
+     */
+    const consumePending = (pendingToken: string, invalidCode: string) =>
+      Effect.gen(function* () {
+        const spent = yield* pendingStore.consume(pendingToken);
+        if (spent === null) return yield* new MultiFactorError({ message: invalidCode });
+        return spent;
+      });
+
+    /**
      * Load the verified multi-factor record for a user, failing if multi-factor
      * is not (fully) enabled.
      */
@@ -670,13 +717,16 @@ export const make = (
               });
             }
 
-            // Persist the counter before creating the session so concurrent
-            // submissions of the same code are rejected even if the session
-            // write has not completed yet.
-            yield* store.upsert({ ...record, lastUsedCounter: matchedCounter });
+            // Spend the time step with one compare-and-set before the session
+            // is created (#594): of concurrent submissions of the same code,
+            // across challenges too, only one passes.
+            if (!(yield* store.useTotpCounter(pending.userId, matchedCounter))) {
+              return yield* new MultiFactorError({
+                message: "Multi-factor code has already been used",
+              });
+            }
 
-            // Consume the pending token (one-time use)
-            yield* pendingStore.delete(pendingToken);
+            yield* consumePending(pendingToken, invalidTotpCode);
 
             const { session, token } = yield* sessionManager.createSession(
               pending.userId,
@@ -708,14 +758,17 @@ export const make = (
               return yield* rejectCode(pendingToken, attempts, invalidBackupCode);
             }
 
-            // Remove the used code (single use)
-            yield* store.upsert({
-              ...record,
-              backupCodes: record.backupCodes.filter((_, i) => i !== index),
-            });
+            // Spend the code atomically (#594): of concurrent redemptions of
+            // one code, across challenges too, only one passes.
+            const storedHash = record.backupCodes[index];
+            if (
+              storedHash === undefined ||
+              !(yield* store.useBackupCode(pending.userId, storedHash))
+            ) {
+              return yield* new MultiFactorError({ message: invalidBackupCode });
+            }
 
-            // Consume the pending token (one-time use)
-            yield* pendingStore.delete(pendingToken);
+            yield* consumePending(pendingToken, invalidBackupCode);
 
             const { session, token } = yield* sessionManager.createSession(
               pending.userId,
