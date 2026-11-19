@@ -66,6 +66,10 @@ Every external version lives in the `pnpm-workspace.yaml` catalog (`catalogMode:
 
 The published `effect` peer is `^4.0.0` unless a dependency or an Effect module first shipped in a later minor needs more; name the reason in the catalog comment. Raising it is a breaking change.
 
+## Adding a package
+
+Code that needs only `effect` (or a dependency the core already has) is a core subpath, not a package ([ADR-0022](adr/0022-package-boundaries.md)). A new package needs: a `vite.config.ts` using `packageTasks` (`vite.tasks.ts`), an `AGENTS.md` (boundary, invariants) with a one-line `CLAUDE.md` importing it, a row in the root README, its entries and zone in `.fallowrc.json`, its `#build` edge in the root `test:coverage` task, its `check:dist` target in `scripts/check-dist.ts`, and a changeset.
+
 ## Changesets
 
 Every change to a published package's behaviour, or to a doc comment that reaches its `.d.ts`, needs a changeset (`vp exec changeset`) naming each package it touches. Docs-, CI- and tooling-only changes need none. Never version or publish by hand: the Release workflow opens the `chore: version packages` PR and the owner merges it ([PUBLISHING.md](PUBLISHING.md)).
