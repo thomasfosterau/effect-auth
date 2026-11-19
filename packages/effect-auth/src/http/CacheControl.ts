@@ -1,5 +1,5 @@
 /**
- * `Cache-Control: no-store` for responses that carry session state (#628).
+ * `Cache-Control: no-store` for responses that carry session state.
  *
  * A response that sets a cookie is the viewer's: a shared cache (a CDN, a
  * proxy) that stored it would replay one browser's session cookie to the next

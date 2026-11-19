@@ -20,7 +20,7 @@ import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291) and emptied before each test.
+ * and emptied before each test.
  */
 let client: PGlite;
 
@@ -211,7 +211,7 @@ describe("IdentifierStore", () => {
   });
 });
 
-// The same contract the single-table store runs (#182): the multi-identifier
+// The same contract the single-table store runs: the multi-identifier
 // store is the reference the shared assertions were written against.
 identifierStoreContract("IdentifierStore (multi-identifier)", {
   run: runWithDatabase,

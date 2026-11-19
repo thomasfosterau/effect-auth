@@ -234,7 +234,7 @@ const _authSecurity = {
  *
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
  * invalid, and with a logged `InternalServerError` (HTTP 500) when the session
- * or user store faults (#612).
+ * or user store faults.
  *
  * It also provides `MaybeCurrentSession` — always `Option.some` here, since
  * this middleware only reaches the handler when a session resolved. That is
@@ -290,7 +290,7 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
  * `.middleware(OptionalAuthMiddleware)`. Behaves like `AuthMiddleware` but
  * does not refuse an anonymous caller: when no valid session is found, it
  * provides `MaybeCurrentSession` with `Option.none()`. A session or user store
- * fault is a logged `500` (#612), unless `optionalLayer`'s `onDegraded` is
+ * fault is a logged `500`, unless `optionalLayer`'s `onDegraded` is
  * given.
  *
  * When (and only when) a session resolves, `CurrentPrincipal`
@@ -331,8 +331,8 @@ export class OptionalAuthMiddleware extends HttpApiMiddleware.Service<
 export interface OptionalAuthOptions {
   /**
    * Serve the request as anonymous when the session or user store faults,
-   * after reporting the fault here. Without it a fault is a logged `500`
-   * (#612): a store outage never silently turns signed-in callers into
+   * after reporting the fault here. Without it a fault is a logged `500`:
+   * a store outage never silently turns signed-in callers into
    * anonymous ones. As with `SessionResolution.resolveFailOpen`'s
    * `onDegraded`, choosing to degrade means naming where it is reported.
    */
@@ -354,7 +354,7 @@ export interface OptionalAuthOptions {
  *
  * Returns `Option.none()` when no token is found at all.
  * Fails with `Unauthorized` when a token is present but invalid/expired, and
- * with the store's `AuthError` when the session or user store faults (#612):
+ * with the store's `AuthError` when the session or user store faults:
  * each middleware decides how a fault is answered, never as a `401`.
  */
 const resolveSessionFromRequest = (
@@ -400,11 +400,11 @@ const resolveSessionFromRequest = (
 /**
  * The requests whose `conduit_session` attempt met a store fault, so the
  * `bearer` fallback answers the same `500` rather than a `401` of its own: the
- * security runtime answers with the last scheme's failure (#612).
+ * security runtime answers with the last scheme's failure.
  */
 const faultedRequests = new WeakSet<HttpServerRequest.HttpServerRequest>();
 
-/** The required-auth answer to a store fault: a logged `500`, never a `401` (#612). */
+/** The required-auth answer to a store fault: a logged `500`, never a `401`. */
 const requiredAuthFault = (request: HttpServerRequest.HttpServerRequest) => (error: AuthError) =>
   Effect.sync(() => faultedRequests.add(request)).pipe(Effect.andThen(internalServerError(error)));
 
@@ -427,7 +427,7 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  *
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
  * invalid, and with a logged `InternalServerError` (HTTP 500) when the session
- * or user store faults (#612).
+ * or user store faults.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
  *   Defaults match `HttpServer.make` defaults (`name: "conduit_session"`,
@@ -601,8 +601,8 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *
  * Provides `MaybeCurrentSession` with `Option.some(resolved)` when
  * authenticated, or `Option.none()` when no session is present or it is
- * invalid. A session or user store fault fails the request with a logged `500`
- * (#612), so an outage never serves signed-in callers as anonymous; pass
+ * invalid. A session or user store fault fails the request with a logged `500`,
+ * so an outage never serves signed-in callers as anonymous; pass
  * `onDegraded` to serve them as anonymous instead, reported there.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
@@ -724,7 +724,7 @@ export const optionalLayer = (
     Effect.fn("OptionalAuthMiddleware")(function* (handler, _opts) {
       const request = yield* HttpServerRequest.HttpServerRequest;
       // An absent or refused session is anonymous; a store fault is a 500
-      // unless the app asked to degrade it (#612).
+      // unless the app asked to degrade it.
       const maybeResolved = yield* resolveSessionFromRequest(request, cfg).pipe(
         Effect.catchTags({
           Unauthorized: () => Effect.succeed(Option.none<Types.SessionWithUser>()),

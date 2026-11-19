@@ -119,7 +119,7 @@ const encodePayload = Schema.encodeSync(ResendPayloadJson);
 
 /**
  * The most characters of a non-2xx response body an {@link AuthError}'s
- * `cause` keeps (#606). A longer body is cut here and ends in
+ * `cause` keeps. A longer body is cut here and ends in
  * {@link TRUNCATION_MARKER}.
  */
 export const MAX_ERROR_BODY_CHARS = 1024;

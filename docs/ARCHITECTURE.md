@@ -181,7 +181,7 @@ directories, each with its own `index.ts` barrel and matching
   state and announces session-changing calls through `onSessionChange`;
   `SessionAtoms.ts` (`./client/atoms`), the session as `effect/reactivity`
   Atoms over the client, the one client module that imports `effect` at
-  runtime (#206); and `testing/fixture.ts` (`./client/testing`, an in-memory
+  runtime; and `testing/fixture.ts` (`./client/testing`, an in-memory
   server and a cookie-jar `fetch`).
 - **`sql/`** (the `./sql` subpath only): `Stores.ts` (every store it covers
   over `effect/sql`'s `SqlClient`, for SQLite, D1 and PostgreSQL), `Schema.ts`
@@ -204,7 +204,7 @@ directories, each with its own `index.ts` barrel and matching
   `UserPurge.ts` (internal: the one purge every user deletion runs, each
   user-keyed store's per-user delete from `UserCredentials.ts`, the
   address-keyed magic links and codes, then sessions, identifiers and the user
-  row last, #601; `FirstProof.ts` sweeps a subset of the same stores),
+  row last; `FirstProof.ts` sweeps a subset of the same stores),
   `AccountDeletion.ts` (the tag `UserService.deleteUser` delegates to; its
   layer is `AccountManagement.ts`'s `accountDeletionLayer`).
 - **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
@@ -227,7 +227,7 @@ root (`Auth.Email`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
 whole headless surface; the per-cluster subpaths (`effect-auth/email`,
 `/oauth`, `/password`, `/plugins`, `/multifactor`) exist for consumers who
 want a narrower import. The HTTP tier is published only as the
-`effect-auth/http` subpath (#205), so the root import's module graph never
+`effect-auth/http` subpath, so the root import's module graph never
 reaches `effect/http-api`; `ModuleGraph.test.ts` holds that line. The same
 goes for `effect-auth/client`, `effect-auth/client/atoms`,
 `effect-auth/client/testing`,
@@ -258,7 +258,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ## HTTP protocol
 
-- `HttpApi.ts` defines the full contract with `effect/http-api`. Every group this library designs is a JSON:API resource group over effect-jsonapi (`sessions`, `users`, `identifiers`, `second-factor-challenges`, `otp-challenges`, `email-verifications`, `password-resets`, `google-one-tap-nonces`, `email-changes`, `account-deletions`, `multi-factor-enrollments`, `backup-code-sets`, `device-sessions`, `organizations`, `organization-members`, `invitations`, `organization-domains`, `organization-roles`, `teams`, `team-members`, `admin-users`, `user-bans`, `impersonations`, `api-keys`, `oauth-clients`, `sso-providers`, `sso-authorizations`, `tokens`, `device-authorizations`; #205). The `auth` group is the RFC tier ([ADR-0024](adr/0024-json-api-http-tier.md)): it keeps the externally specified endpoints in the wire formats their specifications fix (RFC 8628 `/device/code` and `/device/token`, the OIDC / SAML SSO callbacks and SP metadata, the JWKS, and the OIDC provider's OAuth 2.0 / OIDC / RFC 7591 / RFC 8414 endpoints), with camelCase operationIds; SCIM is its own group under `/scim/v2`. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/http-api`. Every group this library designs is a JSON:API resource group over effect-jsonapi (`sessions`, `users`, `identifiers`, `second-factor-challenges`, `otp-challenges`, `email-verifications`, `password-resets`, `google-one-tap-nonces`, `email-changes`, `account-deletions`, `multi-factor-enrollments`, `backup-code-sets`, `device-sessions`, `organizations`, `organization-members`, `invitations`, `organization-domains`, `organization-roles`, `teams`, `team-members`, `admin-users`, `user-bans`, `impersonations`, `api-keys`, `oauth-clients`, `sso-providers`, `sso-authorizations`, `tokens`, `device-authorizations`). The `auth` group is the RFC tier ([ADR-0024](adr/0024-json-api-http-tier.md)): it keeps the externally specified endpoints in the wire formats their specifications fix (RFC 8628 `/device/code` and `/device/token`, the OIDC / SAML SSO callbacks and SP metadata, the JWKS, and the OIDC provider's OAuth 2.0 / OIDC / RFC 7591 / RFC 8414 endpoints), with camelCase operationIds; SCIM is its own group under `/scim/v2`. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.
@@ -274,19 +274,19 @@ Two mechanisms, by boundary (DESIGN.md D4):
 ### Session Security
 
 - 160-bit cryptographically secure session IDs; active + idle timeouts; automatic renewal; whole-user invalidation; optional signed session-data cookie with a short TTL.
-- The raw session token reaches the client only in the `HttpOnly` session cookie and, in opt-in bearer mode, the `set-auth-token` response header. Every session the services answer (`Session.id`) and every response body names a session by its stored id, the token's SHA-256 digest, which is not a credential (#581). `SessionService.createSession` returns `{ session, token }`, and each sign-in result carries `token` beside `session`; nothing overloads `Session.id` with the token, so a session record is safe to log, cache, broadcast between tabs or serialize into a server-rendered page.
+- The raw session token reaches the client only in the `HttpOnly` session cookie and, in opt-in bearer mode, the `set-auth-token` response header. Every session the services answer (`Session.id`) and every response body names a session by its stored id, the token's SHA-256 digest, which is not a credential. `SessionService.createSession` returns `{ session, token }`, and each sign-in result carries `token` beside `session`; nothing overloads `Session.id` with the token, so a session record is safe to log, cache, broadcast between tabs or serialize into a server-rendered page.
 
 ### Token & Challenge Security
 
 - All bearer tokens — magic-link tokens, email-verification tokens, password-reset tokens, device authorization codes, API keys, and OIDC codes/tokens — are stored as SHA-256 digests (via the shared `hashToken` primitive in `TokenHash.ts`). Only the raw token is delivered to the user; the digest is the store key. OTPs follow the same pattern.
 - Lookups and comparisons use constant-time equality (`constantTimeHashEqual`) to prevent timing side-channels.
 - All token flows are single-use with expiry; anti-enumeration responses on send/request endpoints.
-- WebAuthn: 256-bit challenges with expiry, each bound to the ceremony it was issued for (and a registration challenge to its user, #591); origin, RP ID and same-origin verification; user verification enforced when `userVerification: "required"`; the attested credential id stored, never one already registered; counter-based replay protection (ES256 on P-256, RS256, EdDSA).
+- WebAuthn: 256-bit challenges with expiry, each bound to the ceremony it was issued for (and a registration challenge to its user); origin, RP ID and same-origin verification; user verification enforced when `userVerification: "required"`; the attested credential id stored, never one already registered; counter-based replay protection (ES256 on P-256, RS256, EdDSA).
 
 ### Authorization Security
 
 - Explicit permission checks, role-based access control (RBAC) with hierarchy, OAuth-style scopes; policies fail closed.
-- Authority-bearing user attributes are written only through privileged doors. `UserService.updateUserAttributes` refuses `UserServiceConfig.serverOnlyAttributes` (default `["role"]`); `EmailPasswordService.signUp` and `AuthLifecycleService.signUp` never store those, the ban keys, the SCIM keys or `isAnonymous` from their input (`SIGN_UP_PROTECTED_ATTRIBUTES`); and `POST /users` keeps only the attribute keys `Http.make`'s `signUpAttributes` allows (default none), within `SIGN_UP_ATTRIBUTES_MAX_BYTES` (#580).
+- Authority-bearing user attributes are written only through privileged doors. `UserService.updateUserAttributes` refuses `UserServiceConfig.serverOnlyAttributes` (default `["role"]`); `EmailPasswordService.signUp` and `AuthLifecycleService.signUp` never store those, the ban keys, the SCIM keys or `isAnonymous` from their input (`SIGN_UP_PROTECTED_ATTRIBUTES`); and `POST /users` keeps only the attribute keys `Http.make`'s `signUpAttributes` allows (default none), within `SIGN_UP_ATTRIBUTES_MAX_BYTES`.
 
 ### Timing and enumeration
 
@@ -295,7 +295,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### What the library provides, and what the application must
 
-If you mount the included HTTP API, cookie flags (`HttpOnly`, `Secure`, `SameSite`), trusted-origin CSRF checks and per-address rate limits on every sensitive endpoint (`ipRateLimit`, `defaultEndpointRules`) are on by default. The rate limits need a `RateLimiter` in `services` and a client address source (`trustedProxy`; `allowMissingClientIp: true` is none, #682), and `Http.make` refuses to start without them unless it is given `ipRateLimit: false` (#583). A deployment overrides one endpoint's default by putting its own rule ahead of `defaultEndpointRules`. The rules match the endpoint the router matched, so no spelling of a path escapes them (#582). The send cooldowns (`resendCooldown`) on the email and phone OTPs, the magic link and the email-verification resend are on by default at 60 s (#590, #682). Account lockout (`AccountLockoutPlugin`), the per-address plugin limits (`IPRateLimitPlugin`) and captcha are opt-in: compose them when you want them. If you use only the headless core, all of it is yours to implement. Either way the application provides secure store implementations (parameterised queries, encrypted connections) and serves over HTTPS.
+If you mount the included HTTP API, cookie flags (`HttpOnly`, `Secure`, `SameSite`), trusted-origin CSRF checks and per-address rate limits on every sensitive endpoint (`ipRateLimit`, `defaultEndpointRules`) are on by default. The rate limits need a `RateLimiter` in `services` and a client address source (`trustedProxy`; `allowMissingClientIp: true` is none), and `Http.make` refuses to start without them unless it is given `ipRateLimit: false`. A deployment overrides one endpoint's default by putting its own rule ahead of `defaultEndpointRules`. The rules match the endpoint the router matched, so no spelling of a path escapes them. The send cooldowns (`resendCooldown`) on the email and phone OTPs, the magic link and the email-verification resend are on by default at 60 s. Account lockout (`AccountLockoutPlugin`), the per-address plugin limits (`IPRateLimitPlugin`) and captcha are opt-in: compose them when you want them. If you use only the headless core, all of it is yours to implement. Either way the application provides secure store implementations (parameterised queries, encrypted connections) and serves over HTTPS.
 
 Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` or `TWO_FACTOR_ENCRYPT_SECRET` unset to keep it off. A variable that is set but empty fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError`, rather than silently storing the data unencrypted. A whitespace-only value counts as empty. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) reads as unset.
 
@@ -329,7 +329,7 @@ It is **unsafe**, and an escalation, whenever anonymous is privileged in your ap
 Fail-closed is not free either: with a `SessionStore` behind a database, _any_ store fault
 becomes a site-wide 500, including on routes that never touch auth. Choose deliberately.
 
-The included HTTP tier is fail-closed (#612): `Http.make`'s handlers and `AuthMiddleware`
+The included HTTP tier is fail-closed: `Http.make`'s handlers and `AuthMiddleware`
 answer a session-store or user-store fault with a logged 500, never a 401, and
 `OptionalAuthMiddleware` does the same unless `optionalLayer` is given an `onDegraded`. The
 per-endpoint IP limit refuses a request when its store errors, unless
@@ -358,7 +358,7 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Dependencies
 
-- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (PBKDF2, scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256, JWS key generation, signing and verification, the WebAuthn signature checks), which take `Buffer` from `node:buffer`, never the global. That keeps the core running on Cloudflare Workers with `nodejs_compat` from compatibility date 2023-01-01, before the flag set Node globals (#748); `Workerd.test.ts` runs the three modules inside a real workerd. Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
+- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (PBKDF2, scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256, JWS key generation, signing and verification, the WebAuthn signature checks), which take `Buffer` from `node:buffer`, never the global. That keeps the core running on Cloudflare Workers with `nodejs_compat` from compatibility date 2023-01-01, before the flag set Node globals; `Workerd.test.ts` runs the three modules inside a real workerd. Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
 - **Optional peers of the core**, each reached from one subpath only: `@thomasfosterau/effect-jsonapi` (`./http`, and `./client/testing` through it) and `@node-saml/node-saml` (`./saml`, Node-only). `effect/sql`, behind `./sql`, ships in `effect`.
 - **Packages** hold the code that brings a dependency the core lacks (ADR-0022): `-drizzle` (`drizzle-orm`), `-alchemy-cloudflare` (`alchemy`, `@alchemy.run/cloudflare`), `-alchemy-postgres` (`alchemy`, `@effect/sql-pg`), `-argon2` (the Argon2 wasm of `@thomasfosterau/argon2`) and the Svelte binding (`svelte`). `-resend` and `-twilio` (plain `fetch`) stay packages because the owner decides vendor-adapter merges case by case, and `-sveltekit` is the server side of a framework. The browser client, the SQL stores and the SAML verifier, once packages of their own, are core subpaths.
 

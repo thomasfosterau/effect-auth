@@ -191,17 +191,17 @@ export const schemaStatements: readonly string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS auth_api_keys_hash_idx ON auth_api_keys (key_hash)`,
   `CREATE INDEX IF NOT EXISTS auth_api_keys_user_idx ON auth_api_keys (user_id)`,
-  // `purgeExpired` deletes by expiry (#420).
+  // `purgeExpired` deletes by expiry.
   `CREATE INDEX IF NOT EXISTS auth_magic_links_expires_idx ON auth_magic_links (expires_at)`,
   `CREATE INDEX IF NOT EXISTS auth_email_otps_expires_idx ON auth_email_otps (expires_at)`,
-  // Wrong second-factor codes per pending challenge (#496). A table of its
+  // Wrong second-factor codes per pending challenge. A table of its
   // own rather than a column on `auth_pending_multi_factor`: SQLite has no
   // `ADD COLUMN IF NOT EXISTS`, and every statement here must be idempotent.
   `CREATE TABLE IF NOT EXISTS auth_pending_multi_factor_attempts (
     token TEXT PRIMARY KEY,
     attempts INTEGER NOT NULL
   )`,
-  // Wrong email-OTP codes per (email, purpose), kept across resends (#590).
+  // Wrong email-OTP codes per (email, purpose), kept across resends.
   // A table of its own so `emailOtp.upsert`'s DELETE + INSERT and
   // `purgeExpired` leave it; only a successful verification deletes the row.
   `CREATE TABLE IF NOT EXISTS auth_email_otp_failures (
@@ -211,7 +211,7 @@ export const schemaStatements: readonly string[] = [
     last_failure_at BIGINT NOT NULL,
     PRIMARY KEY (email, purpose)
   )`,
-  // The ceremony each WebAuthn challenge was issued for (#591), a table of
+  // The ceremony each WebAuthn challenge was issued for, a table of
   // its own for the same reason. A challenge with no row here reads as
   // missing, so one written before the table existed is redeemable by neither
   // ceremony.

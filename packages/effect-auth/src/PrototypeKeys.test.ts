@@ -1,6 +1,6 @@
 /**
- * Attacker-influenced names that are also members of `Object.prototype`
- * (#621). Role names, attribute paths and model ids are strings a caller or
+ * Attacker-influenced names that are also members of `Object.prototype`.
+ * Role names, attribute paths and model ids are strings a caller or
  * an imported row can choose, so every lookup keyed by one reads only the
  * record's own keys: `constructor` and `__proto__` are unknown names, never
  * the prototype's members.
@@ -27,7 +27,7 @@ const request: Condition.ConditionRequest = {
 
 const slice = Entity.slice([Entity.entity(doc, { attributes: { owner: "alice", tags: {} } })]);
 
-describe("prototype-member names (#621)", () => {
+describe("prototype-member names", () => {
   describe("Condition", () => {
     it.each(prototypeNames)("has(resource, %s) is false", (name) => {
       expect(Condition.evaluate(slice, request, Condition.has("resource", name))).toEqual({

@@ -14,7 +14,7 @@ import { packageTasks } from "../../vite.tasks.ts";
 // - `test:alchemy` runs `AuthSchema.test.ts`. It is not skipped.
 //
 // alchemy 2.0.0-beta.80 is the first release that imports only `effect/*`
-// paths (beta.79 still imported the removed `effect/unstable/*`; #250).
+// paths (beta.79 still imported the removed `effect/unstable/*`).
 const alchemyRuntimeSuite = "src/AuthSchema.test.ts";
 
 export default defineConfig({

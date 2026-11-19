@@ -1,5 +1,5 @@
 /**
- * Core sign-up over the single-table `IdentifierStore` (#380), written once and
+ * Core sign-up over the single-table `IdentifierStore`, written once and
  * run against each dialect that has an engine in the test run.
  *
  * Core passes the address a user signs up with to the store's `createUser` (as

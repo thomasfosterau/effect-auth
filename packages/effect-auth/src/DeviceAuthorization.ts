@@ -95,7 +95,7 @@ export interface DeviceAuthorizationConfig {
    * counts as configured whenever this service is in `services`, so without a
    * `RateLimiter`, `Http.make` throws `RateLimiterConfigError`, and the
    * approve/deny endpoints served outside `Http.make` refuse every request with
-   * `429` (#389).
+   * `429`.
    *
    * With `true`, approve and deny run without the limit when no `RateLimiter` is
    * in `services`. A `RateLimiter` in `services` still applies the limit. Prefer

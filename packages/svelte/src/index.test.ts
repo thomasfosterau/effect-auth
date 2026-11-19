@@ -34,7 +34,7 @@ const makeClient = (onList: () => void = () => {}) => {
     attributes: {},
   };
   let signedIn = false;
-  // The JSON:API resources the server answers with (#205).
+  // The JSON:API resources the server answers with.
   const { id: userId, ...userAttributes } = user;
   const { id: sessionId, userId: _owner, ...sessionAttributes } = session;
   const userResource = () => ({ type: "users", id: userId, attributes: userAttributes });

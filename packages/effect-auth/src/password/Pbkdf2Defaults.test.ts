@@ -8,7 +8,7 @@ import { PasswordHasher, pbkdf2Hasher } from "./Password.ts";
 // option without running a 600,000-iteration derivation: `crypto.pbkdf2` is
 // replaced by a stub that records the arguments it was asked for and returns a
 // zero key at once. The round trips at a cheap explicit count are in
-// `Password.test.ts`, which runs the real KDF (#290).
+// `Password.test.ts`, which runs the real KDF.
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:crypto")>();
   return {

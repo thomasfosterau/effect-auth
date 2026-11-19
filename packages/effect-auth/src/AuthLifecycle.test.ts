@@ -351,7 +351,7 @@ describe("AuthLifecycleService", () => {
     expect(identifier?.verified).toBe(false);
   });
 
-  it("a sign-up for an address held unverified answers with none of the holder's data (#421)", async () => {
+  it("a sign-up for an address held unverified answers with none of the holder's data", async () => {
     const testContext = await makeTestContext();
 
     // An earlier sign-up for the address whose verification never completed,
@@ -477,9 +477,9 @@ describe("AuthLifecycleService", () => {
     expect(sentEmails[0]?.email).toBe("signin@example.com");
   });
 
-  // The default 60 s resend cooldown (#682): a second sign-in and a duplicate
+  // The default 60 s resend cooldown: a second sign-in and a duplicate
   // sign-up inside it answer as before and send nothing more.
-  it("holds the sign-in and sign-up resends back inside the cooldown, answering alike (#682)", async () => {
+  it("holds the sign-in and sign-up resends back inside the cooldown, answering alike", async () => {
     const testContext = await makeTestContext({ requireEmailVerification: true });
     const hashResult = await Effect.runPromise(
       Password.pbkdf2Hasher({ iterations: 1000 }).hash("password-123"),
@@ -519,9 +519,9 @@ describe("AuthLifecycleService", () => {
     expect(MutableHashMap.size(verifications)).toBe(1);
   });
 
-  // The per-recipient cap (#684): past five resends in the hour, a sign-in and
+  // The per-recipient cap: past five resends in the hour, a sign-in and
   // a duplicate sign-up answer as before and send nothing more.
-  it("holds the sign-in and sign-up resends back past the send cap, answering alike (#684)", async () => {
+  it("holds the sign-in and sign-up resends back past the send cap, answering alike", async () => {
     const testContext = await makeTestContext(
       { requireEmailVerification: true },
       { resendCooldown: 0 },
@@ -643,7 +643,7 @@ describe("AuthLifecycleService", () => {
   });
 });
 
-describe("AuthLifecycleService.signUp for a held address under antiEnumeration (#422)", () => {
+describe("AuthLifecycleService.signUp for a held address under antiEnumeration", () => {
   const HELD = "held@example.com";
   const FRESH = "fresh@example.com";
   const PASSWORD = "strong-password-123";
@@ -794,7 +794,7 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
     expect(MutableHashMap.size(verifications)).toBe(0);
   });
 
-  it("a failed send fails neither answer; both failures reach afterDeliveryFailure (#196)", async () => {
+  it("a failed send fails neither answer; both failures reach afterDeliveryFailure", async () => {
     seedHolder(true);
     const failures: DeliveryFailure[] = [];
     const recording = makePlugin({
@@ -836,7 +836,7 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
   });
 });
 
-describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", () => {
+describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
   const VICTIM = "victim@example.com";
   const ATTACKER_PASSWORD = "attacker-password-123";
   const VICTIM_PASSWORD = "victim-password-123";
@@ -941,7 +941,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
     expect(findEmailIdentifier(VICTIM)?.verified).toBe(true);
   });
 
-  it("the first proof also removes the squatter's API keys and multi-factor enrolment (#694)", async () => {
+  it("the first proof also removes the squatter's API keys and multi-factor enrolment", async () => {
     const context = await makeTestContext();
     const user: User = {
       id: "user-1",
@@ -1024,7 +1024,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
   });
 });
 
-describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hooks chose (#426)", () => {
+describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hooks chose", () => {
   const PASSWORD = "strong-password-123";
 
   beforeEach(() => {
@@ -1095,7 +1095,7 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
   });
 });
 
-describe("AuthLifecycleService.signUp never stores authority-bearing attributes (#580)", () => {
+describe("AuthLifecycleService.signUp never stores authority-bearing attributes", () => {
   beforeEach(() => {
     MutableHashMap.clear(users);
     MutableHashMap.clear(identifierRecords);

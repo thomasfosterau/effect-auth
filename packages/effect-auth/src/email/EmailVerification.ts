@@ -48,7 +48,7 @@ export interface EmailVerificationConfig {
    * (`resendVerification`), measured from the newest token for the user.
    * Inside it, `resendVerification` fails with {@link ResendTooSoonError} and
    * sends nothing, leaving the outstanding token usable. Default `60_000`
-   * (60 s, as for the email and phone OTPs and the magic link, #682); `0`
+   * (60 s, as for the email and phone OTPs and the magic link); `0`
    * turns it off. `createVerification` (the first send, at sign-up) is never
    * held back.
    *
@@ -58,7 +58,7 @@ export interface EmailVerificationConfig {
    */
   readonly resendCooldown?: number | undefined;
   /**
-   * The per-recipient send cap (#684): at most `max` resends
+   * The per-recipient send cap: at most `max` resends
    * (`resendVerification`) to one email within `windowMs`, counted through
    * the `RateLimitStore`. Default 5 an hour; `false` turns it off. A resend
    * past it fails with `RateLimitError` and sends nothing. `createVerification`
@@ -95,7 +95,7 @@ export class EmailVerificationStore extends Context.Service<
     readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -107,7 +107,7 @@ export class EmailVerificationStore extends Context.Service<
     /**
      * The user's most recently created verification (greatest `createdAt`),
      * expired or not, or `null` when the user has none. The resend cooldown
-     * reads it (#682).
+     * reads it.
      */
     readonly getLatestByUserId: (
       userId: string,
@@ -161,7 +161,7 @@ export class EmailVerificationService extends Context.Service<
      * change (e.g. `markEmailVerified`) has succeeded, so a store failure
      * before that point leaves the token valid and the user can retry. Fails
      * with {@link EmailVerificationError} when the token is already spent, so
-     * of concurrent verifications of one token only one completes (#594).
+     * of concurrent verifications of one token only one completes.
      *
      * The `token` parameter is the stored hash, as returned in
      * `EmailVerification.token` by `peekToken`.
@@ -175,9 +175,9 @@ export class EmailVerificationService extends Context.Service<
      * Invalidate any outstanding verification tokens for the user and send a
      * fresh one. Fails with {@link ResendTooSoonError}, sending nothing and
      * invalidating nothing, when the user's newest token was created within
-     * `resendCooldown` (default 60 s, #682), and with `RateLimitError`,
+     * `resendCooldown` (default 60 s), and with `RateLimitError`,
      * likewise sending and invalidating nothing, past the `recipientSendLimit`
-     * cap (default 5 resends per email an hour, #684).
+     * cap (default 5 resends per email an hour).
      */
     readonly resendVerification: (
       userId: string,
@@ -292,7 +292,7 @@ export const make = (
           });
         }
 
-        // Spend the token atomically (#594): of concurrent verifications of
+        // Spend the token atomically: of concurrent verifications of
         // one token, only one succeeds.
         if ((yield* store.consume(tokenHash)) === null) {
           return yield* new EmailVerificationError({
@@ -344,7 +344,7 @@ export const make = (
         email: string,
         options?: CreateVerificationOptions,
       ) {
-        // Resend cooldown (#682): inside the window the outstanding token
+        // Resend cooldown: inside the window the outstanding token
         // stays usable and nothing is sent.
         const latest = resendCooldown > 0 ? yield* store.getLatestByUserId(userId) : null;
         if (latest !== null) {
@@ -356,7 +356,7 @@ export const make = (
             });
           }
         }
-        // The per-recipient cap (#684): past it the outstanding token stays
+        // The per-recipient cap: past it the outstanding token stays
         // usable and nothing is sent.
         yield* recipientSendGate("email-verification", normalizeEmail(email));
         // Invalidate outstanding tokens so only the latest one is usable.

@@ -73,7 +73,7 @@ register(Testing.identifierStoreConformance(), () =>
 
 /**
  * A `OneTimeTokenStore` over a map. With `yieldBetween`, its `consume` is the
- * pre-#594 shape: a `get`, then a `delete`, with a fiber switch between them.
+ * pre-atomic shape: a `get`, then a `delete`, with a fiber switch between them.
  */
 const oneTimeTokenStore = (yieldBetween = false): typeof OneTimeTokenStore.Service => {
   const tokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
@@ -204,7 +204,7 @@ describe("a broken store fails its suite", () => {
     ]);
   });
 
-  it("an ApiKeyStore whose deleteByUserId keeps the keys, or deletes everyone's, fails the #601 case", async () => {
+  it("an ApiKeyStore whose deleteByUserId keeps the keys, or deletes everyone's, fails the per-user delete case", async () => {
     const perUser =
       "deleteByUserId removes that user's keys only, and is a no-op for a user with none";
     const keeping = await failures(Testing.apiKeyStoreConformance(), () =>
@@ -224,7 +224,7 @@ describe("a broken store fails its suite", () => {
     expect(sweeping.map((failure) => failure.name)).toEqual([perUser]);
   });
 
-  it("an OAuthAccountStore whose deleteByUserId is a no-op fails its suite (#601)", async () => {
+  it("an OAuthAccountStore whose deleteByUserId is a no-op fails its suite", async () => {
     const failed = await failures(Testing.oauthAccountStoreConformance(), () =>
       Layer.succeed(OAuthAccountStore, {
         ...Testing.memoryOAuthAccountStore(),
@@ -234,11 +234,11 @@ describe("a broken store fails its suite", () => {
     expect(failed).toHaveLength(1);
   });
 
-  it("a PhoneOtpStore whose upsert resets the failure budget fails the #590 case", async () => {
+  it("a PhoneOtpStore whose upsert resets the failure budget fails the failure-budget case", async () => {
     const failed = await failures(Testing.phoneOtpStoreConformance(), () => {
       const failures = MutableHashMap.empty<string, Types.OtpFailures>();
       const inner = Testing.memoryPhoneOtpStore(MutableHashMap.empty(), failures);
-      // The pre-#590 shape: the count lives with the code, so a resend clears it.
+      // The naive shape: the count lives with the code, so a resend clears it.
       return Layer.succeed(PhoneOtpStore, {
         ...inner,
         upsert: (record) =>
@@ -249,11 +249,11 @@ describe("a broken store fails its suite", () => {
       });
     });
     expect(failed.map((failure) => failure.name)).toEqual([
-      "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
+      "the failure budget survives upsert, incrementAttempts and delete of the pair's record",
     ]);
   });
 
-  it("a OneTimeTokenStore whose consume is a get then a delete fails the race case (#594)", async () => {
+  it("a OneTimeTokenStore whose consume is a get then a delete fails the race case", async () => {
     const failed = await failures(Testing.oneTimeTokenStoreConformance(), () =>
       Layer.succeed(OneTimeTokenStore, oneTimeTokenStore(true)),
     );

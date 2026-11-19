@@ -41,7 +41,7 @@ const resolved: Types.SessionWithUser = { session: testSession, user: testUser }
 /**
  * One read-path effect, written the way an app's zero-IO guard is: it must
  * answer for an anonymous caller *without* failing. Every context below runs
- * this exact value — that is the property #185 is about.
+ * this exact value — that is the property under test.
  */
 const canViewDeleted = Effect.map(
   SessionContext.currentUserOption,

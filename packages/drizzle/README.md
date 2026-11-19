@@ -147,7 +147,7 @@ MySQL compares a `VARCHAR` under its collation, and the server default
 (`utf8mb4_0900_ai_ci` on MySQL 8) is case-, accent- and width-insensitive: a
 lookup of `bob@exämple.com` finds `bob@example.com`'s row. A password reset or
 magic link requested for a look-alike address on a domain an attacker holds
-would then resolve the victim's account (#602). PostgreSQL and SQLite compare
+would then resolve the victim's account. PostgreSQL and SQLite compare
 bytes and are not affected.
 
 So `MySql.tables.identifiers.value` is
@@ -879,7 +879,7 @@ store each).
   milliseconds in the record. The contract has no atomic "use": `verify` reads
   the key and writes its decremented `remaining` back with `update`.
   `deleteByUserId` deletes every key of one user in one `DELETE`; core calls
-  it when it deletes the user (#601), and `verify` refuses a key whose owner
+  it when it deletes the user, and `verify` refuses a key whose owner
   `UserStore` no longer finds.
 - **`RateLimitStore`**'s `increment` never reads, modifies and writes. It runs
   an `UPDATE` that re-opens the key's window when it has expired, then an
@@ -891,7 +891,7 @@ store each).
   `Drizzle.RateLimitStore.purgeExpired(tables)` (a cron trigger, a timer) to
   delete, in one `DELETE`, the rows whose `reset_at` and `blocked_until` have
   both passed. A row inside its window or still blocked stays.
-  `purgeExpired(tables, { limit })` caps the rows one call deletes (#729),
+  `purgeExpired(tables, { limit })` caps the rows one call deletes,
   through a derived table that MySQL accepts in `IN`; it returns no count, so
   a cron with a CPU budget runs a fixed number of calls per tick.
 - **`TokenStore`** holds email-verification and password-reset tokens in one

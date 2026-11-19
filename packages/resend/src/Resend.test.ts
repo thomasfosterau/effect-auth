@@ -173,7 +173,7 @@ const hangingFetch = (): {
   return { fetch: fetchStub, signal: () => seen };
 };
 
-describe("resendEmailSender's outbound request (#606)", () => {
+describe("resendEmailSender's outbound request", () => {
   it.each([300, 301, 302, 303, 307, 308, 399])(
     "fails a %i as an AuthError with only its status, the body unread",
     async (status) => {
@@ -355,7 +355,7 @@ describe("defaultRender", () => {
     expect(rendered.text).toContain("reset-token");
   });
 
-  it("tells the holder of an address that someone tried to sign up with it (#428)", () => {
+  it("tells the holder of an address that someone tried to sign up with it", () => {
     const rendered = defaultRender({ to: "a@b.com", purpose: "existing-account", params: {} });
     expect(rendered.subject).toBe("Someone tried to sign up with your email address");
     expect(rendered.text).toContain("Someone tried to create an account with this email address");

@@ -1,7 +1,7 @@
 /**
  * Every flow that creates a user through {@link createUserWithIdentifier}
  * refuses a store whose `createUser` returns a user that already existed
- * (`created: false`), and writes nothing to that user (#406).
+ * (`created: false`), and writes nothing to that user.
  *
  * Each case drives one flow to its create seam with the same writer: it
  * returns the existing owner of the address, whose unverified identifier lands

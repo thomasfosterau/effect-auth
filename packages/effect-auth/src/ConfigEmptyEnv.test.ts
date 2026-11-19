@@ -23,7 +23,7 @@ import { oauthServiceOptionsConfig } from "./oauth/OAuth.ts";
  *
  * For the three optional encryption secrets that would silently turn
  * encryption off, so a variable that is PRESENT BUT EMPTY is a configuration
- * error (owner decision on #252), while an UNSET one stays an opt-out. The
+ * error, while an UNSET one stays an opt-out. The
  * required values (`JWT_ISSUER`, `TRUSTED_DEVICE_SECRET`) fail as missing and
  * `TRUSTED_DEVICE_MAX_AGE_MS` falls back to its default.
  */
@@ -136,7 +136,7 @@ describe("empty environment variables", () => {
       expect(value(await run(optionalSecret(N), env({ [N]: " x " })))).toBe(" x ");
     });
 
-    it("ACCEPTED BLIND SPOT (owner, #252): N='' together with N_FILE reads as unset", async () => {
+    it("ACCEPTED BLIND SPOT (owner): N='' together with N_FILE reads as unset", async () => {
       // A future fix must flip this expectation deliberately.
       expect(
         value(await run(optionalSecret(N), env({ [N]: "", [`${N}_FILE`]: "/x" }))),

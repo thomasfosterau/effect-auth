@@ -1,5 +1,5 @@
 /**
- * The `no-store` merge (#628), and the backstop `Http.make`'s handler runs
+ * The `no-store` merge, and the backstop `Http.make`'s handler runs
  * over every response it serves: `noStoreWithSetCookie`. No endpoint answers a
  * cacheable `Cache-Control` beside a cookie, so the backstop is driven here
  * with the response a handler would have produced.
@@ -10,7 +10,7 @@ import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
 const served = (headers: Record<string, string>) =>
   new Response("{}", { status: 200, statusText: "OK", headers });
 
-describe("the serve backstop: noStoreWithSetCookie (#628)", () => {
+describe("the serve backstop: noStoreWithSetCookie", () => {
   it("appends no-store to a public, max-age=60 response that sets a cookie", () => {
     const response = noStoreWithSetCookie(
       served({ "cache-control": "public, max-age=60", "set-cookie": "a=b; Path=/" }),

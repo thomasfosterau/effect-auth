@@ -1,5 +1,5 @@
 /**
- * The parity matrices of #637: `OwnedAccess` and `ReferenceAccess` against
+ * The parity matrices: `OwnedAccess` and `ReferenceAccess` against
  * the read rules a content kernel (pulpit) enforces today, written down here
  * from the issue's rules, not from the implementation.
  *
@@ -256,7 +256,7 @@ const scopeRelations = (
   member: (group) => inScopeSet(scope.groups, member, graphMember(scope.userId, group)),
 });
 
-/** Published: neither a draft nor unapproved (#637 section 1). */
+/** Published: neither a draft nor unapproved. */
 const isPublished = (row: OwnedAccess.OwnedRow): boolean =>
   row.draft !== true && row.unapproved !== true;
 
@@ -286,7 +286,7 @@ const ownedForAccount = (
 ): boolean =>
   ownedBy(row, accountId) || (isPublished(row) && ownedAudience[row.visibility](row, relations));
 
-/** The owned read rule, from #637's sections 1–3. */
+/** The owned read rule. */
 const expectedOwned = (
   row: OwnedAccess.OwnedRow,
   viewer: AppUser | null,
@@ -469,7 +469,7 @@ const referenceAudience: Readonly<
 const referenceOpen = (row: ReferenceAccess.ReferenceRow): boolean =>
   row.visibility === undefined || row.visibility === "public";
 
-/** The reference read rule, from #637's section 4. */
+/** The reference read rule. */
 const expectedReference = (
   row: ReferenceAccess.ReferenceRow,
   viewer: AppUser | null,

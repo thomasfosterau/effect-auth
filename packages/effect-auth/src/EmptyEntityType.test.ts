@@ -1,5 +1,5 @@
 /**
- * An empty entity type names no entity (#666), as an empty id does (#661).
+ * An empty entity type names no entity, as an empty id does.
  *
  * `Entity.ref("", "alice")` used to be an ordinary reference: it decoded, it
  * equalled itself, and a permit scoped to the type `""` (or a policy over an
@@ -60,7 +60,7 @@ const compiled = (
   return result.scope;
 };
 
-describe("Policy.decidePure refuses an empty entity type (#666)", () => {
+describe("Policy.decidePure refuses an empty entity type", () => {
   it("an empty-type principal does not own a row whose owner has the empty type", () => {
     const decision = decide([ownerPermit], { principal: untyped });
     expect(decision.allowed).toBe(false);
@@ -123,7 +123,7 @@ describe("Policy.decidePure refuses an empty entity type (#666)", () => {
   });
 });
 
-describe("Policy.decide and enforce refuse an empty entity type (#666)", () => {
+describe("Policy.decide and enforce refuse an empty entity type", () => {
   it("does not run a custom permit's predicate for an empty-type principal", () => {
     let ran = false;
     const custom = Policy.custom({
@@ -145,7 +145,7 @@ describe("Policy.decide and enforce refuse an empty entity type (#666)", () => {
   });
 });
 
-describe("ReadScope.compile refuses an empty entity type (#666)", () => {
+describe("ReadScope.compile refuses an empty entity type", () => {
   it("an empty-type principal's scope does not admit the rows it would own", () => {
     const scope = compiled([ownerPermit], untyped);
     expect(scope).toEqual(ReadScope.deny);
@@ -190,7 +190,7 @@ describe("ReadScope.compile refuses an empty entity type (#666)", () => {
   });
 });
 
-describe("Entity: an empty type names no entity (#666)", () => {
+describe("Entity: an empty type names no entity", () => {
   it("namesEntity checks the type and the id", () => {
     expect(Entity.namesEntity(alice)).toBe(true);
     expect(Entity.namesEntity(untyped)).toBe(false);

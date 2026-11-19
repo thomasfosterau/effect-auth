@@ -180,7 +180,7 @@ describe("UsernameService", () => {
     expect(result.session).toBeDefined();
   });
 
-  it("never stores a role, a ban or a SCIM key from the sign-up's attributes (#580)", async () => {
+  it("never stores a role, a ban or a SCIM key from the sign-up's attributes", async () => {
     const result = await run((svc) =>
       svc.signUp({
         username: "mallory",
@@ -349,7 +349,7 @@ describe("UsernameService", () => {
   });
 });
 
-describe("UsernameService under anti-enumeration (#414)", () => {
+describe("UsernameService under anti-enumeration", () => {
   beforeEach(() => {
     MutableHashMap.clear(usersById);
     MutableHashMap.clear(identifierRecords);

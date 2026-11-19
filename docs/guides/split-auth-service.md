@@ -129,7 +129,7 @@ silently stops holding at your edge.
 ### An API key resolves to its user, not to a session
 
 A request carrying an API key (`x-api-key`, or the headers in `credentials.apiKeyHeaders`)
-is resolved through the auth service's `GET /api-keys/current` (#730), not the session
+is resolved through the auth service's `GET /api-keys/current`, not the session
 read. The result is `{ session: None, user, apiKey, credentialClass: "machine" }`:
 `apiKey` holds the key's public fields (id, name, permissions, expiry, `remaining`,
 metadata, enabled, never its hash), and `user` is who it acts as. The key wins over a
@@ -141,8 +141,7 @@ in its `services` included, fails `resolveAtEdge` closed and degrades
 
 **Each resolution consumes one use of the key**: it is a verification, so `remaining`
 decrements and `lastUsedAt` moves, once per request you resolve. A key with
-`remaining: 100` serves 100 resolved requests. A non-consuming check is
-[#645](https://github.com/thomasfosterau/effect-auth/issues/645). The key's own
+`remaining: 100` serves 100 resolved requests. There is no non-consuming check yet. The key's own
 `rateLimit` applies too: over it, the auth service answers `429` with `Retry-After`, which
 reaches you as a `RemoteSessionError` with `status: 429`.
 

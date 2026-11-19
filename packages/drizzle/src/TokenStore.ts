@@ -18,7 +18,7 @@
  *   (`Auth.hashToken`); the raw token goes to the user and never reaches the
  *   store.
  * - `get` returns `null` on a miss; deletes of missing rows are no-ops.
- * - `consume` (#594) reads the row, then deletes it and hands it back only
+ * - `consume` reads the row, then deletes it and hands it back only
  *   when that `DELETE` reports one affected row, so of concurrent consumers
  *   of one token only one receives it. MySQL has no `RETURNING`, so every
  *   dialect takes the driver's affected-row count rather than a
@@ -49,7 +49,7 @@ interface TokenRecord {
 /**
  * The operations of both token contracts: the four they share, and
  * `getLatestByUserId`, which `EmailVerificationStore` adds for its resend
- * cooldown (#682).
+ * cooldown.
  */
 interface TokenStoreShape<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;

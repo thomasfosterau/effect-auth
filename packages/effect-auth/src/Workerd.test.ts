@@ -1,5 +1,5 @@
 /**
- * The core's `node:crypto` corral inside a real workerd (#748), the runtime
+ * The core's `node:crypto` corral inside a real workerd, the runtime
  * the README claims for everything but `./saml`.
  *
  * workerd's `node:crypto` rejects `{ key: KeyObject, dsaEncoding }` with
@@ -10,7 +10,7 @@
  * serves it from the `workerd` binary at workerd's newest compatibility date
  * and at the core's supported minimum, and checks every primitive inside a
  * `fetch` handler. The tokens the worker signs are verified here in Node
- * with the pre-#748 `KeyObject` form, and the worker verifies tokens Node
+ * with the former `KeyObject` form, and the worker verifies tokens Node
  * signed, so the two runtimes agree byte for byte where the algorithm is
  * deterministic. The worker's global outbound is a network service that
  * allows nothing, so no step can reach the internet.
@@ -505,7 +505,7 @@ const valueOf = <A>(
 const bytes = (text: string): Uint8Array =>
   Result.getOrElse(Base64Url.decode(text), () => new Uint8Array(0));
 
-/** The pre-#748 verifier: a `KeyObject` with `dsaEncoding`, which Node accepts and workerd does not. */
+/** The former verifier: a `KeyObject` with `dsaEncoding`, which Node accepts and workerd does not. */
 const keyObjectVerify = (
   algorithm: JwsAlgorithm,
   data: Uint8Array,
@@ -518,7 +518,7 @@ const keyObjectVerify = (
   return crypto.verify(algorithm === "RS256" ? "sha256" : null, data, key, signature);
 };
 
-/** A JWS signed in Node with the pre-#748 `KeyObject` form. */
+/** A JWS signed in Node with the former `KeyObject` form. */
 const nodeSigned = (algorithm: JwsAlgorithm) => {
   const { publicKey, privateKey } =
     algorithm === "ES256"

@@ -50,7 +50,7 @@ export class CurrentPrincipal extends Context.Service<CurrentPrincipal, Entity.E
  *
  * A principal alone answers *who*; this answers *how they got in* — the
  * distinction a policy needs to say "an API key may act as this user, but
- * may not mint another API key" (epic #180: a credential changes WHO the
+ * may not mint another API key" (a credential changes WHO the
  * request is, never WHAT it may do, unless a policy explicitly extends that
  * trust). Kept as its own service rather than folded into the principal
  * entity or the session record: neither a bare `EntityRef` nor a machine

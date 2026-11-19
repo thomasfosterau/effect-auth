@@ -175,7 +175,7 @@ export class AuthLifecycleService extends Context.Service<
      * cleared and all its sessions are revoked before the address is marked
      * verified. Its account was created by a sign-up that proved nothing
      * about the address, so whoever chose that password may not be whoever
-     * holds the address (#425). The verifier then sets a password, with
+     * holds the address. The verifier then sets a password, with
      * `EmailPasswordService.setPassword` from the session this issues or
      * through a password reset, before anyone can sign in with one.
      * Verifying an address already verified changes neither.
@@ -233,7 +233,7 @@ export const make = (
 
     return {
       signUp: Effect.fn("AuthLifecycleService.signUp")(function* (rawInput: SignUpInput) {
-        // Never a role, a ban or a SCIM key from the input (#580): this
+        // Never a role, a ban or a SCIM key from the input: this
         // `UserService`'s server-only attributes are stripped here even when
         // `EmailPasswordService` was built without it in context, and the
         // stand-in below carries the same stripped bag.
@@ -254,7 +254,7 @@ export const make = (
           Effect.catchTag("EmailInUseError", (e) =>
             Effect.gen(function* () {
               // The address `EmailPasswordService.signUp` found taken: the one
-              // its `beforeSignUp` hooks returned, not the raw input (#426).
+              // its `beforeSignUp` hooks returned, not the raw input.
               const email = e.email ?? normalizeEmail(input.email);
               const identifier = yield* lookupIdentifier(identifiers, "email", email);
               const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
@@ -266,7 +266,7 @@ export const make = (
               // Unverified duplicate: resend to the holder (also invalidates
               // stale tokens, matching FIX 5 behaviour).
               // Inside the resend cooldown, or past the send cap, the holder's
-              // outstanding link stands, and the answer is the same (#682, #684).
+              // outstanding link stands, and the answer is the same.
               if (sendOnSignUp) {
                 yield* verification
                   .resendVerification(existing.id, identifier.value, { offResponsePath: true })
@@ -277,7 +277,7 @@ export const make = (
               }
 
               // The caller has proven nothing about the address, so the answer
-              // is a stand-in built only from their own input (#421): never
+              // is a stand-in built only from their own input: never
               // the holder's id, profile or timestamps.
               const now = yield* DateTime.nowAsDate;
               return {
@@ -315,7 +315,7 @@ export const make = (
           // and never verify. That holder gets the existing-account notice
           // instead, so each answer makes one send. Both sends go off the
           // response path, so neither answer waits on the vendor or fails
-          // with it, which would tell the two apart (#196).
+          // with it, which would tell the two apart.
           if (yield* answeredByStandIn(identifiers, userStore, result, input.email)) {
             if (config.sendExistingAccountNotice !== undefined) {
               yield* detached("existing-account", config.sendExistingAccountNotice(email));
@@ -354,7 +354,7 @@ export const make = (
               // FIX 5: use resendVerification (which invalidates prior tokens
               // via deleteByUserId) instead of createVerification.
               // Inside the resend cooldown, or past the send cap, the
-              // outstanding link stands (#682, #684).
+              // outstanding link stands.
               if (sendOnSignIn) {
                 yield* verification.resendVerification(user.id, identifier.value).pipe(
                   Effect.catchTag("ResendTooSoonError", () => Effect.void),
@@ -405,7 +405,7 @@ export const make = (
           });
         }
 
-        // The address's first proof (#425, #694). Until now no one had shown
+        // The address's first proof. Until now no one had shown
         // they own it, so the password, the other credentials and the
         // sessions on the account may be those of someone who signed up with
         // it first. `proveAddress` removes them all before marking the address
@@ -415,7 +415,7 @@ export const make = (
         yield* proveAddress(firstProof, identifier);
         const verifiedUser = yield* userService.getUser(verificationRecord.userId);
 
-        // burnToken spends the token (once, #594) and fires the afterVerifyEmail hook.
+        // burnToken spends the token (once) and fires the afterVerifyEmail hook.
         const verificationResult = {
           userId: verificationRecord.userId,
           email: verificationRecord.email,

@@ -3,72 +3,11 @@
  * against a per-route `AuthorizeInput` and turns a deny into the wire-level
  * 403 `Forbidden` error.
  *
- * `AuthMiddleware` (`./HttpMiddleware.ts`) answers *who* is calling by
- * providing `CurrentPrincipal`; this module answers *may they do this* by
- * reading that principal, asking `Authorizer.authorize`, and gating the
- * handler on the answer. The two compose: attach `AuthMiddleware` (or
- * otherwise put `CurrentPrincipal` in context) first, then a middleware from
- * {@link makeAuthorizationMiddleware} for each route whose resource needs a policy
- * check.
- *
- * ## Why a factory, not a single exported tag
- *
- * `AuthMiddleware` is one static `HttpApiMiddleware.Service` because every
- * route needs the exact same thing from it (a validated session). Authorization
- * is different: almost every route protects a *different* resource — `doc-1`
- * on one endpoint, `org-42` on the next — so `AuthorizeInput` is inherently
- * per-route, not a single static value. {@link makeAuthorizationMiddleware} therefore
- * builds a fresh `HttpApiMiddleware.Service` class (with its own unique tag
- * id and its own baked-in `Layer`) on every call, so each route attaches its
- * own instance carrying its own resource/action.
- *
- * Each guard is named by its first argument, and that name is its TypeScript
- * type: attaching one guard and providing another guard's `.layer` is a compile
- * error, not a missing-service failure at runtime (#320), unless two guards
- * share a name (see Naming on {@link makeAuthorizationMiddleware}).
- *
- * ## Static vs. per-request input
- *
- * Most resources are per-request (a path param, a value read from
- * `HttpServerRequest`, sometimes both), so `makeAuthorizationMiddleware` accepts
- * either:
- *
- * - a fixed {@link AuthorizeInput} — the resource is the same for every call
- *   to this route (rare, but valid: e.g. a `system:admin-panel` singleton
- *   resource);
- * - a `(request) => AuthorizeInput` function — the common case;
- * - a `(request) => Effect<AuthorizeInput>` function — when deriving the
- *   input needs more than the raw request. The function runs inside the same
- *   context the downstream handler would, so it may itself `yield*` ambient
- *   framework services to shape the resource, e.g.
- *   `HttpRouter.RouteContext` for path params (`GET /docs/:id` → the `id`
- *   segment) or `HttpServerRequest.ParsedSearchParams` for query params.
- *   Errors are intentionally not supported here (`R`'s error channel is
- *   `never`) — resolve or default inside the function; a route whose
- *   resource genuinely cannot be determined should fail some other way
- *   before authorization is even relevant.
- *
- * `HttpApiMiddleware`'s `options` argument only carries the *static*
- * endpoint/group metadata, not decoded path params — but path params are not
- * out of reach: `RouteContext` (and therefore path params) is part of
- * `HttpRouter.Provided`, ambiently available to every `HttpApiMiddleware`
- * alongside `HttpServerRequest` (see `@effect-expect-leaking` below, mirroring
- * `AuthMiddleware`'s own note on this). So the middleware-function shape
- * *does* express per-route, per-request resources cleanly; no handler-level
- * fallback combinator was needed.
- *
- * ## Denial handling
- *
- * On deny, the client sees `Forbidden` (403) with a message naming the
- * {@link Policy.Decision.reason} (`"forbid"`, `"default-deny"`, or `"invalid-request"` for
- * a request naming an entity with an empty id or type) — enough to
- * distinguish "a policy explicitly forbids this" from "no policy allows it"
- * without leaking policy ids or the full evaluation trace. The full
- * `Decision` (`determining`/`outcomes`) is logged via `Effect.logDebug` for
- * operators, never returned to the caller. Any other failure surfaced while
- * computing the decision (e.g. an `EntityResolver` failure) is treated the
- * same way the `Authorizer`/`Protected` field guard already treats such
- * failures — fail-closed, as `Forbidden` — and logged via `Effect.logError`.
+ * `AuthMiddleware` answers who is calling; a guard from
+ * {@link makeAuthorizationMiddleware} answers whether they may, per route. The
+ * input may be fixed or derived from the request (path params are in context).
+ * A deny, or any failure computing the decision, is a 403 naming only the
+ * decision's reason; the full trace is logged, never returned.
  *
  * @example Gate one endpoint on a per-request resource
  * ```ts

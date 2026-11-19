@@ -1,5 +1,5 @@
 /**
- * The ordered role ladder (#188), ported from the applications' own ladder
+ * The ordered role ladder, ported from the applications' own ladder
  * suite (gardeneria `packages/database/tests/roles.test.ts`, website's
  * equivalent over `user < commenter < editor < admin`) and extended with the
  * two things the library adds: the kernel bridge (`Policy.roleAtLeast`) and

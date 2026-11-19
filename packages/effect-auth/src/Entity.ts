@@ -39,7 +39,7 @@ import * as Str from "effect/String";
  * cron handlers): construct one with `System.ref`, never by hand, and never
  * name an application's own principal type `"System"` (`Guard.make` refuses it).
  *
- * Neither the type nor the id is ever empty (#661, #666). Decoding refuses
+ * Neither the type nor the id is ever empty. Decoding refuses
  * `""` in either field, and a reference built with one by hand ({@link ref}
  * stays total) **names no entity**: it equals nothing, itself included
  * ({@link refEquals}, {@link attributeValueEquals}), it is in nothing
@@ -72,14 +72,14 @@ export const ref = (type: string, id: string): EntityRef => ({ type, id });
 /**
  * Whether a reference names an entity: neither its type nor its id is empty.
  * A reference that names none is refused by the decision procedure and equals
- * nothing (#661, #666).
+ * nothing.
  */
 export const namesEntity = (r: EntityRef): boolean =>
   Str.isNonEmpty(r.type) && Str.isNonEmpty(r.id);
 
 /**
  * Structural equality on entity references. A reference with an empty type
- * or id names no entity, so it equals nothing, itself included (#661, #666).
+ * or id names no entity, so it equals nothing, itself included.
  */
 export const refEquals = (a: EntityRef, b: EntityRef): boolean =>
   namesEntity(a) && a.type === b.type && a.id === b.id;
@@ -160,7 +160,7 @@ const namesNoEntity = (value: AttributeValue): boolean =>
 
 /**
  * Deep structural equality over {@link AttributeValue}s. An entity value
- * whose type or id is empty equals nothing, itself included (#661, #666), at
+ * whose type or id is empty equals nothing, itself included, at
  * any depth.
  */
 export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): boolean => {
@@ -257,8 +257,7 @@ export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): Attrib
  * transitive descendant of it in the slice's parent DAG? Reflexive, like
  * Cedar's `in`. Cycle-safe (a malformed cyclic hierarchy terminates and
  * never grants beyond the visited set). Never true when either side has an
- * empty type or id: such a reference names no entity, so it is in nothing
- * (#661, #666).
+ * empty type or id: such a reference names no entity, so it is in nothing.
  */
 export const entityIn = (s: EntitySlice, child: EntityRef, ancestor: EntityRef): boolean => {
   if (!namesEntity(child) || !namesEntity(ancestor)) return false;

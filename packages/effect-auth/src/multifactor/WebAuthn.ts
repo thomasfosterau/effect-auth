@@ -32,7 +32,7 @@ import { timingSafeEqualBytes } from "../TokenHash.ts";
  * The WebAuthn ceremony a challenge was issued for: `"registration"`
  * (`navigator.credentials.create()`) or `"authentication"`
  * (`navigator.credentials.get()`). A challenge is redeemable only by the
- * ceremony it was issued for (#591).
+ * ceremony it was issued for.
  */
 export const WebAuthnCeremony = Schema.Literals(["registration", "authentication"]);
 
@@ -244,7 +244,7 @@ export class ChallengeStore extends Context.Service<
     /**
      * Get a challenge by its value, or `null` when no such challenge exists.
      * A stored challenge whose ceremony is missing or unknown (one written
-     * before ceremonies were recorded, #591) reads as `null`.
+     * before ceremonies were recorded) reads as `null`.
      */
     get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge | null, Errors.AuthError>;
     /** Delete a challenge */
@@ -284,7 +284,7 @@ export class CredentialStore extends Context.Service<
     ) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
     /**
      * Delete every credential `userId` registered; a no-op when they hold
-     * none. Deleting a user calls it before the user row goes (#601), and the
+     * none. Deleting a user calls it before the user row goes, and the
      * first proof of an address calls it too.
      */
     deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
@@ -327,7 +327,7 @@ export const make = (
      * Fail a passkey sign-in that names no user (an unknown or expired
      * challenge, an unknown credential, or another user's credential) after
      * firing the `beforeAuthenticate` gate unkeyed, so the per-IP limit
-     * counts it (#678).
+     * counts it.
      */
     const refuseUnkeyed = <E>(error: E): Effect.Effect<never, E | HookError> =>
       hooks.beforeAuthenticate({ method: "passkey" }).pipe(Effect.andThen(Effect.fail(error)));
@@ -369,7 +369,7 @@ export const make = (
      * The first steps of a passkey sign-in: the live authentication challenge
      * and the credential the assertion names (the bound user's, on a bound
      * challenge), then the `beforeAuthenticate` gate for the credential's
-     * user, before the signature is checked or the challenge spent (#678).
+     * user, before the signature is checked or the challenge spent.
      * Answers the credential.
      */
     const resolveAssertion = Effect.fnUntraced(function* (
@@ -735,7 +735,7 @@ export const make = (
  * WebAuthn service for managing passkey registration and authentication.
  *
  * Requires `ChallengeStore`, `CredentialStore` and `Hooks` (passkey sign-in
- * fires `beforeAuthenticate`, #678; provide `Hooks.Default` for no plugins).
+ * fires `beforeAuthenticate`; provide `Hooks.Default` for no plugins).
  */
 export class WebAuthnService extends Context.Service<
   WebAuthnService,
@@ -783,7 +783,7 @@ export class WebAuthnService extends Context.Service<
      * Fires the `beforeAuthenticate` hook (method `"passkey"`, keyed on the
      * credential's user) before the signature is checked or the challenge
      * spent, and unkeyed before failing on an unknown or expired challenge,
-     * an unknown credential or another user's credential (#678). A refusal
+     * an unknown credential or another user's credential. A refusal
      * fails with the hook's error.
      */
     verifyAuthentication: (

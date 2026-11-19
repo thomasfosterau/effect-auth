@@ -79,7 +79,7 @@ export const SignUpPayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   /**
    * Attributes for the new user. The server keeps only the keys `Http.make`'s
-   * `signUpAttributes` allows (default none) and drops the rest (#580).
+   * `signUpAttributes` allows (default none) and drops the rest.
    */
   attributes: Schema.optional(Attributes),
   /** Optional captcha token consumed by the `CaptchaPlugin`. */
@@ -403,7 +403,7 @@ export type SsoProviderView = typeof SsoProviderView.Type;
 /**
  * The attributes of a `POST /sso-providers` registering an **OIDC**
  * connection (admin-gated). The organization is not one of them: the document
- * names it as the `organization` relationship (#642).
+ * names it as the `organization` relationship.
  */
 export const SsoRegisterOidcAttributes = Schema.Struct({
   /** Optional for backwards compatibility: OIDC is the default protocol. */
@@ -710,7 +710,7 @@ export const OrganizationDomainView = Schema.Struct({
   verificationToken: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   verifiedAt: Schema.optional(Schema.Number),
-  /** Who attested a `manual` claim (the platform admin's user id), #680. */
+  /** Who attested a `manual` claim (the platform admin's user id). */
   attestedBy: Schema.optional(Schema.String),
 });
 export type OrganizationDomainView = typeof OrganizationDomainView.Type;
@@ -722,7 +722,7 @@ export type OrganizationDomainListView = typeof OrganizationDomainListView.Type;
 /**
  * Request body for claiming a domain. An organization proves a claim through
  * DNS only: `verificationStrategy` may be omitted or `"dns"`, and `"manual"`
- * is refused (`400`), since manual attestation is the operator's (#598).
+ * is refused (`400`), since manual attestation is the operator's.
  */
 export const AddOrganizationDomainPayload = Schema.Struct({
   domain: Schema.String,
@@ -732,7 +732,7 @@ export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.T
 
 /**
  * The operator's attestation that `organizationId` controls `domain`
- * (`POST /admin/organization-domains`, admin-gated, #598).
+ * (`POST /admin/organization-domains`, admin-gated).
  */
 export const AdminAttestDomainPayload = Schema.Struct({
   organizationId: Schema.String,

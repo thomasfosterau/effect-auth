@@ -1,6 +1,6 @@
 /**
  * Reads the schema's `BIGINT` columns back as JavaScript numbers, whatever
- * the driver hands over (#766).
+ * the driver hands over.
  *
  * The schema stores every epoch-millisecond instant and millisecond duration
  * as `BIGINT` (`Schema.ts`), and drivers disagree on how an `int8` comes back:

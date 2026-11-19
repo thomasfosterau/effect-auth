@@ -43,17 +43,17 @@
  * The per-code attempt counters (`EmailOtpStore.incrementAttempts`,
  * `PendingMultiFactorStore.recordFailedAttempt`) are the guess limit itself:
  * the services count before they compare, and two attempts sharing a count
- * would both be compared (#593). Each runs under a semaphore its store owns,
+ * would both be compared. Each runs under a semaphore its store owns,
  * so one process never hands out a count twice; as with `consume` below,
  * that does not span processes sharing a backend.
  *
- * `OAuthStateStore.consume` is a security guarantee, not a counter (#685), so
+ * `OAuthStateStore.consume` is a security guarantee, not a counter, so
  * it runs its read and remove under a semaphore the store owns: one process
  * never hands the same state out twice. A `KeyValueStore` offers no
  * get-and-delete, so the guarantee does not span processes sharing a backend;
  * see {@link oauthStateStoreKV}. The single-use token stores' `consume`
  * (`EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`,
- * `PendingMultiFactorStore`; #594) works the same way, with the same limit:
+ * `PendingMultiFactorStore`) works the same way, with the same limit:
  * behind several instances sharing one backend, implement those contracts
  * over a backend with an atomic get-and-delete.
  */
@@ -188,7 +188,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 };
 
 /**
- * A single-use store's `consume` (#594): its `get` and `delete` run under one
+ * A single-use store's `consume`: its `get` and `delete` run under one
  * permit of a semaphore the store owns, so within one process two concurrent
  * callers passing the same key never both receive the record. A
  * `KeyValueStore` has no get-and-delete, so the guarantee stops at the
@@ -216,7 +216,7 @@ const oauthStateKey = (state: string) => `oauth-state:${state}`;
  *
  * `consume` is the read and the remove run under one permit of a semaphore
  * this store owns, so within one process two concurrent callers passing the
- * same state never both receive it (#685). A `KeyValueStore` has no
+ * same state never both receive it. A `KeyValueStore` has no
  * get-and-delete, so that guarantee stops at the process: behind several
  * instances sharing one backend (Redis, Cloudflare KV), use an
  * `OAuthStateStore` with a native atomic consume (`./sql`'s
@@ -257,7 +257,7 @@ export const OAuthStateStoreKV: Layer.Layer<OAuthStateStore, never, KeyValueStor
 
 /**
  * JSON-safe encoding of a {@link WebAuthnChallenge} (bytes as base64). An
- * entry written before ceremonies were recorded (#591) has no `ceremony`.
+ * entry written before ceremonies were recorded has no `ceremony`.
  */
 interface StoredChallenge {
   readonly challenge: string;
@@ -332,7 +332,7 @@ const rateLimitKey = (key: string) => `rate-limit:${key}`;
  * rather than by backend-level expiry, since `KeyValueStore` has no TTL API:
  * `set` takes a key and a value only. An entry therefore stays until
  * {@link purgeExpiredKV} deletes it once its window and block have both
- * passed (#709).
+ * passed.
  */
 export const rateLimitStoreKV: Effect.Effect<
   typeof RateLimitStore.Service,
@@ -618,7 +618,7 @@ const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
  *
  * There is at most one active OTP per email + purpose pair, so the pair is
  * the key itself and no secondary index is needed. The pair's failure budget
- * (#590) lives under its own `email-otp-failures:` key, so replacing or
+ * lives under its own `email-otp-failures:` key, so replacing or
  * deleting the OTP leaves it, and it carries no expiry: only `clearFailures`
  * removes it. `incrementAttempts` and `recordFailure` are read-modify-write
  * (see the module docs on atomicity).
@@ -764,7 +764,7 @@ export interface PurgeExpiredKVResult {
   readonly magicLinks: number;
   /** Email OTP records deleted (`EmailOtpStoreKV`). */
   readonly emailOtps: number;
-  /** Rate-limit entries deleted (`RateLimitStoreKV`): their window and block have both passed (#709). */
+  /** Rate-limit entries deleted (`RateLimitStoreKV`): their window and block have both passed. */
   readonly rateLimits: number;
 }
 
@@ -791,7 +791,7 @@ const hasExpired =
 /**
  * `RateLimiter` opens a fresh window once `now >= resetAt` and lifts a block
  * once `now >= blockedUntil`, so an entry past both counts for nothing: the
- * limiter treats its key as one it has never seen (#709, as `./sql`'s #686).
+ * limiter treats its key as one it has never seen (as `./sql`'s does).
  */
 const isSpentRateLimit =
   (now: number) =>
@@ -844,8 +844,8 @@ const purgeExpiredRecords = <A>(options: {
  * `Clock`. A deleted magic link also leaves its address's index.
  *
  * `KeyValueStore` has no per-entry expiry, so rate-limit entries (one per key,
- * IP, identifier and, since #684, recipient and purpose ever counted) stay
- * until this purge too (#709). It deletes an entry once its `resetAt` is not
+ * IP, identifier and, recipient and purpose ever counted) stay
+ * until this purge too. It deletes an entry once its `resetAt` is not
  * after now and its `blockedUntil` is unset or not after now: the limiter then
  * treats the key as one it has never seen. An entry inside its window or still
  * blocked stays.

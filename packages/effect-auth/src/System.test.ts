@@ -380,7 +380,7 @@ describe("decisions about a system principal are audited by name", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Default deny under every library-shipped policy set and helper default (#377)
+// Default deny under every library-shipped policy set and helper default
 // ---------------------------------------------------------------------------
 
 /** Every action a probe asks about: reads, writes, and one no policy mentions. */
@@ -432,7 +432,7 @@ const allowedActions = async (
 const billingAsAdmin = Entity.entity(billing, { attributes: { role: "admin" } });
 const aliceAsAdmin = Entity.entity(alice, { attributes: { role: "admin" } });
 
-describe("a system principal is denied under every library policy set with no grant (#377)", () => {
+describe("a system principal is denied under every library policy set with no grant", () => {
   const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
 
   /** An owned row with the given visibility, owned by `owner`. */
@@ -473,7 +473,7 @@ describe("a system principal is denied under every library policy set with no gr
     );
   });
 
-  it("OwnedAccess.policies: a user is allowed reads on owned rows and no other action (#387)", async () => {
+  it("OwnedAccess.policies: a user is allowed reads on owned rows and no other action", async () => {
     const publicRow = ownedRow("public", Entity.ref("User", "carol"), "public");
     const privateRow = ownedRow("private", Entity.ref("User", "carol"), "private");
     const bob = Entity.entity(Entity.ref("User", "bob"), { attributes: { role: "user" } });
@@ -583,7 +583,7 @@ describe("a system principal is denied under every library policy set with no gr
   });
 });
 
-describe("with an explicit grant, a system principal gets exactly that (#377)", () => {
+describe("with an explicit grant, a system principal gets exactly that", () => {
   const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
   const row = Entity.entity(Entity.ref("Owned", "row-1"), {
     attributes: {
@@ -689,7 +689,7 @@ describe("with an explicit grant, a system principal gets exactly that (#377)", 
   });
 });
 
-describe("protectedField decisions about a system principal are audited by name (#377)", () => {
+describe("protectedField decisions about a system principal are audited by name", () => {
   const field = (policies: ReadonlyArray<Policy.Policy>) =>
     Schema.Struct({
       secret: protectedField(Schema.String, {

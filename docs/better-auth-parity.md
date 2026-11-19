@@ -1,17 +1,6 @@
-# Better Auth Parity Plan
+# Better Auth parity
 
-Status: §2 is the decided target architecture (rev 4, 2026-08-30: authorization decisions settled).
-
-Goal: make effect-auth a suitable replacement for [Better Auth](https://www.better-auth.com/) —
-and beyond that, a **batteries-included auth library**: authorization (RBAC, ABAC,
-Cedar-style policies) as a first-class pillar alongside authentication, not an
-afterthought (§2.5).
-
-This document used to also hold the 2026-08-30 audit (§1), the issue triage (§3), the gap
-inventory versus Better Auth (§4) and the M0–M7 roadmap (§5). Those milestones have landed, so
-the sections were removed; open work is tracked in the issue tracker (framework guides and a
-schema-generation CLI: #261), and the deliberate deferrals in §2.4 stand. Section numbers are
-kept because source comments cite §2.5.
+The target architecture for making effect-auth a replacement for [Better Auth](https://www.better-auth.com/), and beyond it a batteries-included library with authorization (RBAC, ABAC, Cedar-style policies) as a first-class pillar (§2.5). Section numbers are kept because source comments cite them.
 
 ## 2. Target architecture (decided)
 
@@ -30,7 +19,7 @@ package that implements a core service contract.
 | `effect-auth/sql` _(core subpath, ADR-0022)_                                                | Store layers over `effect/sql` (driver-agnostic)                                    | core; SQL drivers as peers                                          |
 | `packages/alchemy-cloudflare`, `packages/alchemy-postgres` _(split per provider, ADR-0022)_ | Alchemy v2 infra resources + D1 / Postgres storage layers                           | core; `alchemy` and the provider or driver as peers                 |
 | `packages/argon2` _(new, extract)_                                                          | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
-| `packages/drizzle` _(M6, #171)_                                                             | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
+| `packages/drizzle` _(M6)_                                                                   | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
 | `packages/<email>` _(M6)_                                                                   | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
 | `packages/<sms>` _(M6)_                                                                     | `SmsSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
 
@@ -86,12 +75,12 @@ as a design rule:
    delegate, and encode. Guardrail: no business logic in `HttpServer.ts` handlers —
    every endpoint must correspond to a service method callable directly.
 3. **Composability over mounting.** `HttpApiMiddleware` + `CurrentUser`/
-   `CurrentSession` (#94, done) is the flagship integration: consumers compose auth
+   `CurrentSession` (done) is the flagship integration: consumers compose auth
    _into_ their own `HttpApi` rather than mounting a black box beside it. The mounted
    Web handler remains as the zero-effort path (and is how "framework support" works
    without framework adapters).
 4. **The typed client derives from the contract**, not from stringly-typed paths —
-   client plugins (#92) should build on the httpapi contract types so client and
+   client plugins should build on the httpapi contract types so client and
    server can't drift.
 
 ### 2.4 Deliberate deferrals (door open, not closed)
@@ -104,8 +93,7 @@ as a design rule:
 - **Framework adapters (Next/Nuxt/SvelteKit/…):** not now. The Web-standard handler
   plus `HttpApiMiddleware` already mount everywhere; if dedicated packages ever prove
   necessary they slot in as `packages/<framework>` without touching core. Until then,
-  framework support is a docs/examples problem (M7). **Reversed for SvelteKit** ([ADR-0021](adr/0021-sveltekit-server-adapter.md),
-  #200): three apps on SvelteKit each re-wrote the same `handle` hook and form-action glue,
+  framework support is a docs/examples problem (M7). **Reversed for SvelteKit** ([ADR-0021](adr/0021-sveltekit-server-adapter.md)): three apps on SvelteKit each re-wrote the same `handle` hook and form-action glue,
   and the copies drifted, so `packages/sveltekit` now ships them. Other frameworks stay deferred.
 
 ### 2.5 Authorization as a first-class pillar
@@ -125,7 +113,7 @@ just validators").
 `requirePermission`, `allowAll`/`denyAll`). A solid RBAC seed — but checks were
 service-method calls, there was no reusable policy _value_, no resource/attribute
 model, no policies-as-data, and the Organization plugin ran its own parallel
-role→permission map (#78). That flat path is now removed and `Rbac` compiles into the
+role→permission map. That flat path is now removed and `Rbac` compiles into the
 kernel instead ([ADR 0018](adr/0018-one-authorization-kernel.md)).
 
 **Governing principle (owner decision): Effect-native-first.** The `Policy` value is
@@ -154,7 +142,7 @@ Settled decisions (design review, 2026-08-30):
    effectful escape hatch, marked opaque.
 3. **Evaluation semantics.** Default deny; forbid overrides permit;
    order-independent; the decision carries its determining policies (the trace
-   feeds audit hooks + #83 spans). **Error posture deviates from Cedar
+   feeds audit hooks and spans). **Error posture deviates from Cedar
    deliberately:** an erroring permit cannot grant, and an erroring forbid DENIES —
    fail-closed in both directions, errors recorded in the trace. (Cedar skips
    erroring policies, which fails open for forbids; the deviation is documented for
@@ -188,9 +176,9 @@ Settled decisions (design review, 2026-08-30):
    guide, coherent User/entity model), per the repo's clean-break convention.
 
 The kernel evolves what exists today: `Policy<E, R>` values pulling the principal
-from #94's middleware context, deny as a typed `AuthorizationDeniedError` with the
+from the middleware context, deny as a typed `AuthorizationDeniedError` with the
 decision trace; constructors `Policy.make`/`Policy.permission`/`Policy.role`/
 `Policy.action`; combinators `Policy.all`/`any`/`not`/`when`. Integration points:
-org-scoped policy resolution replaces the Organization plugin's parallel role map
-(#78); Admin and ApiKey permissions unify onto the same `PermissionRef`/`Policy`
+org-scoped policy resolution replaces the Organization plugin's parallel role map;
+Admin and ApiKey permissions unify onto the same `PermissionRef`/`Policy`
 model.

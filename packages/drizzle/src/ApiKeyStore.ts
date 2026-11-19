@@ -9,13 +9,13 @@
  *   The column is unique, so `getByHash` reads at most one row.
  * - `get` and `getByHash` return `null` on a miss; `delete` of a missing key is
  *   a no-op. `deleteByUserId` deletes every key of one user in one `DELETE`
- *   (core's account deletion calls it before the user row goes, #601).
+ *   (core's account deletion calls it before the user row goes).
  * - Optional fields round-trip as absent: `NULL` reads back as a missing
  *   property, never as `null`. Instants are stored as timestamps and read
  *   back as the epoch milliseconds the contract uses.
  * - `update` writes every field but `id` and `createdAt`; a verify never
  *   calls it.
- * - `recordUse` (#595) is one `UPDATE` whose `WHERE` holds the whole check
+ * - `recordUse` is one `UPDATE` whose `WHERE` holds the whole check
  *   (enabled, not expired, the refill baseline unchanged, a use left) and
  *   whose `SET` moves only the usage columns, computing `remaining` in SQL.
  *   With no `RETURNING` on MySQL, it reads the driver's affected-row count and

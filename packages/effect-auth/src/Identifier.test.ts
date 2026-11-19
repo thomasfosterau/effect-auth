@@ -468,7 +468,7 @@ describe("primaryEmailValue", () => {
 });
 
 // ---------------------------------------------------------------------------
-// lookupIdentifier — exact matches only (#602)
+// lookupIdentifier — exact matches only
 // ---------------------------------------------------------------------------
 
 /** A user lookup that finds every id. */

@@ -1,6 +1,6 @@
 /**
  * Core sign-up over the single-table `IdentifierStore` on SQLite (better-sqlite3,
- * in-process), on a NOT NULL `email` column and on a nullable one (#380).
+ * in-process), on a NOT NULL `email` column and on a nullable one.
  *
  * The same suite as the PostgreSQL file (`testing/SingleTableSignUpContract.ts`),
  * on a synchronous driver with text keys and an integer boolean.

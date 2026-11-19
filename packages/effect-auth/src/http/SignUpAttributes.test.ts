@@ -1,5 +1,5 @@
 /**
- * Sign-up attributes over HTTP (#580): `POST /users` keeps only the keys
+ * Sign-up attributes over HTTP: `POST /users` keeps only the keys
  * `signUpAttributes` allows, the services strip the authority-bearing ones
  * whatever it allows, and the kept bag is size-limited. Run against the real
  * `Http.make` handler over the in-memory `./client/testing` fixture.
@@ -65,7 +65,7 @@ const PROTECTED = {
   isAnonymous: true,
 };
 
-describe("POST /users attributes (#580)", () => {
+describe("POST /users attributes", () => {
   it("an unauthenticated sign-up with role: admin does not create an admin", async () => {
     const { answered, stored } = await signUpWith({ role: "admin" });
 

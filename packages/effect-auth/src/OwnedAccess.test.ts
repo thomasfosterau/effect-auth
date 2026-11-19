@@ -1,8 +1,8 @@
 /**
- * Owned-material read access (#190, #221 (c)), ported from the applications'
+ * Owned-material read access, ported from the applications'
  * guard suite (gardeneria `packages/database/tests/guards.test.ts`:
  * `canViewOwnedE`, `ownedReadScopeE`, the `IsFollower` seam and
- * `isFollowerNever`) with the draft axis (gardeneria #1118).
+ * `isFollowerNever`) with the draft axis.
  *
  * The list-filter half — that the rendered `WHERE` agrees with `canView` on
  * every row — is pinned against a real Postgres in

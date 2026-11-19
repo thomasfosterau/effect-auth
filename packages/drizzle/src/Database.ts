@@ -205,7 +205,7 @@ export interface DrizzleWhereStep {
 
 /**
  * The value `db.update(table)` returns. A column is set to a value, or to a
- * SQL expression over the row (`remaining - 1`, #595), as every dialect's
+ * SQL expression over the row (`remaining - 1`), as every dialect's
  * `set` accepts.
  */
 export interface DrizzleUpdateBuilder<TTable extends Table> {

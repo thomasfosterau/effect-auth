@@ -1,6 +1,6 @@
 # Migrating to the JSON:API HTTP tier
 
-The included HTTP API is JSON:API (#205, [ADR-0024](../adr/0024-json-api-http-tier.md)). Every endpoint effect-auth designs now takes and answers `application/vnd.api+json` documents and fails with JSON:API error documents; the endpoints whose wire format another specification fixes (the RFC tier) are unchanged. This guide maps every route that went away to its replacement, and lists the store-contract, client and status-code changes that came with them.
+The included HTTP API is JSON:API ([ADR-0024](../adr/0024-json-api-http-tier.md)). Every endpoint effect-auth designs now takes and answers `application/vnd.api+json` documents and fails with JSON:API error documents; the endpoints whose wire format another specification fixes (the RFC tier) are unchanged. This guide maps every route that went away to its replacement, and lists the store-contract, client and status-code changes that came with them.
 
 The conversion landed in six slices. Slices 1 to 3 (sessions and identifiers, sign-in and sign-up, account management) were already in `@thomasfosterau/effect-auth` 0.1.0, so an app on 0.1.0 or 0.2.0 has them; the tables mark them **0.1.0**. Slices 4 and 5 (organizations, teams, admin, API keys, OIDC clients, SSO, tokens, device approval) arrive in the release after 0.2.0, marked **next**. An app and the auth service it talks to, through `./client`, `Http.RemoteSession` or the SvelteKit binding, must be on the same release.
 

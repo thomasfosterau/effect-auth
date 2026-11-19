@@ -1,6 +1,6 @@
 /**
  * The `IdentifierStore` contract, written once and run against every drizzle
- * store that claims it (#182).
+ * store that claims it.
  *
  * The suites:
  *
@@ -98,7 +98,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.crossType).toBeNull();
     });
 
-    it("keeps values that differ only by case or accent distinct (#602)", async () => {
+    it("keeps values that differ only by case or accent distinct", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;

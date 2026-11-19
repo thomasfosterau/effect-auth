@@ -42,7 +42,7 @@ const rateLimitStore = {
 
   increment: (key: string, ttl: number) =>
     // Starts a new window when there is none or it has expired, as the
-    // RateLimitStore contract requires (#455).
+    // RateLimitStore contract requires.
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sync(() => {
         const entry = Option.getOrUndefined(MutableHashMap.get(rateLimitEntries, key));
@@ -61,7 +61,7 @@ const rateLimitStore = {
     }),
 };
 
-// The keys' owners: a key verifies only while its owner exists (#601).
+// The keys' owners: a key verifies only while its owner exists.
 const users = memoryUserTable();
 MutableHashMap.set(users.users, "user-1", { ...fixtureUser(), id: "user-1" });
 MutableHashMap.set(users.users, "user-2", { ...fixtureUser(), id: "user-2" });
@@ -142,7 +142,7 @@ describe("ApiKeyService", () => {
     expect(result.verified.apiKey?.lastUsedAt).toBeDefined();
   });
 
-  it("rejects a key whose owner no longer exists, on both verify paths (#601)", async () => {
+  it("rejects a key whose owner no longer exists, on both verify paths", async () => {
     const result = await runService((service) =>
       Effect.gen(function* () {
         MutableHashMap.set(users.users, "user-gone", { ...fixtureUser(), id: "user-gone" });
@@ -371,7 +371,7 @@ describe("ApiKeyService", () => {
     expect(result.third.reason).toBe("rate-limited");
   });
 
-  it("refuses a disabled or exhausted key over its limit for what it is, not as rate-limited (#730)", async () => {
+  it("refuses a disabled or exhausted key over its limit for what it is, not as rate-limited", async () => {
     const testContext = await makeRateLimitContext();
 
     const result = await Effect.runPromise(
@@ -554,7 +554,7 @@ describe("ApiKeyService", () => {
     expect(MutableHashMap.size(rateLimitEntries)).toBe(0);
   });
 
-  describe("concurrent verifies (#595)", () => {
+  describe("concurrent verifies", () => {
     // Reads that yield, as a database round trip does, so concurrent verifies
     // interleave between the read and the spend.
     const slowReads: typeof ApiKeyStore.Service = {
@@ -653,7 +653,6 @@ describe("ApiKeyService", () => {
 
 // ---------------------------------------------------------------------------
 // Credential class: an API key must not be able to mint another API key
-// (issue #198 — "a key can mint a key").
 // ---------------------------------------------------------------------------
 
 describe("ApiKeyService + Authorizer: credential class", () => {

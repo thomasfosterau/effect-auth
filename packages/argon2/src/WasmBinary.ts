@@ -7,7 +7,7 @@
  * does not export): the RustCrypto `argon2` crate built for
  * `wasm32-unknown-unknown`, 70431 bytes, base64-encoded. Embedded
  * as a string rather than imported as a `.wasm` asset so every bundler and
- * runtime loads it as plain JavaScript (#744). `Wasm.test.ts` checks the
+ * runtime loads it as plain JavaScript. `Wasm.test.ts` checks the
  * version, the SHA-256 and the bytes against the installed package.
  *
  * Licence: `@thomasfosterau/argon2` is MIT, Copyright (c) 2026 Thomas

@@ -574,7 +574,7 @@ export interface ResolveWithOptions<A, E, R> {
   /**
    * Whether the payload names a caller, for the outcome (`resolved` or
    * `anonymous`). Defaults to "`session` found one". A payload that carries a
-   * principal without a session (an API key's user, #730) says so here.
+   * principal without a session (an API key's user) says so here.
    */
   readonly resolved?: ((value: A) => boolean) | undefined;
   /** The payload to report when resolution is skipped or degrades. */

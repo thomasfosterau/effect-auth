@@ -308,7 +308,7 @@ const testContext = Context.merge(
   Context.make(OrganizationDomainStore, memoryOrganizationDomainStore(domainRecords)),
 );
 
-/** The accounts the first-proof tests sign in (#586); passwords live in `userTable`. */
+/** The accounts the first-proof tests sign in; passwords live in `userTable`. */
 const userTable = Testing.memoryUserTable();
 const accountUsers = Arr.map(["invitee-user", "other-user"], (id) => Testing.fixtureUser({ id }));
 
@@ -328,7 +328,7 @@ const answer = (invitation: Invitation) => ({
   token: tokenFor(invitation.id),
 });
 
-/** API keys, so a test can see a first proof remove the invitee's (#694). */
+/** API keys, so a test can see a first proof remove the invitee's. */
 const apiKeyRecords = MutableHashMap.empty<string, ApiKey>();
 
 /** The invitee's API key, minted before the address was proved. */
@@ -434,7 +434,7 @@ type ByIdOperation<A> = (
 
 /**
  * The refusals of `operation` for an unknown id (as `owner-1`) and for each of
- * `actors` on the record `id` names (#718).
+ * `actors` on the record `id` names.
  */
 const refusals = <A>(
   operation: ByIdOperation<A>,
@@ -470,7 +470,7 @@ const expectAlike = (
   expect(refused.others.map(errorShape)).toEqual(refused.others.map(() => expected));
 };
 
-/** The refusal of an operation needing `permission` (#715, #718). */
+/** The refusal of an operation needing `permission`. */
 const missingPermission = (permission: string) =>
   `Missing permission '${permission}' in this organization`;
 
@@ -503,7 +503,7 @@ describe("OrganizationService", () => {
     expect(result.listed[0].id).toBe(result.organization.id);
   });
 
-  it("reads an organization and its members only as an active member (#717)", async () => {
+  it("reads an organization and its members only as an active member", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -754,7 +754,7 @@ describe("OrganizationService", () => {
     expect(result.userInvitations).toHaveLength(0);
   });
 
-  it("lists a user's own pending invitations, to their verified addresses only (#706)", async () => {
+  it("lists a user's own pending invitations, to their verified addresses only", async () => {
     seedEmail("invitee-user", "invitee@example.com", true);
     seedEmail("invitee-user", "invitee@work.example", true);
     seedEmail("invitee-user", "claimed@example.com");
@@ -859,7 +859,7 @@ describe("OrganizationService", () => {
     expect(result.orgInvitations[0].status).toBe("canceled");
   });
 
-  it("lists an organization's invitations only for a member holding invitation:create (#715)", async () => {
+  it("lists an organization's invitations only for a member holding invitation:create", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -895,7 +895,7 @@ describe("OrganizationService", () => {
     expect(result.unknown).toEqual(result.stranger);
   });
 
-  it("refuses an unknown team or invitation id exactly as a stranger and a member without the permission (#718)", async () => {
+  it("refuses an unknown team or invitation id exactly as a stranger and a member without the permission", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -1486,7 +1486,7 @@ describe("OrganizationService", () => {
           name: "Acme",
           slug: "acme",
         });
-        // A role must be defined to be granted (#585), so the member gets
+        // A role must be defined to be granted, so the member gets
         // `auditor` while it exists, and keeps it once the definition is gone.
         yield* service.upsertOrgRole("owner-1", organization.id, {
           role: "auditor",
@@ -1524,7 +1524,7 @@ describe("OrganizationService", () => {
   });
 
   it("honors wildcard permissions in custom role definitions", async () => {
-    // Granting `superuser` takes an owner who holds `*:*` itself (#585).
+    // Granting `superuser` takes an owner who holds `*:*` itself.
     const config: OrganizationConfig = { roles: { ...defaultOrganizationRoles, owner: ["*:*"] } };
     const result = await runService(config, (service) =>
       Effect.gen(function* () {
@@ -1743,7 +1743,7 @@ const refusal = <A, R>(
     return error.message;
   });
 
-describe("OrganizationService - no granting beyond your own permissions (#585)", () => {
+describe("OrganizationService - no granting beyond your own permissions", () => {
   beforeEach(resetStores);
 
   it("refuses an admin promoting themselves, or anyone, to owner", async () => {
@@ -1934,7 +1934,7 @@ const withManager = <A, E>(
     }),
   );
 
-describe("OrganizationService - custom-role management follows the grant rule (#673)", () => {
+describe("OrganizationService - custom-role management follows the grant rule", () => {
   beforeEach(resetStores);
 
   it("lets the default owner (`*:*`) grant custom roles with app permissions and wildcards", async () => {
@@ -2470,7 +2470,7 @@ const alive = (issued: ReadonlyArray<IssuedSession>) =>
     );
   });
 
-describe("OrganizationService - invitation tokens (#586)", () => {
+describe("OrganizationService - invitation tokens", () => {
   beforeEach(resetStores);
 
   it("accepts and rejects nothing on the invitation id alone, or a wrong token", async () => {
@@ -2513,7 +2513,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
     // account: the password is gone, and only the accepting session survives.
     expect(MutableHashMap.has(userTable.passwordHashes, "invitee-user")).toBe(false);
     expect(result.sessions).toEqual([true, false]);
-    // So are the credentials it held, such as an API key (#694).
+    // So are the credentials it held, such as an API key.
     expect(MutableHashMap.has(apiKeyRecords, "invitee-key")).toBe(false);
   });
 
@@ -2564,7 +2564,7 @@ describe("OrganizationService - invitation tokens (#586)", () => {
   });
 });
 
-describe("OrganizationService - answering by id from a verified address (#673)", () => {
+describe("OrganizationService - answering by id from a verified address", () => {
   beforeEach(resetStores);
 
   it("accepts by id, without the token, for a verified matching address", async () => {
@@ -2689,7 +2689,7 @@ describe("OrganizationService - domains", () => {
     expect(result.removeUnknown._tag).toBe("Failure");
   });
 
-  it("refuses a second claim by the same organization only, revealing no other tenant's claim (#598)", async () => {
+  it("refuses a second claim by the same organization only, revealing no other tenant's claim", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
@@ -2726,7 +2726,7 @@ describe("OrganizationService - domains", () => {
     expect(result.globexDomains.map((domain) => domain.id)).toEqual([result.otherOrganization.id]);
   });
 
-  it("lets only the organization that proves DNS control verify a domain several claim (#598)", async () => {
+  it("lets only the organization that proves DNS control verify a domain several claim", async () => {
     const claims = await runService({}, (service) =>
       Effect.gen(function* () {
         const squatter = yield* service.createOrganization("owner-1", {
@@ -2869,7 +2869,7 @@ describe("OrganizationService - domains", () => {
     expect(verified.again.verifiedAt).toBe(verified.first.verifiedAt);
   });
 
-  it("never lets an organization owner self-attest a domain (#598)", async () => {
+  it("never lets an organization owner self-attest a domain", async () => {
     // What an untyped caller (or a caller built against the old input) sends.
     const manualRequest = { domain: "victim.test", verificationStrategy: "manual" };
     const result = await runService({}, (service) =>
@@ -2902,14 +2902,14 @@ describe("OrganizationService - domains", () => {
     expect(result.jit).toBeNull();
   });
 
-  it("refuses to verify a manual claim on the organization's own say-so (#598)", async () => {
+  it("refuses to verify a manual claim on the organization's own say-so", async () => {
     const result = await runServiceWithVerifier({}, stubDomainVerifier([]), (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
           name: "Acme",
           slug: "acme",
         });
-        // A pending manual claim stored before #598.
+        // A pending manual claim stored by an earlier release.
         const legacy: OrganizationDomain = {
           id: "dom-legacy",
           organizationId: organization.id,
@@ -2933,7 +2933,7 @@ describe("OrganizationService - domains", () => {
     expect(result.stored?.verificationState).toBe("pending");
   });
 
-  it("lets the operator attest a domain server-side, creating or attesting the claim (#598)", async () => {
+  it("lets the operator attest a domain server-side, creating or attesting the claim", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
@@ -2993,7 +2993,7 @@ describe("OrganizationService - domains", () => {
     );
   });
 
-  it("records who attested a claim, and keeps the first attester on a repeat (#680)", async () => {
+  it("records who attested a claim, and keeps the first attester on a repeat", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
@@ -3019,7 +3019,7 @@ describe("OrganizationService - domains", () => {
     expect("attestedBy" in result.anonymous).toBe(false);
   });
 
-  it("lets the operator release an organization's claim in any state (#680)", async () => {
+  it("lets the operator release an organization's claim in any state", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
@@ -3074,7 +3074,7 @@ describe("OrganizationService - domains", () => {
     });
   });
 
-  it("refuses a release for an unknown organization, a bad domain or a domain it holds no claim on (#680)", async () => {
+  it("refuses a release for an unknown organization, a bad domain or a domain it holds no claim on", async () => {
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
@@ -3199,7 +3199,7 @@ describe("OrganizationService - JIT provisioning", () => {
     expect(result.members.members).toHaveLength(1);
   });
 
-  it("follows a DNS-verified claim, and not another tenant's pending claim on it (#598)", async () => {
+  it("follows a DNS-verified claim, and not another tenant's pending claim on it", async () => {
     const claims = await runService({}, (service) =>
       Effect.gen(function* () {
         const squatter = yield* service.createOrganization("owner-2", {
@@ -3265,7 +3265,7 @@ describe("OrganizationStore conformance", () => {
 const failureTag = (exit: Exit.Exit<unknown, { readonly _tag: string }>): string | null =>
   Option.getOrNull(Option.map(Exit.findErrorOption(exit), (error) => error._tag));
 
-describe("OrganizationService - role names that are prototype members (#621)", () => {
+describe("OrganizationService - role names that are prototype members", () => {
   beforeEach(resetStores);
 
   const prototypeNames = ["constructor", "__proto__", "toString", "hasOwnProperty"] as const;

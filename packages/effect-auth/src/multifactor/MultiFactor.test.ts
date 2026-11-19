@@ -103,7 +103,7 @@ const emailPasswordStore = {
 };
 
 // Every read yields the fiber, as a database round trip would, so concurrent
-// redemptions interleave between a read and the write that follows (#594).
+// redemptions interleave between a read and the write that follows.
 const memoryMultiFactor = memoryMultiFactorStore(multiFactorRecords);
 const multiFactorStore: typeof MultiFactorStore.Service = {
   ...memoryMultiFactor,
@@ -519,7 +519,7 @@ describe("MultiFactorService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("compares at most maxFailedAttempts of a concurrent burst of codes (#593)", async () => {
+  it("compares at most maxFailedAttempts of a concurrent burst of codes", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-burst", "burst@example.com", "correct-password");
     // Reads that yield, as a database round trip does: every code of the
@@ -638,7 +638,7 @@ describe("MultiFactorService", () => {
     ).toHaveLength(8);
   });
 
-  describe("concurrent redemptions (#594)", () => {
+  describe("concurrent redemptions", () => {
     const race = async <A, E>(
       userId: string,
       redeem: (

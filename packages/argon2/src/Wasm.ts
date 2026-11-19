@@ -3,7 +3,7 @@
  * ({@link WASM_BASE64}), compiled **once, at module scope**, and called
  * synchronously through the binary's C ABI.
  *
- * Module scope is the point (#744). workerd forbids generating wasm code while
+ * Module scope is the point. workerd forbids generating wasm code while
  * it serves a request (`CompileError: WebAssembly.compile(): Wasm code
  * generation disallowed by embedder`) and allows it only while the worker's
  * modules are evaluated (from compatibility date 2025-06-01, or with

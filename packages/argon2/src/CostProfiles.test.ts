@@ -9,7 +9,7 @@ import { hashArgon2id, type KernelCosts, type KernelError } from "./Wasm.ts";
 // without running a 19 MiB or 64 MiB derivation: the kernel's `hashArgon2id`
 // is replaced by a stub that records its arguments and answers at once. The
 // round-trip tests in `index.test.ts` run the real KDF at a cheap explicit
-// cost, so neither file depends on how fast the machine is (#270).
+// cost, so neither file depends on how fast the machine is.
 vi.mock("./Wasm.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./Wasm.ts")>();
   return {

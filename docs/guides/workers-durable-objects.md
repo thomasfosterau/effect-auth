@@ -14,7 +14,7 @@ This guide gives copyable code for three objects:
 
 ## 1. A strict rate limiter
 
-effect-auth has two `RateLimiter` implementations. `RateLimiter.layer()` is built over the `RateLimitStore` contract (§2). It reads the count, decides, and then increments. So concurrent requests at the limit all read the same count and all pass, even when the store's increment is atomic (#455). `rateLimiterPersistenceLayer` is built over `effect/persistence`'s `RateLimiter`, which asks its store for one atomic `fixedWindow` operation and decides from the count that operation returns. Over a Durable Object, that is strict: in the check below, 50 concurrent sign-in attempts against a limit of 5 let exactly 5 through.
+effect-auth has two `RateLimiter` implementations. `RateLimiter.layer()` is built over the `RateLimitStore` contract (§2). It reads the count, decides, and then increments. So concurrent requests at the limit all read the same count and all pass, even when the store's increment is atomic. `rateLimiterPersistenceLayer` is built over `effect/persistence`'s `RateLimiter`, which asks its store for one atomic `fixedWindow` operation and decides from the count that operation returns. Over a Durable Object, that is strict: in the check below, 50 concurrent sign-in attempts against a limit of 5 let exactly 5 through.
 
 One object per key holds the counter. The semantics are those of `effect/persistence`'s in-memory store: each token holds the counter open for one refill interval (window ÷ limit), and a request over the limit is refused without changing the counter.
 
@@ -197,7 +197,7 @@ export const rateLimitStoreLayer = (namespace: DurableObjectNamespace<RateLimitC
   Layer.succeed(Auth.RateLimitStore, makeRateLimitStore(namespace));
 ```
 
-An exact store does not make `RateLimiter.layer()` strict. That limiter decides before it increments (#455), so use §1 for limits that must hold under concurrency.
+An exact store does not make `RateLimiter.layer()` strict. That limiter decides before it increments, so use §1 for limits that must hold under concurrency.
 
 ## 3. Sessions
 
@@ -347,7 +347,7 @@ export const sessionStoreLayer = (
 ) => Layer.succeed(Auth.SessionStore, makeSessionStore(users, pointers));
 ```
 
-This store passes the `SessionStore` conformance suite from `@thomasfosterau/effect-auth/testing` (#341).
+This store passes the `SessionStore` conformance suite from `@thomasfosterau/effect-auth/testing`.
 
 ## 4. Wiring it into a Worker
 

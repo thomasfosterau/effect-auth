@@ -116,7 +116,7 @@ describe("UserService", () => {
     expect(result.attributes.role).toBe("member");
   });
 
-  it("refuses a role in a profile update — the rung is server-only by default (#193)", async () => {
+  it("refuses a role in a profile update — the rung is server-only by default", async () => {
     const error = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -179,7 +179,7 @@ describe("UserService", () => {
     expect(result?.verifiedAt).toBeInstanceOf(Date);
   });
 
-  it("deleteUser deletes the account through AccountDeletion (#601)", async () => {
+  it("deleteUser deletes the account through AccountDeletion", async () => {
     const deleted: Array<string> = [];
     const deletion = Context.make(AccountDeletion, {
       deleteUser: (userId) =>
@@ -204,7 +204,7 @@ describe("UserService", () => {
     expect(result.failure._tag).toBe("UserNotFoundError");
   });
 
-  it("deleteUser without AccountDeletion fails and deletes nothing, not even the row (#601)", async () => {
+  it("deleteUser without AccountDeletion fails and deletes nothing, not even the row", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {

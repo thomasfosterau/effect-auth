@@ -22,7 +22,7 @@
  *   because MySQL's default collation (`utf8mb4_0900_ai_ci` on MySQL 8) is
  *   case- and accent-insensitive: under it a lookup of `bob@exämple.com` finds
  *   `bob@example.com`'s row, so a reset or sign-in for one address resolves the
- *   other's account (#602). PostgreSQL and SQLite compare bytes already. An
+ *   other's account. PostgreSQL and SQLite compare bytes already. An
  *   application's own column that holds identifier values (the single-table
  *   store's `users.email`, or a table mapped through `defineSchema`) needs the
  *   same collation.
@@ -64,7 +64,7 @@ const KEY_LENGTH = 255;
 
 /**
  * The collation identifier values are stored and compared under: binary, so
- * two values are equal only when their bytes are (#602). `utf8mb4_bin` rather
+ * two values are equal only when their bytes are. `utf8mb4_bin` rather
  * than MySQL 8's `utf8mb4_0900_bin` because MariaDB and MySQL 5.7 have it too.
  * It is a `PAD SPACE` collation, so trailing spaces still compare equal; core
  * trims the emails and usernames it stores and treats a returned identifier

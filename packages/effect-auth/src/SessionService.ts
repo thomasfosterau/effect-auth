@@ -12,8 +12,8 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 
 /**
- * The first problem with `sessionExpiresIn`, or `undefined` when it is sound
- * (#612): `activePeriod` and `idlePeriod` must be finite and positive, and
+ * The first problem with `sessionExpiresIn`, or `undefined` when it is sound:
+ * `activePeriod` and `idlePeriod` must be finite and positive, and
  * `updateAge`, when set, finite and not negative. A `NaN` period (an unset
  * `Number(env)`) would make every expiry comparison false, so sessions would
  * never expire.
@@ -39,7 +39,7 @@ const isPositivePeriod = (millis: number): boolean => Number.isFinite(millis) &&
 
 /**
  * Run a best-effort store write whose failure must not fail the request, and
- * log the failure rather than drop it (#612).
+ * log the failure rather than drop it.
  */
 const bestEffort = (
   write: Effect.Effect<unknown, Errors.AuthError>,
@@ -52,7 +52,7 @@ const bestEffort = (
 
 /**
  * Create a SessionService implementation. Dies at layer build when
- * `sessionExpiresIn` is not sound (#612), so a misconfigured app fails to
+ * `sessionExpiresIn` is not sound, so a misconfigured app fails to
  * start rather than issue sessions that never expire.
  */
 export const make = (
@@ -104,7 +104,7 @@ export const make = (
             };
 
             yield* sessionStore.create(session);
-            // The raw token travels beside the record, never as its id (#581).
+            // The raw token travels beside the record, never as its id.
             const created = yield* hooks.afterCreateSession(session);
             return { session: created, token: rawToken } satisfies Types.IssuedSession;
           }).pipe(
@@ -116,7 +116,7 @@ export const make = (
       validateSession: Effect.fn("SessionService.validateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
           // Look up the session by its token hash; never expose the raw token
-          // to the store or to a hook (#669). The hook observes or denies:
+          // to the store or to a hook. The hook observes or denies:
           // what it returns is not read back, so it cannot redirect the lookup.
           const tokenHash = hashToken(rawSessionId);
           yield* hooks.beforeValidateSession({ sessionId: tokenHash });
@@ -193,7 +193,7 @@ export const make = (
           }
 
           // The session answers under its stored id: the caller already holds
-          // the token it presented (#581).
+          // the token it presented.
           return yield* hooks.afterValidateSession({ session: updatedSession, user });
         }).pipe(
           Effect.withSpan(Obs.spanNames.validateSession),
@@ -210,8 +210,8 @@ export const make = (
 
       invalidateSession: Effect.fn("SessionService.invalidateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          // Every hook gets the stored id, so none can record the credential
-          // (#669); `beforeSignOut` observes or denies, and is not read back.
+          // Every hook gets the stored id, so none can record the credential;
+          // `beforeSignOut` observes or denies, and is not read back.
           const storedId = hashToken(rawSessionId);
           yield* hooks.beforeSignOut({ sessionId: storedId });
           yield* sessionStore.delete(storedId);
@@ -286,7 +286,7 @@ export class SessionService extends Context.Service<
      * Create a new session for a user. Answers the stored record (its `id`
      * the digest of the token) and the raw `token`, the credential to hand
      * the client in the session cookie (or, in bearer mode, the
-     * `set-auth-token` header). The token is never the record's id (#581).
+     * `set-auth-token` header). The token is never the record's id.
      */
     readonly createSession: (
       userId: string,
@@ -297,7 +297,7 @@ export class SessionService extends Context.Service<
      * Validate the session a raw token names and return it with the user. The
      * session answers under its stored id (the token's digest), never the
      * token. `beforeValidateSession` observes the stored id, never the token,
-     * and can only deny: its return value is not read back (#669).
+     * and can only deny: its return value is not read back.
      */
     readonly validateSession: (
       token: string,
@@ -311,7 +311,7 @@ export class SessionService extends Context.Service<
 
     /**
      * Invalidate the session a raw token names. The sign-out hooks run and
-     * observe the stored id, never the token (#581, #669); `beforeSignOut`
+     * observe the stored id, never the token; `beforeSignOut`
      * can deny the sign-out but not redirect it, since its return value is
      * not read back.
      */

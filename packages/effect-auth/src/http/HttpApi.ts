@@ -22,7 +22,7 @@ import * as R from "./Resources.ts";
  */
 
 // -----------------------------------------------------------------------------
-// JSON:API resource groups (#205)
+// JSON:API resource groups
 // -----------------------------------------------------------------------------
 
 /**
@@ -177,7 +177,7 @@ export type SecondFactorVerificationDocument = typeof SecondFactorVerificationDo
 /**
  * The body of `POST /otp-challenges`: which channel to send a one-time code or
  * link through, and to whom, with an optional `captchaToken` for the captcha
- * plugin's `"sendCode"` endpoint (#678).
+ * plugin's `"sendCode"` endpoint.
  */
 export const OtpChallengeDocument = writeDocument(
   "otp-challenges",
@@ -450,7 +450,7 @@ export const identifiersGroup = Group.make(
  * `users`: the signed-in user's own profile.
  *
  * - `PATCH /users/:id`: update `name` / `image`. `:id` is `me` or the caller's
- *   own id; any other id answers `404`. No other attribute is writable (#193).
+ *   own id; any other id answers `404`. No other attribute is writable.
  */
 export const usersGroup = Group.make(
   R.User,
@@ -477,7 +477,7 @@ export const usersGroup = Group.make(
 );
 
 // -----------------------------------------------------------------------------
-// Account management (#205): password, email change, deletion, multi-factor
+// Account management: password, email change, deletion, multi-factor
 // -----------------------------------------------------------------------------
 
 /** The body of `POST /email-changes`: the address to move the account to. */
@@ -678,7 +678,7 @@ export const backupCodeSetsGroup = Group.make(
 
 // -----------------------------------------------------------------------------
 // Device sessions and organizations: members, invitations, domains, roles and
-// teams (#205, slice 4)
+// teams (slice 4)
 // -----------------------------------------------------------------------------
 
 /**
@@ -864,7 +864,7 @@ export type InvitationCreateDocument = typeof InvitationCreateDocument.Type;
 /**
  * The body of `POST /organizations/:id/domains`: the domain to claim. Its
  * `verificationStrategy` may only be `dns` (the default); `manual` answers
- * `400`, since manual attestation is the operator's (#598).
+ * `400`, since manual attestation is the operator's.
  */
 export const DomainCreateDocument = writeDocument(
   "organization-domains",
@@ -904,10 +904,10 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  * `organizations`: the organizations the signed-in user belongs to.
  *
  * - `GET /organizations`: every organization the caller is an active member
- *   of (#717).
+ *   of.
  * - `POST /organizations`: create one; the caller becomes its owner. `201`.
  * - `GET /organizations/:id`: one organization (any member; a non-member
- *   and an unknown id get the same `403`, #717).
+ *   and an unknown id get the same `403`).
  * - `PATCH /organizations/:id`: `name`, `slug`, `logo`, `metadata` and
  *   `jitProvisioning` (`organization:update`) and `defaultRole`
  *   (`role:manage`).
@@ -915,14 +915,14 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
  * - `PATCH /organizations/active`: record the session's active organization
  *   (a linkage to it, or `null` to clear it); `204`. Only an organization
  *   the caller is an active member of: a non-member and an unknown id get
- *   the same `403` (#576).
+ *   the same `403`.
  * - `GET /organizations/:id/members` · `POST /organizations/:id/members`: its
- *   memberships (any member, refused as `GET /organizations/:id` is, #717),
+ *   memberships (any member, refused as `GET /organizations/:id` is),
  *   and add one directly (`member:create`).
  * - `GET /organizations/:id/invitations` · `POST /organizations/:id/invitations`:
  *   its invitations, and invite someone by email (both `invitation:create`;
  *   a non-member and an unknown id get the same `403` as a member without
- *   it, #715).
+ *   it).
  * - `GET /organizations/:id/domains` · `POST /organizations/:id/domains`: its
  *   email-domain claims (any member), and claim one (`domain:manage`).
  * - `GET /organizations/:id/roles` · `POST /organizations/:id/roles`: its
@@ -1008,7 +1008,7 @@ export const organizationsGroup = Group.make(
  *   member belongs to (any member of that organization).
  *
  * A refusal answers `403`. An unknown id gets exactly what another tenant's
- * membership and a member without the permission get (#718): `Missing
+ * membership and a member without the permission get: `Missing
  * permission 'member:update'` (or `'member:delete'`) for a change or a
  * removal, `You are not a member of this organization` for the teams.
  */
@@ -1023,20 +1023,20 @@ export const organizationMembersGroup = Group.make(
  * `invitations`: the signed-in user's own invitations, and one invitation by id.
  *
  * - `GET /invitations`: the pending, unexpired invitations addressed to the
- *   caller's verified email identifiers (#706), the ones they may answer by
+ *   caller's verified email identifiers, the ones they may answer by
  *   id; `401` without a session. Like `GET /organizations`, the top-level
  *   collection is scoped to the caller, never every invitation; an
  *   organization's own list is `GET /organizations/:id/invitations`.
  * - `PATCH /invitations/:id` with a `status`: `accepted` or `rejected` by the
  *   invitee, with the invitation email's secret as the `token` attribute,
- *   which an invitee whose matching email is verified may omit (#673) (an
+ *   which an invitee whose matching email is verified may omit (an
  *   acceptance includes the new membership), `canceled` by a member
  *   holding `invitation:cancel`. A refused acceptance or rejection answers
  *   `400`, a refused cancellation `403`.
  * - `POST /invitations/:id/deliveries`: send a pending invitation again, with
  *   a fresh expiry (`invitation:create`); `202` with the invitation.
  *
- * A cancellation and a re-delivery check the permission first (#718): an
+ * A cancellation and a re-delivery check the permission first: an
  * unknown id, a stranger and a member without it get the same `403` and
  * body, and only a permitted member learns that an invitation is no longer
  * pending.
@@ -1079,7 +1079,7 @@ export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
  * - `POST /organization-domains/:id/verifications`: check the DNS TXT record
  *   through the server's `DomainVerifier` (`domain:manage`); `200` with the
  *   claim, now `verified` or `failed`. The permission is never the proof: an
- *   unverified `manual` claim is refused (#598).
+ *   unverified `manual` claim is refused.
  * - `POST /admin/organization-domains`: the operator's attestation, after
  *   checking ownership out of band, that the `organization` relationship
  *   controls `domain` (`OrganizationService.attestDomain`). Needs the
@@ -1090,12 +1090,12 @@ export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
  *   domain, a domain verified for another organization) answers `400`.
  * - `DELETE /admin/organization-domains/:id`: the operator's release of any
  *   organization's claim, whatever its state, for disputes
- *   (`OrganizationService.releaseDomain`, #680). Gated as the attestation is;
+ *   (`OrganizationService.releaseDomain`). Gated as the attestation is;
  *   `204`.
  *
  * A tenant's refusal, or a server with no `OrganizationDomainStore`, answers
  * `403`; an unknown id gets the same `403` and body as another tenant's claim
- * and a member without `domain:manage` (#718). The operator's release of an
+ * and a member without `domain:manage`. The operator's release of an
  * unknown id answers `404`, after the admin check.
  */
 export const organizationDomainsGroup = Group.make(
@@ -1125,7 +1125,7 @@ export const organizationDomainsGroup = Group.make(
  *   name (if any) applies again; `204`.
  *
  * A refusal answers `403`; an unknown id gets the same `403` and body as
- * another tenant's definition and a member without `role:manage` (#718).
+ * another tenant's definition and a member without `role:manage`.
  */
 export const organizationRolesGroup = Group.make(
   R.OrganizationRole,
@@ -1144,7 +1144,7 @@ export const organizationRolesGroup = Group.make(
  *   as the `user` relationship (`team:manage-members`).
  *
  * A refusal answers `403`. An unknown team gets exactly what another
- * tenant's team and a member without the permission get (#718): `Missing
+ * tenant's team and a member without the permission get: `Missing
  * permission '<permission>'` for a change, `You are not a member of this
  * organization` for the member list.
  */
@@ -1166,7 +1166,7 @@ export const teamsGroup = Group.make(
  * `team-members`: one team membership, by its stored id.
  * `DELETE /team-members/:id` removes it (`team:manage-members`); `204`. A
  * refusal answers `403`, and an unknown id gets the same `403` and body as
- * another tenant's membership and a member without the permission (#718).
+ * another tenant's membership and a member without the permission.
  */
 export const teamMembersGroup = Group.make(
   R.TeamMember,
@@ -1175,7 +1175,7 @@ export const teamMembersGroup = Group.make(
 
 // -----------------------------------------------------------------------------
 // Admin, impersonation, API keys, OAuth clients, SSO, JWTs and device approval
-// (#205, slice 5)
+// (slice 5)
 // -----------------------------------------------------------------------------
 
 /** The `meta` of `GET /admin/users`: how many users match, before paging. */
@@ -1313,10 +1313,10 @@ export const CurrentApiKeyDocument = Document.DataDocument(R.ApiKey, {
  *
  * - `GET /api-keys/current`: resolve the key the request carries in an API-key
  *   header (`cookie.apiKeyHeaders`, default `x-api-key`; never the URL) to the
- *   key and its user (#730). The key wins over any cookie or bearer token on
+ *   key and its user. The key wins over any cookie or bearer token on
  *   the request, which this endpoint never reads. Each call is a verification
  *   and consumes one use of the key (`remaining` decrements, `lastUsedAt`
- *   moves; a non-consuming check is #645). An unknown, disabled, expired or
+ *   moves). An unknown, disabled, expired or
  *   exhausted key (or none) gets one identical `401`; a real key over its own
  *   `rateLimit` gets `429` with `Retry-After`. Every answer is
  *   `Cache-Control: no-store`.
@@ -1383,7 +1383,7 @@ export const oauthClientsGroup = Group.make(
  * The body of `POST /sso-providers`: one protocol's registration fields,
  * discriminated by `protocol` (omitted, `oidc`), and the connection's
  * organization as the optional `organization` relationship (absent or
- * `data: null` for none), as the answer carries it (#642).
+ * `data: null` for none), as the answer carries it.
  */
 export const SsoProviderCreateDocument = Schema.Struct({
   data: Schema.Struct({

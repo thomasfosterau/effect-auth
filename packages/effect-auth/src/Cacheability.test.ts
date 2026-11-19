@@ -1,5 +1,5 @@
 /**
- * The two cache questions (#191, #221 (e)), ported from the applications:
+ * The two cache questions, ported from the applications:
  * `bypassesCacheForFreshness` / `shouldIncludeDeletedE` (gardeneria
  * `packages/database/tests/guards.test.ts`) and `isPubliclyServeable`'s
  * conservative posture (gardeneria `apps/api/src/cache.ts`).
@@ -165,7 +165,7 @@ describe("OwnedAccess.serveableAxes", () => {
 
 const resource = (name: string) => Condition.attr("resource", name);
 
-describe("Cacheability.publicReach (#191)", () => {
+describe("Cacheability.publicReach", () => {
   const reference = Policy.permit({ id: "species", resource: Policy.isType("Species") });
   const journal = Policy.permit({
     id: "journal:owner",

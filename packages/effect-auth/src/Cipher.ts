@@ -10,7 +10,7 @@
  */
 
 // Imported, never the global: `nodejs_compat` sets no `Buffer` global on
-// Workers dated before 2024-09-23 (#748).
+// Workers dated before 2024-09-23.
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { Effect, Result } from "effect";
@@ -218,7 +218,7 @@ export type JwsAlgorithm = "ES256" | "EdDSA" | "RS256";
 /**
  * An exported JWK whose members are JSON or `undefined`. From compatibility
  * date 2025-12-03 on, workerd's `KeyObject.export({ format: "jwk" })` carries
- * every absent member (`use`, `alg`, `d`, …) as `undefined` (#748).
+ * every absent member (`use`, `alg`, `d`, …) as `undefined`.
  */
 const decodeExportedJwk = Schema.decodeUnknownSync(
   Schema.Record(Schema.String, Schema.UndefinedOr(Schema.Json)),
@@ -285,7 +285,7 @@ export const generateJwsKeyPair = (
  * The ES256 options carry the PEM itself, never a `KeyObject`: workerd's
  * `node:crypto` rejects `{ key: KeyObject, dsaEncoding }` with
  * `ERR_INVALID_ARG_TYPE` on every compatibility date, and accepts a PEM or
- * JWK key input there (#748). `Workerd.test.ts` pins both forms.
+ * JWK key input there. `Workerd.test.ts` pins both forms.
  */
 export const signJws = (
   algorithm: "ES256" | "EdDSA",

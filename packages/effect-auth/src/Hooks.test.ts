@@ -283,7 +283,7 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
         }),
       increment: (key: string, ttl: number) =>
         // Starts a new window when there is none or it has expired, as the
-        // RateLimitStore contract requires (#455).
+        // RateLimitStore contract requires.
         Effect.flatMap(Clock.currentTimeMillis, (now) =>
           Effect.sync(() => {
             const existing = Option.getOrUndefined(MutableHashMap.get(entries, key));

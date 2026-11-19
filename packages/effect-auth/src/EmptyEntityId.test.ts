@@ -1,5 +1,5 @@
 /**
- * An empty entity id names no entity (#661).
+ * An empty entity id names no entity.
  *
  * `Entity.ref("User", "")` used to be an ordinary principal: an owner permit
  * matched every row whose owner was `""`, in the kernel (`Policy.decidePure`)
@@ -62,7 +62,7 @@ const compiled = (
   return result.scope;
 };
 
-describe("Policy.decidePure refuses an empty entity id (#661)", () => {
+describe("Policy.decidePure refuses an empty entity id", () => {
   it("an empty-id principal does not own an empty-owner row", () => {
     const decision = decide([ownerPermit], { principal: nobody });
     expect(decision.allowed).toBe(false);
@@ -114,7 +114,7 @@ describe("Policy.decidePure refuses an empty entity id (#661)", () => {
   });
 });
 
-describe("Policy.decide and enforce refuse an empty entity id (#661)", () => {
+describe("Policy.decide and enforce refuse an empty entity id", () => {
   it("does not run a custom permit's predicate for an empty-id principal", () => {
     let ran = false;
     const custom = Policy.custom({
@@ -136,7 +136,7 @@ describe("Policy.decide and enforce refuse an empty entity id (#661)", () => {
   });
 });
 
-describe("ReadScope.compile refuses an empty entity id (#661)", () => {
+describe("ReadScope.compile refuses an empty entity id", () => {
   it("an empty-id principal's scope does not admit an empty-owner row", () => {
     const scope = compiled([ownerPermit], nobody);
     expect(scope).toEqual(ReadScope.deny);
@@ -171,7 +171,7 @@ describe("ReadScope.compile refuses an empty entity id (#661)", () => {
   });
 });
 
-describe("Entity: an empty id names no entity (#661)", () => {
+describe("Entity: an empty id names no entity", () => {
   it("equals nothing, itself included", () => {
     expect(Entity.refEquals(nobody, Entity.ref("User", ""))).toBe(false);
     expect(Entity.refEquals(alice, Entity.ref("User", "alice"))).toBe(true);
@@ -200,7 +200,7 @@ describe("Entity: an empty id names no entity (#661)", () => {
   });
 });
 
-describe("Guard reads an empty-id viewer as anonymous (#661)", () => {
+describe("Guard reads an empty-id viewer as anonymous", () => {
   interface AppUser {
     readonly id: string;
     readonly role: string;

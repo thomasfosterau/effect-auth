@@ -255,7 +255,7 @@ describe("SamlVerifier.verify — addressing and validity", () => {
   });
 
   // node-saml 5.2 enforces the SubjectConfirmationData window itself, before
-  // our check runs, and rejects with its own message (#532). What is pinned is
+  // our check runs, and rejects with its own message. What is pinned is
   // the rejection; either message names it.
   const EXPIRED = /expired|No valid subject confirmation/i;
 
@@ -307,7 +307,7 @@ describe("SamlVerifier.verify — addressing and validity", () => {
   });
 
   it("reads InResponseTo from the document, not node-saml's profile, so decoys count too", async () => {
-    // node-saml 5.2 reports the signed value as `profile.inResponseTo` (#532),
+    // node-saml 5.2 reports the signed value as `profile.inResponseTo`,
     // so the comparison must read the raw XML: here a second, unsigned
     // attribute elsewhere in the Response.
     const decoy = validResponse().replace(

@@ -1,6 +1,6 @@
 /**
  * Core sign-up over the single-table `IdentifierStore` on PostgreSQL (PGlite),
- * on a NOT NULL `email` column and on a nullable one (#380).
+ * on a NOT NULL `email` column and on a nullable one.
  *
  * Core hands the store's `createUser` the address it signs the user up with; the
  * application's writer inserts the row holding it, and the claim that follows

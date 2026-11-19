@@ -230,7 +230,7 @@ describe("GoogleOneTapService", () => {
     );
     expect(emailIdentifier?.userId).toBe(first.user.id);
     expect(emailIdentifier?.verified).toBe(true);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "alice@gmail.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -320,7 +320,7 @@ describe("GoogleOneTapService", () => {
     });
   });
 
-  it("clears a squatter's password, sessions and credentials when Google proves the address (#440, #694)", async () => {
+  it("clears a squatter's password, sessions and credentials when Google proves the address", async () => {
     const { layer, users, identifiers, nonceStore, passwordHashes, sessionsCleared } = makeStores();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
@@ -343,7 +343,7 @@ describe("GoogleOneTapService", () => {
     );
     MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
 
-    // The squatter also minted an API key, which the first proof removes (#694).
+    // The squatter also minted an API key, which the first proof removes.
     const apiKeys = memoryApiKeyStore();
     await Effect.runPromise(
       apiKeys.create({
@@ -564,11 +564,11 @@ const makeHttpFixture = () => {
   };
 };
 
-/** `POST /google-one-tap-nonces`: mint a nonce (#205). */
+/** `POST /google-one-tap-nonces`: mint a nonce. */
 const nonceRequest = (): Request =>
   new Request("http://test/google-one-tap-nonces", { method: "POST" });
 
-/** `POST /sessions` with a `google-one-tap` credential (#205). */
+/** `POST /sessions` with a `google-one-tap` credential. */
 const signInRequest = (idToken: string, nonce: string): Request =>
   new Request("http://test/sessions", {
     method: "POST",
@@ -590,7 +590,7 @@ describe("HTTP Google One Tap endpoint", () => {
     const fx = makeHttpFixture();
     const res = await fx.handler(nonceRequest());
     expect(res.status).toBe(201);
-    // The single-use nonce is this caller's alone (#628).
+    // The single-use nonce is this caller's alone.
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await jsonBody(res, NonceDocument);
     expect(body.data.type).toBe("google-one-tap-nonces");

@@ -77,7 +77,7 @@ export class OtpSecondFactorStore extends Context.Service<
     ) => Effect.Effect<OtpSecondFactorRecord, Errors.AuthError>;
     /**
      * Count one attempt against the challenge, atomically, and return the new
-     * `attempts`, or `null` when there is no such challenge (#593). The
+     * `attempts`, or `null` when there is no such challenge. The
      * service counts before it compares, so two calls must never return the
      * same number: a get followed by an `update` would let a burst of
      * concurrent guesses all be compared under `maxAttempts`.
@@ -226,7 +226,7 @@ export const make = (
         const record = pendingToken && otp ? yield* store.get(pendingToken) : null;
         if (!record) {
           // Unkeyed: the challenge names no user, but the per-IP limit still
-          // counts the attempt (#678).
+          // counts the attempt.
           yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* invalidOtp();
         }
@@ -237,14 +237,14 @@ export const make = (
           return yield* new OtpSecondFactorError({ message: "OTP has expired" });
         }
 
-        // Counted per user across challenges by the lockout plugin (#592).
+        // Counted per user across challenges by the lockout plugin.
         yield* hooks.beforeAuthenticate({
           method: "second-factor",
           identifier: { type: "user", value: record.userId },
           userId: record.userId,
         });
 
-        // Count the attempt before comparing (#593), so concurrent guesses
+        // Count the attempt before comparing, so concurrent guesses
         // each get their own count and at most `maxAttempts` are compared.
         // `null`: a concurrent request spent or exhausted the challenge.
         const attempts = yield* store.incrementAttempts(pendingToken);

@@ -229,7 +229,7 @@ export class AdminService extends Context.Service<
      * every other method gates on. The HTTP tier's platform-admin endpoints
      * outside this service (SSO providers, OAuth clients, domain attestation
      * and release) ask it too, so a custom `adminRoles` or `adminUserIds`
-     * governs them alike (#680).
+     * governs them alike.
      */
     readonly isAdmin: (user: Types.User) => boolean;
 
@@ -269,7 +269,7 @@ export class AdminService extends Context.Service<
     ) => Effect.Effect<Types.User, AdminError | Errors.AuthError | Errors.UserNotFoundError>;
 
     /**
-     * Delete a user and everything the account holds (#601): every credential
+     * Delete a user and everything the account holds: every credential
      * and token in the user-keyed stores present where this layer is built
      * (OAuth links, passkeys, API keys, the multi-factor enrolment, trusted
      * devices, OIDC provider tokens and consents, password-reset,
@@ -575,7 +575,7 @@ export const make = (
 
         // Normalise the extra identifiers before anything is written, so a
         // failing phone normaliser leaves no user behind, and each value
-        // matches the normalised lookups the other flows make (#408).
+        // matches the normalised lookups the other flows make.
         const extraIdentifiers = yield* Effect.forEach(
           input.identifiers ?? [],
           (ident) =>

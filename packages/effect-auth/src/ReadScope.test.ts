@@ -1,5 +1,5 @@
 /**
- * The read scope (#190, #203): a policy set compiled over an unbound row.
+ * The read scope: a policy set compiled over an unbound row.
  *
  * The kernel (`Policy.decidePure`) is the specification. Every test here
  * compiles a policy set once per viewer and requires the compiled scope's
@@ -25,7 +25,7 @@ interface AppUser {
   readonly id: string;
   readonly role: string;
 }
-/** A viewer of the corpus; `principalType` overrides the guards' own type (#666). */
+/** A viewer of the corpus; `principalType` overrides the guards' own type. */
 interface CorpusViewer extends AppUser {
   readonly principalType?: string | undefined;
 }
@@ -54,7 +54,7 @@ type CorpusRow = {
 };
 
 const users = ["u-admin", "u-moderator", "u-member", "u-other", "u-stranger"] as const;
-// `""` is an owner column holding the empty string, which no principal owns (#661).
+// `""` is an owner column holding the empty string, which no principal owns.
 const corpus: ReadonlyArray<CorpusRow> = Arr.flatMap([...users, "", null], (owner) =>
   Arr.flatMap(["public", "followers", "group", "private", "unknown", null], (visibility) =>
     Arr.flatMap([false, true, null], (draft) =>
@@ -80,9 +80,9 @@ const viewers: ReadonlyArray<CorpusViewer | null> = [
   { id: "u-other", role: "contributor" },
   // A role off the ladder: the role policy errors for this principal.
   { id: "u-stranger", role: "guest" },
-  // An empty id names no principal (#661): refused, even at the top rung.
+  // An empty id names no principal: refused, even at the top rung.
   { id: "", role: "admin" },
-  // An empty type names no principal either (#666): refused, whatever its id or rung.
+  // An empty type names no principal either: refused, whatever its id or rung.
   { id: "u-member", role: "admin", principalType: "" },
   { id: "", role: "admin", principalType: "" },
 ];
@@ -237,7 +237,7 @@ describe("ReadScope.compile", () => {
     expectAgreement(owned.policies);
   });
 
-  it("agrees with the kernel when the owner column holds empty-type references (#666)", () => {
+  it("agrees with the kernel when the owner column holds empty-type references", () => {
     // Every row's owner is `""::"<id>"`, which names no entity: an owner
     // permit or a literal over it matches no row, for any viewer.
     const untypedOwners: ReadScope.Binding = {

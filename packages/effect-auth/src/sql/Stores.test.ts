@@ -196,7 +196,7 @@ const authTables: ReadonlyArray<string> = schemaStatements.flatMap((statement) =
  * PostgreSQL over PGlite. `int8` is how the engine reads a `BIGINT` column
  * back: PGlite's own parser gives a `number`, but `@effect/sql-pg` returns a
  * `bigint` and node-postgres a decimal string, and the stores must read all
- * three (#766), so the contract runs once per shape.
+ * three, so the contract runs once per shape.
  */
 const pgliteEngine = (name: string, int8?: (text: string) => bigint | string): StoreEngine => {
   let database: PGlite | undefined;
@@ -408,7 +408,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.gone).toBeNull();
     });
 
-    it("UserServiceStore.delete removes the user's role rows with the user, and only theirs (#601)", async () => {
+    it("UserServiceStore.delete removes the user's role rows with the user, and only theirs", async () => {
       const result = await run(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
@@ -428,7 +428,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.kept).toEqual([{ role: "admin" }]);
     });
 
-    it("the user purge joins an ambient sql.withTransaction, so a failing step rolls it all back (#601)", async () => {
+    it("the user purge joins an ambient sql.withTransaction, so a failing step rolls it all back", async () => {
       const result = await run(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
@@ -637,7 +637,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.three?.userId).toBe("user-2");
     });
 
-    it("EmailVerificationStore reads a user's newest verification, and null for none (#682)", async () => {
+    it("EmailVerificationStore reads a user's newest verification, and null for none", async () => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.Email.EmailVerificationStore;
@@ -684,7 +684,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.missing).toBeNull();
     });
 
-    it("ChallengeStore reads a challenge with no known ceremony as missing (#591)", async () => {
+    it("ChallengeStore reads a challenge with no known ceremony as missing", async () => {
       // A row written before `auth_webauthn_challenge_ceremonies` existed, and
       // one whose ceremony the core does not know: neither ceremony redeems them.
       const result = await run(
@@ -764,7 +764,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.missing).toBeNull();
     });
 
-    it("OAuthStateStore.consume hands a state to one of several concurrent callers (#685)", async () => {
+    it("OAuthStateStore.consume hands a state to one of several concurrent callers", async () => {
       const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const state: Auth.OAuth.OAuthState = {
         state: "st-race",
@@ -945,7 +945,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.replaced?.attempts).toBe(0);
       expect(result.other?.otpHash).toBe("other");
       expect(result.deleted).toBeNull();
-      // A pair with no code counts nothing (#593).
+      // A pair with no code counts nothing.
       expect(result.missingIncrement).toBeNull();
       expect(result.user.name).toBe("OTP User");
     });
@@ -1019,7 +1019,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
     });
 
-    it("purgeExpired deletes rate-limit rows whose window and block have both passed, and keeps open or blocked ones (#686)", async () => {
+    it("purgeExpired deletes rate-limit rows whose window and block have both passed, and keeps open or blocked ones", async () => {
       const now = 1_000_000;
       const entries: ReadonlyArray<Auth.RateLimitEntry> = [
         { key: "purge-stale", count: 3, resetAt: now - 60_000 },
@@ -1049,7 +1049,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.left).toEqual([null, null, null, entries[3], entries[4]]);
     });
 
-    it("purgeExpiredWith({ limit }) deletes at most limit rows per table per call, and repeated calls drain every expired row (#729)", async () => {
+    it("purgeExpiredWith({ limit }) deletes at most limit rows per table per call, and repeated calls drain every expired row", async () => {
       const now = 1_000_000;
       const stale = Arr.makeBy(5, (i): Auth.RateLimitEntry => ({
         key: `bounded-stale-${i}`,
@@ -1116,7 +1116,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.left).toEqual([...stale.map(() => null), ...kept]);
     });
 
-    it("purgeExpiredWith() with no limit is purgeExpired, and a limit that is not a positive integer fails (#729)", async () => {
+    it("purgeExpiredWith() with no limit is purgeExpired, and a limit that is not a positive integer fails", async () => {
       const now = 1_000_000;
       const result = await run(
         Effect.gen(function* () {
@@ -1795,13 +1795,13 @@ const storeContract = (engine: StoreEngine): void => {
       Testing.apiKeyStoreConformance({ seedUser }),
       Testing.challengeStoreConformance(),
       Testing.emailOtpStoreConformance(),
-      // The per-user deletes account deletion calls (#601).
+      // The per-user deletes account deletion calls.
       Testing.oauthAccountStoreConformance({ seedUser }),
       Testing.credentialStoreConformance({ seedUser }),
       Testing.multiFactorStoreConformance({ seedUser }),
       Testing.emailVerificationStoreConformance({ seedUser }),
       Testing.passwordResetStoreConformance({ seedUser }),
-      // The single-use consumes (#594).
+      // The single-use consumes.
       Testing.magicLinkStoreConformance(),
       Testing.pendingMultiFactorStoreConformance({ seedUser }),
     ];
@@ -1900,7 +1900,7 @@ const recordingSqliteClient = (sent: Array<string>): Layer.Layer<SqlClient.SqlCl
     }),
   ).pipe(Layer.provide(Reactivity.layer));
 
-describe("purgeExpiredWith's capped DELETE (#729)", () => {
+describe("purgeExpiredWith's capped DELETE", () => {
   it("rechecks expiry outside the subquery, so a row refreshed after the subquery picked it survives", async () => {
     // A concurrent refresh between the subquery's pick and the DELETE's row
     // lock cannot be staged deterministically on one connection, so this pins

@@ -46,7 +46,7 @@ export const BAN_ATTRIBUTES: ReadonlyArray<string> = ["banned", "banReason", "ba
 /**
  * Attribute keys a sign-up never takes from its input, on top of
  * {@link UserServiceConfig.serverOnlyAttributes}, whatever an HTTP
- * `signUpAttributes` allow-list names (#580): the ban state
+ * `signUpAttributes` allow-list names: the ban state
  * ({@link BAN_ATTRIBUTES}), the SCIM provisioning keys (`scimUserName`,
  * `scimDeactivated`, `scimExternalId`, which `ScimService` alone writes) and
  * the anonymous-user marker (`isAnonymous`, which `AnonymousService` alone
@@ -69,7 +69,7 @@ export const SIGN_UP_PROTECTED_ATTRIBUTES: ReadonlyArray<string> = [
  * input: `serverOnly` (the configured
  * {@link UserServiceConfig.serverOnlyAttributes}) and
  * {@link SIGN_UP_PROTECTED_ATTRIBUTES}. `EmailPasswordService.signUp` and
- * `AuthLifecycleService.signUp` apply it to every new user (#580).
+ * `AuthLifecycleService.signUp` apply it to every new user.
  *
  * @since 0.1.0
  * @category utils
@@ -85,7 +85,7 @@ export const withoutSignUpProtectedAttributes = (
 
 /**
  * The entries of `attributes` whose key `keys` names, or `undefined` when
- * none is: how `POST /users` applies its `signUpAttributes` allow-list (#580).
+ * none is: how `POST /users` applies its `signUpAttributes` allow-list.
  *
  * @since 0.1.0
  * @category utils
@@ -147,7 +147,7 @@ export class UserService extends Context.Service<
     ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     /**
-     * Delete the user and everything the account holds (#601), through the
+     * Delete the user and everything the account holds, through the
      * `AccountDeletion` service in the context (`accountDeletionLayer`): the
      * user's credentials and tokens, the unspent magic links and one-time
      * codes sent to its addresses, its sessions, its identifiers, and the

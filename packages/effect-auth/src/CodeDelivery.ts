@@ -14,7 +14,7 @@ interface CodeDeliveryOptions<E, E2> {
   /**
    * True where only a known address gets a code, so an inline send would
    * answer it later (and fail it when the vendor does) than an unknown one:
-   * the send then goes off the response path (#196).
+   * the send then goes off the response path.
    */
   readonly hidesAccount: boolean;
   readonly purpose: DeliveryPurpose;

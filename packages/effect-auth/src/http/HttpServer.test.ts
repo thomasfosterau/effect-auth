@@ -142,7 +142,7 @@ interface Fixture {
   readonly services: Layer.Layer<AuthServices>;
   /** Base layer + magic link, email OTP, multi-factor (and the 2FA gate). */
   readonly featureServices: Layer.Layer<AuthServices>;
-  /** `featureServices` with no `RateLimiter`, for the build check (#389). */
+  /** `featureServices` with no `RateLimiter`, for the build check. */
   readonly featureServicesWithoutRateLimiter: Layer.Layer<AuthServices>;
   readonly sentVerificationTokens: string[];
   readonly sentResetTokens: string[];
@@ -178,7 +178,7 @@ const makeFixture = (
   options: {
     /** The `Hooks` stack in `services`. Default `Hooks.Default`. */
     readonly hooks?: Layer.Layer<Hooks> | undefined;
-    /** Build the device service with `allowMissingRateLimiter: true` (#389). */
+    /** Build the device service with `allowMissingRateLimiter: true`. */
     readonly deviceAllowMissingRateLimiter?: boolean | undefined;
     /** Shared config for the magic-link, email OTP and phone OTP services. */
     readonly passwordless?:
@@ -397,7 +397,7 @@ const makeFixture = (
     Layer.succeed(PasswordResetStore)(passwordResetStore),
     Layer.succeed(PasswordResetUserStore)(passwordResetUserStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
-    // The per-recipient send caps (#684).
+    // The per-recipient send caps.
     memoryRateLimitStoreLayer(),
     options.hooks ?? Hooks.Default,
     // Detached sends run in place, so a test reads them as the response returns.
@@ -715,7 +715,7 @@ const makeFixture = (
     MultiFactorGateLayer.pipe(Layer.provide(multiFactorServiceLayer)),
   );
 
-  // The device user-code limit runs only with a RateLimiter (#389), so the feature
+  // The device user-code limit runs only with a RateLimiter, so the feature
   // set that includes device authorization carries one.
   const featureServices = Layer.merge(featureServicesWithoutRateLimiter, memoryRateLimiterLayer());
 
@@ -740,7 +740,7 @@ const makeFixture = (
   };
 };
 
-/** A `RateLimiter` over an in-memory store, for the limits that need one (#389). */
+/** A `RateLimiter` over an in-memory store, for the limits that need one. */
 const memoryRateLimiterLayer = (): Layer.Layer<RateLimiter> =>
   RateLimiter.layer().pipe(Layer.provide(memoryRateLimitStoreLayer()));
 
@@ -753,7 +753,7 @@ const memoryRateLimitStoreLayer = (): Layer.Layer<RateLimitStore> => {
       Effect.sync(() => void MutableHashMap.set(entries, key, entry)),
     increment: (key: string, ttl: number) =>
       // Starts a new window when there is none or it has expired, as the
-      // RateLimitStore contract requires (#455).
+      // RateLimitStore contract requires.
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
           const entry = Option.getOrUndefined(MutableHashMap.get(entries, key));
@@ -985,7 +985,7 @@ const jsonApiRequest = (
   });
 
 /**
- * The flows `/sessions`, `/users` and the verification groups serve (#205),
+ * The flows `/sessions`, `/users` and the verification groups serve,
  * by name: each sign-in credential method, sign-up, and the sends and
  * redemptions that prove an address or a second factor.
  */
@@ -1198,7 +1198,7 @@ const signIn = async (handler: Handler, email: string, password: string = PW): P
 
 // --- tests --------------------------------------------------------------------
 
-describe("anti-enumeration sign-up over HTTP (#414)", () => {
+describe("anti-enumeration sign-up over HTTP", () => {
   const VICTIM = "victim@example.com";
   const FRESH = "fresh1@example.com"; // As long as VICTIM, so bodies match in length.
 
@@ -1216,7 +1216,7 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
    * Everything a caller can compare across two sign-up responses: the status,
    * every header (and `Set-Cookie` on its own) and the body, byte for byte.
    * Under `antiEnumeration` no session is issued, so both are a `202` that
-   * names no user (#205).
+   * names no user.
    */
   const observe = async (res: Response) => ({
     status: res.status,
@@ -1266,7 +1266,7 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
     },
   ];
   // With verification on, the address's holder gets the existing-account
-  // notice when one is configured, and nothing otherwise (#422).
+  // notice when one is configured, and nothing otherwise.
   const lifecycles = [
     { verification: false, notice: false },
     { verification: true, notice: true },
@@ -1312,7 +1312,7 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
 
       // Only the fresh sign-up gets a verification record and link, and it
       // names a real user; the stand-in gets neither, so VICTIM's holder is
-      // never sent a link that can't verify (#422).
+      // never sent a link that can't verify.
       const records = fixture.verificationRecords();
       expect(records.map((record) => record.email)).toEqual(
         verification ? [preCheck ? VICTIM : FRESH] : [],
@@ -1326,7 +1326,7 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
   );
 });
 
-describe("sign-up for an address held unverified over HTTP (#421)", () => {
+describe("sign-up for an address held unverified over HTTP", () => {
   const HELD = "held@example.com";
   const holder: Types.User = {
     id: "user-holder",
@@ -1359,7 +1359,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
           attributes: { plan: "free" },
         }),
       );
-      // No session, so a `202` that names no user (#205).
+      // No session, so a `202` that names no user.
       expect(res.status).toBe(202);
       expect(res.headers.getSetCookie()).toEqual([]);
       const text = await res.text();
@@ -1790,7 +1790,7 @@ describe("change-password and update-user", () => {
     expect(res.status).toBe(404);
   });
 
-  it("refuses a write to the attributes bag (#193)", async () => {
+  it("refuses a write to the attributes bag", async () => {
     const handler = handlerFor();
     const sid = await signUp(handler, "a@b.com");
 
@@ -1838,9 +1838,9 @@ describe("email verification roundtrip", () => {
     expect(replay.status).toBe(400);
   });
 
-  // The default 60 s resend cooldown (#682) holds the second send back, and the
+  // The default 60 s resend cooldown holds the second send back, and the
   // answer stays the one an unknown address gets, so it names no account.
-  it("holds a resend back inside the cooldown with the same answer (#682)", async () => {
+  it("holds a resend back inside the cooldown with the same answer", async () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture);
     await signUp(handler, "a@b.com");
@@ -2123,7 +2123,7 @@ describe("magic link", () => {
   });
 });
 
-describe("POST /otp-challenges hands its captchaToken to beforeSendCode (#678)", () => {
+describe("POST /otp-challenges hands its captchaToken to beforeSendCode", () => {
   /** Hooks whose send gate admits only the captcha token `"ok"`, as a captcha would. */
   const captchaHooks = makePlugin({
     beforeSendCode: (attempt) =>
@@ -2243,7 +2243,7 @@ describe("multi-factor", () => {
     // `202`: the challenge to redeem, and no user until it is redeemed.
     expect(gated.status).toBe(202);
     expect(gated.headers.get("set-cookie")).toBeNull();
-    // The challenge's id redeems the second factor (#628).
+    // The challenge's id redeems the second factor.
     expect(gated.headers.get("cache-control")).toBe("no-store");
     const gatedBody = await authBody(
       gated,
@@ -2405,7 +2405,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
     expect(token.headers.get("set-cookie")).toContain("conduit_session=");
   });
 
-  it("keeps its own JSON wire format, never a JSON:API document (#205)", async () => {
+  it("keeps its own JSON wire format, never a JSON:API document", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
 
     // The device posts plain `application/json` and gets plain JSON back.
@@ -2559,7 +2559,7 @@ describe("HTTP phone OTP", () => {
   });
 });
 
-// #415: where a passwordless send hides whether the address has an account, a
+// Where a passwordless send hides whether the address has an account, a
 // repeat request within the resend cooldown must answer an unknown address
 // exactly as it answers a known one: the same status, body and headers.
 describe("passwordless send within the resend cooldown", () => {
@@ -2629,10 +2629,10 @@ describe("passwordless send within the resend cooldown", () => {
   );
 });
 
-// #684: every unauthenticated send is capped per recipient and purpose (5 an
+// Every unauthenticated send is capped per recipient and purpose (5 an
 // hour by default), across clients, and the cap answers an unknown address
 // exactly as it answers a known one: the same status, body and headers.
-describe("send past the per-recipient cap (#684)", () => {
+describe("send past the per-recipient cap", () => {
   /** Everything a caller can observe of a response. */
   const observe = async (response: Response) => ({
     status: response.status,
@@ -2725,7 +2725,7 @@ describe("send past the per-recipient cap (#684)", () => {
   );
 });
 
-// #417: where a passwordless send hides whether the address has an account,
+// Where a passwordless send hides whether the address has an account,
 // the verify endpoint must answer an address that holds an outstanding code
 // exactly as it answers one that holds a marker record or nothing at all:
 // through wrong codes, the attempt limit and expiry.
@@ -3045,7 +3045,7 @@ describe("HTTP session cookie cache", () => {
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });
 
-  it("never caches a user holding a server-only attribute, so each request reads the store (#194)", async () => {
+  it("never caches a user holding a server-only attribute, so each request reads the store", async () => {
     // Every user this store creates holds `role`, the default server-only attribute.
     const fixture = makeFixture({
       emailPasswordStore: (base) => ({
@@ -3072,7 +3072,7 @@ describe("HTTP session cookie cache", () => {
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });
 
-  it("rejects every outstanding cache cookie when the epoch changes (#194)", async () => {
+  it("rejects every outstanding cache cookie when the epoch changes", async () => {
     const fixture = makeFixture();
     const v1 = handlerFor(fixture, { cache: { secret: SECRET, version: "v1" } });
     const sid = await signUp(v1, "epoch@example.com");
@@ -3117,7 +3117,7 @@ const requireSetCookie = (res: Response, name: string): string => {
 /** The `Cache-Control` a response carries, `null` without one. */
 const cacheControl = (res: Response) => res.headers.get("cache-control");
 
-describe("every response carrying Set-Cookie is no-store (#628)", () => {
+describe("every response carrying Set-Cookie is no-store", () => {
   it("a sign-up and a sign-in that set the session cookie", async () => {
     const handler = handlerFor();
     const up = await handler(authRequest("sign-up", { email: "ns@test.com", password: PW }));
@@ -3562,7 +3562,7 @@ const forwardedAttempt = (handler: Handler, xForwardedFor: string) =>
   );
 
 // ---------------------------------------------------------------------------
-// The session token never reaches a response body (#581)
+// The session token never reaches a response body
 // ---------------------------------------------------------------------------
 
 /**
@@ -3587,7 +3587,7 @@ const expectNoToken = (issued: { token: string; text: string; id: string }) => {
   expect(issued.id).toBe(hashToken(issued.token));
 };
 
-describe("the session token never reaches a response body (#581)", () => {
+describe("the session token never reaches a response body", () => {
   it("cookie mode: a sign-up answers the session by its digest only", async () => {
     const handler = handlerFor();
     const res = await handler(authRequest("sign-up", { email: "leak@test.com", password: PW }));
@@ -3769,7 +3769,7 @@ describe("the session token never reaches a response body (#581)", () => {
   });
 });
 
-/** A rate-limit store call that fails as a down store does (#612). */
+/** A rate-limit store call that fails as a down store does. */
 const limiterDown = () => Effect.fail(new Root.AuthError({ message: "rate-limit store down" }));
 
 describe("client IP at the HTTP boundary", () => {
@@ -3785,7 +3785,7 @@ describe("client IP at the HTTP boundary", () => {
       readonly trustedProxy?: TrustedProxyConfig | undefined;
       readonly allowMissingClientIp?: boolean | undefined;
       readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
-      /** Fail every rate-limit store call, as a down store does (#612). */
+      /** Fail every rate-limit store call, as a down store does. */
       readonly storeDown?: boolean | undefined;
       /** A layer merged into the services, such as a log collector. */
       readonly layer?: Layer.Layer<never> | undefined;
@@ -3806,7 +3806,7 @@ describe("client IP at the HTTP boundary", () => {
         }),
       increment: (key: string, ttl: number) =>
         // Starts a new window when there is none or it has expired, as the
-        // RateLimitStore contract requires (#455).
+        // RateLimitStore contract requires.
         Effect.flatMap(Clock.currentTimeMillis, (now) =>
           Effect.sync(() => {
             MutableHashSet.add(keys, key);
@@ -3862,8 +3862,8 @@ describe("client IP at the HTTP boundary", () => {
   });
 
   // A Web Request has no socket address, so the header's last entry is the one
-  // the trusted proxy wrote (#584).
-  describe("under hopCount: 1 with no socket address (#584)", () => {
+  // the trusted proxy wrote.
+  describe("under hopCount: 1 with no socket address", () => {
     it("keys an honest client on the address its proxy appended", async () => {
       const { handler, keys } = limitedHandler({ trustedProxy: { hopCount: 1 } });
 
@@ -3904,8 +3904,8 @@ describe("client IP at the HTTP boundary", () => {
   });
 
   // A limiter-store outage, or one an attacker can induce, never removes the
-  // limit silently (#612).
-  describe("when the rate-limit store errors (#612)", () => {
+  // limit silently.
+  describe("when the rate-limit store errors", () => {
     it("refuses the request with a logged 500 by default", async () => {
       const logs: Array<{ readonly level: string; readonly message: string }> = [];
       const collector = Logger.make((options) => {
@@ -3995,8 +3995,8 @@ describe("client IP at the HTTP boundary", () => {
   });
 
   // With no proxy no Web Request has an address, so the limit would refuse
-  // every request it covers: the handler refuses to start instead (#682).
-  it("refuses to start with allowMissingClientIp and no trustedProxy (#682)", async () => {
+  // every request it covers: the handler refuses to start instead.
+  it("refuses to start with allowMissingClientIp and no trustedProxy", async () => {
     expect(() => limitedHandler({ allowMissingClientIp: true })).toThrow(
       HttpServer.ClientAddressConfigError,
     );
@@ -4071,7 +4071,7 @@ const fromAddress = (method: string, path: string, ip: string, headers = {}): Re
   });
 
 /**
- * Every endpoint the default IP rules limit (#583), with a concrete path and
+ * Every endpoint the default IP rules limit, with a concrete path and
  * the number of requests the default rule allows from one address.
  */
 const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, max: number]> = [
@@ -4101,7 +4101,7 @@ const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, m
 ];
 
 /**
- * The spellings of `path` the router serves as `path` (#582): a trailing
+ * The spellings of `path` the router serves as `path`: a trailing
  * slash, other letter cases, a duplicated slash, and a percent-encoded letter.
  */
 const pathVariants = (path: string): ReadonlyArray<string> => {
@@ -4131,7 +4131,7 @@ const ipLimitedHandler = (ipRateLimit?: HttpServer.HttpIPRateLimitConfig): Handl
     ...(ipRateLimit !== undefined && { ipRateLimit }),
   }).handler;
 
-describe("the IP limit holds for every spelling of a limited path (#582)", () => {
+describe("the IP limit holds for every spelling of a limited path", () => {
   // The default rules, each allowing one request, so every case is two requests.
   const oncePerRule = {
     rules: HttpServer.defaultEndpointRules.map((rule) => ({ ...rule, maxRequests: 1 })),
@@ -4242,7 +4242,7 @@ describe("the IP limit holds for every spelling of a limited path (#582)", () =>
   });
 });
 
-describe("Http.make refuses to start without the IP limit's dependencies (#583)", () => {
+describe("Http.make refuses to start without the IP limit's dependencies", () => {
   it("throws ClientAddressConfigError when given neither a client address source nor ipRateLimit: false", () => {
     expect(() => HttpServer.make({ services: limiter() })).toThrow(ClientAddressConfigError);
     expect(() => HttpServer.make({ services: limiter() })).toThrow(/ipRateLimit: false/);
@@ -4283,9 +4283,9 @@ describe("Http.make refuses to start without the IP limit's dependencies (#583)"
     expect(statuses[10]).toBe(429);
   });
 
-  // A confidential client's backend calls the token endpoint from one address
-  // (#682): a rule ahead of the defaults replaces that endpoint's limit only.
-  it("lets a rules override placed ahead of the defaults replace one endpoint's limit (#682)", async () => {
+  // A confidential client's backend calls the token endpoint from one address:
+  // a rule ahead of the defaults replaces that endpoint's limit only.
+  it("lets a rules override placed ahead of the defaults replace one endpoint's limit", async () => {
     const handler = ipLimitedHandler({
       rules: [
         { path: "/oauth2/token", methods: ["POST"], maxRequests: 100, windowMs: 60_000 },
@@ -4365,7 +4365,7 @@ describe("Http.make refuses to start without the IP limit's dependencies (#583)"
 });
 /**
  * The auth API composed by hand from the exported group layers, outside
- * `Http.make`: no startup check, no `ClientIP` middleware (#389).
+ * `Http.make`: no startup check, no `ClientIP` middleware.
  */
 const handBuiltHandler = (services: Layer.Layer<AuthServices>): Handler => {
   const platform = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer).pipe(
@@ -4394,7 +4394,7 @@ const ipRateLimitHooks = (): Layer.Layer<Hooks> =>
     Layer.provide(memoryRateLimitStoreLayer()),
   );
 
-describe("rate limits need a RateLimiter when make is called (#389)", () => {
+describe("rate limits need a RateLimiter when make is called", () => {
   it("throws RateLimiterConfigError from make when ipRateLimit has no RateLimiter", () => {
     const fixture = makeFixture();
     expect(() =>
@@ -4544,7 +4544,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
   });
 });
 
-describe("IPRateLimitPlugin needs a client-address source under make (#389)", () => {
+describe("IPRateLimitPlugin needs a client-address source under make", () => {
   it("throws ClientAddressConfigError from make with no trustedProxy and no opt-out", () => {
     const fixture = makeFixture({ hooks: ipRateLimitHooks() });
     expect(() =>
@@ -4581,7 +4581,7 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
     expect((await signIn("203.0.113.21")).status).toBe(401);
   });
 
-  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every sign-in (#682)", () => {
+  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every sign-in", () => {
     const { services } = makeFixture({ hooks: ipRateLimitHooks() });
     const make = () =>
       HttpServer.make({
@@ -4619,7 +4619,7 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
   });
 });
 
-describe("the exported group layers outside make refuse rather than skip (#389)", () => {
+describe("the exported group layers outside make refuse rather than skip", () => {
   it("refuses device approve/deny with 429 when no RateLimiter is in scope, and logs it as an error", async () => {
     const logs: Array<{ readonly level: string; readonly message: string }> = [];
     const collector = Logger.make((options) => {
@@ -4691,12 +4691,12 @@ class BootError extends Data.TaggedError("BootError")<{ readonly reason: string 
 /** `services` whose build fails with a {@link BootError}, typed as `make` takes them. */
 const failingBoot = (layer: Layer.Layer<AuthServices, BootError>): Layer.Layer<AuthServices> => {
   // SAFETY: `make` types `services` as infallible, yet it runs the build and
-  // surfaces the build's typed failure itself (#402). The callers hand it a build
+  // surfaces the build's typed failure itself. The callers hand it a build
   // that fails with a `BootError` on purpose, to check exactly that path.
   return layer as Layer.Layer<AuthServices>;
 };
 
-describe("make builds services synchronously, up to their exit (#402)", () => {
+describe("make builds services synchronously, up to their exit", () => {
   it("returns while a fiber that services forked keeps running, and dispose stops it", async () => {
     // A busy fiber the build forks and never awaits. make must not wait for it.
     // If it did, make would only return once this fiber died at the bound below,
@@ -5059,7 +5059,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
   });
 });
 
-describe("makeAsync builds services fully before it resolves (#400)", () => {
+describe("makeAsync builds services fully before it resolves", () => {
   /** What `promise` rejects with, or a failed assertion when it resolves. */
   const rejectionOf = (promise: Promise<HttpServer.AuthWebHandler>): Promise<Error> =>
     promise.then(() => expect.unreachable("expected a rejection"), thrownError);
@@ -5429,7 +5429,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
   });
 });
 
-describe("make with strict (#416)", () => {
+describe("make with strict", () => {
   const signIn = () => authRequest("password", { email: "nobody@example.com", password: PW });
 
   // Services whose build has not finished when make has run it synchronously.

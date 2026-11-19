@@ -1,7 +1,7 @@
 /**
  * The stores beyond sign-in on MySQL, without a MySQL server: as in
  * `MySqlSchema.test.ts`, `drizzle-orm/mysql-proxy` compiles the store calls to
- * the SQL a server would receive, and these cases pin it (#675). What is
+ * the SQL a server would receive, and these cases pin it. What is
  * MySQL's own here is `RateLimitStore.increment`'s upsert: MySQL has
  * `ON DUPLICATE KEY UPDATE` and no `RETURNING`, so the count is read back.
  */
@@ -51,7 +51,7 @@ describe("MySQL / RateLimitStore", () => {
     expect(proxy.sent.every((statement) => !statement.sql.includes("returning"))).toBe(true);
   });
 
-  it("purgeExpired is one DELETE of the rows whose window and block have both passed (#686)", async () => {
+  it("purgeExpired is one DELETE of the rows whose window and block have both passed", async () => {
     const proxy = recording([]);
     await Effect.runPromise(
       RateLimitStore.purgeExpired(tables).pipe(
@@ -64,7 +64,7 @@ describe("MySQL / RateLimitStore", () => {
     expect(proxy.sent[0]?.params).toHaveLength(2);
   });
 
-  it("purgeExpired with a limit rechecks expiry outside the derived table it picks keys through (#729)", async () => {
+  it("purgeExpired with a limit rechecks expiry outside the derived table it picks keys through", async () => {
     const proxy = recording([]);
     await Effect.runPromise(
       RateLimitStore.purgeExpired(tables, { limit: 500 }).pipe(
@@ -75,7 +75,7 @@ describe("MySQL / RateLimitStore", () => {
       "delete from `effect_auth_rate_limits` where ((`effect_auth_rate_limits`.`reset_at` <= ?) and ((((`effect_auth_rate_limits`.`blocked_until` is null)) or (`effect_auth_rate_limits`.`blocked_until` <= ?)))) and `effect_auth_rate_limits`.`key` in (select `key` from (select `effect_auth_rate_limits`.`key` from `effect_auth_rate_limits` where ((`effect_auth_rate_limits`.`reset_at` <= ?) and ((((`effect_auth_rate_limits`.`blocked_until` is null)) or (`effect_auth_rate_limits`.`blocked_until` <= ?)))) limit 500) as `spent`)",
     ]);
     // The outer predicate rechecks expiry, so a row a concurrent increment
-    // refreshed after the subquery picked it survives (#729).
+    // refreshed after the subquery picked it survives.
     expect(proxy.sent[0]?.params).toHaveLength(4);
   });
 
@@ -117,7 +117,7 @@ describe("MySQL / TokenStore", () => {
   });
 });
 
-describe("MySQL / TokenStore consume (#594)", () => {
+describe("MySQL / TokenStore consume", () => {
   const row = [
     "digest",
     "password-reset",
@@ -185,7 +185,7 @@ describe("MySQL / UserServiceStore", () => {
   });
 });
 
-describe("MySQL / ApiKeyStore recordUse (#595)", () => {
+describe("MySQL / ApiKeyStore recordUse", () => {
   const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKeyUse) =>
     Effect.runPromise(
       Effect.gen(function* () {

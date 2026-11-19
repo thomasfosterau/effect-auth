@@ -1,6 +1,6 @@
 /**
  * effect-auth/sql keeps identifiers in `auth_identifiers`, apart from the user
- * row, so it ignores the `identifier` core passes to `createUser` (#380): every
+ * row, so it ignores the `identifier` core passes to `createUser`: every
  * `createUser` seam inserts the user with no identifier and reports
  * `created: true`, and the claim that follows records the address, as it does
  * without the field.

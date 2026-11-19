@@ -68,7 +68,7 @@ const reachesModule = (
   );
 
 describe("module graph", () => {
-  // The HTTP tier is reachable only through the `./http` subpath (#205), so
+  // The HTTP tier is reachable only through the `./http` subpath, so
   // the headless core costs a consumer no `effect/http-api` and no JSON:API.
   it("root barrel does not reach effect/http-api or effect-jsonapi", async () => {
     const { externalSpecifiers } = await walkModuleGraph(entryFile);

@@ -34,7 +34,7 @@ export class PasswordResetStore extends Context.Service<
     readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none (#594). Of two concurrent callers
+     * return `null` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
      * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
@@ -66,7 +66,7 @@ export interface PasswordResetConfig {
   readonly maxPasswordLength?: number;
   readonly revokeSessionsOnPasswordReset?: boolean;
   /**
-   * The per-recipient send cap (#684): at most `max` reset requests for one
+   * The per-recipient send cap: at most `max` reset requests for one
    * email within `windowMs`, counted through the `RateLimitStore` before the
    * email is looked up. Default 5 an hour; `false` turns it off. A request
    * past it fails with `RateLimitError`, for an email with and without an
@@ -90,7 +90,7 @@ export interface PasswordResetResult {
 /**
  * Password reset by emailed single-use token. Requests for unknown addresses succeed silently (anti-enumeration), and a reset can revoke the user's sessions.
  *
- * Past the `recipientSendLimit` cap (default 5 requests per email an hour, #684), `requestPasswordReset` fails with `RateLimitError`, whether or not the email has an account.
+ * Past the `recipientSendLimit` cap (default 5 requests per email an hour), `requestPasswordReset` fails with `RateLimitError`, whether or not the email has an account.
  *
  * Requires `PasswordResetStore`, `PasswordResetUserStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService`, `Hooks` and `RateLimitStore` (the per-recipient send cap).
  */
@@ -138,7 +138,7 @@ const validatePasswordLength = (
   });
 
 /**
- * Build a {@link PasswordResetService} from its config, for embedding in a custom layer inside the package. The `password` barrel doesn't re-export it, so it never reads as `Password.make` (#259); use {@link PasswordResetService.layer} from the public API.
+ * Build a {@link PasswordResetService} from its config, for embedding in a custom layer inside the package. The `password` barrel doesn't re-export it, so it never reads as `Password.make`; use {@link PasswordResetService.layer} from the public API.
  */
 export const make = (
   config: PasswordResetConfig,
@@ -186,7 +186,7 @@ export const make = (
           return;
         }
 
-        // The per-recipient cap (#684), counted before the lookup, so an
+        // The per-recipient cap, counted before the lookup, so an
         // unknown email is capped exactly as a known one.
         yield* recipientSendGate("password-reset", normalizedEmail);
 
@@ -204,7 +204,7 @@ export const make = (
           return;
         }
         // The token is bound to the identifier's owner, so it goes only to the
-        // identifier's own address, never to the one the caller typed (#602).
+        // identifier's own address, never to the one the caller typed.
         const { user, identifier } = resolved;
 
         yield* resetStore.deleteByUserId(user.id);
@@ -223,7 +223,7 @@ export const make = (
 
         // Only a known address gets a link, so an inline send would answer it
         // later, and fail it when the vendor does, than an unknown one: the
-        // send goes off the response path (#196).
+        // send goes off the response path.
         yield* detached("password-reset", config.sendResetPassword(identifier.value, rawToken));
 
         yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
@@ -264,7 +264,7 @@ export const make = (
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);
 
-        // Spend the token atomically before the password is written (#594):
+        // Spend the token atomically before the password is written:
         // of concurrent resets with one token, only one sets a password.
         if ((yield* resetStore.consume(tokenHash)) === null) {
           return yield* new Errors.PasswordResetError({

@@ -75,7 +75,7 @@ export type HookError =
  * (`beforeValidateSession`, `beforeSignOut`, `afterSignOut`). `sessionId` is
  * always the session's stored id, the SHA-256 digest of the token
  * (`hashToken`), never the token the client presented, so no hook can read
- * or log a credential (#581, #669).
+ * or log a credential.
  *
  * `beforeValidateSession` and `beforeSignOut` are observe-or-deny: a plugin
  * inspects the stored id and fails to refuse the operation, and the services
@@ -130,10 +130,10 @@ export type AuthenticationMethod =
 
 /**
  * The methods that prove possession of an address with a secret sent to it:
- * a one-time code by email or SMS, and a magic link (#678). Their sends fire
+ * a one-time code by email or SMS, and a magic link. Their sends fire
  * `beforeSendCode`, and `AccountLockoutPlugin` exempts them from its account
  * lock: their guesses stay bounded by the per-code attempt limit, the
- * per-address failure backoff (#590) and the rate limits, and a lock that
+ * per-address failure backoff and the rate limits, and a lock that
  * refused them would let anyone who knows a handle block the owner's
  * recovery.
  */
@@ -173,7 +173,7 @@ export interface AuthenticationIdentifier {
  * anything is consumed or created. A plugin denies the attempt by failing
  * (`AccountLockedError`, `RateLimitError`, `CaptchaError`, ...).
  *
- * An attempt that names no account is **unkeyed** (#678): an unknown or
+ * An attempt that names no account is **unkeyed**: an unknown or
  * expired second-factor challenge, magic-link token or passkey challenge, or
  * an unknown passkey credential, fails before the flow can tell whose it is,
  * so the flow fires the hook with neither `identifier` nor `userId`, then
@@ -244,7 +244,7 @@ export const authenticationSubject = (attempt: AuthenticateAttempt): string | un
 
 /**
  * Named arguments for the `beforeSendCode` hook: one request to send a
- * one-time code or a magic link (#678), fired by `EmailOtpService.send`,
+ * one-time code or a magic link, fired by `EmailOtpService.send`,
  * `PhoneOtpService.send` and `MagicLinkService.send` before the address is
  * looked up and before anything is stored or sent. A plugin refuses the send
  * by failing (`CaptchaPlugin` with `CaptchaError`); the flows read nothing

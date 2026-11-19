@@ -89,7 +89,7 @@ export interface ApiKey {
 }
 
 /**
- * One spend of an API key, applied by {@link ApiKeyStore}'s `recordUse` (#595).
+ * One spend of an API key, applied by {@link ApiKeyStore}'s `recordUse`.
  *
  * `refill` is the quota top-up due at `usedAt`, computed by the service from
  * the record it read: the store applies it only while the key's `lastRefillAt`
@@ -153,11 +153,11 @@ export class ApiKeyStore extends Context.Service<
     /**
      * Replace the stored record whole. The owner's edits go through it;
      * a verify never does, since a write from a stale read would undo a
-     * concurrent edit (#595).
+     * concurrent edit.
      */
     readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
     /**
-     * Spend one use of key `id`, atomically (#595), and return the record
+     * Spend one use of key `id`, atomically, and return the record
      * as stored after it, or `null` when the key may not be spent. In one
      * step: the key must exist, be enabled and not have expired at
      * `use.usedAt` (`expiresAt >= usedAt`); a `use.refill` applies only while
@@ -178,7 +178,7 @@ export class ApiKeyStore extends Context.Service<
     readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
     /**
      * Delete every key `userId` holds; a no-op when they hold none. Deleting
-     * a user calls it before the user row goes (#601), and the first proof of
+     * a user calls it before the user row goes, and the first proof of
      * an address calls it too.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
@@ -297,7 +297,7 @@ export interface ApiKeyUpdate {
 /**
  * API key service. Requires `ApiKeyStore`, `RateLimiter` and `UserStore`
  * (a key verifies only while its owner exists and is neither banned nor
- * SCIM-deactivated, #601, #755).
+ * SCIM-deactivated).
  */
 export class ApiKeyService extends Context.Service<
   ApiKeyService,
@@ -316,7 +316,7 @@ export class ApiKeyService extends Context.Service<
      * Verify a plaintext API key: sha256 hash lookup, then the owner check (a
      * key whose `userId` names no user, or a banned or SCIM-deactivated one,
      * answers `Invalid API key`, as an
-     * unknown key does, #601), then enabled / expiry /
+     * unknown key does), then enabled / expiry /
      * remaining-uses / permission checks. On success `remaining` is
      * decremented (when set) and `lastUsedAt` is updated. `requiredPermissions`
      * maps resource → actions; every listed action must be granted on the key.
@@ -329,7 +329,7 @@ export class ApiKeyService extends Context.Service<
     /**
      * Like `verify`, but when the key carries a `rateLimit` configuration a
      * token is consumed from the {@link RateLimiter} bucket keyed
-     * `api-key:${apiKey.id}` once every other check has passed (#730), and
+     * `api-key:${apiKey.id}` once every other check has passed, and
      * before the use is spent. When the limit is exhausted the result is
      * `{ valid: false, error: "Rate limit exceeded", reason: "rate-limited",
      * retryAfter }`. An unknown, disabled, expired, exhausted or
@@ -502,7 +502,7 @@ const withRefill = (key: ApiKey, refill: ApiKeyUse["refill"]): ApiKey => {
 
 /**
  * How many times a verify re-reads and re-checks a key whose `recordUse`
- * found it changed (#595). A loss means a concurrent verify applied the
+ * found it changed. A loss means a concurrent verify applied the
  * refill this one computed, or an owner edited or spent the key out: the
  * re-read sees either a key that passes (and spends without a refill) or a
  * refusal, so two attempts settle all but a key edited in a tight loop.
@@ -550,8 +550,8 @@ export const make = (
       });
 
     /**
-     * Spend one use of a key that passed {@link checkRecord}, atomically
-     * (#595): `recordUse` decrements `remaining` (when set) and moves
+     * Spend one use of a key that passed {@link checkRecord}, atomically:
+     * `recordUse` decrements `remaining` (when set) and moves
      * `lastUsedAt`, touching nothing an owner edits. When it finds the key
      * changed since the read, the key is read and checked again, so a key
      * disabled, expired, exhausted or narrowed meanwhile is refused as such.
@@ -590,7 +590,7 @@ export const make = (
 
     /**
      * Hash lookup for a plaintext key, `null` when no key matches or its owner
-     * no longer exists (#601) or is banned or SCIM-deactivated (#755): a key outlives its user only when something
+     * no longer exists or is banned or SCIM-deactivated: a key outlives its user only when something
      * deleted the user row without the purge, and it must not authenticate.
      * Lookup is by exact sha256 digest, so the comparison carries no
      * secret-dependent timing.
@@ -603,7 +603,7 @@ export const make = (
               owner === null
                 ? Effect.succeed(null)
                 : // A banned or SCIM-deactivated owner's key is refused as
-                  // unknown, before the per-key limit and the spend (#730, #755).
+                  // unknown, before the per-key limit and the spend.
                   Effect.map(isInGoodStanding(owner), (good) => (good ? apiKey : null)),
             ),
       );
@@ -683,7 +683,7 @@ export const make = (
         // Every other refusal comes first, so a disabled, expired, exhausted
         // or under-permitted key is refused as such whatever its bucket holds
         // (and spends no token): only a key that would otherwise pass is ever
-        // `rate-limited` (#730).
+        // `rate-limited`.
         const checked = yield* checkRecord(apiKey, requiredPermissions);
         if (checked.refused !== undefined) return checked.refused;
 

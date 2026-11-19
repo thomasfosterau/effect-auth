@@ -1,5 +1,5 @@
 /**
- * A `beforeAuthenticate` probe for the flows' tests (#592): it records every
+ * A `beforeAuthenticate` probe for the flows' tests: it records every
  * attempt a flow hands the hook and, when told to, refuses it with a
  * `RateLimitError`, so a test can see both that a flow runs the gate and that
  * a refusal stops the flow before it checks or spends the credential.

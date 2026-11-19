@@ -1,5 +1,5 @@
 /**
- * `GET /api-keys/current` and RemoteSession's API-key path (#730): a key
+ * `GET /api-keys/current` and RemoteSession's API-key path: a key
  * presented in an API-key header resolves to the key and its user; every key
  * that does not resolve gets one identical `401`; only a real key over its own
  * limit gets `429`; the key never reaches a log line or a body; and a key never
@@ -150,7 +150,7 @@ const REFUSED_BODY = toJson({
   ],
 });
 
-describe("GET /api-keys/current (#730)", () => {
+describe("GET /api-keys/current", () => {
   it("answers the key's public fields and its user, consuming one use", async () => {
     const { handler } = server();
     const token = await signUp(handler, "ada@example.com");
@@ -354,7 +354,7 @@ describe("GET /api-keys/current (#730)", () => {
     expect(unknown).toEqual(Arr.replicate(401, 5));
   });
 
-  describe("a key whose owner is banned, SCIM-deactivated or gone (#755)", () => {
+  describe("a key whose owner is banned, SCIM-deactivated or gone", () => {
     const owners = {
       banned: (user: Auth.User): Auth.User | null => ({
         ...user,
@@ -451,7 +451,7 @@ const remote = (handler: Handler, options: Partial<RemoteSession.RemoteSessionOp
 const inbound = (headers: Record<string, string>) =>
   new Request("https://app.example.com/api/things", { headers });
 
-describe("RemoteSession's API-key path (#730)", () => {
+describe("RemoteSession's API-key path", () => {
   it("resolves a key to its user, with no session, as a machine caller", async () => {
     const { handler } = server();
     const adaToken = await signUp(handler, "ada@example.com");

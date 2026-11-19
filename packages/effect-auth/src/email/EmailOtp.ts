@@ -80,7 +80,7 @@ export interface EmailOtpCreateUserInput {
  * email + purpose pair; `upsert` replaces any existing record for the pair.
  * Each pair also has a failure budget (`getFailures`, `recordFailure`,
  * `clearFailures`) that outlives its OTP records, so a resend never resets the
- * wrong codes counted against the address (#590).
+ * wrong codes counted against the address.
  */
 export class EmailOtpStore extends Context.Service<
   EmailOtpStore,
@@ -96,7 +96,7 @@ export class EmailOtpStore extends Context.Service<
     ) => Effect.Effect<void, Errors.AuthError>;
     /**
      * Count one attempt against the pair's code, atomically, and return the
-     * new count, or `null` when the pair has no code (#593). The service
+     * new count, or `null` when the pair has no code. The service
      * counts before it compares, so of concurrent guesses each gets its own
      * count and at most `maxAttempts` are ever compared: two calls must never
      * return the same number. On SQL this is one `UPDATE … RETURNING`.
@@ -106,7 +106,7 @@ export class EmailOtpStore extends Context.Service<
       purpose: EmailOtpPurpose,
     ) => Effect.Effect<number | null, Errors.AuthError>;
     /**
-     * The pair's failure budget (#590), or `null` when it has none. It is
+     * The pair's failure budget, or `null` when it has none. It is
      * kept apart from the OTP record: `upsert` and `delete` leave it as it
      * was.
      */
@@ -165,7 +165,7 @@ export interface EmailOtpConfig {
    */
   readonly maxAttempts?: number;
   /**
-   * The failure backoff (#590): every wrong code is also counted against the
+   * The failure backoff: every wrong code is also counted against the
    * email + purpose pair, and a resend never resets that count. Once it
    * reaches `freeFailures` (default 5), `send` fails with
    * {@link Errors.ResendTooSoonError} until `baseDelay` (default one minute),
@@ -197,7 +197,7 @@ export interface EmailOtpConfig {
    */
   readonly resendCooldown?: number;
   /**
-   * The per-recipient send cap (#684): at most `max` sends to one email for
+   * The per-recipient send cap: at most `max` sends to one email for
    * one purpose within `windowMs`, counted through the `RateLimitStore`.
    * Default 5 an hour; `false` turns it off. A send past it fails with
    * {@link Errors.RateLimitError}. It counts every send the resend cooldown
@@ -243,8 +243,8 @@ export interface EmailOtpCheckResult {
  * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore`, `Hooks`, `RateLimitStore` (the per-recipient send cap) and `SecureRandom`.
  *
  * Promoting an address held unverified to verified first clears the
- * account's password and revokes its sessions, through `EmailPasswordStore`
- * (#440): the account was created by a sign-up that proved nothing about the
+ * account's password and revokes its sessions, through `EmailPasswordStore`:
+ * the account was created by a sign-up that proved nothing about the
  * address, so its password may be someone else's.
  */
 export class EmailOtpService extends Context.Service<
@@ -271,11 +271,11 @@ export class EmailOtpService extends Context.Service<
      * and an unknown email.
      *
      * Past the `recipientSendLimit` cap (default 5 sends per email and
-     * purpose an hour, #684), fails with {@link Errors.RateLimitError}, for a
+     * purpose an hour), fails with {@link Errors.RateLimitError}, for a
      * known and an unknown email alike.
      *
      * The `beforeSendCode` hook runs first, before the address is looked up,
-     * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
+     * with `options.captchaToken` (`CaptchaPlugin` guards it).
      */
     readonly send: (
       email: string,
@@ -318,7 +318,7 @@ export class EmailOtpService extends Context.Service<
      *
      * Like `signIn`, it fires `beforeAuthenticate` (method `"email-otp"`,
      * keyed on the email and the user holding it, if any) before the code is
-     * checked, for every purpose (#678).
+     * checked, for every purpose.
      */
     readonly check: (
       email: string,
@@ -400,7 +400,7 @@ export const make = (
     /**
      * Core verification: expiry, attempt limiting, constant-time hash
      * comparison, one-time-use consumption on success, and the failure
-     * budget (#590).
+     * budget.
      */
     const verifyOtp = (
       email: string,
@@ -426,7 +426,7 @@ export const make = (
           return yield* Effect.void;
         }
 
-        // The send gate (captcha, #678) runs before the address is looked
+        // The send gate (captcha) runs before the address is looked
         // up, so it answers alike for every address.
         yield* hooks.beforeSendCode({
           method: "email-otp",
@@ -444,13 +444,13 @@ export const make = (
           ? (yield* lookupIdentifier(identifiers, "email", email)) !== null
           : true;
 
-        // Resend cooldown and failure backoff (#590). Both run for an
+        // Resend cooldown and failure backoff. Both run for an
         // address with no account too, whose earlier request stored an
         // undelivered marker record below and whose wrong codes are counted
         // alike, so a known and an unknown address get the same answer.
         yield* OtpCode.gateSend(store, email, purpose, codes);
 
-        // The per-recipient cap (#684), counted whatever the lookup found.
+        // The per-recipient cap, counted whatever the lookup found.
         yield* recipientSendGate(`email-otp:${purpose}`, email);
 
         // An address with no account gets a marker record that no code
@@ -463,7 +463,7 @@ export const make = (
 
         // Where only a known address gets a code (sign-in with sign-up
         // disabled, forget-password), the send goes off the response path.
-        // Elsewhere a failed send is the caller's to see (#196).
+        // Elsewhere a failed send is the caller's to see.
         return yield* deliverCode(detached, {
           deliver,
           hidesAccount: hidesAccount(purpose),
@@ -519,7 +519,7 @@ export const make = (
         } else if (identifier !== null && !identifier.verified) {
           // The OTP proves ownership — promote the identifier to verified,
           // first clearing the password, credentials and sessions an earlier, unproven
-          // sign-up left on the account (#440, #694).
+          // sign-up left on the account.
           yield* proveAddress(firstProof, identifier);
         }
 
@@ -542,7 +542,7 @@ export const make = (
       ) {
         const email = normalizeEmail(rawEmail);
 
-        // The same gate `signIn` runs (#678). One identifier lookup for an
+        // The same gate `signIn` runs. One identifier lookup for an
         // email with and without an account alike.
         const identifier = yield* lookupIdentifier(identifiers, "email", email);
         yield* hooks.beforeAuthenticate({

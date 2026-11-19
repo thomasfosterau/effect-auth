@@ -485,7 +485,7 @@ const ownHeader = (req: IPResolvableRequest, name: string): string | undefined =
 /**
  * The non-empty entries of a forwarded-address list, each parsed as one IP
  * literal. Anything else (a hostname, a port, `garbage`) is `undefined`, so it
- * can never become a rate-limit key (#584).
+ * can never become a rate-limit key.
  */
 const forwardedEntries = (raw: string | undefined): ReadonlyArray<string | undefined> =>
   raw === undefined

@@ -29,7 +29,7 @@ const verify = (store: typeof PhoneOtpStore.Service, guess: string) =>
     reject: (_purpose, reason): Effect.Effect<never, VerifyFailure> => Effect.fail(reason),
   }).pipe(Effect.result);
 
-describe("verifyCode under concurrency (#593)", () => {
+describe("verifyCode under concurrency", () => {
   it("compares at most maxAttempts of a concurrent burst, so a guess past the cap fails even when right", async () => {
     const store = slowReads();
     const outcomes = await Effect.runPromise(

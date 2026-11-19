@@ -25,8 +25,8 @@ export * from "./HttpClient.ts";
 /** Composable HttpApiMiddleware for consumer apps (AuthMiddleware, OptionalAuthMiddleware, …). */
 export * from "./HttpMiddleware.ts";
 
-/** The JSON:API resources the contract's resource groups are built on (#205). */
+/** The JSON:API resources the contract's resource groups are built on. */
 export * as Resources from "./Resources.ts";
 
-/** The JSON:API error documents the resource groups answer with (#205). */
+/** The JSON:API error documents the resource groups answer with. */
 export * as JsonApiErrors from "./JsonApiErrors.ts";
