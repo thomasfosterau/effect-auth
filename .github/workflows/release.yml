@@ -2,7 +2,7 @@ name: Release
 
 # `select` picks the Changesets mode; `version` opens the version PR; `publish`
 # runs in the protected `release` environment, the only job with `id-token`
-# (npm trusted publishing, through `pnpm publish`). See docs/PUBLISHING.md.
+# (npm trusted publishing, through `vp pm publish`). See docs/PUBLISHING.md.
 
 on:
   push:
@@ -119,6 +119,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          # `changeset git-tag` skips versions already tagged.
+          fetch-depth: 0
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1.22.0
         with:
@@ -131,13 +133,13 @@ jobs:
       # The build runs on the Effect-patched tsc.
       - name: Patch the toolchain
         run: pnpm run prepare
-      - name: Build
-        run: vp run build
-      # `pnpm publish` rewrites the `catalog:` and `workspace:` specifiers, and does the
-      # OIDC trusted-publishing exchange and provenance itself; no npm.
+      # `vp run release` (vite.config.ts): builds every package on this commit,
+      # publishes each unpublished version with `vp pm publish -r` (pnpm, which
+      # rewrites `catalog:` / `workspace:` specifiers and does the OIDC exchange
+      # and provenance itself; no npm), then `changeset git-tag` reports the new
+      # tags through CHANGESETS_OUTPUT, and the action pushes them and creates
+      # the releases.
       - name: Publish to npm
         uses: changesets/action/publish@v2.1.2
         with:
-          script: pnpm run release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          script: vp run release
