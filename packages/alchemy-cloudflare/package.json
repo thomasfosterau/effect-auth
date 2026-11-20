@@ -44,11 +44,15 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "catalog:",
+    "@effect/docgen": "catalog:",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "alchemy": "catalog:",

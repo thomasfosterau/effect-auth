@@ -359,6 +359,9 @@ importers:
       '@alchemy.run/cloudflare':
         specifier: 'catalog:'
         version: 2.0.0-beta.87(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.3.0))(@effect/sql-pg@4.1.4(effect@4.1.4))(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1))(alchemy@2.0.0-beta.87(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.3.0))(@types/react@19.3.0)(@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1))(effect@4.1.4)(ws@8.22.1))(effect@4.1.4)(mysql2@3.24.2(@types/node@26.6.6))(pg@8.23.0)
+      '@effect/docgen':
+        specifier: 'catalog:'
+        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.15)
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0
@@ -384,6 +387,9 @@ importers:
         specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
+      '@effect/docgen':
+        specifier: 'catalog:'
+        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.15)
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 4.1.4(effect@4.1.4)
@@ -412,6 +418,9 @@ importers:
         specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
+      '@effect/docgen':
+        specifier: 'catalog:'
+        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.15)
       '@thomasfosterau/argon2':
         specifier: 'catalog:'
         version: 0.1.1
@@ -437,6 +446,9 @@ importers:
         specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
+      '@effect/docgen':
+        specifier: 'catalog:'
+        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.15)
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 4.1.4(effect@4.1.4)
@@ -523,6 +535,9 @@ importers:
         specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
+      '@effect/docgen':
+        specifier: 'catalog:'
+        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.15)
       '@sveltejs/package':
         specifier: 'catalog:'
         version: 3.0.3(@typescript/typescript6@6.0.2)(svelte@5.58.0)
@@ -554,6 +569,9 @@ importers:
         specifier: workspace:^
         version: link:../effect-auth
     devDependencies:
+      '@effect/docgen':
+        specifier: 'catalog:'
+        version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.15)
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6

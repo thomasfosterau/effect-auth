@@ -40,10 +40,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@effect/docgen": "catalog:",
     "@thomasfosterau/argon2": "catalog:",
     "@types/node": "catalog:",
     "effect": "catalog:",

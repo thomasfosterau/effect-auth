@@ -343,7 +343,19 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-sveltekit#check",
         ],
       },
-      docs: { command: "vp run --filter @thomasfosterau/effect-auth docs" },
+      // The API reference for every package; only the core's examples run.
+      docs: {
+        command: "echo 'docs: every package documented'",
+        dependsOn: [
+          "@thomasfosterau/effect-auth#docs",
+          "@thomasfosterau/effect-auth-alchemy-cloudflare#docs",
+          "@thomasfosterau/effect-auth-alchemy-postgres#docs",
+          "@thomasfosterau/effect-auth-argon2#docs",
+          "@thomasfosterau/effect-auth-drizzle#docs",
+          "@thomasfosterau/effect-auth-svelte#docs",
+          "@thomasfosterau/effect-auth-sveltekit#docs",
+        ],
+      },
       "check:dist": { command: "vpx scripts/check-dist.ts", cache: false },
       fallow: { command: "vp exec fallow --summary", cache: false },
       // Run by the pre-commit hook; fallow scores complexity from the coverage map.
