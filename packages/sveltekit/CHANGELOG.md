@@ -1,5 +1,13 @@
 # @thomasfosterau/effect-auth-sveltekit
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [db2a726]
+- Updated dependencies [93a9153]
+  - @thomasfosterau/effect-auth@0.7.0
+
 ## 0.3.0
 
 ### Minor Changes

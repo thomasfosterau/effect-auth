@@ -1,5 +1,17 @@
 # @thomasfosterau/effect-auth-alchemy-cloudflare
 
+## 0.3.0
+
+### Minor Changes
+
+- 23aa013: Peer on `alchemy` 2.0.0-beta.87 (and `@alchemy.run/cloudflare` 2.0.0-beta.87 for the Cloudflare adapter), and raise the `effect` peer floor to `^4.1.4`, which alchemy beta.87 requires. Breaking: upgrade `alchemy`, `@alchemy.run/cloudflare` and `effect` together.
+
+### Patch Changes
+
+- Updated dependencies [db2a726]
+- Updated dependencies [93a9153]
+  - @thomasfosterau/effect-auth@0.7.0
+
 ## 0.2.0
 
 ### Minor Changes
