@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
+import { Cause, DateTime, Effect, Exit, Layer, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -321,6 +321,74 @@ describe("OAuth token exchange", () => {
       },
     );
   });
+});
+
+// --- Invalid provider bodies -------------------------------------------------
+
+describe("OAuth provider bodies", () => {
+  const html = () =>
+    new Response("<html>Service Unavailable</html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+
+  const expectProviderError = async (run: Effect.Effect<unknown, unknown>) => {
+    const exit = await Effect.runPromiseExit(run);
+    assert(Exit.isFailure(exit), "the call fails");
+    // A typed failure, not a defect.
+    const failure = Cause.findErrorOption(exit.cause);
+    assert(Option.isSome(failure), "the failure is typed");
+    expect(failure.value).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+  };
+
+  it("a 2xx token body that is not JSON is an OAuthProviderError", () =>
+    withFetch(html, () => expectProviderError(GitLabProvider(CLIENT).exchangeCode("the-code"))));
+
+  it("a 2xx token body without access_token is an OAuthProviderError", () =>
+    withFetch(
+      () => json({ token_type: "bearer" }),
+      () => expectProviderError(GitLabProvider(CLIENT).exchangeCode("the-code")),
+    ));
+
+  it("a 2xx user info body that is not JSON is an OAuthProviderError", () =>
+    withFetch(html, () => expectProviderError(GitLabProvider(CLIENT).getUserInfo("at"))));
+
+  it("a 2xx JWKS body that is not JSON is an OAuthProviderError", async () => {
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, baseClaims(1_700_000_000_000));
+    const error = await withFetch(html, () =>
+      Effect.runPromise(
+        Effect.flip(
+          verifyIdToken(token, {
+            provider: "gitlab",
+            jwksEndpoint: JWKS_URL,
+            now: 1_700_000_000_000,
+          }),
+        ),
+      ),
+    );
+    expect(error).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+  });
+
+  it("reads a token response as providers send it", () =>
+    withFetch(
+      () =>
+        json({
+          access_token: "at",
+          expires_in: "3600",
+          scope: ["user:read:email", "openid"],
+          refresh_token: null,
+        }),
+      async () => {
+        const tokens = await Effect.runPromise(GitLabProvider(CLIENT).exchangeCode("the-code"));
+        expect(tokens).toEqual({
+          access_token: "at",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "user:read:email openid",
+        });
+      },
+    ));
 });
 
 // --- Provider-specific profile mapping --------------------------------------
