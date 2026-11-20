@@ -1,5 +1,24 @@
 # @thomasfosterau/effect-auth-resend
 
+## 0.2.0
+
+### Minor Changes
+
+- fa1eacb: Require Node.js 22 or later (`engines.node` is now `>=22`); Node.js 20 is end-of-life.
+
+### Patch Changes
+
+- 93c2ff0: Tighten doc comments: drop history and issue references.
+- Updated dependencies [c5bf0f2]
+- Updated dependencies [1704b6b]
+- Updated dependencies [1a1bb2d]
+- Updated dependencies [d8c7881]
+- Updated dependencies [93c2ff0]
+- Updated dependencies [167ef03]
+- Updated dependencies [fa1eacb]
+- Updated dependencies [a25f872]
+  - @thomasfosterau/effect-auth@0.6.0
+
 ## 0.1.5
 
 ### Patch Changes

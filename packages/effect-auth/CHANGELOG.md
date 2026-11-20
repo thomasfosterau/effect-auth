@@ -1,5 +1,43 @@
 # @thomasfosterau/effect-auth
 
+## 0.6.0
+
+### Minor Changes
+
+- c5bf0f2: Spend API key uses atomically. **Breaking for bring-your-own `ApiKeyStore`s:** the contract gains a required `recordUse(id, use)`, which spends one use in one atomic step and returns the stored record, or `null` when the key is unknown, disabled, expired, exhausted, or its refill baseline moved. It changes only `remaining`, `lastRefillAt`, `lastUsedAt` and `updatedAt`. `ApiKeyService.verify` and `verifyWithRateLimit` now spend through it instead of writing the whole record back from their read. Before this, a verify in flight undid an owner's concurrent disable, permission change or new expiry, and concurrent verifies of a key with one use left all passed. When the spend loses a race, the service re-reads the key and re-checks it.
+  
+  `./sql` implements `recordUse` as one `UPDATE … WHERE … RETURNING`, and the memory stores through the new `applyApiKeyUse`, which is the contract as a pure function. `apiKeyStoreConformance` gains cases for `recordUse`, a concurrent one included.
+  
+  effect-auth-drizzle's `ApiKeyStore` implements `recordUse` as one guarded `UPDATE` with `remaining` computed in SQL, then reads the row back when the driver's affected-row count shows a match, so it needs no `RETURNING` on MySQL. On MySQL that count must be the matched rows, which is mysql2's default.
+- 1704b6b: Spend every single-use token atomically. Concurrent redemptions of one magic link, password-reset or email-verification token, one-time token, OIDC authorization code or consent request, or pending second-factor challenge could all succeed (two sessions, two password writes, two token sets for one code), two concurrent refreshes could fork an OIDC refresh family, and one TOTP or backup code could be accepted twice across challenges.
+  
+  **Breaking for bring-your-own stores.** `EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`, `OneTimeTokenStore`, `OidcCodeStore`, `OidcTokenStore` and `PendingMultiFactorStore` gain a required `consume(key)`: an atomic get-and-delete that returns the record, or `null` when there is none, so of concurrent callers only one receives it. `MultiFactorStore` gains the required compare-and-sets `useTotpCounter(userId, counter)` and `useBackupCode(userId, codeHash)`, which resolve to whether the call spent the step or code and never recreate a deleted enrolment. `get` and `delete` stay. The services spend with these and refuse a `null` or `false` as an invalid token or code; the refresh grant answers a token a concurrent refresh rotated first with `invalid_grant`. `EmailVerificationService.burnToken` now fails with `EmailVerificationError` when the token is already spent.
+  
+  `./sql` implements each `consume` as one `DELETE … RETURNING` and the two spends as compare-and-set `UPDATE … RETURNING`s (D1 and Alchemy Postgres included); the `KeyValueStore` stores serialize `consume` under a store-owned semaphore (atomic per process only); `Testing.memoryStores` implements them all. effect-auth-drizzle's `EmailVerificationStore` and `PasswordResetStore` implement `consume` on every dialect by reading the row, deleting it and returning it only when the `DELETE` reports an affected row (MySQL has no `RETURNING`). `./testing` adds `magicLinkStoreConformance`, `oneTimeTokenStoreConformance` and `oidcCodeStoreConformance`, and the email-verification, password-reset, OIDC-token, pending-multi-factor and multi-factor suites gain concurrent-redemption cases.
+- 1a1bb2d: Add `CloudflareAccess`, a verifier for the identity Cloudflare Access forwards. `CloudflareAccessVerifier` checks the `Cf-Access-Jwt-Assertion` header (and, opt-in, the `CF_Authorization` cookie) against the team's key set: RS256 only, a published `kid`, the team's `iss`, the application's AUD tag in `aud`, and `exp` / `nbf` within a clock tolerance. Keys are cached and refetched on rotation at most once per interval. `findUser` maps a verified user identity to the owner of a verified email identifier, and `userContextLayer` provides it as `CurrentUser`, `CurrentPrincipal` and `CurrentCredential` (service tokens are `machine`).
+- d8c7881: Count guesses before comparing them. Email and phone OTP verification, `OtpSecondFactorService.verify`, `MultiFactorService.verifyTotp` / `verifyBackupCode` and `AccountLockoutPlugin` used to read the attempt count, compare the code or check the password, and count only afterwards. A burst of parallel requests all read the count before any of them raised it, so each request got a comparison even when the store's increment was atomic. With a cap of 3, a few hundred concurrent requests got a few hundred guesses at the code, and the lockout let a burst through in place of 5 password guesses per window. Each one now takes an atomic count first and refuses an attempt uncompared once that count passes the cap. `AccountLockoutPlugin` now acts on the record `registerAttempt` returns.
+  
+  **Breaking for bring-your-own stores:**
+  
+  - `EmailOtpStore.incrementAttempts` and `PhoneOtpStore.incrementAttempts` now return `number | null`. They return `null` when the pair has no code, where they used to fail with `AuthError`.
+  - `OtpSecondFactorStore` gains a required atomic `incrementAttempts(pendingToken) → number | null`.
+  - Every attempt counter (these, `PendingMultiFactorStore.recordFailedAttempt` and `AccountLockoutStore.registerAttempt`) must be one atomic increment.
+  
+  `./sql`'s and the memory stores' counters already were atomic. The `KeyValueStore` defaults now run `EmailOtpStore.incrementAttempts` and `PendingMultiFactorStore.recordFailedAttempt` under a per-store semaphore, which makes them atomic within one process. The OTP and pending multi-factor conformance suites gain concurrent-count cases.
+- 167ef03: Store faults now fail closed in the HTTP tier. This changes what an app sees during a store outage.
+  
+  - **A session-store or user-store fault is a logged `500`, never a `401`.** Only a session that is absent, expired, banned or whose user no longer exists (or one a hook denies) is `401`. Before, any fault answered `401 Invalid or expired session` with nothing logged, which the browser client read as a sign-out. This covers `Http.make`'s handlers (`GET /sessions/current` and every authenticated route, the device-session list and switch, `GET /oauth2/authorize`) and `AuthMiddleware` in an app's own `HttpApi`, which now declares `InternalError` beside `UnauthorizedError`.
+  - **`OptionalAuthMiddleware` fails on a fault instead of serving the caller as anonymous.** An absent or refused session is still anonymous. To degrade a fault to anonymous, pass `onDegraded` as `Http.optionalLayer(config, { onDegraded })`'s new second argument; it receives the fault's `Cause`, as `SessionResolution.resolveFailOpen`'s callback does. The middleware now declares `InternalError`.
+  - **The per-endpoint IP limit refuses a request when its `RateLimitStore` errors**, with a logged `500`, where it used to serve the request unlimited and silently. `ipRateLimit: { onStoreError: "fail-open" }` restores the old behaviour, with a logged warning per request, like `AccountLockoutPlugin`'s option of the same name.
+  - **`SessionService` logs a failed session refresh write or expired-session delete** as a warning instead of ignoring it.
+  - **`SessionService.layer` / `make` dies with the new `SessionConfigError`** when `sessionExpiresIn.activePeriod` or `idlePeriod` is not a finite, positive number, or `updateAge` is not a finite number of 0 or more. A `NaN` period (from an unset `Number(env)`, for example) used to issue sessions that never expired.
+- fa1eacb: Require Node.js 22 or later (`engines.node` is now `>=22`); Node.js 20 is end-of-life.
+
+### Patch Changes
+
+- 93c2ff0: Tighten doc comments: drop history and issue references.
+- a25f872: Read role names, attribute paths and model ids only as a record's own keys. A member role named `constructor`, `__proto__` or another `Object.prototype` member is now an unknown role, so its permission checks deny instead of failing with a defect, and `setDefaultRole` and `addMember` refuse it. In the authorization kernel, `Condition.has` and `Condition.attr` treat such a path segment as absent, `Entity.getAttribute` returns `null` for it, `Rbac.entities` gives such a role no inherited parents, and `AuthorizationModel.validatePolicies` reports such an action, entity type or attribute as undeclared.
+
 ## 0.5.2
 
 ### Patch Changes
