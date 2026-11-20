@@ -16,6 +16,8 @@ import { UserStore } from "./UserStore.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const records = MutableHashMap.empty<string, DeviceAuthorizationRecord>();
 const sessions = MutableHashMap.empty<string, Types.Session>();
@@ -64,6 +66,8 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {

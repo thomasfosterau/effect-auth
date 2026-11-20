@@ -57,6 +57,14 @@
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {
@@ -458,6 +466,14 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {
@@ -636,6 +652,14 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {

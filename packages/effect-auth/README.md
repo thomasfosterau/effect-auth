@@ -37,6 +37,15 @@ const sessionStore: typeof Auth.SessionStore.Service = {
   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
   get: (id) => Effect.sync(() => sessions.get(id) ?? null),
   update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+  // The sliding refresh: moves only the expiry, never recreates a deleted session.
+  touch: (id, touch) =>
+    Effect.sync(() => {
+      const session = sessions.get(id);
+      if (session === undefined || session.expiresAt < touch.lastActivityAt) return null;
+      const touched = { ...session, ...touch };
+      sessions.set(id, touched);
+      return touched;
+    }),
   delete: (id) => Effect.sync(() => void sessions.delete(id)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {

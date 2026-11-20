@@ -23,6 +23,14 @@
  *   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *   get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *   update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *   touch: (id, touch) =>
+ *     Effect.sync(() => {
+ *       const session = sessions.get(id)
+ *       if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *       const touched = { ...session, ...touch }
+ *       sessions.set(id, touched)
+ *       return touched
+ *     }),
  *   delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *   deleteByUserId: (userId) =>
  *     Effect.sync(() => {
@@ -342,6 +350,55 @@ export const sessionStoreConformance = <E = never, R = never>(
           };
           yield* expectEqual("update", yield* store.update(changed), changed);
           yield* expectEqual("get after update", yield* store.get(session.id), changed);
+        }),
+    },
+    {
+      name: "touch moves only lastActivityAt and expiresAt, keeping a concurrent update's attributes",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const session = makeSession(yield* newUser());
+          yield* store.create(session);
+          // Another writer changes the attributes after the refresh read the session.
+          const changed: Types.Session = { ...session, attributes: { organization: "acme" } };
+          yield* store.update(changed);
+          const touch = { lastActivityAt: at(60 * 1000), expiresAt: at(48 * 60 * 60 * 1000) };
+          const touched: Types.Session = { ...changed, ...touch };
+          yield* expectEqual("touch", yield* store.touch(session.id, touch), touched);
+          yield* expectEqual("get after touch", yield* store.get(session.id), touched);
+        }),
+    },
+    {
+      name: "touch of a deleted or unknown session is null and creates nothing",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const session = makeSession(yield* newUser());
+          yield* store.create(session);
+          yield* store.delete(session.id);
+          const touch = { lastActivityAt: at(60 * 1000), expiresAt: at(48 * 60 * 60 * 1000) };
+          yield* expectEqual(
+            "touch of a deleted session",
+            yield* store.touch(session.id, touch),
+            null,
+          );
+          yield* expectEqual("get after touch", yield* store.get(session.id), null);
+          yield* expectEqual("touch of an unknown id", yield* store.touch(digest(), touch), null);
+        }),
+    },
+    {
+      name: "touch of a session expired by lastActivityAt is null and leaves it as it was",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const session = makeSession(yield* newUser());
+          yield* store.create(session);
+          const late = {
+            lastActivityAt: at(24 * 60 * 60 * 1000 + 1),
+            expiresAt: at(48 * 60 * 60 * 1000),
+          };
+          yield* expectEqual("touch", yield* store.touch(session.id, late), null);
+          yield* expectEqual("get after touch", yield* store.get(session.id), session);
         }),
     },
     {

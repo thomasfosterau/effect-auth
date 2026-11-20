@@ -1,4 +1,5 @@
 import { Clock, Context, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
@@ -169,19 +170,40 @@ export const make = (
             ),
           );
 
-          const updatedSession: Types.Session = {
+          const refreshed: Types.Session = {
             ...session,
             lastActivityAt: now,
             expiresAt: newExpiresAt,
           };
 
-          // Throttle store writes: skip the update when the session was
+          // Throttle store writes: skip the refresh when the session was
           // refreshed within the last `updateAge` ms (default: always write).
+          // `touch` moves only the two expiry columns, so a concurrent
+          // attribute write is never undone, and never recreates a session
+          // revoked since the read: its `null` is a revoked session. A failed
+          // write is logged and the request goes on with the refreshed copy.
           const updateAge = config.sessionExpiresIn.updateAge ?? 0;
           const timeSinceUpdate = now.getTime() - session.lastActivityAt.getTime();
-          if (timeSinceUpdate >= updateAge) {
-            yield* bestEffort(sessionStore.update(updatedSession), "refreshing a session");
+          const stored =
+            timeSinceUpdate < updateAge
+              ? Option.some(refreshed)
+              : yield* sessionStore
+                  .touch(tokenHash, { lastActivityAt: now, expiresAt: newExpiresAt })
+                  .pipe(
+                    Effect.map(Option.fromNullishOr),
+                    Effect.catch((error) =>
+                      Effect.logWarning("[effect-auth] refreshing a session failed", error).pipe(
+                        Effect.as(Option.some(refreshed)),
+                      ),
+                    ),
+                  );
+          if (Option.isNone(stored)) {
+            return yield* new Errors.SessionNotFoundError({
+              message: "Session not found",
+              sessionId: tokenHash,
+            });
           }
+          const updatedSession = stored.value;
 
           // Get user
           const user = yield* userStore.get(session.userId);

@@ -3,6 +3,8 @@ import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Auth from "./index.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 describe("static service layers", () => {
   it("SessionService.layer builds a working session manager", async () => {
@@ -27,6 +29,8 @@ describe("static service layers", () => {
           MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
+      touch: (sessionId: string, touch: SessionTouch) =>
+        memorySessionStore(sessions).touch(sessionId, touch),
       delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
       deleteByUserId: () => Effect.void,
       listByUserId: (userId) =>

@@ -19,6 +19,8 @@ import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import * as Testing from "./index.ts";
+import { memorySessionStore } from "./MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const sessionStore = (): typeof SessionStore.Service => {
   const sessions = MutableHashMap.empty<string, Types.Session>();
@@ -28,6 +30,8 @@ const sessionStore = (): typeof SessionStore.Service => {
     get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
     update: (session) =>
       Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {

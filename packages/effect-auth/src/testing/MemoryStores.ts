@@ -230,6 +230,19 @@ export const memorySessionStore = (
   get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
   update: (session) =>
     Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+  touch: (sessionId, touch) =>
+    Effect.sync(() =>
+      Option.getOrNull(
+        MutableHashMap.get(sessions, sessionId).pipe(
+          Option.filter((session) => session.expiresAt.getTime() >= touch.lastActivityAt.getTime()),
+          Option.map((session) => {
+            const touched = { ...session, ...touch };
+            MutableHashMap.set(sessions, sessionId, touched);
+            return touched;
+          }),
+        ),
+      ),
+    ),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {

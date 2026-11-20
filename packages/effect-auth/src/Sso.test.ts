@@ -52,6 +52,8 @@ import {
 } from "./Saml.ts";
 import type * as Types from "./Types.ts";
 import { expectSpecJson, mediaTypeOf } from "./testing/WireFormat.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -1109,6 +1111,8 @@ const makeHttpFixture = () => {
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
