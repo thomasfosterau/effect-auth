@@ -5564,7 +5564,8 @@ export interface AuthWebHandler {
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined =>
-  options.ipRateLimit !== false && options.trustedProxy === undefined
+  trustedProxyError(options) ??
+  (options.ipRateLimit !== false && options.trustedProxy === undefined
     ? new ClientAddressConfigError({
         message:
           "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
@@ -5572,7 +5573,26 @@ const ipRateLimitAddressError = (
           "or set ipRateLimit: false to serve without the limit." +
           allowMissingClientIpNote(options),
       })
-    : undefined;
+    : undefined);
+
+/**
+ * A `trustedProxy` that can never resolve an address: a `hopCount` that is not
+ * a non-negative integer. `resolveClientIP` answers `undefined` for every
+ * request under it, so every limited request would be refused; the handler
+ * refuses to start instead.
+ */
+const trustedProxyError = (
+  options: AuthWebHandlerOptions,
+): ClientAddressConfigError | undefined => {
+  const hopCount = options.trustedProxy?.hopCount;
+  return hopCount === undefined || (Number.isSafeInteger(hopCount) && hopCount >= 0)
+    ? undefined
+    : new ClientAddressConfigError({
+        message:
+          `trustedProxy.hopCount must be a non-negative integer (the number of trusted proxies in front of the app), got ${String(hopCount)}. ` +
+          "With it no request resolves a client address, so every rate-limited request would be refused.",
+      });
+};
 
 /**
  * Why a finished `services` build cannot be served, or `undefined` when it can:

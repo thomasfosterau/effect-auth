@@ -3990,6 +3990,23 @@ describe("client IP at the HTTP boundary", () => {
     );
   });
 
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "refuses to start with hopCount %s, which can resolve no address",
+    async (hopCount) => {
+      expect(() => limitedHandler({ trustedProxy: { hopCount } })).toThrow(
+        /trustedProxy\.hopCount must be a non-negative integer/,
+      );
+      await expect(
+        HttpServer.makeAsync({ services: limiter(), trustedProxy: { hopCount } }),
+      ).rejects.toBeInstanceOf(HttpServer.ClientAddressConfigError);
+    },
+  );
+
+  it("builds with hopCount 0 and 2", () => {
+    expect(() => limitedHandler({ trustedProxy: { hopCount: 0 } })).not.toThrow();
+    expect(() => limitedHandler({ trustedProxy: { hopCount: 2 } })).not.toThrow();
+  });
+
   it("builds with a trustedProxy", () => {
     expect(() => limitedHandler({ trustedProxy: ClientIP.cloudflare })).not.toThrow();
   });

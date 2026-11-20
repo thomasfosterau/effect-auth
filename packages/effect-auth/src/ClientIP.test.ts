@@ -383,6 +383,20 @@ describe("resolveClientIP — IPv6", () => {
     expect(result).toBe("2001:db8::1");
   });
 
+  it("canonicalises the socket address as it does a header entry", () => {
+    const fromSocket = (remote: string) =>
+      resolveClientIP({ headers: {}, remoteAddress: Option.some(remote) });
+    const fromHeader = (value: string) =>
+      resolveClientIP(edge({ "cf-connecting-ip": value }, null), ClientIP.cloudflare);
+    Arr.forEach(["2001:DB8:0:0:0:0:0:1", "2001:db8::0:1", "2001:db8:0000::1"], (spelling) => {
+      expect(fromSocket(spelling)).toBe("2001:db8::1");
+      expect(fromSocket(spelling)).toBe(fromHeader(spelling));
+    });
+    expect(fromSocket("fe80::1%eth0")).toBe("fe80::1");
+    expect(fromSocket("::FFFF:192.0.2.1")).toBe("192.0.2.1");
+    expect(fromSocket("0:0:0:0:0:ffff:c000:201")).toBe("192.0.2.1");
+  });
+
   it("matches IPv6 loopback in CIDR", () => {
     expect(
       resolveClientIP(req("2001:db8::1", "::1"), {

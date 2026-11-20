@@ -442,15 +442,16 @@ export interface IPResolvableRequest {
  *   single IP literal; otherwise return the socket address. See
  *   {@link TrustedHeaderConfig}.
  *
- * The resolved IP is always IPv6-normalized (strips `::ffff:`, zone IDs, and
- * lowercases hex).
+ * The resolved IP is always canonical: IPv4 as written, an IPv4-mapped
+ * address as dotted IPv4, other IPv6 in RFC 5952 form, with no zone ID, from
+ * the socket and from a header alike.
  */
 export const resolveClientIP = (
   req: IPResolvableRequest,
   config?: TrustedProxyConfig,
 ): string | undefined => {
   const rawRemote = Option.getOrUndefined(req.remoteAddress);
-  const remoteIp = rawRemote !== undefined ? normalizeIp(rawRemote) : undefined;
+  const remoteIp = rawRemote !== undefined ? canonicalSocketIp(rawRemote) : undefined;
 
   // SECURE DEFAULT: ignore all forwarded headers
   if (config === undefined) return remoteIp;
@@ -474,6 +475,18 @@ export const resolveClientIP = (
   return config.hopCount !== undefined
     ? selectByHopCount(chain, config.hopCount, remoteIp !== undefined)
     : selectByCidrs(chain, config.trustedProxyCidrs);
+};
+
+/**
+ * The socket address in the form a header entry is read in (`parseIpLiteral`,
+ * RFC 5952 for IPv6, dotted IPv4 for an IPv4-mapped address), with any zone
+ * ID dropped, so one visitor has one rate-limit key whichever path the address
+ * came by. A value that is not an IP literal falls back to {@link normalizeIp}:
+ * the socket address is the runtime's, not the client's.
+ */
+const canonicalSocketIp = (raw: string): string => {
+  const normalized = normalizeIp(raw);
+  return parseIpLiteral(normalized) ?? normalized;
 };
 
 /** The request's own value for header `name` (case-insensitive), never an inherited key. */
