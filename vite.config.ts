@@ -25,9 +25,9 @@ export default defineConfig({
   // fail CI on every version PR's merge commit. It is generated, never edited.
   fmt: { ignorePatterns: ["**/CHANGELOG.md"] },
   lint: {
-    // `@effect/tsgo`'s preset needs the Effect-patched oxlint and
-    // oxlint-tsgolint (the root `prepare` script runs `effect-tsgo patch
-    // --typescript --oxlint`). Its rules are type-aware, and so is lint here
+    // `@effect/tsgo`'s preset needs the Effect-patched oxlint and tsrs (the
+    // root `prepare` script runs `effect-tsgo patch --typescript --oxlint
+    // --tsrs`). Its rules are type-aware, and so is lint here
     // (`typeAware` below). `@enfect/oxlint`'s `recommended` is the `effect/*`
     // rule set, every rule at `error` unless set below.
     extends: [recommended, effect.configs.recommended],
@@ -41,7 +41,7 @@ export default defineConfig({
     rules: {
       "vite-plus/prefer-vite-plus-imports": "error",
 
-      // ---- @effect/tsgo preset (type-aware, through oxlint-tsgolint) -------
+      // ---- @effect/tsgo preset (type-aware, through tsrs) -----------------
       // tsconfig.base.json downgrades `unstableApiUsage` to a suggestion: the
       // HTTP tier is built on `effect/http-api` on purpose, and the
       // patched `tsc` in `vp run check` owns that diagnostic. The preset would
@@ -299,7 +299,7 @@ export default defineConfig({
     ],
     // Type-aware rules resolve siblings through their built `dist/`, so run
     // `vp check` after `vp run build`. `typeCheck` stays off: `vp run check`
-    // owns type checking, and tsgolint (which reads only the nearest
+    // owns type checking, and tsrs (which reads only the nearest
     // tsconfig.json) misreports the colocated tests.
     options: { typeAware: true, typeCheck: false },
   },
