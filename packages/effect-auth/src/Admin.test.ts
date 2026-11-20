@@ -33,6 +33,8 @@ import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Attributes, Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const sessions = MutableHashMap.empty<string, Session>();
@@ -57,6 +59,8 @@ const sessionStore = {
       return session;
     }),
 
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, sessionId);

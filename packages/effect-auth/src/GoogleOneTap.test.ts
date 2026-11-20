@@ -31,6 +31,8 @@ import { type OAuthCreateUserInput, OAuthUserStore } from "./oauth/OAuth.ts";
 import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as GoogleOneTap from "./GoogleOneTap.ts";
 import type * as Types from "./Types.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const CLIENT_ID = "client-123.apps.googleusercontent.com";
 const JWKS_ENDPOINT = "https://fake-google.test/certs";
@@ -498,6 +500,8 @@ const makeHttpFixture = () => {
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),

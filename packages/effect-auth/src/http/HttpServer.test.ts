@@ -125,6 +125,8 @@ import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 import { memoryMultiFactorStore, memoryOtpFailures } from "../testing/MemoryStores.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -274,6 +276,8 @@ const makeFixture = (
         MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {

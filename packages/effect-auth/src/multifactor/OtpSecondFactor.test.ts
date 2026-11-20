@@ -11,6 +11,8 @@ import { make, SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import type { Session, SessionConfig, User } from "../Types.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 // The `index`th item a test double recorded; a missing one fails the test.
 const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
@@ -69,6 +71,8 @@ const sessionStore = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (id: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, id);

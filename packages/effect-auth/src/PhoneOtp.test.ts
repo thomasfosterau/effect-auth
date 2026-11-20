@@ -45,6 +45,8 @@ import {
   zeroCrypto,
 } from "./testing/Passwordless.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -158,6 +160,8 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {

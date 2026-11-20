@@ -3,6 +3,15 @@ import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 
 /**
+ * The columns a sliding refresh moves: {@link SessionStore}'s `touch`.
+ */
+export interface SessionTouch {
+  /** The refresh's own time, also the instant the session must outlive. */
+  readonly lastActivityAt: Date;
+  readonly expiresAt: Date;
+}
+
+/**
  * Tag for SessionStore service
  *
  * Session store interface for managing session persistence.
@@ -33,6 +42,19 @@ export class SessionStore extends Context.Service<
      * Update a session
      */
     readonly update: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
+
+    /**
+     * Slide a session's expiry in one atomic step: set `lastActivityAt` and
+     * `expiresAt`, and nothing else, on the session with this id whose
+     * `expiresAt` is not before `touch.lastActivityAt`. Returns the session as
+     * stored afterwards, or `null` when no session matched (revoked or expired
+     * meanwhile). It never creates a session, and never writes `attributes`, so
+     * a concurrent `update` is not undone by a stale read.
+     */
+    readonly touch: (
+      sessionId: string,
+      touch: SessionTouch,
+    ) => Effect.Effect<Types.Session | null, Errors.AuthError>;
 
     /**
      * Delete a session

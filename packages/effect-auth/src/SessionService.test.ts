@@ -20,7 +20,8 @@ import { composePlugins, Hooks, makePlugin, type PluginImpls, type SessionRef } 
 import { AuditPlugin } from "./plugins/Audit.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
-import { SessionStore } from "./SessionStore.ts";
+import { SessionStore, type SessionTouch } from "./SessionStore.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
 import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
@@ -43,6 +44,9 @@ const mockSessionStore = {
       MutableHashMap.set(mockSessionStore.sessions, session.id, session);
       return session;
     }),
+
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(mockSessionStore.sessions).touch(sessionId, touch),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
@@ -313,9 +317,9 @@ describe("SessionService", () => {
       let updateCallCount = 0;
       const trackingStore = {
         ...mockSessionStore,
-        update: (session: Session) => {
+        touch: (sessionId: string, touch: SessionTouch) => {
           updateCallCount++;
-          return mockSessionStore.update(session);
+          return mockSessionStore.touch(sessionId, touch);
         },
       };
 
@@ -341,9 +345,9 @@ describe("SessionService", () => {
       let updateCallCount = 0;
       const trackingStore = {
         ...mockSessionStore,
-        update: (session: Session) => {
+        touch: (sessionId: string, touch: SessionTouch) => {
           updateCallCount++;
-          return mockSessionStore.update(session);
+          return mockSessionStore.touch(sessionId, touch);
         },
       };
 
@@ -389,10 +393,13 @@ describe("SessionService", () => {
           Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
         update: (session: Session) =>
           Effect.sync(() => {
-            updateCallCount++;
             MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
+        touch: (sessionId: string, touch: SessionTouch) => {
+          updateCallCount++;
+          return memorySessionStore(sessions).touch(sessionId, touch);
+        },
         delete: (sessionId: string) =>
           Effect.sync(() => {
             MutableHashMap.remove(sessions, sessionId);
@@ -463,6 +470,76 @@ describe("SessionService", () => {
       expect(updateCallCount).toBe(1);
     });
 
+    it("keeps an attribute write that lands between the refresh's read and its write", async () => {
+      const sessions = MutableHashMap.empty<string, Session>();
+      const store = memorySessionStore(sessions);
+      // Another request changes the session's attributes right after the read.
+      const racingStore: typeof SessionStore.Service = {
+        ...store,
+        get: (sessionId) =>
+          store
+            .get(sessionId)
+            .pipe(
+              Effect.tap((session) =>
+                session === null
+                  ? Effect.void
+                  : store.update({ ...session, attributes: { activeOrganizationId: "org-1" } }),
+              ),
+            ),
+      };
+
+      const { validated, stored } = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const manager = yield* make(sessionConfig);
+            const issued = yield* manager.createSession("user1", { a: 1 });
+            return {
+              validated: yield* manager.validateSession(issued.token),
+              stored: yield* store.get(issued.session.id),
+            };
+          }),
+          Context.merge(
+            Context.make(SessionStore, racingStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+      );
+
+      expect(stored?.attributes).toEqual({ activeOrganizationId: "org-1" });
+      expect(validated.session.attributes).toEqual({ activeOrganizationId: "org-1" });
+    });
+
+    it("refuses, and does not recreate, a session revoked between the read and the refresh", async () => {
+      const sessions = MutableHashMap.empty<string, Session>();
+      const store = memorySessionStore(sessions);
+      // A sign-out elsewhere deletes the session right after the read.
+      const racingStore: typeof SessionStore.Service = {
+        ...store,
+        get: (sessionId) => store.get(sessionId).pipe(Effect.tap(() => store.delete(sessionId))),
+      };
+
+      const { result, stored } = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const manager = yield* make(sessionConfig);
+            const issued = yield* manager.createSession("user1");
+            return {
+              result: yield* Effect.result(manager.validateSession(issued.token)),
+              stored: yield* store.get(issued.session.id),
+            };
+          }),
+          Context.merge(
+            Context.make(SessionStore, racingStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+      );
+
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("SessionNotFoundError");
+      expect(stored).toBeNull();
+    });
+
     it("still enforces expiry even when write is throttled", async () => {
       const sessions = MutableHashMap.empty<string, Session>();
       const timedStore = {
@@ -478,6 +555,8 @@ describe("SessionService", () => {
             MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
+        touch: (sessionId: string, touch: SessionTouch) =>
+          memorySessionStore(sessions).touch(sessionId, touch),
         delete: (sessionId: string) =>
           Effect.sync(() => {
             MutableHashMap.remove(sessions, sessionId);
@@ -772,7 +851,7 @@ describe("session config and best-effort writes", () => {
     });
     const failingUpdate = Context.make(SessionStore, {
       ...mockSessionStore,
-      update: () => Effect.fail(new AuthError({ message: "store write failed" })),
+      touch: () => Effect.fail(new AuthError({ message: "store write failed" })),
     });
 
     const result = await Effect.runPromise(

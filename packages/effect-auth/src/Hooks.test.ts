@@ -18,6 +18,8 @@ import { UserStore } from "./UserStore.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
 import { RateLimitPlugin } from "./plugins/RateLimit.ts";
 import type { Session, SessionConfig, User } from "./Types.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const signIn = (email: string): SignInInput => ({ email, password: "secret" });
 const authResult: AuthResult = {
@@ -361,6 +363,8 @@ describe("Hooks - integration with EmailPasswordService", () => {
           MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
+      touch: (sessionId: string, touch: SessionTouch) =>
+        memorySessionStore(sessions).touch(sessionId, touch),
       delete: (sessionId: string) =>
         Effect.sync(() => {
           MutableHashMap.remove(sessions, sessionId);

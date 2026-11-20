@@ -306,6 +306,15 @@ export const makeSessionStore: Effect.Effect<
         "session.update",
         sql`UPDATE auth_sessions SET expires_at = ${dateToMs(session.expiresAt)}, last_activity_at = ${dateToMs(session.lastActivityAt)}, attributes = ${encodeAttributes(session.attributes)} WHERE id = ${session.id}`,
       ).pipe(Effect.as(session)),
+    touch: (sessionId, touch) =>
+      firstRow(
+        "session.touch",
+        sql<SessionRow>`UPDATE auth_sessions SET expires_at = ${dateToMs(touch.expiresAt)}, last_activity_at = ${dateToMs(touch.lastActivityAt)}
+            WHERE id = ${sessionId} AND expires_at >= ${dateToMs(touch.lastActivityAt)}
+            RETURNING *`,
+      ).pipe(
+        Effect.flatMap((row) => (row ? rowToSession(row, "session.touch") : Effect.succeed(null))),
+      ),
     delete: (sessionId) =>
       asVoid("session.delete", sql`DELETE FROM auth_sessions WHERE id = ${sessionId}`),
     deleteByUserId: (userId) =>

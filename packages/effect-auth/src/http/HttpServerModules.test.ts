@@ -45,6 +45,8 @@ import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.t
 import type * as Types from "../Types.ts";
 import { memoryApiKeyStore } from "../testing/MemoryStores.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -142,6 +144,8 @@ const makeFixture = (admin?: AdminConfig) => {
         MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (sessionId: string) =>
       Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: (userId: string) =>

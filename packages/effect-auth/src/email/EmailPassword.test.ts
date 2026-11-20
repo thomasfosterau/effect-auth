@@ -22,6 +22,8 @@ import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts"
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { UserService, UserServiceStore } from "../User.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
@@ -61,6 +63,8 @@ const sessionStore = {
       return session;
     }),
 
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, sessionId);
@@ -813,6 +817,8 @@ describe("EmailPasswordService - dangling session protection", () => {
         MutableHashMap.set(localSessions, session.id, session);
         return session;
       }),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(localSessions).touch(sessionId, touch),
     delete: (sessionId: string) =>
       Effect.sync(() => {
         MutableHashMap.remove(localSessions, sessionId);

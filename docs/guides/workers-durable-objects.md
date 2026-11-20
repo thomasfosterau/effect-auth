@@ -232,6 +232,20 @@ export class UserSessions extends DurableObject {
     return (await this.ctx.storage.get<Auth.Session>(sessionKey(sessionId))) ?? null;
   }
 
+  /**
+   * Slide one session's expiry, and nothing else, if it is still here and
+   * unexpired. One object's read and write, so a concurrent `put` of new
+   * attributes or a `remove` is never undone.
+   */
+  async touch(sessionId: string, touch: Auth.SessionTouch): Promise<Auth.Session | null> {
+    const session = await this.read(sessionId);
+    if (session === null || session.expiresAt < touch.lastActivityAt) return null;
+    const touched = { ...session, ...touch };
+    await this.ctx.storage.put(sessionKey(sessionId), touched);
+    await this.scheduleCleanup();
+    return touched;
+  }
+
   async remove(sessionId: string): Promise<void> {
     await this.ctx.storage.delete(sessionKey(sessionId));
   }
@@ -323,6 +337,14 @@ export const makeSessionStore = (
         await user(session.userId).put(session);
         await pointer(session.id).write(session.userId, session.expiresAt);
         return session;
+      }),
+    touch: (sessionId, touch) =>
+      call("session.touch", async () => {
+        const userId = await pointer(sessionId).read();
+        if (userId === null) return null;
+        const touched = await user(userId).touch(sessionId, touch);
+        if (touched !== null) await pointer(sessionId).write(userId, touched.expiresAt);
+        return touched;
       }),
     // The session first, then its pointer: a pointer left behind by a failure
     // in between reads as a miss.
