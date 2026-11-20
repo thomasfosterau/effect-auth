@@ -64,11 +64,11 @@ catalogs:
   drizzle-peers:
     drizzle-orm: ">=1.0.0-rc.5 <2"
   alchemy-peers:
-    # Exact, as the applications pin them; alchemy peers on effect ^4.1.0.
+    # Exact, as the applications pin them; alchemy peers on effect ^4.1.4.
     "@alchemy.run/cloudflare": 2.0.0-beta.87
     alchemy: 2.0.0-beta.87
     "@effect/sql-pg": ^4.1.0
-    effect: ^4.1.0
+    effect: ^4.1.4
 
 overrides:
   effect: "catalog:"
