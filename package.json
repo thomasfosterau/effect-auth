@@ -15,7 +15,7 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "vp config --no-agent && effect-tsgo patch --typescript --oxlint",
+    "prepare": "vp config --no-agent && effect-tsgo patch --typescript --oxlint --tsrs",
     "version": "changeset version && pnpm install --lockfile-only"
   },
   "devDependencies": {
