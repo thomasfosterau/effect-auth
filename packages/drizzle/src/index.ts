@@ -88,6 +88,7 @@ export {
   type AuthSchemaSpec,
   type ColumnKey,
   defineSchema,
+  SchemaMappingError,
   fromTables,
   type IdentifierColumnNames,
   type IdentifierColumns,
