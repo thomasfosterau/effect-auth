@@ -2,7 +2,7 @@ name: Release
 
 # `select` picks the Changesets mode; `version` opens the version PR; `publish`
 # runs in the protected `release` environment, the only job with `id-token`
-# (npm trusted publishing). See docs/PUBLISHING.md.
+# (npm trusted publishing, through `pnpm publish`). See docs/PUBLISHING.md.
 
 on:
   push:
@@ -47,6 +47,7 @@ jobs:
         uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
+          node-version: lts
           cache: false
           # No dependency lifecycle scripts in release jobs.
           run-install: |
@@ -77,6 +78,7 @@ jobs:
         uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
+          node-version: lts
           cache: false
           # No dependency lifecycle scripts in release jobs.
           run-install: |
@@ -121,6 +123,7 @@ jobs:
         uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
+          node-version: lts
           cache: false
           # No dependency lifecycle scripts in release jobs.
           run-install: |
@@ -128,12 +131,10 @@ jobs:
       # The build runs on the Effect-patched tsc.
       - name: Patch the toolchain
         run: pnpm run prepare
-      # Trusted publishing needs npm >= 11.5.1.
-      - name: Update npm
-        run: npm install -g npm@11
       - name: Build
         run: vp run build
-      # `pnpm publish` rewrites the `catalog:` and `workspace:` specifiers; npm would publish them literally.
+      # `pnpm publish` rewrites the `catalog:` and `workspace:` specifiers, and does the
+      # OIDC trusted-publishing exchange and provenance itself; no npm.
       - name: Publish to npm
         uses: changesets/action/publish@v2.1.2
         with:

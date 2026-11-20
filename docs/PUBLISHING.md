@@ -1,6 +1,6 @@
 # Publishing
 
-Releases use [Changesets](https://github.com/changesets/changesets) and npm trusted publishing (OIDC) from [release.yml](../.github/workflows/release.yml); there is no `NPM_TOKEN`.
+Releases use [Changesets](https://github.com/changesets/changesets) and npm trusted publishing (OIDC) through `pnpm publish`, with no npm CLI, from [release.yml](../.github/workflows/release.yml); there is no `NPM_TOKEN`.
 
 1. Commit a changeset with your change ([CONTRIBUTING.md → Changesets](CONTRIBUTING.md#changesets)).
 2. On `trunk`, the workflow opens or updates the `chore: version packages` PR, which bumps versions and writes each `CHANGELOG.md`.
