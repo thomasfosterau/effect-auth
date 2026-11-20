@@ -85,7 +85,7 @@
       },
       {
         "name": "vendor-adapters",
-        "patterns": ["packages/argon2/**", "packages/resend/**", "packages/twilio/**"]
+        "patterns": ["packages/argon2/**"]
       },
       {
         "name": "server-bindings",

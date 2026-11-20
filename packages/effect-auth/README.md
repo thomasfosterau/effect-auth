@@ -708,7 +708,26 @@ The first proof of an unverified address (`AuthLifecycleService.verifyEmail`, a 
 
 ## Delivery
 
-An adapter implements `EmailSender` / `SmsSender` once (`@thomasfosterau/effect-auth-resend`, `@thomasfosterau/effect-auth-twilio`), and `emailCallbacks` / `smsCallbacks` derive every feature's send callback from it. Each derived callback awaits its send. A flow that hides whether an account exists hands its send to the host's `DeliveryScheduler` instead, whichever callback it was given. In that flow only a known address gets a message, so an inline send would answer that address later than an unknown one, and answer a vendor failure with an error the unknown address never sees.
+Any [effect-connect](https://github.com/thomasfosterau/effect-connect) provider backs `EmailSender` / `SmsSender` through `EmailSender.layerConnect` / `SmsSender.layerConnect` (or implement either seam yourself), and `emailCallbacks` / `smsCallbacks` derive every feature's send callback from it. Each derived callback awaits its send. A flow that hides whether an account exists hands its send to the host's `DeliveryScheduler` instead, whichever callback it was given. In that flow only a known address gets a message, so an inline send would answer that address later than an unknown one, and answer a vendor failure with an error the unknown address never sees.
+
+```ts
+import { Layer, Redacted } from "effect";
+import { FetchHttpClient } from "effect/http";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as Resend from "@thomasfosterau/effect-connect-resend";
+import * as Twilio from "@thomasfosterau/effect-connect-twilio";
+
+// `render` (optional) turns a purpose and its params into your own templates.
+const Email = Auth.EmailSender.layerConnect({
+  from: { email: "noreply@example.com", name: "App" },
+}).pipe(Layer.provide(Resend.layer({ apiKey: Redacted.make("re_…") })));
+const Sms = Auth.SmsSender.layerConnect().pipe(
+  Layer.provide(
+    Twilio.layer({ accountSid: "AC…", authToken: Redacted.make("…"), from: "+61400000000" }),
+  ),
+);
+const Delivery = Layer.mergeAll(Email, Sms).pipe(Layer.provide(FetchHttpClient.layer));
+```
 
 | Flow                                                                                 | Send                  | Why                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -741,7 +760,7 @@ const response = handle.pipe(
 
 Detaching does not make the two sign-up answers identical: the fresh branch still writes a verification record that the duplicate branch does not.
 
-**No-op transports.** `EmailSender.logging` and `SmsSender.logging` send nothing and log each message's recipient and purpose. They are for development only, and you opt into them explicitly. Behind them, every flow that waits on a message (magic link, OTP, password reset) is a lockout. The sign-up verification email tolerates being dropped only while verification is advisory, that is, while `requireEmailVerification` does not gate sign-in. effect-auth-resend's `layerConfig` fails at boot when its key is missing rather than falling back to one.
+**No-op transports.** `EmailSender.logging` and `SmsSender.logging` send nothing and log each message's recipient and purpose. They are for development only, and you opt into them explicitly. Behind them, every flow that waits on a message (magic link, OTP, password reset) is a lockout. The sign-up verification email tolerates being dropped only while verification is advisory, that is, while `requireEmailVerification` does not gate sign-in. effect-connect-resend's `layerConfig` fails at boot when its key is missing rather than falling back to one.
 
 ## Rate limiting
 

@@ -48,6 +48,9 @@ catalogs:
     '@thomasfosterau/argon2':
       specifier: 0.1.1
       version: 0.1.1
+    '@thomasfosterau/effect-connect':
+      specifier: ^0.2.1
+      version: 0.2.1
     '@thomasfosterau/effect-jsonapi':
       specifier: ^0.22.1
       version: 0.22.1
@@ -305,6 +308,10 @@ importers:
         version: 5.1.0(@types/node@26.6.6)(@vitest/browser-preview@5.1.0)(@vitest/coverage-istanbul@5.1.0)(@vitest/ui@5.1.0)(@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1))(jsdom@31.0.1)
 
   packages/effect-auth:
+    dependencies:
+      '@thomasfosterau/effect-connect':
+        specifier: 'catalog:'
+        version: 0.2.1(effect@4.1.4)
     devDependencies:
       '@effect/sql-pglite':
         specifier: 'catalog:'
@@ -345,28 +352,6 @@ importers:
       xml-crypto:
         specifier: 'catalog:'
         version: 6.4.0
-
-  packages/resend:
-    dependencies:
-      '@thomasfosterau/effect-auth':
-        specifier: workspace:^
-        version: link:../effect-auth
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.6
-      effect:
-        specifier: 4.1.4
-        version: 4.1.4
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      vite:
-        specifier: 'catalog:'
-        version: '@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1)'
-      workerd:
-        specifier: 'catalog:'
-        version: 1.20261118.1
 
   packages/svelte:
     dependencies:
@@ -414,28 +399,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
-
-  packages/twilio:
-    dependencies:
-      '@thomasfosterau/effect-auth':
-        specifier: workspace:^
-        version: link:../effect-auth
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.6
-      effect:
-        specifier: 4.1.4
-        version: 4.1.4
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
-      vite:
-        specifier: 'catalog:'
-        version: '@voidzero-dev/vite-plus-core@1.5.1(@types/node@26.6.6)(@typescript/typescript6@6.0.2)(@volar/typescript@2.4.30(@typescript/typescript6@6.0.2))(@vue/language-core@3.3.14)(esbuild@0.28.1)(tsx@4.23.15)(vue-tsc@3.3.14(@typescript/typescript6@6.0.2))(yaml@2.9.1)'
-      workerd:
-        specifier: 'catalog:'
-        version: 1.20261118.1
 
 packages:
 
@@ -1818,6 +1781,12 @@ packages:
   '@thomasfosterau/argon2@0.1.1':
     resolution: {integrity: sha512-HBH0XtYGsuCTC2TI8N34X/Y0AvksrfHcp2tXDDFKG09FrnRDbl1O6zNbI4bPbYVOVEVGTvPEMCBz+r1oS0/8Jg==}
     engines: {node: ^20.19.0 || >=22.12.0}
+
+  '@thomasfosterau/effect-connect@0.2.1':
+    resolution: {integrity: sha512-TNmuk+V+m9sHejoRyf3qKK2H9a0Qd3NHg2qXVK1Se58ReujQyl6+2MkBPiaeOTv8gN3OIu1sX7vzWZJm+V0hVQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      effect: 4.1.4
 
   '@thomasfosterau/effect-ext@0.2.0':
     resolution: {integrity: sha512-T1EukW6BJDub7EMdii65Qisy1uDMwAkbso6s2gQQD9MbUC8jGycJppsL4McRdnjgboEu5yVxirzr2pobkh9qFw==}
@@ -4732,6 +4701,10 @@ snapshots:
       '@testing-library/dom': 10.4.2
 
   '@thomasfosterau/argon2@0.1.1': {}
+
+  '@thomasfosterau/effect-connect@0.2.1(effect@4.1.4)':
+    dependencies:
+      effect: 4.1.4
 
   '@thomasfosterau/effect-ext@0.2.0(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.22.1(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.3.0))(effect@4.1.4))(effect@4.1.4)':
     dependencies:

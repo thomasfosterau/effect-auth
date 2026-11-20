@@ -96,6 +96,9 @@
   "scripts": {
     "docs": "docgen"
   },
+  "dependencies": {
+    "@thomasfosterau/effect-connect": "catalog:"
+  },
   "devDependencies": {
     "@effect/sql-pglite": "catalog:",
     "@electric-sql/pglite": "catalog:",

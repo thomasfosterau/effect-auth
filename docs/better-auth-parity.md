@@ -20,8 +20,8 @@ package that implements a core service contract.
 | `packages/alchemy-cloudflare`, `packages/alchemy-postgres` _(split per provider, ADR-0022)_ | Alchemy v2 infra resources + D1 / Postgres storage layers                           | core; `alchemy` and the provider or driver as peers                 |
 | `packages/argon2` _(new, extract)_                                                          | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
 | `packages/drizzle` _(M6)_                                                                   | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
-| `packages/<email>` _(M6)_                                                                   | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
-| `packages/<sms>` _(M6)_                                                                     | `SmsSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
+| effect-connect providers _(ADR-0025)_                                                       | `EmailSender` backed by any effect-connect `EmailService` (Resend today)            | core; `@thomasfosterau/effect-connect`                              |
+| effect-connect providers _(ADR-0025)_                                                       | `SmsSender` backed by any effect-connect `SmsService` (Twilio today)                | core; `@thomasfosterau/effect-connect`                              |
 
 Consequences for the current tree:
 
