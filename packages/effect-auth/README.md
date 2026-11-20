@@ -19,6 +19,8 @@ The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-
 - the **`nodejs_compat`** compatibility flag (on by default from compatibility date 2026-08-04), and
 - a **compatibility date of 2023-01-01 or later**.
 
+Argon2id (`Password.argon2idHasherLayer`) is the exception: it derives through Effect's `Kdf` service, which only `NodeCrypto.layerKdf` (`@effect/platform-node` or `-bun`, on Node.js 24.7+ or Bun 1.4+) provides with Argon2id. On Workers use `@thomasfosterau/effect-auth-argon2`.
+
 The core never relies on the Node globals `nodejs_compat` sets only from 2024-09-23 (`Buffer`, `process`), so an older date works. Every primitive (PBKDF2 and scrypt hashing and verification, `hashToken` and the constant-time comparisons, AES-256-GCM, HMAC, the WebAuthn signature checks, and ES256, EdDSA and RS256 JWS through `JwtService`, `verifyJws` and the Apple client secret) is tested inside a real workerd at 2023-01-01 and at workerd's newest date (`src/Workerd.test.ts`). Releases up to 0.4.0 fail there: ES256 signing and verification on every date, JWT key generation from 2025-12-03, and password hashing, AES-GCM and the WebAuthn checks before 2024-09-23.
 
 ## Usage
@@ -123,7 +125,7 @@ The two `before*` session hooks are observe-or-deny. A plugin refuses the valida
 ## What's included
 
 - **Sessions:** active and idle expiry with renewal, hashed session ids, an optional HMAC-signed session-data cookie (`cookie.cache`), multi-session, trusted devices.
-- **Passwords:** PBKDF2-SHA256 (600,000 iterations, the default) and scrypt, a multi-algorithm verifier, password reset, Have I Been Pwned checks. Argon2id is in `@thomasfosterau/effect-auth-argon2`.
+- **Passwords:** PBKDF2-SHA256 (600,000 iterations, the default) and scrypt, a multi-algorithm verifier, password reset, Have I Been Pwned checks. Argon2id over Effect's `Kdf` (`Password.argon2idHasherLayer`, with `NodeCrypto.layerKdf` on Node.js 24.7+ or Bun 1.4+); on Cloudflare Workers, which has no native Argon2, use `@thomasfosterau/effect-auth-argon2`.
 - **Sign-in methods:** email and password, username (case-insensitive uniqueness), magic link, email OTP, phone (SMS) OTP with a pluggable E.164 normalizer, anonymous guests (`isAnonymousUser`, upgraded on sign-up through a `linkAccount` callback), Google One Tap, the RFC 8628 device authorization grant, passkeys (WebAuthn). Every password-based method honours the multi-factor gate.
 - **Multi-factor:** TOTP with backup codes integrated into sign-in, an OTP second factor, and the RFC 6238 / RFC 4226 primitives.
 - **OAuth 2.0 social login:** 20 provider presets (Google, GitHub, Discord, Microsoft, Apple, and more) plus custom providers, PKCE, and a complete sign-in flow with verified-email account linking.

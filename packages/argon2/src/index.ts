@@ -1,9 +1,10 @@
 /**
  * Argon2id password hasher for effect-auth.
  *
- * Core `effect-auth` ships only dependency-free hashers (PBKDF2, scrypt).
- * Argon2id — OWASP's first-choice password hashing algorithm — needs a KDF the
- * platform does not provide, so it lives in its own package.
+ * Core `effect-auth` hashes Argon2id over Effect's `Kdf` service
+ * (`Password.argon2idHasherLayer`), which only `NodeCrypto.layerKdf` on
+ * Node.js 24.7+ or Bun 1.4+ can derive. This package is the Argon2id for
+ * every other runtime, Cloudflare Workers above all.
  *
  * This package is **WebAssembly**: the RustCrypto `argon2` crate as built by
  * [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2),

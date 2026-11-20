@@ -125,7 +125,8 @@ directories, each with its own `index.ts` barrel and matching
   `EmailVerification.ts`.
 - **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
   multi-algorithm verifier), `PasswordReset.ts`, `HaveIBeenPwned.ts`. Argon2id
-  lives in the separate `effect-auth-argon2` package.
+  is `Argon2.ts`, over `effect/crypto`'s `Kdf`; the separate `effect-auth-argon2`
+  package covers runtimes whose `Kdf` has no Argon2id, Workers among them.
 - **Authorization** (root, flat — a first-class feature, not a cluster): the
   policy kernel `Entity.ts` / `Condition.ts` / `Policy.ts` /
   `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
@@ -268,7 +269,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### Password Security
 
-- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt also in core; Argon2id via `@thomasfosterau/effect-auth-argon2` (WASM: the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2`, compiled at module scope so it runs on Workers); a multi-algorithm verifier supports migration between algorithms.
+- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt also in core; Argon2id in core over `effect/crypto`'s `Kdf` (`NodeCrypto.layerKdf`: Node.js 24.7+, Bun 1.4+), and on Workers via `@thomasfosterau/effect-auth-argon2` (WASM: the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2`, compiled at module scope so it runs on Workers); a multi-algorithm verifier supports migration between algorithms.
 - Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security
@@ -358,7 +359,7 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Dependencies
 
-- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (PBKDF2, scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256, JWS key generation, signing and verification, the WebAuthn signature checks), which take `Buffer` from `node:buffer`, never the global. That keeps the core running on Cloudflare Workers with `nodejs_compat` from compatibility date 2023-01-01, before the flag set Node globals; `Workerd.test.ts` runs the three modules inside a real workerd. Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
+- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (PBKDF2, scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256, JWS key generation, signing and verification, the WebAuthn signature checks), which take `Buffer` from `node:buffer`, never the global. That keeps the core running on Cloudflare Workers with `nodejs_compat` from compatibility date 2023-01-01, before the flag set Node globals; `Workerd.test.ts` runs the three modules inside a real workerd. Native dependencies never enter core: its Argon2id hasher (`password/Argon2.ts`) derives through the `Kdf` service the application provides, and the WebAssembly Argon2id for Workers lives in `@thomasfosterau/effect-auth-argon2`.
 - **Optional peers of the core**, each reached from one subpath only: `@thomasfosterau/effect-jsonapi` (`./http`, and `./client/testing` through it) and `@node-saml/node-saml` (`./saml`, Node-only). `effect/sql`, behind `./sql`, ships in `effect`.
 - **Packages** hold the code that brings a dependency the core lacks (ADR-0022): `-drizzle` (`drizzle-orm`), `-alchemy-cloudflare` (`alchemy`, `@alchemy.run/cloudflare`), `-alchemy-postgres` (`alchemy`, `@effect/sql-pg`), `-argon2` (the Argon2 wasm of `@thomasfosterau/argon2`) and the Svelte binding (`svelte`). `-resend` and `-twilio` (plain `fetch`) stay packages because the owner decides vendor-adapter merges case by case, and `-sveltekit` is the server side of a framework. The browser client, the SQL stores and the SAML verifier, once packages of their own, are core subpaths.
 
