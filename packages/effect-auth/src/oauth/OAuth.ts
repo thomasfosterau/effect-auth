@@ -5,7 +5,7 @@
  * and related data structures.
  */
 
-import { Clock, Config, Context, Data, DateTime, Effect, Formatter, Layer, Redacted } from "effect";
+import { Clock, Config, Context, DateTime, Effect, Formatter, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
@@ -361,34 +361,84 @@ const ProviderJwks = Schema.Struct({ keys: Schema.optional(Schema.Array(Schema.J
 
 const decodeProviderJwks = Schema.decodeUnknownEffect(ProviderJwks);
 
-/** A rejected read of a response body; {@link readText} and {@link readBody} die with its cause. */
-class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
-  readonly cause: unknown;
-}> {}
+/** A provider response whose body could not be read, or is not what it must be. */
+const invalidBody = (provider: string, what: string, cause?: unknown) =>
+  new OAuthProviderError({
+    message: `Invalid ${what} from ${provider}`,
+    provider,
+    ...(cause !== undefined && { cause }),
+  });
 
-/** Turns a failed body read back into a defect carrying the original rejection. */
-const dieWithCause = <A>(self: Effect.Effect<A, ResponseBodyError>): Effect.Effect<A> =>
-  self.pipe(Effect.catch((error) => Effect.die(error.cause)));
-
-/** A response body as text. A failed read is a defect. */
-const readText = (response: Response): Effect.Effect<string> =>
+/** A response body as text. A failed read is an `OAuthProviderError`. */
+const readText = (
+  provider: string,
+  response: Response,
+  what = "response body",
+): Effect.Effect<string, OAuthProviderError> =>
   Effect.tryPromise({
     try: () => response.text(),
-    catch: (cause) => new ResponseBodyError({ cause }),
-  }).pipe(dieWithCause);
+    catch: (cause) => invalidBody(provider, what, cause),
+  });
 
-/** A response body parsed as JSON, unchecked. A failed read or an invalid body is a defect. */
-const readBody = (response: Response) =>
-  Effect.tryPromise({
-    try: () => response.json(),
-    catch: (cause) => new ResponseBodyError({ cause }),
-  }).pipe(dieWithCause);
+const decodeJsonString = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
-const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
+/**
+ * A response body parsed as JSON. A failed read or a body that is not JSON is
+ * an `OAuthProviderError`, never a defect: the body is outside input.
+ */
+const readJson = (
+  provider: string,
+  response: Response,
+  what = "response body",
+): Effect.Effect<Schema.Json, OAuthProviderError> =>
+  readText(provider, response, what).pipe(
+    Effect.flatMap((text) =>
+      decodeJsonString(text).pipe(Effect.mapError((cause) => invalidBody(provider, what, cause))),
+    ),
+  );
 
-/** A response body parsed as JSON. A failed read or an invalid body is a defect. */
-const readJson = (response: Response): Effect.Effect<Schema.Json> =>
-  readBody(response).pipe(Effect.flatMap(decodeJson), Effect.orDie);
+/** An optional member a provider may also send as `null`, which reads as absent. */
+const optionalMember = <S extends Schema.Top>(schema: S) =>
+  Schema.optionalKey(Schema.NullOr(schema));
+
+/**
+ * The RFC 6749 section 5.1 access token response, as providers actually send
+ * it: `expires_in` may be a numeric string, `scope` an array (Twitch), and a
+ * missing `token_type` reads as `Bearer`.
+ */
+const TokenResponseBody = Schema.Struct({
+  access_token: Schema.NonEmptyString,
+  token_type: optionalMember(Schema.String),
+  expires_in: optionalMember(Schema.Union([Schema.Finite, Schema.FiniteFromString])),
+  refresh_token: optionalMember(Schema.String),
+  scope: optionalMember(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+  id_token: optionalMember(Schema.String),
+});
+
+const decodeTokenResponseBody = Schema.decodeUnknownEffect(TokenResponseBody);
+
+/** A 2xx token endpoint's body, decoded. Anything else is an `OAuthProviderError`. */
+const readTokenResponse = (
+  provider: string,
+  response: Response,
+): Effect.Effect<OAuthTokenResponse, OAuthProviderError> =>
+  readJson(provider, response, "token response").pipe(
+    Effect.flatMap((json) =>
+      decodeTokenResponseBody(json).pipe(
+        Effect.mapError((cause) => invalidBody(provider, "token response", cause)),
+      ),
+    ),
+    Effect.map((body): OAuthTokenResponse => ({
+      access_token: body.access_token,
+      token_type: body.token_type ?? "Bearer",
+      ...(P.isNotNullish(body.expires_in) && { expires_in: body.expires_in }),
+      ...(P.isNotNullish(body.refresh_token) && { refresh_token: body.refresh_token }),
+      ...(P.isNotNullish(body.scope) && {
+        scope: P.isString(body.scope) ? body.scope : body.scope.join(" "),
+      }),
+      ...(P.isNotNullish(body.id_token) && { id_token: body.id_token }),
+    })),
+  );
 
 /** Whether a JSON value is an object (not an array or `null`). */
 const isJsonObject = (json: Schema.Json): json is Types.JsonObject => P.isObject(json);
@@ -447,8 +497,8 @@ const fetchIdTokenJwk = (
         provider: params.provider,
       });
     }
-    const jwks = yield* readJson(response).pipe(
-      Effect.flatMap(decodeProviderJwks),
+    const jwks = yield* readJson(params.provider, response, "JWKS document").pipe(
+      Effect.flatMap((json) => decodeProviderJwks(json)),
       Effect.mapError(
         (cause) =>
           new OAuthProviderError({
@@ -634,7 +684,7 @@ const fetchProviderOk = (
     });
 
     if (!response.ok) {
-      const errorText = yield* readText(response);
+      const errorText = yield* readText(provider, response);
       return yield* new OAuthProviderError({
         message: `${failures.statusFailure}: ${errorText}`,
         provider,
@@ -680,7 +730,7 @@ export const provider = (
         },
       );
 
-      const data = yield* readJson(response);
+      const data = yield* readJson(name, response, "user info response");
       if (!isJsonObject(data)) {
         return yield* new OAuthProviderError({
           message: `User info response from ${name} is not a JSON object`,
@@ -787,11 +837,7 @@ export const provider = (
           },
         );
 
-        // SAFETY: unvalidated, as before: a 2xx token endpoint answers with an
-        // RFC 6749 section 5.1 access token response, which this shape describes.
-        const data = (yield* readBody(response)) as OAuthTokenResponse;
-
-        return data;
+        return yield* readTokenResponse(name, response);
       }),
 
     getUserInfo,
@@ -1587,16 +1633,14 @@ export const make = (
             });
 
             if (!response.ok) {
-              const errorText = yield* readText(response);
+              const errorText = yield* readText(provider, response);
               return yield* new OAuthProviderError({
                 message: `Token refresh failed: ${errorText}`,
                 provider,
               });
             }
 
-            // SAFETY: unvalidated, as before: a 2xx token endpoint answers with an
-            // RFC 6749 section 5.1 access token response, which this shape describes.
-            const data = (yield* readBody(response)) as OAuthTokenResponse;
+            const data = yield* readTokenResponse(provider, response);
 
             // Update account with new tokens
             const updatedAccount: OAuthAccount = {
@@ -2197,7 +2241,7 @@ export const discoverOAuthEndpoints = (
         provider: issuerUrl,
       });
     }
-    const doc = yield* readJson(response);
+    const doc = yield* readJson(issuerUrl, response, "OIDC discovery document");
     if (!isJsonObject(doc)) {
       return yield* new OAuthProviderError({
         message: "OIDC discovery document is not a JSON object",
