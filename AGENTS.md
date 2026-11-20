@@ -21,4 +21,6 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 
 ## Fallow
 
-The pre-commit hook runs `vp run fallow:audit` (a full coverage run, then the audit); fix a `fail` verdict rather than skipping the hook. Only findings your change introduces count. Useful otherwise: `vp exec fallow dead-code --trace <file>:<export>`, `vp exec fallow guard <files>`, `vp exec fallow explain <issue-type>`.
+The pre-commit hook runs `vp run fallow:audit` (a full coverage run, then the audit); fix a `fail` verdict rather than skipping the hook. Only findings your change introduces count. Before deleting "unused" code, trace it: `vp exec fallow dead-code --trace <file>:<export>`.
+
+The `fallow` agent skill is linked into `.claude/skills/` from the installed package after `vp install`.
