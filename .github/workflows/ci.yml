@@ -78,6 +78,7 @@ jobs:
         uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
+          node-version: lts
           # Only `vp dlx` runs on the host; a host install would leave a node_modules the container's install refuses to purge.
           run-install: false
       - name: Build and start the container

@@ -16,8 +16,7 @@
   "type": "module",
   "scripts": {
     "prepare": "vp config --no-agent && effect-tsgo patch --typescript --oxlint",
-    "version": "changeset version && pnpm install --lockfile-only",
-    "release": "pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks && changeset tag"
+    "version": "changeset version && pnpm install --lockfile-only"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",
@@ -44,5 +43,5 @@
       "version": "lts"
     }
   },
-  "packageManager": "pnpm@11.11.0"
+  "packageManager": "pnpm@12.21.0"
 }

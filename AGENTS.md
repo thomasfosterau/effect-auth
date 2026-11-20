@@ -7,7 +7,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - You may open PRs in this repository; follow the workflow in docs/CONTRIBUTING.md and keep the PR body current (what changed, gates run with results, changesets).
 - Out-of-scope work you notice: file an issue and move on.
 - Use the GitHub MCP tools or `gh`, whichever is available. Write only to `thomasfosterau/effect-auth`.
-- Never version or publish by hand.
+- Never version or publish by hand: the Release workflow runs `vp run release` (`vp pm publish -r` + `changeset git-tag`); there is no publish script. `vp run release:dry-run` is safe.
 - Use Effect v4's own modules rather than re-inventing them (exceptions in docs/CONTRIBUTING.md). Non-idiomatic code you find: fix it if trivial, otherwise file an issue listing the sites and the replacement.
 
 ## Pitfalls
@@ -21,4 +21,6 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 
 ## Fallow
 
-The pre-commit hook runs `vp run fallow:audit` (a full coverage run, then the audit); fix a `fail` verdict rather than skipping the hook. Only findings your change introduces count. Useful otherwise: `vp exec fallow dead-code --trace <file>:<export>`, `vp exec fallow guard <files>`, `vp exec fallow explain <issue-type>`.
+The pre-commit hook runs `vp run fallow:audit` (a full coverage run, then the audit); fix a `fail` verdict rather than skipping the hook. Only findings your change introduces count. Before deleting "unused" code, trace it: `vp exec fallow dead-code --trace <file>:<export>`.
+
+The `fallow` agent skill is linked into `.claude/skills/` from the installed package after `vp install`.

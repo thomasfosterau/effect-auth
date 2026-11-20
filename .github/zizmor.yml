@@ -4,10 +4,6 @@ rules:
     config:
       # Matches Dependabot's cooldown; pnpm's minimumReleaseAge is 1 day too.
       days: 1
-  adhoc-packages:
-    ignore:
-      # Trusted publishing needs npm >= 11.5.1, newer than the runner's.
-      - release.yml
   unpinned-uses:
     config:
       # Exact release tags; .github/workflows/actions.lock pins their commits.
