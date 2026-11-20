@@ -1,6 +1,6 @@
 # effect-auth
 
-Authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers (sessions, passwords, passkeys, multi-factor, OAuth, SSO, organizations, API keys, JWT, one policy-based authorization kernel), with an optional HTTP API, browser client, Svelte bindings and storage and vendor adapters.
+Authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers (sessions, passwords, passkeys, multi-factor, OAuth, SSO, organizations, API keys, JWT, one policy-based authorization kernel), with an optional HTTP API, browser client, Svelte bindings and storage and vendor adapters. Email and SMS go through [effect-connect](https://github.com/thomasfosterau/effect-connect)'s providers.
 
 > [!WARNING]
 > Experimental, pre-1.0 and largely written with Claude Code. It is **not production-ready**, has not been audited, and its API will change. For something usable today, use [Better Auth](https://www.better-auth.com/).
@@ -36,8 +36,6 @@ Provide `EmailPasswordService.layer()` with its stores (in memory, `/sql` or an 
 | [`effect-auth-alchemy-cloudflare`](packages/alchemy-cloudflare) | Alchemy schema resource and D1 stores                           |
 | [`effect-auth-alchemy-postgres`](packages/alchemy-postgres)     | Alchemy schema resource and Postgres stores                     |
 | [`effect-auth-argon2`](packages/argon2)                         | Argon2id password hashing, Workers-safe                         |
-| [`effect-auth-resend`](packages/resend)                         | Resend email sender                                             |
-| [`effect-auth-twilio`](packages/twilio)                         | Twilio SMS sender                                               |
 
 All are published under `@thomasfosterau/`.
 

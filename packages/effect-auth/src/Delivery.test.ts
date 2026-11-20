@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
 import { DateTime, Effect, Layer, Logger, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Connect from "@thomasfosterau/effect-connect";
 import {
   EmailSender,
   SmsSender,
+  defaultEmailRender,
+  defaultSmsRender,
   emailCallbacks,
   smsCallbacks,
   type EmailMessage,
@@ -180,5 +184,138 @@ describe("logging transports", () => {
     expect(logged).toContain("phone-otp:sign-in");
     expect(logged).not.toContain("secret-token");
     expect(logged).not.toContain("123456");
+  });
+});
+
+describe("defaultEmailRender", () => {
+  it("uses a purpose-keyed subject and includes the OTP in the body", () => {
+    const rendered = defaultEmailRender({
+      to: "user@example.com",
+      purpose: "email-otp:sign-in",
+      params: { otp: "123456" },
+    });
+    expect(rendered.subject).toBe("Your verification code");
+    expect(rendered.text).toContain("123456");
+  });
+
+  it("puts a url ahead of a bare token, and falls back to the token", () => {
+    const withUrl = defaultEmailRender({
+      to: "user@example.com",
+      purpose: "magic-link",
+      params: { token: "tok_abc", url: "https://example.com/verify?token=tok_abc" },
+    });
+    expect(withUrl.text).toContain("https://example.com/verify?token=tok_abc");
+    expect(withUrl.text).not.toContain("Your token:");
+    const tokenOnly = defaultEmailRender({
+      to: "user@example.com",
+      purpose: "password-reset",
+      params: { token: "reset-token" },
+    });
+    expect(tokenOnly.text).toContain("reset-token");
+  });
+
+  it("tells the holder of an address that someone tried to sign up with it", () => {
+    const rendered = defaultEmailRender({ to: "a@b.com", purpose: "existing-account", params: {} });
+    expect(rendered.subject).toBe("Someone tried to sign up with your email address");
+    expect(rendered.text).toContain("reset your password");
+  });
+
+  it("falls back for unknown purposes and empty params", () => {
+    const rendered = defaultEmailRender({ to: "a@b.com", purpose: "custom", params: {} });
+    expect(rendered.subject).toBe("Action required");
+    expect(rendered.text).toBe("Please continue in the app.");
+  });
+});
+
+describe("defaultSmsRender", () => {
+  it("leads OTP purposes with a verification line and the code", () => {
+    expect(
+      defaultSmsRender({ to: "+61400000000", purpose: "phone-otp:sign-in", params: { otp: "1" } }),
+    ).toBe("Your verification code: 1");
+    expect(defaultSmsRender({ to: "+61400000000", purpose: "custom", params: {} })).toBe("Message");
+  });
+});
+
+describe("effect-connect bridges", () => {
+  const magicLink: EmailMessage = {
+    to: "ada@example.com",
+    purpose: "magic-link",
+    params: { token: "t" },
+  };
+
+  it("renders and sends an email through the EmailService", async () => {
+    const sent: Array<Connect.EmailMessage> = [];
+    const layer = EmailSender.layerConnect({
+      from: { email: "noreply@example.com", name: "App" },
+      render: (message) => ({ subject: message.purpose, html: "<p>hi</p>" }),
+    }).pipe(Layer.provide(Connect.EmailService.layerRecording(sent)));
+
+    await Effect.runPromise(
+      EmailSender.use((sender) => sender.send(magicLink)).pipe(Effect.provide(layer)),
+    );
+
+    expect(sent).toEqual([
+      {
+        from: { email: "noreply@example.com", name: "App" },
+        to: [{ email: "ada@example.com" }],
+        subject: "magic-link",
+        html: "<p>hi</p>",
+      },
+    ]);
+  });
+
+  it("fails a provider error as an AuthError carrying it", async () => {
+    const providerError = new Connect.EmailSendError({
+      provider: "resend",
+      message: "rejected",
+      status: Option.some(422),
+    });
+    const sender = EmailSender.fromConnect(
+      { send: () => Effect.fail(providerError), sendBatch: () => Effect.fail(providerError) },
+      { from: { email: "noreply@example.com" } },
+    );
+
+    const error = await Effect.runPromise(Effect.flip(sender.send(magicLink)));
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.message).toBe("Email delivery via resend failed: rejected");
+    expect(error.cause).toBe(providerError);
+  });
+
+  it("renders and sends an SMS through the SmsService, with the provider's sender by default", async () => {
+    const sent: Array<Connect.SmsMessage> = [];
+    const layer = SmsSender.layerConnect().pipe(
+      Layer.provide(Connect.SmsService.layerRecording(sent)),
+    );
+    const message: SmsMessage = {
+      to: "+61412345678",
+      purpose: "second-factor-otp",
+      params: { otp: "654321" },
+    };
+
+    await Effect.runPromise(
+      SmsSender.use((sender) => sender.send(message)).pipe(Effect.provide(layer)),
+    );
+
+    expect(sent).toEqual([{ to: "+61412345678", body: "Your verification code: 654321" }]);
+  });
+
+  it("fails an SMS provider error as an AuthError", async () => {
+    const providerError = new Connect.SmsSendError({
+      provider: "twilio",
+      message: "unreachable",
+      status: Option.none(),
+    });
+    const sender = SmsSender.fromConnect(
+      { send: () => Effect.fail(providerError), sendBatch: () => Effect.fail(providerError) },
+      { from: "App" },
+    );
+
+    const error = await Effect.runPromise(
+      Effect.flip(sender.send({ to: "+61412345678", purpose: "custom", params: {} })),
+    );
+
+    expect(error.message).toBe("SMS delivery via twilio failed: unreachable");
+    expect(error.cause).toBe(providerError);
   });
 });
