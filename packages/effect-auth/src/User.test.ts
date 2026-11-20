@@ -161,6 +161,33 @@ describe("UserService", () => {
     expect(allowed.attributes.role).toBe("admin");
   });
 
+  it.each([
+    "banned",
+    "banReason",
+    "banExpires",
+    "scimDeactivated",
+    "scimUserName",
+    "scimExternalId",
+    "isAnonymous",
+  ])(
+    "refuses %s, which its own service writes, even with no server-only attributes",
+    async (key) => {
+      const error = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* User.make({ serverOnlyAttributes: [] });
+            return yield* Effect.flip(service.updateUserAttributes("user-1", { [key]: false }));
+          }),
+          makeTestContext(),
+        ),
+      );
+      expect(error).toMatchObject({ _tag: "InvalidInputError", field: key });
+      expect(Option.getOrUndefined(MutableHashMap.get(users, "user-1"))?.attributes).toEqual({
+        role: "member",
+      });
+    },
+  );
+
   it("should mark the user's email identifier as verified", async () => {
     const result = await Effect.runPromise(
       Effect.provide(

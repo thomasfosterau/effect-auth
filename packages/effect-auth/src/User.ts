@@ -105,7 +105,7 @@ export interface UserServiceConfig {
    * rung the guards read above all — so a profile-update path built on
    * `updateUserAttributes` cannot let a user set their own role. Change them
    * through their privileged door instead (`AdminService.setRole` for `role`).
-   * Pass `[]` to opt out.
+   * Pass `[]` to opt out; {@link SIGN_UP_PROTECTED_ATTRIBUTES} stay refused.
    */
   readonly serverOnlyAttributes?: ReadonlyArray<string>;
 }
@@ -117,7 +117,7 @@ export interface UpdateUserInput {
 }
 
 /**
- * Reads and updates users: profile fields and the attribute bag, refusing writes to {@link UserServiceConfig.serverOnlyAttributes}.
+ * Reads and updates users: profile fields and the attribute bag, refusing writes to {@link UserServiceConfig.serverOnlyAttributes} and {@link SIGN_UP_PROTECTED_ATTRIBUTES}.
  *
  * Requires `UserServiceStore`; `deleteUser` also needs `AccountDeletion` (`accountDeletionLayer`) where the layer is built, and fails without it.
  */
@@ -131,7 +131,9 @@ export class UserService extends Context.Service<
     /**
      * Merge `attributes` into the user's attribute bag. Fails with
      * `InvalidInputError` — writing nothing — when any key is one of
-     * {@link UserServiceConfig.serverOnlyAttributes}.
+     * {@link UserServiceConfig.serverOnlyAttributes} or of
+     * {@link SIGN_UP_PROTECTED_ATTRIBUTES} (the ban, SCIM and anonymous-user
+     * keys, which their own services write and no config opts out of).
      */
     readonly updateUserAttributes: (
       userId: string,
@@ -193,7 +195,13 @@ export const make = (
     const store = yield* UserServiceStore;
     const accountDeletion = yield* Effect.serviceOption(AccountDeletion);
     const serverOnlyAttributes = config?.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
-    const serverOnly = HashSet.fromIterable(serverOnlyAttributes);
+    // The ban, SCIM and anonymous-user keys are refused whatever the config
+    // says, as at sign-up: `AdminService`, `ScimService` and `AnonymousService`
+    // write them through the store, never through this method.
+    const refusedKeys = HashSet.fromIterable([
+      ...serverOnlyAttributes,
+      ...SIGN_UP_PROTECTED_ATTRIBUTES,
+    ]);
 
     return {
       serverOnlyAttributes,
@@ -205,7 +213,7 @@ export const make = (
       ) {
         const refused = Option.getOrUndefined(
           Arr.findFirst(R.keys<string, Types.Json>(attributes), (key) =>
-            HashSet.has(serverOnly, key),
+            HashSet.has(refusedKeys, key),
           ),
         );
         if (refused !== undefined) {
