@@ -4,7 +4,7 @@ Postgres for effect-auth on Alchemy v2: an `@effect/sql-pg` `SqlClient` from a C
 
 ## Boundary
 
-Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers, all through **`catalog:alchemy-peers`**: `alchemy` (exactly `2.0.0-beta.85`, the applications' pin), `@effect/sql-pg` (`^4.1.0`) and `effect` (`^4.1.0`). Depends on `@thomasfosterau/effect-auth`, for its `/sql` subpath.
+Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers, all through **`catalog:alchemy-peers`**: `alchemy` (exactly `2.0.0-beta.85`, the applications' pin), `@effect/sql-pg` (`^4.1.0`) and `effect` (`^4.1.5`, the core's floor). Depends on `@thomasfosterau/effect-auth`, for its `/sql` subpath.
 
 **Named for the database, not for an Alchemy provider** (ADR-0022). The owner's rule splits the Alchemy packages per provider and named this half for `@alchemy.run/planetscale`, but nothing here can depend on that provider: the code is host-agnostic Postgres. The provider is built before any resource exists, so a PlanetScale `PostgresRole`'s outputs cannot reach it; the role's `connectionUrl` is already a `Redacted<string>` that `database(url)` takes unchanged, and its `PostgresOrigin` is a connection shape the code has no use for. So it peers on no `@alchemy.run/*` package.
 

@@ -69,7 +69,8 @@ catalogs:
     "@alchemy.run/cloudflare": 2.0.0-beta.87
     alchemy: 2.0.0-beta.87
     "@effect/sql-pg": ^4.1.0
-    effect: ^4.1.4
+    # The core's floor: alchemy peers on effect ^4.1.4, the core on ^4.1.5.
+    effect: ^4.1.5
 
 overrides:
   effect: "catalog:"
