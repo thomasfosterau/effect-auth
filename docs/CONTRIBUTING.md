@@ -60,7 +60,7 @@ Tests sit beside the source (`Foo.test.ts`) and import from `vite-plus/test`, ne
 
 ## Dependencies
 
-Every external version lives in the `pnpm-workspace.yaml` catalog (`catalogMode: strict`); after editing it, run `vp install` and commit `pnpm-lock.yaml`. Dependabot groups the sets that must move together. By hand, on the matching PR:
+Every external version lives in the `pnpm-workspace.yaml` catalog (`catalogMode: strict`); after editing it, run `vp install` and commit `pnpm-lock.yaml`. Dependabot groups the sets that must move together, but can't make these moves: make them in a PR from a new branch started from its PR's head (never push to a `dependabot/*` branch, which stops it rebasing), and Dependabot closes its own PR once yours merges.
 
 - The npm aliases `vite` (equal to `vite-plus`), `typescript` and `@typescript/native`, and the devcontainer image tag (equal to `vite-plus`).
 - An `@effect/tsgo` whose `components` table covers the new oxlint and `@typescript/native`.
