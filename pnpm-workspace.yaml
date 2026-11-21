@@ -24,7 +24,7 @@ catalog:
   # Exact: the argon2 adapter embeds this release's wasm.
   "@thomasfosterau/argon2": 0.1.1
   "@thomasfosterau/effect-connect": ^0.2.1
-  "@thomasfosterau/effect-jsonapi": ^0.22.1
+  "@thomasfosterau/effect-jsonapi": ^0.22.2
   "@types/node": ^26.6.6
   "@types/pg": ^8.15.0
   "@types/semver": ^7.8.0
@@ -57,7 +57,7 @@ catalog:
 # Published peer ranges.
 catalogs:
   peers:
-    "@thomasfosterau/effect-jsonapi": ^0.22.1
+    "@thomasfosterau/effect-jsonapi": ^0.22.2
     "@node-saml/node-saml": ^5.2.0
     # Raised from ^4.0.0: the core uses `effect/crypto` (4.1) and its `Password` module (4.1.5).
     effect: ^4.1.5
