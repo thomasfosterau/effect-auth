@@ -1,23 +1,16 @@
 /**
- * Argon2id password hashing over Effect's `Kdf` service (`effect/crypto`).
- *
- * The core writes and reads the PHC string; the derivation is the `Kdf`
- * layer's. Only `NodeCrypto.layerKdf` (`@effect/platform-node` or
- * `@effect/platform-bun`, on Node.js 24.7+ or Bun 1.4+) derives Argon2id:
- * `Kdf.layerWebCrypto` and Cloudflare Workers cannot, so use PBKDF2 there.
+ * Argon2id over `effect/crypto`'s `Password` service, which writes and reads
+ * the PHC strings. Only a `Kdf` with Argon2id (`NodeCrypto.layerKdf`, Node.js
+ * 24.7+ or Bun 1.4+) derives it; on Workers use effect-auth-argon2.
  */
-import { Effect, Layer } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import * as Arr from "effect/Array";
-import { Kdf, SecureRandom } from "effect/crypto";
-import { Base64 } from "effect/encoding";
+import { CryptoError, Kdf, Password as CryptoPassword, SecureRandom } from "effect/crypto";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as R from "effect/Record";
-import * as Result from "effect/Result";
 import * as Str from "effect/String";
 import * as Errors from "../Errors.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { timingSafeEqualBytes } from "../TokenHash.ts";
 import { PasswordHasher } from "./Password.ts";
 
 /** The PHC identifier of the hashes {@link argon2idHasher} writes and verifies. */
@@ -74,120 +67,36 @@ export const argon2DefaultVerifyLimits: Argon2VerifyLimits = {
   maxParallelism: 8,
 };
 
-const SALT_LENGTH = 16;
-const HASH_LENGTH = 32;
 const MAX_PASSWORD_BYTES = 1024;
-// Bounds on a stored salt and digest: RFC 9106's 8-byte salt floor, and the
-// largest any common implementation writes (64 bytes each).
+// `Password.decode` bounds none of these: a multi-megabyte stored value is
+// refused before it is parsed, a salt or digest out of range before the KDF.
+const MAX_STORED_HASH_LENGTH = 512;
 const MIN_SALT_BYTES = 8;
 const MAX_SALT_BYTES = 64;
 const MIN_HASH_BYTES = 4;
 const MAX_HASH_BYTES = 64;
-const MAX_STORED_HASH_LENGTH = 512;
-const COST_NAMES: ReadonlyArray<string> = ["m", "t", "p"];
 
 const encoder = new TextEncoder();
 
 const fail = (message: string, cause?: unknown): Effect.Effect<never, Errors.HashingError> =>
   Effect.fail(new Errors.HashingError(cause === undefined ? { message } : { message, cause }));
 
-const invalidHash = (detail: string) => fail(`Invalid Argon2 hash: ${detail}`);
-
 const isPositiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 
-const parsePositiveInt = (value: string | undefined): number =>
-  value !== undefined && /^[0-9]+$/.test(value) && Number(value) > 0 ? Number(value) : Number.NaN;
+const isNonEmptyString = (value: unknown): value is string =>
+  P.isString(value) && Str.isNonEmpty(value);
 
-/** PHC base64: standard alphabet, no padding. Refuses any non-canonical spelling. */
-const decodePhcBase64 = (text: string): Uint8Array | undefined => {
-  if (!/^[A-Za-z0-9+/]*$/.test(text) || text.length % 4 === 1) return undefined;
-  const decoded = Base64.decode(text.padEnd(text.length + ((4 - (text.length % 4)) % 4), "="));
-  if (Result.isFailure(decoded) || encodePhcBase64(decoded.success) !== text) return undefined;
-  return decoded.success;
-};
+const resolveCosts = (options?: Argon2Options): Argon2Profile => ({
+  memoryCost: options?.memoryCost ?? argon2DefaultProfile.memoryCost,
+  timeCost: options?.timeCost ?? argon2DefaultProfile.timeCost,
+  parallelism: options?.parallelism ?? argon2DefaultProfile.parallelism,
+});
 
-const encodePhcBase64 = (bytes: Uint8Array): string => Base64.encode(bytes).replace(/=+$/, "");
-
-interface StoredArgon2 {
-  readonly costs: Argon2Profile;
-  readonly salt: Uint8Array;
-  readonly digest: Uint8Array;
-}
-
-/**
- * Parse the `m=..,t=..,p=..` segment, in any order. A malformed pair, an
- * unknown or repeated name (`m=4294967295,m=256` must not read as either) or
- * a value that is not a positive decimal integer is refused.
- */
-const parseCosts = (parameters: string): Result.Result<Argon2Profile, string> => {
-  const pairs = Arr.map(parameters.split(","), (parameter) => {
-    const [name, value, ...rest] = parameter.split("=");
-    return { parameter, name, value, extra: Arr.isReadonlyArrayNonEmpty(rest) };
-  });
-  const malformed = Arr.findFirst(
-    pairs,
-    ({ name, value, extra }) => name === undefined || value === undefined || extra,
-  );
-  if (Option.isSome(malformed)) {
-    return Result.fail(`malformed parameter "${malformed.value.parameter}"`);
-  }
-  const names = Arr.map(pairs, ({ name }) => name);
-  const unexpected = Arr.findFirst(names, (name) => !Arr.contains(COST_NAMES, name));
-  if (Option.isSome(unexpected)) return Result.fail(`unknown parameter "${unexpected.value}"`);
-  if (Arr.dedupe(names).length !== names.length) {
-    return Result.fail(`repeated parameter in "${parameters}"`);
-  }
-  const costs: Record<string, number> = R.fromEntries(
-    Arr.map(pairs, ({ name, value }): readonly [string, number] => [name, parsePositiveInt(value)]),
-  );
-  const profile = {
-    memoryCost: costs["m"] ?? Number.NaN,
-    timeCost: costs["t"] ?? Number.NaN,
-    parallelism: costs["p"] ?? Number.NaN,
-  };
-  return Arr.every([profile.memoryCost, profile.timeCost, profile.parallelism], Number.isFinite)
-    ? Result.succeed(profile)
-    : Result.fail(`malformed parameters "${parameters}"`);
-};
-
-/**
- * Read a stored `$argon2id$v=19$m=…,t=…,p=…$salt$hash`, refusing anything
- * this hasher cannot recompute: another variant (the `Kdf` service derives
- * only Argon2id), another version, malformed costs, salt or digest.
- */
-const parseStored = (hash: string): Result.Result<StoredArgon2, string> => {
-  if (hash.length > MAX_STORED_HASH_LENGTH) {
-    return Result.fail(`longer than ${MAX_STORED_HASH_LENGTH} characters`);
-  }
-  const segments = hash.split("$");
-  const [empty, variant, version, parameters, saltText, digestText] = segments;
-  if (
-    segments.length !== 6 ||
-    empty !== "" ||
-    variant === undefined ||
-    version === undefined ||
-    parameters === undefined ||
-    saltText === undefined ||
-    digestText === undefined
-  ) {
-    return Result.fail("expected $argon2id$v=19$m=...,t=...,p=...$salt$hash");
-  }
-  if (variant !== ARGON2ID) return Result.fail(`unsupported variant "${variant}"`);
-  if (version !== "v=19") {
-    return Result.fail(`unsupported version "${version}" (only v=19 is supported)`);
-  }
-  const costs = parseCosts(parameters);
-  if (Result.isFailure(costs)) return Result.fail(costs.failure);
-  const salt = decodePhcBase64(saltText);
-  if (salt === undefined || salt.length < MIN_SALT_BYTES || salt.length > MAX_SALT_BYTES) {
-    return Result.fail("malformed salt");
-  }
-  const digest = decodePhcBase64(digestText);
-  if (digest === undefined || digest.length < MIN_HASH_BYTES || digest.length > MAX_HASH_BYTES) {
-    return Result.fail("malformed digest");
-  }
-  return Result.succeed({ costs: costs.success, salt, digest });
-};
+const resolveLimits = (options?: Argon2Options): Argon2VerifyLimits => ({
+  maxMemoryKiB: options?.maxMemoryKiB ?? argon2DefaultVerifyLimits.maxMemoryKiB,
+  maxIterations: options?.maxIterations ?? argon2DefaultVerifyLimits.maxIterations,
+  maxParallelism: options?.maxParallelism ?? argon2DefaultVerifyLimits.maxParallelism,
+});
 
 /** Why stored costs are over the ceiling, or `undefined` when they are within it. */
 const overCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits): string | undefined => {
@@ -230,91 +139,108 @@ const requireUsableConfig = (costs: Argon2Profile, limits: Argon2VerifyLimits): 
   }
 };
 
-const isNonEmptyString = (value: unknown): value is string =>
-  P.isString(value) && Str.isNonEmpty(value);
+/**
+ * Decode a stored hash and check it is one `verify` runs: argon2id, within
+ * the ceiling, with a salt and digest in range. Fails with the reason.
+ */
+const readStored = (
+  hash: string,
+  limits: Argon2VerifyLimits,
+): Effect.Effect<CryptoPassword.PasswordHash, Errors.HashingError> =>
+  Effect.gen(function* () {
+    if (hash.length > MAX_STORED_HASH_LENGTH) {
+      return yield* fail(`Invalid Argon2 hash: longer than ${MAX_STORED_HASH_LENGTH} characters`);
+    }
+    const stored = yield* CryptoPassword.decode(hash).pipe(
+      Effect.catchTag("CryptoError", (error) =>
+        fail("Invalid Argon2 hash: expected $argon2id$v=19$m=...,t=...,p=...$salt$hash", error),
+      ),
+    );
+    const { algorithm } = stored;
+    if (!P.isTagged(algorithm, "Argon2id")) {
+      return yield* fail(`Invalid Argon2 hash: unsupported algorithm "${algorithm.name}"`);
+    }
+    const over = overCeiling(
+      {
+        memoryCost: algorithm.memory,
+        timeCost: algorithm.passes,
+        parallelism: algorithm.parallelism,
+      },
+      limits,
+    );
+    if (over !== undefined) return yield* fail(`Argon2 hash exceeds the verify ceiling: ${over}`);
+    if (stored.salt.length < MIN_SALT_BYTES || stored.salt.length > MAX_SALT_BYTES) {
+      return yield* fail(
+        `Invalid Argon2 hash: salt must be ${MIN_SALT_BYTES} to ${MAX_SALT_BYTES} bytes`,
+      );
+    }
+    if (stored.hash.length < MIN_HASH_BYTES || stored.hash.length > MAX_HASH_BYTES) {
+      return yield* fail(
+        `Invalid Argon2 hash: digest must be ${MIN_HASH_BYTES} to ${MAX_HASH_BYTES} bytes`,
+      );
+    }
+    return stored;
+  });
+
+const kdfFailure = (action: string) => (error: CryptoError.CryptoError) =>
+  fail(
+    P.isTagged(error.reason, "Unsupported")
+      ? "Argon2id is not available on this Kdf layer (it needs NodeCrypto.layerKdf on Node.js 24.7+ or Bun 1.4+)"
+      : `Failed to ${action} with Argon2id`,
+    error,
+  );
 
 /**
- * Builds an Argon2id {@link PasswordHasher} over the given `Kdf` service.
+ * Adapts an `effect/crypto` {@link CryptoPassword.Password} service that
+ * hashes with Argon2id into a {@link PasswordHasher}, adding what the seam
+ * promises on top of it.
  *
- * Hashes are standard PHC strings (`$argon2id$v=19$m=…,t=…,p=…$salt$hash`,
- * 16-byte salt, 32-byte digest), so hashes written by any other Argon2id
- * implementation, effect-auth-argon2 included, verify. `verify` reads every
- * cost, the salt and the digest length from the stored hash; the one thing it
- * reads from `options` is the ceiling, and a stored hash over it fails with a
- * `HashingError` before the KDF runs. A malformed or non-argon2id hash fails
- * too; a wrong password is `false`. `needsRehash` is true for a hash with a
- * cost below the configured one, or one `verify` refuses.
+ * Hashes are standard PHC strings (`$argon2id$v=19$m=…,t=…,p=…$salt$hash`),
+ * so hashes written by any other Argon2id implementation, effect-auth-argon2
+ * included, verify. `verify` reads every cost from the stored hash; from
+ * `options` it reads only the ceiling, and a stored hash over it fails with a
+ * `HashingError` before the KDF runs (`Password.verify` itself trusts stored
+ * costs). A malformed or non-argon2id hash fails too; a wrong password is
+ * `false`; a password over 1,024 UTF-8 bytes is `false` without the KDF.
+ * `needsRehash` is true for a hash `hash` would not write now, or one
+ * `verify` refuses.
  *
- * Throws a `RangeError` when a cost or limit is not a positive integer, or a
- * cost is over the ceiling.
- *
- * On a `Kdf` without Argon2id (`Kdf.layerWebCrypto`, Cloudflare Workers, Node
- * before 24.7), `hash` and `verify` fail with a `HashingError`.
+ * `passwords` must hash with `Kdf.argon2id` at the costs in `options`; use
+ * {@link argon2idHasherLayer}, which builds it. Throws a `RangeError` when a
+ * cost or limit is not a positive integer, or a cost is over the ceiling.
  */
 export const argon2idHasher = (
-  kdf: typeof Kdf.Kdf.Service,
-  random: typeof SecureRandom.SecureRandom.Service,
+  passwords: typeof CryptoPassword.Password.Service,
   options?: Argon2Options,
 ): typeof PasswordHasher.Service => {
-  const costs: Argon2Profile = {
-    memoryCost: options?.memoryCost ?? argon2DefaultProfile.memoryCost,
-    timeCost: options?.timeCost ?? argon2DefaultProfile.timeCost,
-    parallelism: options?.parallelism ?? argon2DefaultProfile.parallelism,
-  };
-  const limits: Argon2VerifyLimits = {
-    maxMemoryKiB: options?.maxMemoryKiB ?? argon2DefaultVerifyLimits.maxMemoryKiB,
-    maxIterations: options?.maxIterations ?? argon2DefaultVerifyLimits.maxIterations,
-    maxParallelism: options?.maxParallelism ?? argon2DefaultVerifyLimits.maxParallelism,
-  };
+  const costs = resolveCosts(options);
+  const limits = resolveLimits(options);
   requireUsableConfig(costs, limits);
 
-  const derive = (password: Uint8Array, salt: Uint8Array, length: number, at: Argon2Profile) =>
-    kdf
-      .derive(
-        Kdf.argon2id({ memory: at.memoryCost, passes: at.timeCost, parallelism: at.parallelism }),
-        password,
-        { salt, length },
-      )
-      .pipe(
-        Effect.catchTag("CryptoError", (error) =>
-          fail(
-            error.reason._tag === "Unsupported"
-              ? "Argon2id is not available on this Kdf layer (it needs NodeCrypto.layerKdf on Node.js 24.7+ or Bun 1.4+)"
-              : "Failed to derive Argon2id key",
-            error,
-          ),
-        ),
-      );
+  const refused = (hash: string): boolean =>
+    Exit.isFailure(Effect.runSyncExit(readStored(hash, limits)));
 
   return {
     algorithm: ARGON2ID,
 
-    needsRehash: (hash: string): boolean => {
-      const stored = parseStored(hash);
-      if (Result.isFailure(stored)) return true;
-      const { memoryCost, timeCost, parallelism } = stored.success.costs;
-      return (
-        overCeiling(stored.success.costs, limits) !== undefined ||
-        memoryCost < costs.memoryCost ||
-        timeCost < costs.timeCost ||
-        parallelism < costs.parallelism ||
-        stored.success.digest.length !== HASH_LENGTH
-      );
-    },
+    needsRehash: (hash: string): boolean =>
+      refused(hash) ||
+      Exit.match(Effect.runSyncExit(passwords.needsRehash(hash)), {
+        onFailure: () => true,
+        onSuccess: (stale) => stale,
+      }),
 
     hash: Effect.fn("effect-auth.password.hash", { attributes: { algorithm: ARGON2ID } })(
       function* (password: string) {
         if (!isNonEmptyString(password)) {
           return yield* fail("Password must be a non-empty string");
         }
-        const secret = encoder.encode(password);
-        if (secret.length > MAX_PASSWORD_BYTES) {
+        if (encoder.encode(password).length > MAX_PASSWORD_BYTES) {
           return yield* fail("Password exceeds maximum length");
         }
-        const salt = yield* random.randomBytes(SALT_LENGTH);
-        const digest = yield* derive(secret, salt, HASH_LENGTH, costs);
-        const params = `m=${costs.memoryCost},t=${costs.timeCost},p=${costs.parallelism}`;
-        const hash = `$${ARGON2ID}$v=19$${params}$${encodePhcBase64(salt)}$${encodePhcBase64(digest)}`;
+        const hash = yield* passwords
+          .hash(password)
+          .pipe(Effect.catchTag("CryptoError", kdfFailure("hash")));
         return { hash, algorithm: ARGON2ID };
       },
     ),
@@ -325,27 +251,22 @@ export const argon2idHasher = (
           return yield* fail("Password must be a non-empty string");
         }
         if (!isNonEmptyString(hash)) return yield* fail("Hash must be a non-empty string");
-        const secret = encoder.encode(password);
         // Anti-DoS: an absurdly long password never reaches the KDF.
-        if (secret.length > MAX_PASSWORD_BYTES) return false;
-        const stored = parseStored(hash);
-        if (Result.isFailure(stored)) return yield* invalidHash(stored.failure);
-        const over = overCeiling(stored.success.costs, limits);
-        if (over !== undefined) {
-          return yield* fail(`Argon2 hash exceeds the verify ceiling: ${over}`);
-        }
-        const { costs: at, salt, digest } = stored.success;
-        const derived = yield* derive(secret, salt, digest.length, at);
-        return timingSafeEqualBytes(derived, digest);
+        if (encoder.encode(password).length > MAX_PASSWORD_BYTES) return false;
+        yield* readStored(hash, limits);
+        return yield* passwords
+          .verify(password, hash)
+          .pipe(Effect.catchTag("CryptoError", kdfFailure("verify")));
       },
     ),
   };
 };
 
 /**
- * A layer providing {@link argon2idHasher} as the {@link PasswordHasher}, over
- * the `Kdf` service the application provides: `NodeCrypto.layerKdf` from
- * `@effect/platform-node` or `@effect/platform-bun`.
+ * A layer providing {@link argon2idHasher} as the {@link PasswordHasher}: an
+ * `effect/crypto` `Password` service hashing with `Kdf.argon2id` at the
+ * configured costs, over the `Kdf` the application provides
+ * (`NodeCrypto.layerKdf` from `@effect/platform-node` or `@effect/platform-bun`).
  *
  * @example
  * ```ts
@@ -366,11 +287,23 @@ export const argon2idHasher = (
  */
 export const argon2idHasherLayer = (
   options?: Argon2Options,
-): Layer.Layer<PasswordHasher, never, Kdf.Kdf> =>
-  Layer.effect(
+): Layer.Layer<PasswordHasher, never, Kdf.Kdf> => {
+  const costs = resolveCosts(options);
+  return Layer.effect(
     PasswordHasher,
     Effect.gen(function* () {
-      const kdf = yield* Kdf.Kdf;
-      return argon2idHasher(kdf, PlatformCrypto.instance, options);
+      return argon2idHasher(yield* CryptoPassword.Password, options);
     }),
+  ).pipe(
+    Layer.provide(
+      CryptoPassword.layer({
+        algorithm: Kdf.argon2id({
+          memory: costs.memoryCost,
+          passes: costs.timeCost,
+          parallelism: costs.parallelism,
+        }),
+      }),
+    ),
+    Layer.provide(Layer.succeed(SecureRandom.SecureRandom, PlatformCrypto.instance)),
   );
+};

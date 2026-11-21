@@ -9,8 +9,8 @@ catalog:
   "@changesets/cli": ^3.0.3
   "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.5
-  "@effect/sql-pg": 4.1.4
-  "@effect/sql-pglite": 4.1.4
+  "@effect/sql-pg": 4.1.5
+  "@effect/sql-pglite": 4.1.5
   # Patches `@typescript/native` and vite-plus's oxlint and tsrs; moves with them (see its `components` table).
   "@effect/tsgo": 0.73.2
   "@electric-sql/pglite": ^0.5.17
@@ -35,7 +35,7 @@ catalog:
   better-sqlite3: ^13.2.0
   # The tagged rc; `drizzleApplicationsPin` in scripts/check-dist.ts tracks the apps' build.
   drizzle-orm: 1.0.0-rc.5
-  effect: 4.1.4
+  effect: 4.1.5
   fallow: 3.44.0
   jsdom: ^31.0.1
   semver: ^7.8.6
@@ -59,8 +59,8 @@ catalogs:
   peers:
     "@thomasfosterau/effect-jsonapi": ^0.22.1
     "@node-saml/node-saml": ^5.2.0
-    # Raised from ^4.0.0: the core uses `effect/crypto`, new in 4.1.
-    effect: ^4.1.0
+    # Raised from ^4.0.0: the core uses `effect/crypto` (4.1) and its `Password` module (4.1.5).
+    effect: ^4.1.5
     svelte: ^5.20.0
   drizzle-peers:
     drizzle-orm: ">=1.0.0-rc.5 <2"

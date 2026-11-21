@@ -2,7 +2,7 @@ import { describe, it, expect, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
 import { Effect, Exit, Layer } from "effect";
 import * as P from "effect/Predicate";
-import { Kdf } from "effect/crypto";
+import { Kdf, Password as CryptoPassword, SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
   argon2DefaultProfile,
@@ -43,9 +43,33 @@ const nodeKdf = () => {
 };
 
 const cheap: Argon2Options = { memoryCost: 256, timeCost: 1, parallelism: 1 };
+/** The `effect/crypto` `Password` service over `kdf`, hashing at the costs in `options`. */
+const cryptoPasswords = (kdf: typeof Kdf.Kdf.Service, options?: Argon2Options) => {
+  const costs = { ...argon2DefaultProfile, ...options };
+  const algorithm = Kdf.argon2id({
+    memory: costs.memoryCost,
+    passes: costs.timeCost,
+    parallelism: costs.parallelism,
+  });
+  return Effect.runSync(
+    Effect.gen(function* () {
+      return yield* CryptoPassword.Password;
+    }).pipe(
+      Effect.provide(
+        CryptoPassword.layer({ algorithm }).pipe(
+          Layer.provide([
+            Layer.succeed(Kdf.Kdf, kdf),
+            Layer.succeed(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          ]),
+        ),
+      ),
+    ),
+  );
+};
+
 const hasherWith = (options?: Argon2Options) => {
   const { kdf, calls } = nodeKdf();
-  return { hasher: argon2idHasher(kdf, PlatformCrypto.instance, options), calls };
+  return { hasher: argon2idHasher(cryptoPasswords(kdf, options), options), calls };
 };
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 const runExit = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromiseExit(effect);
@@ -132,6 +156,8 @@ describe("argon2idHasher refusals", () => {
 
   it.each([
     "$argon2i$v=19$m=4096,t=3,p=1$c2FsdHNhbHRzYWx0c2FsdA$VBRqg4+btGy7IwGibYuU9f0M9kmWU0rIiVedJHJJyHI",
+    "$pbkdf2-sha256$i=1000,l=32$MDEyMzQ1Njc4OWFiY2RlZg$gy5SuVm5Z7Vw7keB9se9p87QGcomaseB/S2U1OhTsM0",
+    "$argon2id$v=19$m=19456,t=2,p=1$MDEyMzQ1Njc4OWFiY2RlZg$Z3k",
     "$argon2id$v=16$m=19456,t=2,p=1$MDEyMzQ1Njc4OWFiY2RlZg$gy5SuVm5Z7Vw7keB9se9p87QGcomaseB/S2U1OhTsM0",
     "$argon2id$v=19$m=19456,m=1,t=2,p=1$MDEyMzQ1Njc4OWFiY2RlZg$gy5SuVm5Z7Vw7keB9se9p87QGcomaseB/S2U1OhTsM0",
     "$argon2id$v=19$m=19456,t=2,p=1,x=1$MDEyMzQ1Njc4OWFiY2RlZg$gy5SuVm5Z7Vw7keB9se9p87QGcomaseB/S2U1OhTsM0",
@@ -162,8 +188,7 @@ describe("argon2idHasher refusals", () => {
 
   it("throws on a configuration whose hashes would not verify", () => {
     const { kdf } = nodeKdf();
-    const make = (options: Argon2Options) => () =>
-      argon2idHasher(kdf, PlatformCrypto.instance, options);
+    const make = (options: Argon2Options) => () => argon2idHasher(cryptoPasswords(kdf), options);
     expect(make({ memoryCost: 262144 })).toThrow(RangeError);
     expect(make({ timeCost: 0 })).toThrow(RangeError);
     expect(make({ parallelism: Number.NaN })).toThrow(RangeError);
