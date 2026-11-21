@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-drizzle",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "PostgreSQL, SQLite and MySQL storage layers for effect-auth built on Drizzle ORM.",
   "keywords": [
     "auth",
@@ -42,10 +42,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@effect/docgen": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/sql-pglite": "catalog:",
     "@electric-sql/pglite": "catalog:",
@@ -63,6 +67,6 @@
     "effect": "catalog:peers"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+    "node": ">=22"
   }
 }

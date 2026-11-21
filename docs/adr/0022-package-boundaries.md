@@ -57,6 +57,8 @@ Applied:
 - `effect-auth-argon2` (`hash-wasm`), `effect-auth-drizzle` (`drizzle-orm`) and the Svelte binding
   (`svelte`) bring dependencies and stay packages. `effect-auth-resend`, `effect-auth-twilio` and
   `effect-auth-sveltekit` stay as they are, by the owner's decision.
+  [ADR-0025](0025-delivery-through-effect-connect.md) later removed `effect-auth-resend` and
+  `effect-auth-twilio`: the core sends through effect-connect's providers instead.
 
 ## Consequences
 

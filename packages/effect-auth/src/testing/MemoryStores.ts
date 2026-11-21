@@ -26,7 +26,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";
 import { type AccountToken, AccountManagementStore } from "../AccountManagement.ts";
-import { type ApiKey, ApiKeyStore } from "../ApiKey.ts";
+import { type ApiKey, ApiKeyStore, applyApiKeyUse } from "../ApiKey.ts";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
 import { type KeyValueStoreKeys, layerKV, layerMemoryKeyValueStore } from "../KeyValueStores.ts";
@@ -61,6 +61,16 @@ import { TrustedDeviceStore, type TrustedDeviceRecord } from "../TrustedDevice.t
 import type * as Types from "../Types.ts";
 import { UserServiceStore } from "../User.ts";
 import { type CreateUserResult, UserStore } from "../UserStore.ts";
+
+/**
+ * Remove `key` from `map` and return what it held, or `null`: a single-use
+ * store's `consume`, atomic because it runs in one synchronous step.
+ */
+const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
+  const found = Option.getOrNull(MutableHashMap.get(map, key));
+  if (found !== null) MutableHashMap.remove(map, key);
+  return found;
+};
 
 /** Removes every entry whose value matches `predicate`. */
 const removeWhere = <V>(
@@ -131,7 +141,7 @@ export const memoryUserStore = (
 /**
  * `UserServiceStore` over a {@link MemoryUserTable}: `delete` removes the
  * user row and its password hash, and nothing else, as the contract says;
- * the services that delete an account purge the rest first (#601).
+ * the services that delete an account purge the rest first.
  *
  * @since 0.5.0
  * @category constructors
@@ -220,6 +230,19 @@ export const memorySessionStore = (
   get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
   update: (session) =>
     Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+  touch: (sessionId, touch) =>
+    Effect.sync(() =>
+      Option.getOrNull(
+        MutableHashMap.get(sessions, sessionId).pipe(
+          Option.filter((session) => session.expiresAt.getTime() >= touch.lastActivityAt.getTime()),
+          Option.map((session) => {
+            const touched = { ...session, ...touch };
+            MutableHashMap.set(sessions, sessionId, touched);
+            return touched;
+          }),
+        ),
+      ),
+    ),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
@@ -254,6 +277,13 @@ export const memoryApiKeyStore = (
       ),
     ),
   update: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
+  recordUse: (id, use) =>
+    Effect.sync(() => {
+      const stored = Option.getOrNull(MutableHashMap.get(keys, id));
+      const spent = stored === null ? null : applyApiKeyUse(stored, use);
+      if (spent !== null) MutableHashMap.set(keys, id, spent);
+      return spent;
+    }),
   delete: (id) => Effect.sync(() => void MutableHashMap.remove(keys, id)),
   listByUserId: (userId) =>
     Effect.sync(() =>
@@ -331,6 +361,27 @@ export const memoryMultiFactorStore = (
   upsert: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.userId, record), record)),
   delete: (userId) => Effect.sync(() => void MutableHashMap.remove(records, userId)),
+  // Each spend is one synchronous step, so it is atomic on this map.
+  useTotpCounter: (userId, counter) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, userId));
+      if (record === null || !record.verified) return false;
+      if (record.lastUsedCounter !== undefined && record.lastUsedCounter >= counter) return false;
+      MutableHashMap.set(records, userId, { ...record, lastUsedCounter: counter });
+      return true;
+    }),
+  useBackupCode: (userId, codeHash) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, userId));
+      if (record === null || !record.verified || !record.backupCodes.includes(codeHash)) {
+        return false;
+      }
+      MutableHashMap.set(records, userId, {
+        ...record,
+        backupCodes: record.backupCodes.filter((code) => code !== codeHash),
+      });
+      return true;
+    }),
 });
 
 /**
@@ -368,13 +419,20 @@ export const memoryOtpSecondFactorStore = (
     Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, pendingToken))),
   update: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
+  incrementAttempts: (pendingToken) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(records, pendingToken));
+      if (record === null) return null;
+      MutableHashMap.set(records, pendingToken, { ...record, attempts: record.attempts + 1 });
+      return record.attempts + 1;
+    }),
   delete: (pendingToken) => Effect.sync(() => void MutableHashMap.remove(records, pendingToken)),
 });
 
 /**
- * `RateLimitStore` over a map, for the per-recipient send caps (#684) and the
+ * `RateLimitStore` over a map, for the per-recipient send caps and the
  * limiters in a test: `increment` starts a new window when there is none or
- * it has expired, as the contract requires (#455). Pass `entries` to read the
+ * it has expired, as the contract requires. Pass `entries` to read the
  * keys a test wrote.
  *
  * @since 0.3.0
@@ -421,7 +479,7 @@ export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeySt
 const codeKey = (address: string, purpose: string): string => `${purpose}:${address}`;
 
 /**
- * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore` (#590)
+ * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore`
  * over a `MutableHashMap` keyed by purpose and address, to spread into an
  * in-memory code store. The budget lives apart from the code records, so
  * replacing or deleting a code leaves it.
@@ -471,9 +529,7 @@ export const memoryPhoneOtpStore = (
   incrementAttempts: (phoneNumber, purpose) =>
     Effect.suspend(() => {
       const record = Option.getOrNull(MutableHashMap.get(records, codeKey(phoneNumber, purpose)));
-      if (record === null) {
-        return Effect.fail(new Errors.AuthError({ message: "OTP record not found" }));
-      }
+      if (record === null) return Effect.succeed(null);
       const updated: PhoneOtpRecord = { ...record, attempts: record.attempts + 1 };
       MutableHashMap.set(records, codeKey(phoneNumber, purpose), updated);
       return Effect.succeed(updated.attempts);
@@ -566,6 +622,7 @@ export const memoryOidcCodeStore = (
 ): typeof OidcCodeStore.Service => ({
   create: (code) => Effect.sync(() => (MutableHashMap.set(codes, code.codeHash, code), code)),
   get: (codeHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(codes, codeHash))),
+  consume: (codeHash) => Effect.sync(() => take(codes, codeHash)),
   delete: (codeHash) => Effect.sync(() => void MutableHashMap.remove(codes, codeHash)),
 });
 
@@ -581,6 +638,7 @@ export const memoryOidcTokenStore = (
 ): typeof OidcTokenStore.Service => ({
   create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.tokenHash, token), token)),
   get: (tokenHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, tokenHash))),
+  consume: (tokenHash) => Effect.sync(() => take(tokens, tokenHash)),
   delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(tokens, tokenHash)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {

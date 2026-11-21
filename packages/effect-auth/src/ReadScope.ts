@@ -470,7 +470,7 @@ const member = (fact: SetFact): Predicate => ({
 const equalsAtom = (name: string, kind: AttributeKind, value: Entity.AttributeValue): Expr => {
   const atom = (scalar: Scalar): Expr => ({ _tag: "Eq", attribute: name, value: scalar });
   if (!P.isString(kind)) {
-    // An empty id or type names no entity, so it equals no row (#661, #666),
+    // An empty id or type names no entity, so it equals no row,
     // as in the kernel.
     return P.isObject(value) &&
       Entity.isEntityValue(value) &&
@@ -704,7 +704,7 @@ const partial = (env: Env, condition: Condition.Condition): Partial => {
  * The resource a compile stands in for the unbound row: never in the slice,
  * and its id is never read (a resource `eq` scope or a read of the resource
  * reference itself is unsupported), but it must name an entity, or the kernel
- * refuses the request (#661).
+ * refuses the request.
  */
 const placeholder = (binding: Binding): Entity.EntityRef => Entity.ref(binding.resourceType, "row");
 
@@ -753,7 +753,7 @@ const policyOutcomes = (env: Env, policy: Policy.DeclarativePolicy): Partial => 
  *
  * A principal or action with an empty id or type names no entity: the kernel
  * refuses every row for it (`"invalid-request"`), so the scope is
- * {@link deny} (#661, #666). So is a binding whose `resourceType` is empty,
+ * {@link deny}. So is a binding whose `resourceType` is empty,
  * since the kernel refuses each of its rows.
  *
  * @since 0.1.0

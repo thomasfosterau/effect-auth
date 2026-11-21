@@ -14,14 +14,17 @@
  * - `MaybeCurrentSession` — analogous service for optional-auth handlers;
  *   holds `Option<SessionWithUser>` (some when authenticated, none otherwise).
  * - `AuthMiddleware` — required-auth `HttpApiMiddleware.Service` tag.
- * - `OptionalAuthMiddleware` — optional-auth variant; never fails.
+ * - `OptionalAuthMiddleware` — optional-auth variant; fails only on a store
+ *   fault (a logged 500), unless the app opts to degrade.
  * - `layer(config?)` — returns the `Layer` that implements
  *   `AuthMiddleware`. Reads the session cookie (honoring the cache) or an
  *   `Authorization: Bearer/Token` header; fails with `Unauthorized` (401) when
- *   neither is present or the session is expired/invalid.
- * - `optionalLayer(config?)` — returns the `Layer` that
- *   implements `OptionalAuthMiddleware`. Never fails; provides
- *   `MaybeCurrentSession` with `Option.none()` when unauthenticated.
+ *   neither is present or the session is expired/invalid, and with a logged
+ *   `InternalServerError` (500) when the session or user store faults.
+ * - `optionalLayer(config?, options?)` — returns the `Layer` that
+ *   implements `OptionalAuthMiddleware`. Provides `MaybeCurrentSession` with
+ *   `Option.none()` when unauthenticated; a store fault is a logged 500 unless
+ *   `options.onDegraded` is given.
  *
  * The `AuthMiddleware` class carries `HttpApiSecurity` definitions for the
  * session cookie and Bearer token schemes so the derived OpenAPI spec
@@ -54,6 +57,14 @@
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {
@@ -130,7 +141,7 @@
  * ```
  */
 
-import { Clock, Effect, Layer, Redacted } from "effect";
+import { Cause, Clock, Effect, Layer, Redacted } from "effect";
 import * as Option from "effect/Option";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
 import { HttpServerRequest } from "effect/http";
@@ -143,17 +154,19 @@ import {
   MaybeCurrentSession,
   principalOf,
 } from "../SessionContext.ts";
-import { resolveMessage } from "../Messages.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Types from "../Types.ts";
 import {
   dataCookieName,
+  internalServerError,
   resolveCookieConfig,
   sessionIdFromRequest,
+  sessionValidationFailure,
   credentialClassFromRequest,
   type CookieConfig,
   type ResolvedCookieConfig,
 } from "./HttpServer.ts";
+import type { AuthError } from "../Errors.ts";
 import { decodeSessionCacheCookie, sessionCacheGateAttributes } from "../SessionCookieCache.ts";
 import { hashToken } from "../TokenHash.ts";
 
@@ -228,7 +241,8 @@ const _authSecurity = {
  * for the `Authorization` header) to the downstream handler.
  *
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
- * invalid.
+ * invalid, and with a logged `InternalServerError` (HTTP 500) when the session
+ * or user store faults.
  *
  * It also provides `MaybeCurrentSession` — always `Option.some` here, since
  * this middleware only reaches the handler when a session resolved. That is
@@ -269,7 +283,7 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
       | CurrentCredential;
   }
 >()("@effect-auth/AuthMiddleware", {
-  error: S.UnauthorizedError,
+  error: [S.UnauthorizedError, S.InternalError],
   security: _authSecurity,
 }) {}
 
@@ -282,8 +296,10 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
  *
  * Attach to an `HttpApiGroup` or `HttpApiEndpoint` with
  * `.middleware(OptionalAuthMiddleware)`. Behaves like `AuthMiddleware` but
- * never fails: when no valid session is found, it provides
- * `MaybeCurrentSession` with `Option.none()`.
+ * does not refuse an anonymous caller: when no valid session is found, it
+ * provides `MaybeCurrentSession` with `Option.none()`. A session or user store
+ * fault is a logged `500`, unless `optionalLayer`'s `onDegraded` is
+ * given.
  *
  * When (and only when) a session resolves, `CurrentPrincipal`
  * (`User::"<user.id>"`) and `CurrentCredential` are provided too. Neither is
@@ -310,7 +326,26 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
 export class OptionalAuthMiddleware extends HttpApiMiddleware.Service<
   OptionalAuthMiddleware,
   { requires: SessionService | Hooks; provides: MaybeCurrentSession }
->()("@effect-auth/OptionalAuthMiddleware") {}
+>()("@effect-auth/OptionalAuthMiddleware", {
+  error: S.InternalError,
+}) {}
+
+/**
+ * Options for {@link optionalLayer}.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface OptionalAuthOptions {
+  /**
+   * Serve the request as anonymous when the session or user store faults,
+   * after reporting the fault here. Without it a fault is a logged `500`:
+   * a store outage never silently turns signed-in callers into
+   * anonymous ones. As with `SessionResolution.resolveFailOpen`'s
+   * `onDegraded`, choosing to degrade means naming where it is reported.
+   */
+  readonly onDegraded?: ((cause: Cause.Cause<AuthError>) => Effect.Effect<void>) | undefined;
+}
 
 // =============================================================================
 // Internal session resolution helper
@@ -326,12 +361,18 @@ export class OptionalAuthMiddleware extends HttpApiMiddleware.Service<
  *    validated against the session store.
  *
  * Returns `Option.none()` when no token is found at all.
- * Fails with `Unauthorized` when a token is present but invalid/expired.
+ * Fails with `Unauthorized` when a token is present but invalid/expired, and
+ * with the store's `AuthError` when the session or user store faults:
+ * each middleware decides how a fault is answered, never as a `401`.
  */
 const resolveSessionFromRequest = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
-): Effect.Effect<Option.Option<Types.SessionWithUser>, S.Unauthorized, SessionService | Hooks> =>
+): Effect.Effect<
+  Option.Option<Types.SessionWithUser>,
+  S.Unauthorized | AuthError,
+  SessionService | Hooks
+> =>
   Effect.gen(function* () {
     // --- Cache path ---
     if (cfg.cache !== undefined) {
@@ -357,33 +398,23 @@ const resolveSessionFromRequest = (
     if (sessionId === undefined) return Option.none<Types.SessionWithUser>();
 
     const sessionService = yield* SessionService;
-    const resolved = yield* sessionService.validateSession(sessionId).pipe(
-      Effect.catchTag("UserBannedError", (e) =>
-        resolveMessage(e.code, e.message).pipe(
-          Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
-        ),
-      ),
-      Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
-    );
+    const resolved = yield* sessionService
+      .validateSession(sessionId)
+      .pipe(Effect.catch(sessionValidationFailure));
 
     return Option.some(resolved);
   });
 
-// Internal helper to validate a raw token directly (used by bearer fallback).
-const validateToken = (
-  token: string,
-): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionService | Hooks> =>
-  Effect.gen(function* () {
-    const sessionService = yield* SessionService;
-    return yield* sessionService.validateSession(token).pipe(
-      Effect.catchTag("UserBannedError", (e) =>
-        resolveMessage(e.code, e.message).pipe(
-          Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
-        ),
-      ),
-      Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
-    );
-  });
+/**
+ * The requests whose `conduit_session` attempt met a store fault, so the
+ * `bearer` fallback answers the same `500` rather than a `401` of its own: the
+ * security runtime answers with the last scheme's failure.
+ */
+const faultedRequests = new WeakSet<HttpServerRequest.HttpServerRequest>();
+
+/** The required-auth answer to a store fault: a logged `500`, never a `401`. */
+const requiredAuthFault = (request: HttpServerRequest.HttpServerRequest) => (error: AuthError) =>
+  Effect.sync(() => faultedRequests.add(request)).pipe(Effect.andThen(internalServerError(error)));
 
 // =============================================================================
 // Layer factories
@@ -403,7 +434,8 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  * `CurrentUser` to downstream handlers.
  *
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
- * invalid.
+ * invalid, and with a logged `InternalServerError` (HTTP 500) when the session
+ * or user store faults.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
  *   Defaults match `HttpServer.make` defaults (`name: "conduit_session"`,
@@ -434,6 +466,14 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {
@@ -518,7 +558,9 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
       ...[handler]: SchemeHandlerArgs<"conduit_session">
     ) {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const maybeResolved = yield* resolveSessionFromRequest(request, cfg);
+      const maybeResolved = yield* resolveSessionFromRequest(request, cfg).pipe(
+        Effect.catchTag("AuthError", requiredAuthFault(request)),
+      );
       if (Option.isNone(maybeResolved)) {
         return yield* new S.Unauthorized({ message: "Not authenticated" });
       }
@@ -542,9 +584,19 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
     ) {
       const token = Redacted.value(credential);
       if (!token) {
-        return yield* new S.Unauthorized({ message: "Not authenticated" });
+        // The session path already met a store fault: answer it, not a 401.
+        const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest);
+        return yield* Option.isSome(request) && faultedRequests.has(request.value)
+          ? new S.InternalServerError({ message: "Internal server error" })
+          : new S.Unauthorized({ message: "Not authenticated" });
       }
-      const resolved = yield* validateToken(token);
+      const sessionService = yield* SessionService;
+      const resolved = yield* sessionService
+        .validateSession(token)
+        .pipe(
+          Effect.catch(sessionValidationFailure),
+          Effect.catchTag("AuthError", internalServerError),
+        );
       return yield* handler.pipe(
         Effect.provideService(CurrentSession, resolved.session),
         Effect.provideService(CurrentUser, resolved.user),
@@ -563,12 +615,15 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * `Authorization: Bearer/Token` header) and validates it via `SessionService`
  * (honoring the signed cookie cache).
  *
- * Always succeeds: provides `MaybeCurrentSession` with
- * `Option.some(resolved)` when authenticated, or `Option.none()` when no
- * session is present or it is invalid.
+ * Provides `MaybeCurrentSession` with `Option.some(resolved)` when
+ * authenticated, or `Option.none()` when no session is present or it is
+ * invalid. A session or user store fault fails the request with a logged `500`,
+ * so an outage never serves signed-in callers as anonymous; pass
+ * `onDegraded` to serve them as anonymous instead, reported there.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
  *   Defaults match `HttpServer.make` defaults.
+ * @param options - `onDegraded`, to degrade a store fault to anonymous.
  *
  * @example
  * ```ts
@@ -597,6 +652,14 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {
@@ -673,15 +736,27 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * @since 0.1.0
  * @category constructors
  */
-export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMiddleware> => {
+export const optionalLayer = (
+  config?: CookieConfig,
+  options?: OptionalAuthOptions,
+): Layer.Layer<OptionalAuthMiddleware> => {
   const cfg = resolveCookieConfig(config);
+  const onDegraded = options?.onDegraded;
 
   return Layer.succeed(
     OptionalAuthMiddleware,
     Effect.fn("OptionalAuthMiddleware")(function* (handler, _opts) {
       const request = yield* HttpServerRequest.HttpServerRequest;
+      // An absent or refused session is anonymous; a store fault is a 500
+      // unless the app asked to degrade it.
       const maybeResolved = yield* resolveSessionFromRequest(request, cfg).pipe(
-        Effect.catch(() => Effect.succeed(Option.none<Types.SessionWithUser>())),
+        Effect.catchTags({
+          Unauthorized: () => Effect.succeed(Option.none<Types.SessionWithUser>()),
+          AuthError: (error) =>
+            onDegraded === undefined
+              ? internalServerError(error)
+              : onDegraded(Cause.fail(error)).pipe(Effect.as(Option.none<Types.SessionWithUser>())),
+        }),
       );
       // `CurrentPrincipal`/`CurrentCredential` only exist when someone is
       // actually authenticated, so they are added to the context but never

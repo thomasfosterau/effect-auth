@@ -392,7 +392,7 @@ describe("RemoteSession.resolveAtEdge", () => {
   });
 
   it("a machine caller is not cookieless, so its key still resolves", async () => {
-    // What `GET /api-keys/current` answers: the key, its user included (#730).
+    // What `GET /api-keys/current` answers: the key, its user included.
     const keyDocument = {
       data: {
         type: "api-keys",
@@ -507,7 +507,7 @@ describe("RemoteSession relay", () => {
     expect(await response.json()).toStrictEqual(signedIn);
   });
 
-  it("a first sign-in with no inbound cookie receives its session cookie (#619)", async () => {
+  it("a first sign-in with no inbound cookie receives its session cookie", async () => {
     const { fetcher } = spy(() => signInResponse());
     const client = RemoteSession.make({ fetcher });
 
@@ -668,7 +668,7 @@ const clearing = (cacheControl?: string) =>
     },
   });
 
-describe("a relayed response carrying Set-Cookie is no-store (#628)", () => {
+describe("a relayed response carrying Set-Cookie is no-store", () => {
   it("marks a relayed session cookie no-store, first sign-in and cookie-bearing alike", () => {
     expect(relayed(signInResponse()).headers.get("cache-control")).toBe("no-store");
     expect(relayed(signInResponse(), withSession).headers.get("cache-control")).toBe("no-store");
@@ -772,7 +772,7 @@ describe("RemoteSession.layerFetcher", () => {
 // Against the real handler: the session the edge resolves carries no token
 // ---------------------------------------------------------------------------
 
-describe("RemoteSession over a real Http.make handler (#581)", () => {
+describe("RemoteSession over a real Http.make handler", () => {
   it("resolves the session under its digest; the cookie's token is in no body", async () => {
     const server = makeServerFixture();
     const signUp = await server.handler(

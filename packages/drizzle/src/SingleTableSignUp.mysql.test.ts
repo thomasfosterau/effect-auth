@@ -1,6 +1,6 @@
 /**
  * Core sign-up over the single-table `IdentifierStore` on MySQL, without a MySQL
- * server (#380).
+ * server.
  *
  * As in `SingleTableIdentifierStore.mysql.test.ts`, the dialect runs through
  * `drizzle-orm/mysql-proxy`: what is pinned is the SQL a server would receive.

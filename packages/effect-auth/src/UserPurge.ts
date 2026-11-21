@@ -1,5 +1,5 @@
 /**
- * Deleting a user deletes what they hold (#601).
+ * Deleting a user deletes what they hold.
  *
  * Every path that deletes a user (`AccountManagementService`'s confirmed
  * deletion, `AdminService.removeUser`, `AnonymousService` once an anonymous
@@ -81,7 +81,7 @@ export const userPurgeStores: Effect.Effect<UserPurgeStores> = Effect.map(
 
 /**
  * Delete the unspent magic links and one-time codes sent to `identifier`'s
- * address. The codes' failure budgets (#590) stay: they belong to the
+ * address. The codes' failure budgets stay: they belong to the
  * address, not to the account, and a deletion must not reset them.
  */
 const deleteAddressProofs = (

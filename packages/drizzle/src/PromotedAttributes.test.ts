@@ -1,5 +1,5 @@
 /**
- * Promoted attributes (#182): an attribute the application keeps as a real,
+ * Promoted attributes: an attribute the application keeps as a real,
  * typed column — the applications' `users.role`, with its own `CHECK` — read
  * back into `user.attributes` by the user store, and a users table with no
  * `jsonb` attribute bag at all (the applications' `users` has none).
@@ -166,8 +166,8 @@ const ids = {
 };
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291), with this file's applications tables applied on top, and emptied
+ * The file's one in-memory Postgres, opened from the run's migrated template,
+ * with this file's applications tables applied on top, and emptied
  * before each test. The template's `effect_auth_*` tables are not used here.
  */
 let client: PGlite;

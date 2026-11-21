@@ -11,8 +11,8 @@
  *
  * - `get` returns `null` on a miss; `delete` of a missing key is a no-op.
  * - `increment` counts one request without a read-modify-write, so two
- *   concurrent callers never see the same count (the contract's atomic step,
- *   #455). It is two statements, each atomic on its own: an `UPDATE` that
+ *   concurrent callers never see the same count (the contract's atomic step).
+ *   It is two statements, each atomic on its own: an `UPDATE` that
  *   re-opens the key's window when it has expired (count `0`, a new reset time,
  *   no block), then an upsert that adds one to the count, inserting the row
  *   with a count of `1` when there is none. On PostgreSQL and SQLite the upsert
@@ -22,7 +22,7 @@
  *   one through.
  * - `ttl` is not stored: an expired window is re-opened by the next
  *   `increment`, and the rows of keys never seen again stay until
- *   {@link purgeExpired} deletes them (#686).
+ *   {@link purgeExpired} deletes them.
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
  */
@@ -145,7 +145,7 @@ export const layer = (
 
 /**
  * Delete the rate-limit rows whose window and block have both passed, in one
- * `DELETE` over the ambient {@link DrizzleDatabase} (#686).
+ * `DELETE` over the ambient {@link DrizzleDatabase}.
  *
  * The table holds one row per key, IP and identifier ever counted, and no
  * store call deletes the row of a key that is never seen again, so without a
@@ -156,7 +156,7 @@ export const layer = (
  * still blocked stays. Schedule it from the host (a cron trigger, a timer on a
  * long-lived server); now is read from the `Clock`.
  *
- * With `options.limit` (#729) the `DELETE` takes at most that many of those
+ * With `options.limit` the `DELETE` takes at most that many of those
  * rows, chosen by key through a derived table, which PostgreSQL, SQLite and
  * MySQL all accept (MySQL refuses a `LIMIT` directly inside `IN`):
  * `DELETE … WHERE <spent> AND key IN (SELECT key FROM (SELECT key … WHERE
@@ -209,7 +209,7 @@ const checkLimit = (limit: number | undefined): Effect.Effect<void, Auth.AuthErr
 /** Options for {@link purgeExpired}. */
 export interface PurgeExpiredOptions {
   /**
-   * The most rows one call deletes (#729), a positive integer; omitted, every
+   * The most rows one call deletes, a positive integer; omitted, every
    * spent row goes in one `DELETE`.
    */
   readonly limit?: number | undefined;

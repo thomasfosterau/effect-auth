@@ -22,6 +22,8 @@ import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts"
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { UserService, UserServiceStore } from "../User.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
@@ -61,6 +63,8 @@ const sessionStore = {
       return session;
     }),
 
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, sessionId);
@@ -195,11 +199,11 @@ describe("EmailPasswordService", () => {
     );
     expect(stored?.userId).toBe(result.user.id);
     expect(stored?.verified).toBe(false);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([{ type: "email", value: "test@example.com", verified: false }]);
   });
 
-  it("fails with EmailInUseError when the store's writer returns the existing owner, and leaves the owner untouched (#380)", async () => {
+  it("fails with EmailInUseError when the store's writer returns the existing owner, and leaves the owner untouched", async () => {
     // A writer that upserts on the address. The owner's row lands between the
     // sign-up's pre-check and its insert, so the upsert returns the owner and
     // reports that it inserted nothing.
@@ -599,7 +603,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
   // Both counts are low on purpose: the test is about the rehash-on-sign-in
   // path, not the KDF cost, and a real 600,000-iteration derivation made it
-  // race the 5 s test timeout under host load (#346). The production default
+  // race the 5 s test timeout under host load. The production default
   // is pinned, without running the KDF, in password/Pbkdf2Defaults.test.ts.
   const OLD_PBKDF2_ITERATIONS = 1000;
   const CURRENT_PBKDF2_ITERATIONS = 2000;
@@ -813,6 +817,8 @@ describe("EmailPasswordService - dangling session protection", () => {
         MutableHashMap.set(localSessions, session.id, session);
         return session;
       }),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(localSessions).touch(sessionId, touch),
     delete: (sessionId: string) =>
       Effect.sync(() => {
         MutableHashMap.remove(localSessions, sessionId);
@@ -935,7 +941,7 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signInResult.session && MutableHashMap.has(localSessions, signInResult.session.id)).toBe(
       true,
     );
-    // The record carries the stored id; the token travels beside it (#581).
+    // The record carries the stored id; the token travels beside it.
     expect(signInResult.session?.id).toBe(hashToken(signInResult.token ?? ""));
   });
 
@@ -964,7 +970,7 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signUpResult.session && MutableHashMap.has(localSessions, signUpResult.session.id)).toBe(
       true,
     );
-    // The record carries the stored id; the token travels beside it (#581).
+    // The record carries the stored id; the token travels beside it.
     expect(signUpResult.session?.id).toBe(hashToken(signUpResult.token ?? ""));
   });
 });
@@ -1271,7 +1277,7 @@ const userServiceLayer = (serverOnly: ReadonlyArray<string>) =>
     ),
   );
 
-describe("EmailPasswordService — sign-up never stores authority-bearing attributes (#580)", () => {
+describe("EmailPasswordService — sign-up never stores authority-bearing attributes", () => {
   beforeEach(() => {
     MutableHashMap.clear(users);
     MutableHashMap.clear(identifierRecords);

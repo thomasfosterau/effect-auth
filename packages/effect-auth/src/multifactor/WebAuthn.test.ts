@@ -1123,7 +1123,7 @@ describe("WebAuthn algorithm support", () => {
     expect(err.message).toBe("Failed to parse authenticator data");
   });
 });
-// --- Ceremony binding, user verification and the stored credential (#591) ----
+// --- Ceremony binding, user verification and the stored credential ----
 
 /** Run `program` over a fresh service with `overrides` on the shared config. */
 const withService = <A, E>(
@@ -1162,7 +1162,7 @@ const assertion = (
     return { credentialId, authenticatorData, clientDataJSON: clientData, signature };
   }).pipe(Effect.orDie);
 
-describe("WebAuthn ceremony binding (#591)", () => {
+describe("WebAuthn ceremony binding", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockChallengeStore.challenges);
     MutableHashMap.clear(mockCredentialStore.credentials);
@@ -1259,7 +1259,7 @@ describe("WebAuthn ceremony binding (#591)", () => {
   });
 });
 
-describe("WebAuthn user verification (#591)", () => {
+describe("WebAuthn user verification", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockChallengeStore.challenges);
     MutableHashMap.clear(mockCredentialStore.credentials);
@@ -1371,7 +1371,7 @@ describe("WebAuthn user verification (#591)", () => {
   });
 });
 
-describe("WebAuthn registration stores the attested credential (#591)", () => {
+describe("WebAuthn registration stores the attested credential", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockChallengeStore.challenges);
     MutableHashMap.clear(mockCredentialStore.credentials);
@@ -1490,7 +1490,7 @@ const setUp = <A>(promise: () => Promise<A>) =>
     Effect.orDie,
   );
 
-describe("passkey sign-in runs beforeAuthenticate (#678)", () => {
+describe("passkey sign-in runs beforeAuthenticate", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockChallengeStore.challenges);
     MutableHashMap.clear(mockCredentialStore.credentials);

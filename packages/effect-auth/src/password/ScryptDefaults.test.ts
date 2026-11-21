@@ -12,7 +12,7 @@ import { PasswordHasher, scryptHasher } from "./Password.ts";
 // default is far below that at these parameters, and the real call fails with
 // ERR_CRYPTO_INVALID_SCRYPT_PARAMS when `maxmem` is too small. The
 // round-trip tests in `Password.test.ts` run the real KDF at a cheap explicit
-// cost, so neither file depends on how fast the machine is (#270).
+// cost, so neither file depends on how fast the machine is.
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:crypto")>();
   return {

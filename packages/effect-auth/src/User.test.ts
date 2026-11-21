@@ -116,7 +116,7 @@ describe("UserService", () => {
     expect(result.attributes.role).toBe("member");
   });
 
-  it("refuses a role in a profile update — the rung is server-only by default (#193)", async () => {
+  it("refuses a role in a profile update — the rung is server-only by default", async () => {
     const error = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -161,6 +161,33 @@ describe("UserService", () => {
     expect(allowed.attributes.role).toBe("admin");
   });
 
+  it.each([
+    "banned",
+    "banReason",
+    "banExpires",
+    "scimDeactivated",
+    "scimUserName",
+    "scimExternalId",
+    "isAnonymous",
+  ])(
+    "refuses %s, which its own service writes, even with no server-only attributes",
+    async (key) => {
+      const error = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* User.make({ serverOnlyAttributes: [] });
+            return yield* Effect.flip(service.updateUserAttributes("user-1", { [key]: false }));
+          }),
+          makeTestContext(),
+        ),
+      );
+      expect(error).toMatchObject({ _tag: "InvalidInputError", field: key });
+      expect(Option.getOrUndefined(MutableHashMap.get(users, "user-1"))?.attributes).toEqual({
+        role: "member",
+      });
+    },
+  );
+
   it("should mark the user's email identifier as verified", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
@@ -179,7 +206,7 @@ describe("UserService", () => {
     expect(result?.verifiedAt).toBeInstanceOf(Date);
   });
 
-  it("deleteUser deletes the account through AccountDeletion (#601)", async () => {
+  it("deleteUser deletes the account through AccountDeletion", async () => {
     const deleted: Array<string> = [];
     const deletion = Context.make(AccountDeletion, {
       deleteUser: (userId) =>
@@ -204,7 +231,7 @@ describe("UserService", () => {
     expect(result.failure._tag).toBe("UserNotFoundError");
   });
 
-  it("deleteUser without AccountDeletion fails and deletes nothing, not even the row (#601)", async () => {
+  it("deleteUser without AccountDeletion fails and deletes nothing, not even the row", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {

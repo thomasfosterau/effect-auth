@@ -8,17 +8,17 @@
  * `lockoutDurationMs`: `beforeAuthenticate` fails fast with
  * `AccountLockedError` while locked.
  *
- * - **Possession proofs are exempt** (#678). A one-time code by email or SMS
+ * - **Possession proofs are exempt**. A one-time code by email or SMS
  *   and a magic link (`isPossessionMethod`) are neither refused by the lock
  *   nor counted toward it, so knowing a handle is not enough to block the
  *   owner's passwordless recovery. Their guesses stay bounded without it: a
  *   code accepts `maxAttempts` wrong guesses (default 3), the address's
- *   wrong codes put its sends into a backoff no resend resets (#590), a
+ *   wrong codes put its sends into a backoff no resend resets, a
  *   magic-link token is 256 random bits and an unknown one is an unkeyed
  *   attempt `IPRateLimitPlugin` counts, and `RateLimitPlugin` /
  *   `IPRateLimitPlugin` count every attempt. A session one of them issues
  *   clears the lock like any other the user earned.
- * - **Passkeys are exempt too** (#698). A WebAuthn assertion is a signature
+ * - **Passkeys are exempt too**. A WebAuthn assertion is a signature
  *   no attacker can guess, and a credential id is not secret (a bound
  *   challenge lists it), so counting passkey attempts would let anyone who
  *   holds one lock the account. Passkey verification stays under
@@ -35,8 +35,8 @@
  * - **Cleared only when the user earns a session** (`afterCreateSession`),
  *   never by a correct password that only earned a second-factor challenge
  *   (an attacker who has the password cannot reset the count by signing in
- *   again), and never by an admin impersonation (`isImpersonationSession`,
- *   #678), which the user did not earn.
+ *   again), and never by an admin impersonation (`isImpersonationSession`),
+ *   which the user did not earn.
  * - **Second factor has its own per-user count** (`lockout:second-factor:
  *   user:<id>`, `maxSecondFactorAttempts`), independent of the challenge
  *   tokens: each challenge caps its own wrong codes, but the user's count
@@ -92,8 +92,8 @@ import {
 import * as Types from "../Types.ts";
 
 /**
- * Whether the lock leaves `method` alone: a possession proof (#678) or a
- * passkey (#698).
+ * Whether the lock leaves `method` alone: a possession proof or a
+ * passkey.
  */
 const isLockExempt = (method: AuthenticationMethod): boolean =>
   isPossessionMethod(method) || method === "passkey";
@@ -242,8 +242,8 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
 
   /**
    * The counter an attempt draws on, or `null` for one the lock does not
-   * cover: a possession proof (a one-time code or a magic link, #678; a
-   * passkey, #698) or an unkeyed attempt, which names no account.
+   * cover: a possession proof (a one-time code or a magic link; a
+   * passkey) or an unkeyed attempt, which names no account.
    */
   const counterFor = (attempt: AuthenticateAttempt): Counter | null => {
     const subject = authenticationSubject(attempt);
@@ -298,22 +298,34 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
               });
             }
 
-            // Atomic increment-or-reset: concurrent attempts each count.
-            yield* guarded(
+            // Count the attempt, atomically, and act on the count the store
+            // returns: the `get` above is a cheap early refusal, but
+            // concurrent attempts all pass it before any of them counts, so
+            // only the returned record decides. The threshold handed over is
+            // one past the cap, so attempts 1..maxAttempts proceed and the
+            // first beyond it sets the lock and is refused; of a burst, at most
+            // `maxAttempts` ever reach the credential check.
+            const counted = yield* guarded(
               store.registerAttempt(counter.key, {
-                maxAttempts: counter.maxAttempts,
+                maxAttempts: counter.maxAttempts + 1,
                 lockoutDurationMs,
                 now,
               }),
               { failures: 0 },
             );
+            if (counted.lockedUntil !== undefined && counted.lockedUntil > now) {
+              return yield* new Errors.AccountLockedError({
+                message: counter.message,
+                retryAfter: Duration.millis(counted.lockedUntil - now),
+              });
+            }
 
             return attempt;
           }),
 
         // Only a session the user earned clears the counts: a correct
         // password that earned a second-factor challenge leaves them
-        // standing (#592), and so does an admin impersonation (#678).
+        // standing, and so does an admin impersonation.
         afterCreateSession: (session: Types.Session) =>
           Effect.gen(function* () {
             if (Types.isImpersonationSession(session)) return session;

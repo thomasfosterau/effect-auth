@@ -14,7 +14,7 @@ This guide gives copyable code for three objects:
 
 ## 1. A strict rate limiter
 
-effect-auth has two `RateLimiter` implementations. `RateLimiter.layer()` is built over the `RateLimitStore` contract (§2). It reads the count, decides, and then increments. So concurrent requests at the limit all read the same count and all pass, even when the store's increment is atomic (#455). `rateLimiterPersistenceLayer` is built over `effect/persistence`'s `RateLimiter`, which asks its store for one atomic `fixedWindow` operation and decides from the count that operation returns. Over a Durable Object, that is strict: in the check below, 50 concurrent sign-in attempts against a limit of 5 let exactly 5 through.
+effect-auth has two `RateLimiter` implementations. `RateLimiter.layer()` is built over the `RateLimitStore` contract (§2). It reads the count, decides, and then increments. So concurrent requests at the limit all read the same count and all pass, even when the store's increment is atomic. `rateLimiterPersistenceLayer` is built over `effect/persistence`'s `RateLimiter`, which asks its store for one atomic `fixedWindow` operation and decides from the count that operation returns. Over a Durable Object, that is strict: in the check below, 50 concurrent sign-in attempts against a limit of 5 let exactly 5 through.
 
 One object per key holds the counter. The semantics are those of `effect/persistence`'s in-memory store: each token holds the counter open for one refill interval (window ÷ limit), and a request over the limit is refused without changing the counter.
 
@@ -197,7 +197,7 @@ export const rateLimitStoreLayer = (namespace: DurableObjectNamespace<RateLimitC
   Layer.succeed(Auth.RateLimitStore, makeRateLimitStore(namespace));
 ```
 
-An exact store does not make `RateLimiter.layer()` strict. That limiter decides before it increments (#455), so use §1 for limits that must hold under concurrency.
+An exact store does not make `RateLimiter.layer()` strict. That limiter decides before it increments, so use §1 for limits that must hold under concurrency.
 
 ## 3. Sessions
 
@@ -230,6 +230,20 @@ export class UserSessions extends DurableObject {
 
   async read(sessionId: string): Promise<Auth.Session | null> {
     return (await this.ctx.storage.get<Auth.Session>(sessionKey(sessionId))) ?? null;
+  }
+
+  /**
+   * Slide one session's expiry, and nothing else, if it is still here and
+   * unexpired. One object's read and write, so a concurrent `put` of new
+   * attributes or a `remove` is never undone.
+   */
+  async touch(sessionId: string, touch: Auth.SessionTouch): Promise<Auth.Session | null> {
+    const session = await this.read(sessionId);
+    if (session === null || session.expiresAt < touch.lastActivityAt) return null;
+    const touched = { ...session, ...touch };
+    await this.ctx.storage.put(sessionKey(sessionId), touched);
+    await this.scheduleCleanup();
+    return touched;
   }
 
   async remove(sessionId: string): Promise<void> {
@@ -324,6 +338,14 @@ export const makeSessionStore = (
         await pointer(session.id).write(session.userId, session.expiresAt);
         return session;
       }),
+    touch: (sessionId, touch) =>
+      call("session.touch", async () => {
+        const userId = await pointer(sessionId).read();
+        if (userId === null) return null;
+        const touched = await user(userId).touch(sessionId, touch);
+        if (touched !== null) await pointer(sessionId).write(userId, touched.expiresAt);
+        return touched;
+      }),
     // The session first, then its pointer: a pointer left behind by a failure
     // in between reads as a miss.
     delete: (sessionId) =>
@@ -347,7 +369,7 @@ export const sessionStoreLayer = (
 ) => Layer.succeed(Auth.SessionStore, makeSessionStore(users, pointers));
 ```
 
-This store passes the `SessionStore` conformance suite from `@thomasfosterau/effect-auth/testing` (#341).
+This store passes the `SessionStore` conformance suite from `@thomasfosterau/effect-auth/testing`.
 
 ## 4. Wiring it into a Worker
 

@@ -315,7 +315,7 @@ describe("MySQL / statements", () => {
     );
   });
 
-  it("never resolves the row an unmigrated case- and accent-insensitive column returns for a look-alike (#602)", async () => {
+  it("never resolves the row an unmigrated case- and accent-insensitive column returns for a look-alike", async () => {
     // A table still under `utf8mb4_0900_ai_ci` answers `bob@exämple.com` with
     // Bob's row. The lookup goes out unchanged; core refuses the answer.
     const bobRow = wireRow(projection.identifiers.names, {
@@ -409,7 +409,7 @@ describe("MySQL / Schema", () => {
     );
   });
 
-  it("declares identifier values under a binary collation, in the table and the DDL (#602)", () => {
+  it("declares identifier values under a binary collation, in the table and the DDL", () => {
     expect(identifierCollation).toBe("utf8mb4_bin");
     // The drizzle column, as drizzle-kit emits it.
     expect(tables.identifiers.value.getSQLType()).toBe(

@@ -1,5 +1,5 @@
 /**
- * The README's sign-up writer examples (#406), compiled and run.
+ * The README's sign-up writer examples, compiled and run.
  *
  * The writers live in `testing/readme/`, between `README:begin` and
  * `README:end` markers, so the type check covers them; the first test checks the

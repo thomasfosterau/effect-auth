@@ -38,7 +38,7 @@ pnpm add @thomasfosterau/effect-auth-alchemy-cloudflare @thomasfosterau/effect-a
 ```
 
 `alchemy` and `@alchemy.run/cloudflare` (both exactly `2.0.0-beta.85`, the
-release the effect-auth applications pin) and `effect` (`^4.1.0`) are required
+release the effect-auth applications pin) and `effect` (`^4.1.5`, the core's floor) are required
 peer dependencies. Every `@alchemy.run/*` provider peers on `alchemy` at its
 own exact version, and beta.85 is the first alchemy on Effect 4.1's
 `effect/crypto` modules (beta.84 and earlier import `effect/Crypto`, which 4.1

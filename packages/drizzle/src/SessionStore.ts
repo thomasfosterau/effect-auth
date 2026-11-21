@@ -13,13 +13,17 @@
  *
  * - `get` returns `null` on a miss; it never fails with a "not found" error.
  * - Deletes are silent no-ops when the row does not exist.
+ * - `touch` is one `UPDATE` of the two expiry columns guarded by
+ *   `expires_at >= lastActivityAt`, then a re-read when the driver's
+ *   affected-row count shows a match (no `RETURNING` on MySQL), so it never
+ *   recreates a deleted session or writes `attributes`.
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
  * - Session ids are SHA-256 hex digests of the bearer token, computed by the
  *   service layer — the database never sees a raw token.
  */
 
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import { Effect, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
@@ -30,7 +34,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { completeById, makeQuery } from "./internal.ts";
+import { affectedRows, completeById, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +70,16 @@ export const make = (
     const column = sessions.columns;
     const table = sessions.table;
 
+    const get = (label: string, sessionId: string) =>
+      query(label, (db) =>
+        db.select(column).from(table).where(eq(column.id, sessionId)).limit(1).execute(),
+      ).pipe(
+        Effect.map((rows) => {
+          const row = rows[0];
+          return row === undefined ? null : toSession(row);
+        }),
+      );
+
     return {
       create: (session) =>
         query("session.create", (db) =>
@@ -84,15 +98,7 @@ export const make = (
             .execute(),
         ).pipe(Effect.as(session)),
 
-      get: (sessionId) =>
-        query("session.get", (db) =>
-          db.select(column).from(table).where(eq(column.id, sessionId)).limit(1).execute(),
-        ).pipe(
-          Effect.map((rows) => {
-            const row = rows[0];
-            return row === undefined ? null : toSession(row);
-          }),
-        ),
+      get: (sessionId) => get("session.get", sessionId),
 
       update: (session) =>
         query("session.update", (db) =>
@@ -108,6 +114,26 @@ export const make = (
             .where(eq(column.id, session.id))
             .execute(),
         ).pipe(Effect.as(session)),
+
+      touch: (sessionId, touch) =>
+        Effect.gen(function* () {
+          const matched = yield* affectedRows(
+            "session.touch",
+            query("session.touch", (db) =>
+              db
+                .update(table)
+                .set(
+                  writeValues(sessions, {
+                    expiresAt: touch.expiresAt,
+                    lastActivityAt: touch.lastActivityAt,
+                  }),
+                )
+                .where(and(eq(column.id, sessionId), gte(column.expiresAt, touch.lastActivityAt)))
+                .execute(),
+            ),
+          );
+          return matched > 0 ? yield* get("session.touch.read", sessionId) : null;
+        }),
 
       delete: (sessionId) =>
         query("session.delete", (db) =>

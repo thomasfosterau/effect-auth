@@ -45,6 +45,8 @@ import {
   zeroCrypto,
 } from "./testing/Passwordless.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -60,7 +62,7 @@ const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
 const users = MutableHashMap.empty<string, Types.User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const records = MutableHashMap.empty<string, PhoneOtpRecord>();
-/** Each phone number + purpose pair's failure budget (#590). */
+/** Each phone number + purpose pair's failure budget. */
 const otpFailures = MutableHashMap.empty<string, Types.OtpFailures>();
 const sessions = MutableHashMap.empty<string, Types.Session>();
 let seq = 0;
@@ -158,6 +160,8 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
@@ -267,14 +271,14 @@ describe("PhoneOtpService", () => {
     const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551231111"));
     expect(identifier?.userId).toBe(result.user.id);
     expect(identifier?.verified).toBe(true);
-    // The store was handed the number to create the user with (#380).
+    // The store was handed the number to create the user with.
     expect(createdWith).toEqual([
       { type: "phone", value: "+15551231111", verified: true, verifiedAt: expect.any(Date) },
     ]);
     expect(result.session.userId).toBe(result.user.id);
   });
 
-  it("runs beforeAuthenticate with the resolved user before the code is checked (#592)", async () => {
+  it("runs beforeAuthenticate with the resolved user before the code is checked", async () => {
     const testContext = await makeTestContext();
     const user = seedPhoneUser("+15551234444", true);
     const seen: Array<AuthenticateAttempt> = [];
@@ -302,7 +306,7 @@ describe("PhoneOtpService", () => {
     expect(MutableHashMap.size(sessions)).toBe(0);
   });
 
-  it("counts no failure against the number when beforeAuthenticate refuses a wrong code (#590, #592)", async () => {
+  it("counts no failure against the number when beforeAuthenticate refuses a wrong code", async () => {
     const testContext = await makeTestContext();
     const seen: Array<AuthenticateAttempt> = [];
 
@@ -402,14 +406,14 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(sentOtps).toHaveLength(0);
-    // An undelivered marker record stands in for the code (#417).
+    // An undelivered marker record stands in for the code.
     expect(
       Option.getOrUndefined(MutableHashMap.get(records, "+15551236666:sign-in"))?.attempts,
     ).toBe(0);
     expect(MutableHashMap.size(users)).toBe(0);
   });
 
-  it("runs beforeAuthenticate keyed on the signed-in user before checking a verification code (#698)", async () => {
+  it("runs beforeAuthenticate keyed on the signed-in user before checking a verification code", async () => {
     const testContext = await makeTestContext();
     const created = seedPhoneUser("+15551237778", false);
     const seen: Array<AuthenticateAttempt> = [];
@@ -527,7 +531,7 @@ describe("PhoneOtpService", () => {
     ).toBe(hashToken(recorded(sentOtps).otp));
   });
 
-  it("applies a 60 s cooldown by default, and none with resendCooldown: 0 (#590)", async () => {
+  it("applies a 60 s cooldown by default, and none with resendCooldown: 0", async () => {
     const testContext = await makeTestContext();
     const { defaulted, disabled } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -552,7 +556,7 @@ describe("PhoneOtpService", () => {
     ]);
   });
 
-  // #415: with sign-up disabled, an unknown number must hit the cooldown exactly
+  // With sign-up disabled, an unknown number must hit the cooldown exactly
   // as a known one does, or the second request's answer reveals the account.
   it("answers a known and an unknown number alike within the cooldown when sign-up is disabled", async () => {
     const testContext = await makeTestContext();
@@ -600,7 +604,7 @@ describe("PhoneOtpService", () => {
     expect(MutableHashMap.size(users)).toBe(1);
   });
 
-  // #415: an unknown number's cooldown marker must never be redeemable. With
+  // An unknown number's cooldown marker must never be redeemable. With
   // `zeroCrypto` the only code `send` can draw is all zeros, so a marker that
   // held an `otpLength`-digit code would match that guess.
   it("stores a cooldown marker for an unknown number that no code redeems", async () => {
@@ -637,11 +641,11 @@ describe("PhoneOtpService", () => {
   });
 });
 
-// #417: with sign-up disabled, `send` hides whether the number has an account,
+// With sign-up disabled, `send` hides whether the number has an account,
 // so verification must answer a number that holds an outstanding code exactly
 // as it answers one that holds a marker record or nothing at all: through
 // wrong codes, the attempt limit and expiry.
-describe("PhoneOtpService verification where send hides the account (#417)", () => {
+describe("PhoneOtpService verification where send hides the account", () => {
   const maxAttempts = 3;
   const expiresIn = 5 * 60 * 1000;
   const member = "+15559990100";
@@ -859,7 +863,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
   });
 });
 
-// #590: as for email OTPs, the wrong codes a number accepts are bounded across
+// As for email OTPs, the wrong codes a number accepts are bounded across
 // resends by a count per number + purpose that a resend never resets.
 const runInContext = <A, E>(
   program: Effect.Effect<
@@ -879,7 +883,7 @@ const runInContext = <A, E>(
     Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(TestHooks))),
   );
 
-/** The #590 attack against `phoneNumber` for a day, with the default policy. */
+/** The repeated-send attack against `phoneNumber` for a day, with the default policy. */
 const attackNumber = (phoneNumber: string, disableSignUp = false) =>
   Effect.gen(function* () {
     const service = yield* PhoneOtp.make({ disableSignUp, sendOtp: recordingSend });
@@ -892,7 +896,7 @@ const attackNumber = (phoneNumber: string, disableSignUp = false) =>
     });
   });
 
-describe("PhoneOtpService failure backoff across resends (#590)", () => {
+describe("PhoneOtpService failure backoff across resends", () => {
   const member = "+15559990200";
 
   beforeEach(() => {
@@ -914,7 +918,7 @@ describe("PhoneOtpService failure backoff across resends (#590)", () => {
   });
 
   it("bounds the wrong codes at one number in a day, however often it resends", async () => {
-    // Before #590 all 1000 sends issued a code at once: 3000 guesses.
+    // Without the cross-send budget, all 1000 sends issued a code at once: 3000 guesses.
     expect(await runInContext(attackNumber(member))).toEqual(defaultBackoffDay);
   });
 

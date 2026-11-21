@@ -2,7 +2,7 @@
 
 Argon2id `PasswordHasher` for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) — OWASP's first-choice password hashing algorithm, as an Effect `Layer`.
 
-Core effect-auth ships only dependency-free hashers (PBKDF2, scrypt) because Web Crypto has no Argon2 and Node's `crypto.argon2` (24.7+, experimental) is Node-only. This package fills that gap with a WebAssembly backend: the RustCrypto [`argon2`](https://crates.io/crates/argon2) crate as built by [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2) (MIT), embedded as a base64 string and compiled once, when the module loads. No native module, no post-install step, no `node:` imports and no `.wasm` asset, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
+Core effect-auth has its own Argon2id hasher, `Password.argon2idHasherLayer`, over Effect's `Kdf` service. Only `NodeCrypto.layerKdf` (Node.js 24.7+, Bun 1.4+) derives Argon2id there: Web Crypto has no Argon2, and neither has Cloudflare Workers' `node:crypto`. On Node and Bun, prefer the core hasher. This package is for everywhere else, Workers above all, with a WebAssembly backend: the RustCrypto [`argon2`](https://crates.io/crates/argon2) crate as built by [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2) (MIT), embedded as a base64 string and compiled once, when the module loads. No native module, no post-install step, no `node:` imports and no `.wasm` asset, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
 
 Hashes are standard PHC strings (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), so they're interchangeable with older configurations of this package and with any other Argon2 implementation.
 
@@ -62,7 +62,7 @@ const custom = argon2HasherLayer({ memoryCost: 32768, timeCost: 3 });
 
 ## Cloudflare Workers
 
-workerd refuses to compile WebAssembly while it serves a request (`CompileError: WebAssembly.compile(): Wasm code generation disallowed by embedder`). Releases up to 0.1.3 used [`hash-wasm`](https://github.com/Daninet/hash-wasm), which compiles lazily on the first hash, so every sign-up and sign-in failed on a deployed Worker ([#744](https://github.com/thomasfosterau/effect-auth/issues/744)). The hasher now compiles its wasm once, at module scope, while the Worker starts; inside a request it only runs it. A test serves the hasher from the real `workerd` binary and hashes and verifies inside `fetch`.
+workerd refuses to compile WebAssembly while it serves a request (`CompileError: WebAssembly.compile(): Wasm code generation disallowed by embedder`). Releases up to 0.1.3 used [`hash-wasm`](https://github.com/Daninet/hash-wasm), which compiles lazily on the first hash, so every sign-up and sign-in failed on a deployed Worker. The hasher now compiles its wasm once, at module scope, while the Worker starts; inside a request it only runs it. A test serves the hasher from the real `workerd` binary and hashes and verifies inside `fetch`.
 
 What a Worker needs:
 
@@ -113,6 +113,8 @@ import { argon2Hasher } from "@thomasfosterau/effect-auth-argon2";
 
 const verifier = Password.multiAlgorithmVerifier([argon2Hasher(), Password.pbkdf2Hasher()]);
 ```
+
+Moving off this package onto the core hasher needs no migration: both write and read the same `$argon2id$v=19$…` strings, and the core's tests verify hashes this package wrote. Stored `argon2i` and `argon2d` hashes are the exception, since the core hasher reads only argon2id; keep this package in the verifier until they have been re-hashed.
 
 ## API
 

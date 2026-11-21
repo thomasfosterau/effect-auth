@@ -238,7 +238,7 @@ export interface CookieConfig {
    * OTP verify, OAuth callback, …) in addition to the normal `Set-Cookie`.
    *
    * Whatever the mode, no response body carries the token: every session
-   * resource is named by its stored id, the token's digest (#581).
+   * resource is named by its stored id, the token's digest.
    *
    * - `false` (default): sessions are issued only via httpOnly cookies.
    *   The httpOnly flag prevents client-side JavaScript from reading the
@@ -457,7 +457,7 @@ export const credentialClassFromRequest = (
 /**
  * The most the attributes a sign-up keeps (after the
  * {@link AuthWebHandlerOptions.signUpAttributes} allow-list) may take, as JSON
- * text in UTF-8: 4096 bytes (#580). A sign-up whose kept attributes are larger
+ * text in UTF-8: 4096 bytes. A sign-up whose kept attributes are larger
  * is refused with `400`; keys the allow-list drops never count.
  *
  * @since 0.1.0
@@ -470,8 +470,8 @@ const utf8 = new TextEncoder();
 
 /**
  * The sign-up input for a `POST /users` payload: of its `attributes`, only the
- * keys `allowed` names, and those within {@link SIGN_UP_ATTRIBUTES_MAX_BYTES}
- * (#580). Any other key is dropped without an error, so the answer does not
+ * keys `allowed` names, and those within {@link SIGN_UP_ATTRIBUTES_MAX_BYTES}.
+ * Any other key is dropped without an error, so the answer does not
  * tell a caller which keys the server guards. The services strip the
  * server-only, ban and SCIM keys again, whatever `allowed` names.
  */
@@ -893,8 +893,10 @@ const apiKeyResource = (k: ApiKey): R.ApiKey =>
 /**
  * Log the real error server-side and return a generic 500 body so internal
  * implementation details are never exposed to clients.
+ *
+ * @internal
  */
-const internalServerError = (
+export const internalServerError = (
   e: Cause.YieldableError,
 ): Effect.Effect<never, S.InternalServerError> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
@@ -945,8 +947,8 @@ const asRegistration = <A, R>(
 /**
  * Per-user-code rate limit for device-authorization approve/deny endpoints
  * (RFC 8628 §5.2), through the `RateLimiter` in scope. `make` refuses to build
- * a handler whose `services` hold the device service and no `RateLimiter`
- * (#389). Outside `make` (the exported group layers composed by hand), a
+ * a handler whose `services` hold the device service and no `RateLimiter`.
+ * Outside `make` (the exported group layers composed by hand), a
  * request with no `RateLimiter` in scope is refused with `429`, unless the
  * device service was built with `allowMissingRateLimiter: true`.
  */
@@ -1007,7 +1009,7 @@ const NO_CLIENT_ADDRESS = "Client address unavailable; this request cannot be ra
 const NO_RATE_LIMITER = "No RateLimiter in services; this request cannot be rate limited";
 
 /**
- * Refuse a request whose limit has no `RateLimiter` to run on (#389). The
+ * Refuse a request whose limit has no `RateLimiter` to run on. The
  * refusal is the same `429` as a request with no client address: the request
  * cannot be rate limited, so it is not served. The misconfiguration is logged.
  */
@@ -1020,12 +1022,12 @@ const refuseWithoutRateLimiter = (limit: string): Effect.Effect<never, S.TooMany
  * Per-IP rate limit for anonymous dynamic client registration, through the
  * `RateLimiter` in scope. The window comes from the provider's own
  * configuration. `make` refuses to build a handler whose `services` enable
- * registration with no `RateLimiter` (#389); outside `make`, a registration
+ * registration with no `RateLimiter`; outside `make`, a registration
  * with no `RateLimiter` in scope is refused with `429`.
  *
  * A caller with no resolvable client address (or no `ClientIP` service in
  * scope) is refused, never keyed under a shared bucket and never let through
- * uncounted (#358).
+ * uncounted.
  */
 const applyRegistrationRateLimit = (
   limit: RateLimitConfig,
@@ -1043,7 +1045,7 @@ const applyRegistrationRateLimit = (
 
 /**
  * What a `ClientAddressConfigError` adds when `allowMissingClientIp: true` is
- * set (#682): the option is no address source. With no `trustedProxy`, a Web
+ * set: the option is no address source. With no `trustedProxy`, a Web
  * `Request` under `Http.make` never has an address, so the limit would refuse
  * every request it covers with `429`; the handler refuses to start instead.
  */
@@ -1054,7 +1056,7 @@ const allowMissingClientIpNote = (options: AuthWebHandlerOptions): string =>
     : "";
 
 /**
- * The `IPRateLimitPlugin` half of the client-address check (#389): the `Hooks`
+ * The `IPRateLimitPlugin` half of the client-address check: the `Hooks`
  * include a plugin that keys on the client address and there is no
  * `trustedProxy`.
  */
@@ -1076,7 +1078,7 @@ const keyedPluginAddressError = (
 /**
  * The dynamic client registration half of the client-address check: the
  * registration limit keys on the `ClientIP` this handler resolves from
- * `trustedProxy`, so registration needs the same address source (#388, #398).
+ * `trustedProxy`, so registration needs the same address source.
  */
 const registrationAddressError = (
   services: Context.Context<never>,
@@ -1093,7 +1095,7 @@ const registrationAddressError = (
 };
 
 /**
- * The limits configured with no `RateLimiter` in `services` (#389):
+ * The limits configured with no `RateLimiter` in `services`:
  * `ipRateLimit`, dynamic client registration, or the device user-code limit
  * (whenever the device service is present, unless it opted out with
  * `allowMissingRateLimiter`).
@@ -1124,14 +1126,14 @@ const rateLimiterError = (
 };
 
 /**
- * The build-time check of `make`'s `services` (#389). Returns the error `make`
+ * The build-time check of `make`'s `services`. Returns the error `make`
  * raises, or `undefined` when the services are consistent with the options:
  *
  * - The `Hooks` include a plugin that keys on the client address
  *   (`IPRateLimitPlugin`), or the OIDC provider enables dynamic client
  *   registration, and there is no `trustedProxy`. A Web `Request` has no
  *   socket address, and `allowMissingClientIp: true` is no address source
- *   (#682).
+ *  .
  * - A limit is configured with no `RateLimiter` ({@link rateLimiterError}).
  */
 const servicesConfigError = (
@@ -1256,8 +1258,7 @@ interface SynchronousRun<A, E> {
 
 /**
  * Run `effect` synchronously as far as it can go, the way `Effect.runSync`
- * does, without the fibers it forks staying on a synchronous scheduler (#389,
- * #402). `make` uses it to build `services` and to close them.
+ * does, without the fibers it forks staying on a synchronous scheduler. `make` uses it to build `services` and to close them.
  *
  * Only the effect's own fiber runs synchronously: `run` runs the tasks it
  * schedules (yields, the start of a fiber it forks) until it has an exit, or
@@ -1305,11 +1306,11 @@ const runSynchronously = <A, E>(effect: Effect.Effect<A, E>): SynchronousRun<A, 
 };
 
 // -----------------------------------------------------------------------------
-// JSON:API resource groups (#205)
+// JSON:API resource groups
 // -----------------------------------------------------------------------------
 
 /**
- * `response` with `no-store` merged into its `Cache-Control` (#628): kept as
+ * `response` with `no-store` merged into its `Cache-Control`: kept as
  * it is when it already has `no-store`, else with `no-store` appended.
  */
 const withNoStore = (
@@ -1323,7 +1324,7 @@ const withNoStore = (
 
 /**
  * Mark the response a handler is about to send `no-store`, whatever it turns
- * out to be: for the bodies that hand a credential over (#628).
+ * out to be: for the bodies that hand a credential over.
  */
 const noStore: Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =
   HttpEffect.appendPreResponseHandler((_request, response) =>
@@ -1333,7 +1334,7 @@ const noStore: Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =
 /**
  * Set a cookie on the response a JSON:API handler is about to send, so the
  * handler can still answer with its typed document. The response is marked
- * `no-store` with it (#628), so a shared cache never replays the cookie.
+ * `no-store` with it, so a shared cache never replays the cookie.
  */
 const setResponseCookie = (
   name: string,
@@ -1394,7 +1395,7 @@ const userIdentifiers = (
 /**
  * The `sessions` resource of a session. Its `id` is the stored id, the digest
  * of the token; every `Types.Session` the services answer carries that id, so
- * no response body ever holds the token itself (#581).
+ * no response body ever holds the token itself.
  */
 const sessionResource = (session: Types.Session): R.Session =>
   R.Session.make({
@@ -1682,7 +1683,7 @@ export const usersGroupLayer = (
 };
 
 // -----------------------------------------------------------------------------
-// Signing in and proving an address (#205)
+// Signing in and proving an address
 // -----------------------------------------------------------------------------
 
 /** Fail with `403`, the message resolved through the message catalogue. */
@@ -1796,7 +1797,7 @@ const answerSignIn = (
       return yield* signedIn({ ...outcome, session });
     }
     if (outcome.secondFactor !== undefined) {
-      // The challenge's id is the token that redeems the second factor (#628).
+      // The challenge's id is the token that redeems the second factor.
       yield* noStore;
       return {
         data: R.SecondFactorChallenge.make({
@@ -2086,7 +2087,7 @@ export const otpChallengesGroupLayer = () =>
         const challenge = payload.data.attributes;
         const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
           Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
-        // The send gate (`beforeSendCode`, the captcha, #678).
+        // The send gate (`beforeSendCode`, the captcha).
         const options = { captchaToken: challenge.captchaToken };
         return yield* Match.value(challenge).pipe(
           Match.discriminatorsExhaustive("channel")({
@@ -2147,7 +2148,7 @@ export const emailVerificationsGroupLayer = (
           );
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified, or is inside its resend
-          // cooldown (#682) or past its send cap (#684): a 429 there alone
+          // cooldown or past its send cap: a 429 there alone
           // would name an unverified account.
           if (identifier !== null && !identifier.verified) {
             yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
@@ -2225,7 +2226,7 @@ export const googleOneTapNoncesGroupLayer = () =>
       Effect.gen(function* () {
         const oneTap = yield* resolveGoogleOneTap;
         // The single-use nonce is this caller's alone: a cached answer would
-        // hand it to the next caller (#628).
+        // hand it to the next caller.
         yield* noStore;
         const nonce = yield* oneTap.service.createNonce().pipe(
           Effect.catchTags({
@@ -2239,7 +2240,7 @@ export const googleOneTapNoncesGroupLayer = () =>
   );
 
 // -----------------------------------------------------------------------------
-// Account management (#205)
+// Account management
 // -----------------------------------------------------------------------------
 
 /**
@@ -2346,7 +2347,7 @@ export const multiFactorEnrollmentsGroupLayer = (
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const multiFactor = yield* resolveMultiFactor;
-          // The answer carries the TOTP secret and backup codes (#628).
+          // The answer carries the TOTP secret and backup codes.
           yield* noStore;
           const enrolled = yield* multiFactor.service
             .enable(resolved.user.id, payload.data.attributes.password)
@@ -2411,7 +2412,7 @@ export const backupCodeSetsGroupLayer = (
   return HttpApiBuilder.group(AuthApi, "backup-code-sets", (handlers) =>
     handlers.handle("create", ({ payload, request }) =>
       Effect.gen(function* () {
-        // The answer carries the new backup codes (#628).
+        // The answer carries the new backup codes.
         yield* noStore;
         const resolved = yield* requireSession(request, cfg);
         const multiFactor = yield* resolveMultiFactor;
@@ -2502,7 +2503,7 @@ const asOrganizationActor = <A>(
  * gives a stranger (`missingPermission` of the permission it needs, or
  * `notAMember` for a member-only read), and the operation checks that
  * permission before anything else. So an unknown id, another tenant's record
- * and a member without the permission get the same `403` and body (#718).
+ * and a member without the permission get the same `403` and body.
  */
 const organizationTarget =
   <A>(
@@ -2561,7 +2562,17 @@ export const deviceSessionsGroupLayer = (
           const valid = Arr.getSomes(
             yield* Effect.forEach(
               tokens,
-              (token) => Effect.option(sessionManager.validateSession(token)),
+              // A token that no longer validates is left out; a store fault
+              // is a 500, not a shorter list.
+              (token) =>
+                sessionManager.validateSession(token).pipe(
+                  Effect.asSome,
+                  Effect.catch(sessionValidationFailure),
+                  Effect.catchTags({
+                    Unauthorized: () => Effect.succeedNone,
+                    AuthError: internalServerError,
+                  }),
+                ),
               { concurrency: 1 },
             ),
           );
@@ -2606,11 +2617,14 @@ export const deviceSessionsGroupLayer = (
             return yield* new S.BadRequest({ message: "Session is not on this device" });
           }
           const sessionManager = yield* SessionService;
-          const resolved = yield* sessionManager
-            .validateSession(token.value)
-            .pipe(
-              Effect.mapError(() => new S.BadRequest({ message: "Invalid or expired session" })),
-            );
+          const resolved = yield* sessionManager.validateSession(token.value).pipe(
+            Effect.catch(sessionValidationFailure),
+            Effect.catchTags({
+              Unauthorized: () =>
+                Effect.fail(new S.BadRequest({ message: "Invalid or expired session" })),
+              AuthError: internalServerError,
+            }),
+          );
           yield* setResponseCookie(
             cfg.name,
             token.value,
@@ -2665,7 +2679,7 @@ export const organizationsGroupLayer = (
 
   /**
    * The organization `id` names with its members, as the signed-in actor: a
-   * member's read (#717). A stranger and an unknown id both answer the same
+   * member's read. A stranger and an unknown id both answer the same
    * `403`, as the domain, role and team listings do.
    */
   const fullOrganization = (request: HttpServerRequest.HttpServerRequest, id: string) =>
@@ -2699,7 +2713,7 @@ export const organizationsGroupLayer = (
         Effect.gen(function* () {
           const { org, actorId, resolved } = yield* actor(request);
           const organizationId = payload.data?.id ?? null;
-          // Only an organization the actor is an active member of (#576): a
+          // Only an organization the actor is an active member of: a
           // stranger, a deactivated member and an unknown id get the same
           // `403`. Clearing it needs no check.
           if (organizationId !== null) {
@@ -2786,7 +2800,7 @@ export const organizationsGroupLayer = (
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("listInvitations", ({ params, request }) =>
-        // `invitation:create`, as `invite` takes (#715): a stranger, a member
+        // `invitation:create`, as `invite` takes: a stranger, a member
         // without it and an unknown id all answer the same `403`.
         asOrganizationActor(request, cfg, (org, actorId) =>
           org.listInvitations(actorId, params.id),
@@ -2813,7 +2827,7 @@ export const organizationsGroupLayer = (
         ),
       )
       .handle("addDomain", ({ params, payload, request }) =>
-        // The payload admits only the `dns` strategy (#598), so the domain is
+        // The payload admits only the `dns` strategy, so the domain is
         // all there is to pass on.
         asOrganizationActor(request, cfg, (org, actorId) =>
           org.addDomain(actorId, params.id, { domain: payload.data.attributes.domain }),
@@ -2970,9 +2984,9 @@ export const organizationDomainsGroupLayer = (
           return Handlers.data(domainResource(verified));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      // The operator's attestation (#598): gated on `isAdmin`, never on an
+      // The operator's attestation: gated on `isAdmin`, never on an
       // organization permission, like SSO connection registration. The admin
-      // is recorded as the claim's attester (#680).
+      // is recorded as the claim's attester.
       .handle("attest", ({ payload, request }) =>
         Effect.gen(function* () {
           const admin = yield* requireAdminCaller(request, cfg);
@@ -2987,7 +3001,7 @@ export const organizationDomainsGroupLayer = (
           return Handlers.data(domainResource(attested));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      // The operator's release of any organization's claim (#680), gated as
+      // The operator's release of any organization's claim, gated as
       // the attestation is. The admin check comes first, so a non-admin never
       // learns whether an id names a claim.
       .handle("release", ({ params, request }) =>
@@ -3128,7 +3142,7 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
     handlers
       .handle("list", ({ request }) =>
         Effect.gen(function* () {
-          // Only the caller's own verified addresses (#706); `invitationResource`
+          // Only the caller's own verified addresses; `invitationResource`
           // never carries the token digest.
           const { org, actorId } = yield* actor(request);
           const invitations = yield* storeFailure(org.listInvitationsForUser(actorId));
@@ -3139,7 +3153,7 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
         Effect.gen(function* () {
           const { org, actorId, resolved } = yield* actor(request);
           // Without the emailed token, the service takes a verified matching
-          // address as the proof (#673).
+          // address as the proof.
           const { status, token } = payload.data.attributes ?? {};
           const answer = { invitationId: params.id, token };
           if (status === "accepted") {
@@ -3175,7 +3189,7 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
 
 // -----------------------------------------------------------------------------
 // Admin, impersonation, API keys, OAuth clients, SSO, JWTs and device approval
-// (#205, slice 5)
+// (slice 5)
 // -----------------------------------------------------------------------------
 
 // The service inputs below leave an optional key out rather than set it to
@@ -3319,7 +3333,7 @@ const adminActor = (request: HttpServerRequest.HttpServerRequest, cfg: ResolvedC
  * SSO-provider and domain attestation and release endpoints gate on): `401`
  * without a session, `403` otherwise. The rule is the mounted
  * `AdminService`'s, so its `AdminConfig` (`adminRoles`, `adminUserIds`)
- * governs these endpoints as it does `/admin/users` (#680); without an
+ * governs these endpoints as it does `/admin/users`; without an
  * `AdminService`, the default `isAdmin` rule (role `admin`).
  */
 const requireAdminCaller = (
@@ -3514,8 +3528,8 @@ const asApiKeyOwner = <A, R>(
   });
 
 /**
- * The one message every API key that does not resolve is answered with
- * (#730): unknown, disabled, expired, exhausted, missing or ownerless alike,
+ * The one message every API key that does not resolve is answered with:
+ * unknown, disabled, expired, exhausted, missing or ownerless alike,
  * so the answer never tells them apart. The reason goes to the server log.
  */
 const API_KEY_REFUSED = "Invalid API key";
@@ -3554,7 +3568,7 @@ const apiKeyRateLimited = (
   });
 
 /**
- * `GET /api-keys/current` (#730): the key the request carries in an API-key
+ * `GET /api-keys/current`: the key the request carries in an API-key
  * header, verified with `verifyWithRateLimit` (no required permissions, so
  * the app checks those through the policy kernel), and the user it acts as.
  * The session cookie and bearer token are never read here, so a key always
@@ -3581,7 +3595,7 @@ const resolveCurrentApiKey = (
     const user = yield* userService.getUser(key.userId).pipe(
       Effect.catchTags({
         // Owner existence, ban and SCIM deactivation are decided in `verify`, before
-        // the limit and the spend (#755); this covers a delete racing the read.
+        // the limit and the spend; this covers a delete racing the read.
         UserNotFoundError: () => refuseApiKey("API key owner not found"),
         AuthError: (e) => internalServerError(e),
       }),
@@ -3624,7 +3638,7 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
           // another key): only from the interactive session cookie.
           yield* requireInteractiveCredential(request);
           const apiKey = yield* resolveApiKey;
-          // The answer carries the raw key, shown this once (#628).
+          // The answer carries the raw key, shown this once.
           yield* noStore;
           const result = yield* asApiKeyOwner(
             apiKey.service.create(resolved.user.id, apiKeyCreateOptions(payload.data.attributes)),
@@ -3681,7 +3695,7 @@ export const oauthClientsGroupLayer = (
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const { oidc, userId } = yield* administrator(request);
-          // The answer may carry the client secret, shown this once (#628).
+          // The answer may carry the client secret, shown this once.
           yield* noStore;
           const result = yield* oidcProviderFailures(
             oidc.registerClient(oauthClientInput(payload.data.attributes), userId),
@@ -3767,7 +3781,7 @@ export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
       Effect.gen(function* () {
         const sso = yield* resolveSso;
         // The single-use callback state is this caller's alone: a cached
-        // answer would hand it to the next caller (#628).
+        // answer would hand it to the next caller.
         yield* noStore;
         const result = yield* asSsoRequest(
           sso.service.signIn(ssoSelector(payload.data.attributes)),
@@ -3914,7 +3928,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           const device = yield* resolveDevice;
           // RFC 8628 §3.2: the answer carries the device code, the secret
-          // the device polls with (#628).
+          // the device polls with.
           yield* noStore;
           return yield* device.service
             .begin({
@@ -4080,8 +4094,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oidc = yield* resolveOidcProvider;
           // Unauthenticated: redirect to the login page carrying the original
           // authorize URL so the app can resume the flow after sign-in.
+          // A store fault is a 500, never a redirect to sign in again.
           const session = yield* resolveSession(request, cfg).pipe(
-            Effect.catch(() => Effect.succeed(null)),
+            Effect.catchTag("Unauthorized", () => Effect.succeed(null)),
           );
           if (session === null || query.prompt === "login") {
             // prompt=none: must not show any UI — redirect back to the client with login_required.
@@ -4133,7 +4148,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcConsent", ({ payload, request }) =>
         Effect.gen(function* () {
           const oidc = yield* resolveOidcProvider;
-          // The redirect carries the authorization code (#628).
+          // The redirect carries the authorization code.
           yield* noStore;
           const resolved = yield* requireSession(request, cfg);
           const result = yield* oidc.service
@@ -4791,7 +4806,33 @@ const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, Iden
   Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
 
 /**
- * Resolve the authenticated session or fail with 401, preferring the signed
+ * A `validateSession` failure as the HTTP tier answers it. A refusal
+ * (no such session, an expired one, a user that no longer exists, a ban, or a
+ * hook that denies) is `Unauthorized`; a store or infrastructure fault stays an
+ * `AuthError`, which the caller answers as a logged `500` (or, on an optional
+ * route, a degrade the app asked for). A fault is never a `401`: the browser
+ * client reads `401` as signed out, so a database blip would sign everyone out.
+ *
+ * @internal
+ */
+export const sessionValidationFailure = (
+  error: Effect.Error<ReturnType<(typeof SessionService.Service)["validateSession"]>>,
+): Effect.Effect<never, S.Unauthorized | AuthError> =>
+  Match.value(error).pipe(
+    Match.tag("AuthError", (fault) => Effect.fail(fault)),
+    Match.tag("UserBannedError", (banned) =>
+      resolveMessage(banned.code, banned.message).pipe(
+        Effect.flatMap((message) =>
+          Effect.fail(new S.Unauthorized({ message, code: banned.code })),
+        ),
+      ),
+    ),
+    Match.orElse(() => Effect.fail(new S.Unauthorized({ message: "Invalid or expired session" }))),
+  );
+
+/**
+ * Resolve the authenticated session or fail with 401 (a logged 500 when the
+ * session or user store faults), preferring the signed
  * cache cookie (no store read) when the cache is enabled and the cookie is
  * valid; otherwise validating against the session store. `cacheHit` lets
  * callers decide whether to (re)issue the cache cookie; `token` is the raw
@@ -4807,7 +4848,7 @@ const resolveSession = (
     readonly cacheHit: boolean;
     readonly token: string;
   },
-  S.Unauthorized,
+  S.Unauthorized | S.InternalServerError,
   SessionService | Hooks
 > =>
   Effect.gen(function* () {
@@ -4827,22 +4868,23 @@ const resolveSession = (
       if (resolved !== null) return { resolved, cacheHit: true, token };
     }
     const sessionManager = yield* SessionService;
-    const resolved = yield* sessionManager.validateSession(token).pipe(
-      Effect.catchTag("UserBannedError", (e) =>
-        resolveMessage(e.code, e.message).pipe(
-          Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
-        ),
-      ),
-      Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
-    );
+    const resolved = yield* sessionManager
+      .validateSession(token)
+      .pipe(
+        Effect.catch(sessionValidationFailure),
+        Effect.catchTag("AuthError", internalServerError),
+      );
     return { resolved, cacheHit: false, token };
   });
 
 const requireSession = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
-): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionService | Hooks> =>
-  resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
+): Effect.Effect<
+  Types.SessionWithUser,
+  S.Unauthorized | S.InternalServerError,
+  SessionService | Hooks
+> => resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /**
  * Fail with `Forbidden` unless the request's credential is
@@ -4885,8 +4927,8 @@ const withSessionCookie = (
  * Carry a new session on `response`: the session cookie (a browser-session one
  * when `rememberMe` is `false`), the device's multi-session list, the
  * last-login-method hint and, in bearer mode, the `set-auth-token` header.
- * These headers are the only places the raw token is written (#581). The
- * response is marked `no-store` (#628).
+ * These headers are the only places the raw token is written. The
+ * response is marked `no-store`.
  */
 const decorateSessionResponse = (
   json: HttpServerResponse.HttpServerResponse,
@@ -4969,8 +5011,8 @@ const PlatformLayer = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer)
  * endpoint, against the endpoint it matched, never against the raw request
  * path: the router is case-insensitive and ignores trailing and duplicate
  * slashes and percent-encoding, so `/Sessions/`, `//sessions` and
- * `/%73essions` all reach `POST /sessions` and all count under its rule
- * (#582). Paths are relative to the mount `prefix`, as the endpoints are.
+ * `/%73essions` all reach `POST /sessions` and all count under its rule.
+ * Paths are relative to the mount `prefix`, as the endpoints are.
  *
  * `methods` limits the rule to specific HTTP methods (default: all methods).
  *
@@ -4999,6 +5041,14 @@ export interface HttpIPRateLimitConfig {
    * Omit to use the built-in defaults for all sensitive endpoints.
    */
   readonly rules?: ReadonlyArray<EndpointRateLimitRule>;
+  /**
+   * What a rate-limit store error does to the request.
+   * `"fail-closed"` (default): the request is refused with a logged `500`, so
+   * a limiter outage, or one an attacker can induce, never removes the limits.
+   * `"fail-open"`: the error is logged and the request proceeds unlimited
+   * (availability over abuse protection), as `AccountLockoutPlugin`'s option.
+   */
+  readonly onStoreError?: "fail-closed" | "fail-open" | undefined;
 }
 
 const MINUTE_MS = 60 * 1000;
@@ -5016,7 +5066,7 @@ const postRule = (
  * Sane default IP rate-limit rules applied to sensitive auth endpoints: every
  * unauthenticated endpoint that sends a message, writes a row, makes an
  * outbound call or verifies a secret, and the authenticated ones that hash a
- * password or check a second factor (#583). `Http.make` applies them unless
+ * password or check a second factor. `Http.make` applies them unless
  * it is given `ipRateLimit: false` or rules of its own.
  *
  * | Endpoint(s)                                                    | Limit   | Window | Block  |
@@ -5040,7 +5090,7 @@ const postRule = (
  * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
  * | `POST /oauth2/token`                                           | 60 req  | 1 min  | 5 min  |
  * | `POST /register` (dynamic client registration)                 | 10 req  | 1 hr   | 1 hr   |
- * | `GET /api-keys/current` (API-key resolution, #730)             | 300 req | 1 min  | 5 min  |
+ * | `GET /api-keys/current` (API-key resolution)             | 300 req | 1 min  | 5 min  |
  *
  * Endpoints named on one row share one bucket.
  */
@@ -5140,12 +5190,13 @@ const noRateLimiterResponse = (): Effect.Effect<HttpServerResponse.HttpServerRes
  * Count one request under `rule` for the caller's address, and answer the
  * refusal, or `undefined` when the request may proceed. The startup check
  * refuses the limit without a `RateLimiter`, so that refusal is a backstop:
- * the limit never runs as a silent no-op (#389). With no address there is no
- * key (#358): the request is refused rather than skipped or counted under a
+ * the limit never runs as a silent no-op. With no address there is no
+ * key: the request is refused rather than skipped or counted under a
  * bucket that other callers share.
  */
 const consumeEndpointLimit = (
   rule: EndpointRateLimitRule,
+  failOpen: boolean,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse | undefined> =>
   Effect.gen(function* () {
     const limiter = yield* Effect.serviceOption(RateLimiter);
@@ -5165,26 +5216,44 @@ const consumeEndpointLimit = (
         Effect.as(null),
         Effect.catchTags({
           RateLimitError: (e) => Effect.succeed(e),
-          AuthError: () => Effect.succeed(null),
+          AuthError: (e) => Effect.as(limiterStoreFault(e, failOpen), "store-fault" as const),
         }),
       );
-    return denied === null ? undefined : tooManyRequests(denied.retryAfter);
+    if (denied === null) return undefined;
+    if (denied === "store-fault") return failOpen ? undefined : limiterStoreFaultResponse();
+    return tooManyRequests(denied.retryAfter);
   });
+
+/**
+ * Log a rate-limit store error: the request is refused, or under
+ * `onStoreError: "fail-open"` served without its limit, never silently.
+ */
+const limiterStoreFault = (error: AuthError, failOpen: boolean): Effect.Effect<void> =>
+  failOpen
+    ? Effect.logWarning(
+        "[effect-auth] rate-limit store error; serving the request unlimited (onStoreError: fail-open)",
+        error,
+      )
+    : Effect.logError("[effect-auth] rate-limit store error; the request is refused", error);
+
+/** The answer to a request whose limit could not be counted: a generic `500`. */
+const limiterStoreFaultResponse = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.jsonUnsafe({ message: "Internal server error" }, { status: 500 });
 
 /**
  * The per-endpoint IP limit, as router middleware on every auth route. It runs
  * once the router has matched the request, before the endpoint decodes the
  * request or runs any auth logic, and finds its rule by the matched endpoint's
- * path template and method, so no spelling of the path escapes it (#582).
+ * path template and method, so no spelling of the path escapes it.
  */
-const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>) =>
+const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>, failOpen: boolean) =>
   HttpRouter.middleware((effect) =>
     Effect.gen(function* () {
       const { route } = yield* HttpRouter.RouteContext;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const method = route.method === "*" ? request.method.toUpperCase() : route.method;
       const rule = findEndpointRule(rules, openApiTemplate(route.path), method);
-      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule);
+      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule, failOpen);
       return refused ?? (yield* effect);
     }),
   ).layer;
@@ -5217,7 +5286,7 @@ const endpointRules = (
 export { ClientAddressConfigError } from "../Errors.ts";
 
 // The class lives in Errors.ts with the other startup errors; `make` throws it
-// under `strict` (#416).
+// under `strict`.
 export { ServicesBuildPendingError } from "../Errors.ts";
 
 /**
@@ -5236,7 +5305,7 @@ export interface AuthWebHandlerOptions {
   readonly multiSession?: MultiSessionConfig;
   /**
    * The keys of `attributes` a sign-up (`POST /users`) may set on the new
-   * user. Default `[]`: a sign-up stores no attribute its caller sent (#580).
+   * user. Default `[]`: a sign-up stores no attribute its caller sent.
    * A key not named here is dropped without an error, so existing clients
    * that send one keep signing up, and the answer does not tell a caller
    * which keys the server guards. The new user's attributes in the answer
@@ -5270,7 +5339,7 @@ export interface AuthWebHandlerOptions {
    *
    * **Host trust**: the request URL's origin is derived from the `Host` header
    * as seen by the application. When deployed behind a reverse proxy you MUST
-   * configure {@link trustedProxy} (from issue #81 / `ClientIP`) so the proxy
+   * configure {@link trustedProxy} (`ClientIP`) so the proxy
    * forwards the correct `Host` and the origin comparison is accurate.
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
@@ -5319,14 +5388,14 @@ export interface AuthWebHandlerOptions {
   readonly trustedProxy?: TrustedProxyConfig | undefined;
   /**
    * IP-keyed rate limiting at the HTTP boundary, before handlers run. **On by
-   * default** (#583): omitted or `{}`, the built-in
+   * default**: omitted or `{}`, the built-in
    * {@link defaultEndpointRules} apply; `{ rules: [...] }` replaces them with a
    * custom rule set; `false` turns the limit off, and is the only way to.
    *
    * Requires `RateLimiter` in the `services` layer (compose it with its
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
    * Without one, `make` throws `RateLimiterConfigError`, so the app fails to
-   * start rather than run with the limit off (#389). When `services` finishes
+   * start rather than run with the limit off. When `services` finishes
    * building only after `make` returns (asynchronous work while building; see
    * `make`), the handler's build fails with that error instead, and every
    * request rejects with it; {@link makeAsync} rejects with it at startup.
@@ -5336,7 +5405,7 @@ export interface AuthWebHandlerOptions {
    * address, so `make` throws {@link ClientAddressConfigError} unless this is
    * `false` or {@link trustedProxy} is set. A Web `Request` has no socket
    * address to fall back on, and {@link allowMissingClientIp} is no address
-   * source (#682).
+   * source.
    *
    * **Overriding a default.** The first rule that matches an endpoint wins, so
    * a deployment changes one endpoint's limit by putting its own rule ahead of
@@ -5348,7 +5417,7 @@ export interface AuthWebHandlerOptions {
    *
    * Each rule is matched against the endpoint the router matched, by its path
    * template and method, so no spelling of a path (case, trailing or duplicate
-   * slashes, percent-encoding) escapes its limit (#582).
+   * slashes, percent-encoding) escapes its limit.
    *
    * A request to a rate-limited endpoint that resolves no address is refused
    * with `429` and is not counted. It is never let through unlimited and never
@@ -5357,8 +5426,8 @@ export interface AuthWebHandlerOptions {
    */
   readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
   /**
-   * Not an address source, and not an opt-out of the client-address check
-   * (#682). Under `Http.make` a Web `Request` has no socket address, so with no
+   * Not an address source, and not an opt-out of the client-address check.
+   * Under `Http.make` a Web `Request` has no socket address, so with no
    * {@link trustedProxy} no request has an address, and a limit keyed on it
    * would refuse every request it covers with `429`. So `make` throws
    * {@link ClientAddressConfigError} (and {@link makeAsync} rejects with it)
@@ -5486,16 +5555,17 @@ export interface AuthWebHandler {
 }
 
 /**
- * The startup check of `ipRateLimit` (#358), which needs no build: a rate limit
+ * The startup check of `ipRateLimit`, which needs no build: a rate limit
  * keyed by client address needs an address source. A Web Request has no socket
  * address, so `trustedProxy` must be configured; `allowMissingClientIp: true`
  * without it would refuse every request to a limited endpoint, so it is
- * refused too (#682).
+ * refused too.
  */
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined =>
-  options.ipRateLimit !== false && options.trustedProxy === undefined
+  trustedProxyError(options) ??
+  (options.ipRateLimit !== false && options.trustedProxy === undefined
     ? new ClientAddressConfigError({
         message:
           "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
@@ -5503,7 +5573,26 @@ const ipRateLimitAddressError = (
           "or set ipRateLimit: false to serve without the limit." +
           allowMissingClientIpNote(options),
       })
-    : undefined;
+    : undefined);
+
+/**
+ * A `trustedProxy` that can never resolve an address: a `hopCount` that is not
+ * a non-negative integer. `resolveClientIP` answers `undefined` for every
+ * request under it, so every limited request would be refused; the handler
+ * refuses to start instead.
+ */
+const trustedProxyError = (
+  options: AuthWebHandlerOptions,
+): ClientAddressConfigError | undefined => {
+  const hopCount = options.trustedProxy?.hopCount;
+  return hopCount === undefined || (Number.isSafeInteger(hopCount) && hopCount >= 0)
+    ? undefined
+    : new ClientAddressConfigError({
+        message:
+          `trustedProxy.hopCount must be a non-negative integer (the number of trusted proxies in front of the app), got ${String(hopCount)}. ` +
+          "With it no request resolves a client address, so every rate-limited request would be refused.",
+      });
+};
 
 /**
  * Why a finished `services` build cannot be served, or `undefined` when it can:
@@ -5538,7 +5627,7 @@ const releaseRefusedServices = (scope: Scope.Closeable): Effect.Effect<void> =>
 
 /**
  * What `make` throws under `strict` when the `services` build has no exit
- * after it ran synchronously (#416).
+ * after it ran synchronously.
  */
 const pendingBuildError = (): ServicesBuildPendingError =>
   new ServicesBuildPendingError({
@@ -5552,7 +5641,7 @@ const pendingBuildError = (): ServicesBuildPendingError =>
 
 /**
  * Wait for the `services` build `make` refused under `strict`, and log its
- * failure unless it ended only by the interrupt `make` sent (#416). The thrown
+ * failure unless it ended only by the interrupt `make` sent. The thrown
  * `ServicesBuildPendingError` cannot carry a failure the build ends with only
  * after `make` throws, such as a step that failed while a finalizer it runs
  * awaits.
@@ -5580,12 +5669,17 @@ const serve = (
   release: Effect.Effect<void>,
 ): AuthWebHandler => {
   // The IP limit is router middleware on every auth route, so it sees the
-  // endpoint the router matched rather than the raw path (#582). The later
+  // endpoint the router matched rather than the raw path. The later
   // `Layer.provide` is the outer middleware: `tokenEndpointsNoStore` must stay
   // after `endpointRateLimit`, so a token endpoint's 429 is `no-store` too
   // (RFC 6749 §5.2; HttpServer.test.ts, "marks a rate-limited … 429 no-store").
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(endpointRateLimit(endpointRules(options.ipRateLimit))),
+    Layer.provide(
+      endpointRateLimit(
+        endpointRules(options.ipRateLimit),
+        options.ipRateLimit !== false && options.ipRateLimit?.onStoreError === "fail-open",
+      ),
+    ),
     Layer.provide(tokenEndpointsNoStore),
     Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
     Layer.provide(PlatformLayer),
@@ -5655,8 +5749,8 @@ const serve = (
       if (inner === "/reference") return Promise.resolve(referenceResponse());
     }
 
-    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`
-    // (#628); the cookie writers above mark theirs, and this holds the rule
+    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`;
+    // the cookie writers above mark theirs, and this holds the rule
     // for the whole handler.
     if (inner !== null && prefix !== "") {
       url.pathname = inner || "/";
@@ -5755,10 +5849,10 @@ const tooManyRequests = (
  * served as written:
  *
  * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
- *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
+ *   `false`), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
  *   `OidcProviderService`, with no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for one (#682).
+ *   `allowMissingClientIp: true` does not stand in for one.
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
@@ -5824,9 +5918,9 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   if (addressError !== undefined) throw addressError;
 
   // Build `services` here, synchronously until the build has an exit, so the
-  // startup check below sees what the handler will serve (#389). The handler
+  // startup check below sees what the handler will serve. The handler
   // reuses this build rather than building `services` again. Fibers the build
-  // forks run on the default scheduler, and make does not wait for them (#402).
+  // forks run on the default scheduler, and make does not wait for them.
   const servicesScope = Scope.makeUnsafe();
   const build = runSynchronously(Layer.buildWithScope(options.services, servicesScope));
   const servicesFiber = build.fiber;
@@ -5863,10 +5957,10 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * so the app fails to start, with the error `make` would throw:
  *
  * - {@link ClientAddressConfigError}: `ipRateLimit` (on unless it is
- *   `false`, #583), an `IPRateLimitPlugin` in the `services` `Hooks`, or
+ *   `false`), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
  *   `OidcProviderService`, with no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for one (#682).
+ *   `allowMissingClientIp: true` does not stand in for one.
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.

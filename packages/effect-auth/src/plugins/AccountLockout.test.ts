@@ -73,6 +73,24 @@ const makeHarness = (
 };
 
 describe("AccountLockoutPlugin", () => {
+  it("lets at most maxAttempts of a concurrent burst through", async () => {
+    const records = MutableHashMap.empty<string, AccountLockoutRecord>();
+    const inner = memoryAccountLockoutStore(records);
+    // Reads that yield, as a database round trip does: every attempt of the
+    // burst reads the counter before any of them registers.
+    const h = makeHarness(
+      { maxAttempts: 3, lockoutDurationMs: 60_000 },
+      {
+        ...inner,
+        get: (key) => Effect.flatMap(inner.get(key), (r) => Effect.as(Effect.yieldNow, r)),
+      },
+    );
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => h.attemptResult(byEmail("user@example.com"))),
+    );
+    expect(results.filter((result) => result instanceof AccountLockedError)).toHaveLength(7);
+  });
+
   it("locks the handle after maxAttempts attempts", async () => {
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
 
@@ -144,7 +162,7 @@ describe("AccountLockoutPlugin", () => {
     expect(blocked).toBeInstanceOf(AccountLockedError);
   });
 
-  it("neither counts nor refuses a passkey attempt, even on a locked account (#698)", async () => {
+  it("neither counts nor refuses a passkey attempt, even on a locked account", async () => {
     const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
     const passkey: AuthenticateAttempt = {
       method: "passkey",
@@ -166,7 +184,7 @@ describe("AccountLockoutPlugin", () => {
     expect(await h.attemptResult(passkey)).toEqual(passkey);
   });
 
-  it("neither counts nor refuses a possession proof (one-time code, magic link) (#678)", async () => {
+  it("neither counts nor refuses a possession proof (one-time code, magic link)", async () => {
     const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
     const proofs: ReadonlyArray<AuthenticateAttempt> = [
       {
@@ -192,11 +210,12 @@ describe("AccountLockoutPlugin", () => {
       AccountLockedError,
     );
     expect(await Promise.all(proofs.map((proof) => h.attemptResult(proof)))).toEqual(proofs);
-    // ...and the lock on the password methods stands.
-    expect(h.failures("lockout:user:u1")).toBe(2);
+    // ...and the lock on the password methods stands: two attempts, and the
+    // refused third that set it (the lock is counted, not read).
+    expect(h.failures("lockout:user:u1")).toBe(3);
   });
 
-  it("lets an unkeyed attempt through without counting it (#678)", async () => {
+  it("lets an unkeyed attempt through without counting it", async () => {
     const h = makeHarness({ maxAttempts: 1, lockoutDurationMs: 60_000 });
     const unkeyed: AuthenticateAttempt = { method: "second-factor" };
     expect(await h.attemptResult(unkeyed)).toEqual(unkeyed);
@@ -204,7 +223,7 @@ describe("AccountLockoutPlugin", () => {
     expect(MutableHashMap.size(h.records)).toBe(0);
   });
 
-  it("an impersonation session leaves the target's counts standing (#678)", async () => {
+  it("an impersonation session leaves the target's counts standing", async () => {
     const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 });
     await h.attempt(byEmail("user@example.com", "u1"));
     await h.attempt(byEmail("user@example.com", "u1"));

@@ -11,6 +11,8 @@ import { make, SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import type { Session, SessionConfig, User } from "../Types.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 // The `index`th item a test double recorded; a missing one fails the test.
 const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
@@ -43,6 +45,14 @@ const otpStore = {
       return record;
     }),
 
+  incrementAttempts: (pendingToken: string) =>
+    Effect.sync(() => {
+      const record = Option.getOrNull(MutableHashMap.get(otpRecords, pendingToken));
+      if (record === null) return null;
+      MutableHashMap.set(otpRecords, pendingToken, { ...record, attempts: record.attempts + 1 });
+      return record.attempts + 1;
+    }),
+
   delete: (pendingToken: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(otpRecords, pendingToken);
@@ -61,6 +71,8 @@ const sessionStore = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (id: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, id);
@@ -277,7 +289,43 @@ describe("OtpSecondFactorService", () => {
     expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
-  it("runs beforeAuthenticate unkeyed for an unknown or expired challenge (#678)", async () => {
+  it("compares at most maxAttempts of a concurrent burst of guesses", async () => {
+    const sentOtps: Array<{ user: User; otp: string }> = [];
+    const testContext = await makeTestContext();
+    // Reads that yield, as a database round trip does: every guess reads the
+    // challenge before any of them is counted.
+    const slowStore: typeof OtpSecondFactorStore.Service = {
+      ...otpStore,
+      get: (token) => Effect.flatMap(otpStore.get(token), (r) => Effect.as(Effect.yieldNow, r)),
+    };
+
+    const outcomes = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            maxAttempts: 3,
+            sendOtp: (user, otp) => Effect.sync(() => void sentOtps.push({ user, otp })),
+          }).pipe(Effect.provideService(OtpSecondFactorStore, slowStore));
+          const challenge = yield* service.begin(testUser);
+          const otp = recorded(sentOtps).otp;
+          const wrong = otp === "000000" ? "000001" : "000000";
+          // Nine wrong guesses, then the right one.
+          const guesses = [...Array.from({ length: 9 }, () => wrong), otp];
+          return yield* Effect.all(
+            guesses.map((guess) => Effect.result(service.verify(challenge.token, guess))),
+            { concurrency: "unbounded" },
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // The right guess came after the cap, so it was refused uncompared.
+    expect(outcomes.filter(Result.isSuccess)).toHaveLength(0);
+    expect(MutableHashMap.size(otpRecords)).toBe(0);
+  });
+
+  it("runs beforeAuthenticate unkeyed for an unknown or expired challenge", async () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
     const seen: Array<AuthenticateAttempt> = [];

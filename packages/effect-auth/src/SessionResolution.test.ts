@@ -152,7 +152,7 @@ describe("SessionResolution credential sources", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The drift test #186 asks for
+// The drift test
 // ---------------------------------------------------------------------------
 
 describe("the edge predicate cannot desynchronise from the middleware", () => {

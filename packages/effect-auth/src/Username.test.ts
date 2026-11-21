@@ -24,6 +24,8 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const hasher = Password.scryptHasher({ cost: 1024 });
 const sessionConfig: Types.SessionConfig = {
@@ -83,6 +85,8 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
@@ -180,7 +184,7 @@ describe("UsernameService", () => {
     expect(result.session).toBeDefined();
   });
 
-  it("never stores a role, a ban or a SCIM key from the sign-up's attributes (#580)", async () => {
+  it("never stores a role, a ban or a SCIM key from the sign-up's attributes", async () => {
     const result = await run((svc) =>
       svc.signUp({
         username: "mallory",
@@ -349,7 +353,7 @@ describe("UsernameService", () => {
   });
 });
 
-describe("UsernameService under anti-enumeration (#414)", () => {
+describe("UsernameService under anti-enumeration", () => {
   beforeEach(() => {
     MutableHashMap.clear(usersById);
     MutableHashMap.clear(identifierRecords);

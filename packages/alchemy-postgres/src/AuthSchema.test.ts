@@ -3,6 +3,7 @@ import { Config, Effect, FileSystem, Layer, Order, Path, PlatformError, Redacted
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { SecureRandom } from "effect/crypto";
 import { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import { SqlClient } from "effect/sql";
@@ -62,6 +63,7 @@ const platform = Layer.mergeAll(
   }),
   Path.layer,
   FetchHttpClient.layer,
+  SecureRandom.layerWebCrypto,
 );
 
 const STACK = "effect-auth-alchemy-postgres-test";
@@ -127,7 +129,7 @@ const makeEngine = (
         // SAFETY: `withRuntime` provides the engine services a deploy uses, and
         // `compiled.services` is the whole context the stack was built in, its
         // `State` and providers among it. `Stack.make` also declares
-        // `ChildProcessSpawner`, `Digest`, `SecureRandom` and `Interaction`, which an `AuthSchema`
+        // `ChildProcessSpawner`, `Digest` and `Interaction`, which an `AuthSchema`
         // deploy never reaches: one that did would fail with a missing-service defect.
         program.pipe(
           makeStack({ name: STACK, providers, state }),
@@ -190,7 +192,7 @@ const databaseUrl = Option.getOrUndefined(
   Effect.runSync(Config.option(Config.Redacted("DATABASE_URL"))),
 );
 
-/** `CI` is set (GitHub Actions sets `CI=true`): the real-server case is required, never skipped (#766). */
+/** `CI` is set (GitHub Actions sets `CI=true`): the real-server case is required, never skipped. */
 const underCi = Effect.runSync(Config.Boolean("CI").pipe(Config.withDefault(false)));
 const skipWithoutServer = databaseUrl === undefined && !underCi;
 if (skipWithoutServer) {

@@ -77,9 +77,9 @@ policy set (route rejected).
 
 ## What this does not decide
 
-The ordered role ladder (#188) and the zero-IO principal guards (#189) are deliberately left
+The ordered role ladder and the zero-IO principal guards are deliberately left
 unimplemented here. They now have one model to build on: an ordered ladder is a `memberOf` chain
 or a comparison condition, and the guards are the kernel's zero-IO fast path over a resolved
-slice. The read-scope residual (#203/#190) is likewise out of scope — what this ADR guarantees is
+slice. The read-scope residual is likewise out of scope — what this ADR guarantees is
 that a rule authored the short way is now a `DeclarativePolicy`, which is the thing a read scope
 can be compiled from.

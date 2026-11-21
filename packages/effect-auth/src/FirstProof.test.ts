@@ -235,7 +235,7 @@ const untouched = (userId: string) => ({
   trustedDevice: true,
 });
 
-describe("proveAddress: the first proof removes the earlier holder's credentials (#694)", () => {
+describe("proveAddress: the first proof removes the earlier holder's credentials", () => {
   it("removes the account's linked OAuth accounts", () => {
     const f = fixture(false);
     f.prove({ ...f.base, oauthAccounts: f.credentials.oauthAccounts });
@@ -310,7 +310,7 @@ describe("proveAddress: the first proof removes the earlier holder's credentials
   });
 });
 
-describe("proveAddress: the first proof removes the earlier holder's phone and OIDC access (#704)", () => {
+describe("proveAddress: the first proof removes the earlier holder's phone and OIDC access", () => {
   it("removes the account's unverified phone identifiers and keeps a verified one", () => {
     const f = fixture(false);
     f.prove(f.base);

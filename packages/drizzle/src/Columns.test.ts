@@ -19,9 +19,10 @@ import { eq, getTableName } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { type AuthSchema, defineSchema } from "./Columns.ts";
+import { type AuthSchema, defineSchema, SchemaMappingError } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
 import { layer as storesLayer } from "./Layers.ts";
 import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
@@ -152,8 +153,8 @@ const userId = "3f1c0e8a-8b1a-4a5e-9c0e-0a1b2c3d4e5f";
 const identifierId = "7a2d4b6c-1e3f-4058-9a7b-2c4d6e8f0a1b";
 
 /**
- * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291), with the application's own tables applied on top, and emptied before
+ * The file's one in-memory Postgres, opened from the run's migrated template,
+ * with the application's own tables applied on top, and emptied before
  * each test. Each test starts with the one `account` row the others read.
  */
 let client: PGlite;
@@ -366,5 +367,64 @@ describe("stores over an application's own schema", () => {
     );
 
     expect(exit._tag).toBe("Failure");
+  });
+});
+
+describe("defineSchema's promoted attributes", () => {
+  /** The application's schema with `users.promoted` set to `promoted`. */
+  const withPromoted = (
+    promoted: Readonly<Record<string, "key" | "displayName" | "avatar" | "role">>,
+  ) =>
+    defineSchema({
+      sessions: {
+        table: appSessions,
+        columns: {
+          id: "digest",
+          userId: "account",
+          expiresAt: "expires",
+          createdAt: "born",
+          lastActivityAt: "lastSeen",
+          attributes: "meta",
+        },
+      },
+      users: {
+        table: appUsers,
+        columns: {
+          id: "key",
+          name: "displayName",
+          image: "avatar",
+          attributes: "meta",
+          createdAt: "born",
+          updatedAt: "touched",
+        },
+        promoted,
+      },
+      identifiers: {
+        table: appIdentifiers,
+        columns: {
+          id: "key",
+          userId: "account",
+          type: "kind",
+          value: "normalized",
+          verified: "confirmed",
+          verifiedAt: "confirmedOn",
+          createdAt: "born",
+        },
+      },
+    });
+
+  // `createdAt`, `updatedAt` and the bag are refused at the type level: a
+  // promoted column must read back as a string, number, boolean or null.
+  it.each([
+    ["key", "id"],
+    ["displayName", "name"],
+    ["avatar", "image"],
+  ] as const)("refuses an attribute promoted onto %s, the %s column", (column, field) => {
+    expect(() => withPromoted({ role: "role", owner: column })).toThrow(SchemaMappingError);
+    expect(() => withPromoted({ owner: column })).toThrow(`the ${field} column`);
+  });
+
+  it("accepts an attribute promoted onto a column of its own", () => {
+    expect(R.keys(withPromoted({ role: "role" }).users.promoted)).toEqual(["role"]);
   });
 });

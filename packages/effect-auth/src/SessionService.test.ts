@@ -1,16 +1,27 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
+import {
+  Cause,
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Logger,
+  MutableHashMap,
+  Result,
+} from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import type { SecureRandom } from "effect/crypto";
-import { AuthError } from "./Errors.ts";
+import { AuthError, SessionConfigError } from "./Errors.ts";
 import { composePlugins, Hooks, makePlugin, type PluginImpls, type SessionRef } from "./Hooks.ts";
 import { AuditPlugin } from "./plugins/Audit.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
-import { SessionStore } from "./SessionStore.ts";
+import { SessionStore, type SessionTouch } from "./SessionStore.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
 import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
@@ -33,6 +44,9 @@ const mockSessionStore = {
       MutableHashMap.set(mockSessionStore.sessions, session.id, session);
       return session;
     }),
+
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(mockSessionStore.sessions).touch(sessionId, touch),
 
   delete: (sessionId: string) =>
     Effect.sync(() => {
@@ -106,7 +120,7 @@ describe("SessionService", () => {
       ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
     );
 
-    // The record carries the stored id; the token travels beside it (#581).
+    // The record carries the stored id; the token travels beside it.
     expect(session.id).toBe(hashToken(token));
     expect(token).toMatch(/^[0-9a-f]{40}$/);
     expect(session.userId).toBe("user1");
@@ -142,12 +156,19 @@ describe("SessionService", () => {
         Effect.provide(
           Effect.gen(function* () {
             const manager = yield* make({
-              sessionExpiresIn: {
-                activePeriod: -1000, // Already expired
-                idlePeriod: -1000,
-              },
+              sessionExpiresIn: { activePeriod: 1000, idlePeriod: 1000 },
             });
             const session = yield* manager.createSession("user1");
+            // Backdate the stored session past both periods.
+            const past = DateTime.toDateUtc(
+              DateTime.makeUnsafe(DateTime.nowUnsafe().epochMilliseconds - 10_000),
+            );
+            MutableHashMap.set(mockSessionStore.sessions, session.session.id, {
+              ...session.session,
+              createdAt: past,
+              lastActivityAt: past,
+              expiresAt: past,
+            });
             return yield* manager.validateSession(session.token);
           }),
           Context.merge(SessionStoreTest, UserStoreTest),
@@ -207,7 +228,7 @@ describe("SessionService", () => {
     // The raw token is not a key in the store, only its hash is.
     expect(result.storedKeys).not.toContain(result.token);
     expect(result.storedKeys).toEqual([hashToken(result.token)]);
-    // Validation answers the session under its stored id, never the token (#581).
+    // Validation answers the session under its stored id, never the token.
     expect(result.validated.session.id).toBe(hashToken(result.token));
     expect(result.validated.session.id).toBe(result.session.id);
     expect(result.validated.user.id).toBe("user1");
@@ -296,9 +317,9 @@ describe("SessionService", () => {
       let updateCallCount = 0;
       const trackingStore = {
         ...mockSessionStore,
-        update: (session: Session) => {
+        touch: (sessionId: string, touch: SessionTouch) => {
           updateCallCount++;
-          return mockSessionStore.update(session);
+          return mockSessionStore.touch(sessionId, touch);
         },
       };
 
@@ -324,9 +345,9 @@ describe("SessionService", () => {
       let updateCallCount = 0;
       const trackingStore = {
         ...mockSessionStore,
-        update: (session: Session) => {
+        touch: (sessionId: string, touch: SessionTouch) => {
           updateCallCount++;
-          return mockSessionStore.update(session);
+          return mockSessionStore.touch(sessionId, touch);
         },
       };
 
@@ -372,10 +393,13 @@ describe("SessionService", () => {
           Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
         update: (session: Session) =>
           Effect.sync(() => {
-            updateCallCount++;
             MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
+        touch: (sessionId: string, touch: SessionTouch) => {
+          updateCallCount++;
+          return memorySessionStore(sessions).touch(sessionId, touch);
+        },
         delete: (sessionId: string) =>
           Effect.sync(() => {
             MutableHashMap.remove(sessions, sessionId);
@@ -446,6 +470,76 @@ describe("SessionService", () => {
       expect(updateCallCount).toBe(1);
     });
 
+    it("keeps an attribute write that lands between the refresh's read and its write", async () => {
+      const sessions = MutableHashMap.empty<string, Session>();
+      const store = memorySessionStore(sessions);
+      // Another request changes the session's attributes right after the read.
+      const racingStore: typeof SessionStore.Service = {
+        ...store,
+        get: (sessionId) =>
+          store
+            .get(sessionId)
+            .pipe(
+              Effect.tap((session) =>
+                session === null
+                  ? Effect.void
+                  : store.update({ ...session, attributes: { activeOrganizationId: "org-1" } }),
+              ),
+            ),
+      };
+
+      const { validated, stored } = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const manager = yield* make(sessionConfig);
+            const issued = yield* manager.createSession("user1", { a: 1 });
+            return {
+              validated: yield* manager.validateSession(issued.token),
+              stored: yield* store.get(issued.session.id),
+            };
+          }),
+          Context.merge(
+            Context.make(SessionStore, racingStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+      );
+
+      expect(stored?.attributes).toEqual({ activeOrganizationId: "org-1" });
+      expect(validated.session.attributes).toEqual({ activeOrganizationId: "org-1" });
+    });
+
+    it("refuses, and does not recreate, a session revoked between the read and the refresh", async () => {
+      const sessions = MutableHashMap.empty<string, Session>();
+      const store = memorySessionStore(sessions);
+      // A sign-out elsewhere deletes the session right after the read.
+      const racingStore: typeof SessionStore.Service = {
+        ...store,
+        get: (sessionId) => store.get(sessionId).pipe(Effect.tap(() => store.delete(sessionId))),
+      };
+
+      const { result, stored } = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const manager = yield* make(sessionConfig);
+            const issued = yield* manager.createSession("user1");
+            return {
+              result: yield* Effect.result(manager.validateSession(issued.token)),
+              stored: yield* store.get(issued.session.id),
+            };
+          }),
+          Context.merge(
+            Context.make(SessionStore, racingStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+      );
+
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("SessionNotFoundError");
+      expect(stored).toBeNull();
+    });
+
     it("still enforces expiry even when write is throttled", async () => {
       const sessions = MutableHashMap.empty<string, Session>();
       const timedStore = {
@@ -461,6 +555,8 @@ describe("SessionService", () => {
             MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
+        touch: (sessionId: string, touch: SessionTouch) =>
+          memorySessionStore(sessions).touch(sessionId, touch),
         delete: (sessionId: string) =>
           Effect.sync(() => {
             MutableHashMap.remove(sessions, sessionId);
@@ -478,7 +574,7 @@ describe("SessionService", () => {
       };
 
       // updateAge is very long (1 year), so writes are always throttled.
-      // But the session itself has a tiny activePeriod so it expires immediately.
+      // But the stored session is backdated, so it has already expired.
 
       const result = await Effect.runPromise(
         Effect.result(
@@ -486,12 +582,22 @@ describe("SessionService", () => {
             Effect.gen(function* () {
               const manager = yield* make({
                 sessionExpiresIn: {
-                  activePeriod: -1000, // already expired
-                  idlePeriod: -1000,
+                  activePeriod: 1000,
+                  idlePeriod: 1000,
                   updateAge: 365 * 24 * 60 * 60 * 1000, // 1 year — throttle always active
                 },
               });
               const session = yield* manager.createSession("user1");
+              // Backdate the stored session so it is already expired.
+              const past = DateTime.toDateUtc(
+                DateTime.makeUnsafe(DateTime.nowUnsafe().epochMilliseconds - 10_000),
+              );
+              MutableHashMap.set(sessions, session.session.id, {
+                ...session.session,
+                createdAt: past,
+                lastActivityAt: past,
+                expiresAt: past,
+              });
               return yield* manager.validateSession(session.token);
             }),
             Context.merge(
@@ -554,9 +660,9 @@ const denyHook = () => Effect.fail(new AuthError({ message: "denied by plugin" }
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-// #669: the session input hooks see the stored id (the token's digest), never
+// The session input hooks see the stored id (the token's digest), never
 // the raw token, and are observe-or-deny: what they return is not read back.
-describe("session input hooks (#669)", () => {
+describe("session input hooks", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockSessionStore.sessions);
   });
@@ -699,5 +805,78 @@ describe("session input hooks (#669)", () => {
     expect(observed.length).toBe(6);
     expect(observed.filter((value) => value.includes(token))).toEqual([]);
     expect(observed.some((value) => value.includes(hashToken(token)))).toBe(true);
+  });
+});
+
+/** Build the service with `sessionExpiresIn`, its exit kept. */
+const build = (sessionExpiresIn: SessionConfig["sessionExpiresIn"]) =>
+  Effect.runPromiseExit(
+    Effect.provide(make({ sessionExpiresIn }), Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+      Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
+    ),
+  );
+
+// A `sessionExpiresIn` that cannot work fails the layer build, and a
+// best-effort session write that fails is logged, never dropped.
+describe("session config and best-effort writes", () => {
+  it.each([
+    ["a NaN activePeriod", { activePeriod: Number.NaN, idlePeriod: 1000 }, "activePeriod"],
+    ["a zero activePeriod", { activePeriod: 0, idlePeriod: 1000 }, "activePeriod"],
+    ["a negative idlePeriod", { activePeriod: 1000, idlePeriod: -1 }, "idlePeriod"],
+    ["an infinite idlePeriod", { activePeriod: 1000, idlePeriod: Infinity }, "idlePeriod"],
+    ["a negative updateAge", { activePeriod: 1000, idlePeriod: 1000, updateAge: -1 }, "updateAge"],
+    [
+      "a NaN updateAge",
+      { activePeriod: 1000, idlePeriod: 1000, updateAge: Number.NaN },
+      "updateAge",
+    ],
+  ] as const)("dies at build with SessionConfigError for %s", async (_, config, field) => {
+    const exit = await build(config);
+    assert(Exit.isFailure(exit));
+    const defect = Cause.squash(exit.cause);
+    assert(defect instanceof SessionConfigError);
+    expect(defect.message).toContain(field);
+  });
+
+  it("accepts sound periods, and an updateAge of 0", async () => {
+    const exit = await build({ activePeriod: 1000, idlePeriod: 2000, updateAge: 0 });
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
+
+  it("logs a failed refresh write and still validates the session", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+    const logs: Array<{ readonly level: string; readonly line: string }> = [];
+    const collector = Logger.make((options) => {
+      logs.push({ level: options.logLevel, line: Logger.formatJson.log(options) });
+    });
+    const failingUpdate = Context.make(SessionStore, {
+      ...mockSessionStore,
+      touch: () => Effect.fail(new AuthError({ message: "store write failed" })),
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const { token } = yield* manager.createSession("user1");
+          return yield* manager.validateSession(token);
+        }),
+        Context.merge(failingUpdate, UserStoreTest),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(Hooks.Default, PlatformCrypto.layer, Logger.layer([collector])),
+        ),
+      ),
+    );
+
+    expect(result.user.id).toBe("user1");
+    expect(
+      logs.some(
+        (log) =>
+          log.level === "Warn" &&
+          log.line.includes("refreshing a session failed") &&
+          log.line.includes("store write failed"),
+      ),
+    ).toBe(true);
   });
 });

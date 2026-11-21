@@ -219,8 +219,8 @@ describe("resolveClientIP — hopCount", () => {
 });
 
 // A Web `Request` (what `Http.make` handles) has no socket address: the header's
-// last `hopCount` entries are the ones the trusted proxies wrote (#584).
-describe("resolveClientIP — hopCount without a socket address (#584)", () => {
+// last `hopCount` entries are the ones the trusted proxies wrote.
+describe("resolveClientIP — hopCount without a socket address", () => {
   const oneHop = { hopCount: 1 };
 
   it("takes the header's last entry for an honest client behind one proxy", () => {
@@ -317,7 +317,7 @@ describe("resolveClientIP — trustedProxyCidrs", () => {
   });
 
   it("resolves no address when the first untrusted entry is not an IP literal", () => {
-    // Without validation this keyed the limit on the literal `garbage` (#584).
+    // Without validation this keyed the limit on the literal `garbage`.
     expect(resolveClientIP(req("garbage, 10.0.0.100", "10.0.0.200"), trusted10)).toBeUndefined();
   });
 
@@ -381,6 +381,20 @@ describe("resolveClientIP — IPv6", () => {
       trustedProxyCidrs: ["10.0.0.0/8"],
     });
     expect(result).toBe("2001:db8::1");
+  });
+
+  it("canonicalises the socket address as it does a header entry", () => {
+    const fromSocket = (remote: string) =>
+      resolveClientIP({ headers: {}, remoteAddress: Option.some(remote) });
+    const fromHeader = (value: string) =>
+      resolveClientIP(edge({ "cf-connecting-ip": value }, null), ClientIP.cloudflare);
+    Arr.forEach(["2001:DB8:0:0:0:0:0:1", "2001:db8::0:1", "2001:db8:0000::1"], (spelling) => {
+      expect(fromSocket(spelling)).toBe("2001:db8::1");
+      expect(fromSocket(spelling)).toBe(fromHeader(spelling));
+    });
+    expect(fromSocket("fe80::1%eth0")).toBe("fe80::1");
+    expect(fromSocket("::FFFF:192.0.2.1")).toBe("192.0.2.1");
+    expect(fromSocket("0:0:0:0:0:ffff:c000:201")).toBe("192.0.2.1");
   });
 
   it("matches IPv6 loopback in CIDR", () => {

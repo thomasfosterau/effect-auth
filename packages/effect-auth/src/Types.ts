@@ -66,7 +66,7 @@ export type User = typeof User.Type;
  * of the session token (`hashToken`), never the token itself, so a session
  * record is safe to log, serialize into a page or send to a browser. The raw
  * token exists only in the {@link IssuedSession} a sign-in returns, and in
- * the credential the client presents (#581).
+ * the credential the client presents.
  */
 export const Session = Schema.Struct({
   id: Schema.String,
@@ -83,7 +83,7 @@ export type Session = typeof Session.Type;
  * `AdminService.impersonateUser` issued: it carries
  * `attributes.impersonatedBy`. The user did not earn it, so
  * `AccountLockoutPlugin` leaves the user's lockout standing when one is
- * issued (#678).
+ * issued.
  *
  * @example
  * ```ts
@@ -120,7 +120,7 @@ export type SessionWithUser = typeof SessionWithUser.Type;
  * `createSession` returns it, and every sign-in result carries both fields.
  * The token is a credential: the HTTP tier puts it only in the httpOnly
  * session cookie and, in bearer mode, the `set-auth-token` header, never in a
- * response body (#581).
+ * response body.
  */
 export const IssuedSession = Schema.Struct({
   session: Session,
@@ -222,8 +222,8 @@ export interface Permission {
 
 /**
  * The wrong codes counted against one (address, purpose) pair of a one-time
- * code flow (email OTP, phone OTP): the failure budget that survives resends
- * (#590). A store keeps it apart from the code's record, so replacing,
+ * code flow (email OTP, phone OTP): the failure budget that survives resends.
+ * A store keeps it apart from the code's record, so replacing,
  * expiring or deleting the code leaves it as it was; only a successful
  * verification clears it.
  */
@@ -235,7 +235,7 @@ export interface OtpFailures {
 }
 
 /**
- * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore` (#590),
+ * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore`,
  * over the store's purposes `P`: `getFailures` reads a pair's
  * {@link OtpFailures} (`null` when it has none), `recordFailure` counts one
  * wrong code at `at` (epoch ms) and returns the budget after it, and
@@ -256,8 +256,8 @@ export interface OtpFailureBudget<P> {
 
 /**
  * How a one-time code flow (`EmailOtpConfig.backoff`, `PhoneOtpConfig.backoff`)
- * delays sends to an (address, purpose) pair that keeps receiving wrong codes
- * (#590). Once the pair's wrong codes reach `freeFailures`, a send is refused
+ * delays sends to an (address, purpose) pair that keeps receiving wrong codes.
+ * Once the pair's wrong codes reach `freeFailures`, a send is refused
  * with `ResendTooSoonError` until `baseDelay * 2 ** (count - freeFailures)`,
  * capped at `maxDelay`, has passed since the latest wrong code. A successful
  * verification resets the count. There is no lockout: a send succeeds again
@@ -274,7 +274,7 @@ export interface OtpBackoffConfig {
 }
 
 /**
- * The per-recipient send cap (#684): at most `max` messages to one address or
+ * The per-recipient send cap: at most `max` messages to one address or
  * phone number for one purpose within `windowMs`, counted through the
  * `RateLimitStore`. A send past it fails with `RateLimitError` (`429` over
  * HTTP). It counts every request that reaches it, whether or not the address

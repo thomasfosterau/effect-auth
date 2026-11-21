@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-alchemy-postgres",
-  "version": "0.1.4",
+  "version": "0.3.0",
   "description": "Alchemy v2 AuthSchema resource and Postgres (Hyperdrive or URL) storage wiring for effect-auth.",
   "keywords": [
     "alchemy",
@@ -43,10 +43,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@effect/docgen": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/sql-pglite": "catalog:",
     "@electric-sql/pglite": "catalog:",
@@ -61,6 +65,6 @@
     "effect": "catalog:alchemy-peers"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+    "node": ">=22"
   }
 }

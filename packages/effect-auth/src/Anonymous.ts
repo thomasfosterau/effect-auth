@@ -77,7 +77,7 @@ export class AnonymousService extends Context.Service<
     /**
      * Link an anonymous identity to a real account: run the `linkAccount`
      * callback (app data migration), then delete the anonymous user and
-     * whatever it still holds (#601): the credentials and tokens in the
+     * whatever it still holds: the credentials and tokens in the
      * user-keyed stores present where this layer is built, its sessions, any
      * identifiers (when an `IdentifierStore` is present), and the user row
      * last.

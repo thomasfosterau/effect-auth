@@ -114,7 +114,7 @@ describe("apiKeyServiceLayer", () => {
     );
   });
 
-  it("a key whose owner the UserStore does not find fails verify (#601)", async () => {
+  it("a key whose owner the UserStore does not find fails verify", async () => {
     const program = Effect.fn("orphanedKey")(function* () {
       const apiKeys = yield* ApiKeyService;
       const created = yield* apiKeys.create("no-such-user");

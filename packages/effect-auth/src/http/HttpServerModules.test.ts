@@ -43,7 +43,10 @@ import {
 } from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
+import { memoryApiKeyStore } from "../testing/MemoryStores.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -141,6 +144,8 @@ const makeFixture = (admin?: AdminConfig) => {
         MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (sessionId: string) =>
       Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: (userId: string) =>
@@ -312,27 +317,7 @@ const makeFixture = (admin?: AdminConfig) => {
     setPasswordHash: (_userId: string, _hash: string) => Effect.void,
   };
 
-  const apiKeyStore = {
-    create: (k: ApiKey) => Effect.sync(() => (MutableHashMap.set(apiKeys, k.id, k), k)),
-    get: (id: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(apiKeys, id))),
-    getByHash: (keyHash: string) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(apiKeys)).find((k) => k.keyHash === keyHash) ?? null,
-      ),
-    update: (k: ApiKey) => Effect.sync(() => (MutableHashMap.set(apiKeys, k.id, k), k)),
-    delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(apiKeys, id)),
-    listByUserId: (userId: string) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(apiKeys)).filter((k) => k.userId === userId),
-      ),
-    deleteByUserId: (userId: string) =>
-      Effect.sync(() => {
-        Arr.forEach(
-          Arr.filter(Arr.fromIterable(MutableHashMap.values(apiKeys)), (k) => k.userId === userId),
-          (k) => void MutableHashMap.remove(apiKeys, k.id),
-        );
-      }),
-  };
+  const apiKeyStore = memoryApiKeyStore(apiKeys);
 
   const jwtKeyStore = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
@@ -350,7 +335,7 @@ const makeFixture = (admin?: AdminConfig) => {
       Effect.sync(() => void MutableHashMap.set(rateLimitEntries, key, entry)),
     increment: (key: string, ttl: number) =>
       // Starts a new window when there is none or it has expired, as the
-      // RateLimitStore contract requires (#455).
+      // RateLimitStore contract requires.
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
           const entry = Option.getOrUndefined(MutableHashMap.get(rateLimitEntries, key));
@@ -499,7 +484,7 @@ const statusAndBody = async (res: Response) => ({ status: res.status, body: awai
 
 /**
  * The `403` body an id that names no record gets, after checking that every
- * other request gets exactly it, status and body (#718).
+ * other request gets exactly it, status and body.
  */
 const sameRefusal = async (
   fx: { readonly handler: (request: Request) => Promise<Response> },
@@ -648,7 +633,7 @@ const patchRole = (roleId: string, attributes: Schema.Json, sessionId: string) =
     sessionId,
   );
 
-/** The `#718` requests by id: each takes the id and the caller's session. */
+/** The requests by id: each takes the id and the caller's session. */
 type ByIdRequest = (id: string, sessionId: string) => Request;
 
 /** `POST /teams/:id/members` adding user `staff`, as `sessionId`. */
@@ -747,7 +732,7 @@ describe("HTTP organization endpoints", () => {
     // The member id is the stored one.
     expect(memberList.data[0]?.id).toBe(fx.members[0]?.id);
 
-    // An unknown organization answers 403, as a stranger's read does (#717).
+    // An unknown organization answers 403, as a stranger's read does.
     expect((await fx.handler(apiReq("GET", "/organizations/nope", undefined, sid))).status).toBe(
       403,
     );
@@ -846,7 +831,7 @@ describe("HTTP organization endpoints", () => {
     expect(res.headers.get("content-type")).toContain("application/vnd.api+json");
   });
 
-  it("reads an organization and its members only as an active member (#717)", async () => {
+  it("reads an organization and its members only as an active member", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
     fx.seedUser("member", "member@test.com");
@@ -908,7 +893,7 @@ describe("HTTP organization endpoints", () => {
     ]);
   });
 
-  it("sets the active organization only to one the caller is an active member of (#576)", async () => {
+  it("sets the active organization only to one the caller is an active member of", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
     fx.seedUser("former", "former@test.com");
@@ -997,7 +982,7 @@ describe("HTTP organization endpoints", () => {
     });
 
     // A stranger may neither change nor read back a membership, even by a
-    // no-op patch; an unknown id is refused alike (#718).
+    // no-op patch; an unknown id is refused alike.
     expect((await fx.handler(patchMember(member.id, {}, strangerSid))).status).toBe(403);
     expect((await fx.handler(patchMember(member.id, { role: "owner" }, strangerSid))).status).toBe(
       403,
@@ -1059,7 +1044,7 @@ describe("HTTP organization endpoints", () => {
       attributes: { status: "pending" },
     });
 
-    // Only the invitee may accept, and a wrong token accepts nothing (#586);
+    // Only the invitee may accept, and a wrong token accepts nothing;
     // the answer carries the new membership.
     const token = fx.tokenFor(first);
     expect(
@@ -1119,7 +1104,7 @@ describe("HTTP organization endpoints", () => {
     expect((await fx.handler(transitionInvitation(fourth, "pending", ownerSid))).status).toBe(400);
   });
 
-  it("lists an organization's invitations only to a member holding invitation:create (#715)", async () => {
+  it("lists an organization's invitations only to a member holding invitation:create", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
     fx.seedUser("member", "member@test.com");
@@ -1162,7 +1147,7 @@ describe("HTTP organization endpoints", () => {
     expect(await statusAndBody(await list(org.id, memberSid))).toEqual(unknown);
   });
 
-  it("answers an invitation by id from a verified address, and only from one (#673)", async () => {
+  it("answers an invitation by id from a verified address, and only from one", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
     fx.seedUser("verified", "verified@test.com");
@@ -1214,7 +1199,7 @@ describe("HTTP organization endpoints", () => {
     expect(fx.members.some((m) => m.userId === "unverified")).toBe(false);
   });
 
-  it("lists the caller's own pending invitations, never another user's or a digest (#706)", async () => {
+  it("lists the caller's own pending invitations, never another user's or a digest", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
     fx.seedUser("invitee", "invitee@test.com");
@@ -1546,7 +1531,7 @@ describe("HTTP organization endpoints", () => {
     expect(deniedDelete.status).toBe(403);
   });
 
-  it("refuses an unknown id exactly as another tenant's record and a member without the permission (#718)", async () => {
+  it("refuses an unknown id exactly as another tenant's record and a member without the permission", async () => {
     const fx = makeFixture();
     fx.seedUser("owner", "owner@test.com");
     fx.seedUser("member", "member@test.com");
@@ -1900,7 +1885,7 @@ const gateStatuses = (fx: ReturnType<typeof makeFixture>, sid: string) =>
     ].map(async (request) => (await fx.handler(request)).status),
   );
 
-describe("HTTP platform-admin endpoints under a custom AdminConfig (#680)", () => {
+describe("HTTP platform-admin endpoints under a custom AdminConfig", () => {
   it("lets the configured admins through the SSO-provider, OAuth-client and domain gates", async () => {
     const { fx, opsSid, rootSid } = customAdminFixture();
     // Past the gate, each endpoint answers for its own module: this fixture
@@ -1935,7 +1920,7 @@ describe("HTTP impersonation endpoints", () => {
     expect(started.status).toBe(201);
     const token = sessionCookieOf(started);
     assert(token !== undefined && token !== "", "the impersonation's session is the cookie");
-    // The token reaches the browser in the cookie only, never the body (#581).
+    // The token reaches the browser in the cookie only, never the body.
     expect(await started.clone().text()).not.toContain(token);
     const document = await jsonBody(
       started,
@@ -2001,7 +1986,7 @@ describe("HTTP api-key endpoints", () => {
 
     const allowedOverCookie = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
     expect(allowedOverCookie.status).toBe(201);
-    // The answer carries the raw key: never stored by a cache (#628).
+    // The answer carries the raw key: never stored by a cache.
     expect(allowedOverCookie.headers.get("cache-control")).toBe("no-store");
   });
 

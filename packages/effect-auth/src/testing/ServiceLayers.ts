@@ -116,7 +116,7 @@ export interface ApiKeyServiceLayerOptions {
   readonly keys?: Iterable<ApiKey> | undefined;
   /**
    * The users the layer's `UserStore` starts with (none by default). A key
-   * verifies only while its owner exists (#601), so seed the owners of the
+   * verifies only while its owner exists, so seed the owners of the
    * keys a test verifies.
    */
   readonly users?: Iterable<Types.User> | undefined;

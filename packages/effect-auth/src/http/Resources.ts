@@ -1,5 +1,5 @@
 /**
- * The JSON:API resources of the included HTTP API (#205): each entity the
+ * The JSON:API resources of the included HTTP API: each entity the
  * contract exposes is declared once, here, as an effect-jsonapi
  * `Resource.make`, and every endpoint, document and client type over it is
  * derived from that declaration.
@@ -14,7 +14,7 @@
  *
  * Server-maintained fields are read-only (`Resource.readOnlyAttribute`): no
  * write payload accepts them. In particular the untyped `attributes` bag is
- * never writable over HTTP (#193): a `PATCH` cannot set a `role`.
+ * never writable over HTTP: a `PATCH` cannot set a `role`.
  *
  * @module http/Resources
  */
@@ -335,8 +335,8 @@ export type OrganizationMember = typeof OrganizationMember.Type;
  * `inviterId` as the `organization` and `inviter` relationships. `status`
  * moves through `PATCH /invitations/:id`: the invitee sets `accepted` or
  * `rejected`, presenting the invitation email's secret as the input-only
- * `token` attribute (#586), which an invitee whose matching email identifier
- * is verified may omit (#673); a member holding `invitation:cancel` sets
+ * `token` attribute, which an invitee whose matching email identifier
+ * is verified may omit; a member holding `invitation:cancel` sets
  * `canceled`.
  *
  * @since 0.3.0
@@ -376,8 +376,8 @@ export type Invitation = typeof Invitation.Type;
  * `POST /organizations/:id/domains` (`domain`; always a `dns` claim) and
  * proved through `POST /organization-domains/:id/verifications`, or attested
  * by the operator through `POST /admin/organization-domains` (a `manual`
- * claim, #598), and released by the operator through
- * `DELETE /admin/organization-domains/:id` (#680); nothing else about it is
+ * claim), and released by the operator through
+ * `DELETE /admin/organization-domains/:id`; nothing else about it is
  * writable. `verificationToken` is the value a `dns` claim publishes as a TXT
  * record. The `attester` relationship is its `attestedBy`: the platform admin
  * who attested a `manual` claim, `null` for a `dns` claim or an attestation
@@ -511,7 +511,7 @@ export const TeamMember = Resource.make("team-members", {
 export type TeamMember = typeof TeamMember.Type;
 
 // -----------------------------------------------------------------------------
-// Admin, API keys, OAuth clients, SSO and JWTs (#205, slice 5)
+// Admin, API keys, OAuth clients, SSO and JWTs (slice 5)
 // -----------------------------------------------------------------------------
 
 /**

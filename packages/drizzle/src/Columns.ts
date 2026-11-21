@@ -87,6 +87,9 @@
  * ```
  */
 
+import { Data } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import {
   getTableColumns,
@@ -323,11 +326,23 @@ export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSch
 };
 
 /**
+ * A `defineSchema` mapping the stores cannot use: a promoted attribute mapped
+ * onto a column the stores already write as a fixed field (`id`, `name`,
+ * `image`, `attributes`, `createdAt`, `updatedAt`, `passwordHash`).
+ */
+export class SchemaMappingError extends Data.TaggedError("SchemaMappingError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Point the stores at tables this package did not define.
  *
  * Each entry names a table and says which of its columns holds each field the
  * corresponding store reads and writes. See the module docs for what a table
  * still has to satisfy beyond the mapping.
+ *
+ * Throws {@link SchemaMappingError} when `users.promoted` maps an attribute
+ * onto a column already mapped to a fixed field.
  */
 export const defineSchema = <
   TSessions extends Table,
@@ -336,6 +351,29 @@ export const defineSchema = <
 >(
   spec: AuthSchemaSpec<TSessions, TUsers, TIdentifiers>,
 ): AuthSchema => {
+  const users = spec.users.columns;
+  const fixed: Readonly<Record<string, string | undefined>> = {
+    id: users.id,
+    name: users.name,
+    image: users.image,
+    attributes: users.attributes,
+    createdAt: users.createdAt,
+    updatedAt: users.updatedAt,
+    passwordHash: users.passwordHash,
+  };
+  const clashes = R.collect(spec.users.promoted ?? {}, (attribute, key) =>
+    R.findFirst(fixed, (mapped) => mapped === key).pipe(
+      Option.map(([field]) => `"${attribute}" onto "${key}", the ${field} column`),
+    ),
+  ).filter(Option.isSome);
+  if (Arr.isReadonlyArrayNonEmpty(clashes)) {
+    throw new SchemaMappingError({
+      message:
+        `defineSchema: users.promoted maps ${clashes.map((clash) => clash.value).join(", ")}. ` +
+        "The stores write those columns as fixed fields, so a promoted attribute would overwrite them. " +
+        "Map each promoted attribute to a column of its own.",
+    });
+  }
   const userColumns: Readonly<Record<string, Column>> = getTableColumns(spec.users.table);
   return {
     _tag: "AuthSchema",

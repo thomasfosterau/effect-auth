@@ -203,9 +203,15 @@ export interface DrizzleWhereStep {
   where(where: SQL | undefined): DrizzleExecutable<unknown>;
 }
 
-/** The value `db.update(table)` returns. */
+/**
+ * The value `db.update(table)` returns. A column is set to a value, or to a
+ * SQL expression over the row (`remaining - 1`), as every dialect's
+ * `set` accepts.
+ */
 export interface DrizzleUpdateBuilder<TTable extends Table> {
-  set(values: Partial<InferInsertModel<TTable>>): DrizzleWhereStep;
+  set(values: {
+    readonly [K in keyof InferInsertModel<TTable>]?: InferInsertModel<TTable>[K] | SQL;
+  }): DrizzleWhereStep;
 }
 
 /**

@@ -56,6 +56,15 @@ export class OneTimeTokenStore extends Context.Service<
       record: OneTimeTokenRecord,
     ) => Effect.Effect<OneTimeTokenRecord, Errors.AuthError>;
     readonly get: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
+    /**
+     * Atomically take the record for `token`: delete it and return it, or
+     * return `null` when there is none. Of two concurrent callers
+     * passing the same token, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/OneTimeTokenStore") {}
@@ -175,16 +184,13 @@ export const make = (
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
 
-        const tokenHash = hashToken(rawToken);
-        const record = yield* store.get(tokenHash);
+        // Spend the token atomically before anything else, the expiry
+        // check included, so "found but expired" and "not found" take the
+        // same path, and of concurrent redemptions only one gets the record.
+        const record = yield* store.consume(hashToken(rawToken));
         if (!record) {
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
-
-        // Consume the token immediately — delete before the expiry check so
-        // the timing difference between "found-but-expired" and "not found"
-        // does not leak whether the hash exists in the store.
-        yield* store.delete(tokenHash);
 
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
@@ -234,12 +240,27 @@ export const make = (
  *   Layer.succeed(OneTimeTokenStore, {
  *     create: (record) => Effect.sync(() => (tokens.set(record.token, record), record)),
  *     get: (token) => Effect.sync(() => tokens.get(token) ?? null),
+ *     // Atomic get-and-delete: one synchronous step here, `DELETE … RETURNING` in SQL.
+ *     consume: (token) =>
+ *       Effect.sync(() => {
+ *         const record = tokens.get(token) ?? null
+ *         tokens.delete(token)
+ *         return record
+ *       }),
  *     delete: (token) => Effect.sync(() => void tokens.delete(token)),
  *   }),
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     touch: (id, touch) =>
+ *       Effect.sync(() => {
+ *         const session = sessions.get(id)
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         const touched = { ...session, ...touch }
+ *         sessions.set(id, touched)
+ *         return touched
+ *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
  *       Effect.sync(() => {

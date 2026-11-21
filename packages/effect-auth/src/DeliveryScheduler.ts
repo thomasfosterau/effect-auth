@@ -8,7 +8,7 @@
  * would answer that address later than an unknown one, and fail it when the
  * vendor fails. Those sends are handed to the scheduler instead, and their
  * failures go to the `afterDeliveryFailure` hook and the
- * `effect_auth_delivery_sends_total` metric (#196).
+ * `effect_auth_delivery_sends_total` metric.
  *
  * @module deliveryScheduler
  */

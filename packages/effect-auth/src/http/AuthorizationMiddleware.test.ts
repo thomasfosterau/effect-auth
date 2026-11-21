@@ -272,7 +272,7 @@ describe("makeAuthorizationMiddleware – instance isolation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Attaching to an HttpApi (#313)
+// Attaching to an HttpApi
 // ---------------------------------------------------------------------------
 
 // Both forms must attach with `.middleware(...)`: a fixed input and a
@@ -361,7 +361,7 @@ describe("makeAuthorizationMiddleware – served through an HttpApi", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Guard identity (#320): a guard's type is its name, so a wrong layer is caught
+// Guard identity: a guard's type is its name, so a wrong layer is caught
 // ---------------------------------------------------------------------------
 
 describe("makeAuthorizationMiddleware – guard identity", () => {

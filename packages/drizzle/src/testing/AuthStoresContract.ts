@@ -1,10 +1,10 @@
 /**
  * The contracts of the stores beyond sign-in — `EmailPasswordStore`,
  * `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the two token stores —
- * as one suite each dialect's file runs against a real engine (#675, #728).
+ * as one suite each dialect's file runs against a real engine.
  *
  * `ApiKeyStore` runs the core's published conformance suite, and the two
- * token stores its per-user-delete suites (#601). The others have none, so their cases here are written from the contracts' documented
+ * token stores its per-user-delete suites. The others have none, so their cases here are written from the contracts' documented
  * semantics (`EmailPasswordStore`, `UserServiceStore` as core's `/sql` store
  * implements it, `RateLimitStore.increment`, `EmailVerificationStore`,
  * `PasswordResetStore`); the email-password cases end with a real sign-up and
@@ -276,7 +276,7 @@ const userServiceCases = (label: string, run: Run): void => {
     });
 
     it("UserService round-trips over the store", async () => {
-      // `deleteUser` deletes the account through `AccountDeletion` (#601).
+      // `deleteUser` deletes the account through `AccountDeletion`.
       const accountDeletion = Auth.accountDeletionLayer.pipe(
         Layer.provide(
           Auth.SessionService.layer({
@@ -394,7 +394,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       expect(result).toEqual({ gone: null, restarted: 1 });
     });
 
-    it("purgeExpired deletes rows whose window and block have both passed, keeps open or blocked ones, and is idempotent (#686)", async () => {
+    it("purgeExpired deletes rows whose window and block have both passed, keeps open or blocked ones, and is idempotent", async () => {
       // A fixed instant before the real clock: the other cases' rows all reset
       // after it, so the purge leaves them alone.
       const now = millis(0);
@@ -430,7 +430,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       expect(result.second).toEqual(result.first);
     });
 
-    it("purgeExpired with a limit deletes at most that many rows per call, and repeated calls drain every spent row (#729)", async () => {
+    it("purgeExpired with a limit deletes at most that many rows per call, and repeated calls drain every spent row", async () => {
       // The same fixed instant as the case above, so only this case's spent
       // rows are spent at it.
       const now = millis(0);
@@ -558,7 +558,7 @@ const tokenCases = (label: string, run: Run): void => {
       expect(result).toEqual({ afterDelete: second, first: null, second: null, other });
     });
 
-    it("getLatestByUserId reads the user's newest record of its own purpose, and null for none (#682)", async () => {
+    it("getLatestByUserId reads the user's newest record of its own purpose, and null for none", async () => {
       const userId = uuid();
       const older = tokenRecord(userId);
       const newer = { ...tokenRecord(userId), createdAt: millis(2_000) };
@@ -588,7 +588,7 @@ const tokenCases = (label: string, run: Run): void => {
 /** Register every case, `label` naming the engine and driver. */
 export const authStoresContract = (label: string, run: Run): void => {
   conformance(`${label}: ApiKeyStore`, Testing.apiKeyStoreConformance(), run);
-  // The per-user deletes core's account deletion calls (#601).
+  // The per-user deletes core's account deletion calls.
   conformance(`${label}: EmailVerificationStore`, Testing.emailVerificationStoreConformance(), run);
   conformance(`${label}: PasswordResetStore`, Testing.passwordResetStoreConformance(), run);
   emailPasswordCases(label, run);

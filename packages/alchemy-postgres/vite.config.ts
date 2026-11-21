@@ -7,7 +7,7 @@ import { packageTasks } from "../../vite.tasks.ts";
 // which CI's `ci` job starts as a service). The task declares
 // `DATABASE_URL` and `CI` as fingerprinted inputs: a cached task sees only the
 // variables it declares, and without them the server cases silently skipped in
-// CI (#766). Under `CI` a missing `DATABASE_URL` fails them; elsewhere they skip
+// CI. Under `CI` a missing `DATABASE_URL` fails them; elsewhere they skip
 // with a warning.
 // `test:unit` and `check`'s `vp test --typecheck` run neither (`tsc -p
 // tsconfig.test.json` still type-checks both): `test:unit` has no other suite,

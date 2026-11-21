@@ -1,4 +1,5 @@
 import { Clock, Context, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { SecureRandom } from "effect/crypto";
@@ -12,7 +13,48 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 
 /**
- * Create a SessionService implementation
+ * The first problem with `sessionExpiresIn`, or `undefined` when it is sound:
+ * `activePeriod` and `idlePeriod` must be finite and positive, and
+ * `updateAge`, when set, finite and not negative. A `NaN` period (an unset
+ * `Number(env)`) would make every expiry comparison false, so sessions would
+ * never expire.
+ */
+const sessionConfigProblem = (
+  config: Types.SessionConfig["sessionExpiresIn"],
+): string | undefined => {
+  if (!isPositivePeriod(config.activePeriod)) {
+    return `sessionExpiresIn.activePeriod must be a finite, positive number of milliseconds (got ${String(config.activePeriod)})`;
+  }
+  if (!isPositivePeriod(config.idlePeriod)) {
+    return `sessionExpiresIn.idlePeriod must be a finite, positive number of milliseconds (got ${String(config.idlePeriod)})`;
+  }
+  const { updateAge } = config;
+  if (updateAge !== undefined && !(Number.isFinite(updateAge) && updateAge >= 0)) {
+    return `sessionExpiresIn.updateAge must be a finite number of milliseconds, 0 or more (got ${String(updateAge)})`;
+  }
+  return undefined;
+};
+
+/** A period in milliseconds that can bound a session: finite and above zero. */
+const isPositivePeriod = (millis: number): boolean => Number.isFinite(millis) && millis > 0;
+
+/**
+ * Run a best-effort store write whose failure must not fail the request, and
+ * log the failure rather than drop it.
+ */
+const bestEffort = (
+  write: Effect.Effect<unknown, Errors.AuthError>,
+  what: string,
+): Effect.Effect<void> =>
+  write.pipe(
+    Effect.asVoid,
+    Effect.catch((error) => Effect.logWarning(`[effect-auth] ${what} failed`, error)),
+  );
+
+/**
+ * Create a SessionService implementation. Dies at layer build when
+ * `sessionExpiresIn` is not sound, so a misconfigured app fails to
+ * start rather than issue sessions that never expire.
  */
 export const make = (
   config: Types.SessionConfig,
@@ -22,6 +64,10 @@ export const make = (
   SessionStore | UserStore | Hooks | SecureRandom.SecureRandom
 > =>
   Effect.gen(function* () {
+    const problem = sessionConfigProblem(config.sessionExpiresIn);
+    if (problem !== undefined) {
+      return yield* Effect.die(new Errors.SessionConfigError({ message: problem }));
+    }
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
     const hooks = yield* Hooks;
@@ -59,7 +105,7 @@ export const make = (
             };
 
             yield* sessionStore.create(session);
-            // The raw token travels beside the record, never as its id (#581).
+            // The raw token travels beside the record, never as its id.
             const created = yield* hooks.afterCreateSession(session);
             return { session: created, token: rawToken } satisfies Types.IssuedSession;
           }).pipe(
@@ -71,7 +117,7 @@ export const make = (
       validateSession: Effect.fn("SessionService.validateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
           // Look up the session by its token hash; never expose the raw token
-          // to the store or to a hook (#669). The hook observes or denies:
+          // to the store or to a hook. The hook observes or denies:
           // what it returns is not read back, so it cannot redirect the lookup.
           const tokenHash = hashToken(rawSessionId);
           yield* hooks.beforeValidateSession({ sessionId: tokenHash });
@@ -87,7 +133,7 @@ export const make = (
           const nowUtc = yield* DateTime.now;
           const now = DateTime.toDateUtc(nowUtc);
           if (session.expiresAt.getTime() < now.getTime()) {
-            yield* Effect.ignore(sessionStore.delete(tokenHash));
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
             return yield* new Errors.SessionExpiredError({
               message: "Session has expired",
               sessionId: tokenHash,
@@ -97,7 +143,7 @@ export const make = (
           // Check if session has been idle for too long
           const timeSinceLastActivity = now.getTime() - session.lastActivityAt.getTime();
           if (timeSinceLastActivity > config.sessionExpiresIn.idlePeriod) {
-            yield* Effect.ignore(sessionStore.delete(tokenHash));
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
             return yield* new Errors.SessionExpiredError({
               message: "Session expired due to inactivity",
               sessionId: tokenHash,
@@ -107,7 +153,7 @@ export const make = (
           // Check if session has exceeded its absolute maximum lifetime
           const sessionLifetime = now.getTime() - session.createdAt.getTime();
           if (sessionLifetime > config.sessionExpiresIn.activePeriod) {
-            yield* Effect.ignore(sessionStore.delete(tokenHash));
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
             return yield* new Errors.SessionExpiredError({
               message: "Session exceeded maximum lifetime",
               sessionId: tokenHash,
@@ -124,19 +170,40 @@ export const make = (
             ),
           );
 
-          const updatedSession: Types.Session = {
+          const refreshed: Types.Session = {
             ...session,
             lastActivityAt: now,
             expiresAt: newExpiresAt,
           };
 
-          // Throttle store writes: skip the update when the session was
+          // Throttle store writes: skip the refresh when the session was
           // refreshed within the last `updateAge` ms (default: always write).
+          // `touch` moves only the two expiry columns, so a concurrent
+          // attribute write is never undone, and never recreates a session
+          // revoked since the read: its `null` is a revoked session. A failed
+          // write is logged and the request goes on with the refreshed copy.
           const updateAge = config.sessionExpiresIn.updateAge ?? 0;
           const timeSinceUpdate = now.getTime() - session.lastActivityAt.getTime();
-          if (timeSinceUpdate >= updateAge) {
-            yield* Effect.ignore(sessionStore.update(updatedSession));
+          const stored =
+            timeSinceUpdate < updateAge
+              ? Option.some(refreshed)
+              : yield* sessionStore
+                  .touch(tokenHash, { lastActivityAt: now, expiresAt: newExpiresAt })
+                  .pipe(
+                    Effect.map(Option.fromNullishOr),
+                    Effect.catch((error) =>
+                      Effect.logWarning("[effect-auth] refreshing a session failed", error).pipe(
+                        Effect.as(Option.some(refreshed)),
+                      ),
+                    ),
+                  );
+          if (Option.isNone(stored)) {
+            return yield* new Errors.SessionNotFoundError({
+              message: "Session not found",
+              sessionId: tokenHash,
+            });
           }
+          const updatedSession = stored.value;
 
           // Get user
           const user = yield* userStore.get(session.userId);
@@ -148,7 +215,7 @@ export const make = (
           }
 
           // The session answers under its stored id: the caller already holds
-          // the token it presented (#581).
+          // the token it presented.
           return yield* hooks.afterValidateSession({ session: updatedSession, user });
         }).pipe(
           Effect.withSpan(Obs.spanNames.validateSession),
@@ -165,8 +232,8 @@ export const make = (
 
       invalidateSession: Effect.fn("SessionService.invalidateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          // Every hook gets the stored id, so none can record the credential
-          // (#669); `beforeSignOut` observes or denies, and is not read back.
+          // Every hook gets the stored id, so none can record the credential;
+          // `beforeSignOut` observes or denies, and is not read back.
           const storedId = hashToken(rawSessionId);
           yield* hooks.beforeSignOut({ sessionId: storedId });
           yield* sessionStore.delete(storedId);
@@ -241,7 +308,7 @@ export class SessionService extends Context.Service<
      * Create a new session for a user. Answers the stored record (its `id`
      * the digest of the token) and the raw `token`, the credential to hand
      * the client in the session cookie (or, in bearer mode, the
-     * `set-auth-token` header). The token is never the record's id (#581).
+     * `set-auth-token` header). The token is never the record's id.
      */
     readonly createSession: (
       userId: string,
@@ -252,7 +319,7 @@ export class SessionService extends Context.Service<
      * Validate the session a raw token names and return it with the user. The
      * session answers under its stored id (the token's digest), never the
      * token. `beforeValidateSession` observes the stored id, never the token,
-     * and can only deny: its return value is not read back (#669).
+     * and can only deny: its return value is not read back.
      */
     readonly validateSession: (
       token: string,
@@ -266,7 +333,7 @@ export class SessionService extends Context.Service<
 
     /**
      * Invalidate the session a raw token names. The sign-out hooks run and
-     * observe the stored id, never the token (#581, #669); `beforeSignOut`
+     * observe the stored id, never the token; `beforeSignOut`
      * can deny the sign-out but not redirect it, since its return value is
      * not read back.
      */

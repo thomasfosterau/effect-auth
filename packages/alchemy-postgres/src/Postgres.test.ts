@@ -5,7 +5,7 @@
  *
  * It needs a server, so it runs where `DATABASE_URL` names one: CI's alchemy
  * job starts one and runs this file in `test:alchemy`, which declares the
- * variable (and `CI`) so it reaches the suite (#766). Under CI a missing
+ * variable (and `CI`) so it reaches the suite. Under CI a missing
  * `DATABASE_URL` fails every case; anywhere else the cases skip with a
  * warning. A Hyperdrive binding is just `{ connectionString }`, so the
  * binding-shaped source is exercised as such.
@@ -72,7 +72,7 @@ describe.skipIf(skipWithoutServer)("effect-auth on Postgres over @effect/sql-pg"
   });
 
   // The WebAuthn challenge store keeps each challenge's ceremony in a table of
-  // its own (#591); the core's suite pins it over this driver too.
+  // its own; the core's suite pins it over this driver too.
   describe("ChallengeStore conformance", () => {
     it.for(Testing.challengeStoreConformance().cases)("$name", async (testCase) => {
       const outcome = await Effect.runPromise(

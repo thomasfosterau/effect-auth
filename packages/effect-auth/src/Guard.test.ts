@@ -1,5 +1,5 @@
 /**
- * The zero-IO guards (#189), ported from the applications' guard suite
+ * The zero-IO guards, ported from the applications' guard suite
  * (gardeneria `packages/database/tests/guards.test.ts`, website's equivalent):
  * `requireRoleAtLeast` and the named gates built on it, `requireUser`,
  * `requireOwnerOrRole`, the read-path predicates, and the capability hooks
@@ -283,7 +283,7 @@ describe("the capability hooks", () => {
   });
 
   it("roleCapabilities follows its axis: a family gated above corpus-write says so", () => {
-    // gardeneria #1123 — `pages` gates on moderate; inheriting the corpus-write
+    // `pages` gates on moderate; inheriting the corpus-write
     // default advertised canEdit to a contributor the operation refused.
     expect(guards.roleCapabilities(Axes.moderate)(contributor).canEdit).toBe(false);
     expect(Exit.isFailure(runGate(requireModerator, contributor))).toBe(true);
@@ -379,7 +379,7 @@ describe("the errors", () => {
   });
 });
 
-describe("requireSystem (#362)", () => {
+describe("requireSystem", () => {
   const page = Entity.ref("Page", "p-1");
   const policies = [
     System.grant("translation-pipeline", {

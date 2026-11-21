@@ -23,6 +23,14 @@
  *   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *   get: (id) => Effect.sync(() => sessions.get(id) ?? null),
  *   update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *   touch: (id, touch) =>
+ *     Effect.sync(() => {
+ *       const session = sessions.get(id)
+ *       if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *       const touched = { ...session, ...touch }
+ *       sessions.set(id, touched)
+ *       return touched
+ *     }),
  *   delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *   deleteByUserId: (userId) =>
  *     Effect.sync(() => {
@@ -80,7 +88,11 @@ import {
   type WebAuthnCredential,
 } from "../multifactor/WebAuthn.ts";
 import { type OAuthAccount, OAuthAccountStore } from "../oauth/OAuthAccount.ts";
+import { MagicLinkStore, type MagicLinkToken } from "../MagicLink.ts";
+import { type OneTimeTokenRecord, OneTimeTokenStore } from "../OneTimeToken.ts";
 import {
+  type OidcAuthorizationCode,
+  OidcCodeStore,
   type OidcConsent,
   OidcConsentStore,
   type OidcToken,
@@ -341,6 +353,55 @@ export const sessionStoreConformance = <E = never, R = never>(
         }),
     },
     {
+      name: "touch moves only lastActivityAt and expiresAt, keeping a concurrent update's attributes",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const session = makeSession(yield* newUser());
+          yield* store.create(session);
+          // Another writer changes the attributes after the refresh read the session.
+          const changed: Types.Session = { ...session, attributes: { organization: "acme" } };
+          yield* store.update(changed);
+          const touch = { lastActivityAt: at(60 * 1000), expiresAt: at(48 * 60 * 60 * 1000) };
+          const touched: Types.Session = { ...changed, ...touch };
+          yield* expectEqual("touch", yield* store.touch(session.id, touch), touched);
+          yield* expectEqual("get after touch", yield* store.get(session.id), touched);
+        }),
+    },
+    {
+      name: "touch of a deleted or unknown session is null and creates nothing",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const session = makeSession(yield* newUser());
+          yield* store.create(session);
+          yield* store.delete(session.id);
+          const touch = { lastActivityAt: at(60 * 1000), expiresAt: at(48 * 60 * 60 * 1000) };
+          yield* expectEqual(
+            "touch of a deleted session",
+            yield* store.touch(session.id, touch),
+            null,
+          );
+          yield* expectEqual("get after touch", yield* store.get(session.id), null);
+          yield* expectEqual("touch of an unknown id", yield* store.touch(digest(), touch), null);
+        }),
+    },
+    {
+      name: "touch of a session expired by lastActivityAt is null and leaves it as it was",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const session = makeSession(yield* newUser());
+          yield* store.create(session);
+          const late = {
+            lastActivityAt: at(24 * 60 * 60 * 1000 + 1),
+            expiresAt: at(48 * 60 * 60 * 1000),
+          };
+          yield* expectEqual("touch", yield* store.touch(session.id, late), null);
+          yield* expectEqual("get after touch", yield* store.get(session.id), session);
+        }),
+    },
+    {
       name: "delete removes one session, and is a no-op for an unknown id",
       run: (newUser) =>
         Effect.gen(function* () {
@@ -560,7 +621,7 @@ export const identifierStoreConformance = <E = never, R = never>(
         }),
     },
     {
-      name: "getByValue matches exactly: values differing only by case, accent or width are distinct (#602)",
+      name: "getByValue matches exactly: values differing only by case, accent or width are distinct",
       run: (newUser) =>
         Effect.gen(function* () {
           const store = yield* Identifier.IdentifierStore;
@@ -859,6 +920,9 @@ const makeApiKey = (userId: string, full = false): ApiKey.ApiKey => ({
     : {}),
 });
 
+/** Concurrent `recordUse` calls the race case sends at one key. */
+const apiKeyRacers = 8;
+
 const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
   Arr.sort(
     keys.map((key) => key.id),
@@ -867,8 +931,9 @@ const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
 
 /**
  * The `ApiKeyStore` contract: keys round-trip with every optional field, read
- * by id and by hash, misses are `null`, `update` writes, and the per-user list
- * and the per-user delete (#601) touch that user's keys only.
+ * by id and by hash, misses are `null`, `update` writes, `recordUse` spends
+ * atomically and moves only the usage fields, and the per-user list
+ * and the per-user delete touch that user's keys only.
  *
  * @since 0.1.0
  * @category suites
@@ -969,6 +1034,150 @@ export const apiKeyStoreConformance = <E = never, R = never>(
           );
         }),
     },
+    {
+      name: "recordUse spends one use and moves only the usage fields",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const key = makeApiKey(yield* newUser(), true);
+          yield* store.create(key);
+          // An owner's edit lands between a verify's read and its spend.
+          const edited: ApiKey.ApiKey = {
+            ...key,
+            name: "narrowed",
+            permissions: { projects: ["read"] },
+            expiresAt: at(12 * 60 * 60 * 1000).getTime(),
+            updatedAt: at(1500).getTime(),
+          };
+          yield* store.update(edited);
+          const usedAt = at(2000).getTime();
+          const spent: ApiKey.ApiKey = {
+            ...edited,
+            remaining: 9,
+            lastUsedAt: usedAt,
+            updatedAt: usedAt,
+          };
+          yield* expectEqual("recordUse", yield* store.recordUse(key.id, { usedAt }), spent);
+          yield* expectEqual("get after recordUse", yield* store.get(key.id), spent);
+          const unlimited = makeApiKey(key.userId);
+          yield* store.create(unlimited);
+          yield* expectEqual(
+            "recordUse of a key with no quota",
+            yield* store.recordUse(unlimited.id, { usedAt }),
+            { ...unlimited, lastUsedAt: usedAt, updatedAt: usedAt },
+          );
+        }),
+    },
+    {
+      name: "recordUse refuses an unknown, disabled, expired or exhausted key and a stale refill",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const userId = yield* newUser();
+          const base = makeApiKey(userId, true);
+          const usedAt = at(2000).getTime();
+          yield* expectEqual(
+            "recordUse of an unknown key",
+            yield* store.recordUse(uuid(), { usedAt }),
+            null,
+          );
+          const refusedKeys: ReadonlyArray<readonly [string, ApiKey.ApiKey, ApiKey.ApiKeyUse]> = [
+            [
+              "a disabled key",
+              { ...base, id: uuid(), keyHash: digest(), enabled: false },
+              { usedAt },
+            ],
+            [
+              "an expired key",
+              { ...base, id: uuid(), keyHash: digest() },
+              { usedAt: at(48 * 60 * 60 * 1000).getTime() },
+            ],
+            [
+              "an exhausted key",
+              { ...base, id: uuid(), keyHash: digest(), remaining: 0 },
+              { usedAt },
+            ],
+            [
+              "a refill computed from an old baseline",
+              { ...base, id: uuid(), keyHash: digest(), remaining: 0 },
+              {
+                usedAt,
+                refill: { from: at(-60_000).getTime(), to: at().getTime(), amount: 5, max: 10 },
+              },
+            ],
+          ];
+          yield* Effect.forEach(
+            refusedKeys,
+            ([label, key, use]) =>
+              Effect.gen(function* () {
+                yield* store.create(key);
+                yield* expectEqual(
+                  `recordUse of ${label}`,
+                  yield* store.recordUse(key.id, use),
+                  null,
+                );
+                yield* expectEqual(`get of ${label}`, yield* store.get(key.id), key);
+              }),
+            { concurrency: 1, discard: true },
+          );
+        }),
+    },
+    {
+      name: "recordUse applies a due refill once, capped at its max, before the spend",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const key: ApiKey.ApiKey = { ...makeApiKey(yield* newUser(), true), remaining: 0 };
+          yield* store.create(key);
+          const usedAt = at(130_000).getTime();
+          const refill = { from: at().getTime(), to: at(120_000).getTime(), amount: 10, max: 3 };
+          const spent: ApiKey.ApiKey = {
+            ...key,
+            remaining: 2,
+            lastRefillAt: refill.to,
+            lastUsedAt: usedAt,
+            updatedAt: usedAt,
+          };
+          yield* expectEqual(
+            "recordUse with a refill",
+            yield* store.recordUse(key.id, { usedAt, refill }),
+            spent,
+          );
+          yield* expectEqual(
+            "recordUse with the same refill again",
+            yield* store.recordUse(key.id, { usedAt, refill }),
+            null,
+          );
+          yield* expectEqual(
+            "recordUse after the refill",
+            yield* store.recordUse(key.id, { usedAt }),
+            {
+              ...spent,
+              remaining: 1,
+            },
+          );
+        }),
+    },
+    {
+      name: "concurrent recordUse of a key with uses left spends exactly that many",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* ApiKey.ApiKeyStore;
+          const key: ApiKey.ApiKey = { ...makeApiKey(yield* newUser(), true), remaining: 3 };
+          yield* store.create(key);
+          const usedAt = at(2000).getTime();
+          const spends = yield* Effect.all(
+            Arr.makeBy(apiKeyRacers, () => store.recordUse(key.id, { usedAt })),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual(
+            "successful concurrent spends",
+            spends.filter((spent) => spent !== null).length,
+            3,
+          );
+          yield* expectEqual("remaining after them", (yield* store.get(key.id))?.remaining, 0);
+        }),
+    },
     perUserDeleteCase(ApiKey.ApiKeyStore, {
       records: "keys",
       make: (userId: string) => makeApiKey(userId),
@@ -992,8 +1201,10 @@ const makePending = (userId: string): PendingMultiFactor => ({
 /**
  * The `PendingMultiFactorStore` contract: challenges round-trip, a miss is
  * `null`, `recordFailedAttempt` counts each challenge's wrong codes from 1
- * without touching the challenge or another challenge's count, and `delete`
- * removes the challenge with its count (a no-op for an unknown token).
+ * without touching the challenge or another challenge's count, `delete`
+ * removes the challenge with its count (a no-op for an unknown token), and
+ * `consume` hands a challenge out once, with its count dropped, to
+ * exactly one of concurrent callers.
  *
  * @since 0.1.0
  * @category suites
@@ -1034,6 +1245,24 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
         }),
     },
     {
+      name: "concurrent recordFailedAttempt calls on one challenge each get their own count",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* PendingMultiFactorStore;
+          const pending = makePending(yield* newUser());
+          yield* store.create(pending);
+          const counts = yield* Effect.all(
+            Arr.makeBy(attemptRacers, () => store.recordFailedAttempt(pending.token)),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual(
+            "the counts, sorted",
+            Arr.sort(counts, Order.Number),
+            Arr.makeBy(attemptRacers, (i) => i + 1),
+          );
+        }),
+    },
+    {
       name: "delete removes the challenge and its count, and is a no-op for an unknown token",
       run: (newUser) =>
         Effect.gen(function* () {
@@ -1053,6 +1282,37 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
           );
         }),
     },
+    {
+      name: "consume drops the challenge's count with it",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* PendingMultiFactorStore;
+          const pending = makePending(yield* newUser());
+          yield* store.create(pending);
+          yield* store.recordFailedAttempt(pending.token);
+          yield* expectEqual("consume", yield* store.consume(pending.token), pending);
+          yield* store.create(pending);
+          yield* expectEqual(
+            "the first count of a challenge recreated under the same token",
+            yield* store.recordFailedAttempt(pending.token),
+            1,
+          );
+        }),
+    },
+    ...consumeCases<
+      PendingMultiFactorStore,
+      typeof PendingMultiFactorStore.Service,
+      PendingMultiFactor,
+      E,
+      R
+    >(PendingMultiFactorStore, {
+      record: "challenge",
+      make: makePending,
+      write: (store, pending) => store.create(pending),
+      read: (store, pending) => store.get(pending.token),
+      key: (pending) => pending.token,
+      consume: (store, token) => store.consume(token),
+    }),
   ]);
 
 // ---------------------------------------------------------------------------
@@ -1072,7 +1332,7 @@ const challengeView = (challenge: WebAuthnChallenge | null) =>
  * authentication challenge), a miss is `null`, `create` under bytes already
  * stored replaces that challenge (ceremony and user included), and `delete`
  * removes it (a no-op for unknown bytes). The ceremony is what keeps an
- * authentication challenge from being redeemed as a registration (#591), so a
+ * authentication challenge from being redeemed as a registration, so a
  * store that drops or defaults it fails here.
  *
  * @since 0.3.0
@@ -1419,6 +1679,9 @@ export const organizationStoreConformance = <E = never, R = never>(
 // EmailOtpStore / PhoneOtpStore
 // ---------------------------------------------------------------------------
 
+/** Concurrent attempt counts the race cases send at one code or challenge. */
+const attemptRacers = 8;
+
 /** The part of a one-time code store the code suites exercise. */
 interface CodeStoreShape<P, A extends CodeRecord> extends CodeStore<P, A> {
   readonly upsert: (record: A) => Effect.Effect<A, Errors.AuthError>;
@@ -1475,6 +1738,32 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
           yield* store.delete(address, purpose);
           yield* store.delete(spec.newAddress(), purpose);
           yield* expectEqual("get after delete", yield* store.get(address, purpose), null);
+          yield* expectEqual(
+            "incrementAttempts of a pair with no code",
+            yield* store.incrementAttempts(address, purpose),
+            null,
+          );
+        }),
+    },
+    {
+      name: "concurrent incrementAttempts calls on one code each get their own count",
+      run: () =>
+        Effect.gen(function* () {
+          const store = yield* spec.store;
+          const address = spec.newAddress();
+          yield* store.upsert(spec.makeRecord(address, purpose));
+          const counts = yield* Effect.all(
+            Arr.makeBy(attemptRacers, () => store.incrementAttempts(address, purpose)),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual(
+            "the counts, sorted",
+            Arr.sort(
+              counts.map((count) => count ?? 0),
+              Order.Number,
+            ),
+            Arr.makeBy(attemptRacers, (i) => i + 1),
+          );
         }),
     },
     {
@@ -1509,7 +1798,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
         }),
     },
     {
-      name: "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
+      name: "the failure budget survives upsert, incrementAttempts and delete of the pair's record",
       run: () =>
         Effect.gen(function* () {
           const store = yield* spec.store;
@@ -1575,7 +1864,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
 /**
  * The `EmailOtpStore` contract: one record per email and purpose (`upsert`
  * replaces it, `incrementAttempts` counts from 1, `delete` removes it, a miss
- * is `null`), and a failure budget per pair (#590) that counts wrong codes
+ * is `null`), and a failure budget per pair that counts wrong codes
  * from 1 at the time given, outlives every write to the pair's record, and is
  * forgotten only by `clearFailures`.
  *
@@ -1609,7 +1898,76 @@ export const phoneOtpStoreConformance = <E = never, R = never>(
     makeRecord: (phoneNumber, purpose) => ({ phoneNumber, purpose, ...codeFields() }),
   });
 // ---------------------------------------------------------------------------
-// Per-user deletes (#601)
+// Single-use consumes
+// ---------------------------------------------------------------------------
+
+/** How the consume cases write, read and spend one single-use contract's records. */
+interface SingleUse<S, A> {
+  /** The record, singular, as the case names say it ("token"). */
+  readonly record: string;
+  readonly make: (userId: string) => A;
+  readonly write: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
+  /** Read `record` back: the record while it is stored, `null` once it is gone. */
+  readonly read: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
+  /** The key `consume` takes for `record`. */
+  readonly key: (record: A) => string;
+  readonly consume: (store: S, key: string) => Effect.Effect<A | null, Errors.AuthError>;
+}
+
+/** Concurrent callers the race case starts against one record. */
+const consumeRacers = 8;
+
+/**
+ * The cases every single-use store's `consume` shares: it hands the
+ * record back once and removes it, answers `null` for a spent or unknown key,
+ * and of concurrent callers passing one key exactly one receives the record.
+ */
+const consumeCases = <I, S, A, E, R>(store: Context.Key<I, S>, spec: SingleUse<S, A>) => [
+  {
+    name: `consume returns the ${spec.record} once and removes it, and is null for an unknown ${spec.record}`,
+    run: (newUser: () => Effect.Effect<string, E, R>) =>
+      Effect.gen(function* () {
+        const service = yield* store;
+        const record = spec.make(yield* newUser());
+        yield* spec.write(service, record);
+        yield* expectEqual("consume", yield* spec.consume(service, spec.key(record)), record);
+        yield* expectEqual(
+          `read of the consumed ${spec.record}`,
+          yield* spec.read(service, record),
+          null,
+        );
+        yield* expectEqual(
+          "a second consume",
+          yield* spec.consume(service, spec.key(record)),
+          null,
+        );
+        yield* expectEqual(
+          `consume of an unknown ${spec.record}`,
+          yield* spec.consume(service, digest()),
+          null,
+        );
+      }),
+  },
+  {
+    name: `concurrent consumes of one ${spec.record} hand it to exactly one caller`,
+    run: (newUser: () => Effect.Effect<string, E, R>) =>
+      Effect.gen(function* () {
+        const service = yield* store;
+        const record = spec.make(yield* newUser());
+        yield* spec.write(service, record);
+        const results = yield* Effect.all(
+          Arr.makeBy(consumeRacers, () => spec.consume(service, spec.key(record))),
+          { concurrency: "unbounded" },
+        );
+        const winners = results.filter(P.isNotNull);
+        yield* expectEqual(`callers that received the ${spec.record}`, winners.length, 1);
+        yield* expectEqual(`the ${spec.record} the winner received`, winners[0], record);
+      }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Per-user deletes
 // ---------------------------------------------------------------------------
 
 /** How a per-user-delete case writes, reads and deletes one contract's records. */
@@ -1628,7 +1986,7 @@ interface PerUserDelete<S, A> {
 /**
  * The case every user-keyed credential store's contract shares: the per-user
  * delete removes that user's records only, and is a no-op for a user with
- * none. Deleting a user calls it before the user row goes (#601).
+ * none. Deleting a user calls it before the user row goes.
  */
 const perUserDeleteCase = <I, S, A, E, R>(store: Context.Key<I, S>, spec: PerUserDelete<S, A>) => ({
   name: `${spec.method ?? "deleteByUserId"} removes that user's ${spec.records} only, and is a no-op for a user with none`,
@@ -1682,7 +2040,7 @@ const makeOAuthAccount = (userId: string): OAuthAccount => ({
 });
 
 /**
- * The `OAuthAccountStore` per-user delete (#601): `deleteByUserId` removes
+ * The `OAuthAccountStore` per-user delete: `deleteByUserId` removes
  * every provider link of that user, and only theirs.
  *
  * @since 0.5.0
@@ -1709,7 +2067,7 @@ const makePasskey = (userId: string): WebAuthnCredential => ({
 });
 
 /**
- * The WebAuthn `CredentialStore` per-user delete (#601): `deleteByUserId`
+ * The WebAuthn `CredentialStore` per-user delete: `deleteByUserId`
  * removes every passkey of that user, and only theirs.
  *
  * @since 0.5.0
@@ -1726,9 +2084,20 @@ export const credentialStoreConformance = <E = never, R = never>(
     purge: (store, userId) => store.deleteByUserId(userId),
   });
 
+const makeEnrolment = (userId: string): MultiFactorRecord => ({
+  userId,
+  secret: "JBSWY3DPEHPK3PXP",
+  backupCodes: [digest(), digest()],
+  verified: true,
+  createdAt: at().getTime(),
+});
+
 /**
- * The `MultiFactorStore` per-user delete (#601): the record is keyed by user
- * id, so `delete(userId)` removes that user's enrolment, and only theirs.
+ * The `MultiFactorStore` per-user delete: the record is keyed by user
+ * id, so `delete(userId)` removes that user's enrolment, and only theirs. And
+ * its compare-and-set spends: `useTotpCounter` and `useBackupCode`
+ * accept each TOTP step and each backup code once, to exactly one of
+ * concurrent callers, and never recreate a record that is gone.
  *
  * @since 0.5.0
  * @category suites
@@ -1736,23 +2105,130 @@ export const credentialStoreConformance = <E = never, R = never>(
 export const multiFactorStoreConformance = <E = never, R = never>(
   options?: ConformanceOptions<E, R>,
 ): ConformanceSuite<E, R | MultiFactorStore> =>
-  perUserDeleteSuite("MultiFactorStore", options, MultiFactorStore, {
-    records: "enrolment",
-    method: "delete",
-    make: (userId): MultiFactorRecord => ({
-      userId,
-      secret: "JBSWY3DPEHPK3PXP",
-      backupCodes: [digest(), digest()],
-      verified: true,
-      createdAt: at().getTime(),
-    }),
-    write: (store, record) => store.upsert(record),
-    read: (store, record) => store.get(record.userId),
-    purge: (store, userId) => store.delete(userId),
-  });
+  suite<E, R, MultiFactorStore>("MultiFactorStore", options, [
+    perUserDeleteCase<MultiFactorStore, typeof MultiFactorStore.Service, MultiFactorRecord, E, R>(
+      MultiFactorStore,
+      {
+        records: "enrolment",
+        method: "delete",
+        make: makeEnrolment,
+        write: (store, record) => store.upsert(record),
+        read: (store, record) => store.get(record.userId),
+        purge: (store, userId) => store.delete(userId),
+      },
+    ),
+    {
+      name: "useTotpCounter moves the counter only forward, on a verified record that exists",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* MultiFactorStore;
+          const record = makeEnrolment(yield* newUser());
+          yield* store.upsert(record);
+          yield* expectEqual(
+            "first use of step 10",
+            yield* store.useTotpCounter(record.userId, 10),
+            true,
+          );
+          yield* expectEqual(
+            "step 10 again",
+            yield* store.useTotpCounter(record.userId, 10),
+            false,
+          );
+          yield* expectEqual(
+            "an earlier step",
+            yield* store.useTotpCounter(record.userId, 9),
+            false,
+          );
+          yield* expectEqual("a later step", yield* store.useTotpCounter(record.userId, 11), true);
+          yield* expectEqual(
+            "the stored counter",
+            (yield* store.get(record.userId))?.lastUsedCounter,
+            11,
+          );
+          const unverified = { ...makeEnrolment(yield* newUser()), verified: false };
+          yield* store.upsert(unverified);
+          yield* expectEqual(
+            "an unverified record",
+            yield* store.useTotpCounter(unverified.userId, 1),
+            false,
+          );
+          const absent = yield* newUser();
+          yield* expectEqual("no record", yield* store.useTotpCounter(absent, 1), false);
+          yield* expectEqual("no record recreated", yield* store.get(absent), null);
+        }),
+    },
+    {
+      name: "concurrent uses of one TOTP step accept exactly one",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* MultiFactorStore;
+          const record = makeEnrolment(yield* newUser());
+          yield* store.upsert(record);
+          const results = yield* Effect.all(
+            Arr.makeBy(consumeRacers, () => store.useTotpCounter(record.userId, 42)),
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual("accepted uses", results.filter((used) => used).length, 1);
+        }),
+    },
+    {
+      name: "useBackupCode removes a code once and leaves the others",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* MultiFactorStore;
+          const record = makeEnrolment(yield* newUser());
+          const [first, second] = record.backupCodes;
+          yield* store.upsert(record);
+          yield* expectEqual(
+            "first use",
+            yield* store.useBackupCode(record.userId, first ?? ""),
+            true,
+          );
+          yield* expectEqual(
+            "second use of the same code",
+            yield* store.useBackupCode(record.userId, first ?? ""),
+            false,
+          );
+          yield* expectEqual(
+            "an unknown code",
+            yield* store.useBackupCode(record.userId, digest()),
+            false,
+          );
+          yield* expectEqual("the codes left", (yield* store.get(record.userId))?.backupCodes, [
+            second,
+          ]);
+          const absent = yield* newUser();
+          yield* expectEqual("no record", yield* store.useBackupCode(absent, first ?? ""), false);
+          yield* expectEqual("no record recreated", yield* store.get(absent), null);
+        }),
+    },
+    {
+      name: "concurrent uses of backup codes accept each code exactly once",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* MultiFactorStore;
+          const record = makeEnrolment(yield* newUser());
+          const [first, second] = record.backupCodes;
+          yield* store.upsert(record);
+          const results = yield* Effect.all(
+            [
+              ...Arr.makeBy(consumeRacers / 2, () =>
+                store.useBackupCode(record.userId, first ?? ""),
+              ),
+              ...Arr.makeBy(consumeRacers / 2, () =>
+                store.useBackupCode(record.userId, second ?? ""),
+              ),
+            ],
+            { concurrency: "unbounded" },
+          );
+          yield* expectEqual("accepted uses", results.filter((used) => used).length, 2);
+          yield* expectEqual("the codes left", (yield* store.get(record.userId))?.backupCodes, []);
+        }),
+    },
+  ]);
 
 /**
- * The `TrustedDeviceStore` per-user delete (#601): `deleteByUserId` removes
+ * The `TrustedDeviceStore` per-user delete: `deleteByUserId` removes
  * every trusted device of that user, and only theirs.
  *
  * @since 0.5.0
@@ -1774,9 +2250,21 @@ export const trustedDeviceStoreConformance = <E = never, R = never>(
     purge: (store, userId) => store.deleteByUserId(userId),
   });
 
+const makeOidcToken = (userId: string): OidcToken => ({
+  tokenHash: digest(),
+  kind: "refresh",
+  clientId: "conformance-client",
+  userId,
+  scopes: ["openid"],
+  expiresAt: at(60 * 60 * 1000).getTime(),
+  createdAt: at().getTime(),
+});
+
 /**
- * The `OidcTokenStore` per-user delete (#601, #704): `deleteByUserId` removes
- * every access and refresh token issued to that user, and only theirs.
+ * The `OidcTokenStore` per-user delete: `deleteByUserId` removes
+ * every access and refresh token issued to that user, and only theirs. And
+ * its single-use `consume`, which refresh rotation spends a token
+ * with: handed out once, to exactly one of concurrent callers.
  *
  * @since 0.5.0
  * @category suites
@@ -1784,24 +2272,32 @@ export const trustedDeviceStoreConformance = <E = never, R = never>(
 export const oidcTokenStoreConformance = <E = never, R = never>(
   options?: ConformanceOptions<E, R>,
 ): ConformanceSuite<E, R | OidcTokenStore> =>
-  perUserDeleteSuite("OidcTokenStore", options, OidcTokenStore, {
-    records: "tokens",
-    make: (userId): OidcToken => ({
-      tokenHash: digest(),
-      kind: "refresh",
-      clientId: "conformance-client",
-      userId,
-      scopes: ["openid"],
-      expiresAt: at(60 * 60 * 1000).getTime(),
-      createdAt: at().getTime(),
-    }),
-    write: (store, token) => store.create(token),
-    read: (store, token) => store.get(token.tokenHash),
-    purge: (store, userId) => store.deleteByUserId(userId),
-  });
+  suite<E, R, OidcTokenStore>("OidcTokenStore", options, [
+    perUserDeleteCase<OidcTokenStore, typeof OidcTokenStore.Service, OidcToken, E, R>(
+      OidcTokenStore,
+      {
+        records: "tokens",
+        make: makeOidcToken,
+        write: (store, token) => store.create(token),
+        read: (store, token) => store.get(token.tokenHash),
+        purge: (store, userId) => store.deleteByUserId(userId),
+      },
+    ),
+    ...consumeCases<OidcTokenStore, typeof OidcTokenStore.Service, OidcToken, E, R>(
+      OidcTokenStore,
+      {
+        record: "refresh token",
+        make: makeOidcToken,
+        write: (store, token) => store.create(token),
+        read: (store, token) => store.get(token.tokenHash),
+        key: (token) => token.tokenHash,
+        consume: (store, tokenHash) => store.consume(tokenHash),
+      },
+    ),
+  ]);
 
 /**
- * The `OidcConsentStore` per-user delete (#601): `deleteByUserId` removes the
+ * The `OidcConsentStore` per-user delete: `deleteByUserId` removes the
  * consents that user granted, for every client, and only theirs.
  *
  * @since 0.5.0
@@ -1834,8 +2330,10 @@ const makeUserToken = (userId: string) => ({
 });
 
 /**
- * The `EmailVerificationStore` per-user delete (#601): `deleteByUserId`
- * removes that user's pending verifications, and only theirs.
+ * The `EmailVerificationStore` per-user delete: `deleteByUserId`
+ * removes that user's pending verifications, and only theirs. And its
+ * single-use `consume`: a token is handed out once, to exactly one of
+ * concurrent callers.
  *
  * @since 0.5.0
  * @category suites
@@ -1843,17 +2341,40 @@ const makeUserToken = (userId: string) => ({
 export const emailVerificationStoreConformance = <E = never, R = never>(
   options?: ConformanceOptions<E, R>,
 ): ConformanceSuite<E, R | EmailVerificationStore> =>
-  perUserDeleteSuite("EmailVerificationStore", options, EmailVerificationStore, {
-    records: "verifications",
-    make: (userId): EmailVerification => makeUserToken(userId),
-    write: (store, verification) => store.create(verification),
-    read: (store, verification) => store.get(verification.token),
-    purge: (store, userId) => store.deleteByUserId(userId),
-  });
+  suite<E, R, EmailVerificationStore>("EmailVerificationStore", options, [
+    perUserDeleteCase<
+      EmailVerificationStore,
+      typeof EmailVerificationStore.Service,
+      EmailVerification,
+      E,
+      R
+    >(EmailVerificationStore, {
+      records: "verifications",
+      make: (userId): EmailVerification => makeUserToken(userId),
+      write: (store, verification) => store.create(verification),
+      read: (store, verification) => store.get(verification.token),
+      purge: (store, userId) => store.deleteByUserId(userId),
+    }),
+    ...consumeCases<
+      EmailVerificationStore,
+      typeof EmailVerificationStore.Service,
+      EmailVerification,
+      E,
+      R
+    >(EmailVerificationStore, {
+      record: "verification token",
+      make: (userId): EmailVerification => makeUserToken(userId),
+      write: (store, verification) => store.create(verification),
+      read: (store, verification) => store.get(verification.token),
+      key: (verification) => verification.token,
+      consume: (store, token) => store.consume(token),
+    }),
+  ]);
 
 /**
- * The `PasswordResetStore` per-user delete (#601): `deleteByUserId` removes
- * that user's pending resets, and only theirs.
+ * The `PasswordResetStore` per-user delete: `deleteByUserId` removes
+ * that user's pending resets, and only theirs. And its single-use `consume`:
+ * a token is handed out once, to exactly one of concurrent callers.
  *
  * @since 0.5.0
  * @category suites
@@ -1861,16 +2382,38 @@ export const emailVerificationStoreConformance = <E = never, R = never>(
 export const passwordResetStoreConformance = <E = never, R = never>(
   options?: ConformanceOptions<E, R>,
 ): ConformanceSuite<E, R | PasswordResetStore> =>
-  perUserDeleteSuite("PasswordResetStore", options, PasswordResetStore, {
-    records: "resets",
-    make: (userId): PasswordResetToken => makeUserToken(userId),
-    write: (store, reset) => store.create(reset),
-    read: (store, reset) => store.get(reset.token),
-    purge: (store, userId) => store.deleteByUserId(userId),
-  });
+  suite<E, R, PasswordResetStore>("PasswordResetStore", options, [
+    perUserDeleteCase<
+      PasswordResetStore,
+      typeof PasswordResetStore.Service,
+      PasswordResetToken,
+      E,
+      R
+    >(PasswordResetStore, {
+      records: "resets",
+      make: (userId): PasswordResetToken => makeUserToken(userId),
+      write: (store, reset) => store.create(reset),
+      read: (store, reset) => store.get(reset.token),
+      purge: (store, userId) => store.deleteByUserId(userId),
+    }),
+    ...consumeCases<
+      PasswordResetStore,
+      typeof PasswordResetStore.Service,
+      PasswordResetToken,
+      E,
+      R
+    >(PasswordResetStore, {
+      record: "reset token",
+      make: (userId): PasswordResetToken => makeUserToken(userId),
+      write: (store, reset) => store.create(reset),
+      read: (store, reset) => store.get(reset.token),
+      key: (reset) => reset.token,
+      consume: (store, token) => store.consume(token),
+    }),
+  ]);
 
 /**
- * The `AccountManagementStore` per-user delete (#601): `deleteByUserId`
+ * The `AccountManagementStore` per-user delete: `deleteByUserId`
  * removes that user's pending email-change and deletion tokens, and only
  * theirs.
  *
@@ -1893,3 +2436,111 @@ export const accountManagementStoreConformance = <E = never, R = never>(
     read: (store, token) => store.get(token.token),
     purge: (store, userId) => store.deleteByUserId(userId),
   });
+
+// ---------------------------------------------------------------------------
+// Single-use token stores without a per-user delete
+// ---------------------------------------------------------------------------
+
+/**
+ * The `MagicLinkStore` single-use `consume`: a link's token is handed
+ * out once and removed, a spent or unknown token is `null`, and of concurrent
+ * callers passing one token exactly one receives it.
+ *
+ * @since 0.6.0
+ * @category suites
+ */
+export const magicLinkStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | MagicLinkStore> =>
+  suite<E, R, MagicLinkStore>(
+    "MagicLinkStore",
+    options,
+    consumeCases<MagicLinkStore, typeof MagicLinkStore.Service, MagicLinkToken, E, R>(
+      MagicLinkStore,
+      {
+        record: "magic-link token",
+        make: (): MagicLinkToken => ({
+          token: digest(),
+          email: `${uuid()}@example.com`,
+          createdAt: at().getTime(),
+          expiresAt: at(15 * 60 * 1000).getTime(),
+        }),
+        write: (store, token) => store.create(token),
+        read: (store, token) => store.get(token.token),
+        key: (token) => token.token,
+        consume: (store, token) => store.consume(token),
+      },
+    ),
+  );
+
+/**
+ * The `OneTimeTokenStore` single-use `consume`: a token is handed out
+ * once and removed, a spent or unknown token is `null`, and of concurrent
+ * callers passing one token exactly one receives it.
+ *
+ * @since 0.6.0
+ * @category suites
+ */
+export const oneTimeTokenStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | OneTimeTokenStore> =>
+  suite<E, R, OneTimeTokenStore>(
+    "OneTimeTokenStore",
+    options,
+    consumeCases<OneTimeTokenStore, typeof OneTimeTokenStore.Service, OneTimeTokenRecord, E, R>(
+      OneTimeTokenStore,
+      {
+        record: "one-time token",
+        make: (userId): OneTimeTokenRecord => ({
+          token: digest(),
+          subject: userId,
+          metadata: { purpose: "conformance" },
+          createdAt: at().getTime(),
+          expiresAt: at(15 * 60 * 1000).getTime(),
+        }),
+        write: (store, record) => store.create(record),
+        read: (store, record) => store.get(record.token),
+        key: (record) => record.token,
+        consume: (store, token) => store.consume(token),
+      },
+    ),
+  );
+
+/**
+ * The `OidcCodeStore` single-use `consume`: an authorization code (or
+ * a pending consent request) is handed out once and removed, a spent or
+ * unknown code is `null`, and of concurrent redemptions of one code exactly
+ * one receives it (RFC 6749 §4.1.2).
+ *
+ * @since 0.6.0
+ * @category suites
+ */
+export const oidcCodeStoreConformance = <E = never, R = never>(
+  options?: ConformanceOptions<E, R>,
+): ConformanceSuite<E, R | OidcCodeStore> =>
+  suite<E, R, OidcCodeStore>(
+    "OidcCodeStore",
+    options,
+    consumeCases<OidcCodeStore, typeof OidcCodeStore.Service, OidcAuthorizationCode, E, R>(
+      OidcCodeStore,
+      {
+        record: "authorization code",
+        make: (userId): OidcAuthorizationCode => ({
+          codeHash: digest(),
+          kind: "authorization_code",
+          clientId: "conformance-client",
+          userId,
+          scopes: ["openid"],
+          redirectUri: "https://client.example.com/callback",
+          codeChallenge: digest(),
+          codeChallengeMethod: "S256",
+          expiresAt: at(60 * 1000).getTime(),
+          createdAt: at().getTime(),
+        }),
+        write: (store, code) => store.create(code),
+        read: (store, code) => store.get(code.codeHash),
+        key: (code) => code.codeHash,
+        consume: (store, codeHash) => store.consume(codeHash),
+      },
+    ),
+  );

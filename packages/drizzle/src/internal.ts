@@ -12,6 +12,8 @@
 import { Effect, Exit, HashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import * as Auth from "@thomasfosterau/effect-auth";
 import type { SQL, Table } from "drizzle-orm";
 import type {
@@ -133,3 +135,63 @@ export const resolveTableNames = (names?: Partial<TableNames>): TableNames => ({
   ...defaultTableNames,
   ...names,
 });
+
+/** One driver's report of the rows a statement touched. */
+const AffectedRowsHeader = Schema.Union([
+  Schema.Struct({ affectedRows: Schema.Finite }),
+  Schema.Struct({ rowCount: Schema.Finite }),
+  Schema.Struct({ changes: Schema.Finite }),
+  Schema.Struct({ rowsAffected: Schema.Finite }),
+  Schema.Struct({ meta: Schema.Struct({ changes: Schema.Finite }) }),
+]);
+
+/**
+ * The number of rows a `DELETE` / `UPDATE` touched, decoded from whatever the
+ * driver's `execute()` resolved to. The shapes differ by driver: PGlite and
+ * mysql2 carry `affectedRows` (mysql2 in a `[ResultSetHeader, …]` pair),
+ * node-postgres `rowCount`, better-sqlite3 `changes`, libsql `rowsAffected`
+ * and D1 `meta.changes`.
+ */
+const AffectedRows = Schema.Union([
+  AffectedRowsHeader,
+  Schema.TupleWithRest(Schema.Tuple([AffectedRowsHeader]), [Schema.Unknown]),
+]).pipe(
+  Schema.decodeTo(Schema.Finite, {
+    decode: SchemaGetter.transform((result) => {
+      const header = Array.isArray(result) ? result[0] : result;
+      return "affectedRows" in header
+        ? header.affectedRows
+        : "rowCount" in header
+          ? header.rowCount
+          : "changes" in header
+            ? header.changes
+            : "rowsAffected" in header
+              ? header.rowsAffected
+              : header.meta.changes;
+    }),
+    encode: SchemaGetter.forbidden(() => "affected-row counts are read, never written"),
+  }),
+);
+
+/**
+ * Run a write and count the rows it touched, from its driver result, for a
+ * compare-and-set that cannot use `RETURNING` (MySQL has none). A driver
+ * that reports no count fails as `AuthError` rather than let the caller
+ * guess.
+ *
+ * @internal
+ */
+export const affectedRows = <E>(
+  label: string,
+  write: Effect.Effect<unknown, E>,
+): Effect.Effect<number, E | Auth.AuthError> =>
+  Effect.flatMap(write, (result) =>
+    Effect.fromOption(Schema.decodeUnknownOption(AffectedRows)(result)).pipe(
+      Effect.mapError(
+        () =>
+          new Auth.AuthError({
+            message: `drizzle ${label}: the driver reported no affected-row count`,
+          }),
+      ),
+    ),
+  );

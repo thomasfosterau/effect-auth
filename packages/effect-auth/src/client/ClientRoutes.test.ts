@@ -1,5 +1,5 @@
 /**
- * The browser client names only routes the contract serves (#205): every
+ * The browser client names only routes the contract serves: every
  * request it builds from a literal path is an operation of the OpenAPI
  * document, with the same method. A client left pointing at a removed route
  * (`/organization/…`, `/multi-session/…`, `GET /token`, …) fails here.

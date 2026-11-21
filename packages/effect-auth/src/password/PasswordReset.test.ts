@@ -27,6 +27,8 @@ import { hashToken } from "../TokenHash.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 import { looseCollationIdentifierStore } from "../testing/LooseCollation.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -69,6 +71,8 @@ const sessionStore = {
       return session;
     }),
 
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, sessionId);
@@ -109,6 +113,13 @@ const passwordResetStore = {
 
   get: (token: string) =>
     Effect.sync(() => Option.getOrNull(MutableHashMap.get(resetTokens, token))),
+
+  consume: (token: string) =>
+    Effect.sync(() => {
+      const found = Option.getOrNull(MutableHashMap.get(resetTokens, token));
+      MutableHashMap.remove(resetTokens, token);
+      return found;
+    }),
 
   delete: (token: string) =>
     Effect.sync(() => {
@@ -216,7 +227,7 @@ describe("PasswordResetService", () => {
     expect(MutableHashMap.size(resetTokens)).toBe(1);
   });
 
-  it("sends nothing for a look-alike address a loose store matches to another account (#602)", async () => {
+  it("sends nothing for a look-alike address a loose store matches to another account", async () => {
     const testContext = await makeTestContext();
     const bob: User = {
       id: "user-bob",
@@ -336,6 +347,48 @@ describe("PasswordResetService", () => {
     expect(updatedHash).not.toBe(oldHash.hash);
     expect(MutableHashMap.size(resetTokens)).toBe(0);
     expect(MutableHashMap.size(sessions)).toBe(0);
+  });
+
+  it("sets one password from concurrent resets with one token", async () => {
+    const testContext = await makeTestContext();
+    const user: User = {
+      id: "user-reset-race",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    };
+    MutableHashMap.set(users, user.id, user);
+    seedEmailIdentifier(user.id, "race-reset@example.com", true);
+    const resetToken: PasswordResetToken = {
+      token: hashToken("token-race"),
+      userId: user.id,
+      email: "race-reset@example.com",
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+    };
+    MutableHashMap.set(resetTokens, resetToken.token, resetToken);
+
+    const passwords = ["first-new-password", "second-new-password"];
+    const results = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({ sendResetPassword: () => Effect.void });
+          return yield* Effect.all(
+            passwords.map((password) =>
+              Effect.result(service.resetPassword("token-race", password)),
+            ),
+            { concurrency: "unbounded" },
+          );
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(results.filter(Result.isSuccess)).toHaveLength(1);
+    const winner = passwords[results.findIndex(Result.isSuccess)] ?? "";
+    const stored = Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id)) ?? "";
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
+    expect(await Effect.runPromise(hasher.verify(winner, stored))).toBe(true);
   });
 
   it("should not revoke sessions when revokeSessionsOnPasswordReset is false", async () => {

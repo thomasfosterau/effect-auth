@@ -33,6 +33,8 @@ import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Attributes, Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const sessions = MutableHashMap.empty<string, Session>();
@@ -57,6 +59,8 @@ const sessionStore = {
       return session;
     }),
 
+  touch: (sessionId: string, touch: SessionTouch) =>
+    memorySessionStore(sessions).touch(sessionId, touch),
   delete: (sessionId: string) =>
     Effect.sync(() => {
       MutableHashMap.remove(sessions, sessionId);
@@ -314,7 +318,7 @@ describe("AdminService", () => {
     expect(listed.total).toBe(3);
   });
 
-  it("answers isAdmin under its own config, the rule the HTTP admin gates ask (#680)", async () => {
+  it("answers isAdmin under its own config, the rule the HTTP admin gates ask", async () => {
     const roleAdmin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     const superuser = seedUser("super-1", "super@example.com", { role: "superuser" });
     const byId = seedUser("root-1", "root@example.com");
@@ -349,7 +353,7 @@ describe("AdminService", () => {
     expect(isAdmin(stored)).toBe(true);
   });
 
-  it("refuses a role off the configured ladder, writing nothing (#193)", async () => {
+  it("refuses a role off the configured ladder, writing nothing", async () => {
     const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     seedUser("user-1", "user@example.com", { role: "user" });
@@ -369,7 +373,7 @@ describe("AdminService", () => {
     expect(promoted.attributes["role"]).toBe("moderator");
   });
 
-  it("checks createUser's role whichever door it comes in by (#193)", async () => {
+  it("checks createUser's role whichever door it comes in by", async () => {
     const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     const roles = Ladder.make(["user", "admin"]);
@@ -588,7 +592,7 @@ describe("AdminService", () => {
       { impersonationSessionDuration: 15 * 60 * 1000 },
       (service) => service.impersonateUser(admin, "user-1"),
     );
-    // The record carries the stored id; the token travels beside it (#581).
+    // The record carries the stored id; the token travels beside it.
     expect(session.id).toBe(hashToken(token));
 
     expect(session.userId).toBe("user-1");
@@ -661,7 +665,7 @@ describe("AdminService", () => {
     expect(usernameIdent?.value).toBe("bobthemod");
     expect(usernameIdent?.verified).toBe(false);
 
-    // The store was handed each primary address to create the user with (#380).
+    // The store was handed each primary address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "alice@example.com", verified: false },
       { type: "email", value: "bob@example.com", verified: true, verifiedAt: expect.any(Date) },
@@ -708,7 +712,7 @@ describe("AdminService", () => {
     expect(result.duplicate.failure._tag).toBe("AdminError");
   });
 
-  it("createUser: normalises each extra identifier for its type before it is claimed (#408)", async () => {
+  it("createUser: normalises each extra identifier for its type before it is claimed", async () => {
     const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     seedUser("user-1", "taken@example.com");
@@ -749,7 +753,7 @@ describe("AdminService", () => {
     expect(result.duplicate._tag).toBe("Failure");
   });
 
-  it("createUser: a failing phone normaliser writes nothing (#408)", async () => {
+  it("createUser: a failing phone normaliser writes nothing", async () => {
     const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     const usersBefore = MutableHashMap.size(users);
@@ -775,7 +779,7 @@ describe("AdminService", () => {
     ).toBe(false);
   });
 
-  it("createUser: refuses when the store's writer returns the existing owner, and leaves the owner untouched (#380)", async () => {
+  it("createUser: refuses when the store's writer returns the existing owner, and leaves the owner untouched", async () => {
     // A writer that finds or creates on the address: it returns the user who
     // already holds it and reports that it inserted nothing.
     const findOrCreateStore: typeof AdminUserStore.Service = {

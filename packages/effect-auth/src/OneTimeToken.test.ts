@@ -17,6 +17,8 @@ import { SessionStore } from "./SessionStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const oneTimeTokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
 
@@ -29,6 +31,13 @@ const oneTimeTokenStore = {
 
   get: (token: string) =>
     Effect.sync(() => Option.getOrNull(MutableHashMap.get(oneTimeTokens, token))),
+
+  consume: (token: string) =>
+    Effect.sync(() => {
+      const found = Option.getOrNull(MutableHashMap.get(oneTimeTokens, token));
+      MutableHashMap.remove(oneTimeTokens, token);
+      return found;
+    }),
 
   delete: (token: string) =>
     Effect.sync(() => {
@@ -242,6 +251,8 @@ describe("redeemOneTimeTokenForSession", () => {
           get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
           update: (session) =>
             Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+          touch: (sessionId: string, touch: SessionTouch) =>
+            memorySessionStore(sessions).touch(sessionId, touch),
           delete: (id) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
           deleteByUserId: () => Effect.void,
           listByUserId: () => Effect.succeed([]),

@@ -134,7 +134,7 @@ describe("RateLimiter.consumeToken", () => {
     expect(results.map(Result.isSuccess)).toEqual([true, true, false]);
   });
 
-  it("allows only the limit when requests arrive concurrently (#455)", async () => {
+  it("allows only the limit when requests arrive concurrently", async () => {
     const { layer, stored } = makeStore();
     const limit = { maxRequests: 5, windowMs: 60_000 };
     const results = await Effect.runPromise(

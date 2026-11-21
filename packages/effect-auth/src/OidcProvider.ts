@@ -154,6 +154,15 @@ export class OidcCodeStore extends Context.Service<
       code: OidcAuthorizationCode,
     ) => Effect.Effect<OidcAuthorizationCode, AuthError>;
     readonly get: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
+    /**
+     * Atomically take the record for `codeHash`: delete it and return it, or
+     * return `null` when there is none. Of two concurrent callers
+     * passing the same code, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
     readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
   }
 >()("@effect-auth/OidcCodeStore") {}
@@ -181,10 +190,20 @@ export class OidcTokenStore extends Context.Service<
   {
     readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
     readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
+    /**
+     * Atomically take the record for `tokenHash`: delete it and return it, or
+     * return `null` when there is none. Refresh rotation spends the presented token with it, so two
+     * concurrent refreshes cannot both rotate one token. Of two concurrent callers
+     * passing the same refresh token, at most one receives the record; the other
+     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * Redis `GETDEL`, a conditional delete checked by its affected-row
+     * count), never a `get` then a `delete`.
+     */
+    readonly consume: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
     readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
     /**
      * Delete every access and refresh token issued to `userId`, for every
-     * client. The first proof of the user's email address calls it (#704), so
+     * client. The first proof of the user's email address calls it, so
      * an earlier, unproven holder of the address keeps no OIDC-provider access.
      * No-ops silently when the user holds none.
      */
@@ -218,8 +237,7 @@ export class OidcConsentStore extends Context.Service<
     readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
     /**
      * Delete every consent `userId` granted, for every client; a no-op when
-     * they granted none. Deleting a user calls it before the user row goes
-     * (#601).
+     * they granted none. Deleting a user calls it before the user row goes.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
   }
@@ -387,7 +405,7 @@ export interface OidcDynamicRegistrationConfig {
    * `Http.make` and `Http.makeAsync` resolve from their own `trustedProxy`.
    * They fail at startup with `ClientAddressConfigError` when registration is
    * enabled with no `trustedProxy` (`allowMissingClientIp: true` does not
-   * stand in for one, #682).
+   * stand in for one).
    * A registration with no address is refused with `429`, and is never counted
    * under a shared bucket.
    */
@@ -1533,7 +1551,13 @@ export const make = (
                 message: "Consent request not found or expired",
               });
             }
-            yield* codeStore.delete(pending.codeHash);
+            // Spend the consent request atomically: of concurrent
+            // answers to one request, only one proceeds.
+            if ((yield* codeStore.consume(pending.codeHash)) === null) {
+              return yield* new OidcProviderError({
+                message: "Consent request not found or expired",
+              });
+            }
 
             if (!accept) {
               return {
@@ -1602,8 +1626,12 @@ export const make = (
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
             // Single use: burn the code before any further checks so a replay
-            // (even with corrected parameters) always fails.
-            yield* codeStore.delete(record.codeHash);
+            // (even with corrected parameters) always fails. `consume` is
+            // atomic, so of concurrent redemptions of one code only one
+            // gets past here (RFC 6749 §4.1.2).
+            if ((yield* codeStore.consume(record.codeHash)) === null) {
+              return yield* new OidcTokenError({ error: "invalid_grant" });
+            }
             if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
               return yield* new OidcTokenError({
                 error: "invalid_grant",
@@ -1680,8 +1708,12 @@ export const make = (
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
 
-            // Rotation: burn the presented token immediately.
-            yield* tokenStore.delete(record.tokenHash);
+            // Rotation: burn the presented token immediately, atomically.
+            // A `null` means a concurrent refresh rotated it first, so
+            // this one is refused rather than forking the family.
+            if ((yield* tokenStore.consume(record.tokenHash)) === null) {
+              return yield* new OidcTokenError({ error: "invalid_grant" });
+            }
 
             // Carry the family lineage and absolute lifetime through all rotations.
             const familyId = record.familyId ?? (yield* randomToken());

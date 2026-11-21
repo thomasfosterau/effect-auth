@@ -15,7 +15,7 @@ Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may imp
 - **No CSS ships.** Semantic markup with stable `ea-*` classes (including `ea-restart`); `class` appends, `classes` replaces defaults. Class names and default labels are public API; server messages render verbatim.
 - `getAuthClient()` throws a pointed error when nothing above called `setAuthClient`; a form's `client` prop overrides context.
 - No published file may be a compiled test: keep the postbuild step when changing the build.
-- SSR hydration of the session Atoms is not implemented (follow-up to #206).
+- SSR hydration of the session Atoms is not implemented.
 
 ## Terms
 

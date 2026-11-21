@@ -7,7 +7,7 @@
  * matching effect-auth `Context.Service` tag. {@link layer} bundles all of
  * them so a single `Layer.provide` wires up the entire auth stack on top of
  * a `SqlClient` layer for a supported dialect (SQLite, Cloudflare D1 and
- * PostgreSQL; see the package README). MySQL is not supported (#260).
+ * PostgreSQL; see the package README). MySQL is not supported.
  *
  * Data codecs: dates as epoch milliseconds (`BIGINT`, read back as a number
  * from whatever an `int8` comes back as: see `Int8.ts`), booleans as `0`/`1`, attribute
@@ -18,14 +18,16 @@
  * `multiFactor`) and counters (`rateLimit.increment`,
  * `emailOtp.incrementAttempts`, `emailOtp.recordFailure`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. One-time consumes (`oauthState.consume`, #685) are a single
- * `DELETE … RETURNING`, so a state is handed out at most once. Multi-step
+ * races. One-time consumes (`oauthState.consume`; the token stores'
+ * `consume`) are a single `DELETE … RETURNING`, so a record is handed
+ * out at most once; `multiFactor.useTotpCounter` / `useBackupCode` are
+ * compare-and-set `UPDATE … RETURNING`s. Multi-step
  * writes (challenge, oauthState.create, emailOtp.upsert,
  * pendingMultiFactor.delete, and identifier.replace's claim-then-release) run
  * inside `sql.withTransaction`.
  * `ON CONFLICT` targets a declared primary key or unique index. MySQL has no
  * `ON CONFLICT` clause, so these statements fail there, and MySQL is not a
- * supported dialect (#260). For MySQL, use `@thomasfosterau/effect-auth-drizzle`'s
+ * supported dialect. For MySQL, use `@thomasfosterau/effect-auth-drizzle`'s
  * MySQL tables.
  *
  * Token columns store SHA-256 hashes computed by the service layer (the
@@ -103,7 +105,7 @@ const asVoid = <A, E>(label: string, statement: Effect.Effect<A, E>) =>
 /**
  * Every row a store reads, with its `BIGINT` columns read as numbers whatever
  * the driver returns for an `int8` (a `bigint` from `@effect/sql-pg`, a string
- * from node-postgres; #766). A value that is not a safe integer fails as an
+ * from node-postgres). A value that is not a safe integer fails as an
  * `AuthError`.
  */
 const allRows = <A extends object>(
@@ -304,6 +306,15 @@ export const makeSessionStore: Effect.Effect<
         "session.update",
         sql`UPDATE auth_sessions SET expires_at = ${dateToMs(session.expiresAt)}, last_activity_at = ${dateToMs(session.lastActivityAt)}, attributes = ${encodeAttributes(session.attributes)} WHERE id = ${session.id}`,
       ).pipe(Effect.as(session)),
+    touch: (sessionId, touch) =>
+      firstRow(
+        "session.touch",
+        sql<SessionRow>`UPDATE auth_sessions SET expires_at = ${dateToMs(touch.expiresAt)}, last_activity_at = ${dateToMs(touch.lastActivityAt)}
+            WHERE id = ${sessionId} AND expires_at >= ${dateToMs(touch.lastActivityAt)}
+            RETURNING *`,
+      ).pipe(
+        Effect.flatMap((row) => (row ? rowToSession(row, "session.touch") : Effect.succeed(null))),
+      ),
     delete: (sessionId) =>
       asVoid("session.delete", sql`DELETE FROM auth_sessions WHERE id = ${sessionId}`),
     deleteByUserId: (userId) =>
@@ -342,7 +353,7 @@ export const makeUserStore: Effect.Effect<
  * `Auth.UserServiceStore` over the `auth_users` table; requires `SqlClient`.
  * `delete` removes the user's `auth_user_roles` rows with the user row, in
  * one transaction: the roles are this subpath's own data about the user, and
- * no core store owns them (#601).
+ * no core store owns them.
  */
 export const makeUserServiceStore: Effect.Effect<
   typeof Auth.UserServiceStore.Service,
@@ -539,7 +550,7 @@ export const makeRateLimitStore: Effect.Effect<
         // expired, reset count to 1; otherwise increment by 1. RETURNING
         // avoids a separate SELECT and prevents TOCTOU undercounting. The
         // right-hand side names the target table's columns explicitly:
-        // unqualified, PostgreSQL reports them as ambiguous (#348).
+        // unqualified, PostgreSQL reports them as ambiguous.
         const rows = yield* allRows(
           "rateLimit.increment",
           sql<{ count: number }>`
@@ -596,6 +607,13 @@ export const makeEmailVerificationStore: Effect.Effect<
         "emailVerification.get",
         sql<EmailVerificationRow>`SELECT * FROM auth_email_verifications WHERE token = ${token}`,
       ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
+    // One `DELETE ... RETURNING`: of concurrent consumers of one
+    // token, only the one whose delete removed the row gets it back.
+    consume: (token) =>
+      firstRow(
+        "emailVerification.consume",
+        sql<EmailVerificationRow>`DELETE FROM auth_email_verifications WHERE token = ${token} RETURNING *`,
+      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
     delete: (token) =>
       asVoid(
         "emailVerification.delete",
@@ -639,7 +657,7 @@ const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge |
 /**
  * `Auth.MultiFactor.ChallengeStore` over `auth_webauthn_challenges` and the
  * ceremony each challenge was issued for, in
- * `auth_webauthn_challenge_ceremonies` (#591); requires `SqlClient`. A
+ * `auth_webauthn_challenge_ceremonies`; requires `SqlClient`. A
  * challenge with no ceremony row reads as missing.
  */
 export const makeChallengeStore: Effect.Effect<
@@ -819,7 +837,7 @@ export const makeOAuthStateStore: Effect.Effect<
           return state;
         }),
       ),
-    // One `DELETE ... RETURNING` statement (#685): of two concurrent callers
+    // One `DELETE ... RETURNING` statement: of two concurrent callers
     // passing the same state, only the one whose delete removed the row gets
     // it back, on SQLite, D1 and PostgreSQL alike.
     consume: (state) =>
@@ -998,6 +1016,12 @@ export const makePasswordResetStore: Effect.Effect<
         "passwordReset.get",
         sql<PasswordResetRow>`SELECT * FROM auth_password_resets WHERE token = ${token}`,
       ).pipe(Effect.map((row) => (row ? rowToPasswordReset(row) : null))),
+    // One `DELETE ... RETURNING`.
+    consume: (token) =>
+      firstRow(
+        "passwordReset.consume",
+        sql<PasswordResetRow>`DELETE FROM auth_password_resets WHERE token = ${token} RETURNING *`,
+      ).pipe(Effect.map((row) => (row ? rowToPasswordReset(row) : null))),
     delete: (token) =>
       asVoid("passwordReset.delete", sql`DELETE FROM auth_password_resets WHERE token = ${token}`),
     deleteByUserId: (userId) =>
@@ -1048,6 +1072,12 @@ export const makeMagicLinkStore: Effect.Effect<
       firstRow(
         "magicLink.getByEmail",
         sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE email = ${email}`,
+      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+    // One `DELETE ... RETURNING`.
+    consume: (token) =>
+      firstRow(
+        "magicLink.consume",
+        sql<MagicLinkRow>`DELETE FROM auth_magic_links WHERE token = ${token} RETURNING *`,
       ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
     delete: (token) =>
       asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
@@ -1104,7 +1134,7 @@ const rowToOtpFailures = (row: EmailOtpFailuresRow): Auth.OtpFailures => ({
 
 /**
  * `Auth.Email.EmailOtpStore` over the `auth_email_otps` table, with each
- * pair's failure budget (#590) in `auth_email_otp_failures`; requires
+ * pair's failure budget in `auth_email_otp_failures`; requires
  * `SqlClient`.
  */
 export const makeEmailOtpStore: Effect.Effect<
@@ -1157,11 +1187,8 @@ export const makeEmailOtpStore: Effect.Effect<
             WHERE email = ${email} AND purpose = ${purpose}
             RETURNING attempts`,
         );
-        const attempts = rows[0]?.attempts;
-        if (attempts == null) {
-          return yield* new Auth.AuthError({ message: "OTP record not found" });
-        }
-        return attempts;
+        // No row: another request consumed or exhausted the code.
+        return rows[0]?.attempts ?? null;
       }),
     getFailures: (email, purpose) =>
       firstRow(
@@ -1219,7 +1246,7 @@ export interface PurgeExpiredResult {
   readonly magicLinks: number;
   /** Rows deleted from `auth_email_otps`. */
   readonly emailOtps: number;
-  /** Rows deleted from `auth_rate_limits`: their window and block have both passed (#686). */
+  /** Rows deleted from `auth_rate_limits`: their window and block have both passed. */
   readonly rateLimits: number;
 }
 
@@ -1237,7 +1264,7 @@ export interface PurgeExpiredResult {
  * `expires_at` equals the current time is still accepted, so it stays.
  *
  * A rate-limit row is one per key, IP and identifier ever counted, so
- * `auth_rate_limits` grows the same way (#686). The purge deletes a row once
+ * `auth_rate_limits` grows the same way. The purge deletes a row once
  * its `reset_at` is not after now and its `blocked_until` is unset or not after
  * now: the limiter then treats the key exactly as one it has never seen, so the
  * next request opens a fresh window either way. A row inside its window or
@@ -1253,7 +1280,7 @@ export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, Sql
 /** Options for {@link purgeExpiredWith}. */
 export interface PurgeExpiredOptions {
   /**
-   * The most rows the run deletes from each table (#729): at most `limit`
+   * The most rows the run deletes from each table: at most `limit`
    * magic links, `limit` email OTPs and `limit` rate-limit rows. A positive
    * integer; omitted, every expired row goes, as {@link purgeExpired} does.
    */
@@ -1386,6 +1413,9 @@ const rowToMultiFactor = (
     catch: (cause) => new Auth.AuthError({ message: "multiFactor decode failed", cause }),
   });
 
+/** How many times `useBackupCode` re-reads after losing its compare-and-set to a concurrent change. */
+const backupCodeRetries = 8;
+
 /** `Auth.MultiFactor.MultiFactorStore` over the `auth_multi_factor` table; requires `SqlClient`. */
 export const makeMultiFactorStore: Effect.Effect<
   typeof Auth.MultiFactor.MultiFactorStore.Service,
@@ -1415,6 +1445,62 @@ export const makeMultiFactorStore: Effect.Effect<
       ).pipe(Effect.as(record)),
     delete: (userId) =>
       asVoid("multiFactor.delete", sql`DELETE FROM auth_multi_factor WHERE user_id = ${userId}`),
+    // One compare-and-set: the counter moves only forward, on a
+    // verified record that still exists.
+    useTotpCounter: (userId, counter) =>
+      firstRow(
+        "multiFactor.useTotpCounter",
+        sql<{ user_id: string }>`UPDATE auth_multi_factor SET last_used_counter = ${counter}
+            WHERE user_id = ${userId} AND verified = 1
+              AND (last_used_counter IS NULL OR last_used_counter < ${counter})
+            RETURNING user_id`,
+      ).pipe(Effect.map((row) => row !== null)),
+    // A compare-and-set on the stored list: the write lands only if
+    // the list is still the one read. A concurrent change (another code
+    // spent) moves it, and the read is retried while the code is still there.
+    useBackupCode: (userId, codeHash) => {
+      const attempt = (left: number): Effect.Effect<boolean, Auth.AuthError> =>
+        firstRow(
+          "multiFactor.useBackupCode",
+          sql<{ backup_codes: string }>`SELECT backup_codes FROM auth_multi_factor
+              WHERE user_id = ${userId} AND verified = 1`,
+        ).pipe(
+          Effect.flatMap((row) =>
+            row === null
+              ? Effect.succeed(null)
+              : Effect.try({
+                  try: () => ({
+                    stored: row.backup_codes,
+                    codes: decodeStringList(row.backup_codes),
+                  }),
+                  catch: (cause) =>
+                    new Auth.AuthError({ message: "multiFactor decode failed", cause }),
+                }),
+          ),
+          Effect.flatMap((read) => {
+            if (read === null || !read.codes.includes(codeHash)) return Effect.succeed(false);
+            const { stored, codes } = read;
+            const next = encodeStringList(codes.filter((code) => code !== codeHash));
+            return firstRow(
+              "multiFactor.useBackupCode",
+              sql<{ user_id: string }>`UPDATE auth_multi_factor SET backup_codes = ${next}
+                  WHERE user_id = ${userId} AND verified = 1 AND backup_codes = ${stored}
+                  RETURNING user_id`,
+            ).pipe(
+              Effect.flatMap((updated) =>
+                updated !== null
+                  ? Effect.succeed(true)
+                  : left > 0
+                    ? attempt(left - 1)
+                    : Effect.fail(
+                        new Auth.AuthError({ message: "multiFactor.useBackupCode contended" }),
+                      ),
+              ),
+            );
+          }),
+        );
+      return attempt(backupCodeRetries);
+    },
   } satisfies typeof Auth.MultiFactor.MultiFactorStore.Service;
 });
 
@@ -1469,6 +1555,24 @@ export const makePendingMultiFactorStore: Effect.Effect<
             : Effect.fail(
                 new Auth.AuthError({ message: "Pending multi-factor challenge not found" }),
               ),
+        ),
+      ),
+    // The challenge goes in one `DELETE ... RETURNING`, so of
+    // concurrent consumers only one gets it back; its count follows, as in
+    // `delete`.
+    consume: (token) =>
+      tx(
+        "pendingMultiFactor.consume",
+        Effect.tap(
+          firstRow(
+            "pendingMultiFactor.consume",
+            sql<PendingMultiFactorRow>`DELETE FROM auth_pending_multi_factor WHERE token = ${token} RETURNING *`,
+          ).pipe(Effect.map((row) => (row ? rowToPendingMultiFactor(row) : null))),
+          () =>
+            asVoid(
+              "pendingMultiFactor.consume",
+              sql`DELETE FROM auth_pending_multi_factor_attempts WHERE token = ${token}`,
+            ),
         ),
       ),
     // The challenge goes first: interrupted in between (D1 has no
@@ -1808,6 +1912,32 @@ export const makeApiKeyStore: Effect.Effect<
               updated_at = ${apiKey.updatedAt}
             WHERE id = ${apiKey.id}`,
       ).pipe(Effect.as(apiKey)),
+    // One `UPDATE … RETURNING`: only the usage columns move, so a
+    // concurrent owner edit survives, and the `WHERE` is the whole check, so
+    // of concurrent uses of a key with one use left exactly one matches.
+    recordUse: (id, use) => {
+      const refill = use.refill;
+      const topped =
+        refill === undefined
+          ? sql`remaining`
+          : refill.max === undefined
+            ? sql`remaining + ${refill.amount}`
+            : sql`CASE WHEN remaining + ${refill.amount} > ${refill.max} THEN ${refill.max} ELSE remaining + ${refill.amount} END`;
+      return firstRow(
+        "apiKey.recordUse",
+        sql<ApiKeyRow>`UPDATE auth_api_keys SET
+              remaining = ${topped} - 1,
+              ${refill === undefined ? sql`` : sql`last_refill_at = ${refill.to},`}
+              last_used_at = ${use.usedAt},
+              updated_at = ${use.usedAt}
+            WHERE id = ${id}
+              AND enabled = 1
+              AND (expires_at IS NULL OR expires_at >= ${use.usedAt})
+              AND (remaining IS NULL OR ${topped} > 0)
+              ${refill === undefined ? sql`` : sql`AND last_refill_at = ${refill.from}`}
+            RETURNING *`,
+      ).pipe(Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))));
+    },
     delete: (id) => asVoid("apiKey.delete", sql`DELETE FROM auth_api_keys WHERE id = ${id}`),
     listByUserId: (userId) =>
       allRows(

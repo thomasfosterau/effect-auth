@@ -232,7 +232,7 @@ export const jwtServiceConfig = Config.all({
   audience: Config.String("JWT_AUDIENCE").pipe(Config.orElse(() => Config.succeed(undefined))),
   expiresIn: Config.Int("JWT_EXPIRES_IN_MS").pipe(Config.orElse(() => Config.succeed(undefined))),
   // Unset is the default algorithm; a value that names no supported algorithm
-  // fails the config rather than reaching `make` (#443).
+  // fails the config rather than reaching `make`.
   algorithm: Config.schema(JwtAlgorithm, "JWT_ALGORITHM").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -666,9 +666,7 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
           ),
     ),
     Effect.flatMap((body) => decodeJwksDocument(body).pipe(Effect.mapError(jwksFetchError))),
-    Effect.flatMap((data) =>
-      Effect.map(Clock.currentTimeMillis, (fetchedAt) => ({ keys: data.keys, fetchedAt })),
-    ),
+    Effect.zipWith(Clock.currentTimeMillis, (data, fetchedAt) => ({ keys: data.keys, fetchedAt })),
   );
 
 /**

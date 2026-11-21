@@ -13,11 +13,14 @@ import * as Errors from "../Errors.ts";
 import { type Identifier, IdentifierStore } from "../Identifier.ts";
 import { IdentifierStoreKV } from "../KeyValueStores.ts";
 import { OAuthAccountStore } from "../oauth/OAuthAccount.ts";
+import { type OneTimeTokenRecord, OneTimeTokenStore } from "../OneTimeToken.ts";
 import { PhoneOtpStore } from "../PhoneOtp.ts";
 import { SessionStore } from "../SessionStore.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import * as Testing from "./index.ts";
+import { memorySessionStore } from "./MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const sessionStore = (): typeof SessionStore.Service => {
   const sessions = MutableHashMap.empty<string, Types.Session>();
@@ -27,6 +30,8 @@ const sessionStore = (): typeof SessionStore.Service => {
     get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
     update: (session) =>
       Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -68,6 +73,33 @@ register(Testing.apiKeyStoreConformance(), () =>
 );
 register(Testing.identifierStoreConformance(), () =>
   IdentifierStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+);
+
+/**
+ * A `OneTimeTokenStore` over a map. With `yieldBetween`, its `consume` is the
+ * pre-atomic shape: a `get`, then a `delete`, with a fiber switch between them.
+ */
+const oneTimeTokenStore = (yieldBetween = false): typeof OneTimeTokenStore.Service => {
+  const tokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
+  const get = (token: string) =>
+    Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token)));
+  const remove = (token: string) => Effect.sync(() => void MutableHashMap.remove(tokens, token));
+  return {
+    create: (record) =>
+      Effect.sync(() => (MutableHashMap.set(tokens, record.token, record), record)),
+    get,
+    consume: (token) =>
+      Effect.gen(function* () {
+        const found = yield* get(token);
+        if (yieldBetween) yield* Effect.yieldNow;
+        if (found !== null) yield* remove(token);
+        return found;
+      }),
+    delete: remove,
+  };
+};
+register(Testing.oneTimeTokenStoreConformance(), () =>
+  Layer.succeed(OneTimeTokenStore, oneTimeTokenStore()),
 );
 
 describe("the suites share one store", () => {
@@ -176,7 +208,7 @@ describe("a broken store fails its suite", () => {
     ]);
   });
 
-  it("an ApiKeyStore whose deleteByUserId keeps the keys, or deletes everyone's, fails the #601 case", async () => {
+  it("an ApiKeyStore whose deleteByUserId keeps the keys, or deletes everyone's, fails the per-user delete case", async () => {
     const perUser =
       "deleteByUserId removes that user's keys only, and is a no-op for a user with none";
     const keeping = await failures(Testing.apiKeyStoreConformance(), () =>
@@ -196,7 +228,7 @@ describe("a broken store fails its suite", () => {
     expect(sweeping.map((failure) => failure.name)).toEqual([perUser]);
   });
 
-  it("an OAuthAccountStore whose deleteByUserId is a no-op fails its suite (#601)", async () => {
+  it("an OAuthAccountStore whose deleteByUserId is a no-op fails its suite", async () => {
     const failed = await failures(Testing.oauthAccountStoreConformance(), () =>
       Layer.succeed(OAuthAccountStore, {
         ...Testing.memoryOAuthAccountStore(),
@@ -206,11 +238,11 @@ describe("a broken store fails its suite", () => {
     expect(failed).toHaveLength(1);
   });
 
-  it("a PhoneOtpStore whose upsert resets the failure budget fails the #590 case", async () => {
+  it("a PhoneOtpStore whose upsert resets the failure budget fails the failure-budget case", async () => {
     const failed = await failures(Testing.phoneOtpStoreConformance(), () => {
       const failures = MutableHashMap.empty<string, Types.OtpFailures>();
       const inner = Testing.memoryPhoneOtpStore(MutableHashMap.empty(), failures);
-      // The pre-#590 shape: the count lives with the code, so a resend clears it.
+      // The naive shape: the count lives with the code, so a resend clears it.
       return Layer.succeed(PhoneOtpStore, {
         ...inner,
         upsert: (record) =>
@@ -221,7 +253,16 @@ describe("a broken store fails its suite", () => {
       });
     });
     expect(failed.map((failure) => failure.name)).toEqual([
-      "the failure budget survives upsert, incrementAttempts and delete of the pair's record (#590)",
+      "the failure budget survives upsert, incrementAttempts and delete of the pair's record",
+    ]);
+  });
+
+  it("a OneTimeTokenStore whose consume is a get then a delete fails the race case", async () => {
+    const failed = await failures(Testing.oneTimeTokenStoreConformance(), () =>
+      Layer.succeed(OneTimeTokenStore, oneTimeTokenStore(true)),
+    );
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "concurrent consumes of one one-time token hand it to exactly one caller",
     ]);
   });
 

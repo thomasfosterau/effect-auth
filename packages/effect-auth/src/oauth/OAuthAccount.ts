@@ -1,6 +1,6 @@
 /**
  * The OAuth account link and its store, apart from the OAuth flows so that
- * modules the flows import (the first proof of an address, #694) can reach
+ * modules the flows import (the first proof of an address) can reach
  * the store without an import cycle. `OAuth.ts` re-exports both.
  */
 import { Context, type Effect } from "effect";
@@ -43,7 +43,7 @@ export class OAuthAccountStore extends Context.Service<
     /**
      * Delete every provider link `userId` holds (their provider tokens with
      * them); a no-op when they hold none. Deleting a user calls it before the
-     * user row goes (#601), and the first proof of an address calls it too.
+     * user row goes, and the first proof of an address calls it too.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
     /**

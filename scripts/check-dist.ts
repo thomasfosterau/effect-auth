@@ -121,9 +121,9 @@ const root = resolve(import.meta.dirname, "..");
  * `semver` is CommonJS, so its default import is whatever `module.exports`
  * held when Node read `node_modules/semver/index.js`. If that object lacks the
  * functions this script calls, the import still succeeds and the first call
- * fails later as `semver.minVersion is not a function` (#331). Fail here
+ * fails later as `semver.minVersion is not a function`. Fail here
  * instead, naming the file and its size. One known way to get there is an empty
- * or truncated read of the file; the root cause of #331 is not confirmed.
+ * or truncated read of the file; the root cause is not confirmed.
  */
 if (typeof semver.minVersion !== "function" || typeof semver.satisfies !== "function") {
   // Resolved only on this path, so a healthy run never depends on
@@ -132,7 +132,7 @@ if (typeof semver.minVersion !== "function" || typeof semver.satisfies !== "func
   throw new Error(
     `semver loaded without its exports from ${semverFile} (${statSync(semverFile).size} bytes now). ` +
       "The module exported nothing; an empty or truncated read of the file is one known cause. " +
-      "Rerun, and if it recurs, record the run on #331.",
+      "Rerun; if it recurs, file an issue.",
   );
 }
 
@@ -147,14 +147,12 @@ interface Target {
 }
 
 const allTargets: ReadonlyArray<Target> = [
-  // effect-jsonapi is the optional peer of the `./http` entry (#205), and of
+  // effect-jsonapi is the optional peer of the `./http` entry, and of
   // the `./client/testing` entry through it; `@node-saml/node-saml` is the
   // optional peer of the `./saml` entry. Both are installed at their floors so
   // those entries import like the rest.
   { dir: "effect-auth", peers: ["@thomasfosterau/effect-jsonapi", "@node-saml/node-saml"] },
   { dir: "argon2" },
-  { dir: "resend" },
-  { dir: "twilio" },
   { dir: "sveltekit" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
   { dir: "alchemy-cloudflare", peers: ["alchemy", "@alchemy.run/cloudflare"] },
@@ -616,7 +614,7 @@ const insideDrizzleOrm = (line: string): boolean =>
 
 /**
  * The classifier's own cases, checked before it is trusted: a mistake here
- * would silently tolerate the class of failure #735 is about.
+ * would silently tolerate the class of failure it guards.
  */
 const insideDrizzleOrmCases: ReadonlyArray<readonly [line: string, tolerated: boolean]> = [
   [

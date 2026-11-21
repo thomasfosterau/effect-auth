@@ -5,9 +5,9 @@ HTTP API's wire format is JSON:API without recording what that covers. ADR-0001 
 auto-mounted HTTP routes"; this record describes the furthest thing from it, a complete HTTP API
 with one wire format, and the one place that format stops.
 
-Until #205 the HTTP tier was 124 endpoints in one `effect/http-api` group, in a dialect of its own:
+Previously the HTTP tier was 124 endpoints in one `effect/http-api` group, in a dialect of its own:
 command routes (`POST /sign-in`, `POST /organization/set-active`, `POST /admin/users/list`), plain
-JSON bodies, and tagged-error bodies. The conversion ran in six slices (#494, #495, #498, then the
+JSON bodies, and tagged-error bodies. The conversion ran in six slices (then the
 organization, team and admin slices) and is complete. What it left is two kinds of endpoint, and the
 line between them is not a matter of taste.
 

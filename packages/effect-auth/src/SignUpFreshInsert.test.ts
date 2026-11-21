@@ -1,7 +1,7 @@
 /**
  * Every flow that creates a user through {@link createUserWithIdentifier}
  * refuses a store whose `createUser` returns a user that already existed
- * (`created: false`), and writes nothing to that user (#406).
+ * (`created: false`), and writes nothing to that user.
  *
  * Each case drives one flow to its create seam with the same writer: it
  * returns the existing owner of the address, whose unverified identifier lands
@@ -277,6 +277,12 @@ const cases: ReadonlyArray<Case> = [
           create: (token) =>
             Effect.sync(() => (MutableHashMap.set(tokens, token.token, token), token)),
           get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+          consume: (token) =>
+            Effect.sync(() => {
+              const found = Option.getOrNull(MutableHashMap.get(tokens, token));
+              MutableHashMap.remove(tokens, token);
+              return found;
+            }),
           getByEmail: () => Effect.succeed(null),
           delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
           deleteByEmail: () => Effect.void,

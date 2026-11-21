@@ -29,6 +29,14 @@ const hasher = Auth.Password.scryptHasher({ cost: 16384 });
  * default so the base fixture keeps answering 404 for unconfigured features
  * (the shape most tests assert against).
  */
+
+/** Remove `key` from `map` and return what it held, or `null`: a single-use `consume`. */
+const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
+  const found = Option.getOrNull(MutableHashMap.get(map, key));
+  if (found !== null) MutableHashMap.remove(map, key);
+  return found;
+};
+
 export interface ServerFixtureOptions {
   /**
    * Mount the optional auth features: username + anonymous sign-in,
@@ -52,7 +60,7 @@ export interface ServerFixtureOptions {
   readonly multiSession?: { readonly maximumSessions?: number };
   /**
    * The attribute keys a sign-up may set (`Http.make`'s `signUpAttributes`).
-   * Default none: as in production, a sign-up keeps no attribute (#580).
+   * Default none: as in production, a sign-up keeps no attribute.
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
   /**
@@ -127,6 +135,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
     create: (v) => Effect.sync(() => (MutableHashMap.set(verifications, v.token, v), v)),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+    consume: (token) => Effect.sync(() => take(verifications, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(verifications, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -149,6 +158,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const passwordResetStore: typeof Auth.Password.PasswordResetStore.Service = {
     create: (reset) => Effect.sync(() => (MutableHashMap.set(resets, reset.token, reset), reset)),
     get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(resets, token))),
+    consume: (token) => Effect.sync(() => take(resets, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(resets, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -245,6 +255,26 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     upsert: (record) =>
       Effect.sync(() => (MutableHashMap.set(multiFactorRecords, record.userId, record), record)),
     delete: (userId) => Effect.sync(() => void MutableHashMap.remove(multiFactorRecords, userId)),
+    useTotpCounter: (userId, counter) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId));
+        if (record === null || !record.verified) return false;
+        if (record.lastUsedCounter !== undefined && record.lastUsedCounter >= counter) return false;
+        MutableHashMap.set(multiFactorRecords, userId, { ...record, lastUsedCounter: counter });
+        return true;
+      }),
+    useBackupCode: (userId, codeHash) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId));
+        if (record === null || !record.verified || !record.backupCodes.includes(codeHash)) {
+          return false;
+        }
+        MutableHashMap.set(multiFactorRecords, userId, {
+          ...record,
+          backupCodes: record.backupCodes.filter((code) => code !== codeHash),
+        });
+        return true;
+      }),
   };
 
   const pendingMultiFactors = MutableHashMap.empty<string, Auth.MultiFactor.PendingMultiFactor>();
@@ -260,6 +290,11 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
           Option.getOrElse(MutableHashMap.get(pendingMultiFactorAttempts, token), () => 0) + 1;
         MutableHashMap.set(pendingMultiFactorAttempts, token, attempts);
         return attempts;
+      }),
+    consume: (token) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(pendingMultiFactorAttempts, token);
+        return take(pendingMultiFactors, token);
       }),
     delete: (token) =>
       Effect.sync(() => {
@@ -491,7 +526,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   );
 
   // The feature set mounts device authorization, whose user-code limit needs a
-  // RateLimiter (Http.make throws without one, #389), so the feature set carries
+  // RateLimiter (Http.make throws without one), so the feature set carries
   // an in-memory one. Device approve/deny are limited to 5 per user code per 15
   // minutes, as in production.
   const rateLimitStore = options.rateLimitStore ?? memoryRateLimitStore();
@@ -499,8 +534,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
 
   // API keys over an in-memory store, with the RateLimiter their per-key
-  // `rateLimit` runs on (#730), and the UserStore that `verify` reads the key's
-  // owner from (#601).
+  // `rateLimit` runs on, and the UserStore that `verify` reads the key's
+  // owner from.
   const apiKeyRecords = MutableHashMap.empty<string, Auth.ApiKey>();
   const apiKeyLayer = Auth.ApiKeyService.layer().pipe(
     Layer.provide(
@@ -512,7 +547,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     ),
   );
 
-  // The same store carries the per-recipient send caps (#684).
+  // The same store carries the per-recipient send caps.
   const services: Layer.Layer<Http.AuthServices> = Layer.mergeAll(
     core,
     options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
@@ -522,7 +557,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   ).pipe(Layer.provide(rateLimitStoreLayer));
 
   // The fixture runs one in-process client, with no client address, so the
-  // per-address IP limit `Http.make` applies by default is off (#583): it would
+  // per-address IP limit `Http.make` applies by default is off: it would
   // refuse every address-less request to a limited endpoint.
   const { handler } = Http.make({
     services,

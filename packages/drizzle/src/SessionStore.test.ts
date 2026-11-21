@@ -21,7 +21,7 @@ import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 /**
  * The file's one in-memory Postgres, opened from the run's migrated template
- * (#291) and emptied before each test.
+ * and emptied before each test.
  */
 let client: PGlite;
 

@@ -1,5 +1,50 @@
 # @thomasfosterau/effect-auth-drizzle
 
+## 0.5.0
+
+### Minor Changes
+
+- db2a726: Slide a session's expiry atomically. **Breaking for bring-your-own `SessionStore`s:** the contract gains a required `touch(sessionId, { lastActivityAt, expiresAt })`, which sets those two fields, and nothing else, on a session that still exists and has not expired at `lastActivityAt`, and returns the stored session, or `null` when none matched. `SessionService.validateSession` now refreshes through it instead of writing the whole session back from its read. Before this, the refresh undid a concurrent change to the session's attributes (an organization switch, an elevation), and a store whose `update` upserts brought back a session signed out meanwhile. A session revoked between the read and the refresh is now refused with `SessionNotFoundError`. `SessionTouch` is exported.
+  
+  `./sql` implements `touch` as one `UPDATE … WHERE … RETURNING`, and the memory stores in `./testing` implement it too. `sessionStoreConformance` gains cases for it.
+  
+  effect-auth-drizzle's `SessionStore` implements `touch` as one guarded `UPDATE`, then reads the row back when the driver's affected-row count shows a match, so it needs no `RETURNING` on MySQL. On MySQL that count must be the matched rows, which is mysql2's default.
+
+### Patch Changes
+
+- Updated dependencies [db2a726]
+- Updated dependencies [93a9153]
+  - @thomasfosterau/effect-auth@0.7.0
+
+## 0.4.0
+
+### Minor Changes
+
+- c5bf0f2: Spend API key uses atomically. **Breaking for bring-your-own `ApiKeyStore`s:** the contract gains a required `recordUse(id, use)`, which spends one use in one atomic step and returns the stored record, or `null` when the key is unknown, disabled, expired, exhausted, or its refill baseline moved. It changes only `remaining`, `lastRefillAt`, `lastUsedAt` and `updatedAt`. `ApiKeyService.verify` and `verifyWithRateLimit` now spend through it instead of writing the whole record back from their read. Before this, a verify in flight undid an owner's concurrent disable, permission change or new expiry, and concurrent verifies of a key with one use left all passed. When the spend loses a race, the service re-reads the key and re-checks it.
+  
+  `./sql` implements `recordUse` as one `UPDATE … WHERE … RETURNING`, and the memory stores through the new `applyApiKeyUse`, which is the contract as a pure function. `apiKeyStoreConformance` gains cases for `recordUse`, a concurrent one included.
+  
+  effect-auth-drizzle's `ApiKeyStore` implements `recordUse` as one guarded `UPDATE` with `remaining` computed in SQL, then reads the row back when the driver's affected-row count shows a match, so it needs no `RETURNING` on MySQL. On MySQL that count must be the matched rows, which is mysql2's default.
+- 1704b6b: Spend every single-use token atomically. Concurrent redemptions of one magic link, password-reset or email-verification token, one-time token, OIDC authorization code or consent request, or pending second-factor challenge could all succeed (two sessions, two password writes, two token sets for one code), two concurrent refreshes could fork an OIDC refresh family, and one TOTP or backup code could be accepted twice across challenges.
+  
+  **Breaking for bring-your-own stores.** `EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`, `OneTimeTokenStore`, `OidcCodeStore`, `OidcTokenStore` and `PendingMultiFactorStore` gain a required `consume(key)`: an atomic get-and-delete that returns the record, or `null` when there is none, so of concurrent callers only one receives it. `MultiFactorStore` gains the required compare-and-sets `useTotpCounter(userId, counter)` and `useBackupCode(userId, codeHash)`, which resolve to whether the call spent the step or code and never recreate a deleted enrolment. `get` and `delete` stay. The services spend with these and refuse a `null` or `false` as an invalid token or code; the refresh grant answers a token a concurrent refresh rotated first with `invalid_grant`. `EmailVerificationService.burnToken` now fails with `EmailVerificationError` when the token is already spent.
+  
+  `./sql` implements each `consume` as one `DELETE … RETURNING` and the two spends as compare-and-set `UPDATE … RETURNING`s (D1 and Alchemy Postgres included); the `KeyValueStore` stores serialize `consume` under a store-owned semaphore (atomic per process only); `Testing.memoryStores` implements them all. effect-auth-drizzle's `EmailVerificationStore` and `PasswordResetStore` implement `consume` on every dialect by reading the row, deleting it and returning it only when the `DELETE` reports an affected row (MySQL has no `RETURNING`). `./testing` adds `magicLinkStoreConformance`, `oneTimeTokenStoreConformance` and `oidcCodeStoreConformance`, and the email-verification, password-reset, OIDC-token, pending-multi-factor and multi-factor suites gain concurrent-redemption cases.
+- fa1eacb: Require Node.js 22 or later (`engines.node` is now `>=22`); Node.js 20 is end-of-life.
+
+### Patch Changes
+
+- 93c2ff0: Tighten doc comments: drop history and issue references.
+- Updated dependencies [c5bf0f2]
+- Updated dependencies [1704b6b]
+- Updated dependencies [1a1bb2d]
+- Updated dependencies [d8c7881]
+- Updated dependencies [93c2ff0]
+- Updated dependencies [167ef03]
+- Updated dependencies [fa1eacb]
+- Updated dependencies [a25f872]
+  - @thomasfosterau/effect-auth@0.6.0
+
 ## 0.3.0
 
 ### Minor Changes

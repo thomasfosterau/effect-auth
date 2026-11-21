@@ -20,7 +20,7 @@ const captureLogs = <A, E>(effect: Effect.Effect<A, E, Hooks>) => {
   ).then(() => records);
 };
 
-describe("AuditPlugin afterWrite (#362)", () => {
+describe("AuditPlugin afterWrite", () => {
   const resource = Entity.ref("Page", "p-1");
 
   it.each([

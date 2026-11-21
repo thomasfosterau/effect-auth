@@ -9,25 +9,28 @@
  *   The column is unique, so `getByHash` reads at most one row.
  * - `get` and `getByHash` return `null` on a miss; `delete` of a missing key is
  *   a no-op. `deleteByUserId` deletes every key of one user in one `DELETE`
- *   (core's account deletion calls it before the user row goes, #601).
+ *   (core's account deletion calls it before the user row goes).
  * - Optional fields round-trip as absent: `NULL` reads back as a missing
  *   property, never as `null`. Instants are stored as timestamps and read
  *   back as the epoch milliseconds the contract uses.
- * - `update` writes every field but `id` and `createdAt`. The contract has no
- *   atomic "use" operation: `ApiKeyService.verify` reads the key and writes the
- *   decremented `remaining` back, so two concurrent verifies of one
- *   quota-limited key can both pass. That is the core contract's, not this
- *   store's, to close.
+ * - `update` writes every field but `id` and `createdAt`; a verify never
+ *   calls it.
+ * - `recordUse` is one `UPDATE` whose `WHERE` holds the whole check
+ *   (enabled, not expired, the refill baseline unchanged, a use left) and
+ *   whose `SET` moves only the usage columns, computing `remaining` in SQL.
+ *   With no `RETURNING` on MySQL, it reads the driver's affected-row count and
+ *   re-reads the row only when the `UPDATE` matched it. On MySQL that count
+ *   must be the matched rows, mysql2's default (`FOUND_ROWS`).
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { affectedRows, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { ApiKeyRow, Tables } from "./Schema.ts";
 
@@ -130,6 +133,41 @@ export const make = (
         query("apiKey.update", (db) =>
           db.update(table).set(mutableValues(apiKey)).where(eq(table.id, apiKey.id)).execute(),
         ).pipe(Effect.as(apiKey)),
+
+      recordUse: (id, use) =>
+        Effect.gen(function* () {
+          const refill = use.refill;
+          const topped =
+            refill === undefined
+              ? sql`${table.remaining}`
+              : refill.max === undefined
+                ? sql`${table.remaining} + ${refill.amount}`
+                : sql`case when ${table.remaining} + ${refill.amount} > ${refill.max} then ${refill.max} else ${table.remaining} + ${refill.amount} end`;
+          const matched = yield* affectedRows(
+            "apiKey.recordUse",
+            query("apiKey.recordUse", (db) =>
+              db
+                .update(table)
+                .set({
+                  remaining: sql`${topped} - 1`,
+                  ...(refill !== undefined && { lastRefillAt: instant(refill.to) }),
+                  lastUsedAt: instant(use.usedAt),
+                  updatedAt: instant(use.usedAt),
+                })
+                .where(
+                  and(
+                    eq(table.id, id),
+                    eq(table.enabled, true),
+                    or(isNull(table.expiresAt), gte(table.expiresAt, instant(use.usedAt))),
+                    or(isNull(table.remaining), sql`${topped} > 0`),
+                    refill === undefined ? undefined : eq(table.lastRefillAt, instant(refill.from)),
+                  ),
+                )
+                .execute(),
+            ),
+          );
+          return matched > 0 ? yield* one("apiKey.recordUse.read", eq(table.id, id)) : null;
+        }),
 
       delete: (id) =>
         query("apiKey.delete", (db) => db.delete(table).where(eq(table.id, id)).execute()).pipe(

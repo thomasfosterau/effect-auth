@@ -4,7 +4,7 @@
 [ADR-0003](0003-protocol-server-plugins-out-of-scope.md).**
 
 > **Extended by [ADR-0024](0024-json-api-http-tier.md).** The JSON:API wire format settled below
-> now covers every endpoint this library designs (#205); the endpoints whose format another
+> now covers every endpoint this library designs; the endpoints whose format another
 > specification fixes (OAuth 2.0 / OIDC, RFC 8628, RFC 7591 / 7592, RFC 8414, JWKS, the SSO
 > bindings, SCIM) keep it as the RFC tier. The text below is left as written.
 

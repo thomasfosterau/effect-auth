@@ -1,6 +1,6 @@
 /**
  * Regenerate `packages/argon2/src/WasmBinary.ts` from the installed
- * `@thomasfosterau/argon2` devDependency (#744).
+ * `@thomasfosterau/argon2` devDependency.
  *
  * That package embeds its Argon2 wasm as a base64 constant, `WASM_BASE64`, in
  * `dist/index.js` and does not export it. This script reads that file and the
@@ -55,7 +55,7 @@ writeFileSync(
  * does not export): the RustCrypto \`argon2\` crate built for
  * \`wasm32-unknown-unknown\`, ${bytes.length} bytes, base64-encoded. Embedded
  * as a string rather than imported as a \`.wasm\` asset so every bundler and
- * runtime loads it as plain JavaScript (#744). \`Wasm.test.ts\` checks the
+ * runtime loads it as plain JavaScript. \`Wasm.test.ts\` checks the
  * version, the SHA-256 and the bytes against the installed package.
  *
  * Licence: \`@thomasfosterau/argon2\` is MIT, Copyright (c) 2026 Thomas

@@ -180,7 +180,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
 
           // Count first, then decide from the count the store returns: the
           // increment is the one step a concurrent request cannot interleave
-          // with (#455). The store starts a new window when there is none or
+          // with. The store starts a new window when there is none or
           // the current one has expired.
           const count = yield* store.increment(key, Math.ceil(config.windowMs / 1000));
           if (count <= config.maxRequests) return yield* Effect.void;

@@ -35,5 +35,5 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
 
 import { db, nullableUsers as appUsers } from "./tables.ts";
 
-/** The README's nullable writer (#406). */
+/** The README's nullable writer. */
 export { createUser };

@@ -65,7 +65,7 @@ export interface PhoneOtpRecord {
  * pair; `upsert` replaces any existing record for the pair. Each pair also
  * has a failure budget (`getFailures`, `recordFailure`, `clearFailures`) that
  * outlives its OTP records, so a resend never resets the wrong codes counted
- * against the number (#590).
+ * against the number.
  */
 export class PhoneOtpStore extends Context.Service<
   PhoneOtpStore,
@@ -79,12 +79,19 @@ export class PhoneOtpStore extends Context.Service<
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
     ) => Effect.Effect<void, Errors.AuthError>;
+    /**
+     * Count one attempt against the pair's code, atomically, and return the
+     * new count, or `null` when the pair has no code. The service
+     * counts before it compares, so of concurrent guesses each gets its own
+     * count and at most `maxAttempts` are ever compared: two calls must never
+     * return the same number. On SQL this is one `UPDATE … RETURNING`.
+     */
     readonly incrementAttempts: (
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
-    ) => Effect.Effect<number, Errors.AuthError>;
+    ) => Effect.Effect<number | null, Errors.AuthError>;
     /**
-     * The pair's failure budget (#590), or `null` when it has none. It is
+     * The pair's failure budget, or `null` when it has none. It is
      * kept apart from the OTP record: `upsert` and `delete` leave it as it
      * was.
      */
@@ -156,7 +163,7 @@ export interface PhoneOtpConfig {
    */
   readonly maxAttempts?: number;
   /**
-   * The failure backoff (#590): every wrong code is also counted against the
+   * The failure backoff: every wrong code is also counted against the
    * phone number + purpose pair, and a resend never resets that count. Once
    * it reaches `freeFailures` (default 5), `send` fails with
    * {@link Errors.ResendTooSoonError} until `baseDelay` (default one minute),
@@ -188,7 +195,7 @@ export interface PhoneOtpConfig {
    */
   readonly resendCooldown?: number;
   /**
-   * The per-recipient send cap (#684): at most `max` sends to one number for
+   * The per-recipient send cap: at most `max` sends to one number for
    * one purpose within `windowMs`, counted through the `RateLimitStore`,
    * which bounds SMS toll fraud against one number from many clients.
    * Default 5 an hour; `false` turns it off. A send past it fails with
@@ -251,11 +258,11 @@ export class PhoneOtpService extends Context.Service<
      * and an unknown number.
      *
      * Past the `recipientSendLimit` cap (default 5 sends per number and
-     * purpose an hour, #684), fails with {@link Errors.RateLimitError}, for a
+     * purpose an hour), fails with {@link Errors.RateLimitError}, for a
      * known and an unknown number alike.
      *
      * The `beforeSendCode` hook runs first, before the number is looked up,
-     * with `options.captchaToken` (`CaptchaPlugin` guards it, #678).
+     * with `options.captchaToken` (`CaptchaPlugin` guards it).
      */
     readonly send: (
       phoneNumber: string,
@@ -388,7 +395,7 @@ export const make = (
           return yield* Effect.void;
         }
 
-        // The send gate (captcha, #678) runs before the number is looked
+        // The send gate (captcha) runs before the number is looked
         // up, so it answers alike for every number.
         yield* hooks.beforeSendCode({
           method: "phone-otp",
@@ -403,13 +410,13 @@ export const make = (
           ? (yield* lookupIdentifier(identifiers, "phone", phoneNumber)) !== null
           : true;
 
-        // Resend cooldown and failure backoff (#590). Both run for a number
+        // Resend cooldown and failure backoff. Both run for a number
         // with no account too, whose earlier request stored an undelivered
         // marker record below and whose wrong codes are counted alike, so a
         // known and an unknown number get the same answer.
         yield* OtpCode.gateSend(store, phoneNumber, purpose, codes);
 
-        // The per-recipient cap (#684), counted whatever the lookup found.
+        // The per-recipient cap, counted whatever the lookup found.
         yield* recipientSendGate(`phone-otp:${purpose}`, phoneNumber);
 
         // A number with no account gets a marker record that no code
@@ -420,7 +427,7 @@ export const make = (
         yield* store.upsert(record);
 
         // With sign-up disabled, only a known number gets a code, so its send
-        // goes off the response path (#196).
+        // goes off the response path.
         return yield* deliverCode(detached, {
           purpose: `phone-otp:${purpose}`,
           code: otp,
@@ -494,7 +501,7 @@ export const make = (
         otp: string,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
-        // The signed-in user proves a number: the gate keys on them (#698).
+        // The signed-in user proves a number: the gate keys on them.
         yield* hooks.beforeAuthenticate({
           method: "phone-otp",
           identifier: { type: "phone", value: phoneNumber },

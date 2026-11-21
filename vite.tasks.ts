@@ -19,7 +19,7 @@ const builtDependencies = {
  * reads. A cached task sees only the variables it declares, so a variable the
  * command needs (a test server's `DATABASE_URL`, `CI`) goes in `env`, which
  * passes it through and fingerprints it: a run without it is never replayed
- * for a run with it (#766).
+ * for a run with it.
  */
 type ExtraTask = string | { readonly command: string; readonly env: ReadonlyArray<string> };
 

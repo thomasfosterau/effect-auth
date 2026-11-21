@@ -59,7 +59,7 @@ register(Testing.emailOtpStoreConformance(), () => Testing.memoryStores);
 register(Testing.phoneOtpStoreConformance(), () =>
   Layer.succeed(PhoneOtpStore, Testing.memoryPhoneOtpStore()),
 );
-// The per-user deletes (#601). `memoryStores` serves the email-verification
+// The per-user deletes. `memoryStores` serves the email-verification
 // and password-reset stores from `layerKV`.
 register(Testing.oauthAccountStoreConformance(), () => Testing.memoryStores);
 register(Testing.credentialStoreConformance(), () => Testing.memoryStores);
@@ -70,6 +70,9 @@ register(Testing.oidcConsentStoreConformance(), () => Testing.memoryStores);
 register(Testing.emailVerificationStoreConformance(), () => Testing.memoryStores);
 register(Testing.passwordResetStoreConformance(), () => Testing.memoryStores);
 register(Testing.accountManagementStoreConformance(), () => Testing.memoryStores);
+// The single-use consumes; `memoryStores` serves `MagicLinkStore` from `layerKV`.
+register(Testing.magicLinkStoreConformance(), () => Testing.memoryStores);
+register(Testing.oidcCodeStoreConformance(), () => Testing.memoryStores);
 
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 24 * 60 * 60 * 1000, idlePeriod: 60 * 60 * 1000 },

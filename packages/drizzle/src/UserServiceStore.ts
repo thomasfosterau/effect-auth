@@ -1,7 +1,7 @@
 /**
  * Drizzle-backed implementation of effect-auth's `UserServiceStore` — the
  * store `UserService`, `AccountManagementService` and `AdminService` read,
- * update and delete users through (#728).
+ * update and delete users through.
  *
  * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
  * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed

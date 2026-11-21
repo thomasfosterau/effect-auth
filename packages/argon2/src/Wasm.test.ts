@@ -1,5 +1,5 @@
 /**
- * The kernel against the hashes this package wrote before #744 and against
+ * The kernel against the hashes this package wrote with its previous kernel and against
  * `@thomasfosterau/argon2`, whose wasm it embeds.
  */
 import { createHash } from "node:crypto";

@@ -13,6 +13,8 @@ import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
+import { memorySessionStore } from "../testing/MemoryStores.ts";
+import type { SessionTouch } from "../SessionStore.ts";
 
 const hasher = Password.scryptHasher({ cost: 1024 });
 
@@ -49,6 +51,8 @@ const makeFixture = () => {
     get: (sessionId) =>
       Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
     update: (s) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),

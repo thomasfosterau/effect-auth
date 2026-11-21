@@ -31,6 +31,8 @@ import { type OAuthCreateUserInput, OAuthUserStore } from "./oauth/OAuth.ts";
 import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as GoogleOneTap from "./GoogleOneTap.ts";
 import type * as Types from "./Types.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const CLIENT_ID = "client-123.apps.googleusercontent.com";
 const JWKS_ENDPOINT = "https://fake-google.test/certs";
@@ -230,7 +232,7 @@ describe("GoogleOneTapService", () => {
     );
     expect(emailIdentifier?.userId).toBe(first.user.id);
     expect(emailIdentifier?.verified).toBe(true);
-    // The store was handed the address to create the user with (#380).
+    // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "alice@gmail.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -320,7 +322,7 @@ describe("GoogleOneTapService", () => {
     });
   });
 
-  it("clears a squatter's password, sessions and credentials when Google proves the address (#440, #694)", async () => {
+  it("clears a squatter's password, sessions and credentials when Google proves the address", async () => {
     const { layer, users, identifiers, nonceStore, passwordHashes, sessionsCleared } = makeStores();
     // A squatter signed up with the address and a password they know; it was
     // never verified.
@@ -343,7 +345,7 @@ describe("GoogleOneTapService", () => {
     );
     MutableHashMap.set(passwordHashes, "user-squat", "squatter-hash");
 
-    // The squatter also minted an API key, which the first proof removes (#694).
+    // The squatter also minted an API key, which the first proof removes.
     const apiKeys = memoryApiKeyStore();
     await Effect.runPromise(
       apiKeys.create({
@@ -498,6 +500,8 @@ const makeHttpFixture = () => {
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),
@@ -564,11 +568,11 @@ const makeHttpFixture = () => {
   };
 };
 
-/** `POST /google-one-tap-nonces`: mint a nonce (#205). */
+/** `POST /google-one-tap-nonces`: mint a nonce. */
 const nonceRequest = (): Request =>
   new Request("http://test/google-one-tap-nonces", { method: "POST" });
 
-/** `POST /sessions` with a `google-one-tap` credential (#205). */
+/** `POST /sessions` with a `google-one-tap` credential. */
 const signInRequest = (idToken: string, nonce: string): Request =>
   new Request("http://test/sessions", {
     method: "POST",
@@ -590,7 +594,7 @@ describe("HTTP Google One Tap endpoint", () => {
     const fx = makeHttpFixture();
     const res = await fx.handler(nonceRequest());
     expect(res.status).toBe(201);
-    // The single-use nonce is this caller's alone (#628).
+    // The single-use nonce is this caller's alone.
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await jsonBody(res, NonceDocument);
     expect(body.data.type).toBe("google-one-tap-nonces");

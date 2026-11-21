@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-svelte",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "description": "Svelte bindings and form components for the effect-auth client.",
   "keywords": [
     "auth",
@@ -43,10 +43,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@effect/docgen": "catalog:",
     "@sveltejs/package": "catalog:",
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "@testing-library/svelte": "catalog:",

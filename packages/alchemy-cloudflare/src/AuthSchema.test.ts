@@ -2,6 +2,7 @@ import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, FileSystem, Layer, Order, Path, PlatformError } from "effect";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
+import { SecureRandom } from "effect/crypto";
 import { SqlClient } from "effect/sql";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
@@ -58,6 +59,7 @@ const platform = Layer.mergeAll(
   }),
   Path.layer,
   FetchHttpClient.layer,
+  SecureRandom.layerWebCrypto,
 );
 
 const STACK = "effect-auth-alchemy-cloudflare-test";
@@ -168,7 +170,7 @@ const makeEngine = (cloudflare: ReturnType<typeof makeCloudflare>) => {
         // SAFETY: `withRuntime` provides the engine services a deploy uses, and
         // `compiled.services` is the whole context the stack was built in, its
         // `State` and providers among it. `Stack.make` also declares
-        // `ChildProcessSpawner`, `Digest`, `SecureRandom` and `Interaction`, which an `AuthSchema`
+        // `ChildProcessSpawner`, `Digest` and `Interaction`, which an `AuthSchema`
         // deploy never reaches: one that did would fail with a missing-service defect.
         program.pipe(
           // What an application provides around `AuthSchema` on deploy

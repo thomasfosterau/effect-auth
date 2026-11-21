@@ -66,6 +66,8 @@ import * as OidcProvider from "./OidcProvider.ts";
 import { ClientAddressConfigError, RateLimiterConfigError } from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import { expectSpecJson, JSON_API_MEDIA_TYPE, mediaTypeOf } from "./testing/WireFormat.ts";
+import { memorySessionStore } from "./testing/MemoryStores.ts";
+import type { SessionTouch } from "./SessionStore.ts";
 
 const ISSUER = "http://idp.test/api/auth";
 
@@ -89,12 +91,34 @@ const makeOidcStores = () => {
   };
   const codeStore: typeof OidcCodeStore.Service = {
     create: (c) => Effect.sync(() => (MutableHashMap.set(codes, c.codeHash, c), c)),
-    get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
+    // Reads yield the fiber, as a database round trip would, so concurrent
+    // redemptions interleave between a read and the spend.
+    get: (hash) =>
+      Effect.tap(
+        Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
+        () => Effect.yieldNow,
+      ),
+    consume: (hash) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(codes, hash));
+        MutableHashMap.remove(codes, hash);
+        return found;
+      }),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(codes, hash)),
   };
   const tokenStore: typeof OidcTokenStore.Service = {
     create: (t) => Effect.sync(() => (MutableHashMap.set(tokens, t.tokenHash, t), t)),
-    get: (hash) => Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
+    get: (hash) =>
+      Effect.tap(
+        Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
+        () => Effect.yieldNow,
+      ),
+    consume: (hash) =>
+      Effect.sync(() => {
+        const found = Option.getOrNull(MutableHashMap.get(tokens, hash));
+        MutableHashMap.remove(tokens, hash);
+        return found;
+      }),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(tokens, hash)),
     deleteByUserId: (userId) =>
       Effect.sync(() =>
@@ -647,7 +671,7 @@ describe("OidcProviderService dynamic client registration", () => {
     return Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
   };
 
-  it("builds with dynamic registration and no address source of its own (#398)", async () => {
+  it("builds with dynamic registration and no address source of its own", async () => {
     // The registration limit reads the address from the ClientIP that Http.make
     // provides, which checks the address source itself.
     await expect(Effect.runPromise(buildProvider({}))).resolves.toBeDefined();
@@ -902,7 +926,7 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(custom.dynamicRegistration?.management).toBe(true);
   });
 
-  it("mcpProviderPreset builds with no address source of its own (#398)", async () => {
+  it("mcpProviderPreset builds with no address source of its own", async () => {
     const { layer } = setup();
     const build = (config: OidcProviderConfig) =>
       Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
@@ -915,13 +939,13 @@ describe("OidcProviderService dynamic client registration", () => {
 // HTTP layer: full end-to-end flow
 // -----------------------------------------------------------------------------
 
-/** `Http.make`'s startup error for registration with no address source (#398). */
+/** `Http.make`'s startup error for registration with no address source. */
 const REGISTRATION_ADDRESS_ERROR =
   /Dynamic client registration \(POST \/register\) is rate limited per client address/;
 
 /**
  * The handler options of {@link makeHttpFixture}: the registration limit is the
- * one under test, and `Http.make`'s per-endpoint IP limit (on by default, #583)
+ * one under test, and `Http.make`'s per-endpoint IP limit (on by default)
  * is not.
  */
 const WITHOUT_IP_LIMIT = { cookie: { secure: false }, ipRateLimit: false } as const;
@@ -1009,6 +1033,8 @@ const makeHttpFixture = (
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
+    touch: (sessionId: string, touch: SessionTouch) =>
+      memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id: string) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
@@ -1068,9 +1094,9 @@ const makeHttpFixture = (
     Layer.succeed(IdentifierStore)(identifierStore),
   );
 
-  // Registration is rate limited per client address and needs a RateLimiter (#389),
+  // Registration is rate limited per client address and needs a RateLimiter,
   // so a registration-enabled fixture gets Cloudflare's address source and a limiter
-  // unless it says otherwise. The source is Http.make's own (#388, #398).
+  // unless it says otherwise. The source is Http.make's own.
   const registrationEnabled = options.dynamicRegistration !== undefined;
   const addressSource: TrustedProxyConfig | undefined =
     options.declareRegistrationAddress === false
@@ -1103,7 +1129,7 @@ const makeHttpFixture = (
       }),
     increment: (key: string, ttl: number) =>
       // Starts a new window when there is none or it has expired, as the
-      // RateLimitStore contract requires (#455).
+      // RateLimitStore contract requires.
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
           MutableHashSet.add(rateLimitKeys, key);
@@ -1160,7 +1186,7 @@ const makeHttpFixture = (
 
 /**
  * The auth API composed by hand from the exported group layers, outside
- * `Http.make`: no startup check and no `ClientIP` middleware (#389).
+ * `Http.make`: no startup check and no `ClientIP` middleware.
  */
 const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
   const platform = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer).pipe(
@@ -1331,7 +1357,7 @@ describe("HTTP OIDC provider endpoints", () => {
       ),
     );
     expect(registered.status).toBe(201);
-    // The answer carries the client secret (#628).
+    // The answer carries the client secret.
     expect(registered.headers.get("cache-control")).toBe("no-store");
     const { client, clientSecret } = await registeredClient(registered);
     expect(clientSecret).toBeTruthy();
@@ -1373,7 +1399,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
-    // RFC 6749 §5.1: a token response is never stored by a cache (#628).
+    // RFC 6749 §5.1: a token response is never stored by a cache.
     expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const tokens = await jsonBody(
       tokenRes,
@@ -1558,7 +1584,7 @@ describe("HTTP OIDC provider endpoints", () => {
       post("/oauth2/consent", { consentCode: consentCode2, accept: true }, userSid),
     );
     expect(accepted.status).toBe(200);
-    // The redirect carries the authorization code (#628).
+    // The redirect carries the authorization code.
     expect(accepted.headers.get("cache-control")).toBe("no-store");
     const acceptedRedirect = new URL(
       (await jsonBody(accepted, Schema.Struct({ redirectTo: Schema.String }))).redirectTo,
@@ -1818,6 +1844,76 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(afterRevoke.status).toBe(400);
+  });
+
+  it("redeems an authorization code and rotates a refresh token once under concurrency", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const userSid = fx.makeSession(fx.seedUser("race@idp.test"));
+
+    const registered = await fx.handler(
+      registerClientRequest(
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client, clientSecret } = await registeredClient(registered);
+
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: "https://rp.test/cb",
+          scope: "openid offline_access",
+          code_challenge: pkce.codeChallenge,
+          code_challenge_method: "S256",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    const code = searchParam(locationOf(authorize), "code");
+
+    // RFC 6749 §4.1.2: of concurrent exchanges of one code, one gets tokens.
+    const exchanges = await Promise.all(
+      Arr.makeBy(3, () =>
+        fx.handler(
+          post("/oauth2/token", {
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "https://rp.test/cb",
+            code_verifier: pkce.codeVerifier,
+            client_id: client.clientId,
+            client_secret: clientSecret,
+          }),
+        ),
+      ),
+    );
+    expect(exchanges.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+      200, 400, 400,
+    ]);
+    const issued = exchanges.find((response) => response.status === 200);
+    assert(issued !== undefined);
+    const { refresh_token: refreshToken } = await jsonBody(issued, RefreshTokenBody);
+
+    // Concurrent refreshes of one token rotate it once, never forking the family.
+    const rotations = await Promise.all(
+      Arr.makeBy(3, () =>
+        fx.handler(
+          post("/oauth2/token", {
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            client_id: client.clientId,
+            client_secret: clientSecret,
+          }),
+        ),
+      ),
+    );
+    expect(rotations.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+      200, 400, 400,
+    ]);
   });
 
   it("enforces absolute (non-sliding) refresh token lifetime", async () => {
@@ -2107,7 +2203,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
       }),
     );
     expect(tokenRes.status).toBe(200);
-    // RFC 6749 §5.1: a token response is never stored by a cache (#628).
+    // RFC 6749 §5.1: a token response is never stored by a cache.
     expect(tokenRes.headers.get("cache-control")).toBe("no-store");
     const tokens = await jsonBody(
       tokenRes,
@@ -2363,7 +2459,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
   });
 });
 
-describe("HTTP OIDC provider: the RFC tier keeps its wire format (#205)", () => {
+describe("HTTP OIDC provider: the RFC tier keeps its wire format", () => {
   const REDIRECT = "https://rp.test/cb";
 
   it("answers OAuth 2.0 / OIDC, RFC 7591 / 7592 and RFC 8414 as their specifications fix", async () => {
@@ -2493,7 +2589,7 @@ describe("HTTP OIDC provider: the RFC tier keeps its wire format (#205)", () => 
   });
 });
 
-describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
+describe("HTTP dynamic registration and the per-IP limit", () => {
   // An anonymous RFC 7591 registration: POST /register, no initial access token.
   const register = (headers: Record<string, string> = {}): Request =>
     new Request("http://idp.test/register", {
@@ -2508,7 +2604,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
 
   it("throws from Http.make when registration is enabled with no RateLimiter in services", () => {
     // Registration needs its limit to run, so the app fails to start rather than
-    // serve registrations with the limit silently off (#389).
+    // serve registrations with the limit silently off.
     expect(() => makeHttpFixture({ dynamicRegistration: {}, rateLimit: false })).toThrow(
       RateLimiterConfigError,
     );
@@ -2517,7 +2613,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     );
   });
 
-  it("throws ClientAddressConfigError from Http.make when registration has no address source (#398)", () => {
+  it("throws ClientAddressConfigError from Http.make when registration has no address source", () => {
     // The registration limit keys on the ClientIP that Http.make resolves from
     // its trustedProxy, so Http.make checks that source, and the app fails to
     // start rather than refuse every registration.
@@ -2527,7 +2623,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
   });
 
-  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every registration (#682)", () => {
+  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every registration", () => {
     const options = {
       dynamicRegistration: {},
       declareRegistrationAddress: false,
@@ -2539,7 +2635,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     expect(make).toThrow(/allowMissingClientIp: true does not stand in for trustedProxy/);
   });
 
-  it("rejects Http.makeAsync with ClientAddressConfigError when registration has no address source and services build asynchronously (#400)", async () => {
+  it("rejects Http.makeAsync with ClientAddressConfigError when registration has no address source and services build asynchronously", async () => {
     // With an asynchronous build step, the check runs only after Http.make
     // returns, so make cannot throw it: every request rejects with it.
     const fx = makeHttpFixture({

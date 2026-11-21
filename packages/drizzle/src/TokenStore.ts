@@ -18,6 +18,12 @@
  *   (`Auth.hashToken`); the raw token goes to the user and never reaches the
  *   store.
  * - `get` returns `null` on a miss; deletes of missing rows are no-ops.
+ * - `consume` reads the row, then deletes it and hands it back only
+ *   when that `DELETE` reports one affected row, so of concurrent consumers
+ *   of one token only one receives it. MySQL has no `RETURNING`, so every
+ *   dialect takes the driver's affected-row count rather than a
+ *   per-dialect branch; a driver that reports none fails with `AuthError`
+ *   rather than hand the token out twice.
  * - Expiry is the services' to check: an expired row is returned as found.
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
@@ -27,7 +33,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { affectedRows, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables, TokenPurpose, TokenRow } from "./Schema.ts";
 
@@ -43,11 +49,12 @@ interface TokenRecord {
 /**
  * The operations of both token contracts: the four they share, and
  * `getLatestByUserId`, which `EmailVerificationStore` adds for its resend
- * cooldown (#682).
+ * cooldown.
  */
 interface TokenStoreShape<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;
   readonly get: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
+  readonly consume: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Auth.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.AuthError>;
   readonly getLatestByUserId: (userId: string) => Effect.Effect<A | null, Auth.AuthError>;
@@ -94,6 +101,20 @@ const makeFor = (
         query(`${purpose}.get`, (db) =>
           db.select().from(table).where(byToken(token)).limit(1).execute(),
         ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
+
+      consume: (token) =>
+        Effect.gen(function* () {
+          const rows = yield* query(`${purpose}.consume.read`, (db) =>
+            db.select().from(table).where(byToken(token)).limit(1).execute(),
+          );
+          const row = rows[0];
+          if (row === undefined) return null;
+          const deleted = yield* affectedRows(
+            `${purpose}.consume`,
+            query(`${purpose}.consume`, (db) => db.delete(table).where(byToken(token)).execute()),
+          );
+          return deleted > 0 ? toRecord(row) : null;
+        }),
 
       delete: (token) =>
         query(`${purpose}.delete`, (db) => db.delete(table).where(byToken(token)).execute()).pipe(

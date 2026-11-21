@@ -1,15 +1,5 @@
 name: CI
 
-# One workflow, one command: after checkout, Vite+ setup and a frozen install,
-# the job runs `vp run ci` (the root `ci` task in vite.config.ts), a fail-fast
-# chain of every gate in CI's order (AGENTS.md, Verification): build, format
-# and lint, docs, the two dist smokes, the type gate, the unit suites, the
-# audit, then the alchemy runtime suites. The task graph lives in
-# vite.config.ts / vite.tasks.ts, not in GitHub Actions `needs:`.
-#
-# Branch protection requires each matrix leg by name: `ci (node lts)` and
-# `ci (node latest)`. There is no aggregate job.
-
 on:
   pull_request:
   push:
@@ -20,7 +10,6 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# No permissions by default; each job grants only read access.
 permissions: {}
 
 jobs:
@@ -34,10 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         node: [lts, latest]
-    # alchemy-postgres's `Postgres.test.ts` and the real-server case of its
-    # `AuthSchema.test.ts` run against this service. `test:alchemy` declares
-    # `DATABASE_URL` and `CI`, so under CI a missing server fails them rather
-    # than skipping (#766).
+    # For alchemy-postgres's `test:alchemy`, which fails rather than skips without it under CI.
     services:
       postgres:
         image: postgres:17
@@ -55,33 +41,47 @@ jobs:
     env:
       DATABASE_URL: postgres://auth:auth@localhost:5432/auth
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-
-      # Vite+, Node.js and the `packageManager` pnpm, and the dependency
-      # cache; the install is the next step. `latest` maps to the semver range
-      # `*`, the newest stable release: Vite+ resolves the `latest` tag to the
-      # head of the Node.js release index, which can be a pre-release (it was
-      # v27.0.0-alpha when this was written).
       - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
+          version-file: pnpm-workspace.yaml
+          # `*` is the newest stable release; Vite+'s `latest` can resolve to a pre-release.
           node-version: ${{ matrix.node == 'latest' && '*' || matrix.node }}
           cache: true
-          run-install: false
-
-      - name: Install
-        run: vp install --frozen-lockfile
-
+          run-install: true
       - name: Restore the Vite+ task cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: node_modules/.vite/task-cache
           key: vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-${{ github.sha }}
           restore-keys: |
             vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-
-
       - name: CI
         run: vp run ci
+
+  devcontainer:
+    name: devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DEVCONTAINER_CLI: "@devcontainers/cli@0.89.0"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version: lts
+          # Only `vp dlx` runs on the host; a host install would leave a node_modules the container's install refuses to purge.
+          run-install: false
+      - name: Build and start the container
+        run: vp dlx "$DEVCONTAINER_CLI" up --workspace-folder .
+      - name: Check the toolchain
+        run: vp dlx "$DEVCONTAINER_CLI" exec --workspace-folder . vp --version
