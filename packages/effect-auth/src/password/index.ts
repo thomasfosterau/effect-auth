@@ -1,4 +1,5 @@
 export * from "./HaveIBeenPwned.ts";
+export * from "./Argon2.ts";
 export * from "./Password.ts";
 // Named, not `export *`: `PasswordReset.make` builds a `PasswordResetService`,
 // and through this barrel it would read as `Password.make`, the cluster's

@@ -35,7 +35,7 @@ Provide `EmailPasswordService.layer()` with its stores (in memory, `/sql` or an 
 | [`effect-auth-drizzle`](packages/drizzle)                       | Drizzle stores for PostgreSQL, SQLite and MySQL                 |
 | [`effect-auth-alchemy-cloudflare`](packages/alchemy-cloudflare) | Alchemy schema resource and D1 stores                           |
 | [`effect-auth-alchemy-postgres`](packages/alchemy-postgres)     | Alchemy schema resource and Postgres stores                     |
-| [`effect-auth-argon2`](packages/argon2)                         | Argon2id password hashing, Workers-safe                         |
+| [`effect-auth-argon2`](packages/argon2)                         | Argon2id over WebAssembly, for Workers                          |
 
 All are published under `@thomasfosterau/`.
 

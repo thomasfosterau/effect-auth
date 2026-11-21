@@ -4,7 +4,7 @@ Cloudflare D1 for effect-auth on Alchemy v2, built on `@alchemy.run/cloudflare`'
 
 ## Boundary
 
-Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers, all through **`catalog:alchemy-peers`**: `alchemy` and `@alchemy.run/cloudflare` at the exact release the applications pin (`2.0.0-beta.85`), and `effect` (`^4.1.0`, its own catalog entry because alchemy beta.85 itself peers `effect ^4.1.0`; it currently equals the programme floor). Depends on `@thomasfosterau/effect-auth`, for its `/sql` subpath. alchemy and its provider are peers, never bundled, vendored or structurally copied.
+Archetype **Storage adapter** (`.fallowrc.json` zone `storage-adapters`, which may import `core` and `ladder`). Peers, all through **`catalog:alchemy-peers`**: `alchemy` and `@alchemy.run/cloudflare` at the exact release the applications pin (`2.0.0-beta.85`), and `effect` (`^4.1.5`, its own catalog entry: the core's floor, above the `^4.1.4` alchemy itself peers on). Depends on `@thomasfosterau/effect-auth`, for its `/sql` subpath. alchemy and its provider are peers, never bundled, vendored or structurally copied.
 
 ## Invariants
 

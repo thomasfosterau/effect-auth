@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-argon2
 
-Argon2id `PasswordHasher` on WebAssembly (the RustCrypto `argon2` crate, as built by `@thomasfosterau/argon2`), with OWASP cost profiles; runs unchanged on Node, Bun, Deno, Cloudflare Workers and browsers.
+Argon2id `PasswordHasher` on WebAssembly (the RustCrypto `argon2` crate, as built by `@thomasfosterau/argon2`), with OWASP cost profiles; runs unchanged on Node, Bun, Deno, Cloudflare Workers and browsers. The core's own `Password.argon2idHasher` (over `effect/crypto`'s `Kdf`) covers Node 24.7+ and Bun; this package stays for runtimes whose `Kdf` has no Argon2id, Workers above all. Keep the two interchangeable: same PHC format, same defaults, same verify ceiling.
 
 ## Boundary
 

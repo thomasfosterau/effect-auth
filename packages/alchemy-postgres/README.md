@@ -27,7 +27,7 @@ pnpm add @thomasfosterau/effect-auth-alchemy-postgres @thomasfosterau/effect-aut
 ```
 
 `alchemy` (exactly `2.0.0-beta.85`, the release the effect-auth applications
-pin), `@effect/sql-pg` (`^4.1.0`) and `effect` (`^4.1.0`) are required peer
+pin), `@effect/sql-pg` (`^4.1.0`) and `effect` (`^4.1.5`, the core's floor) are required peer
 dependencies. `@thomasfosterau/effect-auth` comes along as a dependency, for
 its `/sql` subpath.
 
