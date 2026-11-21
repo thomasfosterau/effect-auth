@@ -1,5 +1,16 @@
 # @thomasfosterau/effect-auth-drizzle
 
+## 0.5.1
+
+### Patch Changes
+
+- 4e5dfed: `defineSchema` throws the new `SchemaMappingError` when `users.promoted` maps an attribute onto a column already mapped to a fixed field (`id`, `name`, `image`, `passwordHash`; `createdAt`, `updatedAt` and the attribute bag are already refused by the types). Before, `UserServiceStore.update` and `EmailPasswordStore.createUser` wrote the attribute over that column, or set it to `NULL` when the attribute was absent.
+- Updated dependencies [f3e1da7]
+- Updated dependencies [7635b1e]
+- Updated dependencies [3fa7b9a]
+- Updated dependencies [7d4de4b]
+  - @thomasfosterau/effect-auth@0.8.0
+
 ## 0.5.0
 
 ### Minor Changes
