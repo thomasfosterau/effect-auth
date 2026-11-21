@@ -1,5 +1,21 @@
 # @thomasfosterau/effect-auth
 
+## 0.8.0
+
+### Minor Changes
+
+- f3e1da7: Add an Argon2id password hasher to the core over `effect/crypto`'s `Password` service: `Password.argon2idHasherLayer(options?)` (a `Layer<PasswordHasher, never, Kdf>`) and `Password.argon2idHasher(passwords, options?)`, with `argon2DefaultProfile`, `argon2ServerProfile` and `argon2DefaultVerifyLimits`. Provide `NodeCrypto.layerKdf` from `@effect/platform-node` or `@effect/platform-bun` (Node.js 24.7+ or Bun 1.4+). Hashes are the same `$argon2id$v=19$…` PHC strings effect-auth-argon2 writes, so stored hashes verify unchanged; a stored hash over the verify ceiling is refused before the KDF runs.
+  
+  **Breaking:** the core's `effect` peer is now `^4.1.5`, the release that added `effect/crypto`'s `Password` module. effect-auth-alchemy-cloudflare and effect-auth-alchemy-postgres raise their `effect` peer to `^4.1.5` with it.
+  
+  effect-auth-argon2 stays the Argon2id for Cloudflare Workers and other runtimes whose `Kdf` has no Argon2id; its docs now say so.
+
+### Patch Changes
+
+- 7635b1e: `Http.make` and `Http.makeAsync` refuse a `trustedProxy: { hopCount }` that is negative or not an integer with `ClientAddressConfigError` at startup, instead of starting a handler that resolves no client address and refuses every rate-limited request. `resolveClientIP` now canonicalises the socket address the way it reads a header entry (RFC 5952 for IPv6, dotted IPv4 for an IPv4-mapped address, no zone ID), so one IPv6 visitor gets one rate-limit key whichever path the address came by.
+- 3fa7b9a: A provider response body that can't be read or isn't what it must be now fails with `OAuthProviderError` instead of dying. That covers a non-JSON 2xx token, user info, JWKS or OIDC discovery body, and a failed read of an error body. The token endpoint's response (code exchange and refresh) is decoded rather than cast: `access_token` is required, `expires_in` may be a number or a numeric string, `scope` a string or an array (joined with spaces), optional members may be `null`, and a missing `token_type` reads as `Bearer`. A 2xx token body without `access_token` is now refused instead of flowing on with `undefined` fields.
+- 7d4de4b: `UserService.updateUserAttributes` refuses the ban keys (`banned`, `banReason`, `banExpires`), the SCIM keys (`scimUserName`, `scimDeactivated`, `scimExternalId`) and `isAnonymous` with `InvalidInputError`, as sign-up already strips them, whatever `serverOnlyAttributes` says. Before, a server-side caller could clear a ban by writing `banned: false`. `AdminService`, `ScimService` and `AnonymousService` keep writing these keys through `UserServiceStore`.
+
 ## 0.7.0
 
 ### Minor Changes

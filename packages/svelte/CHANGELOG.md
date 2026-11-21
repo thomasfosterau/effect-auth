@@ -1,5 +1,15 @@
 # @thomasfosterau/effect-auth-svelte
 
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [f3e1da7]
+- Updated dependencies [7635b1e]
+- Updated dependencies [3fa7b9a]
+- Updated dependencies [7d4de4b]
+  - @thomasfosterau/effect-auth@0.8.0
+
 ## 0.2.4
 
 ### Patch Changes
