@@ -43,10 +43,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@effect/docgen": "catalog:",
     "@sveltejs/package": "catalog:",
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "@testing-library/svelte": "catalog:",

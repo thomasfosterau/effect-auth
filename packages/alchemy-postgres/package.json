@@ -43,10 +43,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "docs": "docgen"
+  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:^"
   },
   "devDependencies": {
+    "@effect/docgen": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/sql-pglite": "catalog:",
     "@electric-sql/pglite": "catalog:",

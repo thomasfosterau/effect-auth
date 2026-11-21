@@ -98,6 +98,7 @@ examples/*/.svelte-kit/
 
 # docgen output (`vp run docs`, packages/effect-auth)
 packages/effect-auth/docs/
+packages/*/docs/api/
 
 # Removed workspace directories (still present on disk)
 site/
