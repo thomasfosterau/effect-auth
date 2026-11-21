@@ -666,9 +666,7 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
           ),
     ),
     Effect.flatMap((body) => decodeJwksDocument(body).pipe(Effect.mapError(jwksFetchError))),
-    Effect.flatMap((data) =>
-      Effect.map(Clock.currentTimeMillis, (fetchedAt) => ({ keys: data.keys, fetchedAt })),
-    ),
+    Effect.zipWith(Clock.currentTimeMillis, (data, fetchedAt) => ({ keys: data.keys, fetchedAt })),
   );
 
 /**
