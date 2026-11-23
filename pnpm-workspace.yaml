@@ -51,7 +51,7 @@ catalog:
   vite-plus: 1.7.0
   vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
   vitest: 5.1.0
-  workerd: 1.20261119.1
+  workerd: 1.20261121.1
   xml-crypto: ^6.4.0
 
 # Published peer ranges.
