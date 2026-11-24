@@ -7,7 +7,7 @@ catalogMode: strict
 
 catalog:
   "@changesets/cli": ^3.0.3
-  "@effect/docgen": ^4.1.4
+  "@effect/docgen": ^4.1.5
   "@effect/language-service": ^0.87.5
   "@effect/sql-pg": 4.1.5
   "@effect/sql-pglite": 4.1.5
