@@ -216,8 +216,8 @@ catalogs:
       specifier: 0.1.1
       version: 0.1.1
     '@thomasfosterau/effect-connect':
-      specifier: ^0.2.1
-      version: 0.2.1
+      specifier: ^0.5.0
+      version: 0.5.0
     '@thomasfosterau/effect-jsonapi':
       specifier: ^0.22.2
       version: 0.22.2
@@ -487,7 +487,7 @@ importers:
     dependencies:
       '@thomasfosterau/effect-connect':
         specifier: 'catalog:'
-        version: 0.2.1(effect@4.1.5)
+        version: 0.5.0(effect@4.1.5)
     devDependencies:
       '@effect/sql-pglite':
         specifier: 'catalog:'
@@ -1931,8 +1931,8 @@ packages:
     resolution: {integrity: sha512-HBH0XtYGsuCTC2TI8N34X/Y0AvksrfHcp2tXDDFKG09FrnRDbl1O6zNbI4bPbYVOVEVGTvPEMCBz+r1oS0/8Jg==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@thomasfosterau/effect-connect@0.2.1':
-    resolution: {integrity: sha512-TNmuk+V+m9sHejoRyf3qKK2H9a0Qd3NHg2qXVK1Se58ReujQyl6+2MkBPiaeOTv8gN3OIu1sX7vzWZJm+V0hVQ==}
+  '@thomasfosterau/effect-connect@0.5.0':
+    resolution: {integrity: sha512-JeGGTkh7vylx664yoBQWbeNKx5HNuiwDrwIwRqhcmGBbhcEJEXTUpT+kDiAXarwyxVYuxXMTdp/MMX/qwFturg==}
     engines: {node: '>=22'}
     peerDependencies:
       effect: 4.1.5
@@ -4887,7 +4887,7 @@ snapshots:
 
   '@thomasfosterau/argon2@0.1.1': {}
 
-  '@thomasfosterau/effect-connect@0.2.1(effect@4.1.5)':
+  '@thomasfosterau/effect-connect@0.5.0(effect@4.1.5)':
     dependencies:
       effect: 4.1.5
 
