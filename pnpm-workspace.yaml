@@ -48,7 +48,7 @@ catalog:
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` and `vitest` equal what vite-plus depends on (`npm view vite-plus@<v>
   # dependencies`), not vite-plus itself; the devcontainer image tag follows vite-plus.
-  vite-plus: 1.7.0
+  vite-plus: 1.8.0
   vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
   vitest: 5.1.1
   workerd: 1.20261124.2
