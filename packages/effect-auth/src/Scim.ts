@@ -18,6 +18,12 @@
  * and every resource operation takes the authenticated connection as its first
  * argument so the scope can never be forgotten.
  *
+ * Membership lets a connection read a user; writing needs more. A connection
+ * changes a user's profile and addresses only when its organization manages
+ * them ({@link module:managed-user}), and claims or unclaims only addresses on
+ * the organization's verified domains. For any other member only `active`
+ * changes, and it deactivates their membership, never their account.
+ *
  * The provisioning token is a bearer secret: it is returned **once**, from
  * {@link ScimService.createConnection}, and only its SHA-256 digest is stored
  * (the {@link module:token-hash} convention shared with API keys, magic links
@@ -45,8 +51,8 @@
  *
  * ## Deactivation is a soft disable
  *
- * `PATCH {"active": false}` and `DELETE /Users/:id` both **deactivate** rather
- * than delete: the user keeps their id, their identifiers and their audit
+ * `PATCH {"active": false}` and `DELETE /Users/:id` both **deactivate** a
+ * managed user rather than delete them: the user keeps their id, their identifiers and their audit
  * trail, gains `attributes.scimDeactivated = true`, and has every live session
  * revoked. Reactivation (`PATCH {"active": true}`) is then a single write, which
  * is what an IdP expects when someone returns from leave.
@@ -76,7 +82,19 @@ import {
   primaryEmail,
   type Identifier,
 } from "./Identifier.ts";
-import { OrganizationStore, type Member, type Team } from "./Organization.ts";
+import {
+  isManagedBy,
+  isOnDomains,
+  provisionedByAttributes,
+  verifiedDomains,
+} from "./ManagedUser.ts";
+import {
+  isActiveMember,
+  OrganizationDomainStore,
+  OrganizationStore,
+  type Member,
+  type Team,
+} from "./Organization.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -685,6 +703,53 @@ const parsePatchOp = (operation: ScimPatchOperation): Effect.Effect<PatchOp, Sci
     : Effect.fail(badRequest(`Unsupported PATCH op "${operation.op}"`, "invalidSyntax"));
 };
 
+/**
+ * A user as one connection sees them: their membership in its organization,
+ * the organization's verified domains, and whether it manages them
+ * ({@link module:managed-user}).
+ */
+interface ScimTarget {
+  readonly user: Types.User;
+  readonly member: Member;
+  readonly domains: ReadonlyArray<string>;
+  readonly managed: boolean;
+}
+
+/**
+ * Whether the user is active as this connection sees them: a managed
+ * user's account, else their membership in the connection's organization.
+ */
+const isActive = (target: ScimTarget): boolean =>
+  target.managed ? !isScimDeactivated(target.user) : isActiveMember(target.member);
+
+/** Refuse to change anything but `active` on a user the organization does not manage. */
+const requireManaged = (target: ScimTarget): Effect.Effect<void, ScimError> =>
+  target.managed
+    ? Effect.void
+    : Effect.fail(
+        badRequest(
+          "This organization does not manage this user: only `active` may change",
+          "mutability",
+        ),
+      );
+
+/** Refuse an address outside the organization's verified domains. */
+const requireOnDomains = (
+  email: string,
+  domains: ReadonlyArray<string>,
+): Effect.Effect<void, ScimError> =>
+  isOnDomains(email, domains)
+    ? Effect.void
+    : Effect.fail(
+        badRequest(
+          `The email "${email}" is not on a verified domain of this organization`,
+          "invalidValue",
+        ),
+      );
+
+/** Replace the target's user, keeping the rest. */
+const withUser = (target: ScimTarget, user: Types.User): ScimTarget => ({ ...target, user });
+
 /** One `path`/`value` pair of a PATCH operation, after path-less expansion. */
 interface PatchEntry {
   readonly path: string;
@@ -716,6 +781,8 @@ export const make = (
     const sessions = yield* SessionService;
     const credentials = yield* userCredentialStores;
     const crypto = yield* SecureRandom.SecureRandom;
+    // Without domain claims an organization manages only the users it created.
+    const domainStore = Option.getOrUndefined(yield* Effect.serviceOption(OrganizationDomainStore));
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
@@ -747,7 +814,11 @@ export const make = (
      * email for users this module did not create, and finally to the user id so
      * the resource is always well-formed.
      */
-    const toUserResource = (user: Types.User, all: ReadonlyArray<Identifier>): ScimUserResource => {
+    const toUserResource = (
+      user: Types.User,
+      all: ReadonlyArray<Identifier>,
+      active: boolean = !isScimDeactivated(user),
+    ): ScimUserResource => {
       const emails = emailIdentifiers(all);
       const pinned = user.attributes[SCIM_USERNAME_ATTRIBUTE];
       const userName =
@@ -765,14 +836,35 @@ export const make = (
             ? { value: identifier.value, primary: true, type: "work" }
             : { value: identifier.value, type: "work" },
         ),
-        active: !isScimDeactivated(user),
+        active,
         createdAt: user.createdAt.getTime(),
         updatedAt: user.updatedAt.getTime(),
       };
     };
 
-    const readUserResource = (user: Types.User) =>
-      Effect.map(identifiers.listByUser(user.id), (all) => toUserResource(user, all));
+    const readUserResource = (target: ScimTarget) =>
+      Effect.map(identifiers.listByUser(target.user.id), (all) =>
+        toUserResource(target.user, all, isActive(target)),
+      );
+
+    /** A member and their user, with whether the connection's organization manages them. */
+    const targetOf = (
+      connection: ScimConnection,
+      member: Member,
+      user: Types.User,
+      domains: ReadonlyArray<string>,
+    ) =>
+      Effect.map(identifiers.listByUser(user.id), (all): ScimTarget => ({
+        user,
+        member,
+        domains,
+        managed: isManagedBy({
+          user,
+          identifiers: all,
+          organizationId: connection.organizationId,
+          verifiedDomains: domains,
+        }),
+      }));
 
     /**
      * Resolve a user *within the connection's organization*.
@@ -787,7 +879,8 @@ export const make = (
         if (member === null) return yield* notFound(`User "${userId}" not found`);
         const user = yield* users.get(userId);
         if (user === null) return yield* notFound(`User "${userId}" not found`);
-        return user;
+        const domains = yield* verifiedDomains(domainStore, connection.organizationId);
+        return yield* targetOf(connection, member, user, domains);
       });
 
     const requireTeam = (connection: ScimConnection, groupId: string) =>
@@ -809,11 +902,18 @@ export const make = (
       }));
 
     /** A membership's user as a SCIM `User`; none for a stale row whose user is gone. */
-    const memberResource = (member: Member) =>
+    const memberResource = (
+      connection: ScimConnection,
+      member: Member,
+      domains: ReadonlyArray<string>,
+    ) =>
       Effect.flatMap(users.get(member.userId), (user) =>
         user === null
           ? Effect.succeed(Option.none<ScimUserResource>())
-          : Effect.map(readUserResource(user), Option.some),
+          : Effect.map(
+              Effect.flatMap(targetOf(connection, member, user, domains), readUserResource),
+              Option.some,
+            ),
       );
 
     /**
@@ -821,13 +921,17 @@ export const make = (
      * the email identifier holding it, then a membership check, so a user of
      * another organization is not found.
      */
-    const findByUserName = (organizationId: string, userName: string) =>
+    const findByUserName = (
+      connection: ScimConnection,
+      userName: string,
+      domains: ReadonlyArray<string>,
+    ) =>
       Effect.gen(function* () {
         const identifier = yield* lookupIdentifier(identifiers, "email", userName);
         if (identifier === null) return Option.none<ScimUserResource>();
-        const member = yield* orgs.getMember(organizationId, identifier.userId);
+        const member = yield* orgs.getMember(connection.organizationId, identifier.userId);
         if (member === null) return Option.none<ScimUserResource>();
-        const resource = yield* memberResource(member);
+        const resource = yield* memberResource(connection, member, domains);
         // The address may be one of the user's other emails, not its userName.
         return Option.filter(resource, (found) => found.userName.toLowerCase() === userName);
       });
@@ -886,11 +990,12 @@ export const make = (
       );
 
     /**
-     * Flip a user's `active` state. Deactivation revokes every live session,
-     * API key and OIDC grant, so the door closes now rather than whenever they
-     * would have expired; `SessionService` refuses the user a new session.
+     * Flip a managed user's `active` state. Deactivation revokes every live
+     * session, API key and OIDC grant, so the door closes now rather than
+     * whenever they would have expired; `SessionService` refuses the user a new
+     * session.
      */
-    const setActive = (user: Types.User, active: boolean) =>
+    const setAccountActive = (user: Types.User, active: boolean) =>
       Effect.gen(function* () {
         const attributes = { ...user.attributes };
         if (active) {
@@ -906,20 +1011,95 @@ export const make = (
         return updated;
       });
 
-    /** Repoint `userName` at `email`, claiming it and unclaiming the old one. */
-    const renameUserName = (user: Types.User, email: string) =>
+    /**
+     * Flip a membership's status, as `OrganizationService.deactivateMember`
+     * and `reactivateMember` do: the role is parked in `previousRole` and
+     * restored on reactivation.
+     */
+    const setMembershipActive = (member: Member, active: boolean) =>
       Effect.gen(function* () {
+        if (active) {
+          const { previousRole, ...rest } = member;
+          return yield* orgs.updateMember({
+            ...rest,
+            status: "active",
+            role: previousRole ?? member.role,
+          });
+        }
+        const organization = yield* orgs.getOrganizationById(member.organizationId);
+        return yield* orgs.updateMember({
+          ...member,
+          status: "inactive",
+          previousRole: member.role,
+          role: organization?.defaultRole ?? "member",
+        });
+      });
+
+    /**
+     * Set whether the user is active: a managed user's account, or only the
+     * membership of a user the organization does not manage.
+     */
+    const setActive = (target: ScimTarget, active: boolean) =>
+      Effect.gen(function* () {
+        if (isActive(target) === active) return target;
+        if (target.managed) return withUser(target, yield* setAccountActive(target.user, active));
+        const member = yield* setMembershipActive(target.member, active);
+        return { ...target, member };
+      });
+
+    /**
+     * Repoint `userName` at `email`, claiming it and unclaiming the old one
+     * (kept when it is off the verified domains, which SCIM never unclaims).
+     */
+    const renameUserName = (target: ScimTarget, email: string) =>
+      Effect.gen(function* () {
+        const { user } = target;
         const all = yield* identifiers.listByUser(user.id);
         const current = toUserResource(user, all).userName;
-        if (current === email) return user;
+        if (current === email) return target;
+        yield* requireManaged(target);
         const existing = emailIdentifiers(all).find((identifier) => identifier.value === email);
-        if (existing === undefined) yield* claimEmail(user.id, email);
+        if (existing === undefined) {
+          yield* requireOnDomains(email, target.domains);
+          yield* claimEmail(user.id, email);
+        }
         const previous = emailIdentifiers(all).find((identifier) => identifier.value === current);
-        if (previous !== undefined) yield* identifiers.delete(previous.id);
-        return yield* writeAttributes(user, {
-          ...user.attributes,
-          [SCIM_USERNAME_ATTRIBUTE]: email,
-        });
+        if (previous !== undefined && isOnDomains(previous.value, target.domains)) {
+          yield* identifiers.delete(previous.id);
+        }
+        return withUser(
+          target,
+          yield* writeAttributes(user, {
+            ...user.attributes,
+            [SCIM_USERNAME_ATTRIBUTE]: email,
+          }),
+        );
+      });
+
+    /**
+     * Whether a `PUT` body only restates the user's current profile: the same
+     * `userName`, `displayName`, `externalId` and (when sent) email set.
+     */
+    const restatesProfile = (user: Types.User, userName: string, input: ScimUserInput) =>
+      Effect.map(identifiers.listByUser(user.id), (all) => {
+        const current = toUserResource(user, all);
+        const sent = Arr.dedupe([
+          userName,
+          ...(input.emails ?? [])
+            .map((email) => normalizeEmail(email.value))
+            .filter((e) => e !== ""),
+        ]);
+        const held = current.emails.map((email) => email.value);
+        const sameEmails =
+          input.emails === undefined ||
+          (Arr.isReadonlyArrayEmpty(Arr.difference(sent, held)) &&
+            Arr.isReadonlyArrayEmpty(Arr.difference(held, sent)));
+        return (
+          current.userName === userName &&
+          (input.displayName === undefined || input.displayName === current.displayName) &&
+          input.externalId === current.externalId &&
+          sameEmails
+        );
       });
 
     const addTeamMemberScoped = (connection: ScimConnection, teamId: string, userId: string) =>
@@ -973,25 +1153,32 @@ export const make = (
       });
 
     /** Set or clear the user's `externalId`; `remove` or a non-string value clears it. */
-    const patchExternalId = (user: Types.User, op: PatchOp, { value }: PatchEntry) => {
-      const externalId = asString(value);
-      const attributes = { ...user.attributes };
-      if (op === "remove" || externalId === null) {
-        delete attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
-      } else {
-        attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = externalId;
-      }
-      return writeAttributes(user, attributes);
-    };
+    const patchExternalId = (target: ScimTarget, op: PatchOp, { value }: PatchEntry) =>
+      Effect.gen(function* () {
+        yield* requireManaged(target);
+        const externalId = asString(value);
+        const attributes = { ...target.user.attributes };
+        if (op === "remove" || externalId === null) {
+          delete attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
+        } else {
+          attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = externalId;
+        }
+        return withUser(target, yield* writeAttributes(target.user, attributes));
+      });
 
     /**
-     * Unclaim the listed email addresses (every address when `values` is
-     * empty), keeping the one `userName` resolves to.
+     * Unclaim the listed email addresses (every address on the verified
+     * domains when `values` is empty), keeping the one `userName` resolves to.
+     * An address off the verified domains is never SCIM's to unclaim.
      */
-    const removeUserEmails = (user: Types.User, values: ReadonlyArray<string>) =>
+    const removeUserEmails = (target: ScimTarget, values: ReadonlyArray<string>) =>
       Effect.gen(function* () {
-        const all = yield* identifiers.listByUser(user.id);
-        const userName = toUserResource(user, all).userName;
+        yield* Effect.forEach(values, (email) => requireOnDomains(email, target.domains), {
+          concurrency: 1,
+          discard: true,
+        });
+        const all = yield* identifiers.listByUser(target.user.id);
+        const userName = toUserResource(target.user, all).userName;
         yield* Effect.forEach(
           Arr.filter(
             emailIdentifiers(all),
@@ -999,6 +1186,7 @@ export const make = (
               // Never unclaim the address `userName` resolves to — that
               // would leave the resource without the handle it is keyed by.
               identifier.value !== userName &&
+              isOnDomains(identifier.value, target.domains) &&
               (Arr.isReadonlyArrayEmpty(values) || values.includes(identifier.value)),
           ),
           (identifier) => identifiers.delete(identifier.id),
@@ -1007,75 +1195,81 @@ export const make = (
       });
 
     /** Claim one email address for the user; another user's address is a `409`. */
-    const addUserEmail = (user: Types.User, email: string) =>
+    const addUserEmail = (target: ScimTarget, email: string) =>
       Effect.gen(function* () {
         const existing = yield* lookupIdentifier(identifiers, "email", email);
         if (existing !== null) {
-          if (existing.userId === user.id) return yield* Effect.void;
+          if (existing.userId === target.user.id) return yield* Effect.void;
           return yield* conflict(`The email "${email}" is already in use`);
         }
-        return yield* Effect.asVoid(claimEmail(user.id, email));
+        yield* requireOnDomains(email, target.domains);
+        return yield* Effect.asVoid(claimEmail(target.user.id, email));
       });
 
     /** Apply an `emails` PATCH entry: unclaim on `remove`, else claim each address. */
-    const patchUserEmails = (user: Types.User, op: PatchOp, { value }: PatchEntry) => {
+    const patchUserEmails = (target: ScimTarget, op: PatchOp, { value }: PatchEntry) => {
       const values = emailValues(value);
       const applied =
         op === "remove"
-          ? removeUserEmails(user, values)
+          ? removeUserEmails(target, values)
           : Effect.forEach(
               Arr.filter(values, (email) => email !== ""),
-              (email) => addUserEmail(user, email),
+              (email) => addUserEmail(target, email),
               { concurrency: 1, discard: true },
             );
-      return Effect.as(applied, user);
+      return Effect.as(Effect.andThen(requireManaged(target), applied), target);
     };
 
-    /** Apply an `active` PATCH entry, revoking sessions on deactivation. */
-    const patchActive = (user: Types.User, { value }: PatchEntry) => {
+    /** Apply an `active` PATCH entry. */
+    const patchActive = (target: ScimTarget, { value }: PatchEntry) => {
       const active = asBoolean(value);
       if (active === null) {
         return Effect.fail(badRequest("active must be a boolean", "invalidValue"));
       }
-      return active === isScimDeactivated(user) ? setActive(user, active) : Effect.succeed(user);
+      return setActive(target, active);
     };
 
     /** Apply a `userName` PATCH entry. */
-    const patchUserName = (user: Types.User, { value }: PatchEntry) => {
+    const patchUserName = (target: ScimTarget, { value }: PatchEntry) => {
       const email = asString(value);
       if (email === null) {
         return Effect.fail(badRequest("userName must be a non-empty string", "invalidValue"));
       }
-      return renameUserName(user, normalizeEmail(email));
+      return renameUserName(target, normalizeEmail(email));
     };
 
     /** Apply a `displayName` PATCH entry; a non-string value leaves the name as is. */
-    const patchDisplayName = (user: Types.User, { value }: PatchEntry) => {
-      const name = asString(value);
-      return Effect.flatMap(DateTime.nowAsDate, (updatedAt) =>
-        users.update({
-          ...user,
+    const patchDisplayName = (target: ScimTarget, { value }: PatchEntry) =>
+      Effect.gen(function* () {
+        yield* requireManaged(target);
+        const name = asString(value);
+        const updated = yield* users.update({
+          ...target.user,
           ...(name === null ? {} : { name }),
-          updatedAt,
-        }),
-      );
-    };
+          updatedAt: yield* DateTime.nowAsDate,
+        });
+        return withUser(target, updated);
+      });
 
-    /** Apply one expanded PATCH entry to a user, returning the updated user. */
-    const patchUserEntry = (user: Types.User, op: PatchOp, entry: PatchEntry) => {
+    /** Apply one expanded PATCH entry to a user, returning the updated target. */
+    const patchUserEntry = (
+      target: ScimTarget,
+      op: PatchOp,
+      entry: PatchEntry,
+    ): Effect.Effect<ScimTarget, ScimError | Errors.AuthError> => {
       const attribute = entry.path.toLowerCase();
-      if (attribute === "active") return patchActive(user, entry);
-      if (attribute === "displayname") return patchDisplayName(user, entry);
-      if (attribute === "username") return patchUserName(user, entry);
-      if (attribute === "externalid") return patchExternalId(user, op, entry);
+      if (attribute === "active") return patchActive(target, entry);
+      if (attribute === "displayname") return patchDisplayName(target, entry);
+      if (attribute === "username") return patchUserName(target, entry);
+      if (attribute === "externalid") return patchExternalId(target, op, entry);
       if (attribute === "emails" || attribute.startsWith("emails[")) {
-        return patchUserEmails(user, op, entry);
+        return patchUserEmails(target, op, entry);
       }
       return Effect.fail(badRequest(`Unsupported PATCH path "${entry.path}"`, "invalidPath"));
     };
 
-    /** Apply one PATCH operation to a user, returning the updated user. */
-    const patchUserOperation = (user: Types.User, operation: ScimPatchOperation) =>
+    /** Apply one PATCH operation to a user, returning the updated target. */
+    const patchUserOperation = (target: ScimTarget, operation: ScimPatchOperation) =>
       Effect.gen(function* () {
         const op = yield* parsePatchOp(operation);
 
@@ -1094,7 +1288,7 @@ export const make = (
 
         return yield* Effect.reduce(
           expanded,
-          () => user,
+          () => target,
           (current, entry) => patchUserEntry(current, op, entry),
         );
       });
@@ -1255,6 +1449,11 @@ export const make = (
 
         // Check every address up front: a conflict discovered halfway through
         // would leave a user created with only some of its identifiers.
+        const domains = yield* verifiedDomains(domainStore, connection.organizationId);
+        yield* Effect.forEach([userName, ...extras], (email) => requireOnDomains(email, domains), {
+          concurrency: 1,
+          discard: true,
+        });
         const taken = yield* Effect.findFirst([userName, ...extras], (email) =>
           Effect.map(
             lookupIdentifier(identifiers, "email", email),
@@ -1266,6 +1465,11 @@ export const make = (
         }
 
         const attributes: Types.Attributes = {
+          ...provisionedByAttributes({
+            kind: "scim",
+            connectionId: connection.id,
+            organizationId: connection.organizationId,
+          }),
           [SCIM_USERNAME_ATTRIBUTE]: userName,
           ...(input.externalId !== undefined && { [SCIM_EXTERNAL_ID_ATTRIBUTE]: input.externalId }),
           ...(input.active === false && { [SCIM_DEACTIVATED_ATTRIBUTE]: true }),
@@ -1294,19 +1498,18 @@ export const make = (
         });
 
         const existingMember = yield* orgs.getMember(connection.organizationId, user.id);
-        if (existingMember === null) {
-          const member: Member = {
+        const member: Member =
+          existingMember ??
+          (yield* orgs.createMember({
             id: yield* randomId(),
             organizationId: connection.organizationId,
             userId: user.id,
             role: yield* provisioningRole(connection.organizationId),
             status: "active",
             createdAt: yield* Clock.currentTimeMillis,
-          };
-          yield* orgs.createMember(member);
-        }
+          }));
 
-        return yield* readUserResource(user);
+        return yield* readUserResource({ user, member, domains, managed: true });
       }),
 
       getUser: Effect.fn("ScimService.getUser")(function* (
@@ -1326,11 +1529,12 @@ export const make = (
             : yield* parseFilter(query.filter, ["userName", "externalId"]);
 
         const organizationId = connection.organizationId;
+        const domains = yield* verifiedDomains(domainStore, organizationId);
 
         // IdPs send `userName eq` on every sync: one identifier lookup and one
         // membership check, never a scan of the directory.
         if (parsed?.attribute === "userName") {
-          const found = yield* findByUserName(organizationId, normalizeEmail(parsed.value));
+          const found = yield* findByUserName(connection, normalizeEmail(parsed.value), domains);
           return paginate(Option.toArray(found), query);
         }
 
@@ -1342,7 +1546,7 @@ export const make = (
           const matched = yield* Effect.forEach(
             members,
             (member) =>
-              Effect.map(memberResource(member), (resource) =>
+              Effect.map(memberResource(connection, member, domains), (resource) =>
                 Option.filter(resource, ({ externalId }) => externalId === parsed.value),
               ),
             { concurrency: 1 },
@@ -1367,7 +1571,11 @@ export const make = (
                   page.limit,
                 );
         const resources = Arr.getSomes(
-          yield* Effect.forEach(Arr.take(members, count), memberResource, { concurrency: 1 }),
+          yield* Effect.forEach(
+            Arr.take(members, count),
+            (member) => memberResource(connection, member, domains),
+            { concurrency: 1 },
+          ),
         );
         return { totalResults, startIndex, itemsPerPage: resources.length, resources };
       }),
@@ -1377,29 +1585,51 @@ export const make = (
         userId: string,
         input: ScimUserInput,
       ) {
-        const user = yield* requireUser(connection, userId);
+        const target = yield* requireUser(connection, userId);
         const userName = normalizeEmail(input.userName);
         if (userName === "") {
           return yield* badRequest("userName is required", "invalidValue");
         }
-
-        let current = yield* renameUserName(user, userName);
+        // A user the organization does not manage keeps their profile: a PUT
+        // that only restates it may still flip `active`.
+        if (!target.managed && !(yield* restatesProfile(target.user, userName, input))) {
+          yield* requireManaged(target);
+        }
 
         // `emails` is authoritative only when the IdP sent it; a PUT that omits
         // it is reconciling the profile, not clearing the address book.
-        if (input.emails !== undefined) {
-          const desired = Arr.dedupe([
-            userName,
-            ...input.emails.map((email) => normalizeEmail(email.value)).filter((e) => e !== ""),
-          ]);
-          const all = yield* identifiers.listByUser(current.id);
-          const owner = current.id;
+        const desired =
+          input.emails === undefined
+            ? undefined
+            : Arr.dedupe([
+                userName,
+                ...input.emails.map((email) => normalizeEmail(email.value)).filter((e) => e !== ""),
+              ]);
+        if (desired !== undefined) {
+          // Check every address it would claim before writing anything.
+          const held = Arr.map(
+            emailIdentifiers(yield* identifiers.listByUser(target.user.id)),
+            (identifier) => identifier.value,
+          );
+          yield* Effect.forEach(
+            Arr.filter(desired, (email) => !Arr.contains(held, email)),
+            (email) => requireOnDomains(email, target.domains),
+            { concurrency: 1, discard: true },
+          );
+        }
+
+        let current = yield* renameUserName(target, userName);
+
+        if (desired !== undefined && current.managed) {
+          const all = yield* identifiers.listByUser(current.user.id);
+          const owner = current.user.id;
           const missing = yield* Effect.reduce(
             emailIdentifiers(all),
             () => desired,
             (remaining, identifier) =>
               Effect.as(
-                Arr.contains(remaining, identifier.value)
+                Arr.contains(remaining, identifier.value) ||
+                  !isOnDomains(identifier.value, current.domains)
                   ? Effect.void
                   : identifiers.delete(identifier.id),
                 Arr.filter(remaining, (email) => email !== identifier.value),
@@ -1411,20 +1641,25 @@ export const make = (
           });
         }
 
-        const attributes = { ...current.attributes };
-        if (input.externalId === undefined) {
-          delete attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
-        } else {
-          attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = input.externalId;
+        if (current.managed) {
+          const attributes = { ...current.user.attributes };
+          if (input.externalId === undefined) {
+            delete attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
+          } else {
+            attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = input.externalId;
+          }
+          current = withUser(
+            current,
+            yield* users.update({
+              ...current.user,
+              ...(input.displayName !== undefined && { name: input.displayName }),
+              attributes,
+              updatedAt: yield* DateTime.nowAsDate,
+            }),
+          );
         }
-        current = yield* users.update({
-          ...current,
-          ...(input.displayName !== undefined && { name: input.displayName }),
-          attributes,
-          updatedAt: yield* DateTime.nowAsDate,
-        });
 
-        if (input.active !== undefined && input.active === isScimDeactivated(current)) {
+        if (input.active !== undefined) {
           current = yield* setActive(current, input.active);
         }
 
@@ -1436,8 +1671,8 @@ export const make = (
         userId: string,
         operations: ReadonlyArray<ScimPatchOperation>,
       ) {
-        const user = yield* requireUser(connection, userId);
-        const patched = yield* Effect.reduce(operations, () => user, patchUserOperation);
+        const target = yield* requireUser(connection, userId);
+        const patched = yield* Effect.reduce(operations, () => target, patchUserOperation);
         return yield* readUserResource(patched);
       }),
 
@@ -1445,8 +1680,7 @@ export const make = (
         connection: ScimConnection,
         userId: string,
       ) {
-        const user = yield* requireUser(connection, userId);
-        yield* setActive(user, false);
+        yield* setActive(yield* requireUser(connection, userId), false);
       }),
 
       createGroup: Effect.fn("ScimService.createGroup")(function* (
