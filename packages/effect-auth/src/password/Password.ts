@@ -370,7 +370,9 @@ const PBKDF2_ITERATIONS_CAP = 5000000;
  *
  * `iterations` defaults to 600,000, the OWASP figure for PBKDF2-HMAC-SHA256.
  * Lower it only where the cost is not the point (such as in tests); the default
- * is the production setting. It must be an integer from 1 to 2147483647.
+ * is the production setting. On Cloudflare Workers the default costs about
+ * 75 ms of CPU per hash or verify, more than the Free plan's 10 ms per request.
+ * It must be an integer from 1 to 2147483647.
  * `hash` refuses any other value with a
  * `HashingError`, so a hasher never writes a hash its own `verify` would refuse.
  *

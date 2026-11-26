@@ -285,6 +285,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/ping") return new Response("pong");
     if (url.pathname === "/verify") return Response.json(await verifyCompact(await request.json()));
+    if (url.pathname === "/pbkdf2") return Response.json(await password(pbkdf2Hasher()));
     const body =
       url.pathname === "/check"
         ? await check(await request.json())
@@ -659,6 +660,25 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
 
   it("verifies WebAuthn DER signatures", () => {
     expect(valueOf(run.der)).toEqual({ es256: true, eddsa: true });
+  });
+
+  it("hashes with PBKDF2 at its default 600,000 iterations within a Worker's CPU budget", async () => {
+    // One hash and two verifies, about 75 ms each in local workerd: inside
+    // Workers' limits, but a large share of a request's CPU. The bound leaves
+    // room for a slow CI runner; the first call warms the isolate.
+    const timed = async () => {
+      const started = performance.now();
+      const result = await callWorker(PasswordRun, date, "/pbkdf2");
+      return { result, elapsed: performance.now() - started };
+    };
+    await timed();
+    const { result, elapsed } = await timed();
+    expect(result).toMatchObject({ verifies: true, rejectsWrong: true });
+    expect(result.hash.split("$").slice(0, 2)).toEqual(["pbkdf2-sha256", "600000"]);
+    expect(
+      await Effect.runPromise(pbkdf2Hasher().verify("correct horse battery staple", result.hash)),
+    ).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
   });
 
   it("verifies what Node signed, sealed and hashed", async () => {

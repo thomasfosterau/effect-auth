@@ -21,6 +21,8 @@ The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-
 
 Argon2id (`Password.argon2idHasherLayer`) is the exception: it derives through Effect's `Kdf` service, which only `NodeCrypto.layerKdf` (`@effect/platform-node` or `-bun`, on Node.js 24.7+ or Bun 1.4+) provides with Argon2id. On Workers use `@thomasfosterau/effect-auth-argon2`.
 
+Password hashing is the costly step on Workers. PBKDF2 at its default 600,000 iterations takes about 75 ms of CPU per hash or verify in workerd, so a sign-in that verifies a password fits a paid plan's CPU limit but not the Free plan's 10 ms; lowering `iterations` trades away resistance to offline cracking. Keep the scrypt verifier (`./scrypt`) off Workers: at its default cost (N = 2^17, r = 8) it needs about 128 MiB, the whole memory of an isolate.
+
 The core never relies on the Node globals `nodejs_compat` sets only from 2024-09-23 (`Buffer`, `process`), so an older date works. Every primitive (PBKDF2 hashing and verification, the opt-in scrypt verifier, `hashToken` and the constant-time comparisons, AES-256-GCM, HMAC, the WebAuthn signature checks, and ES256, EdDSA and RS256 JWS through `effect/jose`, `JwtService` and the Apple client secret) is tested inside a real workerd at 2023-01-01 and at workerd's newest date (`src/Workerd.test.ts`). Releases up to 0.4.0 fail there: ES256 signing and verification on every date, JWT key generation from 2025-12-03, and password hashing, AES-GCM and the WebAuthn checks before 2024-09-23.
 
 ## Usage
