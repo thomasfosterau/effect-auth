@@ -90,4 +90,22 @@ describe.skipIf(skipWithoutServer)("effect-auth on Postgres over @effect/sql-pg"
       expect(outcome).toBeUndefined();
     });
   });
+
+  // Each passkey's backup flags and AAGUID live in a table of their own.
+  describe("CredentialStore conformance", () => {
+    it.for(Testing.credentialStoreConformance().cases)("$name", async (testCase) => {
+      const outcome = await Effect.runPromise(
+        Postgres.migrate(url()).pipe(
+          Effect.andThen(
+            testCase.run.pipe(
+              Effect.provide(
+                Postgres.layer({ connectionString: Redacted.value(url()) }, { maxConnections: 1 }),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(outcome).toBeUndefined();
+    });
+  });
 });

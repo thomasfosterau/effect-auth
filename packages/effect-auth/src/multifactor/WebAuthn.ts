@@ -84,6 +84,27 @@ export interface WebAuthnCredential {
   name?: string;
   /** Transports this credential supports */
   transports?: readonly string[];
+  /**
+   * BE: whether the credential may be backed up (a multi-device passkey), as
+   * the authenticator reported at registration. It never changes for a
+   * credential (WebAuthn Level 3 §6.1.3), so an assertion reporting another
+   * value is refused. Absent on a credential stored before it was recorded;
+   * the next sign-in records it.
+   */
+  backupEligible?: boolean | undefined;
+  /**
+   * BS: whether the credential was backed up at its latest ceremony. It may
+   * change, and each sign-in records it.
+   */
+  backupState?: boolean | undefined;
+  /**
+   * The authenticator's AAGUID from registration, as a lowercase hyphenated
+   * UUID (all zeros when the authenticator reports none), for an app's own
+   * allow- or deny-list of authenticator models. Under `none` attestation it is
+   * the authenticator's claim, not a verified fact. Absent on a credential
+   * registered before it was recorded.
+   */
+  aaguid?: string | undefined;
 }
 
 /**
@@ -516,7 +537,12 @@ export const make = (
         try: () => serializePublicKey(attested.publicKey, algorithm),
         catch: invalidKey,
       }).pipe(Effect.flatMap(Effect.mapError(invalidKey)));
-      return { id: base64UrlEncode(attested.id), algorithm, publicKey };
+      return {
+        id: base64UrlEncode(attested.id),
+        algorithm,
+        publicKey,
+        aaguid: formatAaguid(attested.authenticatorAAGUID),
+      };
     });
 
     return {
@@ -600,6 +626,9 @@ export const make = (
               algorithm: attested.algorithm,
               counter: authenticatorData.signatureCounter,
               createdAt: yield* Clock.currentTimeMillis,
+              backupEligible: flags.backupEligible,
+              backupState: flags.backupState,
+              aaguid: attested.aaguid,
             };
 
             // Spend the challenge, then store the credential.
@@ -648,6 +677,15 @@ export const make = (
 
             const flags = yield* verifyAuthenticatorData(authenticatorData);
 
+            // §6.1.3: backup eligibility is fixed when the credential is
+            // created, so a change means this is not the registered credential.
+            if (
+              credential.backupEligible !== undefined &&
+              credential.backupEligible !== flags.backupEligible
+            ) {
+              return yield* verificationError("Backup eligibility changed for this credential");
+            }
+
             // Verify counter (anti-replay protection)
             // If both counters are 0, the authenticator does not support counter-based replay protection
             // and the counter check must be skipped per WebAuthn specification.
@@ -674,10 +712,13 @@ export const make = (
               return yield* verificationError("Invalid signature");
             }
 
-            // Update credential counter
-            const updatedCredential = {
+            // Record the counter and the backup state (and the eligibility of a
+            // credential stored before it was recorded).
+            const updatedCredential: WebAuthnCredential = {
               ...credential,
               counter: authenticatorData.signatureCounter,
+              backupEligible: flags.backupEligible,
+              backupState: flags.backupState,
             };
             yield* credentialStore.update(updatedCredential);
 
@@ -838,6 +879,18 @@ class UnsupportedAlgorithmError extends Data.TaggedError("UnsupportedAlgorithmEr
 }> {}
 
 const b64url = (bytes: Uint8Array): string => Base64Url.encode(bytes);
+
+/** A 16-byte AAGUID as a lowercase hyphenated UUID (8-4-4-4-12). */
+const formatAaguid = (aaguid: Uint8Array): string => {
+  const hex = Hex.encode(aaguid);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join("-");
+};
 
 /**
  * Serialize a COSE public key to SPKI DER for storage. Using a single
