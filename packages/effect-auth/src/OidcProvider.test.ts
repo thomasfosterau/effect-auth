@@ -1220,7 +1220,11 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 // The response bodies several tests read.
 /** A JSON object's own fields, read one by one. */
 const JsonFields = Schema.Record(Schema.String, Schema.Json);
-const MessageBody = Schema.Struct({ message: Schema.String });
+/** An RFC 6749 §5.2 token-endpoint error response. */
+const OAuthErrorBody = Schema.Struct({
+  error: Schema.String,
+  error_description: Schema.optional(Schema.String),
+});
 /** What `POST /oauth-clients` answers: the client, its secret (if any) in `meta`. */
 const CreatedClientBody = Schema.Struct({
   data: Schema.Struct({ id: Schema.String }),
@@ -1443,6 +1447,10 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(wrongClient.headers.get("cache-control")).toBe("no-store");
     const malformed = await fx.handler(post("/oauth2/token", { code }));
     expect(malformed.status).toBe(400);
+    expect((await jsonBody(malformed, OAuthErrorBody)).error).toBe("invalid_request");
+    const wrongType = await fx.handler(post("/oauth2/token", { grant_type: 42 }));
+    expect(wrongType.status).toBe(400);
+    expect((await jsonBody(wrongType, OAuthErrorBody)).error).toBe("invalid_request");
     expect(malformed.headers.get("cache-control")).toBe("no-store");
 
     // 4. Verify the id_token against the published JWKS.
@@ -1512,7 +1520,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(reuse.status).toBe(400);
-    expect((await jsonBody(reuse, MessageBody)).message).toBe("invalid_grant");
+    expect((await jsonBody(reuse, OAuthErrorBody)).error).toBe("invalid_grant");
 
     // The rotated access token is live.
     const userinfo2 = await fx.handler(
@@ -1658,7 +1666,10 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badVerifier.status).toBe(400);
-    expect((await jsonBody(badVerifier, MessageBody)).message).toBe("invalid_grant");
+    expect(badVerifier.headers.get("www-authenticate")).toBeNull();
+    const invalidGrant = await jsonBody(badVerifier, OAuthErrorBody);
+    expect(invalidGrant.error).toBe("invalid_grant");
+    expect(invalidGrant.error_description).toBe("PKCE verification failed");
 
     // Wrong client secret -> 401 invalid_client.
     const badSecret = await fx.handler(
@@ -1672,7 +1683,11 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badSecret.status).toBe(401);
-    expect((await jsonBody(badSecret, MessageBody)).message).toBe("invalid_client");
+    expect(badSecret.headers.get("www-authenticate")).toBe('Basic realm="oauth"');
+    expect(badSecret.headers.get("cache-control")).toBe("no-store");
+    const invalidClient = await expectSpecJson(badSecret, "application/json", ["error"]);
+    expect(invalidClient["error"]).toBe("invalid_client");
+    expect(invalidClient["message"]).toBeUndefined();
 
     // Unsupported grant type -> 400.
     const badGrant = await fx.handler(
@@ -1683,7 +1698,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badGrant.status).toBe(400);
-    expect((await jsonBody(badGrant, MessageBody)).message).toBe("unsupported_grant_type");
+    expect((await jsonBody(badGrant, OAuthErrorBody)).error).toBe("unsupported_grant_type");
   });
 
   it("accepts a form-urlencoded token request", async () => {
@@ -1977,7 +1992,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(expired.status).toBe(400);
-    expect((await jsonBody(expired, MessageBody)).message).toBe("invalid_grant");
+    expect((await jsonBody(expired, OAuthErrorBody)).error).toBe("invalid_grant");
   });
 
   it("allows scope down-scoping on refresh token grant", async () => {
@@ -2051,7 +2066,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(upScoped.status).toBe(400);
-    expect((await jsonBody(upScoped, MessageBody)).message).toBe("invalid_scope");
+    expect((await jsonBody(upScoped, OAuthErrorBody)).error).toBe("invalid_scope");
   });
 
   it("prompt=none on authorize returns login_required for unauthenticated users", async () => {

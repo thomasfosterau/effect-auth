@@ -814,6 +814,28 @@ const registrationError = (
   );
 };
 
+/**
+ * An RFC 6749 §5.2 token-endpoint refusal: `{ error, error_description? }`,
+ * `401` with `WWW-Authenticate` for `invalid_client`, `400` for the rest.
+ */
+const tokenError = (
+  error: string,
+  description: string | undefined,
+): Effect.Effect<
+  never,
+  S.OAuthError | S.OAuthInvalidClient,
+  HttpServerRequest.HttpServerRequest
+> => {
+  const body = { ...(description !== undefined && { error_description: description }) };
+  return error === "invalid_client"
+    ? HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(
+          HttpServerResponse.setHeader(response, "WWW-Authenticate", 'Basic realm="oauth"'),
+        ),
+      ).pipe(Effect.andThen(Effect.fail(new S.OAuthInvalidClient({ error, ...body }))))
+    : Effect.fail(new S.OAuthError({ error, ...body }));
+};
+
 /** The `Authorization: Bearer` value of a request, if any. */
 const bearerToken = (request: HttpServerRequest.HttpServerRequest): string | undefined => {
   const auth = request.headers["authorization"];
@@ -4195,13 +4217,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                // RFC 6749 error codes: invalid_client -> 401, the rest -> 400.
-                OidcTokenError: (e) =>
-                  Effect.fail(
-                    e.error === "invalid_client"
-                      ? new S.Unauthorized({ message: e.error })
-                      : new S.BadRequest({ message: e.error }),
-                  ),
+                OidcTokenError: (e) => tokenError(e.error, e.description),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -4307,6 +4323,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         // 404 when the OIDC provider is disabled.
         Effect.andThen(resolveOidcProvider, jwksDocument()),
       ),
+  ).pipe(
+    // `/oauth2/token` answers a request it cannot decode as RFC 6749 §5.2 does.
+    Layer.provide(S.OAuthTokenSchemaErrors.layer),
   );
 };
 
