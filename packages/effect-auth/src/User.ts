@@ -1,7 +1,6 @@
 import { Context, DateTime, Effect, HashSet, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import { AccountDeletion } from "./AccountDeletion.ts";
 import * as Errors from "./Errors.ts";
