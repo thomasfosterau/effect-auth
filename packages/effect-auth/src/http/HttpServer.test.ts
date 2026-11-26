@@ -116,6 +116,7 @@ import {
   ClientAddressConfigError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
+  SignUpAttributesConfigError,
 } from "../Errors.ts";
 import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
 import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
@@ -5447,6 +5448,50 @@ describe("makeAsync builds services fully before it resolves", () => {
     const atDispose = counter.state.ticks;
     await untilTicks(counter.state, atDispose + 1);
     expect(counter.state.ticks).toBeGreaterThan(atDispose);
+  });
+});
+
+describe("signUpAttributes naming a protected attribute", () => {
+  const options = (strict: boolean) => ({
+    services: makeFixture().services,
+    cookie: { secure: false },
+    ipRateLimit: false as const,
+    signUpAttributes: ["nickname", "banned", "scimExternalId"],
+    strict,
+  });
+
+  it("warns, naming the protected keys, and starts without strict", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    const { dispose } = HttpServer.make(options(false));
+    onTestFinished(dispose);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(/WARN .*signUpAttributes names "banned", "scimExternalId"/s),
+    );
+    expect(logged.join("\n")).not.toContain('"nickname"');
+  });
+
+  it("refuses to start under strict, in make and makeAsync", async () => {
+    const error = thrownBy(() => HttpServer.make(options(true)));
+    expect(error).toBeInstanceOf(SignUpAttributesConfigError);
+    assert(error instanceof SignUpAttributesConfigError);
+    expect(error.attributes).toStrictEqual(["banned", "scimExternalId"]);
+    await expect(HttpServer.makeAsync(options(true))).rejects.toBeInstanceOf(
+      SignUpAttributesConfigError,
+    );
+  });
+
+  it("says nothing about a list of unprotected keys", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    const { dispose } = HttpServer.make({ ...options(true), signUpAttributes: ["nickname"] });
+    onTestFinished(dispose);
+    expect(log.mock.calls.map(String).join("\n")).not.toContain("signUpAttributes");
   });
 });
 
