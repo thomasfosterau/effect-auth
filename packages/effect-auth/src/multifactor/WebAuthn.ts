@@ -108,6 +108,24 @@ export interface WebAuthnCredential {
 }
 
 /**
+ * The attestation conveyance preference a relying party can ask for
+ * (WebAuthn Level 3 §5.4.7). Only `"none"` is supported: see
+ * {@link WebAuthnConfig.attestation}.
+ */
+export type AttestationConveyancePreference = "none" | "indirect" | "direct" | "enterprise";
+
+/**
+ * `WebAuthnService.layer` (or `make`) was configured with an attestation
+ * conveyance other than `"none"`. The service never verifies an attestation
+ * statement, so it refuses to ask for one rather than imply a guarantee it
+ * does not give; the layer build dies with this error, so the app fails to
+ * start.
+ */
+export class WebAuthnConfigError extends Data.TaggedError("WebAuthnConfigError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Configuration for WebAuthn service
  */
 export interface WebAuthnConfig {
@@ -133,6 +151,16 @@ export interface WebAuthnConfig {
    * the results) for the host to act on.
    */
   userVerification?: "required" | "preferred" | "discouraged";
+  /**
+   * Attestation conveyance advertised during registration. Only `"none"` (the
+   * default) is supported: the service parses the attestation object for the
+   * credential but never verifies its attestation statement (`packed`, `tpm`,
+   * `fido-u2f`, …), so every registration carries `none`-style trust and
+   * says nothing about the authenticator's make or model. `"indirect"`,
+   * `"direct"` and `"enterprise"` are refused: the layer build dies with
+   * {@link WebAuthnConfigError}.
+   */
+  attestation?: AttestationConveyancePreference | undefined;
 }
 
 /** A `PublicKeyCredentialParameters` entry advertised to the authenticator. */
@@ -168,6 +196,8 @@ export interface RegistrationChallenge {
   /** The user's existing credentials, to prevent duplicate registration. */
   readonly excludeCredentials: readonly PublicKeyCredentialDescriptor[];
   readonly authenticatorSelection: AuthenticatorSelectionCriteria;
+  /** Attestation conveyance to pass to `navigator.credentials.create()`; always `"none"`. */
+  readonly attestation: "none";
 }
 
 /**
@@ -343,6 +373,14 @@ export const make = (
   | Digest.Digest
 > =>
   Effect.gen(function* () {
+    const attestation = config.attestation ?? "none";
+    if (attestation !== "none") {
+      return yield* Effect.die(
+        new WebAuthnConfigError({
+          message: `WebAuthn attestation "${attestation}" is not supported: attestation statements are not verified, so only "none" is offered`,
+        }),
+      );
+    }
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
     const hooks = yield* Hooks;
@@ -584,6 +622,7 @@ export const make = (
             ),
             excludeCredentials,
             authenticatorSelection,
+            attestation,
           };
         },
       ),
