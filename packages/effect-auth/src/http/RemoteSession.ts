@@ -812,7 +812,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
           new Request(target.toString(), {
             method: request.method,
             headers,
-            ...(body === undefined ? {} : { body }),
+            ...definedKeys({ body }),
           }),
         ),
       );

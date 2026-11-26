@@ -21,7 +21,7 @@ import {
   type UserSchema,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { completeById, queryRunner } from "./internal.ts";
+import { completeById, queryRunner, presentKeys } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -88,8 +88,7 @@ export const userFromRow =
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       attributes,
-      ...(row.name !== null ? { name: row.name } : {}),
-      ...(row.image !== null ? { image: row.image } : {}),
+      ...presentKeys({ name: row.name, image: row.image }),
     };
   };
 

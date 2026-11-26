@@ -111,9 +111,8 @@ export default defineConfig({
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // "Nothing" is an `Option`; an options-object member is `readonly x?: T`
       // and a value that may be `undefined` is forwarded by leaving its key
-      // out, which a conditional spread does.
+      // out, which `definedKeys` does.
       "effect/prefer-option-over-null": "error",
-      "effect/no-conditional-empty-object-spread": "off",
       // Owner decision (2026-11-11): the helper modules are namespace imports
       // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.

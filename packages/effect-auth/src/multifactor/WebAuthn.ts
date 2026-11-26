@@ -32,6 +32,7 @@ import { type HookError, Hooks } from "../Hooks.ts";
 import * as Obs from "../Observability.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * The WebAuthn ceremony a challenge was issued for: `"registration"`
@@ -706,7 +707,7 @@ export const make = (
             challenge,
             ceremony: "authentication",
             expiresAt,
-            ...(userId !== undefined ? { userId } : {}),
+            ...definedKeys({ userId }),
           });
 
           return { challenge, expiresAt };

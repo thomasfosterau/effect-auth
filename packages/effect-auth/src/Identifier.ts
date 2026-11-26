@@ -13,6 +13,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Errors from "./Errors.ts";
 import * as Types from "./Types.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Domain type
@@ -312,7 +313,7 @@ export const makeIdentifier = (input: {
     type: input.type,
     value: input.value,
     verified: input.verified ?? false,
-    ...(input.verifiedAt !== undefined ? { verifiedAt: input.verifiedAt } : {}),
+    ...definedKeys({ verifiedAt: input.verifiedAt }),
     createdAt: now,
   };
 };

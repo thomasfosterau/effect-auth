@@ -35,6 +35,7 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import { presentKeys } from "./internal.ts";
 import { isFollowerLayer, isMemberLayer, ownedListFilter } from "./OwnedListFilter.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
@@ -498,7 +499,7 @@ describe("ownedListFilter's rendered SQL", () => {
     const where = ownedListFilter({
       owner: posts.ownerId,
       visibility: posts.visibility,
-      ...(withDraft ? { draft: posts.draft } : {}),
+      ...presentKeys({ draft: withDraft ? posts.draft : undefined }),
     })(scope);
     if (where === undefined) return undefined;
     const { sql, params } = dialect.sqlToQuery(where);

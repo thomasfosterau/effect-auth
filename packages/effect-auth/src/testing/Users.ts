@@ -71,12 +71,12 @@ export const fixtureUser = (options: FixtureUserOptions = {}): Types.User => {
   const createdAt = options.createdAt ?? fixtureEpoch;
   return {
     id: options.id ?? globalThis.crypto.randomUUID(),
-    ...(options.name === undefined ? {} : { name: options.name }),
+    ...definedKeys({ name: options.name }),
     createdAt,
     updatedAt: createdAt,
     attributes: {
       ...options.attributes,
-      ...(options.role === undefined ? {} : { role: options.role }),
+      ...definedKeys({ role: options.role }),
     },
   };
 };

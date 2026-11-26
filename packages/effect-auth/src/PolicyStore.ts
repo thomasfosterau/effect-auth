@@ -20,6 +20,7 @@ import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Templates
@@ -85,8 +86,7 @@ export const template = (options: TemplateOptions): PolicyTemplate => ({
   principal: options.principal ?? Policy.any,
   action: options.action ?? Policy.any,
   resource: options.resource ?? Policy.any,
-  ...(options.when !== undefined ? { when: options.when } : {}),
-  ...(options.description !== undefined ? { description: options.description } : {}),
+  ...definedKeys({ when: options.when, description: options.description }),
 });
 
 // ---------------------------------------------------------------------------
@@ -124,8 +124,7 @@ export const makeLink = (input: {
 }): TemplateLink => ({
   id: input.id ?? globalThis.crypto.randomUUID(),
   templateId: input.templateId,
-  ...(input.principal !== undefined ? { principal: input.principal } : {}),
-  ...(input.resource !== undefined ? { resource: input.resource } : {}),
+  ...definedKeys({ principal: input.principal, resource: input.resource }),
   createdAt: input.now,
 });
 
@@ -211,8 +210,7 @@ export const instantiate = (template: PolicyTemplate, link: TemplateLink): Insta
       principal: principal.scope,
       action: template.action,
       resource: resource.scope,
-      ...(template.when !== undefined ? { when: template.when } : {}),
-      ...(template.description !== undefined ? { description: template.description } : {}),
+      ...definedKeys({ when: template.when, description: template.description }),
     },
   };
 };
@@ -542,8 +540,7 @@ const erased = (value: PolicyTemplate): Policy.DeclarativePolicy => {
     principal: scope(value.principal),
     action: value.action,
     resource: scope(value.resource),
-    ...(value.when !== undefined ? { when: value.when } : {}),
-    ...(value.description !== undefined ? { description: value.description } : {}),
+    ...definedKeys({ when: value.when, description: value.description }),
   };
 };
 

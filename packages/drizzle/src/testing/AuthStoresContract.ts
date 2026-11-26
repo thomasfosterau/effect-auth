@@ -27,6 +27,7 @@ import * as SessionStore from "../SessionStore.ts";
 import * as TokenStore from "../TokenStore.ts";
 import * as UserServiceStore from "../UserServiceStore.ts";
 import * as UserStore from "../UserStore.ts";
+import { presentKeys } from "../internal.ts";
 import { conformance } from "./Conformance.ts";
 
 /** The store key a service computes for `token`: its SHA-256 hex digest. */
@@ -467,7 +468,7 @@ const rateLimitCases = (label: string, run: Run): void => {
         key: `ip:${uuid()}`,
         count: 1,
         resetAt: now - 60_000,
-        ...(i % 2 === 0 ? {} : { blockedUntil: now - 1 }),
+        ...presentKeys({ blockedUntil: i % 2 === 0 ? undefined : now - 1 }),
       }));
       const kept: ReadonlyArray<Auth.RateLimitEntry> = [
         { key: `ip:${uuid()}`, count: 2, resetAt: now + 60_000 },

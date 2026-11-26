@@ -23,6 +23,7 @@ import * as Sql from "./Stores.ts";
 import { layer } from "./Stores.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
 import { purgeUser, userPurgeStores } from "../UserPurge.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal test-only SqlClient over better-sqlite3.
@@ -1138,7 +1139,7 @@ const storeContract = (engine: StoreEngine): void => {
         key: `bounded-stale-${i}`,
         count: 1,
         resetAt: now - 60_000,
-        ...(i % 2 === 0 ? {} : { blockedUntil: now - 1 }),
+        ...definedKeys({ blockedUntil: i % 2 !== 0 ? now - 1 : undefined }),
       }));
       const kept: ReadonlyArray<Auth.RateLimitEntry> = [
         { key: "bounded-open", count: 2, resetAt: now + 1 },

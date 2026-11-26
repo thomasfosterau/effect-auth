@@ -68,6 +68,7 @@ import { expectSpecJson, mediaTypeOf } from "./testing/WireFormat.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
 import { globalFetchHttpClient, runPromiseHttp } from "./testing/HttpClient.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -1508,7 +1509,9 @@ const create =
       method: "POST",
       headers: {
         "content-type": "application/vnd.api+json",
-        ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+        ...definedKeys({
+          cookie: sessionId !== undefined ? `conduit_session=${sessionId}` : undefined,
+        }),
       },
       body: encodeJson({
         data: { type, attributes, ...(relationships !== undefined && { relationships }) },

@@ -58,6 +58,7 @@ import {
   memoryOidcConsentStore,
   memoryOidcTokenStore,
 } from "./testing/MemoryStores.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 const ORG_A = "org-a";
 const ORG_B = "org-b";
@@ -1227,10 +1228,12 @@ const scimReq = (
   new Request(`http://test/scim/v2${path}`, {
     method,
     headers: {
-      ...(options.body !== undefined ? { "content-type": "application/scim+json" } : {}),
-      ...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
+      ...definedKeys({
+        "content-type": options.body !== undefined ? "application/scim+json" : undefined,
+        authorization: options.token !== undefined ? `Bearer ${options.token}` : undefined,
+      }),
     },
-    ...(options.body !== undefined ? { body: encodeJson(options.body) } : {}),
+    ...definedKeys({ body: options.body !== undefined ? encodeJson(options.body) : undefined }),
   });
 
 /** A JSON response body, decoded against the shape the test reads from it. */

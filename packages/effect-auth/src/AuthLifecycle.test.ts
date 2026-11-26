@@ -49,6 +49,7 @@ import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
 import { memoryApiKeyStore, memoryMultiFactorStore } from "./testing/MemoryStores.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -69,7 +70,7 @@ const addEmailIdentifier = (userId: string, email: string, verified: boolean) =>
     type: "email",
     value: email,
     verified,
-    ...(verified ? { verifiedAt: DateTime.toDateUtc(DateTime.nowUnsafe()) } : {}),
+    ...definedKeys({ verifiedAt: verified ? DateTime.toDateUtc(DateTime.nowUnsafe()) : undefined }),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   MutableHashMap.set(identifierRecords, identifier.id, identifier);

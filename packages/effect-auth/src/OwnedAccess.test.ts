@@ -21,6 +21,7 @@ import * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
 import * as Policy from "./Policy.ts";
 import * as SessionContext from "./SessionContext.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 interface AppUser {
   readonly id: string;
@@ -66,7 +67,7 @@ const canView = (
 const row = (visibility: OwnedAccess.Visibility, draft?: boolean): OwnedAccess.OwnedRow => ({
   ownerId: member.id,
   visibility,
-  ...(draft === undefined ? {} : { draft }),
+  ...definedKeys({ draft }),
 });
 
 describe("canView (the owned-material read predicate)", () => {

@@ -32,6 +32,7 @@ import {
   CredentialNotFoundError,
   AuthError,
 } from "../Errors.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 // Mock implementations for testing
 const mockChallengeStore = {
@@ -774,7 +775,7 @@ const clientDataJSON = (
         type,
         challenge: Buffer.from(challenge).toString("base64url"),
         origin: "https://example.com",
-        ...(crossOrigin === undefined ? {} : { crossOrigin }),
+        ...definedKeys({ crossOrigin }),
       }),
       "utf8",
     ),

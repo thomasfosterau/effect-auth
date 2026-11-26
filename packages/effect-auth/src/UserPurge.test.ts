@@ -49,6 +49,7 @@ import type * as Types from "./Types.ts";
 import { UserService, UserServiceStore } from "./User.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
 import * as Testing from "./testing/index.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 const notUsed = () => Effect.fail(new AuthError({ message: "not used by these tests" }));
 
@@ -403,9 +404,11 @@ const request = (method: string, path: string, sessionToken: string, body?: Sche
     method,
     headers: {
       cookie: `conduit_session=${sessionToken}`,
-      ...(body === undefined ? {} : { "content-type": "application/vnd.api+json" }),
+      ...definedKeys({
+        "content-type": body !== undefined ? "application/vnd.api+json" : undefined,
+      }),
     },
-    ...(body === undefined ? {} : { body: toJson(body) }),
+    ...definedKeys({ body: body !== undefined ? toJson(body) : undefined }),
   });
 
 describe("every path that deletes a user deletes everything the account holds", () => {

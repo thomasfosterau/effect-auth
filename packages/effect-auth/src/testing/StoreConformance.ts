@@ -883,7 +883,7 @@ export const identifierStoreConformance = <E = never, R = never>(
 // ApiKeyStore
 // ---------------------------------------------------------------------------
 
-const makeApiKey = (userId: string, full = false): ApiKey.ApiKey => ({
+const baseApiKey = (userId: string): ApiKey.ApiKey => ({
   id: uuid(),
   start: "abc123",
   keyHash: digest(),
@@ -892,22 +892,25 @@ const makeApiKey = (userId: string, full = false): ApiKey.ApiKey => ({
   metadata: { purpose: "conformance" },
   createdAt: at().getTime(),
   updatedAt: at().getTime(),
-  ...(full
-    ? {
-        name: "CI deploy key",
-        prefix: "app_",
-        expiresAt: at(24 * 60 * 60 * 1000).getTime(),
-        lastUsedAt: at(1000).getTime(),
-        permissions: { projects: ["read", "write"] },
-        remaining: 10,
-        refillAmount: 5,
-        refillInterval: 60_000,
-        refillMax: 10,
-        lastRefillAt: at().getTime(),
-        rateLimit: { maxRequests: 100, windowMs: 60_000 },
-      }
-    : {}),
 });
+
+/** Every optional field set, so a store's round trip is checked for each. */
+const fullApiKeyFields = () => ({
+  name: "CI deploy key",
+  prefix: "app_",
+  expiresAt: at(24 * 60 * 60 * 1000).getTime(),
+  lastUsedAt: at(1000).getTime(),
+  permissions: { projects: ["read", "write"] },
+  remaining: 10,
+  refillAmount: 5,
+  refillInterval: 60_000,
+  refillMax: 10,
+  lastRefillAt: at().getTime(),
+  rateLimit: { maxRequests: 100, windowMs: 60_000 },
+});
+
+const makeApiKey = (userId: string, full = false): ApiKey.ApiKey =>
+  full ? { ...baseApiKey(userId), ...fullApiKeyFields() } : baseApiKey(userId);
 
 /** Concurrent `recordUse` calls the race case sends at one key. */
 const apiKeyRacers = 8;

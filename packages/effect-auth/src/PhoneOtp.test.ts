@@ -54,6 +54,7 @@ import {
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -148,7 +149,7 @@ const seedPhoneUser = (phoneNumber: string, verified: boolean): Types.User => {
     type: "phone",
     value: phoneNumber,
     verified,
-    ...(verified ? { verifiedAt: now } : {}),
+    ...definedKeys({ verifiedAt: verified ? now : undefined }),
     now: DateTime.toDateUtc(DateTime.nowUnsafe()),
   });
   MutableHashMap.set(identifierRecords, identifier.id, identifier);

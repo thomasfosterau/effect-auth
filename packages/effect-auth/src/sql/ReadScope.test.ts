@@ -18,6 +18,7 @@ import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/tes
 import { Condition, Entity, Policy, ReadScope } from "../index.ts";
 import { readScopeWhere } from "./ReadScope.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 let database: PGlite;
 
@@ -145,12 +146,13 @@ const kernel = (viewer: string | null) => {
       Arr.filter(corpus, (row) => {
         const resource = Entity.entity(Entity.ref("Owned", row.id), {
           attributes: {
-            ...(row.owner === null
-              ? {}
-              : { owner: Entity.entityValue(Entity.ref("User", row.owner)) }),
-            ...(row.visibility === null ? {} : { visibility: row.visibility }),
-            ...(row.draft === null ? {} : { draft: row.draft }),
-            ...(row.score === null ? {} : { score: row.score }),
+            ...definedKeys({
+              owner:
+                row.owner !== null ? Entity.entityValue(Entity.ref("User", row.owner)) : undefined,
+              visibility: row.visibility ?? undefined,
+              draft: row.draft ?? undefined,
+              score: row.score ?? undefined,
+            }),
           },
         });
         return Policy.decidePure(
@@ -183,13 +185,11 @@ const listed = (scope: ReadScope.ReadScope, viewer: string | null, withSets: boo
           draft: sql("draft"),
           score: sql("score"),
         },
-        ...(withSets
-          ? {
-              sets: {
-                following: sql`SELECT followee FROM follows WHERE follower = ${viewer ?? ""}`,
-              },
-            }
-          : {}),
+        ...definedKeys({
+          sets: withSets
+            ? { following: sql`SELECT followee FROM follows WHERE follower = ${viewer ?? ""}` }
+            : undefined,
+        }),
       });
       const rows = yield* sql<{ readonly id: string }>`SELECT id FROM owned WHERE ${where}`;
       return Arr.sort(

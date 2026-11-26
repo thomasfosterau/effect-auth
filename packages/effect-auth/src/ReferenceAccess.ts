@@ -201,12 +201,13 @@ export const make = <Id, User extends Guard.Viewer, Rung extends string>(
     const principal = Option.isSome(viewer) ? guards.principal(viewer.value) : anonymousPrincipal;
     const resource = Entity.entity(Entity.ref(referenceType, "row"), {
       attributes: {
-        ...(row.visibility === undefined ? {} : { visibility: row.visibility }),
-        // The guards' principal type, so the anonymous principal never matches it.
-        ...(P.isString(row.followersOf)
-          ? { followersOf: Entity.entityValue(Entity.ref(guards.principalType, row.followersOf)) }
-          : {}),
-        ...(P.isString(row.groupId) ? { group: row.groupId } : {}),
+        ...definedKeys({
+          visibility: row.visibility,
+          followersOf: P.isString(row.followersOf)
+            ? Entity.entityValue(Entity.ref(guards.principalType, row.followersOf))
+            : undefined,
+          group: P.isString(row.groupId) ? row.groupId : undefined,
+        }),
       },
     });
     return Policy.decidePure(

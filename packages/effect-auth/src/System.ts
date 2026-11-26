@@ -14,6 +14,7 @@ import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * The reserved entity type of system principals. Application principal types
@@ -130,6 +131,5 @@ export const grant = (name: string, options: GrantOptions): Policy.DeclarativePo
     principal: Policy.eq(ref(name)),
     action: Policy.eq(Entity.ref("Action", options.action)),
     resource: options.resource,
-    ...(options.when !== undefined ? { when: options.when } : {}),
-    ...(options.description !== undefined ? { description: options.description } : {}),
+    ...definedKeys({ when: options.when, description: options.description }),
   });
