@@ -2145,14 +2145,21 @@ describe("request body size limit", () => {
     return { stream, pulled };
   };
 
-  const streamedSignUp = (stream: ReadableStream<Uint8Array>) =>
-    // SAFETY: `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
-    new Request("http://test/users", {
+  // `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
+  const streamedRequest = (
+    stream: ReadableStream<Uint8Array>,
+    headers: Record<string, string>,
+  ): Request => {
+    const init: RequestInit & { readonly duplex: "half" } = {
       method: "POST",
-      headers: { "content-type": "application/vnd.api+json" },
+      headers: { "content-type": "application/vnd.api+json", ...headers },
       body: stream,
       duplex: "half",
-    } as RequestInit);
+    };
+    return new Request("http://test/users", init);
+  };
+
+  const streamedSignUp = (stream: ReadableStream<Uint8Array>) => streamedRequest(stream, {});
 
   it("counts a body without Content-Length and refuses it with 413 at the limit, creating no user", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 1024 });
@@ -2173,15 +2180,7 @@ describe("request body size limit", () => {
   it("refuses a body that streams past an understated Content-Length", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 200 });
     const { stream } = streamedBody("x".repeat(1000), 100);
-    const res = await handler(
-      // SAFETY: `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
-      new Request("http://test/users", {
-        method: "POST",
-        headers: { "content-type": "application/vnd.api+json", "content-length": "10" },
-        body: stream,
-        duplex: "half",
-      } as RequestInit),
-    );
+    const res = await handler(streamedRequest(stream, { "content-length": "10" }));
     expect(res.status).toBe(413);
   });
 

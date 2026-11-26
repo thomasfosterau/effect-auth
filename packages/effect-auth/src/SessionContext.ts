@@ -442,11 +442,9 @@ export const viewerLayer = <Id, User>(
 ): Layer.Layer<Id> => {
   if (user === null || user === undefined) return Layer.succeed(viewer, Option.none());
   if (Option.isOption(user)) {
-    // SAFETY: `Option.isOption` held, so `user` is the `Option<User>` arm of the union.
-    return Layer.succeed(viewer, user as Option.Option<User>);
+    return Layer.succeed(viewer, user);
   }
-  // SAFETY: not null/undefined and not an `Option`, so `user` is the bare `User` arm.
-  return Layer.succeed(viewer, Option.some(user as User));
+  return Layer.succeed(viewer, Option.some(user));
 };
 
 /**

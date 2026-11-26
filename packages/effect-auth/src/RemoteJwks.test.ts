@@ -116,12 +116,16 @@ describe("RemoteJwks", () => {
     run(
       Effect.gen(function* () {
         const sets = yield* RemoteJwks.makeKeySets();
-        const { fetch } = yield* scriptedFetch([[{ kid: "a" }]]);
+        const { fetch, calls } = yield* scriptedFetch([[{ kid: "a" }]]);
+        const pickA: RemoteJwks.Pick = (keys) => keys.find((k) => k["kid"] === "a");
         const first = yield* sets.forUrl("https://a.test/jwks", fetch);
+        yield* first.key(pickA);
         const again = yield* sets.forUrl("https://a.test/jwks", fetch);
+        expect(yield* again.key(pickA)).toEqual({ kid: "a" });
+        expect(yield* calls).toBe(1);
         const other = yield* sets.forUrl("https://b.test/jwks", fetch);
-        expect(again).toBe(first);
-        expect(other).not.toBe(first);
+        yield* other.key(pickA);
+        expect(yield* calls).toBe(2);
       }),
     ));
 });

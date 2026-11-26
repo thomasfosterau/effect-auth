@@ -1,6 +1,10 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import type { AuthClient } from "@thomasfosterau/effect-auth/client";
+import {
+  type AuthClient,
+  createAuthClient,
+  definePlugin,
+} from "@thomasfosterau/effect-auth/client";
 import { authClientKey } from "../context.ts";
 import EmailOtpForm from "./EmailOtpForm.svelte";
 import MagicLinkForm from "./MagicLinkForm.svelte";
@@ -32,10 +36,15 @@ type StubOf<T> = T extends (...args: infer A) => infer R
 
 /** Any subset of the client's members; the code under test touches only the ones a test supplies. */
 type ClientStub = StubOf<AuthClient>;
+
+/** A request no stub answers: a test that reaches the network fails. */
+const unstubbed: typeof globalThis.fetch = () => Promise.reject(new Error("unstubbed request"));
+
+/** A real client whose members the stub's replace, so a call no test supplies fails. */
 const stub = (methods: ClientStub): AuthClient =>
-  // SAFETY: the code under test touches only the members a test supplies; reaching
-  // for a missing one throws, so a stub cannot let a test pass by omission.
-  methods as AuthClient;
+  createAuthClient({ baseUrl: "http://svelte.test", fetch: unstubbed }).extend(
+    definePlugin(() => methods),
+  );
 
 const inputLabelled = (label: string): HTMLInputElement => {
   const element = screen.getByLabelText(label);

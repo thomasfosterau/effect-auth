@@ -202,12 +202,9 @@ const carry = (
  * @since 0.1.0
  * @category conversions
  */
-export const fromHttpError = <E extends HttpError>(error: E): FromHttpError<E> => {
-  // Matching on `E` itself leaves the arms' parameters generic; widen it to
-  // the union so each arm sees its own member.
-  const widened: HttpError = error;
-  // SAFETY: each arm builds the class `FromHttpError` names for its tag.
-  return Match.valueTags(widened, {
+export function fromHttpError<E extends HttpError>(error: E): FromHttpError<E>;
+export function fromHttpError(error: HttpError): FromHttpError<HttpError> {
+  return Match.valueTags(error, {
     Unauthorized: (e) => new Unauthorized(carry(e)),
     Forbidden: (e) => new Forbidden(carry(e)),
     NotFound: (e) => new NotFound(carry(e)),
@@ -215,8 +212,8 @@ export const fromHttpError = <E extends HttpError>(error: E): FromHttpError<E> =
     Conflict: (e) => new Conflict(carry(e)),
     TooManyRequests: (e) => new TooManyRequests(carry(e)),
     InternalServerError: (e) => new InternalServerError({ message: e.message }),
-  }) as FromHttpError<E>;
-};
+  });
+}
 
 /**
  * Re-type an effect that fails with `HttpApiSchema.ts` errors so it fails with

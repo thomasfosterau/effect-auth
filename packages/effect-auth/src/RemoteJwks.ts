@@ -39,51 +39,58 @@ export interface KeySet<E> {
   readonly key: (pick: Pick) => Effect.Effect<Types.JsonObject | undefined, E>;
 }
 
+const emptyState: Effect.Effect<SynchronizedRef.SynchronizedRef<State>> =
+  SynchronizedRef.make<State>({
+    keys: [],
+    fetchedAt: Number.NEGATIVE_INFINITY,
+    attemptedAt: Number.NEGATIVE_INFINITY,
+  });
+
+/** A key set over `fetch` that keeps its keys in `ref`. */
+const over = <E>(
+  ref: SynchronizedRef.SynchronizedRef<State>,
+  fetch: Effect.Effect<ReadonlyArray<Types.JsonObject>, E>,
+  timing: KeySetTiming,
+): KeySet<E> => {
+  const key = (pick: Pick): Effect.Effect<Types.JsonObject | undefined, E> =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const current = yield* SynchronizedRef.get(ref);
+      const cached = pick(current.keys);
+      if (cached !== undefined && now - current.fetchedAt < timing.ttlMs) return cached;
+
+      return yield* SynchronizedRef.modifyEffect(ref, (state) =>
+        Effect.gen(function* () {
+          const known = pick(state.keys);
+          // Another fiber may have refetched while this one waited.
+          if (known !== undefined && now - state.fetchedAt < timing.ttlMs) {
+            return [known, state] as const;
+          }
+          if (now - state.attemptedAt < timing.minRefreshIntervalMs) {
+            return [known, state] as const;
+          }
+          const fetched = yield* Effect.result(fetch);
+          if (Result.isFailure(fetched)) {
+            // Keep serving keys fetched before: a fetch fault must not
+            // fail every token the old keys still verify.
+            const next = { ...state, attemptedAt: now };
+            if (known !== undefined) return [known, next] as const;
+            return yield* Effect.fail(fetched.failure);
+          }
+          const next = { keys: fetched.success, fetchedAt: now, attemptedAt: now };
+          return [pick(next.keys), next] as const;
+        }),
+      );
+    });
+
+  return { key };
+};
+
 /** A key set over `fetch`, empty until the first lookup. */
 export const make = <E>(
   fetch: Effect.Effect<ReadonlyArray<Types.JsonObject>, E>,
   timing: KeySetTiming = defaultTiming,
-): Effect.Effect<KeySet<E>> =>
-  Effect.gen(function* () {
-    const ref = yield* SynchronizedRef.make<State>({
-      keys: [],
-      fetchedAt: Number.NEGATIVE_INFINITY,
-      attemptedAt: Number.NEGATIVE_INFINITY,
-    });
-
-    const key = (pick: Pick): Effect.Effect<Types.JsonObject | undefined, E> =>
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        const current = yield* SynchronizedRef.get(ref);
-        const cached = pick(current.keys);
-        if (cached !== undefined && now - current.fetchedAt < timing.ttlMs) return cached;
-
-        return yield* SynchronizedRef.modifyEffect(ref, (state) =>
-          Effect.gen(function* () {
-            const known = pick(state.keys);
-            // Another fiber may have refetched while this one waited.
-            if (known !== undefined && now - state.fetchedAt < timing.ttlMs) {
-              return [known, state] as const;
-            }
-            if (now - state.attemptedAt < timing.minRefreshIntervalMs) {
-              return [known, state] as const;
-            }
-            const fetched = yield* Effect.result(fetch);
-            if (Result.isFailure(fetched)) {
-              // Keep serving keys fetched before: a fetch fault must not
-              // fail every token the old keys still verify.
-              const next = { ...state, attemptedAt: now };
-              if (known !== undefined) return [known, next] as const;
-              return yield* Effect.fail(fetched.failure);
-            }
-            const next = { keys: fetched.success, fetchedAt: now, attemptedAt: now };
-            return [pick(next.keys), next] as const;
-          }),
-        );
-      });
-
-    return { key };
-  });
+): Effect.Effect<KeySet<E>> => Effect.map(emptyState, (ref) => over(ref, fetch, timing));
 
 /**
  * Key sets by JWKS URL, built on first use. For verifiers whose endpoints are
@@ -104,20 +111,19 @@ export const makeKeySets = (
   timing: KeySetTiming = defaultTiming,
 ): Effect.Effect<typeof KeySets.Service> =>
   Effect.gen(function* () {
-    const sets = yield* SynchronizedRef.make(HashMap.empty<string, KeySet<unknown>>());
+    const sets = yield* SynchronizedRef.make(
+      HashMap.empty<string, SynchronizedRef.SynchronizedRef<State>>(),
+    );
     return {
+      // Callers share a URL's keys; each lookup refetches through its own
+      // caller's `fetch`, so its failure keeps that caller's error type.
       forUrl: <E>(url: string, fetch: Effect.Effect<ReadonlyArray<Types.JsonObject>, E>) =>
-        // SAFETY: a URL's set is built from the first fetch given for it, and
-        // each caller passes the same fetch (and so the same E) for its URL.
         SynchronizedRef.modifyEffect(sets, (map) =>
           Option.match(HashMap.get(map, url), {
             onSome: (existing) => Effect.succeed([existing, map] as const),
             onNone: () =>
-              Effect.map(
-                make<unknown>(fetch, timing),
-                (set) => [set, HashMap.set(map, url, set)] as const,
-              ),
+              Effect.map(emptyState, (ref) => [ref, HashMap.set(map, url, ref)] as const),
           }),
-        ) as Effect.Effect<KeySet<E>>,
+        ).pipe(Effect.map((ref) => over(ref, fetch, timing))),
     };
   });

@@ -7,7 +7,7 @@
  */
 
 import Database from "better-sqlite3";
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { Effect, Layer } from "effect";
@@ -83,9 +83,9 @@ signUpContract("single-table SQLite", false, {
       .values({
         ...row,
         userId: row.id,
-        // SAFETY: deliberately unchecked: a row without an address must reach the
-        // database as NULL, which the column's NOT NULL refuses.
-        email: row.email as string,
+        // A row without an address reaches the database as NULL, which the
+        // column's NOT NULL refuses.
+        email: row.email ?? sql`NULL`,
       })
       .run();
   },

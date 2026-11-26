@@ -50,7 +50,7 @@ import {
 } from "../email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import { SessionService } from "../SessionService.ts";
-import type * as Types from "../Types.ts";
+import * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { IdentifierStore, lookupIdentifier } from "../Identifier.ts";
 import {
@@ -466,6 +466,12 @@ const readTokenResponse = (
 
 /** Whether a JSON value is an object (not an array or `null`). */
 const isJsonObject = (json: Schema.Json): json is Types.JsonObject => P.isObject(json);
+
+const isJsonObjectValue = Schema.is(Types.JsonObject);
+
+/** The user object a provider nests in its answer, or the answer itself when it nests none. */
+const userObject = (raw: Types.JsonObject, user: unknown): Types.JsonObject =>
+  isJsonObjectValue(user) ? user : raw;
 
 /**
  * Verify and decode an OIDC `id_token` (compact JWS) against a provider's
@@ -2157,9 +2163,8 @@ export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["users.read", "tweet.read"],
       tokenAuthMethod: "basic",
       mapProfile: (raw) => {
-        // SAFETY: Twitter's users/me answers `{ data: user }`, the user an object;
-        // a missing envelope falls back to the (object) payload itself.
-        const data = (raw["data"] ?? raw) as Types.JsonObject;
+        // Twitter's users/me answers `{ data: user }`.
+        const data = userObject(raw, raw["data"]);
         return profile(data, {
           id: data["id"],
           name: str(data["name"]),
@@ -2316,9 +2321,8 @@ export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
       tokenAuthMethod: "basic",
       authorizationParams: { owner: "user" },
       mapProfile: (raw) => {
-        // SAFETY: Notion's users/me carries the user object at bot.owner.user;
-        // without it, the (object) payload itself is the user.
-        const user = (nested(raw, "bot", "owner", "user") ?? raw) as Types.JsonObject;
+        // Notion's users/me carries the user object at bot.owner.user.
+        const user = userObject(raw, nested(raw, "bot", "owner", "user"));
         return profile(raw, {
           id: user["id"] ?? raw["id"],
           email: str(nested(user, "person", "email")),
@@ -2388,9 +2392,8 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
         "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url",
       scopes: ["user.info.basic"],
       mapProfile: (raw) => {
-        // SAFETY: TikTok's user/info carries the user object at data.user;
-        // without it, the (object) payload itself is the user.
-        const user = (nested(raw, "data", "user") ?? raw) as Types.JsonObject;
+        // TikTok's user/info carries the user object at data.user.
+        const user = userObject(raw, nested(raw, "data", "user"));
         return profile(user, {
           id: user["open_id"] ?? user["id"],
           name: str(user["display_name"]),
@@ -2434,9 +2437,8 @@ export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["user:read"],
       mapProfile: (raw) => {
         const data = raw["data"];
-        // SAFETY: Kick's users endpoint answers `{ data: [user] }`, each user an
-        // object; without the array, the (object) payload itself is the user.
-        const user = (Array.isArray(data) ? data[0] : raw) as Types.JsonObject;
+        // Kick's users endpoint answers `{ data: [user] }`.
+        const user = userObject(raw, Array.isArray(data) ? data[0] : undefined);
         return profile(user, {
           id: user["user_id"] ?? user["id"],
           email: str(user["email"]),

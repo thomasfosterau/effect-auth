@@ -239,6 +239,17 @@ export type AuthorizationMiddlewareConfig<R = never> = {
 };
 
 /**
+ * The runtime key of a guard named `Id`:
+ * `@effect-auth/AuthorizationMiddleware/<name>#<n>`, where `<n>` counts
+ * factory calls, so two guards built with one name still get distinct tags.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type AuthorizationMiddlewareKey<Id extends string> =
+  `@effect-auth/AuthorizationMiddleware/${Id}#${number}`;
+
+/**
  * The identifier of a middleware built by {@link makeAuthorizationMiddleware}:
  * the instance type that `HttpApiEndpoint.middleware(...)` and
  * `HttpApiGroup.middleware(...)` accept, and that `Layer`s and `Context` key on.
@@ -249,10 +260,9 @@ export type AuthorizationMiddlewareConfig<R = never> = {
  * that instance, so an identifier typed as the class value (rather than its
  * instance) is rejected with a type error at `.middleware(...)`.
  *
- * `Id` is the guard's name, carried as the instance's `key` literal. It is what
- * makes two guards with the same `R` different types. The runtime key is not
- * the bare name: it is `@effect-auth/AuthorizationMiddleware/<name>#<n>`, where
- * `<n>` counts factory calls, so the type-level key and the runtime key differ.
+ * `Id` is the guard's name, carried in the instance's `key`
+ * ({@link AuthorizationMiddlewareKey}). It is what makes two guards with the
+ * same `R` different types.
  *
  * @since 0.1.0
  * @category models
@@ -261,7 +271,7 @@ export type AuthorizationMiddlewareInstance<
   R = never,
   Id extends string = string,
 > = Context.ServiceClass.Shape<
-  Id,
+  AuthorizationMiddlewareKey<Id>,
   HttpApiMiddleware.HttpApiMiddleware<never, typeof S.ForbiddenError, AuthorizationRequires<R>>
 > & {
   readonly "~effect/http-api/HttpApiMiddleware": {
@@ -291,7 +301,7 @@ export interface AuthorizationMiddlewareClass<
   Id extends string = string,
 > extends HttpApiMiddleware.ServiceClass<
   AuthorizationMiddlewareInstance<R, Id>,
-  Id,
+  AuthorizationMiddlewareKey<Id>,
   AuthorizationMiddlewareConfig<R>
 > {
   /**
@@ -388,14 +398,10 @@ type GuardName<Id extends string, All extends string = Id> = Id extends string
  * @category constructors
  */
 export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
-  name: GuardName<Id>,
+  name: Id & GuardName<Id>,
   input: AuthorizationMiddlewareInput<R>,
 ): AuthorizationMiddlewareClass<R, Id> => {
-  const id: string = `@effect-auth/AuthorizationMiddleware/${name}#${_nextMiddlewareId++}`;
-  // SAFETY: the guard's type-level key is its name, `Id`; the runtime key adds
-  // the namespace and the call counter (see `AuthorizationMiddlewareInstance`).
-  // Nothing reads the key's type back as the runtime string.
-  const key = id as Id;
+  const key: AuthorizationMiddlewareKey<Id> = `@effect-auth/AuthorizationMiddleware/${name}#${_nextMiddlewareId++}`;
 
   class AuthorizationMiddleware extends HttpApiMiddleware.Service<
     AuthorizationMiddleware,

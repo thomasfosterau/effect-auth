@@ -139,10 +139,7 @@ export default defineConfig({
       "effect/effect-catchall-default": "off",
       // The only `makeFilter` calls probe config keys; they are not reusable checks.
       "effect/require-filter-metadata": "off",
-      // An awareness prompt, not a defect rule: it fires on every `as`,
-      // including the narrowings the DOM, Fetch and framework types
-      // structurally require. Stays visible as a warning.
-      "effect/casting-awareness": "warn",
+      "effect/casting-awareness": "error",
     },
     overrides: [
       {
@@ -470,6 +467,37 @@ export default defineConfig({
         // fix (`channel.location.origin`) does not type-check.
         files: ["packages/effect-auth/src/client/SessionAtoms.ts"],
         rules: { "unicorn/require-post-message-target-origin": "off" },
+      },
+      {
+        // `client/Client.ts` has no runtime imports, so it cannot decode the
+        // wire: each call names the contract's own response type for the body
+        // the server encodes. `./ladder` imports nothing, so it cannot map its
+        // axes with `Record.map`.
+        files: ["packages/effect-auth/src/client/Client.ts", "packages/effect-auth/src/Ladder.ts"],
+        rules: { "effect/casting-awareness": "off" },
+      },
+      {
+        // drizzle's dialect table brands keep its three handles from sharing a
+        // type, and a generic table's columns lose their value types, so the
+        // adapter restates what `ColumnKey` checked at the caller. `effect/sql`
+        // types `transformRows` over the row object its D1 client builds, and
+        // the test shim fakes only the D1 binding members the suites reach.
+        // Alchemy's `Stack.make` declares services an `AuthSchema` deploy never
+        // reaches, which its suites cannot provide. The Release workflow's
+        // `tag` job runs `scripts/release.ts` before any install, so it reads
+        // its JSON with Node built-ins alone.
+        files: [
+          "scripts/release.ts",
+          "packages/drizzle/src/Columns.ts",
+          "packages/drizzle/src/Database.ts",
+          "packages/drizzle/src/RateLimitStore.ts",
+          "packages/drizzle/src/UserStore.ts",
+          "packages/alchemy-cloudflare/src/D1Client.ts",
+          "packages/alchemy-cloudflare/src/testShim.ts",
+          "packages/alchemy-cloudflare/src/AuthSchema.test.ts",
+          "packages/alchemy-postgres/src/AuthSchema.test.ts",
+        ],
+        rules: { "effect/casting-awareness": "off" },
       },
       {
         // SvelteKit's `handle` is a Promise-facing entrypoint: it runs the
