@@ -303,9 +303,7 @@ describe("RBAC as policy-kernel sugar", () => {
         });
       }).pipe(Authorizer.CurrentPrincipal.provide(Entity.ref("User", "viewer-user")));
 
-      const exit = await Effect.runPromise(
-        Effect.exit(Effect.provide(program, Rbac.layer(config))),
-      );
+      const exit = await Effect.runPromiseExit(Effect.provide(program, Rbac.layer(config)));
 
       expect(exit._tag).toBe("Failure");
     });
