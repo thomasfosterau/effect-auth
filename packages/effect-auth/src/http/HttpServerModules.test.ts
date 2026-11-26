@@ -43,6 +43,9 @@ import {
 } from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
+import { provisionedByAttributes } from "../ManagedUser.ts";
+import * as OrganizationModule from "../Organization.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { memoryApiKeyStore } from "../testing/MemoryStores.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
@@ -54,7 +57,10 @@ const HOUR = 60 * 60 * 1000;
  * Build a handler wired with real org/admin/api-key/jwt services + in-memory
  * stores; `admin`, when given, replaces the `AdminService`'s config.
  */
-const makeFixture = (admin?: AdminConfig) => {
+const makeFixture = (
+  admin?: AdminConfig,
+  options: { readonly invitationResendCooldown?: number } = {},
+) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const sessions = MutableHashMap.empty<string, Types.Session>();
@@ -393,9 +399,45 @@ const makeFixture = (admin?: AdminConfig) => {
   // Stage 2: services that depend on stage-1 services (SessionService, etc.).
   // Invitations the server "emailed", with their secret tokens (newest last).
   const sentInvitations: InvitationDelivery[] = [];
-  const organizationServiceLayer = OrganizationService.layer({
-    sendInvitationEmail: (delivery) => Effect.sync(() => void sentInvitations.push(delivery)),
-  }).pipe(Layer.provide(stage1));
+  // `addMember` takes only a user the organization manages, so this fixture's
+  // service stamps each user it adds (except the `unmanaged` ids) as
+  // provisioned by the organization first.
+  const unmanaged = MutableHashSet.empty<string>();
+  const stampManaged = (userId: string, organizationId: string) =>
+    Effect.sync(() =>
+      Option.map(MutableHashMap.get(usersById, userId), (user) =>
+        MutableHashSet.has(unmanaged, userId)
+          ? undefined
+          : MutableHashMap.set(usersById, userId, {
+              ...user,
+              attributes: {
+                ...user.attributes,
+                ...provisionedByAttributes({
+                  kind: "scim",
+                  connectionId: "scim-1",
+                  organizationId,
+                }),
+              },
+            }),
+      ),
+    );
+  const organizationServiceLayer = Layer.effect(
+    OrganizationService,
+    Effect.map(
+      OrganizationModule.make({
+        sendInvitationEmail: (delivery) => Effect.sync(() => void sentInvitations.push(delivery)),
+        invitationResendCooldown: options.invitationResendCooldown ?? 0,
+      }),
+      (service): typeof OrganizationService.Service => ({
+        ...service,
+        addMember: (actorId, organizationId, userId, role) =>
+          Effect.andThen(
+            stampManaged(userId, organizationId),
+            service.addMember(actorId, organizationId, userId, role),
+          ),
+      }),
+    ),
+  ).pipe(Layer.provide(Layer.merge(stage1, PlatformCrypto.layer)));
   const adminServiceLayer = AdminService.layer({ adminRoles: ["admin"] }).pipe(
     Layer.provide(stage1),
   );
@@ -420,7 +462,17 @@ const makeFixture = (admin?: AdminConfig) => {
       { onNone: () => assert.fail(`no email for ${invitationId}`), onSome: (sent) => sent.token },
     );
 
-  return { handler, seedUser, makeSession, sessions, members, invitations, tokenFor };
+  return {
+    handler,
+    seedUser,
+    makeSession,
+    sessions,
+    members,
+    invitations,
+    tokenFor,
+    unmanaged,
+    sentInvitations,
+  };
 };
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
@@ -676,6 +728,54 @@ const deliverInvitation: ByIdRequest = (id, sessionId) =>
   apiReq("POST", `/invitations/${id}/deliveries`, undefined, sessionId);
 
 describe("HTTP organization endpoints", () => {
+  it("adds only managed users, lets a member leave, and answers a resend too soon with 429", async () => {
+    const fx = makeFixture(undefined, { invitationResendCooldown: 60_000 });
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("staff", "staff@test.com");
+    fx.seedUser("outsider", "outsider@test.com");
+    MutableHashSet.add(fx.unmanaged, "outsider");
+    const ownerSid = fx.makeSession("owner");
+    const staffSid = fx.makeSession("staff");
+    const org = await createOrganization(fx, ownerSid);
+
+    const outsider = await fx.handler(addMemberRequest(org.id, "outsider", "member", ownerSid));
+    expect(outsider.status).toBe(403);
+    const ghost = await fx.handler(addMemberRequest(org.id, "ghost", "member", ownerSid));
+    expect(await statusAndBody(ghost)).toEqual(
+      await statusAndBody(
+        await fx.handler(addMemberRequest(org.id, "outsider", "member", ownerSid)),
+      ),
+    );
+
+    // `member` holds no `member:delete`; deleting your own membership is leaving.
+    const added = await fx.handler(addMemberRequest(org.id, "staff", "member", ownerSid));
+    const member = (await jsonBody(added, MemberBody)).data;
+    const left = await fx.handler(
+      apiReq("DELETE", `/organization-members/${member.id}`, undefined, staffSid),
+    );
+    expect(left.status).toBe(204);
+    expect(fx.members.map((m) => m.userId)).toEqual(["owner"]);
+    const ownerMember = fx.members.find((m) => m.userId === "owner");
+    assert(ownerMember !== undefined, "the owner is a member");
+    const lastOwner = await fx.handler(
+      apiReq("DELETE", `/organization-members/${ownerMember.id}`, undefined, ownerSid),
+    );
+    expect(lastOwner.status).toBe(403);
+
+    const invited = await fx.handler(
+      apiReq(
+        "POST",
+        `/organizations/${org.id}/invitations`,
+        { data: { type: "invitations", attributes: { email: "new@test.com", role: "member" } } },
+        ownerSid,
+      ),
+    );
+    const invitationId = (await jsonBody(invited, resourceBody({ status: Schema.String }))).data.id;
+    const tooSoon = await fx.handler(deliverInvitation(invitationId, ownerSid));
+    expect(tooSoon.status).toBe(429);
+    expect(fx.sentInvitations).toHaveLength(1);
+  });
+
   it("runs a full organization lifecycle", async () => {
     const fx = makeFixture();
     fx.seedUser("u1", "owner@test.com");

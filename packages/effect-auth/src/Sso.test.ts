@@ -287,6 +287,7 @@ const makeStores = (
           Layer.succeed(OrganizationDomainStore)(domainStore),
           Layer.succeed(SessionService)(sessionManager),
           Layer.succeed(EmailPasswordStore)(emailPasswords),
+          Layer.succeed(UserStore)(coreUserStore),
         ),
       ),
     ),
