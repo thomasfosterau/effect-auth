@@ -597,6 +597,8 @@ export const SsoRegisterOidcAttributes = Schema.Struct({
   jwksEndpoint: Schema.optional(UrlInput),
   scopes: Schema.optional(Schema.Array(Schema.String)),
   usePKCE: Schema.optional(Schema.Boolean),
+  /** `false` accepts a profile without `email_verified`; an explicit `false` is always refused. */
+  requireEmailVerified: Schema.optional(Schema.Boolean),
 });
 export type SsoRegisterOidcAttributes = typeof SsoRegisterOidcAttributes.Type;
 

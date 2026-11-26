@@ -184,6 +184,8 @@ export {
   type GoogleOneTapSignInResult,
   GoogleOneTapService,
 } from "./GoogleOneTap.ts";
+// Managed users: which organization's SSO and SCIM may act on a user.
+export * as ManagedUser from "./ManagedUser.ts";
 // Cloudflare Access: `make`, `findUser` and friends are too generic for the
 // root, so the module is reached through its namespace only.
 export * as CloudflareAccess from "./CloudflareAccess.ts";

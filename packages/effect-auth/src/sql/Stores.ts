@@ -209,7 +209,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     input: {
       readonly name?: string;
       readonly image?: string;
-      readonly attributes?: Auth.Attributes;
+      readonly attributes?: Auth.Attributes | undefined;
     },
     label: string,
   ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>

@@ -48,8 +48,9 @@ export const BAN_ATTRIBUTES: ReadonlyArray<string> = ["banned", "banReason", "ba
  * {@link UserServiceConfig.serverOnlyAttributes}, whatever an HTTP
  * `signUpAttributes` allow-list names: the ban state
  * ({@link BAN_ATTRIBUTES}), the SCIM provisioning keys (`scimUserName`,
- * `scimDeactivated`, `scimExternalId`, which `ScimService` alone writes) and
- * the anonymous-user marker (`isAnonymous`, which `AnonymousService` alone
+ * `scimDeactivated`, `scimExternalId`, which `ScimService` alone writes), the
+ * managed-user stamp (`provisionedBy`, which SSO and SCIM write when they
+ * create a user) and the anonymous-user marker (`isAnonymous`, which `AnonymousService` alone
  * writes). Each is state another, privileged flow owns, so a caller who could
  * preset it at sign-up could forge it.
  *
@@ -61,6 +62,7 @@ export const SIGN_UP_PROTECTED_ATTRIBUTES: ReadonlyArray<string> = [
   "scimUserName",
   "scimDeactivated",
   "scimExternalId",
+  "provisionedBy",
   "isAnonymous",
 ];
 

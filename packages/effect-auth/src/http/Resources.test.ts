@@ -183,6 +183,7 @@ const ssoProviderKeys = {
   jwksEndpoint: true,
   scopes: true,
   usePKCE: false,
+  requireEmailVerified: false,
   // SAML.
   entityId: true,
   ssoUrl: true,
