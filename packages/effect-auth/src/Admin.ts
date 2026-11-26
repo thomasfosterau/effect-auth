@@ -15,8 +15,9 @@
  *   absent means permanent). A `banExpires` in the past means the ban has
  *   lapsed - see {@link isBanned}.
  *
- * Wire {@link BannedUserPlugin} into your hooks stack to block banned users
- * from validating sessions.
+ * `SessionService` refuses a banned user a new session and refuses their
+ * existing ones, with no plugin needed; a ban also revokes the user's
+ * sessions, API keys and OIDC grants.
  *
  * @module admin
  */
@@ -35,6 +36,7 @@ import { AccountManagementStore } from "./AccountManagement.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
+import { revokeStandingAccess } from "./UserCredentials.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { isBanned } from "./UserStanding.ts";
 import { normalizeEmail, normalizeUsername } from "./utils.ts";
@@ -491,6 +493,7 @@ export const make = (
         });
 
         yield* sessionManager.invalidateUserSessions(userId);
+        yield* revokeStandingAccess(purgeServices, userId);
 
         return banned;
       }),
@@ -674,22 +677,9 @@ export const make = (
   });
 
 /**
- * Hooks plugin that blocks banned users at session validation.
+ * A no-op, kept so existing hook stacks still compose: `SessionService`
+ * refuses a banned user's sessions itself.
  *
- * Fails `afterValidateSession` with `AuthError("User is banned")` when the
- * validated user {@link isBanned | is currently banned}, short-circuiting
- * `SessionService.validateSession`. Lapsed bans (`banExpires` in the past)
- * pass through.
- *
- * Zero-dependency: compose it with the rest of your stack, e.g.
- * `composePlugins([BannedUserPlugin]).pipe(Layer.provide(Hooks.Default))` or
- * `BannedUserPlugin.pipe(Layer.provide(Hooks.Default))`.
+ * @deprecated Drop it from your hook stack; the ban is enforced without it.
  */
-export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
-  afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
-    Effect.flatMap(isBanned(sessionWithUser.user), (banned) =>
-      banned
-        ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been suspended" }))
-        : Effect.succeed(sessionWithUser),
-    ),
-});
+export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({});

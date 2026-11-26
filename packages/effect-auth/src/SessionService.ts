@@ -11,6 +11,7 @@ import { tokenHasher } from "./TokenHash.ts";
 import * as Obs from "./Observability.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
+import { requireGoodStanding } from "./UserStanding.ts";
 
 /**
  * The first problem with `sessionExpiresIn`, or `undefined` when it is sound:
@@ -85,6 +86,11 @@ export const make = (
               userId: rawUserId,
               attributes: rawAttributes,
             });
+
+            // A banned or SCIM-deactivated user gets no session, whichever
+            // sign-in method asked for it.
+            const user = yield* userStore.get(args.userId);
+            if (user !== null) yield* requireGoodStanding(user);
 
             const rawToken = yield* generateSessionId();
             const nowUtc = yield* DateTime.now;
@@ -214,6 +220,7 @@ export const make = (
               userId: session.userId,
             });
           }
+          yield* requireGoodStanding(user);
 
           // The session answers under its stored id: the caller already holds
           // the token it presented.
@@ -320,7 +327,9 @@ export class SessionService extends Context.Service<
      * Validate the session a raw token names and return it with the user. The
      * session answers under its stored id (the token's digest), never the
      * token. `beforeValidateSession` observes the stored id, never the token,
-     * and can only deny: its return value is not read back.
+     * and can only deny: its return value is not read back. Fails with
+     * `UserBannedError` when the user is banned or SCIM-deactivated, with no
+     * plugin needed.
      */
     readonly validateSession: (
       token: string,
@@ -329,6 +338,7 @@ export class SessionService extends Context.Service<
       | Errors.SessionNotFoundError
       | Errors.SessionExpiredError
       | Errors.UserNotFoundError
+      | Errors.UserBannedError
       | HookError
     >;
 
