@@ -1621,6 +1621,7 @@ rejection, not a warning:
 | `SubjectConfirmationData` `NotOnOrAfter`                              | `/saml`                    |
 | `Destination` equals the ACS URL                                      | `/saml`                    |
 | Signed `InResponseTo` agrees with the `Response` attribute            | `/saml`                    |
+| `InResponseTo` read only from signed content                          | `/saml`                    |
 | Signature/digest algorithms on an allow-list (SHA-256+ by default)    | `/saml`                    |
 | HMAC signature methods refused outright                               | `/saml`                    |
 | Encrypted assertions refused with an actionable message               | `/saml`                    |

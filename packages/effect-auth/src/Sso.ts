@@ -371,8 +371,9 @@ export interface SsoConfig {
   readonly samlClockSkewMs?: number;
   /**
    * Fallback replay window for an assertion that carries no `NotOnOrAfter`.
-   * Default 10 minutes. When the assertion does declare an expiry, that is used
-   * instead — the id only needs to be remembered for as long as it is valid.
+   * Default 10 minutes. When the assertion does declare an expiry, the id is
+   * remembered until that expiry plus `samlClockSkewMs`, as long as the
+   * verifier would still accept it.
    */
   readonly samlAssertionReplayTtl?: number;
   /**
@@ -952,14 +953,19 @@ export const make = (
 
         // Spend the assertion id itself, so a captured response cannot be
         // replayed inside its own validity window (or at all, for an
-        // IdP-initiated one, where there is no request to spend).
+        // IdP-initiated one, where there is no request to spend). The verifier
+        // accepts an assertion until `NotOnOrAfter` plus the clock skew, so
+        // the record outlives it by the skew too.
         const now = yield* Clock.currentTimeMillis;
         const seen = yield* replay.create({
           id: assertion.id,
           kind: "assertion",
           providerId: provider.id,
           createdAt: now,
-          expiresAt: assertion.notOnOrAfter ?? now + samlAssertionReplayTtl,
+          expiresAt:
+            assertion.notOnOrAfter === undefined
+              ? now + samlAssertionReplayTtl
+              : assertion.notOnOrAfter + samlClockSkewMs,
         });
         if (seen === null) {
           return yield* new SsoError({ message: "SAML assertion has already been used" });
