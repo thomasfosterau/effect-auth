@@ -776,15 +776,26 @@ Detaching does not make the two sign-up answers identical: the fresh branch stil
 ## Rate limiting
 
 ```typescript
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer, Result } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// Use a shared store (Redis, SQL) when you run more than one instance.
+// An in-process store: one instance only. Use a shared store (`/sql`, Redis)
+// when you run more than one, where `increment` must be one atomic statement.
 const counts = new Map<string, Auth.RateLimitEntry>();
 const rateLimitStore: typeof Auth.RateLimitStore.Service = {
   get: (key) => Effect.sync(() => counts.get(key) ?? null),
   set: (key, entry, _ttl) => Effect.sync(() => void counts.set(key, entry)),
-  increment: (_key, _ttl) => Effect.succeed(1), // must be atomic in a real store
+  // Count one request, opening a new window when there is none or it has ended.
+  increment: (key, ttlSeconds) =>
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      const entry = counts.get(key);
+      const next =
+        entry === undefined || now >= entry.resetAt
+          ? { key, count: 1, resetAt: now + ttlSeconds * 1000 }
+          : { ...entry, count: entry.count + 1 };
+      counts.set(key, next);
+      return next.count;
+    }),
   delete: (key) => Effect.sync(() => void counts.delete(key)),
 };
 
@@ -808,7 +819,13 @@ const strict: Auth.RateLimitConfig = {
   blockDurationMs: 5 * 60 * 1000, // then block for 5 minutes
 };
 
-await Effect.runPromise(Effect.provide(guardSignIn("192.0.2.1"), RateLimiterLive));
+// Five sign-ins from one address pass; the sixth is refused.
+const attempts = await Effect.runPromise(
+  Effect.forEach(Array.from({ length: 6 }), () => Effect.result(guardSignIn("192.0.2.1"))).pipe(
+    Effect.provide(RateLimiterLive),
+  ),
+);
+console.log(attempts.map(Result.isSuccess)); // [true, true, true, true, true, false]
 export { strict };
 ```
 
