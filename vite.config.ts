@@ -115,8 +115,6 @@ export default defineConfig({
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.
       "effect/avoid-data-tagged-error": "off",
-      // Vendor adapters and the client use plain `fetch` to stay Workers-safe.
-      "effect/avoid-native-fetch": "off",
       // Optional properties are `?: T | undefined`, and a conditional spread
       // is how a value is omitted under `exactOptionalPropertyTypes`.
       "effect/prefer-option-over-null": "off",
@@ -280,6 +278,20 @@ export default defineConfig({
           "effect/no-unknown-parameters": "off",
           "effect/no-unknown-returns": "off",
         },
+      },
+      {
+        // The edge, where plain `fetch` is the API being adapted: the
+        // browser client has no Effect runtime, the test `HttpClient` defers
+        // to the global a suite swaps, and the workerd and Web-handler suites
+        // call the server they start. Core code goes through `HttpClient`.
+        files: [
+          "packages/effect-auth/src/client/Client.ts",
+          "packages/effect-auth/src/testing/HttpClient.ts",
+          "packages/effect-auth/src/http/DomainAttestation.test.ts",
+          "packages/effect-auth/src/Workerd.test.ts",
+          "packages/argon2/src/Workerd.test.ts",
+        ],
+        rules: { "effect/avoid-native-fetch": "off" },
       },
       {
         // The Promise-facing web handler is an entrypoint: it runs effects.

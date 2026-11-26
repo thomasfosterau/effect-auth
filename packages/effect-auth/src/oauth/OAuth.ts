@@ -12,9 +12,11 @@ import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
+import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import { signWithPkcs8, verifiesWithJwk } from "../JwsSignature.ts";
 import * as Obs from "../Observability.ts";
+import * as OutboundHttp from "../OutboundHttp.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as RootSecret from "../RootSecret.ts";
 import { tokenHasher } from "../TokenHash.ts";
@@ -217,11 +219,18 @@ export interface OAuthProvider {
     OAuthProviderError | AuthError,
     OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest | Mac.Mac | RootSecret.RootSecret
   >;
+  /**
+   * The token, userinfo and JWKS requests require an `HttpClient`;
+   * `OAuthService` and `SsoService` provide the one their layer was built
+   * with.
+   */
   readonly exchangeCode: (
     code: string,
     codeVerifier?: string,
-  ) => Effect.Effect<OAuthTokenResponse, OAuthProviderError>;
-  readonly getUserInfo: (accessToken: string) => Effect.Effect<OAuthUserInfo, OAuthProviderError>;
+  ) => Effect.Effect<OAuthTokenResponse, OAuthProviderError, HttpClient.HttpClient>;
+  readonly getUserInfo: (
+    accessToken: string,
+  ) => Effect.Effect<OAuthUserInfo, OAuthProviderError, HttpClient.HttpClient>;
   /**
    * Resolve the user profile from a token response. Dispatches on
    * {@link OAuthProviderConfig.getUserInfoFromIdToken}: verifies + decodes the
@@ -232,7 +241,7 @@ export interface OAuthProvider {
   readonly getProfile: (
     tokens: OAuthTokenResponse,
     options?: { readonly expectedNonce?: string },
-  ) => Effect.Effect<OAuthUserInfo, OAuthProviderError>;
+  ) => Effect.Effect<OAuthUserInfo, OAuthProviderError, HttpClient.HttpClient>;
 }
 
 /**
@@ -402,13 +411,10 @@ const invalidBody = (provider: string, what: string, cause?: unknown) =>
 /** A response body as text. A failed read is an `OAuthProviderError`. */
 const readText = (
   provider: string,
-  response: Response,
+  response: HttpClientResponse.HttpClientResponse,
   what = "response body",
 ): Effect.Effect<string, OAuthProviderError> =>
-  Effect.tryPromise({
-    try: () => response.text(),
-    catch: (cause) => invalidBody(provider, what, cause),
-  });
+  response.text.pipe(Effect.mapError((cause) => invalidBody(provider, what, cause)));
 
 const decodeJsonString = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
@@ -418,7 +424,7 @@ const decodeJsonString = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema
  */
 const readJson = (
   provider: string,
-  response: Response,
+  response: HttpClientResponse.HttpClientResponse,
   what = "response body",
 ): Effect.Effect<Schema.Json, OAuthProviderError> =>
   readText(provider, response, what).pipe(
@@ -450,7 +456,7 @@ const decodeTokenResponseBody = Schema.decodeUnknownEffect(TokenResponseBody);
 /** A 2xx token endpoint's body, decoded. Anything else is an `OAuthProviderError`. */
 const readTokenResponse = (
   provider: string,
-  response: Response,
+  response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<OAuthTokenResponse, OAuthProviderError> =>
   readJson(provider, response, "token response").pipe(
     Effect.flatMap((json) =>
@@ -488,7 +494,8 @@ export const verifyIdToken = (
     readonly nonce?: string;
     readonly now?: number;
   },
-): Effect.Effect<Types.JsonObject, OAuthProviderError> => verifyIdTokenClaims(idToken, params);
+): Effect.Effect<Types.JsonObject, OAuthProviderError, HttpClient.HttpClient> =>
+  verifyIdTokenClaims(idToken, params);
 
 type IdTokenParams = Parameters<typeof verifyIdToken>[1];
 
@@ -510,18 +517,23 @@ const splitIdToken = (idToken: string): readonly [string, string, string] | unde
 const fetchIdTokenJwk = (
   params: IdTokenParams,
   header: Types.JsonObject,
-): Effect.Effect<Types.JsonObject, OAuthProviderError> =>
+): Effect.Effect<Types.JsonObject, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(params.jwksEndpoint, { headers: { Accept: "application/json" } }),
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: `Failed to fetch JWKS for ${params.provider}`,
-          provider: params.provider,
-          cause,
-        }),
-    });
-    if (!response.ok) {
+    const client = yield* HttpClient.HttpClient;
+    const response = yield* OutboundHttp.send(
+      client,
+      OutboundHttp.getJson(params.jwksEndpoint),
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Failed to fetch JWKS for ${params.provider}`,
+            provider: params.provider,
+            cause,
+          }),
+      ),
+    );
+    if (!OutboundHttp.isOk(response)) {
       return yield* new OAuthProviderError({
         message: `JWKS request failed with status ${response.status}`,
         provider: params.provider,
@@ -579,7 +591,7 @@ const idTokenClaimFailure = (
 const verifyIdTokenClaims = (
   idToken: string,
   params: IdTokenParams,
-): Effect.Effect<Types.JsonObject, OAuthProviderError> =>
+): Effect.Effect<Types.JsonObject, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const fail = (message: string) =>
       new OAuthProviderError({ message, provider: params.provider });
@@ -689,28 +701,52 @@ const profileAccount = (
 });
 
 /**
- * `fetch` a provider endpoint, failing with `fetchFailure` when the request
- * cannot be sent and with `statusFailure` plus the response text on a non-2xx
- * answer.
+ * A token endpoint `POST` of `params`, the client authenticating in the body
+ * or, with `tokenAuthMethod: "basic"`, in the `Authorization` header.
+ */
+const tokenRequest = (
+  config: OAuthProviderConfig,
+  params: URLSearchParams,
+): HttpClientRequest.HttpClientRequest =>
+  HttpClientRequest.post(config.tokenEndpoint, {
+    headers: {
+      Accept: "application/json",
+      ...(config.tokenAuthMethod === "basic" && {
+        Authorization: `Basic ${Base64.encode(
+          `${config.clientId}:${Redacted.value(config.clientSecret)}`,
+        )}`,
+      }),
+    },
+  }).pipe(HttpClientRequest.bodyText(params.toString(), "application/x-www-form-urlencoded"));
+
+/**
+ * Send a request to a provider endpoint, failing with `fetchFailure` when the
+ * request cannot be sent and with `statusFailure` plus the response text on a
+ * non-2xx answer.
  */
 const fetchProviderOk = (
   provider: string,
-  url: string,
-  init: RequestInit,
+  request: HttpClientRequest.HttpClientRequest,
   failures: { readonly fetchFailure: string; readonly statusFailure: string },
-): Effect.Effect<Response, OAuthProviderError> =>
+): Effect.Effect<
+  HttpClientResponse.HttpClientResponse,
+  OAuthProviderError,
+  HttpClient.HttpClient
+> =>
   Effect.gen(function* () {
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(url, init),
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: failures.fetchFailure,
-          provider,
-          cause,
-        }),
-    });
+    const client = yield* HttpClient.HttpClient;
+    const response = yield* OutboundHttp.send(client, request).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: failures.fetchFailure,
+            provider,
+            cause,
+          }),
+      ),
+    );
 
-    if (!response.ok) {
+    if (!OutboundHttp.isOk(response)) {
       const errorText = yield* readText(provider, response);
       return yield* new OAuthProviderError({
         message: `${failures.statusFailure}: ${errorText}`,
@@ -730,7 +766,9 @@ export const provider = (
 ): OAuthProvider => {
   const mapProfile = config.mapProfile ?? claimsToUserInfo;
 
-  const getUserInfo = (accessToken: string): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
+  const getUserInfo = (
+    accessToken: string,
+  ): Effect.Effect<OAuthUserInfo, OAuthProviderError, HttpClient.HttpClient> =>
     Effect.gen(function* () {
       const userInfoEndpoint = config.userInfoEndpoint;
       if (!userInfoEndpoint) {
@@ -742,15 +780,13 @@ export const provider = (
 
       const response = yield* fetchProviderOk(
         name,
-        userInfoEndpoint,
-        {
-          method: config.userInfoMethod ?? "GET",
+        HttpClientRequest.make(config.userInfoMethod ?? "GET")(userInfoEndpoint, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             Accept: "application/json",
             ...config.userInfoHeaders,
           },
-        },
+        }),
         {
           fetchFailure: `Failed to get user info from ${name}`,
           statusFailure: "User info request failed",
@@ -842,27 +878,10 @@ export const provider = (
           params.set("code_verifier", codeVerifier);
         }
 
-        const response = yield* fetchProviderOk(
-          name,
-          config.tokenEndpoint,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-              Accept: "application/json",
-              ...(useBasic && {
-                Authorization: `Basic ${Base64.encode(
-                  `${config.clientId}:${Redacted.value(config.clientSecret)}`,
-                )}`,
-              }),
-            },
-            body: params.toString(),
-          },
-          {
-            fetchFailure: `Failed to exchange code with ${name}`,
-            statusFailure: "Token exchange failed",
-          },
-        );
+        const response = yield* fetchProviderOk(name, tokenRequest(config, params), {
+          fetchFailure: `Failed to exchange code with ${name}`,
+          statusFailure: "Token exchange failed",
+        });
 
         return yield* readTokenResponse(name, response);
       }),
@@ -1104,11 +1123,13 @@ export const make = (
   | SecureRandom.SecureRandom
   | Aead.Aead
   | Digest.Digest
+  | HttpClient.HttpClient
   | Kdf.Kdf
   | Mac.Mac
   | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
     const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
     const trustedProviders = options.trustedProviders ?? [];
     const allowDifferentEmails = options.allowDifferentEmails ?? false;
@@ -1206,6 +1227,27 @@ export const make = (
         return stateEntry;
       });
 
+    /** Exchange the callback's code, then read the profile, over this layer's client. */
+    const exchangeForProfile = (
+      providerInstance: OAuthProvider,
+      state: string,
+      code: string,
+      stateEntry: OAuthState,
+    ): Effect.Effect<
+      { readonly tokens: OAuthTokenResponse; readonly userInfo: OAuthUserInfo },
+      OAuthProviderError
+    > =>
+      Effect.gen(function* () {
+        const tokens = yield* providerInstance.exchangeCode(
+          code,
+          yield* callbackVerifier(providerInstance, state, stateEntry),
+        );
+        const userInfo = yield* providerInstance.getProfile(tokens, {
+          ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+        });
+        return { tokens, userInfo };
+      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+
     /**
      * Shared callback plumbing: consume the state, exchange the code and
      * fetch the provider profile.
@@ -1222,13 +1264,12 @@ export const make = (
           });
         }
 
-        const tokens = yield* providerInstance.exchangeCode(
+        const { tokens, userInfo } = yield* exchangeForProfile(
+          providerInstance,
+          state,
           code,
-          yield* callbackVerifier(providerInstance, state, stateEntry),
+          stateEntry,
         );
-        const userInfo = yield* providerInstance.getProfile(tokens, {
-          ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
-        });
 
         return { stateEntry, tokens, userInfo };
       });
@@ -1521,16 +1562,13 @@ export const make = (
           });
         }
 
-        // Exchange code for tokens
-        const tokens = yield* providerInstance.exchangeCode(
+        // Exchange the code, then read the profile (userinfo or a verified id_token).
+        const { tokens, userInfo } = yield* exchangeForProfile(
+          providerInstance,
+          state,
           code,
-          yield* callbackVerifier(providerInstance, state, stateEntry),
+          stateEntry,
         );
-
-        // Get user info (userinfo endpoint or verified OIDC id_token)
-        const userInfo = yield* providerInstance.getProfile(tokens, {
-          ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
-        });
 
         // Email-mismatch guard: reject when the provider email differs from the
         // user's current account email (overridable with allowDifferentEmails).
@@ -1675,35 +1713,10 @@ export const make = (
               params.set("client_secret", Redacted.value(rConfig.clientSecret));
             }
 
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                fetch(rConfig.tokenEndpoint, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    ...(rUseBasic && {
-                      Authorization: `Basic ${Base64.encode(
-                        `${rConfig.clientId}:${Redacted.value(rConfig.clientSecret)}`,
-                      )}`,
-                    }),
-                  },
-                  body: params.toString(),
-                }),
-              catch: (cause) =>
-                new OAuthProviderError({
-                  message: `Failed to refresh token for ${provider}`,
-                  provider,
-                  cause,
-                }),
-            });
-
-            if (!response.ok) {
-              const errorText = yield* readText(provider, response);
-              return yield* new OAuthProviderError({
-                message: `Token refresh failed: ${errorText}`,
-                provider,
-              });
-            }
+            const response = yield* fetchProviderOk(provider, tokenRequest(rConfig, params), {
+              fetchFailure: `Failed to refresh token for ${provider}`,
+              statusFailure: "Token refresh failed",
+            }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
 
             const data = yield* readTokenResponse(provider, response);
 
@@ -2281,20 +2294,22 @@ export interface DiscoveredEndpoints {
  */
 export const discoverOAuthEndpoints = (
   issuerUrl: string,
-): Effect.Effect<DiscoveredEndpoints, OAuthProviderError> =>
+): Effect.Effect<DiscoveredEndpoints, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const base = issuerUrl.replace(/\/$/, "");
     const url = `${base}/.well-known/openid-configuration`;
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(url, { headers: { Accept: "application/json" } }),
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: `Failed to fetch OIDC discovery document from ${url}`,
-          provider: issuerUrl,
-          cause,
-        }),
-    });
-    if (!response.ok) {
+    const client = yield* HttpClient.HttpClient;
+    const response = yield* OutboundHttp.send(client, OutboundHttp.getJson(url)).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Failed to fetch OIDC discovery document from ${url}`,
+            provider: issuerUrl,
+            cause,
+          }),
+      ),
+    );
+    if (!OutboundHttp.isOk(response)) {
       return yield* new OAuthProviderError({
         message: `OIDC discovery request failed with status ${response.status}`,
         provider: issuerUrl,

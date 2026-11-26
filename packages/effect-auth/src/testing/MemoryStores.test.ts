@@ -23,6 +23,7 @@ import { purgeExpiredKV } from "../KeyValueStores.ts";
 import { MagicLinkStore } from "../MagicLink.ts";
 import { PhoneOtpStore } from "../PhoneOtp.ts";
 import * as Testing from "./index.ts";
+import { runPromiseHttp } from "../testing/HttpClient.ts";
 
 const register = <E, R>(
   suite: Testing.ConformanceSuite<E, R>,
@@ -110,7 +111,7 @@ const services = Layer.mergeAll(
 
 describe("memoryStores", () => {
   it("builds the service graphs the docs examples need, and they run", async () => {
-    const result = await Effect.runPromise(
+    const result = await runPromiseHttp(
       Effect.gen(function* () {
         const emailPassword = yield* EmailPasswordService;
         const signedUp = yield* emailPassword.signUp({
