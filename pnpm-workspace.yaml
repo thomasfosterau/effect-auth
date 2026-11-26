@@ -25,7 +25,7 @@ catalog:
   "@thomasfosterau/argon2": 0.1.1
   "@thomasfosterau/effect-connect": ^0.5.0
   "@thomasfosterau/effect-jsonapi": ^0.22.2
-  "@types/node": ^26.6.7
+  "@types/node": ^26.6.10
   "@types/pg": ^8.15.0
   "@types/semver": ^7.8.0
   # Must equal the vitest vite-plus bundles.
