@@ -31,7 +31,7 @@ import * as Obs from "./Observability.ts";
  * configurations that hide whether an account exists, where an inline send
  * would put a vendor round-trip (and any vendor failure) on the known-address
  * branch only. Every other send is awaited inline, so its failure reaches the
- * caller. Which flows detach is listed in the package README ("Delivery").
+ * caller. Which flows detach is listed in the sign-in methods guide ("Delivery").
  *
  * `schedule` receives a task that never fails and needs no services; it must
  * return once the task is handed off, not when it finishes. Without this

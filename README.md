@@ -23,7 +23,7 @@ const signIn = Effect.gen(function* () {
 });
 ```
 
-Provide `EmailPasswordService.layer()` with its stores (in memory, `/sql` or an adapter); the [core README](packages/effect-auth/README.md) has the full, runnable setup.
+Provide `EmailPasswordService.layer()` with its stores (in memory, `/sql` or an adapter); the [getting-started guide](docs/guides/getting-started.md) has the full, runnable setup.
 
 ## Packages
 

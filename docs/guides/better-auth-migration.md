@@ -159,7 +159,7 @@ SCIM provisioning (`Auth.ScimService`) has no Better Auth counterpart; [`scim.md
 
 Better Auth takes a `sendX` callback per feature. effect-auth does too, but adds a single seam so you write the transport once: implement `Auth.EmailSender` / `Auth.SmsSender` and derive every per-feature callback with `Auth.emailCallbacks(sender, identifiers)` and `Auth.smsCallbacks(sender, identifiers)`. `EmailSender.layerConnect` / `SmsSender.layerConnect` back them with any effect-connect provider (`@thomasfosterau/effect-connect-resend`, `@thomasfosterau/effect-connect-twilio`).
 
-Better Auth leaves it to the app to schedule a send outside the response (the `waitUntil` workaround). effect-auth does that itself for the flows that hide whether an account exists: they hand the send to `Auth.DeliveryScheduler`, and on Workers you provide `Auth.DeliveryScheduler.waitUntil(...)` per request. Every other send is awaited. The core README's "Delivery" section lists which flow does which.
+Better Auth leaves it to the app to schedule a send outside the response (the `waitUntil` workaround). effect-auth does that itself for the flows that hide whether an account exists: they hand the send to `Auth.DeliveryScheduler`, and on Workers you provide `Auth.DeliveryScheduler.waitUntil(...)` per request. Every other send is awaited. The [sign-in methods guide](./sign-in-methods.md#delivery) lists which flow does which.
 
 ## 5. Client migration
 

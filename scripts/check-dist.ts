@@ -81,8 +81,8 @@
  * is opened.
  *
  * The same project type-checks a consumer of the packed declarations
- * (`typeCheckDrizzleConsumer`): the drizzle README's `defineSchema` example,
- * read from the README itself, and `drizzleConsumer`, which queries the packed
+ * (`typeCheckDrizzleConsumer`): the Drizzle guide's `defineSchema` example,
+ * read from the guide itself, and `drizzleConsumer`, which queries the packed
  * tables with the consumer's own drizzle and hands `databaseLayer` a real
  * handle of each dialect. It runs once on the drizzle-orm the project
  * installed and again on `drizzleApplicationsPin`, the commit build the
@@ -578,16 +578,16 @@ export type NotAnInstant = Holds<Refuses<Drizzle.ColumnKey<SessionsTable, Date>,
 `;
 
 /**
- * The first `ts` code block under the drizzle README's "Adopting an existing
+ * The first `ts` code block under the Drizzle guide's "Adopting an existing
  * schema" heading: the `defineSchema` example consumers copy.
  */
 const readmeDefineSchemaExample = (): string => {
-  const readme = readFileSync(join(root, "packages", "drizzle", "README.md"), "utf8");
+  const readme = readFileSync(join(root, "docs", "guides", "drizzle.md"), "utf8");
   const section = readme.split("\n## Adopting an existing schema")[1];
   const block = section === undefined ? undefined : /\n```ts\n([\s\S]*?)\n```/.exec(section)?.[1];
   if (block === undefined) {
     throw new Error(
-      "packages/drizzle/README.md has no ts block under `## Adopting an existing schema`",
+      "docs/guides/drizzle.md has no ts block under `## Adopting an existing schema`",
     );
   }
   return block;

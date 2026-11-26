@@ -63,4 +63,4 @@ answers through `device-authorizations`, because RFC 8628 §3.3 leaves that page
   `getOrgRoleById`, and `addTeamMember(record)`. A resource is otherwise addressed by an id the
   stores already held.
 - [docs/guides/jsonapi-migration.md](../guides/jsonapi-migration.md) maps every removed route to
-  its replacement; the core README's endpoint reference lists both tiers.
+  its replacement; the HTTP API guide's endpoint reference lists both tiers.

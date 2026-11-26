@@ -1,7 +1,7 @@
 /**
- * The scope the README's sign-up writer examples are compiled in: the
+ * The scope the Drizzle guide's sign-up writer examples are compiled in: the
  * application's users table, NOT NULL and nullable, and its drizzle `db`.
- * `ReadmeSignUpWriter.test.ts` sets `db` and checks that the README shows the
+ * `ReadmeSignUpWriter.test.ts` sets `db` and checks that the guide shows the
  * writers in `NotNullWriter.ts` and `NullableWriter.ts` verbatim.
  *
  * Never published (`tsconfig.json` excludes `src/testing/`).
