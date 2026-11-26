@@ -7,7 +7,7 @@
  * @module authorizer
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as HashMap from "effect/HashMap";
 import * as Layer from "effect/Layer";
@@ -301,9 +301,12 @@ export interface AuthorizerConfig<E = unknown> {
  * Fails `Authorizer.layer` when its policies do not validate against the
  * model: a configuration error, raised while the layer is built.
  */
-export class PolicyValidationError extends Data.TaggedError("PolicyValidationError")<{
-  readonly message: string;
-}> {}
+export class PolicyValidationError extends Schema.TaggedError<
+  PolicyValidationError,
+  { readonly brand: unique symbol }
+>()("PolicyValidationError", {
+  message: Schema.String,
+}) {}
 
 /**
  * The authorization service: decides, checks and enforces requests against the configured policies (plus a `PolicyStore`'s, when one is in context).

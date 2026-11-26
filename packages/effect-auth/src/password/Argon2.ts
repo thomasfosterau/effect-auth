@@ -3,7 +3,7 @@
  * the PHC strings. Only a `Kdf` with Argon2id (`NodeCrypto.layerKdf`, Node.js
  * 24.7+ or Bun 1.4+) derives it; on Workers use effect-auth-argon2.
  */
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -122,9 +122,12 @@ const overCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits): string |
  * or limit that is not a positive integer, or costs over the verify ceiling.
  * Thrown when the hasher is built.
  */
-export class Argon2ConfigError extends Data.TaggedError("Argon2ConfigError")<{
-  readonly message: string;
-}> {}
+export class Argon2ConfigError extends Schema.TaggedError<
+  Argon2ConfigError,
+  { readonly brand: unique symbol }
+>()("Argon2ConfigError", {
+  message: Schema.String,
+}) {}
 
 const requireUsableConfig = (costs: Argon2Profile, limits: Argon2VerifyLimits): void => {
   const invalid = Arr.findFirst(

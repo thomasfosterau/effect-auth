@@ -12,7 +12,7 @@
 
 /** The core records: users, sessions, attributes and JSON values. */
 export * as Types from "./Types.ts";
-/** The domain errors, each a `Data.TaggedError` with a stable `code`. */
+/** The domain errors, each a `Schema.TaggedError` with a stable `code`. */
 export * as Errors from "./Errors.ts";
 /** A typed plugin system over fixed points in the auth lifecycle. */
 export * as Hooks from "./Hooks.ts";

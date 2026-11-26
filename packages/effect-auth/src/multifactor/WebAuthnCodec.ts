@@ -35,11 +35,15 @@ export type CBORValue =
   | CBORMap;
 
 /** Thrown for any input this decoder rejects. */
-export class CBORParseError extends Data.TaggedError("CBORParseError")<{
-  readonly message: string;
-}> {
-  constructor(message: string) {
-    super({ message: `Failed to decode CBOR: ${message}` });
+export class CBORParseError extends Schema.TaggedError<
+  CBORParseError,
+  { readonly brand: unique symbol }
+>()("CBORParseError", {
+  message: Schema.String,
+}) {
+  /** This error with its decoder's prefix on `message`. */
+  static withDetail(message: string): CBORParseError {
+    return new CBORParseError({ message: `Failed to decode CBOR: ${message}` });
   }
 }
 
@@ -98,10 +102,10 @@ const readArgument = (
   if (size === 0) {
     // 28–30 are reserved; 31 is the indefinite-length form, which CTAP2
     // canonical CBOR forbids.
-    throw new CBORParseError("Unsupported or reserved additional information");
+    throw CBORParseError.withDetail("Unsupported or reserved additional information");
   }
   if (data.byteLength < offset + 1 + size) {
-    throw new CBORParseError("Insufficient bytes");
+    throw CBORParseError.withDetail("Insufficient bytes");
   }
   return [bigIntFromBytes(data.subarray(offset + 1, offset + 1 + size)), offset + 1 + size];
 };
@@ -112,7 +116,7 @@ const readLength = (data: Uint8Array, offset: number, additionalInformation: num
   if (raw > BigInt(data.byteLength)) {
     // Every length/count is bounded by the remaining input: a byte string
     // needs that many bytes, and an array/map needs at least one byte per item.
-    throw new CBORParseError("Insufficient bytes");
+    throw CBORParseError.withDetail("Insufficient bytes");
   }
   return [Number(raw), next] as const;
 };
@@ -123,10 +127,10 @@ const decodeItem = (
   offset: number,
   depth: number,
 ): readonly [CBORValue, number] => {
-  if (depth > MAX_CBOR_DEPTH) throw new CBORParseError("Maximum depth exceeded");
+  if (depth > MAX_CBOR_DEPTH) throw CBORParseError.withDetail("Maximum depth exceeded");
   // `offset` is a non-negative integer, so this is `data.byteLength < offset + 1`.
   const head = data[offset];
-  if (head === undefined) throw new CBORParseError("Insufficient bytes");
+  if (head === undefined) throw CBORParseError.withDetail("Insufficient bytes");
 
   const majorType = head >> 5;
   const additionalInformation = head & 0x1f;
@@ -143,12 +147,12 @@ const decodeItem = (
     }),
     Match.whenOr(2, 3, () => {
       const [length, start] = readLength(data, offset, additionalInformation);
-      if (data.byteLength < start + length) throw new CBORParseError("Insufficient bytes");
+      if (data.byteLength < start + length) throw CBORParseError.withDetail("Insufficient bytes");
       const bytes = data.slice(start, start + length);
       if (majorType === 2) return [bytes, start + length] as const;
       const text = Result.getOrThrowWith(
         Result.try(() => utf8.decode(bytes)),
-        () => new CBORParseError("Invalid UTF-8 text string"),
+        () => CBORParseError.withDetail("Invalid UTF-8 text string"),
       );
       return [text, start + length] as const;
     }),
@@ -174,8 +178,8 @@ const decodeItem = (
           : P.isNumber(key) || P.isBigInt(key)
             ? key.toString()
             : null;
-        if (stringifiedKey === null) throw new CBORParseError("Unsupported map key type");
-        if (entries.has(stringifiedKey)) throw new CBORParseError("Duplicate map key");
+        if (stringifiedKey === null) throw CBORParseError.withDetail("Unsupported map key type");
+        if (entries.has(stringifiedKey)) throw CBORParseError.withDetail("Duplicate map key");
         const [value, afterValue] = decodeItem(data, afterKey, depth + 1);
         entries.set(stringifiedKey, value);
         return afterValue;
@@ -193,7 +197,7 @@ const decodeItem = (
       if (additionalInformation === 21) return [true, offset + 1] as const;
       if (additionalInformation === 22) return [null, offset + 1] as const;
       if (additionalInformation === 23) return [undefined, offset + 1] as const;
-      throw new CBORParseError("Unsupported simple value, float, or break");
+      throw CBORParseError.withDetail("Unsupported simple value, float, or break");
     }),
   );
 };
@@ -212,7 +216,7 @@ export const decodeCBOR = (data: Uint8Array): readonly [CBORValue, number] => {
 export const decodeCBORNoLeftoverBytes = (data: Uint8Array): CBORValue => {
   const [value, size] = decodeCBOR(data);
   if (size !== data.byteLength) {
-    throw new CBORParseError(`${data.byteLength - size} leftover bytes`);
+    throw CBORParseError.withDetail(`${data.byteLength - size} leftover bytes`);
   }
   return value;
 };
@@ -403,11 +407,15 @@ export interface ClientData {
 }
 
 /** Thrown when `clientDataJSON` is missing required members or malformed. */
-export class ClientDataParseError extends Data.TaggedError("ClientDataParseError")<{
-  readonly message: string;
-}> {
-  constructor(message: string) {
-    super({ message: `Failed to parse client data: ${message}` });
+export class ClientDataParseError extends Schema.TaggedError<
+  ClientDataParseError,
+  { readonly brand: unique symbol }
+>()("ClientDataParseError", {
+  message: Schema.String,
+}) {
+  /** This error with its decoder's prefix on `message`. */
+  static withDetail(message: string): ClientDataParseError {
+    return new ClientDataParseError({ message: `Failed to parse client data: ${message}` });
   }
 }
 
@@ -455,11 +463,11 @@ const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema
 const base64urlProperty = (value: unknown, key: string, message: string): Uint8Array => {
   const raw = P.hasProperty(value, key) ? value[key] : undefined;
   if (!P.isString(raw)) {
-    throw new ClientDataParseError(message);
+    throw ClientDataParseError.withDetail(message);
   }
   return Result.getOrThrowWith(
     Result.try(() => decodeBase64urlIgnorePadding(raw)),
-    () => new ClientDataParseError(message),
+    () => ClientDataParseError.withDetail(message),
   );
 };
 
@@ -468,14 +476,14 @@ const clientDataType = (parsed: unknown): ClientDataType => {
   const rawType = P.hasProperty(parsed, "type") ? parsed.type : undefined;
   if (rawType === "webauthn.get") return ClientDataType.Get;
   if (rawType === "webauthn.create") return ClientDataType.Create;
-  throw new ClientDataParseError("Missing or invalid property 'type'");
+  throw ClientDataParseError.withDetail("Missing or invalid property 'type'");
 };
 
 /** The optional `crossOrigin` flag, `false` when absent. */
 const clientDataCrossOrigin = (parsed: unknown): boolean => {
   if (!P.hasProperty(parsed, "crossOrigin")) return false;
   if (!P.isBoolean(parsed.crossOrigin)) {
-    throw new ClientDataParseError("Invalid property 'crossOrigin'");
+    throw ClientDataParseError.withDetail("Invalid property 'crossOrigin'");
   }
   return parsed.crossOrigin;
 };
@@ -485,7 +493,7 @@ const tokenBindingStatus = (raw: unknown): TokenBindingStatus => {
   const rawStatus = P.hasProperty(raw, "status") ? raw.status : undefined;
   if (rawStatus === "present") return TokenBindingStatus.Present;
   if (rawStatus === "supported") return TokenBindingStatus.Supported;
-  throw new ClientDataParseError("Missing or invalid property 'tokenBinding.status'");
+  throw ClientDataParseError.withDetail("Missing or invalid property 'tokenBinding.status'");
 };
 
 /** The optional `tokenBinding` member, `null` when absent. */
@@ -494,7 +502,7 @@ const clientDataTokenBinding = (parsed: unknown): TokenBinding | null => {
   const raw = parsed.tokenBinding;
   // Any non-null object, arrays included.
   if (!P.isObjectOrArray(raw)) {
-    throw new ClientDataParseError("Invalid property 'tokenBinding'");
+    throw ClientDataParseError.withDetail("Invalid property 'tokenBinding'");
   }
   const id = base64urlProperty(raw, "id", "Missing or invalid property 'tokenBinding.id'");
   const status = tokenBindingStatus(raw);
@@ -503,13 +511,12 @@ const clientDataTokenBinding = (parsed: unknown): TokenBinding | null => {
 
 /** Parse and validate the `clientDataJSON` a client returns. */
 export function parseClientDataJSON(encoded: Uint8Array): ClientData {
-  const parsed = Option.getOrThrowWith(
-    decodeJsonOption(new TextDecoder().decode(encoded)),
-    () => new ClientDataParseError("Invalid client data JSON"),
+  const parsed = Option.getOrThrowWith(decodeJsonOption(new TextDecoder().decode(encoded)), () =>
+    ClientDataParseError.withDetail("Invalid client data JSON"),
   );
   // Any non-null object, arrays included.
   if (!P.isObjectOrArray(parsed)) {
-    throw new ClientDataParseError("Invalid client data JSON");
+    throw ClientDataParseError.withDetail("Invalid client data JSON");
   }
 
   const type = clientDataType(parsed);
@@ -521,7 +528,7 @@ export function parseClientDataJSON(encoded: Uint8Array): ClientData {
 
   const origin = P.hasProperty(parsed, "origin") ? parsed.origin : undefined;
   if (!P.isString(origin)) {
-    throw new ClientDataParseError("Missing or invalid property 'origin'");
+    throw ClientDataParseError.withDetail("Missing or invalid property 'origin'");
   }
 
   const crossOrigin = clientDataCrossOrigin(parsed);
@@ -542,11 +549,17 @@ export interface AttestedCredential {
 }
 
 /** Thrown when authenticator data is truncated or otherwise malformed. */
-export class AuthenticatorDataParseError extends Data.TaggedError("AuthenticatorDataParseError")<{
-  readonly message: string;
-}> {
-  constructor(message: string) {
-    super({ message: `Failed to parse authenticator data: ${message}` });
+export class AuthenticatorDataParseError extends Schema.TaggedError<
+  AuthenticatorDataParseError,
+  { readonly brand: unique symbol }
+>()("AuthenticatorDataParseError", {
+  message: Schema.String,
+}) {
+  /** This error with its decoder's prefix on `message`. */
+  static withDetail(message: string): AuthenticatorDataParseError {
+    return new AuthenticatorDataParseError({
+      message: `Failed to parse authenticator data: ${message}`,
+    });
   }
 }
 
@@ -585,7 +598,7 @@ const bigEndianUint32 = (data: Uint8Array, offset: number): number => view(data)
 /** Parse the authenticator data blob returned by an authenticator. */
 export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
   if (encoded.byteLength < 37) {
-    throw new AuthenticatorDataParseError("Insufficient bytes");
+    throw AuthenticatorDataParseError.withDetail("Insufficient bytes");
   }
   const relyingPartyIdHash = encoded.slice(0, 32);
   const flags = view(encoded).getUint8(32);
@@ -599,17 +612,17 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
   let credential: AttestedCredential | null = null;
   if (includesAttestedCredentialData) {
     if (encoded.byteLength < 37 + 18) {
-      throw new AuthenticatorDataParseError("Invalid credential data");
+      throw AuthenticatorDataParseError.withDetail("Invalid credential data");
     }
     const authenticatorAAGUID = encoded.slice(37, 53);
     const credentialIdLength = bigEndianUint16(encoded, 53);
     if (encoded.byteLength < 37 + 18 + credentialIdLength) {
-      throw new AuthenticatorDataParseError("Insufficient bytes");
+      throw AuthenticatorDataParseError.withDetail("Insufficient bytes");
     }
     const id = encoded.slice(55, 55 + credentialIdLength);
     const [publicKey] = Result.getOrThrowWith(
       Result.try(() => decodeCOSEPublicKey(encoded.slice(55 + credentialIdLength))),
-      () => new AuthenticatorDataParseError("Failed to parse public key"),
+      () => AuthenticatorDataParseError.withDetail("Failed to parse public key"),
     );
     credential = { authenticatorAAGUID, id, publicKey };
   }
@@ -672,11 +685,17 @@ export interface AttestationObject {
 }
 
 /** Thrown when an attestation object is malformed or uses an unknown format. */
-export class AttestationObjectParseError extends Data.TaggedError("AttestationObjectParseError")<{
-  readonly message: string;
-}> {
-  constructor(message: string) {
-    super({ message: `Failed to parse attestation object: ${message}` });
+export class AttestationObjectParseError extends Schema.TaggedError<
+  AttestationObjectParseError,
+  { readonly brand: unique symbol }
+>()("AttestationObjectParseError", {
+  message: Schema.String,
+}) {
+  /** This error with its decoder's prefix on `message`. */
+  static withDetail(message: string): AttestationObjectParseError {
+    return new AttestationObjectParseError({
+      message: `Failed to parse attestation object: ${message}`,
+    });
   }
 }
 
@@ -684,28 +703,30 @@ export class AttestationObjectParseError extends Data.TaggedError("AttestationOb
 export function parseAttestationObject(encoded: Uint8Array): AttestationObject {
   const decoded = Result.getOrThrowWith(
     Result.try(() => decodeCBORNoLeftoverBytes(encoded)),
-    () => new AttestationObjectParseError("Invalid CBOR data"),
+    () => AttestationObjectParseError.withDetail("Invalid CBOR data"),
   );
   if (!(decoded instanceof Map)) {
-    throw new AttestationObjectParseError("Invalid CBOR data");
+    throw AttestationObjectParseError.withDetail("Invalid CBOR data");
   }
 
   const fmt = decoded.get("fmt");
   if (!P.isString(fmt)) {
-    throw new AttestationObjectParseError("Invalid or missing property 'fmt'");
+    throw AttestationObjectParseError.withDetail("Invalid or missing property 'fmt'");
   }
   const attStmt = decoded.get("attStmt");
   if (!(attStmt instanceof Map)) {
-    throw new AttestationObjectParseError("Invalid or missing property 'attStmt'");
+    throw AttestationObjectParseError.withDetail("Invalid or missing property 'attStmt'");
   }
   const authData = decoded.get("authData");
   if (!(authData instanceof Uint8Array)) {
-    throw new AttestationObjectParseError("Invalid or missing property 'authData'");
+    throw AttestationObjectParseError.withDetail("Invalid or missing property 'authData'");
   }
 
   const format = ATTESTATION_FORMATS[fmt];
   if (format === undefined) {
-    throw new AttestationObjectParseError(`Unsupported attestation statement format '${fmt}'`);
+    throw AttestationObjectParseError.withDetail(
+      `Unsupported attestation statement format '${fmt}'`,
+    );
   }
 
   return {
