@@ -79,8 +79,10 @@ const callSignIn = (ip: string | undefined) =>
     return yield* hooks.beforeAuthenticate(signIn).pipe(
       Effect.provideService(ClientIP, { ip }),
       Effect.map(() => "ok" as const),
-      Effect.catchTag("RateLimitError", () => Effect.succeed("limited" as const)),
-      Effect.catchTag("AuthError", () => Effect.succeed("ok" as const)),
+      Effect.catchTags({
+        RateLimitError: () => Effect.succeed("limited" as const),
+        AuthError: () => Effect.succeed("ok" as const),
+      }),
     );
   });
 

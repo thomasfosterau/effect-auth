@@ -122,9 +122,7 @@ describe("the suites share one store", () => {
     const listing = suite.cases.find((testCase) => testCase.name.startsWith("listByUserId"));
     assert(listing !== undefined, "the suite has a listByUserId case");
 
-    await Effect.runPromise(
-      listing.run.pipe(Effect.provide(Layer.succeed(SessionStore, sessionStore()))),
-    );
+    await Effect.runPromise(listing.run.pipe(Effect.provideService(SessionStore, sessionStore())));
     expect(seeded).toHaveLength(2);
   });
 });
@@ -188,7 +186,7 @@ describe("a broken store fails its suite", () => {
         Effect.map(Effect.service(IdentifierStore), (inner) => ({
           ...inner,
           create: (identifier: Identifier) =>
-            inner.create(identifier).pipe(Effect.catch(() => Effect.succeed(identifier))),
+            inner.create(identifier).pipe(Effect.orElseSucceed(() => identifier)),
         })),
       ).pipe(Layer.provide(IdentifierStoreKV), Layer.provide(KeyValueStore.layerMemory)),
     );

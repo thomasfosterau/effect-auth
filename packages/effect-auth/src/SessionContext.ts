@@ -396,10 +396,9 @@ export const requireCurrentUser: Effect.Effect<
   Types.User,
   Errors.NotAuthenticatedError,
   MaybeCurrentSession
-> = Effect.flatMap(currentUserOption, (user) =>
-  Option.isSome(user)
-    ? Effect.succeed(user.value)
-    : Effect.fail(new Errors.NotAuthenticatedError({ message: "Not authenticated" })),
+> = Effect.flatMap(
+  currentUserOption,
+  Effect.fromOption(() => new Errors.NotAuthenticatedError({ message: "Not authenticated" })),
 );
 
 /**
@@ -413,10 +412,9 @@ export const requireCurrentSession: Effect.Effect<
   Types.Session,
   Errors.NotAuthenticatedError,
   MaybeCurrentSession
-> = Effect.flatMap(currentSessionOption, (session) =>
-  Option.isSome(session)
-    ? Effect.succeed(session.value)
-    : Effect.fail(new Errors.NotAuthenticatedError({ message: "Not authenticated" })),
+> = Effect.flatMap(
+  currentSessionOption,
+  Effect.fromOption(() => new Errors.NotAuthenticatedError({ message: "Not authenticated" })),
 );
 
 // ---------------------------------------------------------------------------

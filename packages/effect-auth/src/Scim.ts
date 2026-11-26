@@ -910,9 +910,8 @@ export const make = (
       Effect.flatMap(users.get(member.userId), (user) =>
         user === null
           ? Effect.succeed(Option.none<ScimUserResource>())
-          : Effect.map(
+          : Effect.asSome(
               Effect.flatMap(targetOf(connection, member, user, domains), readUserResource),
-              Option.some,
             ),
       );
 

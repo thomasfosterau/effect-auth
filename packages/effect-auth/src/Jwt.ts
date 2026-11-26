@@ -519,19 +519,22 @@ export const make = (
     });
 
     /** Sign `payload`, which expires at `exp` (seconds), under the active key with header type `typ`. */
-    const signToken = (typ: string, payload: Types.JsonObject, exp: number) =>
-      Effect.gen(function* () {
-        const pair = yield* getOrCreateActiveKey();
-        const signingKey = yield* signingKeyOf(pair);
-        const token = yield* JoseJwt.sign(Claims, payload, signingKey, {
-          kid: pair.id,
-          typ,
-        }).pipe(
-          Effect.mapError((cause) => new JwtError({ message: "Failed to sign token", cause })),
-          Effect.provideContext(context),
-        );
-        return { token: Redacted.value(token), expiresAt: exp * 1000 } satisfies JwtSignResult;
-      }).pipe(Effect.withSpan(Obs.spanNames.tokenSign));
+    const signToken = Effect.fn(Obs.spanNames.tokenSign)(function* (
+      typ: string,
+      payload: Types.JsonObject,
+      exp: number,
+    ) {
+      const pair = yield* getOrCreateActiveKey();
+      const signingKey = yield* signingKeyOf(pair);
+      const token = yield* JoseJwt.sign(Claims, payload, signingKey, {
+        kid: pair.id,
+        typ,
+      }).pipe(
+        Effect.mapError((cause) => new JwtError({ message: "Failed to sign token", cause })),
+        Effect.provideContext(context),
+      );
+      return { token: Redacted.value(token), expiresAt: exp * 1000 } satisfies JwtSignResult;
+    });
 
     return {
       sign: Effect.fn("JwtService.sign")((user: Types.User, extraClaims?: Types.JsonObject) =>

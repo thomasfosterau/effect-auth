@@ -159,7 +159,7 @@ const decide = <E>(
       ? Effect.succeed<Entity.EntitySlice | null>(Entity.emptySlice)
       : resolver.value.resolve(requestRefs(policies, request)).pipe(
           Effect.map((entities): Entity.EntitySlice | null => Entity.slice(entities)),
-          Effect.catch(() => Effect.succeed<Entity.EntitySlice | null>(null)),
+          Effect.orElseSucceed(() => null),
         );
     if (slice === null) {
       yield* auditSystemDecision(request, {

@@ -1,6 +1,7 @@
 import { Context, DateTime, Effect, HashSet, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import { AccountDeletion } from "./AccountDeletion.ts";
 import * as Errors from "./Errors.ts";
@@ -196,10 +197,10 @@ const getUserOrFail = (
   store: typeof UserServiceStore.Service,
   userId: string,
 ): Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError> =>
-  Effect.flatMap(store.get(userId), (user) =>
-    user === null
-      ? Effect.fail(new Errors.UserNotFoundError({ message: "User not found", userId }))
-      : Effect.succeed(user),
+  Effect.filterOrFail(
+    store.get(userId),
+    P.isNotNull,
+    () => new Errors.UserNotFoundError({ message: "User not found", userId }),
   );
 
 export const make = (

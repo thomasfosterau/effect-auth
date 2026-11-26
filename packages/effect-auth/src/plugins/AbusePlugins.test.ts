@@ -296,14 +296,12 @@ describe("CaptchaPlugin", () => {
     "refuses to build with $recaptchaVersion / $minScore",
     async (extra) => {
       const client = stubHttpClient(() => Response.json({ success: true }));
-      const exit = await Effect.runPromise(
-        Effect.exit(
-          Effect.scoped(
-            Layer.build(
-              CaptchaPlugin({ ...config, provider: "google-recaptcha", ...extra }).pipe(
-                Layer.provide(Hooks.Default),
-                Layer.provide(client),
-              ),
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          Layer.build(
+            CaptchaPlugin({ ...config, provider: "google-recaptcha", ...extra }).pipe(
+              Layer.provide(Hooks.Default),
+              Layer.provide(client),
             ),
           ),
         ),

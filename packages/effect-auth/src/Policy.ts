@@ -574,14 +574,13 @@ export const enforce = <E, R>(
   req: PolicyRequest,
   slice?: Entity.EntitySlice,
 ): Effect.Effect<Decision, AuthorizationDeniedError, R> =>
-  Effect.flatMap(decide(policies, req, slice), (decision) =>
-    decision.allowed
-      ? Effect.succeed(decision)
-      : Effect.fail(
-          new AuthorizationDeniedError({
-            message: `Authorization denied: ${Entity.formatRef(req.principal)} may not ${Entity.formatRef(req.action)} on ${Entity.formatRef(req.resource)} (${decision.reason})`,
-            request: req,
-            decision,
-          }),
-        ),
+  Effect.filterOrFail(
+    decide(policies, req, slice),
+    (decision) => decision.allowed,
+    (decision) =>
+      new AuthorizationDeniedError({
+        message: `Authorization denied: ${Entity.formatRef(req.principal)} may not ${Entity.formatRef(req.action)} on ${Entity.formatRef(req.resource)} (${decision.reason})`,
+        request: req,
+        decision,
+      }),
   );

@@ -307,15 +307,20 @@ export const provideCurrent = <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,
 ): Effect.Effect<Effect.Effect<A, E>, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const limits = yield* OutboundLimits;
-    const urlPolicy = yield* OutboundUrlPolicy;
-    return effect.pipe(
-      Effect.provideService(HttpClient.HttpClient, client),
-      Effect.provideService(OutboundLimits, limits),
-      Effect.provideService(OutboundUrlPolicy, urlPolicy),
-    );
-  });
+    return {
+      client: yield* HttpClient.HttpClient,
+      limits: yield* OutboundLimits,
+      urlPolicy: yield* OutboundUrlPolicy,
+    };
+  }).pipe(
+    Effect.map(({ client, limits, urlPolicy }) =>
+      effect.pipe(
+        Effect.provideService(HttpClient.HttpClient, client),
+        Effect.provideService(OutboundLimits, limits),
+        Effect.provideService(OutboundUrlPolicy, urlPolicy),
+      ),
+    ),
+  );
 
 const decodeJsonString = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 

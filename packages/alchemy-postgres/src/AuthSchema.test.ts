@@ -99,7 +99,7 @@ const makeEngine = (
       // SAFETY: `LoggingCli` asks for a `Terminal` only to prompt in `approvePlan`;
       // these deploys call `apply` directly and never ask for approval.
       effect.pipe(
-        Effect.provide(Layer.succeed(Stage, STAGE)),
+        Effect.provideService(Stage, STAGE),
         provideFreshArtifactStore,
         Effect.provideService(AdoptPolicy, false),
         Effect.provideService(AuthProviders, {}),

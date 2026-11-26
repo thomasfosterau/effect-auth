@@ -478,15 +478,16 @@ describe("SQLite / Schema", () => {
           yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
           yield* identifiers.create(identifier());
 
-          const present = yield* Effect.sync(() =>
-            Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
-              client
-                .prepare(
-                  "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-                )
-                .all(),
-            ).map((row) => row.name),
+          const rows = yield* Effect.sync(() =>
+            client
+              .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+              )
+              .all(),
           );
+          const present = (yield* Effect.orDie(
+            Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String })))(rows),
+          )).map((row) => row.name);
 
           return {
             present,

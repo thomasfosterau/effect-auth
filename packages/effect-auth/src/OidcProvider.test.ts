@@ -552,9 +552,11 @@ describe("OidcProviderService", () => {
         const idToken = tokens.idToken ?? "";
         const jwt = yield* JwtService;
         return {
-          claims: Schema.decodeUnknownSync(
-            Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
-          )(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8")),
+          claims: yield* Effect.orDie(
+            Schema.decodeUnknownEffect(
+              Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+            )(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8")),
+          ),
           verified: yield* Effect.result(jwt.verify(idToken)),
         };
       }).pipe(Effect.provide(layer)),
@@ -781,7 +783,7 @@ describe("OidcProviderService token state", () => {
     // scheduler orders them.
     let armed = false;
     let arrived = 0;
-    const bothRead = Effect.runSync(Deferred.make<void>());
+    const bothRead = Deferred.makeUnsafe<void>();
     const { provider } = setup((store) => ({
       ...store,
       get: (hash) =>

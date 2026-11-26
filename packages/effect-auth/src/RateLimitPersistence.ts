@@ -128,7 +128,7 @@ export const rateLimiterPersistence: Effect.Effect<
     config: RateLimitConfig,
   ): Effect.Effect<Duration.Duration | undefined, AuthError | RateLimitError> => {
     const duration = blockDuration(config);
-    if (duration === undefined) return Effect.succeed(undefined);
+    if (duration === undefined) return Effect.undefined;
     return limiter.consume({ ...blockOptions(key, duration), tokens: 0 }).pipe(
       Effect.map((result) => (result.remaining <= 0 ? result.resetAfter : undefined)),
       Effect.mapError(toError),

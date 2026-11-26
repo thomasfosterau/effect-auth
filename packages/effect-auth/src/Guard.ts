@@ -478,18 +478,15 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
     Option.filter((user) => Str.isNonEmpty(user.id)),
   );
 
-  const requireUser: Effect.Effect<User, Unauthorized, Id> = Effect.flatMap(viewer, (maybe) =>
-    Option.isSome(maybe)
-      ? Effect.succeed(maybe.value)
-      : Effect.fail(new Unauthorized({ message: "Unauthorized" })),
+  const requireUser: Effect.Effect<User, Unauthorized, Id> = Effect.flatMap(
+    viewer,
+    Effect.fromOption(() => new Unauthorized({ message: "Unauthorized" })),
   );
 
   const gate = (
     allowed: (user: User) => boolean,
   ): Effect.Effect<User, Unauthorized | Forbidden, Id> =>
-    Effect.flatMap(requireUser, (user) =>
-      allowed(user) ? Effect.succeed(user) : Effect.fail(new Forbidden({ message: "Forbidden" })),
-    );
+    Effect.filterOrFail(requireUser, allowed, () => new Forbidden({ message: "Forbidden" }));
 
   const predicate = (allowed: (user: User) => boolean): Effect.Effect<boolean, never, Id> =>
     Effect.map(viewer, (maybe) => Option.isSome(maybe) && allowed(maybe.value));
