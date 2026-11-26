@@ -1199,13 +1199,10 @@ const makeHttpFixture = (
     readonly rateLimit?: boolean;
     readonly trustedProxy?: TrustedProxyConfig;
     /**
-     * `false` passes `Http.make` neither `trustedProxy` nor
-     * `allowMissingClientIp`, so a registration-enabled handler fails its
-     * startup check.
+     * `false` passes `Http.make` no `trustedProxy`, so a registration-enabled
+     * handler fails its startup check.
      */
     readonly declareRegistrationAddress?: boolean;
-    /** Pass `allowMissingClientIp: true` to `Http.make`. */
-    readonly allowMissingClientIp?: boolean;
     /**
      * Add a build step that waits on a promise, as a database connection does,
      * so the services finish building only after `Http.make` returns.
@@ -1416,7 +1413,6 @@ const makeHttpFixture = (
       services: limited ? withOidcLimiter : withOidc,
       ...WITHOUT_IP_LIMIT,
       ...(addressSource !== undefined && { trustedProxy: addressSource }),
-      ...(options.allowMissingClientIp === true && { allowMissingClientIp: true }),
     }).handler,
     handlerWithoutOidc: HttpServer.make({ services: withoutOidc, ...WITHOUT_IP_LIMIT }).handler,
   };
@@ -2890,18 +2886,6 @@ describe("HTTP dynamic registration and the per-IP limit", () => {
       makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
     expect(make).toThrow(ClientAddressConfigError);
     expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
-  });
-
-  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every registration", () => {
-    const options = {
-      dynamicRegistration: {},
-      declareRegistrationAddress: false,
-      allowMissingClientIp: true,
-    };
-    const make = () => makeHttpFixture(options);
-    expect(make).toThrow(ClientAddressConfigError);
-    expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
-    expect(make).toThrow(/allowMissingClientIp: true does not stand in for trustedProxy/);
   });
 
   it("rejects Http.makeAsync with ClientAddressConfigError when registration has no address source and services build asynchronously", async () => {

@@ -584,10 +584,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  *   `false`) has no `trustedProxy`, when the `Hooks` in
  *   `services` include `IPRateLimitPlugin` with no `trustedProxy`, and
  *   when the `services` include an `OidcProviderService` with dynamic client
- *   registration enabled and there is no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for a `trustedProxy`: with
- *   no proxy no request has an address, so every limited request would be
- *   refused with `429`, and the handler refuses to start instead.
+ *   registration enabled and there is no `trustedProxy`. With no proxy no
+ *   request has an address, so every limited request would be refused with
+ *   `429`, and the handler refuses to start instead.
  *
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.

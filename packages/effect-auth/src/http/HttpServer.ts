@@ -1136,25 +1136,12 @@ const applyRegistrationRateLimit = (
   });
 
 /**
- * What a `ClientAddressConfigError` adds when `allowMissingClientIp: true` is
- * set: the option is no address source. With no `trustedProxy`, a Web
- * `Request` under `Http.make` never has an address, so the limit would refuse
- * every request it covers with `429`; the handler refuses to start instead.
- */
-const allowMissingClientIpNote = (options: AuthWebHandlerOptions): string =>
-  options.allowMissingClientIp === true
-    ? " allowMissingClientIp: true does not stand in for trustedProxy: with no proxy no request has an address, " +
-      "so every request the limit covers would be refused with 429."
-    : "";
-
-/**
  * The `IPRateLimitPlugin` half of the client-address check: the `Hooks`
  * include a plugin that keys on the client address and there is no
  * `trustedProxy`.
  */
 const keyedPluginAddressError = (
   services: Context.Context<never>,
-  options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined => {
   const hooks = Context.getOption(services, Hooks);
   const keyed = Option.isSome(hooks) ? clientAddressKeyedPlugins(hooks.value) : [];
@@ -1162,8 +1149,7 @@ const keyedPluginAddressError = (
   return new ClientAddressConfigError({
     message:
       `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make or Http.makeAsync. ` +
-      "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address." +
-      allowMissingClientIpNote(options),
+      "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address.",
   });
 };
 
@@ -1174,15 +1160,13 @@ const keyedPluginAddressError = (
  */
 const registrationAddressError = (
   services: Context.Context<never>,
-  options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined => {
   const oidc = Context.getOption(services, OidcProviderService);
   if (Option.isNone(oidc) || !oidc.value.dynamicRegistration.enabled) return undefined;
   return new ClientAddressConfigError({
     message:
       "Dynamic client registration (POST /register) is rate limited per client address, and a Web Request has none under Http.make or Http.makeAsync. " +
-      "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address." +
-      allowMissingClientIpNote(options),
+      "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address.",
   });
 };
 
@@ -1224,8 +1208,7 @@ const rateLimiterError = (
  * - The `Hooks` include a plugin that keys on the client address
  *   (`IPRateLimitPlugin`), or the OIDC provider enables dynamic client
  *   registration, and there is no `trustedProxy`. A Web `Request` has no
- *   socket address, and `allowMissingClientIp: true` is no address source
- *  .
+ *   socket address.
  * - A limit is configured with no `RateLimiter` ({@link rateLimiterError}).
  */
 const servicesConfigError = (
@@ -1233,7 +1216,7 @@ const servicesConfigError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | RateLimiterConfigError | undefined =>
   (options.trustedProxy === undefined
-    ? (keyedPluginAddressError(services, options) ?? registrationAddressError(services, options))
+    ? (keyedPluginAddressError(services) ?? registrationAddressError(services))
     : undefined) ?? rateLimiterError(services, options);
 
 /**
@@ -5635,8 +5618,7 @@ export interface AuthWebHandlerOptions {
    * **Client address required**: the limiter keys each request by its client
    * address, so `make` throws {@link ClientAddressConfigError} unless this is
    * `false` or {@link trustedProxy} is set. A Web `Request` has no socket
-   * address to fall back on, and {@link allowMissingClientIp} is no address
-   * source.
+   * address to fall back on.
    *
    * **Overriding a default.** The first rule that matches an endpoint wins, so
    * a deployment changes one endpoint's limit by putting its own rule ahead of
@@ -5656,24 +5638,6 @@ export interface AuthWebHandlerOptions {
    * with no rule are unaffected.
    */
   readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
-  /**
-   * Not an address source, and not an opt-out of the client-address check.
-   * Under `Http.make` a Web `Request` has no socket address, so with no
-   * {@link trustedProxy} no request has an address, and a limit keyed on it
-   * would refuse every request it covers with `429`. So `make` throws
-   * {@link ClientAddressConfigError} (and {@link makeAsync} rejects with it)
-   * whenever {@link ipRateLimit} (on unless it is `false`), an
-   * `IPRateLimitPlugin` in the `services` `Hooks`, or dynamic client
-   * registration in the `services`' `OidcProviderService` has no
-   * `trustedProxy`, whether or not this is set; with it set, the error's
-   * message says so. With a `trustedProxy` it changes nothing.
-   *
-   * Give the handler a `trustedProxy`, or serve without the IP limit with
-   * `ipRateLimit: false`, the only way to turn it off. Under a `trustedProxy`,
-   * a request whose forwarded address is missing or unusable is refused with
-   * `429` on a limited endpoint, and is never counted under a shared bucket.
-   */
-  readonly allowMissingClientIp?: boolean | undefined;
   /**
    * Refuse configuration that would otherwise only be warned about, and a
    * `services` build `make` cannot check at startup. Default `false`.
@@ -5814,9 +5778,8 @@ export interface AuthWebHandler {
 /**
  * The startup check of `ipRateLimit`, which needs no build: a rate limit
  * keyed by client address needs an address source. A Web Request has no socket
- * address, so `trustedProxy` must be configured; `allowMissingClientIp: true`
- * without it would refuse every request to a limited endpoint, so it is
- * refused too. Its IPv6 prefix length must be one it can key on.
+ * address, so `trustedProxy` must be configured. Its IPv6 prefix length must
+ * be one it can key on.
  */
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
@@ -5828,8 +5791,7 @@ const ipRateLimitAddressError = (
         message:
           "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-          "or set ipRateLimit: false to serve without the limit." +
-          allowMissingClientIpNote(options),
+          "or set ipRateLimit: false to serve without the limit.",
       })
     : undefined);
 
@@ -6166,7 +6128,6 @@ const tooManyRequests = (
  *   `false`), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
  *   `OidcProviderService`, with no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for one.
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
@@ -6279,7 +6240,6 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  *   `false`), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
  *   `OidcProviderService`, with no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for one.
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
