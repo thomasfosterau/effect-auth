@@ -1710,7 +1710,7 @@ export const organizationStoreConformance = <E = never, R = never>(
 const attemptRacers = 8;
 
 /** The part of a one-time code store the code suites exercise. */
-interface CodeStoreShape<P, A extends CodeRecord> extends CodeStore<P, A> {
+interface CodeStoreMethods<P, A extends CodeRecord> extends CodeStore<P, A> {
   readonly upsert: (record: A) => Effect.Effect<A, Errors.AuthError>;
 }
 
@@ -1733,7 +1733,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
   contract: string,
   options: ConformanceOptions<E, R> | undefined,
   spec: {
-    readonly store: Effect.Effect<CodeStoreShape<P, A>, never, S>;
+    readonly store: Effect.Effect<CodeStoreMethods<P, A>, never, S>;
     readonly purposes: readonly [P, P];
     readonly newAddress: () => string;
     readonly makeRecord: (address: string, purpose: P) => A;

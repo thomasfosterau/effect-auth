@@ -77,7 +77,7 @@ export const publiclyServeable =
  * @since 0.1.0
  * @category predicates
  */
-export const bypassesForFreshness = <Id, User extends Guard.ViewerShape, Rung extends string>(
+export const bypassesForFreshness = <Id, User extends Guard.Viewer, Rung extends string>(
   guards: Guard.Guards<Id, User, Rung>,
   axes: ReadonlyArray<NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>>,
 ): Effect.Effect<boolean, never, Id> =>
@@ -95,7 +95,7 @@ export const bypassesForFreshness = <Id, User extends Guard.ViewerShape, Rung ex
  * @category predicates
  */
 export const shouldIncludeDeleted =
-  <Id, User extends Guard.ViewerShape, Rung extends string>(
+  <Id, User extends Guard.Viewer, Rung extends string>(
     guards: Guard.Guards<Id, User, Rung>,
     viewDeleted: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
   ) =>

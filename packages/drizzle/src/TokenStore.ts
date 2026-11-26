@@ -41,7 +41,7 @@ interface TokenRecord {
  * `getLatestByUserId`, which `EmailVerificationStore` adds for its resend
  * cooldown.
  */
-interface TokenStoreShape<A extends TokenRecord> {
+interface TokenStoreMethods<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;
   readonly get: (token: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
   readonly consume: (token: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
@@ -64,7 +64,7 @@ const toRecord = (row: TokenRow): TokenRecord => ({
 const makeFor = (
   purpose: TokenPurpose,
   tables: TokenTableInput,
-): Effect.Effect<TokenStoreShape<TokenRecord>, never, DrizzleDatabase> =>
+): Effect.Effect<TokenStoreMethods<TokenRecord>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
     const query = queryRunner(handle);
     const schema = resolveTokenTable(tables);

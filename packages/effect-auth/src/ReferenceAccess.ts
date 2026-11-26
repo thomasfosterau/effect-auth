@@ -71,7 +71,7 @@ export interface ReferenceAccess<Id> {
  * @since 0.3.0
  * @category models
  */
-export interface ReferenceAccessOptions<Id, User extends Guard.ViewerShape, Rung extends string> {
+export interface ReferenceAccessOptions<Id, User extends Guard.Viewer, Rung extends string> {
   readonly guards: Guard.Guards<Id, User, Rung>;
   /** The axis that sees every reference row. */
   readonly viewPrivate: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>;
@@ -141,7 +141,7 @@ const questionsFor = (row: ReferenceRow): OwnedAccess.RelationQuestions => {
  * @since 0.3.0
  * @category constructors
  */
-export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
+export const make = <Id, User extends Guard.Viewer, Rung extends string>(
   options: ReferenceAccessOptions<Id, User, Rung>,
 ): ReferenceAccess<Id> => {
   const { guards, viewPrivate } = options;

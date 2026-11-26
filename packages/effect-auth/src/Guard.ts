@@ -110,7 +110,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden, { readonly brand: u
  * @since 0.1.0
  * @category models
  */
-export interface ViewerShape {
+export interface Viewer {
   readonly id: string;
   readonly role: string;
 }
@@ -135,7 +135,7 @@ export interface Capabilities {
  * @since 0.1.0
  * @category models
  */
-export interface Guards<Id, User extends ViewerShape, Rung extends string> {
+export interface Guards<Id, User extends Viewer, Rung extends string> {
   /** The ladder the kit compares against. */
   readonly ladder: Ladder.Ladder<Rung>;
   /** The resolved viewer, `Option.none()` when anonymous (or its id is empty). Never fails. */
@@ -247,7 +247,7 @@ export interface Guards<Id, User extends ViewerShape, Rung extends string> {
  * @since 0.1.0
  * @category models
  */
-export interface GuardOptions<Id, User extends ViewerShape, Rung extends string> {
+export interface GuardOptions<Id, User extends Viewer, Rung extends string> {
   readonly ladder: Ladder.Ladder<Rung>;
   /**
    * The application's viewer service: `Option<User>`, `none` when anonymous.
@@ -285,7 +285,7 @@ class ReservedPrincipalTypeError extends Schema.TaggedError<
  * @since 0.1.0
  * @category constructors
  */
-export const make = <Id, User extends ViewerShape, Rung extends string>(
+export const make = <Id, User extends Viewer, Rung extends string>(
   options: GuardOptions<Id, User, Rung>,
 ): Guards<Id, User, Rung> => {
   const { ladder } = options;

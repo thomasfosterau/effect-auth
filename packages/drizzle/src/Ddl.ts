@@ -221,15 +221,19 @@ const inlineIndex = (table: string, index: IndexSpec): string =>
 const indexStatement = (table: string, index: IndexSpec): string =>
   `CREATE ${index.unique === true ? "UNIQUE INDEX" : "INDEX"} IF NOT EXISTS ${indexName(table, index)} ON ${table} (${index.columns.join(", ")})`;
 
-const tableStatements = (dialect: DdlDialect, table: string, shape: TableSpec): Array<string> => {
+const tableStatements = (
+  dialect: DdlDialect,
+  table: string,
+  tableSpec: TableSpec,
+): Array<string> => {
   const inline = dialect.inlineIndexes
-    ? shape.indexes.map((index) => inlineIndex(table, index))
+    ? tableSpec.indexes.map((index) => inlineIndex(table, index))
     : [];
-  const lines = [...shape.columns.map((column) => columnLine(dialect, column)), ...inline];
+  const lines = [...tableSpec.columns.map((column) => columnLine(dialect, column)), ...inline];
   const create = `CREATE TABLE IF NOT EXISTS ${table} (\n${lines.join(",\n")}\n)`;
   const separate = dialect.inlineIndexes
     ? []
-    : shape.indexes.map((index) => indexStatement(table, index));
+    : tableSpec.indexes.map((index) => indexStatement(table, index));
   return [create, ...separate];
 };
 

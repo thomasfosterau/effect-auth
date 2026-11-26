@@ -2228,10 +2228,10 @@ describe("purgeExpiredWith's capped DELETE", () => {
     const capped =
       /^DELETE FROM (\w+) WHERE \(([\s\S]+)\) AND \(([\w, ]+)\) IN \(SELECT \3 FROM \1 WHERE ([\s\S]+) LIMIT \?\) RETURNING \3$/;
     expect(deletes.length).toBe(14);
-    const shapes = Arr.map(deletes, (statement) => {
+    const kinds = Arr.map(deletes, (statement) => {
       const match = capped.exec(statement);
       return match !== null && match[2] === match[4] ? "capped" : statement;
     });
-    expect(shapes).toEqual(Arr.map(deletes, () => "capped"));
+    expect(kinds).toEqual(Arr.map(deletes, () => "capped"));
   });
 });

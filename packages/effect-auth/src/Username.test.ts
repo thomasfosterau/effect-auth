@@ -520,13 +520,13 @@ describe("UsernameService under anti-enumeration", () => {
       const owner = arranged.owner;
 
       // The same answer: same fields, no session, the submitted address.
-      const shape = (result: AuthResult) => ({
+      const summary = (result: AuthResult) => ({
         keys: Arr.sort(Struct.keys(result), Order.String),
         userKeys: Arr.sort(Struct.keys(result.user), Order.String),
         session: result.session,
         method: result.method,
       });
-      expect(shape(taken)).toEqual(shape(fresh));
+      expect(summary(taken)).toEqual(summary(fresh));
       expect(fresh.identifier).toEqual({ type: "email", value: "fresh@example.com" });
       expect(taken.identifier).toEqual({ type: "email", value: VICTIM });
       expect(taken.user.id).not.toBe(owner.id);

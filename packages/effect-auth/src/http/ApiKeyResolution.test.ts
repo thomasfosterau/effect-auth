@@ -104,7 +104,7 @@ const current = (handler: Handler, headers: Record<string, string>, query = "") 
   );
 
 /** The parts of an answer a refusal must not vary in. */
-const refusalShape = async (res: Response) => ({
+const refusalSummary = async (res: Response) => ({
   status: res.status,
   contentType: res.headers.get("content-type"),
   cacheControl: res.headers.get("cache-control"),
@@ -202,7 +202,7 @@ describe("GET /api-keys/current", () => {
     const exhausted = await createKey(handler, token, { name: "exhausted", remaining: 1 });
     expect((await current(handler, { "x-api-key": exhausted.key })).status).toBe(200);
 
-    const unknown = await refusalShape(await current(handler, { "x-api-key": "ak_not-a-key" }));
+    const unknown = await refusalSummary(await current(handler, { "x-api-key": "ak_not-a-key" }));
     expect(unknown).toEqual({
       status: 401,
       contentType: JSON_API,
@@ -219,7 +219,7 @@ describe("GET /api-keys/current", () => {
         { "x-api-key": exhausted.key },
         {},
       ],
-      async (headers) => refusalShape(await current(handler, headers)),
+      async (headers) => refusalSummary(await current(handler, headers)),
     );
     expect(others).toEqual([unknown, unknown, unknown, unknown]);
   });
@@ -242,9 +242,9 @@ describe("GET /api-keys/current", () => {
     await updateKey(handler, token, disabled.id, { enabled: false });
     await updateKey(handler, token, expired.id, { expiresAt: 1 });
 
-    const unknown = await refusalShape(await current(handler, { "x-api-key": "ak_not-a-key" }));
+    const unknown = await refusalSummary(await current(handler, { "x-api-key": "ak_not-a-key" }));
     const overLimit = await inSequence([disabled, expired, exhausted], async ({ key }) =>
-      refusalShape(await current(handler, { "x-api-key": key })),
+      refusalSummary(await current(handler, { "x-api-key": key })),
     );
     expect(overLimit).toEqual([unknown, unknown, unknown]);
     expect(unknown.body).toBe(REFUSED_BODY);
@@ -391,9 +391,11 @@ describe("GET /api-keys/current", () => {
         else MutableHashMap.set(fixture.usersById, userId, changed);
         const before = [under, over].map(({ id }) => record(id));
 
-        const unknown = await refusalShape(await current(handler, { "x-api-key": "ak_not-a-key" }));
+        const unknown = await refusalSummary(
+          await current(handler, { "x-api-key": "ak_not-a-key" }),
+        );
         const answers = await inSequence([under, over, under, over], async ({ key }) =>
-          refusalShape(await current(handler, { "x-api-key": key })),
+          refusalSummary(await current(handler, { "x-api-key": key })),
         );
 
         expect(answers).toEqual([unknown, unknown, unknown, unknown]);
