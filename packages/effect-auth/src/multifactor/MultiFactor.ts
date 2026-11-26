@@ -608,6 +608,32 @@ export const make = (
         return spent;
       });
 
+    /** Spend the challenge, then issue the session its second factor earned. */
+    const redeemPending = (
+      pendingToken: string,
+      userId: string,
+      invalidCode: string,
+      options: MultiFactorVerifyOptions | undefined,
+    ) =>
+      Effect.gen(function* () {
+        yield* consumePending(pendingToken, invalidCode);
+        const { session, token } = yield* sessionManager.createSession(
+          userId,
+          options?.sessionAttributes,
+        );
+        return { userId, session, token } satisfies MultiFactorVerifyResult;
+      });
+
+    /** Trace a second-factor verification and count its outcome. */
+    const observeVerification =
+      (type: "totp" | "backup-code") =>
+      <A, E, R>(self: Effect.Effect<A, E, R>) =>
+        self.pipe(
+          Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type } }),
+          Effect.tap(() => Obs.recordMultiFactorVerification(type, "success")),
+          Effect.tapError(() => Obs.recordMultiFactorVerification(type, "failure")),
+        );
+
     /**
      * Load the verified multi-factor record for a user, failing if multi-factor
      * is not (fully) enabled.
@@ -781,23 +807,8 @@ export const make = (
               });
             }
 
-            yield* consumePending(pendingToken, invalidTotpCode);
-
-            const { session, token } = yield* sessionManager.createSession(
-              pending.userId,
-              options?.sessionAttributes,
-            );
-
-            return {
-              userId: pending.userId,
-              session,
-              token,
-            } satisfies MultiFactorVerifyResult;
-          }).pipe(
-            Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type: "totp" } }),
-            Effect.tap(() => Obs.recordMultiFactorVerification("totp", "success")),
-            Effect.tapError(() => Obs.recordMultiFactorVerification("totp", "failure")),
-          ),
+            return yield* redeemPending(pendingToken, pending.userId, invalidTotpCode, options);
+          }).pipe(observeVerification("totp")),
       ),
 
       verifyBackupCode: Effect.fn("MultiFactorService.verifyBackupCode")(
@@ -831,23 +842,8 @@ export const make = (
               return yield* new MultiFactorError({ message: invalidBackupCode });
             }
 
-            yield* consumePending(pendingToken, invalidBackupCode);
-
-            const { session, token } = yield* sessionManager.createSession(
-              pending.userId,
-              options?.sessionAttributes,
-            );
-
-            return {
-              userId: pending.userId,
-              session,
-              token,
-            } satisfies MultiFactorVerifyResult;
-          }).pipe(
-            Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type: "backup-code" } }),
-            Effect.tap(() => Obs.recordMultiFactorVerification("backup-code", "success")),
-            Effect.tapError(() => Obs.recordMultiFactorVerification("backup-code", "failure")),
-          ),
+            return yield* redeemPending(pendingToken, pending.userId, invalidBackupCode, options);
+          }).pipe(observeVerification("backup-code")),
       ),
 
       regenerateBackupCodes: Effect.fn("MultiFactorService.regenerateBackupCodes")(function* (

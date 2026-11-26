@@ -65,7 +65,7 @@ import { EmailPasswordService, type SessionOrChallenge } from "../email/EmailPas
 import * as EmailPassword from "../email/EmailPassword.ts";
 import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
-import { AccountManagementService } from "../AccountManagement.ts";
+import { AccountManagementService, type AccountTokenError } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
 import { PhoneOtpService } from "../PhoneOtp.ts";
 import { UsernameService } from "../Username.ts";
@@ -1891,6 +1891,20 @@ const hookFailures = {
   PwnedPasswordError: badRequestFor,
 };
 
+/**
+ * The refusals of {@link hookFailures} other than a rate limit, all answered
+ * with `refuse`: for the RFC-tier and redirect answers, which have one shape
+ * for every refusal.
+ */
+const hookRefusals = <A, E, R>(
+  refuse: (error: Cause.YieldableError) => Effect.Effect<A, E, R>,
+) => ({
+  AccountLockedError: refuse,
+  UserBannedError: refuse,
+  CaptchaError: refuse,
+  PwnedPasswordError: refuse,
+});
+
 /** What a sign-in, sign-up or verification produced, before it is answered. */
 interface SignInOutcome {
   readonly user: Types.User;
@@ -2429,13 +2443,35 @@ const clearDataCookie = (cfg: ResolvedCookieConfig) =>
     ? Effect.void
     : setResponseCookie(dataCookieName(cfg), "", clearCookieOptions(cfg));
 
-/** A redeemed account token that does not verify: `400`. */
-const accountTokenFailures = {
-  AccountTokenError: (e: { readonly message: string }) =>
-    Effect.fail(new S.BadRequest({ message: e.message })),
-  UserNotFoundError: (e: { readonly message: string }) =>
-    Effect.fail(new S.BadRequest({ message: e.message })),
-};
+/**
+ * The `redeem` handler of an emailed account token: confirm it with the
+ * service's `confirm`, then clear the session-data cookie. A token that does
+ * not verify is a `400`.
+ */
+const redeemAccountToken =
+  (
+    cfg: ResolvedCookieConfig,
+    confirm: (
+      service: typeof AccountManagementService.Service,
+      token: string,
+    ) => Effect.Effect<unknown, AccountTokenError | UserNotFoundError | AuthError>,
+  ) =>
+  ({
+    payload,
+  }: {
+    readonly payload: { readonly data: { readonly attributes: { readonly token: string } } };
+  }) =>
+    Effect.gen(function* () {
+      const account = yield* resolveAccountManagement;
+      yield* confirm(account.service, payload.data.attributes.token).pipe(
+        Effect.catchTags({
+          AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+          UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+          AuthError: (e) => internalServerError(e),
+        }),
+      );
+      yield* clearDataCookie(cfg);
+    }).pipe(JsonApiErrors.mapHttpErrors);
 
 /** Layer implementing the `email-changes` group. */
 export const emailChangesGroupLayer = (
@@ -2471,17 +2507,9 @@ export const emailChangesGroupLayer = (
             );
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle("redeem", ({ payload }) =>
-        Effect.gen(function* () {
-          const account = yield* resolveAccountManagement;
-          yield* account.service.confirmEmailChange(payload.data.attributes.token).pipe(
-            Effect.catchTags({
-              ...accountTokenFailures,
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          yield* clearDataCookie(cfg);
-        }).pipe(JsonApiErrors.mapHttpErrors),
+      .handle(
+        "redeem",
+        redeemAccountToken(cfg, (service, token) => service.confirmEmailChange(token)),
       ),
   );
 };
@@ -2501,19 +2529,22 @@ export const accountDeletionsGroupLayer = (
           yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle("redeem", ({ payload }) =>
-        Effect.gen(function* () {
-          const account = yield* resolveAccountManagement;
-          yield* account.service.confirmAccountDeletion(payload.data.attributes.token).pipe(
-            Effect.catchTags({
-              ...accountTokenFailures,
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
-          yield* clearDataCookie(cfg);
-        }).pipe(JsonApiErrors.mapHttpErrors),
+      .handle(
+        "redeem",
+        redeemAccountToken(cfg, (service, token) => service.confirmAccountDeletion(token)),
       ),
   );
+};
+
+/**
+ * A multi-factor change the caller's password guards: a wrong password is a
+ * `400`, a hashing or store fault a `500`.
+ */
+const passwordGuardFailures = {
+  InvalidCredentialsError: (e: { readonly message: string }) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  HashingError: internalServerError,
+  AuthError: internalServerError,
 };
 
 /** The `multi-factor-enrollments` resource: always `current`. */
@@ -2538,14 +2569,11 @@ export const multiFactorEnrollmentsGroupLayer = (
             .enable(resolved.user.id, payload.data.attributes.password)
             .pipe(
               Effect.catchTags({
-                InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.BadRequest({ message: e.message })),
+                ...passwordGuardFailures,
                 MultiFactorAlreadyEnabledError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
                 MultiFactorError: (e) => internalServerError(e),
                 UserNotFoundError: (e) => internalServerError(e),
-                HashingError: (e) => internalServerError(e),
-                AuthError: (e) => internalServerError(e),
               }),
             );
           // The secret and backup codes are shown this once, in `meta`.
@@ -2578,13 +2606,9 @@ export const multiFactorEnrollmentsGroupLayer = (
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const multiFactor = yield* resolveMultiFactor;
-          yield* multiFactor.service.disable(resolved.user.id, payload.meta.password).pipe(
-            Effect.catchTags({
-              InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              HashingError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
-            }),
-          );
+          yield* multiFactor.service
+            .disable(resolved.user.id, payload.meta.password)
+            .pipe(Effect.catchTags(passwordGuardFailures));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -2608,9 +2632,7 @@ export const backupCodeSetsGroupLayer = (
           .pipe(
             Effect.catchTags({
               MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              HashingError: (e) => internalServerError(e),
-              AuthError: (e) => internalServerError(e),
+              ...passwordGuardFailures,
             }),
           );
         // The codes are shown this once, in `meta`.
@@ -4326,10 +4348,7 @@ export const authGroupLayer = (
               // A session hook refused the grant: the device stops polling.
               // A rate limit asks it to poll more slowly instead.
               RateLimitError: (e) => oauthError("slow_down", e.message),
-              AccountLockedError: (e) => oauthError("access_denied", e.message),
-              UserBannedError: (e) => oauthError("access_denied", e.message),
-              CaptchaError: (e) => oauthError("access_denied", e.message),
-              PwnedPasswordError: (e) => oauthError("access_denied", e.message),
+              ...hookRefusals((e) => oauthError("access_denied", e.message)),
             }),
           );
           const now = yield* Clock.currentTimeMillis;
@@ -4355,31 +4374,7 @@ export const authGroupLayer = (
             Effect.catchTags({
               SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
+              ...hookFailures,
             }),
           );
           return yield* clearSsoStateCookie(yield* answerIdpSignIn(result, cfg, "sso"), cfg);
@@ -4426,10 +4421,7 @@ export const authGroupLayer = (
               ),
               Effect.catchTags({
                 SsoError: refused("access_denied"),
-                AccountLockedError: refused("access_denied"),
-                UserBannedError: refused("access_denied"),
-                CaptchaError: refused("access_denied"),
-                PwnedPasswordError: refused("access_denied"),
+                ...hookRefusals(refused("access_denied")),
                 RateLimitError: refused("temporarily_unavailable"),
                 AuthError: (e) =>
                   Effect.logError("[effect-auth] internal error", e).pipe(

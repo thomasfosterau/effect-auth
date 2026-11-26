@@ -26,7 +26,7 @@
  *
  * @module google-one-tap
  */
-import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import { Clock, Context, Data, Effect, Layer } from "effect";
 import * as P from "effect/Predicate";
 import { Digest, SecureRandom } from "effect/crypto";
 import type { HttpClient } from "effect/http";
@@ -40,10 +40,10 @@ import {
   sessionOrChallenge,
   type SessionOrChallenge,
 } from "./email/EmailPassword.ts";
-import { firstProofServices, proveAddress } from "./FirstProof.ts";
+import { firstProofServices, userForProvenEmail } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
-import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
+import { UserStore } from "./UserStore.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
@@ -253,42 +253,27 @@ export const make = (
         }
         const normalized = normalizeEmail(email);
 
-        const { identifier, user: owner } = yield* findIdentifierOwner(
+        const found = yield* findIdentifierOwner(
           identifiers,
           users.get,
           "email",
           normalized,
           () => new GoogleOneTapError({ message: "Account is unavailable" }),
         );
-        let user = owner;
-        const isNewUser = user === null;
-        if (user === null) {
-          // Google attested the address as verified.
-          const created = yield* createUserWithIdentifier(
-            identifiers,
-            {
-              type: "email",
-              value: normalized,
-              verified: true,
-              verifiedAt: yield* DateTime.nowAsDate,
-            },
-            (identifier) =>
-              userStore.createUser({
-                ...(P.isString(claims["name"]) && { name: claims["name"] }),
-                ...(P.isString(claims["picture"]) && { image: claims["picture"] }),
-                identifier,
-              }),
-          ).pipe(
-            Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new GoogleOneTapError({ message: "This email is already in use" })),
-            ),
-          );
-          user = created.user;
-        } else if (identifier !== null && !identifier.verified) {
-          // Google verified the address: clear what an earlier, unproven
-          // sign-up left on the account before promoting it.
-          yield* proveAddress(firstProof, identifier);
-        }
+        const isNewUser = found.user === null;
+        // Google attested the address as verified.
+        const user = yield* userForProvenEmail(
+          firstProof,
+          found,
+          normalized,
+          (identifier) =>
+            userStore.createUser({
+              ...(P.isString(claims["name"]) && { name: claims["name"] }),
+              ...(P.isString(claims["picture"]) && { image: claims["picture"] }),
+              identifier,
+            }),
+          () => new GoogleOneTapError({ message: "This email is already in use" }),
+        );
 
         const issued = yield* sessionOrChallenge(sessionManager, user, "google-one-tap");
         return { user, ...issued, isNewUser, claims } satisfies GoogleOneTapSignInResult;
