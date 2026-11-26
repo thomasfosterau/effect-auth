@@ -499,6 +499,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const organizationLayer = Layer.mergeAll(
     organizationBase,
     Auth.OrganizationService.layer({
+      // Clients resend at once; the cooldown has its own service tests.
+      invitationResendCooldown: 0,
       sendInvitationEmail: ({ invitation, token }) =>
         Effect.sync(
           () =>

@@ -23,7 +23,7 @@ import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
-import type { AuthError, UserNotFoundError } from "../Errors.ts";
+import type { AuthError, ResendTooSoonError, UserNotFoundError } from "../Errors.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import {
   Etag,
@@ -2635,6 +2635,22 @@ const refusedForbidden = organizationRefusal((message) => new S.Forbidden({ mess
 /** A refused organization operation, answered `400`. */
 const refusedBadRequest = organizationRefusal((message) => new S.BadRequest({ message }));
 
+/**
+ * An invitation send (`inviteMember`, `resendInvitation`): inside the resend
+ * cooldown a `429`, any other refusal a `403`.
+ */
+const refusedInvitationSend = <A, R>(
+  self: Effect.Effect<A, OrganizationError | ResendTooSoonError | AuthError, R>,
+): Effect.Effect<A, S.Forbidden | S.TooManyRequests | S.InternalServerError, R> =>
+  self.pipe(
+    Effect.catchTags({
+      ResendTooSoonError: (e) =>
+        Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
+      OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+      AuthError: (e) => internalServerError(e),
+    }),
+  );
+
 /** A store (or hook) failure, answered `500`. */
 const storeFailure = <A, E extends Cause.YieldableError, R>(
   self: Effect.Effect<A, E, R>,
@@ -2995,7 +3011,7 @@ export const organizationsGroupLayer = (
       .handle("invite", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const { org, resolved } = yield* actor(request);
-          const invitation = yield* refusedForbidden(
+          const invitation = yield* refusedInvitationSend(
             org.inviteMember(resolved.user.id, params.id, payload.data.attributes),
           );
           return Handlers.data(invitationResource(invitation));
@@ -3121,7 +3137,12 @@ export const organizationMembersGroupLayer = (
             actorId,
             target: member,
           } = yield* target(request, params.id, missingPermission("member:delete"));
-          yield* refusedForbidden(org.removeMember(actorId, member.organizationId, member.userId));
+          // Your own membership: leaving, which needs no permission.
+          yield* refusedForbidden(
+            member.userId === actorId
+              ? org.leaveOrganization(actorId, member.organizationId)
+              : org.removeMember(actorId, member.organizationId, member.userId),
+          );
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("listTeams", ({ params, request }) =>
@@ -3375,7 +3396,7 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
       .handle("deliver", ({ params, request }) =>
         Effect.gen(function* () {
           const { org, actorId } = yield* actor(request);
-          const invitation = yield* refusedForbidden(org.resendInvitation(actorId, params.id));
+          const invitation = yield* refusedInvitationSend(org.resendInvitation(actorId, params.id));
           return Handlers.data(invitationResource(invitation));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),

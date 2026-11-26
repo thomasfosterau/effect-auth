@@ -51,13 +51,24 @@
  * @module organization
  */
 
-import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order, Result } from "effect";
+import {
+  Clock,
+  Context,
+  Data,
+  Duration,
+  Effect,
+  Layer,
+  MutableHashMap,
+  Order,
+  Result,
+} from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { Digest, SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
+import { isManagedUser } from "./ManagedUser.ts";
 import * as Errors from "./Errors.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
@@ -65,6 +76,7 @@ import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
+import { UserStore } from "./UserStore.ts";
 import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeDomain, normalizeEmail } from "./utils.ts";
@@ -185,12 +197,22 @@ export interface Invitation {
   /** Role the invitee receives upon acceptance */
   readonly role: string;
   readonly status: InvitationStatus;
-  /** User id of the member who created the invitation */
+  /**
+   * User id of the member who issued the invitation, or last resent it. At
+   * acceptance they must still hold `invitation:create` and be able to grant
+   * {@link role}.
+   */
   readonly inviterId: string;
   /** Epoch milliseconds */
   readonly expiresAt: number;
   /** Epoch milliseconds */
   readonly createdAt: number;
+  /**
+   * When the invitation's latest email was sent, in epoch milliseconds; the
+   * resend cooldown runs from it. Absent on rows written before it existed,
+   * which read as {@link createdAt}.
+   */
+  readonly sentAt?: number | undefined;
 }
 
 /**
@@ -612,10 +634,29 @@ export class OrganizationStore extends Context.Service<
 export interface OrganizationConfig {
   /** Whether users may create organizations at all (default: true) */
   readonly allowUserToCreateOrganization?: boolean;
-  /** Maximum number of organizations a user may belong to (default: 5) */
+  /**
+   * Maximum number of organizations a user may hold before creating another
+   * (default: 5). Only memberships the user chose count: organizations they
+   * own (hold the creator role in) or joined by accepting an invitation. A
+   * membership someone else made for them (a managed user's direct add, JIT
+   * provisioning, SCIM) does not, so nobody can fill another user's quota.
+   */
   readonly organizationLimit?: number;
   /** Maximum number of members per organization (default: 100) */
   readonly membershipLimit?: number;
+  /**
+   * Maximum number of pending, unexpired invitations per organization
+   * (default: 100). `inviteMember`, and a resend that revives an expired
+   * invitation, refuse past it.
+   */
+  readonly pendingInvitationLimit?: number;
+  /**
+   * Minimum time in milliseconds between two invitation emails from one
+   * organization to one address (default: 60 seconds; `0` turns it off).
+   * It covers `resendInvitation` and a fresh `inviteMember` after a
+   * cancellation alike; a send inside it fails with `ResendTooSoonError`.
+   */
+  readonly invitationResendCooldown?: number;
   /** Invitation lifetime in milliseconds (default: 48 hours) */
   readonly invitationExpiresIn?: number;
   /** Role assigned to the creator of an organization (default: "owner").
@@ -821,8 +862,8 @@ export class OrganizationService extends Context.Service<
   {
     /**
      * Create an organization. Enforces `allowUserToCreateOrganization`,
-     * `organizationLimit` (organizations the user already belongs to) and slug
-     * uniqueness. The creator becomes a member with `creatorRole`.
+     * `organizationLimit` (organizations the user owns or joined by invitation)
+     * and slug uniqueness. The creator becomes a member with `creatorRole`.
      */
     readonly createOrganization: (
       userId: string,
@@ -914,15 +955,20 @@ export class OrganizationService extends Context.Service<
      * `invitation:create` permission, a `role` the organization defines, and
      * that the inviter holds every permission that role carries (no granting
      * beyond your own permissions). Rejects duplicate pending invitations for
-     * the same email + organization and enforces `membershipLimit`. Mints the
-     * invitation's secret token, stores its digest and hands the raw token to
-     * `sendInvitationEmail`, which must be configured.
+     * the same email + organization and enforces `membershipLimit` and
+     * `pendingInvitationLimit`. Fails with `ResendTooSoonError` inside
+     * `invitationResendCooldown` of the organization's last email to the
+     * address. Mints the invitation's secret token, stores its digest and
+     * hands the raw token to `sendInvitationEmail`, which must be configured.
      */
     readonly inviteMember: (
       inviterId: string,
       organizationId: string,
       input: InviteMemberInput,
-    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
+    ) => Effect.Effect<
+      Invitation,
+      OrganizationError | Errors.ResendTooSoonError | Errors.AuthError
+    >;
 
     /**
      * Accept a pending invitation with the secret token its email carried,
@@ -931,6 +977,9 @@ export class OrganizationService extends Context.Service<
      * match its digest (a wrong token answers "Invitation not found"), and it
      * must be addressed to one of the user's email identifiers (without a
      * token, a verified one; anyone else is told "Invitation not found").
+     * Its inviter must still be an active member holding `invitation:create`
+     * and every permission of the invitation's role, so an invitation does
+     * not outlive its inviter's demotion or removal.
      * Creates the membership and marks the invitation accepted.
      *
      * The token proves the address, so acceptance works for apps that run
@@ -1013,12 +1062,19 @@ export class OrganizationService extends Context.Service<
      * checked before anything else: an unknown id, a stranger and a
      * member without it get the same `OrganizationError`. A permitted member's
      * accepted, rejected or canceled invitation is refused with an
-     * `OrganizationError` rather than silently re-issued.
+     * `OrganizationError` rather than silently re-issued. The actor must hold
+     * every permission of the invitation's role and becomes its `inviterId`;
+     * reviving an expired invitation counts against `pendingInvitationLimit`,
+     * and a resend inside `invitationResendCooldown` fails with
+     * `ResendTooSoonError`.
      */
     readonly resendInvitation: (
       actorId: string,
       invitationId: string,
-    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
+    ) => Effect.Effect<
+      Invitation,
+      OrganizationError | Errors.ResendTooSoonError | Errors.AuthError
+    >;
 
     /**
      * Add a user to the organization directly (no invitation). Requires the
@@ -1026,6 +1082,11 @@ export class OrganizationService extends Context.Service<
      * `role` uses the organization's `defaultRole` (default `"member"`). The
      * role (named or default) must be defined, and the actor must hold every
      * permission it carries.
+     *
+     * Only a user the organization manages (`ManagedUser.isManagedUser`:
+     * provisioned by one of its SSO or SCIM connections, or with a primary
+     * email on one of its verified domains) can be added this way; anyone
+     * else joins by invitation. An unknown user id gets the same refusal.
      */
     readonly addMember: (
       actorId: string,
@@ -1033,6 +1094,18 @@ export class OrganizationService extends Context.Service<
       userId: string,
       role?: string,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Leave an organization: the user removes their own membership, active
+     * or not, with no permission needed. The last active owner cannot leave;
+     * they transfer ownership or delete the organization instead. A user with
+     * no membership is refused as `notAMember()`. Cascades to the
+     * organization's teams, as `removeMember` does.
+     */
+    readonly leaveOrganization: (
+      userId: string,
+      organizationId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
      * Remove a member. Requires the `member:delete` permission and that the
@@ -1406,10 +1479,11 @@ export class OrganizationService extends Context.Service<
   /**
    * Construct a Layer providing this service.
    *
-   * Requires `OrganizationStore`, `IdentifierStore`, `EmailPasswordStore` and
-   * `SessionService`: accepting an invitation is a first proof of the invited
-   * address, which clears an unproven account's password, credentials and
-   * sessions.
+   * Requires `OrganizationStore`, `IdentifierStore`, `EmailPasswordStore`,
+   * `SessionService` and `UserStore`: accepting an invitation is a first proof
+   * of the invited address, which clears an unproven account's password,
+   * credentials and sessions, and `addMember` reads the user it adds to
+   * check the organization manages them.
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
@@ -1451,6 +1525,7 @@ export const make = (
   | IdentifierStore
   | EmailPasswordStore
   | SessionService
+  | UserStore
   | SecureRandom.SecureRandom
   | Digest.Digest
 > =>
@@ -1458,6 +1533,8 @@ export const make = (
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
     const organizationLimit = config.organizationLimit ?? 5;
     const membershipLimit = config.membershipLimit ?? 100;
+    const pendingInvitationLimit = config.pendingInvitationLimit ?? 100;
+    const invitationResendCooldown = config.invitationResendCooldown ?? 60 * 1000;
     const invitationExpiresIn = config.invitationExpiresIn ?? 48 * 60 * 60 * 1000; // 48 hours
     const creatorRole = config.creatorRole ?? "owner";
     const roles = config.roles ?? defaultOrganizationRoles;
@@ -1472,6 +1549,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const passwords = yield* EmailPasswordStore;
     const sessions = yield* SessionService;
+    const users = yield* UserStore;
     const firstProof = yield* firstProofServices({ identifiers, passwords, sessions });
     const crypto = yield* SecureRandom.SecureRandom;
 
@@ -1705,6 +1783,106 @@ export const make = (
           });
         }
         return yield* Effect.void;
+      });
+
+    /** Enforce the per-organization cap on pending, unexpired invitations. */
+    const ensureInvitationCapacity = (organizationId: string, now: number) =>
+      Effect.gen(function* () {
+        const invitations = yield* store.listInvitationsByOrganization(organizationId);
+        const pending = Arr.filter(
+          invitations,
+          (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
+        );
+        if (pending.length >= pendingInvitationLimit) {
+          return yield* new OrganizationError({
+            message: "Organization has reached its pending invitation limit",
+          });
+        }
+        return yield* Effect.void;
+      });
+
+    /**
+     * Refuse an invitation email sent inside `invitationResendCooldown` of
+     * the organization's last one to the address, whatever that invitation's
+     * status, so cancelling and re-inviting does not bypass it.
+     */
+    const ensureInvitationCooldown = (
+      invitations: ReadonlyArray<Invitation>,
+      organizationId: string,
+      now: number,
+    ) => {
+      const lastSent = Arr.reduce(invitations, Number.NEGATIVE_INFINITY, (latest, invitation) =>
+        invitation.organizationId === organizationId
+          ? Math.max(latest, invitation.sentAt ?? invitation.createdAt)
+          : latest,
+      );
+      const wait = lastSent + invitationResendCooldown - now;
+      return invitationResendCooldown > 0 && wait > 0
+        ? Effect.fail(
+            new Errors.ResendTooSoonError({
+              message: "An invitation was sent to this address too recently; try again later",
+              retryAfter: Duration.millis(wait),
+            }),
+          )
+        : Effect.void;
+    };
+
+    /**
+     * Refuse an acceptance whose inviter could no longer issue it: they must
+     * still be an active member holding `invitation:create` and every
+     * permission of the invitation's role.
+     */
+    const requireInviterStillGrants = (invitation: Invitation) =>
+      Effect.gen(function* () {
+        const stale = new OrganizationError({
+          message: "This invitation is no longer valid; ask for a new one",
+        });
+        const inviter = yield* requireMemberPermission(
+          invitation.inviterId,
+          invitation.organizationId,
+          "invitation:create",
+        ).pipe(Effect.catchTag("OrganizationError", () => Effect.fail(stale)));
+        yield* requireGrantable(invitation.organizationId, inviter, invitation.role).pipe(
+          Effect.catchTag("OrganizationError", () => Effect.fail(stale)),
+        );
+      });
+
+    /**
+     * How many organizations count toward `organizationLimit` for `userId`:
+     * the memberships they own (the creator role) or joined by accepting an
+     * invitation to one of their email addresses.
+     */
+    const countChosenMemberships = (userId: string) =>
+      Effect.gen(function* () {
+        const memberships = yield* store.listMembersByUser(userId);
+        const emails = Arr.filterMap(yield* identifiers.listByUser(userId), (identifier) =>
+          identifier.type === "email" ? Result.succeed(identifier.value) : Result.failVoid,
+        );
+        const invitations = yield* Effect.forEach(emails, store.listInvitationsByEmail, {
+          concurrency: 1,
+        });
+        const accepted = Arr.filterMap(invitations.flat(), (invitation) =>
+          invitation.status === "accepted"
+            ? Result.succeed(invitation.organizationId)
+            : Result.failVoid,
+        );
+        return Arr.filter(
+          memberships,
+          (member) => member.role === creatorRole || Arr.contains(accepted, member.organizationId),
+        ).length;
+      });
+
+    /** Delete a membership and its team memberships in the organization. */
+    const deleteMembership = (member: Member) =>
+      Effect.gen(function* () {
+        yield* store.deleteMember(member.id);
+        // Cascade: leaving the organization also leaves all of its teams.
+        const teams = yield* store.listTeamsForMember(member.organizationId, member.userId);
+        return yield* Effect.forEach(
+          teams,
+          (team) => store.removeTeamMember(team.id, member.userId),
+          { concurrency: 1, discard: true },
+        );
       });
 
     /**
@@ -1943,8 +2121,7 @@ export const make = (
           });
         }
 
-        const memberships = yield* store.listMembersByUser(userId);
-        if (memberships.length >= organizationLimit) {
+        if ((yield* countChosenMemberships(userId)) >= organizationLimit) {
           return yield* new OrganizationError({
             message: `You have reached the maximum of ${organizationLimit} organizations`,
           });
@@ -2102,6 +2279,8 @@ export const make = (
             message: "A pending invitation already exists for this email",
           });
         }
+        yield* ensureInvitationCapacity(organizationId, now);
+        yield* ensureInvitationCooldown(existingInvitations, organizationId, now);
 
         const { tokenHash, deliver } = yield* issueInvitationToken();
         const invitation: Invitation = {
@@ -2114,6 +2293,7 @@ export const make = (
           inviterId,
           expiresAt: now + invitationExpiresIn,
           createdAt: now,
+          sentAt: now,
         };
 
         const created = yield* store.createInvitation(invitation);
@@ -2126,6 +2306,7 @@ export const make = (
         input: AcceptInvitationInput,
       ) {
         const { invitation, identifier } = yield* getPendingInvitationFor(input, userId);
+        yield* requireInviterStillGrants(invitation);
 
         const existingMember = yield* store.getMember(invitation.organizationId, userId);
         if (existingMember) {
@@ -2183,11 +2364,26 @@ export const make = (
         // The permission first, as for `cancelInvitation`.
         const invitation = yield* store.getInvitation(invitationId);
         if (!invitation) return yield* missingPermission("invitation:create");
-        yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
+        const actor = yield* requireMemberPermission(
+          actorId,
+          invitation.organizationId,
+          "invitation:create",
+        );
         if (invitation.status !== "pending") {
           return yield* new OrganizationError({ message: "Invitation is no longer pending" });
         }
         const organization = yield* getOrganizationOrFail(invitation.organizationId);
+        // The resender becomes the inviter, so they must be able to grant it.
+        yield* requireGrantable(invitation.organizationId, actor, invitation.role);
+        const now = yield* Clock.currentTimeMillis;
+        if (invitation.expiresAt <= now) {
+          yield* ensureInvitationCapacity(invitation.organizationId, now);
+        }
+        yield* ensureInvitationCooldown(
+          yield* store.listInvitationsByEmail(invitation.email),
+          invitation.organizationId,
+          now,
+        );
 
         // The same row and id, so an expired-but-pending invitation is revived
         // rather than duplicated; only the digest is stored, so the token is
@@ -2196,7 +2392,9 @@ export const make = (
         const refreshed = yield* store.updateInvitation({
           ...invitation,
           tokenHash,
-          expiresAt: (yield* Clock.currentTimeMillis) + invitationExpiresIn,
+          inviterId: actorId,
+          expiresAt: now + invitationExpiresIn,
+          sentAt: now,
         });
         yield* deliver(refreshed, organization);
         return refreshed;
@@ -2242,6 +2440,21 @@ export const make = (
         const granted = role ?? defaultRoleOf(organization);
         yield* requireGrantable(organizationId, actor, granted);
 
+        const user = yield* users.get(userId);
+        const managed =
+          user !== null &&
+          (yield* isManagedUser(
+            { identifiers, domains: Option.getOrUndefined(domainStoreOption) },
+            organizationId,
+            user,
+          ));
+        if (!managed) {
+          return yield* new OrganizationError({
+            message:
+              "Only a user this organization manages can be added directly; invite anyone else",
+          });
+        }
+
         const existing = yield* store.getMember(organizationId, userId);
         if (existing) {
           return yield* new OrganizationError({
@@ -2277,14 +2490,26 @@ export const make = (
           }
         }
 
-        yield* store.deleteMember(target.id);
-        // Cascade: leaving the organization also leaves all of its teams.
-        const teams = yield* store.listTeamsForMember(organizationId, memberUserId);
-        return yield* Effect.forEach(
-          teams,
-          (team) => store.removeTeamMember(team.id, memberUserId),
-          { concurrency: 1, discard: true },
-        );
+        return yield* deleteMembership(target);
+      }),
+
+      leaveOrganization: Effect.fn("OrganizationService.leaveOrganization")(function* (
+        userId: string,
+        organizationId: string,
+      ) {
+        const member = yield* store.getMember(organizationId, userId);
+        if (!member) return yield* notAMember();
+        if (
+          member.role === creatorRole &&
+          isActiveMember(member) &&
+          (yield* countOwners(organizationId)) <= 1
+        ) {
+          return yield* new OrganizationError({
+            message:
+              "The last owner of an organization cannot leave it; transfer ownership or delete the organization",
+          });
+        }
+        return yield* deleteMembership(member);
       }),
 
       updateMemberRole: Effect.fn("OrganizationService.updateMemberRole")(function* (

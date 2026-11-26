@@ -81,6 +81,29 @@ const recordingFetch = (body: Schema.Json) => {
 // -----------------------------------------------------------------------------
 
 /** The user a call that issued a session resolved with. */
+/**
+ * Stamp `userId` as provisioned by `organizationId`, making them a user the
+ * organization manages, whom `addMember` takes.
+ */
+const manage = (
+  server: ReturnType<typeof makeServerFixture>,
+  userId: string,
+  organizationId: string,
+) =>
+  Option.map(MutableHashMap.get(server.usersById, userId), (user) =>
+    MutableHashMap.set(server.usersById, userId, {
+      ...user,
+      attributes: {
+        ...user.attributes,
+        ...Auth.ManagedUser.provisionedByAttributes({
+          kind: "scim",
+          connectionId: "scim-1",
+          organizationId,
+        }),
+      },
+    }),
+  );
+
 const signedInUser = (result: AuthResult) => {
   assert(result.user !== undefined, "the call issued a session");
   return result.user;
@@ -494,7 +517,7 @@ describe("organizations", () => {
   });
 
   it("manages teams and per-organization roles", async () => {
-    const { browser } = withServer({ organization: true });
+    const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const teammate = browser();
 
@@ -502,6 +525,7 @@ describe("organizations", () => {
     const mate = await teammate.signUp({ email: "mate@client.test", password: PW });
 
     const org = await owner.organization.create({ name: "Globex", slug: "globex" });
+    manage(server, signedInUser(mate).id, org.id);
     const membership = await owner.organization.addMember(org.id, {
       userId: signedInUser(mate).id,
       role: "member",
@@ -564,7 +588,7 @@ describe("organizations", () => {
   });
 
   it("deactivates and reactivates a member, restoring their role", async () => {
-    const { browser } = withServer({ organization: true });
+    const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const staff = browser();
 
@@ -572,6 +596,7 @@ describe("organizations", () => {
     const employee = await staff.signUp({ email: "staff@client.test", password: PW });
 
     const org = await owner.organization.create({ name: "Initech", slug: "initech" });
+    manage(server, signedInUser(employee).id, org.id);
     const membership = await owner.organization.addMember(org.id, {
       userId: signedInUser(employee).id,
       role: "admin",
@@ -762,13 +787,14 @@ describe("organizations", () => {
   });
 
   it("refuses an admin granting the owner role, to themselves included", async () => {
-    const { browser } = withServer({ organization: true });
+    const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const admin = browser();
 
     await owner.signUp({ email: "founder@client.test", password: PW });
     const adminUser = await admin.signUp({ email: "admin@client.test", password: PW });
     const org = await owner.organization.create({ name: "Hooli", slug: "hooli" });
+    manage(server, signedInUser(adminUser).id, org.id);
     const membership = await owner.organization.addMember(org.id, {
       userId: signedInUser(adminUser).id,
       role: "admin",
@@ -795,7 +821,7 @@ describe("organizations", () => {
   });
 
   it("sets a default role that addMember and the org view both use", async () => {
-    const { browser } = withServer({ organization: true });
+    const { server, browser } = withServer({ organization: true });
     const owner = browser();
     const newcomer = browser();
 
@@ -813,6 +839,7 @@ describe("organizations", () => {
     const updated = await owner.organization.setDefaultRole(org.id, { role: "contributor" });
     expect(updated.defaultRole).toBe("contributor");
 
+    manage(server, signedInUser(hire).id, org.id);
     const member = await owner.organization.addMember(org.id, { userId: signedInUser(hire).id });
     expect(member.role).toBe("contributor");
     expect(member.status).toBe("active");
