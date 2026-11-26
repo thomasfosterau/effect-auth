@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
+import { Clock, Context, DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 import { KeyValueStore } from "effect/persistence";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
-  layerKV,
+  layerKVSingleProcess,
   OAuthStateStoreKV,
   ChallengeStoreKV,
   RateLimitStoreKV,
@@ -17,6 +17,7 @@ import {
   PendingMultiFactorStoreKV,
   GoogleOneTapNonceStoreKV,
   KeyValueStoreKeys,
+  KeyValueStoreTake,
   layerMemoryKeyValueStore,
   purgeExpiredKV,
   purgeExpiredKVWith,
@@ -39,7 +40,7 @@ import { GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as Errors from "./Errors.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
-const testLayer = () => layerKV.pipe(Layer.provide(KeyValueStore.layerMemory));
+const testLayer = () => layerKVSingleProcess.pipe(Layer.provide(KeyValueStore.layerMemory));
 
 const run = <A, E>(
   effect: Effect.Effect<
@@ -74,6 +75,36 @@ describe("KeyValueStores", () => {
     expect(MagicLinkStoreKV).toBeDefined();
     expect(EmailOtpStoreKV).toBeDefined();
     expect(PendingMultiFactorStoreKV).toBeDefined();
+  });
+
+  describe("a failing backend", () => {
+    const backendError = new KeyValueStore.KeyValueStoreError({ message: "down", method: "get" });
+    const failing = KeyValueStore.makeStringOnly({
+      get: () => Effect.fail(backendError),
+      set: () => Effect.void,
+      remove: () => Effect.void,
+      clear: Effect.void,
+      size: Effect.succeed(0),
+      keys: Effect.succeed([]),
+    });
+    const failingLayer = layerKVSingleProcess.pipe(
+      Layer.provide(Layer.succeed(KeyValueStore.KeyValueStore, failing)),
+    );
+    const flip = <A>(
+      effect: Effect.Effect<A, Errors.AuthError, Layer.Success<typeof failingLayer>>,
+    ) => Effect.runPromise(Effect.flip(effect).pipe(Effect.provide(failingLayer)));
+
+    it("fails a challenge read with an AuthError that keeps the cause", async () => {
+      const error = await flip(ChallengeStore.use((store) => store.get(new Uint8Array([1]))));
+      expect(error).toBeInstanceOf(Errors.AuthError);
+      expect(error.cause).toBe(backendError);
+    });
+
+    it("fails a rate-limit read with an AuthError rather than a defect", async () => {
+      const error = await flip(RateLimitStore.use((store) => store.get("k")));
+      expect(error).toBeInstanceOf(Errors.AuthError);
+      expect(error.cause).toBe(backendError);
+    });
   });
 
   describe("OAuthStateStoreKV", () => {
@@ -135,6 +166,162 @@ describe("KeyValueStores", () => {
         ),
       );
       expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
+    });
+  });
+
+  describe("KeyValueStoreTake", () => {
+    const state: OAuthState = {
+      state: "state-1",
+      provider: "google",
+      codeVerifier: "verifier",
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 600_000,
+    };
+
+    /**
+     * One backend shared by two separately built stores, as two processes
+     * would share Redis: a read suspends after it reads, so read-then-remove interleaves.
+     */
+    const sharedBackend = () => {
+      const entries = MutableHashMap.empty<string, string>();
+      const store = KeyValueStore.makeStringOnly({
+        get: (key) =>
+          Effect.sync(() => Option.getOrUndefined(MutableHashMap.get(entries, key))).pipe(
+            Effect.tap(() => Effect.yieldNow),
+          ),
+        set: (key, value) => Effect.sync(() => void MutableHashMap.set(entries, key, value)),
+        remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
+        clear: Effect.sync(() => void MutableHashMap.clear(entries)),
+        size: Effect.sync(() => MutableHashMap.size(entries)),
+        keys: Effect.sync(() => Arr.fromIterable(MutableHashMap.keys(entries))),
+      });
+      let takes = 0;
+      const take = Layer.succeed(KeyValueStoreTake, {
+        take: (key) =>
+          Effect.sync(() => {
+            takes += 1;
+            const value = Option.getOrUndefined(MutableHashMap.get(entries, key));
+            MutableHashMap.remove(entries, key);
+            return value;
+          }),
+      });
+      return {
+        entries,
+        store: Layer.succeed(KeyValueStore.KeyValueStore)(store),
+        take,
+        takes: () => takes,
+      };
+    };
+
+    /** Consume one state from two stores built apart over one backend. */
+    const raceTwoInstances = (backend: Layer.Layer<KeyValueStore.KeyValueStore>) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const first = yield* Layer.build(OAuthStateStoreKV.pipe(Layer.provide(backend)));
+          const second = yield* Layer.build(OAuthStateStoreKV.pipe(Layer.provide(backend)));
+          const a = Context.get(first, OAuthStateStore);
+          const b = Context.get(second, OAuthStateStore);
+          yield* a.create(state);
+          return yield* Effect.all([a.consume("state-1"), b.consume("state-1")], {
+            concurrency: "unbounded",
+          });
+        }).pipe(Effect.scoped),
+      );
+
+    it("without it, two instances over one backend can both consume a state", async () => {
+      const { store } = sharedBackend();
+      const results = await raceTwoInstances(store);
+      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state, state]);
+    });
+
+    it("with it, only one of two instances over one backend consumes a state", async () => {
+      const backend = sharedBackend();
+      const results = await raceTwoInstances(Layer.merge(backend.store, backend.take));
+      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
+      expect(backend.takes()).toBe(2);
+    });
+
+    it("spends every single-use token through take and cleans its index", async () => {
+      const backend = sharedBackend();
+      const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const links = yield* MagicLinkStore;
+          const resets = yield* PasswordResetStore;
+          const verifications = yield* EmailVerificationStore;
+          const pending = yield* PendingMultiFactorStore;
+          yield* links.create({
+            token: "ml",
+            email: "a@example.com",
+            createdAt: now,
+            expiresAt: now + 60_000,
+          });
+          yield* resets.create({
+            token: "pr",
+            userId: "u1",
+            email: "a@example.com",
+            createdAt: now,
+            expiresAt: now + 60_000,
+          });
+          yield* verifications.create({
+            token: "ev",
+            userId: "u1",
+            email: "a@example.com",
+            createdAt: now,
+            expiresAt: now + 60_000,
+          });
+          yield* pending.create({
+            token: "mf",
+            userId: "u1",
+            createdAt: now,
+            expiresAt: now + 60_000,
+          });
+          yield* pending.recordFailedAttempt("mf");
+          return {
+            link: yield* links.consume("ml"),
+            reset: yield* resets.consume("pr"),
+            verification: yield* verifications.consume("ev"),
+            pending: yield* pending.consume("mf"),
+            again: yield* links.consume("ml"),
+          };
+        }).pipe(
+          Effect.provide(
+            layerKVSingleProcess.pipe(Layer.provide(Layer.merge(backend.store, backend.take))),
+          ),
+        ),
+      );
+      expect(result.link?.token).toBe("ml");
+      expect(result.reset?.token).toBe("pr");
+      expect(result.verification?.token).toBe("ev");
+      expect(result.pending).toEqual({
+        token: "mf",
+        userId: "u1",
+        createdAt: now,
+        expiresAt: now + 60_000,
+      });
+      expect(result.again).toBeNull();
+      expect(backend.takes()).toBe(5);
+      expect(MutableHashMap.size(backend.entries)).toBe(0);
+    });
+
+    it("surfaces a failed take as its AuthError", async () => {
+      const backend = sharedBackend();
+      const failure = new Errors.AuthError({ message: "GETDEL failed" });
+      const error = await Effect.runPromise(
+        Effect.flip(OAuthStateStore.use((store) => store.consume("state-1"))).pipe(
+          Effect.provide(
+            OAuthStateStoreKV.pipe(
+              Layer.provide(
+                Layer.merge(
+                  backend.store,
+                  Layer.succeed(KeyValueStoreTake, { take: () => Effect.fail(failure) }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(error).toBe(failure);
     });
   });
 
@@ -200,7 +387,9 @@ describe("KeyValueStores", () => {
             yield* store.get(new Uint8Array([1, 2, 3])),
             yield* store.get(new Uint8Array([4, 5, 6])),
           ];
-        }).pipe(Effect.provide(Layer.provideMerge(layerKV, KeyValueStore.layerMemory))),
+        }).pipe(
+          Effect.provide(Layer.provideMerge(layerKVSingleProcess, KeyValueStore.layerMemory)),
+        ),
       );
       expect(loaded).toEqual([null, null]);
     });
@@ -359,6 +548,18 @@ describe("KeyValueStores", () => {
       expect(result.afterDelete).toBeNull();
       expect(result.two).toBeNull();
       expect(result.three?.email).toBe("b@example.com");
+    });
+
+    it("getByEmail returns the newest token for the address", async () => {
+      const latest = await run(
+        Effect.gen(function* () {
+          const store = yield* MagicLinkStore;
+          yield* store.create(link("ml-old", "a@example.com"));
+          yield* store.create(link("ml-new", "a@example.com"));
+          return yield* store.getByEmail("a@example.com");
+        }),
+      );
+      expect(latest?.token).toBe("ml-new");
     });
   });
 
@@ -749,7 +950,7 @@ describe("KeyValueStores", () => {
           Effect.provide(
             Layer.merge(
               Layer.provideMerge(
-                Layer.merge(layerKV, GoogleOneTapNonceStoreKV),
+                Layer.merge(layerKVSingleProcess, GoogleOneTapNonceStoreKV),
                 layerMemoryKeyValueStore,
               ),
               TestClock.layer(),

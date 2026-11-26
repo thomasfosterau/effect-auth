@@ -1,15 +1,41 @@
 /**
  * `KeyValueStore`-backed implementations of effect-auth's ephemeral stores.
  *
- * These stores hold short-lived token/state data (OAuth states, WebAuthn
- * challenges, rate-limit counters, verification / reset / magic-link tokens,
- * email OTPs and pending multi-factor challenges) — a natural fit for a
- * key-value backend such as Redis, Cloudflare KV, or an in-memory map.
+ * These stores hold short-lived token and state data (OAuth states, WebAuthn
+ * challenges, verification, reset and magic-link tokens, One Tap nonces) and
+ * the attempt counters (rate limits, email OTPs, pending multi-factor
+ * challenges), plus one long-lived store, {@link IdentifierStoreKV}.
  *
  * Each layer requires the `KeyValueStore` service from
  * `effect/persistence`; provide any of its backends (e.g.
  * `KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`,
  * `KeyValueStore.layerSql`) underneath.
+ *
+ * ## What is supported where
+ *
+ * A `KeyValueStore` offers get, set and remove, and nothing atomic across
+ * them, so every write that depends on a read can interleave with another.
+ *
+ * - **Token and state stores** (`OAuthStateStoreKV`, `ChallengeStoreKV`,
+ *   `EmailVerificationStoreKV`, `PasswordResetStoreKV`, `MagicLinkStoreKV`,
+ *   `GoogleOneTapNonceStoreKV`) tolerate it, apart from spending a single-use
+ *   record: `consume` is atomic across processes only with a
+ *   {@link KeyValueStoreTake} (below).
+ *   {@link layerKV} bundles the first five, for a deployment.
+ * - **Counter stores** (`RateLimitStoreKV`, `EmailOtpStoreKV`,
+ *   `PendingMultiFactorStoreKV`) and **`IdentifierStoreKV`** are for
+ *   development, tests and a single process only. Their counts are
+ *   read-modify-write, so parallel guesses across processes share a count and
+ *   the attempt caps scale with concurrency, and `IdentifierStoreKV` checks a
+ *   value is free with a read before it writes, so two processes can both
+ *   claim one address. {@link layerKVSingleProcess} adds them to
+ *   {@link layerKV}. In production use `./sql` (or another store with atomic
+ *   counters and a unique index) for these.
+ *
+ * Never put a single-use record on an eventually consistent backend such as
+ * Cloudflare KV: a read after a remove may still see the record, so a spent
+ * token or state can be spent again. Use Durable Objects, D1 through
+ * `./sql`, or Redis.
  *
  * Records are serialized as JSON strings. All of these record shapes use
  * epoch-millisecond numbers for timestamps (no `Date` fields), so plain
@@ -43,9 +69,8 @@
  * `RateLimitStore.increment` (and `EmailOtpStore.recordFailure` and the
  * secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
- * the same count and only bump it once. This is acceptable for the KV
- * backend's intended use (best-effort rate limiting);
- * use a backend with atomic counters when strict enforcement is required.
+ * the same count and only bump it once, which is why the counter stores are
+ * single-process only.
  *
  * The per-code attempt counters (`EmailOtpStore.incrementAttempts`,
  * `PendingMultiFactorStore.recordFailedAttempt`) are the guess limit itself:
@@ -54,15 +79,15 @@
  * so one process never hands out a count twice; as with `consume` below,
  * that does not span processes sharing a backend.
  *
- * `OAuthStateStore.consume` is a security guarantee, not a counter, so
- * it runs its read and remove under a semaphore the store owns: one process
- * never hands the same state out twice. A `KeyValueStore` offers no
- * get-and-delete, so the guarantee does not span processes sharing a backend;
- * see {@link oauthStateStoreKV}. The single-use token stores' `consume`
- * (`EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`,
- * `PendingMultiFactorStore`) works the same way, with the same limit:
- * behind several instances sharing one backend, implement those contracts
- * over a backend with an atomic get-and-delete.
+ * The single-use stores' `consume` (`OAuthStateStore`,
+ * `EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`,
+ * `PendingMultiFactorStore`) is a security guarantee, not a counter. A
+ * `KeyValueStore` offers no get-and-delete, so by default each runs its read
+ * and remove under a semaphore the store owns: one process never hands a
+ * record out twice, but two processes sharing a backend can. Behind several
+ * instances, provide a {@link KeyValueStoreTake} (Redis `GETDEL`, a Durable
+ * Object) where the stores are built, and `consume` takes the record in one
+ * atomic call instead.
  */
 import {
   Clock,
@@ -75,6 +100,7 @@ import {
   Order,
   Result,
   Semaphore,
+  Struct,
 } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -115,6 +141,7 @@ const toAuthError =
       message: `KeyValueStore ${label} failed${
         P.hasProperty(cause, "message") && P.isString(cause.message) ? `: ${cause.message}` : ""
       }`,
+      cause,
     });
 
 const toBase64 = (bytes: Uint8Array): string => Base64.encode(bytes);
@@ -152,6 +179,25 @@ const isEnvelope = Schema.is(Schema.Struct({ [EXPIRES_AT]: Schema.Number, value:
  * `KeyValueStore` has no per-entry TTL, so the envelope is what tells
  * {@link purgeExpiredKV} an entry is spent, whatever its record shape.
  */
+/** A stored JSON text, or `undefined` for a miss, with its envelope opened. */
+const decodeEntry = <A>(
+  value: string | undefined,
+  label: string,
+): Effect.Effect<StoredEntry<A> | null, Errors.AuthError> =>
+  value === undefined
+    ? Effect.succeed(null)
+    : decodeJsonText(value).pipe(
+        // SAFETY: every key is namespaced to one record shape and written
+        // only by `write` / `writeExpiring` with a value of that shape, so the
+        // JSON under a key round-trips to the `A` its caller wrote there.
+        Effect.map((parsed): StoredEntry<A> =>
+          isEnvelope(parsed)
+            ? { value: parsed.value as A, expiresAt: parsed[EXPIRES_AT] }
+            : { value: parsed as A, expiresAt: undefined },
+        ),
+        Effect.mapError(toAuthError(label)),
+      );
+
 const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
   /** The entry under `key`, expired or not, with its envelope opened. */
   const readEntry = <A>(
@@ -160,22 +206,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
   ): Effect.Effect<StoredEntry<A> | null, Errors.AuthError> =>
     kv.get(key).pipe(
       Effect.mapError(toAuthError(label)),
-      Effect.flatMap((value) =>
-        value === undefined
-          ? Effect.succeed(null)
-          : decodeJsonText(value).pipe(
-              // SAFETY: every key is namespaced to one record shape and
-              // written only by `write` / `writeExpiring` with a value of that
-              // shape, so the JSON under a key round-trips to the `A` its
-              // caller wrote there.
-              Effect.map((parsed): StoredEntry<A> =>
-                isEnvelope(parsed)
-                  ? { value: parsed.value as A, expiresAt: parsed[EXPIRES_AT] }
-                  : { value: parsed as A, expiresAt: undefined },
-              ),
-              Effect.mapError(toAuthError(label)),
-            ),
-      ),
+      Effect.flatMap((value) => decodeEntry<A>(value, label)),
     );
 
   /**
@@ -242,22 +273,105 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 };
 
 /**
- * A single-use store's `consume`: its `get` and `delete` run under one
- * permit of a semaphore the store owns, so within one process two concurrent
- * callers passing the same key never both receive the record. A
- * `KeyValueStore` has no get-and-delete, so the guarantee stops at the
- * process (see the module docs).
+ * An atomic get-and-delete over the same backend as the `KeyValueStore`
+ * (Redis `GETDEL`, a Durable Object, a `DELETE … RETURNING`), for the
+ * single-use stores' `consume`.
+ *
+ * A `KeyValueStore` has no get-and-delete, so without this service each
+ * `*StoreKV` `consume` runs its read and remove under a semaphore the store
+ * owns: atomic within one process, but behind several instances sharing one
+ * backend, two of them can both read a record before either removes it.
+ * Provide this service where the stores are built and their `consume` takes
+ * the record with one `take` call instead, which holds across processes.
+ *
+ * `take(key)` deletes the value under `key` and returns it, or returns
+ * `undefined` when there is none, as one indivisible operation: of two
+ * concurrent calls with one key, at most one receives the value. It must name
+ * keys as the `KeyValueStore` does: behind a `KeyValueStore.prefix` view, add
+ * that prefix before calling the backend.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * // A Redis client's `getDel`, standing in for a host's binding.
+ * const redis = new Map([["oauth-state:s1", "{}"]])
+ * const getDel = async (key: string) => {
+ *   const value = redis.get(key)
+ *   redis.delete(key)
+ *   return value ?? null
+ * }
+ *
+ * const TakeLive = Layer.succeed(Auth.KeyValueStoreTake, {
+ *   take: (key) =>
+ *     Effect.tryPromise({
+ *       try: async () => (await getDel(key)) ?? undefined,
+ *       catch: (cause) => new Auth.AuthError({ message: "GETDEL failed", cause }),
+ *     }),
+ * })
+ *
+ * const program = Effect.gen(function* () {
+ *   const { take } = yield* Auth.KeyValueStoreTake
+ *   return [yield* take("oauth-state:s1"), yield* take("oauth-state:s1")]
+ * })
+ * assert.deepEqual(await Effect.runPromise(program.pipe(Effect.provide(TakeLive))), [
+ *   "{}",
+ *   undefined,
+ * ])
+ * ```
+ *
+ * @since 0.1.0
+ * @category services
  */
-const consumeUnder =
-  <A>(
-    get: (key: string) => Effect.Effect<A | null, Errors.AuthError>,
-    remove: (key: string) => Effect.Effect<void, Errors.AuthError>,
-  ) =>
-  (lock: Semaphore.Semaphore) =>
-  (key: string): Effect.Effect<A | null, Errors.AuthError> =>
-    lock.withPermit(
-      get(key).pipe(Effect.tap((found) => (found === null ? Effect.void : remove(key)))),
-    );
+export class KeyValueStoreTake extends Context.Service<
+  KeyValueStoreTake,
+  {
+    /** Delete the value under `key` and return it, as one indivisible step. */
+    readonly take: (key: string) => Effect.Effect<string | undefined, Errors.AuthError>;
+  }
+>()("@effect-auth/KeyValueStoreTake") {}
+
+/**
+ * The ambient `KeyValueStore` and the {@link KeyValueStoreTake}, when one is
+ * provided, for building the single-use stores.
+ */
+const singleUseContext = Effect.all(
+  {
+    store: Effect.service(KeyValueStore.KeyValueStore),
+    take: Effect.serviceOption(KeyValueStoreTake),
+  },
+  { concurrency: 1 },
+);
+
+/**
+ * A single-use store's spend of the record under a key: one
+ * {@link KeyValueStoreTake} call when the service is provided, otherwise its
+ * read and remove under one permit of a semaphore the store owns, so within
+ * one process two concurrent callers never both receive the record.
+ */
+const makeTakeRecord = (
+  store: KeyValueStore.KeyValueStore,
+  take: Option.Option<typeof KeyValueStoreTake.Service>,
+) => {
+  const kv = jsonKv(store);
+  const lock = Semaphore.makeUnsafe(1);
+  return <A>(key: string, label: string): Effect.Effect<A | null, Errors.AuthError> =>
+    Option.match(take, {
+      onSome: (service) =>
+        service.take(key).pipe(
+          Effect.flatMap((value) => decodeEntry<A>(value, label)),
+          Effect.map((entry) => (entry === null ? null : entry.value)),
+        ),
+      onNone: () =>
+        lock.withPermit(
+          kv
+            .read<A>(key, label)
+            .pipe(Effect.tap((found) => (found === null ? Effect.void : kv.remove(key, label)))),
+        ),
+    });
+};
 
 // ---------------------------------------------------------------------------
 // OAuthStateStore
@@ -268,36 +382,28 @@ const oauthStateKey = (state: string) => `oauth-state:${state}`;
 /**
  * Build an {@link OAuthStateStore} over the ambient `KeyValueStore`.
  *
- * `consume` is the read and the remove run under one permit of a semaphore
- * this store owns, so within one process two concurrent callers passing the
- * same state never both receive it. A `KeyValueStore` has no
- * get-and-delete, so that guarantee stops at the process: behind several
- * instances sharing one backend (Redis, Cloudflare KV), use an
- * `OAuthStateStore` with a native atomic consume (`./sql`'s
- * `DELETE ... RETURNING`, or Redis `GETDEL`).
+ * `consume` takes the state with one {@link KeyValueStoreTake} call when that
+ * service is provided where the store is built, which holds across
+ * instances sharing one backend. Without it, `consume` is the read and the
+ * remove under one permit of a semaphore this store owns: two concurrent
+ * callers in one process never both receive a state, but two instances
+ * sharing a backend can, so this store is then single-instance only. Behind
+ * several instances, provide a `KeyValueStoreTake` or use `./sql`'s store
+ * (`DELETE ... RETURNING`, D1 included).
  */
 export const oauthStateStoreKV: Effect.Effect<
   typeof OAuthStateStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = KeyValueStore.KeyValueStore.useSync((store) => {
+> = Effect.map(singleUseContext, ({ store, take }) => {
   const kv = jsonKv(store);
-  const consumeLock = Semaphore.makeUnsafe(1);
+  const takeRecord = makeTakeRecord(store, take);
   return {
     create: (state) =>
       kv
         .writeExpiring(oauthStateKey(state.state), state, state.expiresAt, "oauthState.create")
         .pipe(Effect.as(state)),
-    consume: (state) =>
-      consumeLock.withPermit(
-        kv
-          .read<OAuthState>(oauthStateKey(state), "oauthState.consume")
-          .pipe(
-            Effect.tap((entry) =>
-              entry === null ? Effect.void : kv.remove(oauthStateKey(state), "oauthState.consume"),
-            ),
-          ),
-      ),
+    consume: (state) => takeRecord<OAuthState>(oauthStateKey(state), "oauthState.consume"),
   } satisfies typeof OAuthStateStore.Service;
 });
 
@@ -360,10 +466,9 @@ export const challengeStoreKV: Effect.Effect<
         )
         .pipe(Effect.as(challenge)),
     get: (challenge) =>
-      kv.read<StoredChallenge>(challengeKey(challenge), "challenge.get").pipe(
-        Effect.orDie,
-        Effect.map((stored) => (stored ? decodeChallenge(stored) : null)),
-      ),
+      kv
+        .read<StoredChallenge>(challengeKey(challenge), "challenge.get")
+        .pipe(Effect.map((stored) => (stored ? decodeChallenge(stored) : null))),
     delete: (challenge) => kv.remove(challengeKey(challenge), "challenge.delete"),
   } satisfies typeof ChallengeStore.Service;
 });
@@ -387,8 +492,11 @@ const rateLimitExpiry = (entry: RateLimitEntry, until: number): number =>
 /**
  * Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
  *
- * `increment` is read-modify-write and therefore not atomic (see the module
- * docs) — fine for best-effort limiting, not for strict quota enforcement.
+ * **Development and single-process use only** (see the module docs):
+ * `increment` is read-modify-write, so across processes parallel requests
+ * share a count and overshoot the limit. In production use `./sql` or
+ * another store with an atomic increment.
+ *
  * The `ttl` arguments are honoured logically via each entry's `resetAt`
  * rather than by backend-level expiry, since `KeyValueStore` has no TTL API:
  * `set` takes a key and a value only. An entry therefore stays until
@@ -403,7 +511,7 @@ export const rateLimitStoreKV: Effect.Effect<
   const kv = jsonKv(store);
   const readEntry = (key: string) => kv.read<RateLimitEntry>(rateLimitKey(key), "rateLimit.get");
   return {
-    get: (key) => readEntry(key).pipe(Effect.orDie),
+    get: readEntry,
     set: (key, entry, ttl) =>
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         kv.writeExpiring(
@@ -436,7 +544,8 @@ export const rateLimitStoreKV: Effect.Effect<
 });
 
 /**
- * `RateLimitStore` layer backed by `KeyValueStore`.
+ * `RateLimitStore` layer backed by `KeyValueStore`. Development and
+ * single-process use only; see {@link rateLimitStoreKV}.
  */
 export const RateLimitStoreKV: Layer.Layer<RateLimitStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(RateLimitStore, rateLimitStoreKV);
@@ -462,8 +571,9 @@ export const emailVerificationStoreKV: Effect.Effect<
   typeof EmailVerificationStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = KeyValueStore.KeyValueStore.useSync((store) => {
+> = Effect.map(singleUseContext, ({ store, take }) => {
   const kv = jsonKv(store);
+  const takeRecord = makeTakeRecord(store, take);
   const self = {
     create: (verification) =>
       Effect.gen(function* () {
@@ -532,7 +642,21 @@ export const emailVerificationStoreKV: Effect.Effect<
   } satisfies Omit<typeof EmailVerificationStore.Service, "consume">;
   return {
     ...self,
-    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
+    consume: (token) =>
+      takeRecord<EmailVerification>(
+        emailVerificationTokenKey(token),
+        "emailVerification.consume",
+      ).pipe(
+        Effect.tap((taken) =>
+          taken === null
+            ? Effect.void
+            : kv.indexRemove(
+                emailVerificationUserKey(taken.userId),
+                token,
+                "emailVerification.consume",
+              ),
+        ),
+      ),
   } satisfies typeof EmailVerificationStore.Service;
 });
 
@@ -561,8 +685,9 @@ export const passwordResetStoreKV: Effect.Effect<
   typeof PasswordResetStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = KeyValueStore.KeyValueStore.useSync((store) => {
+> = Effect.map(singleUseContext, ({ store, take }) => {
   const kv = jsonKv(store);
+  const takeRecord = makeTakeRecord(store, take);
   const self = {
     create: (reset) =>
       Effect.gen(function* () {
@@ -602,7 +727,14 @@ export const passwordResetStoreKV: Effect.Effect<
   } satisfies Omit<typeof PasswordResetStore.Service, "consume">;
   return {
     ...self,
-    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
+    consume: (token) =>
+      takeRecord<PasswordResetToken>(passwordResetTokenKey(token), "passwordReset.consume").pipe(
+        Effect.tap((taken) =>
+          taken === null
+            ? Effect.void
+            : kv.indexRemove(passwordResetUserKey(taken.userId), token, "passwordReset.consume"),
+        ),
+      ),
   } satisfies typeof PasswordResetStore.Service;
 });
 
@@ -631,8 +763,9 @@ export const magicLinkStoreKV: Effect.Effect<
   typeof MagicLinkStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = KeyValueStore.KeyValueStore.useSync((store) => {
+> = Effect.map(singleUseContext, ({ store, take }) => {
   const kv = jsonKv(store);
+  const takeRecord = makeTakeRecord(store, take);
   const self = {
     create: (token) =>
       Effect.gen(function* () {
@@ -649,10 +782,10 @@ export const magicLinkStoreKV: Effect.Effect<
     getByEmail: (email) =>
       Effect.gen(function* () {
         const tokens = yield* kv.readIndex(magicLinkEmailKey(email), "magicLink.getByEmail");
-        const first = Arr.head(tokens);
-        if (Option.isNone(first)) return null;
+        const latest = Arr.last(tokens);
+        if (Option.isNone(latest)) return null;
         return yield* kv.read<MagicLinkToken>(
-          magicLinkTokenKey(first.value),
+          magicLinkTokenKey(latest.value),
           "magicLink.getByEmail",
         );
       }),
@@ -679,7 +812,14 @@ export const magicLinkStoreKV: Effect.Effect<
   } satisfies Omit<typeof MagicLinkStore.Service, "consume">;
   return {
     ...self,
-    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
+    consume: (token) =>
+      takeRecord<MagicLinkToken>(magicLinkTokenKey(token), "magicLink.consume").pipe(
+        Effect.tap((taken) =>
+          taken === null
+            ? Effect.void
+            : kv.indexRemove(magicLinkEmailKey(taken.email), token, "magicLink.consume"),
+        ),
+      ),
   } satisfies typeof MagicLinkStore.Service;
 });
 
@@ -705,8 +845,11 @@ const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
  * the key itself and no secondary index is needed. The pair's failure budget
  * lives under its own `email-otp-failures:` key, so replacing or
  * deleting the OTP leaves it; `clearFailures` removes it, and
- * {@link purgeExpiredKV} once its backoff has long decayed. `incrementAttempts` and `recordFailure` are read-modify-write
- * (see the module docs on atomicity).
+ * {@link purgeExpiredKV} once its backoff has long decayed.
+ *
+ * **Development and single-process use only** (see the module docs): its
+ * counts are read-modify-write, so across processes parallel attempts share
+ * a count. In production use `./sql` or another store with atomic counters.
  */
 export const emailOtpStoreKV: Effect.Effect<
   typeof EmailOtpStore.Service,
@@ -761,7 +904,8 @@ export const emailOtpStoreKV: Effect.Effect<
 });
 
 /**
- * `EmailOtpStore` layer backed by `KeyValueStore`.
+ * `EmailOtpStore` layer backed by `KeyValueStore`. Development and
+ * single-process use only; see {@link emailOtpStoreKV}.
  */
 export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(EmailOtpStore, emailOtpStoreKV);
@@ -817,17 +961,17 @@ export class KeyValueStoreKeys extends Context.Service<
 
 /**
  * An in-memory `KeyValueStore` together with the {@link KeyValueStoreKeys}
- * listing over the same map, for tests, examples and single-process demos.
- * Each build of the layer starts empty. `KeyValueStore.layerMemory` serves
- * {@link purgeExpiredKV} too (through its `keys`); this layer also provides
- * the listing, for code that reads it.
+ * listing and the {@link KeyValueStoreTake} over the same map, for tests,
+ * examples and single-process demos. Each build of the layer starts empty.
+ * `KeyValueStore.layerMemory` serves {@link purgeExpiredKV} too (through its
+ * `keys`); this layer also provides the listing, for code that reads it.
  */
 export const layerMemoryKeyValueStore: Layer.Layer<
-  KeyValueStore.KeyValueStore | KeyValueStoreKeys
+  KeyValueStore.KeyValueStore | KeyValueStoreKeys | KeyValueStoreTake
 > = Layer.unwrap(
   Effect.sync(() => {
     const entries = MutableHashMap.empty<string, string>();
-    return Layer.merge(
+    return Layer.mergeAll(
       Layer.succeed(
         KeyValueStore.KeyValueStore,
         KeyValueStore.makeStringOnly({
@@ -846,6 +990,14 @@ export const layerMemoryKeyValueStore: Layer.Layer<
               key.startsWith(prefix),
             ),
           ),
+      }),
+      Layer.succeed(KeyValueStoreTake, {
+        take: (key) =>
+          Effect.sync(() => {
+            const value = Option.getOrUndefined(MutableHashMap.get(entries, key));
+            MutableHashMap.remove(entries, key);
+            return value;
+          }),
       }),
     );
   }),
@@ -1139,15 +1291,23 @@ interface StoredPendingMultiFactor extends PendingMultiFactor {
   readonly failedAttempts?: number | undefined;
 }
 
+const withoutAttempts = (stored: StoredPendingMultiFactor): PendingMultiFactor =>
+  Struct.omit(stored, ["failedAttempts"]);
+
 /**
  * Build a {@link PendingMultiFactorStore} over the ambient `KeyValueStore`.
+ *
+ * **Development and single-process use only** (see the module docs): its
+ * counts are read-modify-write, so across processes parallel attempts share
+ * a count. In production use `./sql` or another store with atomic counters.
  */
 export const pendingMultiFactorStoreKV: Effect.Effect<
   typeof PendingMultiFactorStore.Service,
   never,
   KeyValueStore.KeyValueStore
-> = KeyValueStore.KeyValueStore.useSync((store) => {
+> = Effect.map(singleUseContext, ({ store, take }) => {
   const kv = jsonKv(store);
+  const takeRecord = makeTakeRecord(store, take);
   const attemptsLock = Semaphore.makeUnsafe(1);
   const read = (token: string, label: string) =>
     kv.read<StoredPendingMultiFactor>(pendingMultiFactorKey(token), label);
@@ -1163,11 +1323,7 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
         .pipe(Effect.as(pending)),
     get: (token) =>
       read(token, "pendingMultiFactor.get").pipe(
-        Effect.map((stored) => {
-          if (stored === null) return null;
-          const { failedAttempts: _, ...pending } = stored;
-          return pending;
-        }),
+        Effect.map((stored) => (stored === null ? null : withoutAttempts(stored))),
       ),
     recordFailedAttempt: (token) =>
       attemptsLock.withPermit(
@@ -1192,12 +1348,17 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   } satisfies Omit<typeof PendingMultiFactorStore.Service, "consume">;
   return {
     ...self,
-    consume: consumeUnder(self.get, self.delete)(Semaphore.makeUnsafe(1)),
+    consume: (token) =>
+      takeRecord<StoredPendingMultiFactor>(
+        pendingMultiFactorKey(token),
+        "pendingMultiFactor.consume",
+      ).pipe(Effect.map((taken) => (taken === null ? null : withoutAttempts(taken)))),
   } satisfies typeof PendingMultiFactorStore.Service;
 });
 
 /**
- * `PendingMultiFactorStore` layer backed by `KeyValueStore`.
+ * `PendingMultiFactorStore` layer backed by `KeyValueStore`. Development and
+ * single-process use only; see {@link pendingMultiFactorStoreKV}.
  */
 export const PendingMultiFactorStoreKV: Layer.Layer<
   PendingMultiFactorStore,
@@ -1254,6 +1415,12 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
 
 /**
  * Build an {@link IdentifierStore} over the ambient `KeyValueStore`.
+ *
+ * **Development and single-process use only** (see the module docs): a
+ * `KeyValueStore` has no unique index, so `create` and `replace` check that
+ * a value is free with a read before they write, and two processes can both
+ * claim one address. `byo-stores.md` makes a real unique constraint a must;
+ * in production use `./sql` or another store with one.
  *
  * Key layout:
  * - `identifier:${id}` — primary record (full `StoredIdentifier`)
@@ -1401,9 +1568,10 @@ export const identifierStoreKV: Effect.Effect<
 /**
  * `IdentifierStore` layer backed by `KeyValueStore`.
  *
- * Unlike the ephemeral stores in {@link layerKV}, identifier records are
- * long-lived. Provide this layer alongside a `KeyValueStore` backend that
- * persists data across restarts (file system, Redis, …).
+ * Development and single-process use only; see {@link identifierStoreKV}.
+ * Unlike the ephemeral stores, identifier records are long-lived, so even
+ * then give it a `KeyValueStore` backend that persists data across restarts
+ * (the file system, SQLite through `KeyValueStore.layerSql`).
  */
 export const IdentifierStoreKV: Layer.Layer<IdentifierStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(IdentifierStore, identifierStoreKV);
@@ -1455,29 +1623,41 @@ export const GoogleOneTapNonceStoreKV: Layer.Layer<
 // ---------------------------------------------------------------------------
 
 /**
- * Every ephemeral store in one layer, backed by the ambient `KeyValueStore`.
+ * The token and state stores, backed by the ambient `KeyValueStore`: OAuth
+ * states, WebAuthn challenges, email verification, password reset and
+ * magic-link tokens. This is the bundle for a deployment; it leaves out the
+ * counter stores, which are single-process only (see the module docs), so
+ * provide `RateLimitStore`, `EmailOtpStore` and `PendingMultiFactorStore`
+ * from `@thomasfosterau/effect-auth/sql` or another store with atomic counters.
+ * {@link layerKVSingleProcess} adds the KV counter stores, for development,
+ * tests and one process.
  *
- * Combine with a persistent backend (e.g. `@thomasfosterau/effect-auth/sql`'s user/session
- * stores) for a complete auth stack.
+ * Their single-use `consume` is atomic within one process, and across
+ * processes only when a {@link KeyValueStoreTake} is provided beneath (see
+ * the module docs), and an eventually consistent backend such as Cloudflare KV can hand
+ * a spent record out again, so keep these on a strongly consistent backend.
  */
 export const layerKV: Layer.Layer<
-  | OAuthStateStore
-  | ChallengeStore
-  | RateLimitStore
-  | EmailVerificationStore
-  | PasswordResetStore
-  | MagicLinkStore
-  | EmailOtpStore
-  | PendingMultiFactorStore,
+  OAuthStateStore | ChallengeStore | EmailVerificationStore | PasswordResetStore | MagicLinkStore,
   never,
   KeyValueStore.KeyValueStore
 > = Layer.mergeAll(
   OAuthStateStoreKV,
   ChallengeStoreKV,
-  RateLimitStoreKV,
   EmailVerificationStoreKV,
   PasswordResetStoreKV,
   MagicLinkStoreKV,
-  EmailOtpStoreKV,
-  PendingMultiFactorStoreKV,
 );
+
+/**
+ * {@link layerKV} and the KV counter stores (`RateLimitStoreKV`,
+ * `EmailOtpStoreKV`, `PendingMultiFactorStoreKV`): every ephemeral store over
+ * the ambient `KeyValueStore`. **Development, tests and a single process
+ * only**: across processes the counters' read-modify-write lets parallel
+ * guesses share a count (see the module docs).
+ */
+export const layerKVSingleProcess: Layer.Layer<
+  Layer.Success<typeof layerKV> | RateLimitStore | EmailOtpStore | PendingMultiFactorStore,
+  never,
+  KeyValueStore.KeyValueStore
+> = Layer.mergeAll(layerKV, RateLimitStoreKV, EmailOtpStoreKV, PendingMultiFactorStoreKV);

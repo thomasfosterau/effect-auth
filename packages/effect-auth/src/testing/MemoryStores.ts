@@ -11,8 +11,9 @@
  * `OAuthAccountStore.hasPassword` share one {@link MemoryUserTable}, so a user
  * created through one is read through the others. {@link layer} provides every
  * store at once over fresh state, along with the core's `KeyValueStore`-backed
- * ephemeral stores (`layerKV`) over an in-memory `KeyValueStore` (provided
- * with its `KeyValueStoreKeys` listing, so `purgeExpiredKV` runs against it),
+ * ephemeral stores (`layerKVSingleProcess`) over an in-memory `KeyValueStore` (provided
+ * with its `KeyValueStoreKeys` listing, so `purgeExpiredKV` runs against it,
+ * and its `KeyValueStoreTake`, so the token stores' `consume` takes records),
  * and `memoryIdentifierStore`.
  *
  * Every operation is synchronous, so the read-then-write steps are atomic
@@ -31,7 +32,12 @@ import { type AccountToken, AccountManagementStore } from "../AccountManagement.
 import { type ApiKey, ApiKeyStore, applyApiKeyUse } from "../ApiKey.ts";
 import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
-import { type KeyValueStoreKeys, layerKV, layerMemoryKeyValueStore } from "../KeyValueStores.ts";
+import {
+  type KeyValueStoreKeys,
+  type KeyValueStoreTake,
+  layerKVSingleProcess,
+  layerMemoryKeyValueStore,
+} from "../KeyValueStores.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
@@ -713,21 +719,22 @@ export type MemoryStores =
   | OidcCodeStore
   | OidcTokenStore
   | OidcConsentStore
-  | Layer.Success<typeof layerKV>
+  | Layer.Success<typeof layerKVSingleProcess>
   | KeyValueStore.KeyValueStore
   | KeyValueStoreKeys
+  | KeyValueStoreTake
   | RootSecret;
 
 /**
  * Every in-memory store over fresh, shared state: the user-writing stores
  * share one {@link MemoryUserTable}, identifiers come from
- * `memoryIdentifierStore`, and the ephemeral token stores (`layerKV`: OAuth
+ * `memoryIdentifierStore`, and the ephemeral token stores (`layerKVSingleProcess`: OAuth
  * state, WebAuthn challenges, rate limits, verification, reset and magic-link
  * tokens, email OTPs, pending multi-factor challenges) run over an in-memory
  * `KeyValueStore`, which the layer also provides with its `KeyValueStoreKeys`
- * listing, so `purgeExpiredKV` runs against it. It also provides the public
- * test {@link RootSecret} (`testRootSecretLayer`). Each build of the layer
- * starts empty.
+ * listing, so `purgeExpiredKV` runs against it, and its `KeyValueStoreTake`.
+ * It also provides the public test {@link RootSecret} (`testRootSecretLayer`).
+ * Each build of the layer starts empty.
  *
  * @example
  * ```ts
@@ -771,7 +778,7 @@ export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(
       Layer.succeed(OidcCodeStore, memoryOidcCodeStore()),
       Layer.succeed(OidcTokenStore, memoryOidcTokenStore()),
       Layer.succeed(OidcConsentStore, memoryOidcConsentStore()),
-      Layer.provideMerge(layerKV, layerMemoryKeyValueStore),
+      Layer.provideMerge(layerKVSingleProcess, layerMemoryKeyValueStore),
       testRootSecretLayer,
     );
   }),
