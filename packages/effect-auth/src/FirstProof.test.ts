@@ -8,12 +8,18 @@ import { makeIdentifier, memoryIdentifierStore } from "./Identifier.ts";
 import { MultiFactorStore, type MultiFactorRecord } from "./multifactor/MultiFactor.ts";
 import { CredentialStore, type WebAuthnCredential } from "./multifactor/WebAuthn.ts";
 import type { OAuthAccount } from "./oauth/OAuthAccount.ts";
-import { type OidcToken, OidcTokenStore } from "./OidcProvider.ts";
+import {
+  type OidcConsent,
+  OidcConsentStore,
+  type OidcToken,
+  OidcTokenStore,
+} from "./OidcProvider.ts";
 import {
   memoryApiKeyStore,
   memoryEmailPasswordStore,
   memoryMultiFactorStore,
   memoryOAuthAccountStore,
+  memoryOidcConsentStore,
   memoryOidcTokenStore,
   memoryTrustedDeviceStore,
   memoryUserTable,
@@ -124,6 +130,7 @@ const fixture = (verified: boolean) => {
   const enrolments = MutableHashMap.empty<string, MultiFactorRecord>();
   const devices = MutableHashMap.empty<string, TrustedDeviceRecord>();
   const tokens = MutableHashMap.empty<string, OidcToken>();
+  const consents = MutableHashMap.empty<string, OidcConsent>();
   const credentials = {
     oauthAccounts: memoryOAuthAccountStore(table, accounts),
     passkeys: memoryPasskeyStore(passkeys),
@@ -131,6 +138,7 @@ const fixture = (verified: boolean) => {
     multiFactor: memoryMultiFactorStore(enrolments),
     trustedDevices: memoryTrustedDeviceStore(devices),
     oidcTokens: memoryOidcTokenStore(tokens),
+    oidcConsents: memoryOidcConsentStore(consents),
   };
   const revoked: Array<string> = [];
   const identifiers = memoryIdentifierStore();
@@ -169,6 +177,13 @@ const fixture = (verified: boolean) => {
               credentials.trustedDevices.upsert(trustedDevice(userId, `device-${userId}`)),
               credentials.oidcTokens.create(oidcToken(userId, "access")),
               credentials.oidcTokens.create(oidcToken(userId, "refresh")),
+              credentials.oidcConsents.upsert({
+                userId,
+                clientId: "rp",
+                scopes: ["openid"],
+                createdAt: 0,
+                updatedAt: 0,
+              }),
             ],
             { concurrency: 1, discard: true },
           ),
@@ -213,11 +228,15 @@ const fixture = (verified: boolean) => {
       .filter((token) => token.userId === userId)
       .map((token) => token.kind)
       .toSorted();
+  /** Whether `userId` still holds a consent to the client `rp`. */
+  const oidcConsent = (userId: string) =>
+    Effect.runSync(credentials.oidcConsents.get(userId, "rp")) !== null;
   return {
     table,
     identifier,
     phones,
     oidcTokens,
+    oidcConsent,
     credentials,
     base,
     revoked,
@@ -327,6 +346,19 @@ describe("proveAddress: the first proof removes the earlier holder's phone and O
     expect(f.holdings(BYSTANDER)).toEqual(untouched(BYSTANDER));
   });
 
+  it("removes the account's OIDC consents, so a client asks the prover again", () => {
+    const f = fixture(false);
+    f.prove({ ...f.base, oidcConsents: f.credentials.oidcConsents });
+    expect(f.oidcConsent(SQUATTER)).toBe(false);
+    expect(f.oidcConsent(BYSTANDER)).toBe(true);
+  });
+
+  it("keeps the OIDC consents of an address already verified", () => {
+    const f = fixture(true);
+    f.prove({ ...f.base, oidcConsents: f.credentials.oidcConsents });
+    expect(f.oidcConsent(SQUATTER)).toBe(true);
+  });
+
   it("leaves OIDC-provider tokens alone when the app provides no OidcTokenStore", () => {
     const f = fixture(false);
     f.prove(f.base);
@@ -381,7 +413,10 @@ describe("firstProofServices", () => {
                 Context.make(MultiFactorStore, f.credentials.multiFactor),
                 Context.merge(
                   Context.make(TrustedDeviceStore, f.credentials.trustedDevices),
-                  Context.make(OidcTokenStore, f.credentials.oidcTokens),
+                  Context.merge(
+                    Context.make(OidcTokenStore, f.credentials.oidcTokens),
+                    Context.make(OidcConsentStore, f.credentials.oidcConsents),
+                  ),
                 ),
               ),
             ),
@@ -397,6 +432,7 @@ describe("firstProofServices", () => {
       multiFactor: f.credentials.multiFactor,
       trustedDevices: f.credentials.trustedDevices,
       oidcTokens: f.credentials.oidcTokens,
+      oidcConsents: f.credentials.oidcConsents,
     });
   });
 });

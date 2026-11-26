@@ -370,18 +370,18 @@ export const Invitation = Resource.make("invitations", {
 export type Invitation = typeof Invitation.Type;
 
 /**
- * An email domain an organization claims (`organization-domains`):
- * `Organization.OrganizationDomain`, its `organizationId` as the
- * `organization` relationship. A claim is created through
+ * An email domain an organization claims (`organization-domains`), as a
+ * tenant reads it: `Organization.OrganizationDomain`, its `organizationId` as
+ * the `organization` relationship. A claim is created through
  * `POST /organizations/:id/domains` (`domain`; always a `dns` claim) and
  * proved through `POST /organization-domains/:id/verifications`, or attested
  * by the operator through `POST /admin/organization-domains` (a `manual`
  * claim), and released by the operator through
  * `DELETE /admin/organization-domains/:id`; nothing else about it is
  * writable. `verificationToken` is the value a `dns` claim publishes as a TXT
- * record. The `attester` relationship is its `attestedBy`: the platform admin
- * who attested a `manual` claim, `null` for a `dns` claim or an attestation
- * that recorded no one.
+ * record. Who attested a claim is the operator's business, so this view has
+ * no `attester`: only the platform-admin endpoints answer
+ * {@link OperatorOrganizationDomain}.
  *
  * @since 0.3.0
  * @category resources
@@ -411,17 +411,44 @@ export const OrganizationDomain = Resource.make("organization-domains", {
   },
   relationships: {
     organization: Relationship.one(() => Organization),
-    attester: Relationship.optional(() => User),
   },
 });
 
 /**
- * The decoded `organization-domains` resource object.
+ * The decoded `organization-domains` resource object, as a tenant reads it.
  *
  * @since 0.3.0
  * @category resources
  */
 export type OrganizationDomain = typeof OrganizationDomain.Type;
+
+/**
+ * An `organization-domains` claim as the platform admin reads it, from
+ * `GET /admin/organization-domains` and `POST /admin/organization-domains`:
+ * {@link OrganizationDomain} plus the `attester` relationship, its
+ * `attestedBy`: the platform admin who attested a `manual` claim, `null` for
+ * a `dns` claim or an attestation that recorded no one.
+ *
+ * @since 0.9.0
+ * @category resources
+ */
+export const OperatorOrganizationDomain = Resource.extend(
+  OrganizationDomain,
+  "organization-domains",
+  {
+    id: Schema.String,
+    relationships: { attester: Relationship.optional(() => User) },
+  },
+);
+
+/**
+ * The decoded `organization-domains` resource object, as the platform admin
+ * reads it.
+ *
+ * @since 0.9.0
+ * @category resources
+ */
+export type OperatorOrganizationDomain = typeof OperatorOrganizationDomain.Type;
 
 /**
  * A role one organization defines at runtime (`organization-roles`):

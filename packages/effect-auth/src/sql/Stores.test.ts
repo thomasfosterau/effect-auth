@@ -267,6 +267,21 @@ const makeUser = (email: string) =>
 // The store contract
 // ---------------------------------------------------------------------------
 
+/** A purge that deleted nothing. */
+const nothingPurged: Sql.PurgeExpiredResult = {
+  sessions: 0,
+  oauthStates: 0,
+  webauthnChallenges: 0,
+  pendingMultiFactor: 0,
+  emailVerifications: 0,
+  passwordResets: 0,
+  magicLinks: 0,
+  emailOtps: 0,
+  emailOtpFailures: 0,
+  rateLimits: 0,
+  accountLockouts: 0,
+};
+
 const storeContract = (engine: StoreEngine): void => {
   /** Run an effect against a migrated database with every store layer. */
   const run = <A, E>(effect: Effect.Effect<A, E, StoreServices>): Promise<A> =>
@@ -288,6 +303,7 @@ const storeContract = (engine: StoreEngine): void => {
         }),
       );
       expect(tables).toEqual([
+        "auth_account_lockout_attempts",
         "auth_account_lockouts",
         "auth_api_keys",
         "auth_email_otp_failures",
@@ -1012,8 +1028,8 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 1, rateLimits: 0 });
-      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result.purged).toEqual({ ...nothingPurged, magicLinks: 2, emailOtps: 1 });
+      expect(result.again).toEqual({ ...nothingPurged });
       expect(result.stale).toBeNull();
       expect(result.live?.token).toBe("live");
       expect(result.staleOtp).toBeNull();
@@ -1041,7 +1057,7 @@ const storeContract = (engine: StoreEngine): void => {
           return yield* Sql.purgeExpired;
         }).pipe(Effect.provide(TestClock.layer())),
       );
-      expect(result).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result).toEqual({ ...nothingPurged });
     });
 
     it("purgeExpired deletes rate-limit rows whose window and block have both passed, and keeps open or blocked ones", async () => {
@@ -1069,8 +1085,8 @@ const storeContract = (engine: StoreEngine): void => {
           return { purged, again, left };
         }).pipe(Effect.provide(TestClock.layer())),
       );
-      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 3 });
-      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result.purged).toEqual({ ...nothingPurged, rateLimits: 3 });
+      expect(result.again).toEqual({ ...nothingPurged });
       expect(result.left).toEqual([null, null, null, entries[3], entries[4]]);
     });
 
@@ -1133,10 +1149,10 @@ const storeContract = (engine: StoreEngine): void => {
         }).pipe(Effect.provide(TestClock.layer())),
       );
       expect(result.ticks).toEqual([
-        { magicLinks: 2, emailOtps: 2, rateLimits: 2 },
-        { magicLinks: 1, emailOtps: 1, rateLimits: 2 },
-        { magicLinks: 0, emailOtps: 0, rateLimits: 1 },
-        { magicLinks: 0, emailOtps: 0, rateLimits: 0 },
+        { ...nothingPurged, magicLinks: 2, emailOtps: 2, rateLimits: 2 },
+        { ...nothingPurged, magicLinks: 1, emailOtps: 1, rateLimits: 2 },
+        { ...nothingPurged, rateLimits: 1 },
+        { ...nothingPurged },
       ]);
       expect(result.left).toEqual([...stale.map(() => null), ...kept]);
     });
@@ -1166,8 +1182,202 @@ const storeContract = (engine: StoreEngine): void => {
           return { unbounded, refused: refused.map((error) => error._tag) };
         }).pipe(Effect.provide(TestClock.layer())),
       );
-      expect(result.unbounded).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 5 });
+      expect(result.unbounded).toEqual({ ...nothingPurged, rateLimits: 5 });
       expect(result.refused).toEqual(["AuthError", "AuthError", "AuthError", "AuthError"]);
+    });
+
+    it("purgeExpired deletes every expired token, state, challenge and session, and keeps live ones", async () => {
+      const now = 1_000_000;
+      const at = (ms: number) => DateTime.toDateUtc(DateTime.makeUnsafe(ms));
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const sessions = yield* Auth.SessionStore;
+          const states = yield* Auth.OAuth.OAuthStateStore;
+          const challenges = yield* Auth.MultiFactor.ChallengeStore;
+          const pending = yield* Auth.MultiFactor.PendingMultiFactorStore;
+          const verifications = yield* Auth.Email.EmailVerificationStore;
+          const resets = yield* Auth.Password.PasswordResetStore;
+          yield* Effect.forEach(
+            [
+              ["stale", now - 1],
+              ["edge", now],
+              ["live", now + 60_000],
+            ] as const,
+            ([id, expiresAt]) =>
+              Effect.gen(function* () {
+                yield* sessions.create({
+                  id: `sess-${id}`,
+                  userId: "u",
+                  expiresAt: at(expiresAt),
+                  createdAt: at(0),
+                  lastActivityAt: at(0),
+                  attributes: {},
+                });
+                yield* states.create({
+                  state: `state-${id}`,
+                  provider: "p",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* challenges.create({
+                  challenge: new TextEncoder().encode(`challenge-${id}`),
+                  ceremony: "authentication",
+                  expiresAt,
+                });
+                yield* pending.create({
+                  token: `pending-${id}`,
+                  userId: "u",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* pending.recordFailedAttempt(`pending-${id}`);
+                yield* verifications.create({
+                  token: `verify-${id}`,
+                  userId: "u",
+                  email: "a@example.com",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* resets.create({
+                  token: `reset-${id}`,
+                  userId: "u",
+                  email: "a@example.com",
+                  createdAt: 0,
+                  expiresAt,
+                });
+              }),
+            { concurrency: 1, discard: true },
+          );
+          const purged = yield* Sql.purgeExpired;
+          const sql = yield* SqlClient.SqlClient;
+          const companions = yield* sql<{ readonly n: number | string | bigint }>`
+            SELECT (SELECT COUNT(*) FROM auth_webauthn_challenge_ceremonies)
+              + (SELECT COUNT(*) FROM auth_pending_multi_factor_attempts) AS n`;
+          return {
+            purged,
+            again: yield* Sql.purgeExpired,
+            staleSession: yield* sessions.get("sess-stale"),
+            edgeSession: yield* sessions.get("sess-edge"),
+            liveState: yield* states.consume("state-live"),
+            staleChallenge: yield* challenges.get(new TextEncoder().encode("challenge-stale")),
+            edgeChallenge: yield* challenges.get(new TextEncoder().encode("challenge-edge")),
+            stalePending: yield* pending.get("pending-stale"),
+            companions: Number(companions[0]?.n),
+          };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.purged).toEqual({
+        ...nothingPurged,
+        sessions: 1,
+        oauthStates: 1,
+        webauthnChallenges: 1,
+        pendingMultiFactor: 1,
+        emailVerifications: 1,
+        passwordResets: 1,
+      });
+      expect(result.again).toEqual(nothingPurged);
+      expect(result.staleSession).toBeNull();
+      expect(result.edgeSession?.id).toBe("sess-edge");
+      expect(result.liveState?.state).toBe("state-live");
+      expect(result.staleChallenge).toBeNull();
+      expect(result.edgeChallenge?.ceremony).toBe("authentication");
+      expect(result.stalePending).toBeNull();
+      // The purged challenge's ceremony and the purged challenge's attempt
+      // count went with them: two of each kind are left.
+      expect(result.companions).toBe(4);
+    });
+
+    it("purgeExpired drops an OTP failure budget only once its latest wrong code is older than the retention", async () => {
+      const now = 10 * 24 * 60 * 60 * 1000;
+      const hour = 60 * 60 * 1000;
+      const result = await run(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const otps = yield* Auth.Email.EmailOtpStore;
+          yield* otps.recordFailure("old@example.com", "sign-in", now - 26 * hour);
+          yield* otps.recordFailure("recent@example.com", "sign-in", now - 24 * hour);
+          yield* otps.recordFailure("short@example.com", "sign-in", now - 2 * hour);
+          const byDefault = yield* Sql.purgeExpired;
+          const shorter = yield* Sql.purgeExpiredWith({ otpFailureRetention: "1 hour" });
+          return {
+            byDefault,
+            shorter,
+            old: yield* otps.getFailures("old@example.com", "sign-in"),
+            recent: yield* otps.getFailures("recent@example.com", "sign-in"),
+          };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.byDefault).toEqual({ ...nothingPurged, emailOtpFailures: 1 });
+      expect(result.shorter).toEqual({ ...nothingPurged, emailOtpFailures: 2 });
+      expect(result.old).toBeNull();
+      expect(result.recent).toBeNull();
+    });
+
+    it("purgeExpired drops an ended lock and an idle counter, and keeps an active lock and a recent counter", async () => {
+      const day = 24 * 60 * 60 * 1000;
+      const start = 10 * day;
+      const options = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60_000, now });
+      const result = await run(
+        Effect.gen(function* () {
+          const lockouts = yield* Auth.Plugins.AccountLockoutStore;
+          yield* TestClock.setTime(start);
+          // Idle: one failure, then nothing for over a day.
+          yield* lockouts.registerAttempt("idle", options(start));
+          // Ended: locked at the start, the lock long over.
+          yield* lockouts.registerAttempt("ended", options(start));
+          yield* lockouts.registerAttempt("ended", options(start));
+          const now = start + day + 1;
+          yield* TestClock.setTime(now);
+          // Active: locked just now.
+          yield* lockouts.registerAttempt("active", options(now));
+          yield* lockouts.registerAttempt("active", options(now));
+          // Recent: one failure just now.
+          yield* lockouts.registerAttempt("recent", options(now));
+          const purged = yield* Sql.purgeExpired;
+          const left = yield* Effect.forEach(
+            ["idle", "ended", "active", "recent"],
+            (key) => lockouts.get(key),
+            { concurrency: 1 },
+          );
+          const sql = yield* SqlClient.SqlClient;
+          const attempts = yield* sql<{
+            readonly key: string;
+          }>`SELECT key FROM auth_account_lockout_attempts ORDER BY key`;
+          return { purged, left, attempts: attempts.map((row) => row.key) };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.purged).toEqual({ ...nothingPurged, accountLockouts: 2 });
+      expect(result.left.map((record) => record?.failures ?? null)).toEqual([null, null, 2, 1]);
+      expect(result.attempts).toEqual(["active", "recent"]);
+    });
+
+    it("purgeExpired gives a lockout row with no recorded attempt time one, and judges it from then", async () => {
+      const day = 24 * 60 * 60 * 1000;
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* TestClock.setTime(day);
+          yield* sql`INSERT INTO auth_account_lockouts (key, failures, locked_until) VALUES ('legacy', 3, NULL)`;
+          const first = yield* Sql.purgeExpired;
+          yield* TestClock.setTime(2 * day + 1);
+          const second = yield* Sql.purgeExpired;
+          return { first, second };
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
+      expect(result.first).toEqual(nothingPurged);
+      expect(result.second).toEqual({ ...nothingPurged, accountLockouts: 1 });
+    });
+
+    it("purgeExpiredWith refuses a negative or infinite retention", async () => {
+      const result = await run(
+        Effect.forEach(
+          [{ otpFailureRetention: -1 }, { accountLockoutRetention: "Infinity" as const }],
+          (options) => Effect.flip(Sql.purgeExpiredWith(options)),
+          { concurrency: 1 },
+        ),
+      );
+      expect(result.map((error) => error._tag)).toEqual(["AuthError", "AuthError"]);
     });
 
     it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {
@@ -1936,10 +2146,24 @@ describe("purgeExpiredWith's capped DELETE", () => {
       Sql.purgeExpiredWith({ limit: 10 }).pipe(Effect.provide(recordingSqliteClient(sent))),
     );
     const deletes = sent.filter((statement) => statement.startsWith("DELETE"));
-    expect(deletes).toEqual([
+    expect(deletes).toContain(
       "DELETE FROM auth_magic_links WHERE (expires_at < ?) AND (token) IN (SELECT token FROM auth_magic_links WHERE expires_at < ? LIMIT ?) RETURNING token",
+    );
+    expect(deletes).toContain(
       "DELETE FROM auth_email_otps WHERE (expires_at < ?) AND (email, purpose) IN (SELECT email, purpose FROM auth_email_otps WHERE expires_at < ? LIMIT ?) RETURNING email, purpose",
+    );
+    expect(deletes).toContain(
       "DELETE FROM auth_rate_limits WHERE (reset_at <= ? AND (blocked_until IS NULL OR blocked_until <= ?)) AND (key) IN (SELECT key FROM auth_rate_limits WHERE reset_at <= ? AND (blocked_until IS NULL OR blocked_until <= ?) LIMIT ?) RETURNING key",
-    ]);
+    );
+    // Every table's capped DELETE has the same shape: the predicate outside
+    // the subquery is the one inside it.
+    const capped =
+      /^DELETE FROM (\w+) WHERE \(([\s\S]+)\) AND \(([\w, ]+)\) IN \(SELECT \3 FROM \1 WHERE ([\s\S]+) LIMIT \?\) RETURNING \3$/;
+    expect(deletes.length).toBe(14);
+    const shapes = Arr.map(deletes, (statement) => {
+      const match = capped.exec(statement);
+      return match !== null && match[2] === match[4] ? "capped" : statement;
+    });
+    expect(shapes).toEqual(Arr.map(deletes, () => "capped"));
   });
 });

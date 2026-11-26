@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, MutableHashMap } from "effect";
+import { Cause, DateTime, Effect, Exit, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import * as Condition from "./Condition.ts";
@@ -38,6 +38,14 @@ const link = (id: string, principal: Entity.EntityRef, resource: Entity.EntityRe
   });
 
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
+
+/** `not(not(...has(context.x)))`, `depth` levels deep (the Has and its path are two). */
+const nested = (depth: number): Condition.Condition =>
+  Arr.reduce(
+    Arr.range(3, depth),
+    Condition.has("context", "x"),
+    (inner: Condition.Condition): Condition.Condition => Condition.not(inner),
+  );
 
 describe("PolicyStore CRUD", () => {
   it("stores, reads, updates and deletes policies", async () => {
@@ -333,6 +341,91 @@ describe("effectivePolicies", () => {
 
     const failure = await run(Effect.flip(PolicyStore.effectivePolicies(store)));
     expect(failure._tag).toBe("AuthError");
+  });
+});
+
+describe("effectivePolicies batching", () => {
+  it("reads templates once however many links there are", async () => {
+    const inner = PolicyStore.memoryPolicyStore();
+    await run(inner.createTemplate(shareTemplate));
+    await run(inner.createLink(link("l1", alice, doc1)));
+    await run(inner.createLink(link("l2", bob, doc2)));
+    await run(inner.createLink(link("l3", carol, doc1)));
+    const reads = { get: 0, list: 0 };
+    const store: typeof PolicyStore.PolicyStore.Service = {
+      ...inner,
+      getTemplate: (id) => Effect.suspend(() => (reads.get++, inner.getTemplate(id))),
+      listTemplates: () => Effect.suspend(() => (reads.list++, inner.listTemplates())),
+    };
+
+    const policies = await run(PolicyStore.effectivePolicies(store));
+    expect(policies).toHaveLength(3);
+    expect(reads).toEqual({ get: 0, list: 1 });
+  });
+});
+
+describe("condition bounds", () => {
+  it("measures depth through objects and arrays, and counts nodes", () => {
+    expect(Condition.isWithinBounds(nested(Condition.maxDepth))).toBe(true);
+    expect(Condition.isWithinBounds(nested(Condition.maxDepth + 1))).toBe(false);
+    // `and` adds two levels: the And object and its conditions array.
+    expect(Condition.isWithinBounds(Condition.and(nested(Condition.maxDepth - 2)))).toBe(true);
+    expect(Condition.isWithinBounds(Condition.and(nested(Condition.maxDepth - 1)))).toBe(false);
+    // Wide rather than deep: each Has is two nodes (itself and its path).
+    const wide = (count: number) =>
+      Condition.or(...Arr.makeBy(count, () => Condition.has("context", "x")));
+    expect(Condition.isWithinBounds(wide((Condition.maxNodes - 2) / 2))).toBe(true);
+    expect(Condition.isWithinBounds(wide(Condition.maxNodes / 2))).toBe(false);
+  });
+
+  it("rejects a stored condition too deep to decode as a SchemaError, not a defect", async () => {
+    // Deep enough to overflow the recursive decoder were it not checked first.
+    const deep = nested(100_000);
+    const policy = await run(
+      Effect.exit(
+        PolicyStore.decodePolicyDocument({
+          version: 1,
+          policy: { ...Policy.permit({ id: "p" }), when: deep },
+        }),
+      ),
+    );
+    expect(Exit.isFailure(policy) && Cause.hasFails(policy.cause)).toBe(true);
+    expect(Exit.isFailure(policy) && Cause.hasDies(policy.cause)).toBe(false);
+
+    const template = await run(
+      Effect.exit(
+        PolicyStore.decodeTemplateDocument({
+          version: 1,
+          template: { ...shareTemplate, when: deep },
+        }),
+      ),
+    );
+    expect(Exit.isFailure(template) && Cause.hasFails(template.cause)).toBe(true);
+    expect(Exit.isFailure(template) && Cause.hasDies(template.cause)).toBe(false);
+  });
+
+  it("decodes a condition at the limit", async () => {
+    const policy = { ...Policy.permit({ id: "p" }), when: nested(Condition.maxDepth) };
+    const decoded = await run(PolicyStore.decodePolicyDocument({ version: 1, policy }));
+    expect(decoded.policy).toEqual(policy);
+  });
+
+  it("the memory store refuses to write a condition beyond the bounds", async () => {
+    const store = PolicyStore.memoryPolicyStore();
+    const deep = nested(Condition.maxDepth + 1);
+    await run(store.createPolicy(Policy.permit({ id: "p" })));
+    await run(store.createTemplate(shareTemplate));
+
+    const failures = [
+      await run(Effect.flip(store.createPolicy({ ...Policy.permit({ id: "q" }), when: deep }))),
+      await run(Effect.flip(store.updatePolicy({ ...Policy.permit({ id: "p" }), when: deep }))),
+      await run(Effect.flip(store.createTemplate({ ...shareTemplate, id: "t2", when: deep }))),
+      await run(Effect.flip(store.updateTemplate({ ...shareTemplate, when: deep }))),
+    ];
+    expect(Arr.map(failures, (failure) => failure._tag)).toEqual(Arr.replicate("AuthError", 4));
+    expect(await run(store.getPolicy("q"))).toBeNull();
+    expect((await run(store.getPolicy("p")))?.when).toBeUndefined();
+    expect((await run(store.getTemplate("share-doc")))?.when).toBeUndefined();
   });
 });
 

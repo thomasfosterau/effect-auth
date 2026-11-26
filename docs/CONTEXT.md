@@ -180,7 +180,10 @@ operator checks ownership out of band and calls `OrganizationService.attestDomai
 platform-admin `POST /admin/organization-domains`), which leaves the claim verified with the
 `manual` strategy and records the attester as `attestedBy`. The operator also
 **releases** any Organization's claim, whatever its state, to settle a dispute
-(`OrganizationService.releaseDomain`, `DELETE /admin/organization-domains/:id`). Several
+(`OrganizationService.releaseDomain`, `DELETE /admin/organization-domains/:id`), after finding
+it among every claim on the domain (`OrganizationService.listDomainClaims`,
+`GET /admin/organization-domains?filter[domain]=`). Who attested a claim is shown only to
+platform admins, never to the Organization. Several
 Organizations may hold pending claims on one domain; at most one claim per domain is verified.
 _Avoid_: "manual verification" for anything an Organization member does — holding
 `domain:manage` proves nothing about a domain.
