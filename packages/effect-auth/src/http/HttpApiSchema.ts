@@ -1382,34 +1382,46 @@ export type ScimPatchPayload = typeof ScimPatchPayload.Type;
 export { Forbidden, Unauthorized };
 
 /** 409 — conflict (e.g. user already exists). */
-export class Conflict extends Schema.TaggedError<Conflict>()("Conflict", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
+export class Conflict extends Schema.TaggedError<Conflict, { readonly brand: unique symbol }>()(
+  "Conflict",
+  {
+    message: Schema.String,
+    code: Schema.optional(Schema.String),
+  },
+) {}
 
 /** 400 — malformed/invalid request (e.g. password policy violation, invalid input). */
-export class BadRequest extends Schema.TaggedError<BadRequest>()("BadRequest", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
+export class BadRequest extends Schema.TaggedError<BadRequest, { readonly brand: unique symbol }>()(
+  "BadRequest",
+  {
+    message: Schema.String,
+    code: Schema.optional(Schema.String),
+  },
+) {}
 
 /** 404 — resource or optional feature not available (e.g. plugin not enabled). */
-export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
+export class NotFound extends Schema.TaggedError<NotFound, { readonly brand: unique symbol }>()(
+  "NotFound",
+  {
+    message: Schema.String,
+    code: Schema.optional(Schema.String),
+  },
+) {}
 
 /** 429 — rate limited; retry later. */
-export class TooManyRequests extends Schema.TaggedError<TooManyRequests>()("TooManyRequests", {
+export class TooManyRequests extends Schema.TaggedError<
+  TooManyRequests,
+  { readonly brand: unique symbol }
+>()("TooManyRequests", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 500 — unexpected server error. */
-export class InternalServerError extends Schema.TaggedError<InternalServerError>()(
-  "InternalServerError",
-  { message: Schema.String },
-) {}
+export class InternalServerError extends Schema.TaggedError<
+  InternalServerError,
+  { readonly brand: unique symbol }
+>()("InternalServerError", { message: Schema.String }) {}
 
 /**
  * 400 — an OAuth error response body (`{ error, error_description }`) rather
@@ -1418,24 +1430,27 @@ export class InternalServerError extends Schema.TaggedError<InternalServerError>
  * §5.2 for the device grant's endpoints, and generic OAuth clients
  * (MCP clients included) read `error` to decide what to do next.
  */
-export class OAuthError extends Schema.TaggedError<OAuthError>()("OAuthError", {
-  /** The RFC's code, e.g. `invalid_client_metadata` or `authorization_pending`. */
-  error: Schema.String,
-  error_description: Schema.optional(Schema.String),
-}) {}
+export class OAuthError extends Schema.TaggedError<OAuthError, { readonly brand: unique symbol }>()(
+  "OAuthError",
+  {
+    /** The RFC's code, e.g. `invalid_client_metadata` or `authorization_pending`. */
+    error: Schema.String,
+    error_description: Schema.optional(Schema.String),
+  },
+) {}
 
 /**
  * 401 — an RFC 6749 §5.2 `invalid_client` error response
  * (`{ error, error_description }`) from the token endpoint, which also sends
  * `WWW-Authenticate`.
  */
-export class OAuthInvalidClient extends Schema.TaggedError<OAuthInvalidClient>()(
-  "OAuthInvalidClient",
-  {
-    error: Schema.Literal("invalid_client"),
-    error_description: Schema.optional(Schema.String),
-  },
-) {}
+export class OAuthInvalidClient extends Schema.TaggedError<
+  OAuthInvalidClient,
+  { readonly brand: unique symbol }
+>()("OAuthInvalidClient", {
+  error: Schema.Literal("invalid_client"),
+  error_description: Schema.optional(Schema.String),
+}) {}
 
 /**
  * SCIM error bodies (RFC 7644 §3.12).
@@ -1451,7 +1466,9 @@ export class OAuthInvalidClient extends Schema.TaggedError<OAuthInvalidClient>()
  * arm's `status` literal can match a given value, the right status code is
  * always chosen.
  */
-export class ScimBadRequest extends Schema.Error<ScimBadRequest>("ScimBadRequest")({
+export class ScimBadRequest extends Schema.Error<ScimBadRequest, { readonly brand: unique symbol }>(
+  "ScimBadRequest",
+)({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("400"),
   /** RFC 7644 §3.12 code: `invalidFilter`, `invalidPath`, `invalidValue`, … */
@@ -1460,7 +1477,10 @@ export class ScimBadRequest extends Schema.Error<ScimBadRequest>("ScimBadRequest
 }) {}
 
 /** 401 — missing or unknown provisioning token. */
-export class ScimUnauthorized extends Schema.Error<ScimUnauthorized>("ScimUnauthorized")({
+export class ScimUnauthorized extends Schema.Error<
+  ScimUnauthorized,
+  { readonly brand: unique symbol }
+>("ScimUnauthorized")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("401"),
   scimType: Schema.optional(Schema.String),
@@ -1468,7 +1488,9 @@ export class ScimUnauthorized extends Schema.Error<ScimUnauthorized>("ScimUnauth
 }) {}
 
 /** 404 — no such resource, or one outside the connection's organization. */
-export class ScimNotFound extends Schema.Error<ScimNotFound>("ScimNotFound")({
+export class ScimNotFound extends Schema.Error<ScimNotFound, { readonly brand: unique symbol }>(
+  "ScimNotFound",
+)({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("404"),
   scimType: Schema.optional(Schema.String),
@@ -1476,7 +1498,9 @@ export class ScimNotFound extends Schema.Error<ScimNotFound>("ScimNotFound")({
 }) {}
 
 /** 409 — the `uniqueness` conflict an IdP reconciles against. */
-export class ScimConflict extends Schema.Error<ScimConflict>("ScimConflict")({
+export class ScimConflict extends Schema.Error<ScimConflict, { readonly brand: unique symbol }>(
+  "ScimConflict",
+)({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("409"),
   scimType: Schema.optional(Schema.String),
@@ -1484,7 +1508,10 @@ export class ScimConflict extends Schema.Error<ScimConflict>("ScimConflict")({
 }) {}
 
 /** 500 — unexpected server error, in SCIM's shape. */
-export class ScimInternalError extends Schema.Error<ScimInternalError>("ScimInternalError")({
+export class ScimInternalError extends Schema.Error<
+  ScimInternalError,
+  { readonly brand: unique symbol }
+>("ScimInternalError")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("500"),
   scimType: Schema.optional(Schema.String),
