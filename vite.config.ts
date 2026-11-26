@@ -120,7 +120,6 @@ export default defineConfig({
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
       "effect/prefer-namespace-imports": "error",
       // Renaming these would change the published API or the wire format.
-      "effect/require-is-prefix-for-boolean-schema-field": "off",
       "effect/no-object-parameters": "off",
       "effect/no-known-value-widening": "off",
       // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
@@ -304,6 +303,26 @@ export default defineConfig({
           "packages/alchemy-postgres/src/AuthSchema.test.ts",
         ],
         rules: { "effecttsgo/unsafe-effect-type-assertion": "off" },
+      },
+      {
+        // Published wire contract: these schemas name JSON fields fixed by
+        // the HTTP API (JSON:API attributes, SCIM 2.0, OAuth registration),
+        // the captcha vendors' answers (`success`) and stored records
+        // (`verified`), and the tests decode those same bodies.
+        files: [
+          "packages/effect-auth/src/http/HttpApiSchema.ts",
+          "packages/effect-auth/src/http/HttpApi.ts",
+          "packages/effect-auth/src/Identifier.ts",
+          "packages/effect-auth/src/KeyValueStores.ts",
+          "packages/effect-auth/src/plugins/Captcha.ts",
+          "packages/sveltekit/src/Actions.ts",
+          "packages/effect-auth/src/http/HttpServer.test.ts",
+          "packages/effect-auth/src/http/HttpServerModules.test.ts",
+          "packages/effect-auth/src/http/ApiKeyResolution.test.ts",
+          "packages/effect-auth/src/OidcProvider.test.ts",
+          "packages/effect-auth/src/Scim.test.ts",
+        ],
+        rules: { "effect/require-is-prefix-for-boolean-schema-field": "off" },
       },
       {
         // Third-party API boundary: `Context.ServiceClass.Shape` is Effect's
