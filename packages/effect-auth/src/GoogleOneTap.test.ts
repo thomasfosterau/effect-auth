@@ -570,11 +570,11 @@ const makeHttpFixture = () => {
     Layer.succeed(UserServiceStore)(userServiceStore),
     Layer.succeed(IdentifierStore)(identifierStore),
     Hooks.Default,
-    Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordService)(undefined as never),
-    Layer.succeed(PasswordHasher)(undefined as never),
-    Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(PasswordResetService)(undefined as never),
+    Layer.mock(AuthLifecycleService, {}),
+    Layer.mock(EmailPasswordService, {}),
+    Layer.mock(PasswordHasher, { algorithm: "unused" }),
+    Layer.mock(EmailVerificationService, {}),
+    Layer.mock(PasswordResetService, {}),
   );
 
   const oneTapDeps = Layer.mergeAll(
