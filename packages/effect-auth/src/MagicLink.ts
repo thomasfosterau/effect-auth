@@ -345,13 +345,13 @@ export const make = (
         if (disableSignUp) {
           return yield* detached("magic-link", config.sendMagicLink(email, rawToken));
         }
-        return yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
-          Effect.fail(
+        return yield* Effect.mapError(
+          config.sendMagicLink(email, rawToken),
+          (error) =>
             new Errors.MagicLinkError({
               message: `Failed to send magic link to ${email}`,
               cause: error,
             }),
-          ),
         );
       }),
 

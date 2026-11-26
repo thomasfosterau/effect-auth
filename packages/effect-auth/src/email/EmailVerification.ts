@@ -252,13 +252,13 @@ export const make = (
       if (options?.offResponsePath === true) {
         yield* detached("email-verification", config.sendEmail(email, rawToken));
       } else {
-        yield* Effect.catch(config.sendEmail(email, rawToken), (error) =>
-          Effect.fail(
+        yield* Effect.mapError(
+          config.sendEmail(email, rawToken),
+          (error) =>
             new EmailVerificationError({
               message: `Failed to send verification email to ${email}`,
               cause: error,
             }),
-          ),
         );
       }
 

@@ -230,13 +230,13 @@ export const make = (
 
         yield* store.create(record);
 
-        yield* Effect.catch(config.sendOtp(user, otp), (err) =>
-          Effect.fail(
+        yield* Effect.mapError(
+          config.sendOtp(user, otp),
+          (err) =>
             new OtpSecondFactorError({
               message: "Failed to send second-factor OTP",
               cause: err,
             }),
-          ),
         );
 
         return {
