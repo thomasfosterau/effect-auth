@@ -155,20 +155,19 @@ describe("Schema", () => {
         yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
         yield* identifiers.create(identifier());
 
-        const present = yield* Effect.orDie(
+        const rows = yield* Effect.orDie(
           Effect.tryPromise({
-            try: async () => {
-              const rows = await db.execute(
+            try: () =>
+              db.execute(
                 `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
-              );
-              return Schema.decodeUnknownSync(TableNameRows)(rows.rows).map(
-                (row) => row.table_name,
-              );
-            },
+              ),
             catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
           }),
         );
+        const present = (yield* Effect.orDie(
+          Schema.decodeUnknownEffect(TableNameRows)(rows.rows),
+        )).map((row) => row.table_name);
 
         return {
           present,
