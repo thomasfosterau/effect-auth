@@ -621,6 +621,10 @@ export interface AuthClient {
       memberId: string,
       payload: Http.UpdateMemberRolePayload,
     ) => Promise<Http.MemberView>;
+    /**
+     * Remove a membership by its own `id`. Removing your own membership leaves
+     * the organization and needs no permission; the last owner cannot leave.
+     */
     readonly removeMember: (memberId: string) => Promise<void>;
     /**
      * Suspend a membership without deleting it: the row (and the member's

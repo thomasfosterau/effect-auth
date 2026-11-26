@@ -798,6 +798,14 @@ const resourceErrorWires = [
 /** Those errors and a `409` (`POST /organizations/:id/roles` of a defined role). */
 const resourceConflictErrorWires = [...resourceErrorWires, E.Conflict.wire];
 
+/** Those errors and a `429` (an invitation send inside its resend cooldown). */
+const resourceSendErrorWires = [...resourceErrorWires, E.TooManyRequests.wire];
+
+/** Any of the error wires a hand-built resource endpoint declares. */
+type ResourceErrorWire =
+  | (typeof resourceConflictErrorWires)[number]
+  | (typeof resourceSendErrorWires)[number];
+
 /**
  * `GET <path>`, the `:id` in it naming the parent: a JSON:API collection of
  * `resource`, answering the resource errors.
@@ -833,7 +841,7 @@ const childCreate = <
   path: Path,
   payload: Payload,
   resource: Resource,
-  errors: ReadonlyArray<(typeof resourceConflictErrorWires)[number]>,
+  errors: ReadonlyArray<ResourceErrorWire>,
 ) =>
   HttpApiEndpoint.post(name, path, {
     params: { id: Schema.String },
@@ -857,11 +865,12 @@ const itemAction = <
   path: Path,
   resource: Resource,
   status: number,
+  errors: ReadonlyArray<ResourceErrorWire> = resourceErrorWires,
 ) =>
   HttpApiEndpoint.post(name, path, {
     params: { id: Schema.String },
     success: MediaType.asJsonApi(Document.DataDocument(resource), status),
-    error: resourceErrorWires,
+    error: errors,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors);
@@ -1022,7 +1031,7 @@ export const organizationsGroup = Group.make(
     "/organizations/:id/invitations",
     InvitationCreateDocument,
     R.Invitation,
-    resourceErrorWires,
+    resourceSendErrorWires,
   ),
   childCollection("listDomains", "/organizations/:id/domains", R.OrganizationDomain),
   childCreate(
@@ -1108,7 +1117,7 @@ export const invitationsGroup = Group.make(
     success: InvitationTransitionDocument,
     errors: resourceErrors,
   }),
-  itemAction("deliver", "/invitations/:id/deliveries", R.Invitation, 202),
+  itemAction("deliver", "/invitations/:id/deliveries", R.Invitation, 202, resourceSendErrorWires),
 );
 
 /**
