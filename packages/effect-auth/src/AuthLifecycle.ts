@@ -30,6 +30,7 @@ import {
   withoutSignUpProtectedAttributes,
 } from "./User.ts";
 import type * as Types from "./Types.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 
 /**
  * Configuration for {@link AuthLifecycleService}.
@@ -296,7 +297,7 @@ export const make = (
               return {
                 recovered: true as const,
                 user: {
-                  id: globalThis.crypto.randomUUID(),
+                  id: yield* PlatformCrypto.instance.uuidV4(),
                   ...(input.name !== undefined && { name: input.name }),
                   createdAt: now,
                   updatedAt: now,

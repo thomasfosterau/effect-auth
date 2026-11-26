@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Errors from "./Errors.ts";
 import * as Types from "./Types.ts";
 import { definedKeys } from "./DefinedKeys.ts";
+import { SecureRandom } from "effect/crypto";
 
 // ---------------------------------------------------------------------------
 // Domain type
@@ -308,7 +309,7 @@ export const makeIdentifier = (input: {
 }): Identifier => {
   const now = input.now;
   return {
-    id: globalThis.crypto.randomUUID(),
+    id: SecureRandom.uuidV4Unsafe(),
     userId: input.userId,
     type: input.type,
     value: input.value,

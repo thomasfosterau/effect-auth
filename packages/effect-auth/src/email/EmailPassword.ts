@@ -34,6 +34,7 @@ import {
 import * as Obs from "../Observability.ts";
 import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 import { definedKeys } from "../DefinedKeys.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 /**
  * Fields for a new user record. Services record the login handle as an
@@ -82,7 +83,7 @@ export class EmailPasswordStore extends Context.Service<
      * the username for that user): draw it from the same sequence
      * `createUser` uses, reserving it. Minting it must not read or change any
      * existing user. Without it the stand-in's id is a random UUID
-     * (`crypto.randomUUID()`), the shape effect-auth/sql's `createUser`
+     * (a UUIDv4 from `SecureRandom`), the shape effect-auth/sql's `createUser`
      * assigns.
      */
     readonly newUserId?: () => Effect.Effect<string, Errors.AuthError>;
@@ -591,7 +592,9 @@ export const make = (
         }
         yield* passwordHasher.hash(input.password);
         const id =
-          store.newUserId === undefined ? globalThis.crypto.randomUUID() : yield* store.newUserId();
+          store.newUserId === undefined
+            ? yield* PlatformCrypto.instance.uuidV4()
+            : yield* store.newUserId();
         const now = yield* DateTime.nowAsDate;
         return {
           user: {

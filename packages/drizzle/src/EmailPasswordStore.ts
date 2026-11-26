@@ -25,6 +25,7 @@ import { DrizzleDatabase } from "./Database.ts";
 import { queryRunner, type Query, selectOne } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import { userFromRow, selection } from "./UserStore.ts";
+import * as PlatformCrypto from "@thomasfosterau/effect-auth/PlatformCrypto";
 
 /**
  * Each promoted attribute's column, by the key it has on the table object
@@ -128,7 +129,7 @@ export const make = (
           input.attributes ?? {},
           "emailPassword.createUser",
         );
-        const id = globalThis.crypto.randomUUID();
+        const id = yield* PlatformCrypto.instance.uuidV4();
         const now = yield* DateTime.nowAsDate;
         yield* query("emailPassword.createUser", (db) =>
           db
