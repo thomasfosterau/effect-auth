@@ -1,4 +1,5 @@
 import { Clock, Context, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
@@ -14,6 +15,7 @@ import type { RecipientSendLimit } from "../Types.ts";
 import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
+import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 
 /** A pending password reset, keyed by the SHA-256 digest of its token. */
 export interface PasswordResetToken {
@@ -88,7 +90,7 @@ export interface PasswordResetResult {
 }
 
 /**
- * Password reset by emailed single-use token. Requests for unknown addresses succeed silently (anti-enumeration), and a reset can revoke the user's sessions.
+ * Password reset by emailed single-use token. Requests for unknown addresses succeed silently (anti-enumeration), a reset can revoke the user's sessions, and it always revokes the user's trusted devices (`TrustedDeviceStore`, when present).
  *
  * Past the `recipientSendLimit` cap (default 5 requests per email an hour), `requestPasswordReset` fails with `RateLimitError`, whether or not the email has an account.
  *
@@ -174,6 +176,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
+    const trustedDevices = Option.getOrUndefined(yield* Effect.serviceOption(TrustedDeviceStore));
     const detached = yield* makeDetachedSend;
     const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
@@ -290,6 +293,9 @@ export const make = (
         if (revokeSessionsOnPasswordReset) {
           yield* sessionManager.invalidateUserSessions(reset.userId);
         }
+        // Whatever the session setting: a device trusted before the reset
+        // must pass the second factor again.
+        if (trustedDevices !== undefined) yield* trustedDevices.deleteByUserId(reset.userId);
 
         const result = {
           userId: reset.userId,

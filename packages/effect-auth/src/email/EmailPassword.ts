@@ -25,6 +25,7 @@ import {
   UserStore,
 } from "../UserStore.ts";
 import * as Obs from "../Observability.ts";
+import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 
 /**
  * Fields for a new user record. Services record the login handle as an
@@ -285,9 +286,12 @@ export interface ChangePasswordInput {
   readonly userId: string;
   readonly currentPassword: string;
   readonly newPassword: string;
-  /** Revoke the user's other sessions after the change (keeps `currentSessionId`). */
+  /**
+   * Revoke the user's other sessions (keeping `currentSessionId`) and every
+   * trusted device after the change. Default `true`; `false` keeps them.
+   */
   readonly revokeOtherSessions?: boolean;
-  /** The stored id (`session.id`) of the session to keep when `revokeOtherSessions` is set; omit to revoke all. */
+  /** The stored id (`session.id`) of the session to keep when `revokeOtherSessions` is on; omit to revoke all. */
   readonly currentSessionId?: string;
 }
 
@@ -330,7 +334,10 @@ export class EmailPasswordService extends Context.Service<
 
     /**
      * Change the password of a user that already has one, verifying the current
-     * password first. Optionally revokes the user's other sessions.
+     * password first. By default it then revokes the user's other sessions and
+     * every trusted device (`TrustedDeviceStore`, when present), so a session
+     * or device cookie an attacker holds stops working; `revokeOtherSessions:
+     * false` keeps them.
      */
     readonly changePassword: (
       input: ChangePasswordInput,
@@ -418,6 +425,7 @@ export const make = (
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
+    const trustedDevices = Option.getOrUndefined(yield* Effect.serviceOption(TrustedDeviceStore));
     // The attributes a sign-up never stores from its input: the
     // configured server-only ones (the `UserService`'s when it is in context
     // as this layer is built, else the default `["role"]`) and the ban, SCIM
@@ -704,12 +712,13 @@ export const make = (
         const hashedPassword = yield* passwordHasher.hash(input.newPassword);
         yield* store.setPasswordHash(input.userId, hashedPassword.hash);
 
-        if (input.revokeOtherSessions) {
+        if (input.revokeOtherSessions ?? true) {
           if (input.currentSessionId !== undefined) {
             yield* sessionManager.revokeOtherSessions(input.userId, input.currentSessionId);
           } else {
             yield* sessionManager.invalidateUserSessions(input.userId);
           }
+          if (trustedDevices !== undefined) yield* trustedDevices.deleteByUserId(input.userId);
         }
         return yield* Effect.void;
       }),

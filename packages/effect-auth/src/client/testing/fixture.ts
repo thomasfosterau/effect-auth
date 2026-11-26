@@ -222,6 +222,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   // can read the token/OTP a flow would have emailed or texted.
 
   const sentChangeEmail: Array<{ readonly newEmail: string; readonly token: string }> = [];
+  const sentEmailChangeNotices: Array<{ readonly oldEmail: string; readonly newEmail: string }> =
+    [];
   const sentDeleteTokens: string[] = [];
   const sentPhoneOtps: Array<{ readonly phoneNumber: string; readonly otp: string }> = [];
   const sentInvitations: Array<{
@@ -356,6 +358,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Auth.AccountManagementService.layer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
+      sendEmailChangeNotice: ({ oldEmail, newEmail }) =>
+        Effect.sync(() => void sentEmailChangeNotices.push({ oldEmail, newEmail })),
       sendDeleteAccountVerification: ({ token }) =>
         Effect.sync(() => void sentDeleteTokens.push(token)),
     }).pipe(Layer.provide(featureBase)),
@@ -593,6 +597,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     registerUsername,
     /** Change-email verifications the server "sent" (newest last). */
     sentChangeEmail,
+    /** Notices of a requested email change, "sent" to the old address (newest last). */
+    sentEmailChangeNotices,
     /** Delete-account tokens the server "sent". */
     sentDeleteTokens,
     /** Phone OTPs the server "texted". */

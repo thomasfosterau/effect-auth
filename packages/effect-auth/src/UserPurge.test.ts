@@ -143,6 +143,7 @@ const world = (outbox: Outbox, failing?: () => boolean) =>
     AdminService.layer(),
     AccountManagementService.layer({
       sendChangeEmailVerification: () => Effect.void,
+      sendEmailChangeNotice: () => Effect.void,
       sendDeleteAccountVerification: ({ user, token }) =>
         Effect.sync(() => void MutableHashMap.set(outbox.deletions, user.id, token)),
     }),

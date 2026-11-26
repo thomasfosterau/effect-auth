@@ -24,6 +24,7 @@ import type { Session, User, SessionConfig } from "../Types.ts";
 import { UserService, UserServiceStore } from "../User.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
+import { TrustedDeviceStore } from "../TrustedDevice.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const identifierRecords = MutableHashMap.empty<string, Identifier>();
@@ -355,6 +356,63 @@ describe("EmailPasswordService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailNotVerifiedError");
+  });
+});
+
+describe("EmailPasswordService.changePassword revokes sessions and trusted devices", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+  });
+
+  const credentials = { email: "ada@example.com", password: "old-password-123" };
+
+  const changeWith = async (revokeOtherSessions: boolean | undefined) => {
+    const revokedDevices: string[] = [];
+    const devices: typeof TrustedDeviceStore.Service = {
+      upsert: (record) => Effect.succeed(record),
+      getByTokenHash: () => Effect.succeed(null),
+      delete: () => Effect.void,
+      deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
+    };
+    const context = Context.add(await makeTestContext(), TrustedDeviceStore, devices);
+    const remaining = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        const sessionService = yield* SessionService;
+        const current = yield* service.signUp(credentials);
+        const other = yield* service.signIn(credentials);
+        assert(current.session !== undefined && other.session !== undefined);
+        yield* service.changePassword({
+          userId: current.user.id,
+          currentPassword: credentials.password,
+          newPassword: "new-password-456",
+          currentSessionId: current.session.id,
+          ...(revokeOtherSessions !== undefined && { revokeOtherSessions }),
+        });
+        const left = yield* sessionService.listSessions(current.user.id);
+        return {
+          userId: current.user.id,
+          current: current.session.id,
+          ids: left.map((session) => session.id),
+        };
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+    return { ...remaining, revokedDevices };
+  };
+
+  it("by default keeps only the current session and revokes every trusted device", async () => {
+    const { userId, current, ids, revokedDevices } = await changeWith(undefined);
+    expect(ids).toEqual([current]);
+    expect(revokedDevices).toEqual([userId]);
+  });
+
+  it("with revokeOtherSessions: false keeps both", async () => {
+    const { ids, revokedDevices } = await changeWith(false);
+    expect(ids).toHaveLength(2);
+    expect(revokedDevices).toEqual([]);
   });
 });
 

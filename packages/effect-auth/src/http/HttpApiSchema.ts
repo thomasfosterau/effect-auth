@@ -161,6 +161,10 @@ export type ResetPasswordPayload = typeof ResetPasswordPayload.Type;
 export const ChangePasswordPayload = Schema.Struct({
   currentPassword: Schema.String,
   newPassword: Schema.String,
+  /**
+   * Revoke the user's other sessions and every trusted device. Default `true`;
+   * `false` keeps them.
+   */
   revokeOtherSessions: Schema.optional(Schema.Boolean),
 });
 export type ChangePasswordPayload = typeof ChangePasswordPayload.Type;
@@ -191,6 +195,8 @@ export type MagicLinkVerifyPayload = typeof MagicLinkVerifyPayload.Type;
 /** Request body for requesting an email change (authenticated). */
 export const ChangeEmailRequestPayload = Schema.Struct({
   newEmail: Schema.String,
+  /** The current password; required when the account has one. */
+  currentPassword: Schema.optional(Schema.String),
 });
 export type ChangeEmailRequestPayload = typeof ChangeEmailRequestPayload.Type;
 

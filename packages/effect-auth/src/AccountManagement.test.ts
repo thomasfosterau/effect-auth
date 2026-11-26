@@ -9,7 +9,15 @@ import {
   AccountTokenError,
   type AccountToken,
 } from "./AccountManagement.ts";
-import { AuthError, EmailInUseError } from "./Errors.ts";
+import {
+  AuthError,
+  EmailInUseError,
+  InvalidCredentialsError,
+  ReauthenticationRequiredError,
+} from "./Errors.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { MultiAlgorithmVerifier, PasswordHasher, pbkdf2Hasher } from "./password/Password.ts";
+import { scryptHasher } from "./password/Scrypt.ts";
 import {
   IdentifierStore,
   makeIdentifier,
@@ -36,7 +44,32 @@ interface Harness {
   readonly deleteSends: Array<{ email: string | null; token: string }>;
   readonly beforeDeleteCalls: string[];
   readonly notifiedOld: Array<{ oldEmail: string | null; newEmail: string }>;
+  readonly notices: Array<{ oldEmail: string; newEmail: string }>;
 }
+
+interface HarnessOptions {
+  /** Password hashes by user id: provides an `EmailPasswordStore` and a `PasswordHasher`. */
+  readonly passwordHashes?: Readonly<Record<string, string>>;
+  /** Hashers a `MultiAlgorithmVerifier` accepts, beside the `PasswordHasher`. */
+  readonly legacyHashers?: ReadonlyArray<typeof PasswordHasher.Service>;
+  readonly sendEmailChangeNotice?: () => Effect.Effect<void, AuthError>;
+}
+
+/** A session of `userId` created `minutesAgo` minutes ago. */
+const sessionFor = (userId: string, minutesAgo = 0, attributes = {}): Types.Session => {
+  const createdAt = DateTime.subtract(DateTime.nowUnsafe(), { minutes: minutesAgo });
+  return {
+    id: `session-${userId}`,
+    userId,
+    createdAt: DateTime.toDateUtc(createdAt),
+    lastActivityAt: DateTime.toDateUtc(createdAt),
+    expiresAt: DateTime.toDateUtc(DateTime.add(createdAt, { days: 1 })),
+    attributes,
+  };
+};
+
+/** A passwordless account's proof: a session it signed in on just now. */
+const signedIn = (userId: string) => ({ session: sessionFor(userId) });
 
 const makeUser = (id: string): Types.User => {
   const now = DateTime.toDateUtc(DateTime.nowUnsafe());
@@ -48,6 +81,31 @@ const makeUser = (id: string): Types.User => {
   };
 };
 
+const hasher = scryptHasher({ cost: 16384 });
+const PASSWORD = "correct horse battery staple";
+const hashOf = (password: string, with_ = hasher) =>
+  Effect.runPromise(Effect.map(with_.hash(password), (result) => result.hash));
+
+const passwordLayer = (options: HarnessOptions): Layer.Layer<never> => {
+  const hashes = options.passwordHashes;
+  if (hashes === undefined) return Layer.empty;
+  const store: typeof EmailPasswordStore.Service = {
+    createUser: () => Effect.die("unused"),
+    getPasswordHash: (userId) => Effect.succeed(hashes[userId] ?? null),
+    setPasswordHash: () => Effect.die("unused"),
+    clearPasswordHash: () => Effect.die("unused"),
+  };
+  const verifier =
+    options.legacyHashers === undefined
+      ? Layer.empty
+      : MultiAlgorithmVerifier.layer([...options.legacyHashers, hasher]);
+  return Layer.mergeAll(
+    Layer.succeed(EmailPasswordStore)(store),
+    Layer.succeed(PasswordHasher)(hasher),
+    verifier,
+  );
+};
+
 /**
  * Wraps the identifier store for a test: `records` is the live map the store
  * writes to, so a wrapper can simulate a concurrent claim by writing to it.
@@ -57,7 +115,7 @@ type WrapIdentifiers = (
   records: MutableHashMap.MutableHashMap<string, Identifier>,
 ) => typeof IdentifierStore.Service;
 
-const makeHarness = (wrap?: WrapIdentifiers): Harness => {
+const makeHarness = (wrap?: WrapIdentifiers, options: HarnessOptions = {}): Harness => {
   const users = MutableHashMap.empty<string, Types.User>();
   const identifiers = MutableHashMap.empty<string, Identifier>();
   const tokens = MutableHashMap.empty<string, AccountToken>();
@@ -66,6 +124,7 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
   const deleteSends: Array<{ email: string | null; token: string }> = [];
   const beforeDeleteCalls: string[] = [];
   const notifiedOld: Array<{ oldEmail: string | null; newEmail: string }> = [];
+  const notices: Array<{ oldEmail: string; newEmail: string }> = [];
 
   const addUser = (user: Types.User, email: string) => {
     MutableHashMap.set(users, user.id, user);
@@ -123,6 +182,10 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
   const layer = AccountManagementService.layer({
     sendChangeEmailVerification: ({ newEmail, token }) =>
       Effect.sync(() => void changeEmails.push({ newEmail, token })),
+    sendEmailChangeNotice: ({ oldEmail, newEmail }) =>
+      (options.sendEmailChangeNotice?.() ?? Effect.void).pipe(
+        Effect.tap(() => Effect.sync(() => void notices.push({ oldEmail, newEmail }))),
+      ),
     sendDeleteAccountVerification: ({ email, token }) =>
       Effect.sync(() => void deleteSends.push({ email, token })),
     beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
@@ -139,6 +202,7 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
         ),
         Layer.succeed(AccountManagementStore)(tokenStore),
         Layer.succeed(SessionService)(sessionManager),
+        passwordLayer(options),
       ),
     ),
   );
@@ -153,6 +217,7 @@ const makeHarness = (wrap?: WrapIdentifiers): Harness => {
     deleteSends,
     beforeDeleteCalls,
     notifiedOld,
+    notices,
   };
 };
 
@@ -177,7 +242,7 @@ describe("AccountManagement — change email", () => {
   it("swaps the email and marks it verified on confirm (happy path)", async () => {
     const h = makeHarness();
     const { token } = await run(h, (svc) =>
-      svc.requestEmailChange("user-1", "ALICE-NEW@example.com"),
+      svc.requestEmailChange("user-1", "ALICE-NEW@example.com", signedIn("user-1")),
     );
     expect(h.changeEmails).toHaveLength(1);
     expect(h.changeEmails[0]?.newEmail).toBe("alice-new@example.com");
@@ -207,7 +272,7 @@ describe("AccountManagement — change email", () => {
   it("rejects a target email already in use by another account", async () => {
     const h = makeHarness();
     const err = await run(h, (svc) =>
-      Effect.flip(svc.requestEmailChange("user-1", "bob@example.com")),
+      Effect.flip(svc.requestEmailChange("user-1", "bob@example.com", signedIn("user-1"))),
     );
     expect(err).toBeInstanceOf(EmailInUseError);
     expect(h.changeEmails).toHaveLength(0);
@@ -216,7 +281,9 @@ describe("AccountManagement — change email", () => {
 
   it("consumes the token on first confirm (single use)", async () => {
     const h = makeHarness();
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice2@example.com"));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "alice2@example.com", signedIn("user-1")),
+    );
     await run(h, (svc) => svc.confirmEmailChange(token));
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AccountTokenError);
@@ -224,14 +291,18 @@ describe("AccountManagement — change email", () => {
 
   it("stores the token's digest, never the token", async () => {
     const h = makeHarness();
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice4@example.com"));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "alice4@example.com", signedIn("user-1")),
+    );
     expect(MutableHashMap.has(h.tokens, token)).toBe(false);
     expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
   });
 
   it("rejects an expired token", async () => {
     const h = makeHarness();
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice3@example.com"));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "alice3@example.com", signedIn("user-1")),
+    );
     // Force expiry.
     const rec = Option.getOrUndefined(MutableHashMap.get(h.tokens, sha256Hex(token)));
     assert(rec !== undefined, "the change-email token is stored");
@@ -242,6 +313,122 @@ describe("AccountManagement — change email", () => {
     });
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AccountTokenError);
+  });
+});
+
+describe("AccountManagement — change email: re-authentication", () => {
+  const withPassword = async (extra: Partial<HarnessOptions> = {}) =>
+    makeHarness(undefined, {
+      passwordHashes: { "user-1": await hashOf(PASSWORD) },
+      ...extra,
+    });
+  const nothingSent = (h: Harness) => {
+    expect(h.notices).toEqual([]);
+    expect(h.changeEmails).toEqual([]);
+    expect(MutableHashMap.size(h.tokens)).toBe(0);
+  };
+
+  it("an account with a password must give it, even on a fresh session", async () => {
+    const h = await withPassword();
+    const err = await run(h, (svc) =>
+      Effect.flip(svc.requestEmailChange("user-1", "new@example.com", signedIn("user-1"))),
+    );
+    expect(err).toBeInstanceOf(ReauthenticationRequiredError);
+    expect(err.code).toBe("REAUTHENTICATION_REQUIRED");
+    nothingSent(h);
+  });
+
+  it("a wrong password is refused and sends nothing", async () => {
+    const h = await withPassword();
+    const err = await run(h, (svc) =>
+      Effect.flip(
+        svc.requestEmailChange("user-1", "new@example.com", { currentPassword: "wrong password" }),
+      ),
+    );
+    expect(err).toBeInstanceOf(InvalidCredentialsError);
+    nothingSent(h);
+  });
+
+  it("the right password starts the change, whatever the session's age", async () => {
+    const h = await withPassword();
+    await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "new@example.com", {
+        currentPassword: PASSWORD,
+        session: sessionFor("user-1", 600),
+      }),
+    );
+    expect(h.changeEmails.map((sent) => sent.newEmail)).toEqual(["new@example.com"]);
+  });
+
+  it("a password hashed by a previous hasher verifies through MultiAlgorithmVerifier", async () => {
+    const legacy = pbkdf2Hasher({ iterations: 1000 });
+    const h = makeHarness(undefined, {
+      passwordHashes: { "user-1": await hashOf(PASSWORD, legacy) },
+      legacyHashers: [legacy],
+    });
+    await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "new@example.com", { currentPassword: PASSWORD }),
+    );
+    expect(h.changeEmails).toHaveLength(1);
+  });
+
+  it.each([
+    ["no session", {}],
+    ["a session older than five minutes", { session: sessionFor("user-1", 6) }],
+    ["another user's session", { session: sessionFor("user-2") }],
+    [
+      "an impersonation session",
+      { session: sessionFor("user-1", 0, { impersonatedBy: "admin-1" }) },
+    ],
+    ["a password, when the account has none", { currentPassword: PASSWORD }],
+  ])("a passwordless account is refused with %s", async (_label, proof) => {
+    const h = makeHarness();
+    const err = await run(h, (svc) =>
+      Effect.flip(svc.requestEmailChange("user-1", "new@example.com", proof)),
+    );
+    expect(err).toBeInstanceOf(ReauthenticationRequiredError);
+    nothingSent(h);
+  });
+
+  it("a passwordless account's session counts as recent within reauthenticationMaxAge", async () => {
+    const h = makeHarness();
+    await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "new@example.com", {
+        session: sessionFor("user-1", 4),
+      }),
+    );
+    expect(h.changeEmails).toHaveLength(1);
+  });
+});
+
+describe("AccountManagement — change email: the old address is told at request time", () => {
+  it("notifies the current address, naming the new one, before the confirmation is sent", async () => {
+    const h = makeHarness();
+    await run(h, (svc) => svc.requestEmailChange("user-1", "new@example.com", signedIn("user-1")));
+    expect(h.notices).toEqual([{ oldEmail: "alice@example.com", newEmail: "new@example.com" }]);
+    // Nothing is confirmed yet, so the after-change notice has not gone.
+    expect(h.notifiedOld).toEqual([]);
+  });
+
+  it("notifies the current address even when the new one is taken", async () => {
+    const h = makeHarness();
+    const err = await run(h, (svc) =>
+      Effect.flip(svc.requestEmailChange("user-1", "bob@example.com", signedIn("user-1"))),
+    );
+    expect(err).toBeInstanceOf(EmailInUseError);
+    expect(h.notices).toEqual([{ oldEmail: "alice@example.com", newEmail: "bob@example.com" }]);
+  });
+
+  it("a failed notice fails the request and issues no token", async () => {
+    const h = makeHarness(undefined, {
+      sendEmailChangeNotice: () => Effect.fail(new AuthError({ message: "provider down" })),
+    });
+    const err = await run(h, (svc) =>
+      Effect.flip(svc.requestEmailChange("user-1", "new@example.com", signedIn("user-1"))),
+    );
+    expect(err).toBeInstanceOf(AuthError);
+    expect(h.changeEmails).toEqual([]);
+    expect(MutableHashMap.size(h.tokens)).toBe(0);
   });
 });
 
@@ -273,7 +460,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
           return store.replace(from, to);
         }),
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -301,7 +490,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         return store.replace(from, to);
       },
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -332,7 +523,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         return store.replace(from, to);
       },
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AuthError);
@@ -369,7 +562,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       now: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
     });
     MutableHashMap.set(h.identifiers, second.id, second);
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
     expect(err).toBeInstanceOf(AuthError);
@@ -392,7 +587,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       ...store,
       replace: (from, to) => store.delete(from.id).pipe(Effect.andThen(store.replace(from, to))),
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -440,7 +637,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     ([label, rejectTakenFirst]) => {
       it(`a double-submitted confirmation converges to success when the store ${label}`, async () => {
         const h = makeHarness(doubleSubmit(rejectTakenFirst));
-        const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+        const { token } = await run(h, (svc) =>
+          svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+        );
 
         const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
 
@@ -453,7 +652,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
       it(`a converged confirmation leaves the new address verified when the concurrent write left it unverified and the store ${label}`, async () => {
         const h = makeHarness(doubleSubmit(rejectTakenFirst, false));
-        const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+        const { token } = await run(h, (svc) =>
+          svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+        );
 
         await run(h, (svc) => svc.confirmEmailChange(token));
 
@@ -482,7 +683,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
           return yield* store.getByValue(to.type, to.value);
         }),
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     await run(h, (svc) => svc.confirmEmailChange(token));
 
@@ -492,7 +695,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
   it("a user who already holds the new address, unverified, ends with it verified and the previous address released", async () => {
     const h = makeHarness();
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
     const held = makeIdentifier({
       userId: "user-1",
       type: "email",
@@ -519,7 +724,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         return store.setVerified(id, verifiedAt);
       },
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -540,7 +747,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       setVerified: (id, verifiedAt) =>
         store.delete(id).pipe(Effect.andThen(store.setVerified(id, verifiedAt))),
     }));
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -556,7 +765,11 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     MutableHashMap.forEach(h.identifiers, (identifier, id) => {
       if (identifier.userId === "user-1") MutableHashMap.remove(h.identifiers, id);
     });
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
+    // No current address to tell.
+    expect(h.notices).toEqual([]);
 
     await run(h, (svc) => svc.confirmEmailChange(token));
 
@@ -589,7 +802,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
   it("a double-submitted confirmation by a user with no email converges to success, with the address verified", async () => {
     const h = claimedMidConfirm("user-1");
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
 
@@ -602,7 +817,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
   it("a user with no email whose claim another account wins mid-confirm fails with Email already in use and keeps the token", async () => {
     const h = claimedMidConfirm("user-2");
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", NEW_EMAIL, signedIn("user-1")),
+    );
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -640,7 +857,9 @@ describe("AccountManagement — delete user", () => {
 
   it("rejects a change-email token at the deletion confirm endpoint (wrong purpose)", async () => {
     const h = makeHarness();
-    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice9@example.com"));
+    const { token } = await run(h, (svc) =>
+      svc.requestEmailChange("user-1", "alice9@example.com", signedIn("user-1")),
+    );
     const err = await run(h, (svc) => Effect.flip(svc.confirmAccountDeletion(token)));
     expect(err).toBeInstanceOf(AccountTokenError);
     // The user still exists.

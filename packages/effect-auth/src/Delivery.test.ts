@@ -84,6 +84,13 @@ describe("emailCallbacks", () => {
     );
     await Effect.runPromise(cb.sendSecondFactorOtp(user(), "654321"));
     await Effect.runPromise(cb.sendExistingAccountNotice("e@example.com"));
+    await Effect.runPromise(
+      cb.sendEmailChangeNotice({
+        user: user(),
+        oldEmail: "alice@example.com",
+        newEmail: "new@example.com",
+      }),
+    );
 
     expect(sent).toEqual([
       { to: "a@example.com", purpose: "email-verification", params: { token: "tok-1" } },
@@ -94,6 +101,11 @@ describe("emailCallbacks", () => {
       { to: "alice@example.com", purpose: "delete-account", params: { token: "tok-5" } },
       { to: "alice@example.com", purpose: "second-factor-otp", params: { otp: "654321" } },
       { to: "e@example.com", purpose: "existing-account", params: {} },
+      {
+        to: "alice@example.com",
+        purpose: "email-change-requested",
+        params: { newEmail: "new@example.com" },
+      },
     ]);
   });
 
@@ -218,6 +230,17 @@ describe("defaultEmailRender", () => {
     const rendered = defaultEmailRender({ to: "a@b.com", purpose: "existing-account", params: {} });
     expect(rendered.subject).toBe("Someone tried to sign up with your email address");
     expect(rendered.text).toContain("reset your password");
+  });
+
+  it("tells the current address which address an email change asks for", () => {
+    const rendered = defaultEmailRender({
+      to: "a@b.com",
+      purpose: "email-change-requested",
+      params: { newEmail: "new@example.com" },
+    });
+    expect(rendered.subject).toBe("Your email address is being changed");
+    expect(rendered.text).toContain("new@example.com");
+    expect(rendered.text).toContain("change your password");
   });
 
   it("falls back for unknown purposes and empty params", () => {

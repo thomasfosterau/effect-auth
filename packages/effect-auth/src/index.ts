@@ -247,6 +247,7 @@ export {
   AccountManagementStore,
   AccountTokenError,
   type AccountManagementConfig,
+  type EmailChangeReauthentication,
   type EmailChangeResult,
   AccountManagementService,
   accountDeletionLayer,

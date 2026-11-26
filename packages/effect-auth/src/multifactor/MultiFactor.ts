@@ -14,6 +14,7 @@
 
 import { Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { Hex } from "effect/encoding";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
@@ -32,6 +33,7 @@ import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
 import { SessionService } from "../SessionService.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
+import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 
 /**
  * Two-factor error
@@ -285,7 +287,8 @@ export class MultiFactorService extends Context.Service<
     ) => Effect.Effect<void, MultiFactorError | Errors.HashingError | Errors.AuthError>;
 
     /**
-     * Disable multi-factor after re-verifying the user's password.
+     * Disable multi-factor after re-verifying the user's password, and revoke
+     * every trusted device of the user (`TrustedDeviceStore`, when present).
      */
     readonly disable: (
       userId: string,
@@ -470,6 +473,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
+    const trustedDevices = Option.getOrUndefined(yield* Effect.serviceOption(TrustedDeviceStore));
     const maxFailedAttempts = config.maxFailedAttempts ?? 5;
 
     /**
@@ -709,6 +713,8 @@ export const make = (
       ) {
         yield* verifyPassword(userId, password);
         yield* store.delete(userId);
+        // A device trusted under this enrolment must not skip a later one.
+        if (trustedDevices !== undefined) yield* trustedDevices.deleteByUserId(userId);
       }),
 
       isEnabled: Effect.fn("MultiFactorService.isEnabled")(function* (userId: string) {

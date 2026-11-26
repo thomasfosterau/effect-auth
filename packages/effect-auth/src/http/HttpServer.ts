@@ -2348,15 +2348,24 @@ export const emailChangesGroupLayer = (
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const account = yield* resolveAccountManagement;
+          const { newEmail, currentPassword } = payload.data.attributes;
           yield* account.service
-            .requestEmailChange(resolved.user.id, payload.data.attributes.newEmail)
+            .requestEmailChange(resolved.user.id, newEmail, {
+              currentPassword,
+              session: resolved.session,
+            })
             .pipe(
               Effect.catchTags({
                 // Anti-enumeration: never reveal whether the target address is taken.
                 EmailInUseError: () => Effect.void,
                 UserNotFoundError: () =>
                   Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
+                ReauthenticationRequiredError: (e) =>
+                  Effect.fail(new S.Forbidden({ message: e.message, code: e.code })),
                 AuthError: (e) => internalServerError(e),
+                HashingError: (e) => internalServerError(e),
               }),
             );
         }).pipe(JsonApiErrors.mapHttpErrors),
@@ -5162,6 +5171,7 @@ const postRule = (
  * | `POST /email-verifications/redemptions`                        | 10 req  | 15 min | 30 min |
  * | `POST /second-factor-challenges/verifications`                 | 10 req  | 5 min  | 30 min |
  * | `PATCH /users/me/password` (change password)                   | 10 req  | 15 min | 30 min |
+ * | `POST /email-changes` (re-authenticates with the password)     | 10 req  | 15 min | 30 min |
  * | `POST`, `PATCH`, `DELETE /multi-factor-enrollments[/current]`  | 10 req  | 15 min | 30 min |
  * | `POST /backup-code-sets` (regenerate backup codes)             | 10 req  | 15 min | 30 min |
  * | `POST /google-one-tap-nonces`                                  | 20 req  | 10 min | 30 min |
@@ -5201,6 +5211,7 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
     blockDurationMs: 30 * MINUTE_MS,
   },
   postRule("/backup-code-sets", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
+  postRule("/email-changes", 10, 15 * MINUTE_MS, 30 * MINUTE_MS),
   // Unauthenticated endpoints that write a store row or call out.
   postRule("/google-one-tap-nonces", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   postRule("/device/code", 10, 10 * MINUTE_MS, 30 * MINUTE_MS),

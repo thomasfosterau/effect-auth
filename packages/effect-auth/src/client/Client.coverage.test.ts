@@ -383,10 +383,15 @@ describe("change email and delete user", () => {
     const { server, client } = withServer({ features: true });
     await client.signUp({ email: "old@client.test", password: PW });
 
-    expect(await client.changeEmail.request({ newEmail: "new@client.test" })).toEqual({
+    expect(
+      await client.changeEmail.request({ newEmail: "new@client.test", currentPassword: PW }),
+    ).toEqual({
       status: true,
     });
     expect(server.sentChangeEmail).toHaveLength(1);
+    expect(server.sentEmailChangeNotices).toEqual([
+      { oldEmail: "old@client.test", newEmail: "new@client.test" },
+    ]);
 
     const [sent] = server.sentChangeEmail;
     assert(sent !== undefined);

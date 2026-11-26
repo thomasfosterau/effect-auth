@@ -30,6 +30,7 @@ import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
+import { TrustedDeviceStore } from "../TrustedDevice.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const identifiers = MutableHashMap.empty<string, Identifier>();
@@ -388,7 +389,15 @@ describe("MultiFactorService", () => {
   });
 
   it("should fail to disable with a wrong password and remove the record on success", async () => {
-    const testContext = await makeTestContext();
+    // Trusted devices are revoked by the successful disable only.
+    const revokedDevices: string[] = [];
+    const devices: typeof TrustedDeviceStore.Service = {
+      upsert: (record) => Effect.succeed(record),
+      getByTokenHash: () => Effect.succeed(null),
+      delete: () => Effect.void,
+      deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
+    };
+    const testContext = Context.add(await makeTestContext(), TrustedDeviceStore, devices);
     await seedUser("user-2fa-4", "disable@example.com", "correct-password");
 
     const { wrongPassword, stillEnabled, enabledAfterDisable } = await Effect.runPromise(
@@ -421,6 +430,7 @@ describe("MultiFactorService", () => {
     expect(stillEnabled).toBe(true);
     expect(enabledAfterDisable).toBe(false);
     expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
+    expect(revokedDevices).toEqual(["user-2fa-4"]);
   });
 
   it("should create a session on the challenge + verifyTotp happy path", async () => {

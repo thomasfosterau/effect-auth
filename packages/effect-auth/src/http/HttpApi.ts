@@ -570,8 +570,11 @@ const accountErrors = [
  * `email-changes`: move the account to a new address, proved by a link sent
  * there.
  *
- * - `POST /email-changes`: signed in; `202` whether or not the new address is
- *   taken (anti-enumeration).
+ * - `POST /email-changes`: signed in and re-authenticated: `currentPassword`
+ *   for an account with a password (`400` when wrong), else a session
+ *   created in the last few minutes; `403` (`REAUTHENTICATION_REQUIRED`)
+ *   without it. Notifies the current address, then answers `202` whether or
+ *   not the new address is taken (anti-enumeration).
  * - `POST /email-changes/redemptions`: the link's token; `204`.
  *
  * `404` when account management is not configured.
@@ -581,7 +584,7 @@ export const emailChangesGroup = Group.make(
   HttpApiEndpoint.post("create", "/email-changes", {
     payload: jsonApiPayload(EmailChangeDocument),
     success: Accepted,
-    error: accountErrors,
+    error: [...accountErrors, E.Forbidden.wire, E.TooManyRequests.wire],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
