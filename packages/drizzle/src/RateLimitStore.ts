@@ -4,7 +4,8 @@
  * `RateLimitPlugin` hooks and `ApiKeyService`'s per-key limits.
  *
  * One row per rate-limit key in the `rateLimits` table of any dialect's
- * {@link Tables}: the open window's `count`, the instant it resets, and the
+ * {@link Tables}, or an application's own table mapped with
+ * `defineRateLimitTable`: the open window's `count`, the instant it resets, and the
  * instant a block set by `RateLimiter` lifts.
  *
  * ### Contract notes
@@ -35,12 +36,22 @@ import * as Auth from "@thomasfosterau/effect-auth";
 import {
   type DrizzleInsertValues,
   type DrizzleResult,
+  type DrizzleSelected,
   type DrizzleUpsertSet,
   DrizzleDatabase,
 } from "./Database.ts";
+import {
+  type RateLimitColumns,
+  type RateLimitSchema,
+  type RateLimitTableInput,
+  resolveRateLimitTable,
+  writeValues,
+} from "./Columns.ts";
 import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { RateLimitRow, Tables } from "./Schema.ts";
+
+/** What a counter read projects, under the store's own field names. */
+type RateLimitRow = DrizzleSelected<RateLimitColumns>;
 
 const toEntry = (row: RateLimitRow): Auth.RateLimitEntry => ({
   key: row.key,
@@ -58,15 +69,28 @@ const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe
  */
 const upsert = (
   insert: DrizzleInsertValues,
-  target: Tables["rateLimits"],
+  target: RateLimitSchema,
   set: DrizzleUpsertSet,
 ): DrizzleResult<unknown> =>
   insert.onConflictDoUpdate === undefined
     ? (insert.onDuplicateKeyUpdate?.({ set }) ?? insert).execute()
     : insert
-        .onConflictDoUpdate({ target: target.key, set })
-        .returning({ count: target.count })
+        .onConflictDoUpdate({ target: target.columns.key, set })
+        .returning({ count: target.columns.count })
         .execute();
+
+/**
+ * What an upsert sets, re-keyed into the mapped table's column keys.
+ *
+ * `writeValues` has already checked each value against its column.
+ */
+const upsertSet = (
+  schema: RateLimitSchema,
+  values: Parameters<typeof writeValues<RateLimitColumns>>[1],
+): DrizzleUpsertSet =>
+  // SAFETY: every value is a column value of `RateLimitColumns` (string, number,
+  // `Date`, `null`) or a `SQL` expression, all of which `DrizzleUpsertValue` admits.
+  writeValues(schema, values) as DrizzleUpsertSet;
 
 /**
  * The count an upsert returned: the `RETURNING` row's, or `None` for a driver
@@ -78,31 +102,37 @@ const returnedCount = Schema.decodeUnknownOption(
 
 /** Build a `RateLimitStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
-  tables: Tables = defaultTables,
+  tables: RateLimitTableInput = defaultTables,
 ): Effect.Effect<typeof Auth.RateLimitStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = makeQuery(yield* DrizzleDatabase);
-    const table = tables.rateLimits;
+    const schema = resolveRateLimitTable(tables);
+    const table = schema.table;
+    const column = schema.columns;
 
     const get = (key: string, label: string) =>
       query(label, (db) =>
-        db.select().from(table).where(eq(table.key, key)).limit(1).execute(),
+        db.select(column).from(table).where(eq(column.key, key)).limit(1).execute(),
       ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toEntry(rows[0]))));
 
     const reopenExpired = (key: string, now: Date, resetAt: Date) =>
       query("rateLimit.increment.reopen", (db) =>
         db
           .update(table)
-          .set({ count: 0, resetAt, blockedUntil: null })
-          .where(and(eq(table.key, key), lte(table.resetAt, now)))
+          .set(writeValues(schema, { count: 0, resetAt, blockedUntil: null }))
+          .where(and(eq(column.key, key), lte(column.resetAt, now)))
           .execute(),
       );
 
     const countOne = (key: string, resetAt: Date) =>
       query("rateLimit.increment", (db) =>
-        upsert(db.insert(table).values({ key, count: 1, resetAt, blockedUntil: null }), table, {
-          count: sql`${table.count} + 1`,
-        }),
+        upsert(
+          db
+            .insert(table)
+            .values(writeValues(schema, { key, count: 1, resetAt, blockedUntil: null })),
+          schema,
+          upsertSet(schema, { count: sql`${column.count} + 1` }),
+        ),
       );
 
     return {
@@ -115,7 +145,11 @@ export const make = (
           blockedUntil: entry.blockedUntil === undefined ? null : instant(entry.blockedUntil),
         };
         return query("rateLimit.set", (db) =>
-          upsert(db.insert(table).values({ key, ...values }), table, values),
+          upsert(
+            db.insert(table).values(writeValues(schema, { key, ...values })),
+            schema,
+            upsertSet(schema, values),
+          ),
         ).pipe(Effect.asVoid);
       },
 
@@ -132,14 +166,14 @@ export const make = (
 
       delete: (key) =>
         query("rateLimit.delete", (db) =>
-          db.delete(table).where(eq(table.key, key)).execute(),
+          db.delete(table).where(eq(column.key, key)).execute(),
         ).pipe(Effect.asVoid),
     } satisfies typeof Auth.RateLimitStore.Service;
   });
 
 /** `RateLimitStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
-  tables: Tables = defaultTables,
+  tables: RateLimitTableInput = defaultTables,
 ): Layer.Layer<Auth.RateLimitStore, never, DrizzleDatabase> =>
   Layer.effect(Auth.RateLimitStore, make(tables));
 
@@ -170,27 +204,29 @@ export const layer = (
  * `AuthError` before any statement runs.
  */
 export const purgeExpired = (
-  tables: Tables = defaultTables,
+  tables: RateLimitTableInput = defaultTables,
   options?: PurgeExpiredOptions,
 ): Effect.Effect<void, Auth.AuthError, DrizzleDatabase> =>
   Effect.gen(function* () {
     const limit = options?.limit;
     yield* checkLimit(limit);
     const query = makeQuery(yield* DrizzleDatabase);
-    const table = tables.rateLimits;
+    const schema = resolveRateLimitTable(tables);
+    const table = schema.table;
+    const column = schema.columns;
     const now = yield* DateTime.nowAsDate;
     const spent = and(
-      lte(table.resetAt, now),
-      or(isNull(table.blockedUntil), lte(table.blockedUntil, now)),
+      lte(column.resetAt, now),
+      or(isNull(column.blockedUntil), lte(column.blockedUntil, now)),
     );
-    const key = sql.identifier(table.key.name);
+    const key = sql.identifier(column.key.name);
     yield* query("rateLimit.purgeExpired", (db) =>
       db
         .delete(table)
         .where(
           limit === undefined
             ? spent
-            : sql`${spent} and ${table.key} in (select ${key} from (select ${table.key} from ${table} where ${spent} limit ${sql.raw(String(limit))}) as ${sql.identifier("spent")})`,
+            : sql`${spent} and ${column.key} in (select ${key} from (select ${column.key} from ${table} where ${spent} limit ${sql.raw(String(limit))}) as ${sql.identifier("spent")})`,
         )
         .execute(),
     );

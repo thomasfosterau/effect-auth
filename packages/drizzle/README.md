@@ -106,6 +106,7 @@ yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
 | `Requests`                                                                     | The batched read interface                                                            |
 | `Pg`, `Sqlite`, `MySql`                                                        | One namespace per dialect: tables, `defineTables`, DDL (`MySql` also `binaryVarchar`) |
 | `defineSchema`, `fromTables`, `AuthSchema` and column types                    | The stores pointed at tables you already have                                         |
+| `defineApiKeyTable`, `defineTokenTable`, `defineRateLimitTable`                | `ApiKeyStore`, `TokenStore`, `RateLimitStore` pointed at tables you already have      |
 | `TableNames`, `defaultTableNames`, `Tables`, row types                         | What the three dialects agree on                                                      |
 | `ladderCheck(column, ladder)`                                                  | A role column's `CHECK` derived from an `Auth.Ladder`                                 |
 | `ownedListFilter(columns)`, `isFollowerLayer`, `isMemberLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`                          |
@@ -899,6 +900,50 @@ store each).
   services compute; every read and delete is scoped to the store's purpose, so
   a password-reset request never clears a pending verification. Expiry is the
   services' check: an expired row is returned as found.
+
+### Your own API key, token and rate-limit tables
+
+The package's `api_keys` and `tokens` tables keep `user_id` as `text` with no
+foreign key. An application whose `users.id` is a `uuid`, or that wants
+deleting a user to cascade to its keys and pending tokens in the database,
+keeps those tables itself and maps the stores onto them, as `defineSchema` does
+for the sign-in stores. `defineApiKeyTable`, `defineTokenTable` and
+`defineRateLimitTable` each take one table and the column that holds every
+field the store writes; each store's `make` / `layer` (and
+`RateLimitStore.purgeExpired`) takes the result in place of `tables`:
+
+```ts
+const appApiKeys = pgTable("api_keys", {
+  id: text("id").primaryKey(),
+  owner: uuid("owner_id")
+    .notNull()
+    .references(() => appUsers.userId, { onDelete: "cascade" }),
+  digest: text("digest").notNull().unique(),
+  // ... a column for every other ApiKeyColumnNames field
+});
+
+const stores = Layer.mergeAll(
+  Drizzle.ApiKeyStore.layer(
+    Drizzle.defineApiKeyTable({
+      table: appApiKeys,
+      columns: { id: "id", userId: "owner", keyHash: "digest" /* , ... */ },
+    }),
+  ),
+  Drizzle.TokenStore.layer(Drizzle.defineTokenTable({ table: appTokens, columns: { ... } })),
+  Drizzle.RateLimitStore.layer(
+    Drizzle.defineRateLimitTable({ table: appThrottle, columns: { ... } }),
+  ),
+).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+```
+
+The mapping is checked at the type level, as in `defineSchema`: each field
+names a column that reads back as the value the store needs (a `uuid` owner
+reads back as a `string`). What the table still has to carry: a unique index
+on the API key's `keyHash`; `token` as the tokens table's primary key, with one
+`purpose` column serving both token stores; and the rate-limit `key` as a
+primary key or unique index, since `increment` and `set` upsert on it. Core's
+account deletion still deletes a user's keys and tokens through
+`deleteByUserId` first, so the cascade is a second guarantee, not the only one.
 
 ## Store semantics
 
