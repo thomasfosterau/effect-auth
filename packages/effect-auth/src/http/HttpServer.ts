@@ -2176,17 +2176,21 @@ export const emailVerificationsGroupLayer = (
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified, or is inside its resend
           // cooldown or past its send cap: a 429 there alone
-          // would name an unverified account.
+          // would name an unverified account. The send goes off the response
+          // path, so neither the mail round trip nor a vendor failure tells an
+          // unverified account apart either.
           if (identifier !== null && !identifier.verified) {
-            yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
-              Effect.catchIf(isRecipientSendCapped, () => Effect.void),
-              Effect.catchTags({
-                ResendTooSoonError: () => Effect.void,
-                AuthError: (e) => internalServerError(e),
-                EmailVerificationError: (e) => internalServerError(e),
-                ...hookFailures,
-              }),
-            );
+            yield* verification
+              .resendVerification(identifier.userId, identifier.value, { offResponsePath: true })
+              .pipe(
+                Effect.catchIf(isRecipientSendCapped, () => Effect.void),
+                Effect.catchTags({
+                  ResendTooSoonError: () => Effect.void,
+                  AuthError: (e) => internalServerError(e),
+                  EmailVerificationError: (e) => internalServerError(e),
+                  ...hookFailures,
+                }),
+              );
           }
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
