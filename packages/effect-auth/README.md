@@ -14,14 +14,18 @@ pnpm add @thomasfosterau/effect-auth effect
 
 ### Runtimes
 
-The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-only. Password hashing, token digests, AES-256-GCM, HMAC and JWS signing take a few primitives from `node:crypto` (and `Buffer` from `node:buffer`), so a Worker needs:
+The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-only. Crypto goes through `effect/crypto` and `effect/jose` over Web Crypto; only the opt-in scrypt verifier takes `node:crypto` (and `Buffer` from `node:buffer`). A Worker needs:
 
 - the **`nodejs_compat`** compatibility flag (on by default from compatibility date 2026-08-04), and
 - a **compatibility date of 2023-01-01 or later**.
 
+Outbound requests (the OAuth and OIDC provider endpoints, SSO discovery, Cloudflare Access's key set, Google One Tap's JWKS) go through `effect/http`'s `HttpClient`, so the layers that make them require one: provide `FetchHttpClient.layer`, which works on Workers, Node and in browsers, or a stub in tests. `RemoteJwksVerifier.layer` provides fetch itself; `layerHttpClient` takes yours.
+
 Argon2id (`Password.argon2idHasherLayer`) is the exception: it derives through Effect's `Kdf` service, which only `NodeCrypto.layerKdf` (`@effect/platform-node` or `-bun`, on Node.js 24.7+ or Bun 1.4+) provides with Argon2id. On Workers use `@thomasfosterau/effect-auth-argon2`.
 
-The core never relies on the Node globals `nodejs_compat` sets only from 2024-09-23 (`Buffer`, `process`), so an older date works. Every primitive (PBKDF2 and scrypt hashing and verification, `hashToken` and the constant-time comparisons, AES-256-GCM, HMAC, the WebAuthn signature checks, and ES256, EdDSA and RS256 JWS through `JwtService`, `verifyJws` and the Apple client secret) is tested inside a real workerd at 2023-01-01 and at workerd's newest date (`src/Workerd.test.ts`). Releases up to 0.4.0 fail there: ES256 signing and verification on every date, JWT key generation from 2025-12-03, and password hashing, AES-GCM and the WebAuthn checks before 2024-09-23.
+Password hashing is the costly step on Workers. PBKDF2 at its default 600,000 iterations takes about 75 ms of CPU per hash or verify in workerd, so a sign-in that verifies a password fits a paid plan's CPU limit but not the Free plan's 10 ms; lowering `iterations` trades away resistance to offline cracking. Keep the scrypt verifier (`./scrypt`) off Workers: at its default cost (N = 2^17, r = 8) it needs about 128 MiB, the whole memory of an isolate.
+
+The core never relies on the Node globals `nodejs_compat` sets only from 2024-09-23 (`Buffer`, `process`), so an older date works. Every primitive (PBKDF2 hashing and verification, the opt-in scrypt verifier, `hashToken` and the constant-time comparisons, AES-256-GCM, HMAC, the WebAuthn signature checks, and ES256, EdDSA and RS256 JWS through `effect/jose`, `JwtService` and the Apple client secret) is tested inside a real workerd at 2023-01-01 and at workerd's newest date (`src/Workerd.test.ts`). Releases up to 0.4.0 fail there: ES256 signing and verification on every date, JWT key generation from 2025-12-03, and password hashing, AES-GCM and the WebAuthn checks before 2024-09-23.
 
 ## Usage
 
@@ -125,7 +129,7 @@ The two `before*` session hooks are observe-or-deny. A plugin refuses the valida
 ## What's included
 
 - **Sessions:** active and idle expiry with renewal, hashed session ids, an optional HMAC-signed session-data cookie (`cookie.cache`), multi-session, trusted devices.
-- **Passwords:** PBKDF2-SHA256 (600,000 iterations, the default) and scrypt, a multi-algorithm verifier, password reset, Have I Been Pwned checks. Argon2id over Effect's `Kdf` (`Password.argon2idHasherLayer`, with `NodeCrypto.layerKdf` on Node.js 24.7+ or Bun 1.4+); on Cloudflare Workers, which has no native Argon2, use `@thomasfosterau/effect-auth-argon2`.
+- **Passwords:** PBKDF2-SHA256 (600,000 iterations, the default, over `effect/crypto`'s `Kdf`), an opt-in Node-only scrypt verifier for older hashes (`@thomasfosterau/effect-auth/scrypt`), a multi-algorithm verifier with rehash on sign-in, password reset, Have I Been Pwned checks. Argon2id over Effect's `Kdf` (`Password.argon2idHasherLayer`, with `NodeCrypto.layerKdf` on Node.js 24.7+ or Bun 1.4+); on Cloudflare Workers, which has no native Argon2, use `@thomasfosterau/effect-auth-argon2`.
 - **Sign-in methods:** email and password, username (case-insensitive uniqueness), magic link, email OTP, phone (SMS) OTP with a pluggable E.164 normalizer, anonymous guests (`isAnonymousUser`, upgraded on sign-up through a `linkAccount` callback), Google One Tap, the RFC 8628 device authorization grant, passkeys (WebAuthn). Every password-based method honours the multi-factor gate.
 - **Multi-factor:** TOTP with backup codes integrated into sign-in, an OTP second factor, and the RFC 6238 / RFC 4226 primitives.
 - **OAuth 2.0 social login:** 20 provider presets (Google, GitHub, Discord, Microsoft, Apple, and more) plus custom providers, PKCE, and a complete sign-in flow with verified-email account linking.
@@ -133,7 +137,7 @@ The two `before*` session hooks are observe-or-deny. A plugin refuses the valida
 - **Enterprise:** OIDC and SAML SSO with per-organization connections and JIT provisioning (the SAML XML verification is the Node-only [`/saml` subpath](#saml-saml)), SCIM 2.0, and an OIDC provider with RFC 7591 dynamic client registration for MCP clients.
 - **Account management:** verification-gated email change and self-service account deletion (single-use tokens, a `beforeDelete` cleanup hook, and every credential, session and identifier of the account deleted with it; see [Deleting a user](#deleting-a-user)).
 - **Organizations and admin:** members (with deactivation), invitations, teams, per-organization roles and default role (no member grants, defines, redefines or deletes a role, or acts on a member, beyond the permissions their own role carries, nor edits their own role; the default `owner` role is `*:*`), verified email domains with opt-in JIT provisioning; admin ban and impersonation.
-- **API keys and JWT:** hashed API keys with permissions and quotas; ES256 / EdDSA JWTs with JWKS.
+- **API keys and JWT:** hashed API keys with permissions and quotas; ES256 / EdDSA JWTs with JWKS, and `RemoteJwksVerifier` for RS256, ES256 and EdDSA tokens against any issuer's JWKS.
 - **Authorization:** one policy kernel (`Policy`, `Entity`, `Condition`, `Authorizer`) with RBAC as authoring sugar, schema-embedded field guards (`protectedField`), zero-IO guards and role ladders.
 - **Abuse protection:** rate limiting with presets and an optional `effect/persistence` backend (`rateLimiterPersistenceLayer`), per-IP limits, account lockout (`AccountLockoutPlugin`), captcha (Turnstile, reCAPTCHA, hCaptcha).
 - **HTTP API:** a typed `effect/http-api` contract served as a mountable Web handler (`Http.make`, or `Http.makeAsync` for services that build asynchronously), with session cookies, trusted-origin CSRF checks, a derived typed client and an OpenAPI 3.1 document (`Http.getOpenApiSpec()`, or `Http.make({ docs: true })` for a Scalar reference page).
@@ -552,12 +556,15 @@ What the service enforces:
 
 - **A challenge is bound to its ceremony.** Each stored `WebAuthnChallenge` carries `ceremony: "registration" | "authentication"`; `verifyRegistration` refuses an authentication challenge and `verifyAuthentication` a registration one, leaving it in place. A registration challenge is also bound to the user it was issued to, which must be the `userId` passed to `verifyRegistration`. A `ChallengeStore` must persist the ceremony; a stored challenge without a known one reads as `null` (`Testing.challengeStoreConformance` pins the contract).
 - **`userVerification: "required"` is enforced**, not only advertised: a registration or assertion without the UV flag is refused. Under `"preferred"` (the default) or `"discouraged"`, both results report `userVerified`, with the backup flags `backupEligible` and `backupState`, for the host to act on (for example, to require a second factor when `userVerified` is `false`).
+- **The backup flags and AAGUID are stored.** A registered `WebAuthnCredential` carries `backupEligible` (BE), `backupState` (BS) and the authenticator's `aaguid` (a lowercase hyphenated UUID; under `none` attestation it is the authenticator's claim). BE never changes for a credential (WebAuthn Level 3 §6.1.3), so an assertion reporting another BE is refused; each sign-in records BS. A credential stored before the flags were has them absent, and its next sign-in records them. A `CredentialStore` must persist all three (`Testing.credentialStoreConformance` pins it).
+- **Only `none` attestation is supported.** The attestation object is parsed for the credential, but its attestation statement (`packed`, `tpm`, `fido-u2f`, …) is never verified, so a registration says nothing about the authenticator's make or model. The registration options always carry `attestation: "none"`, and a `WebAuthnConfig` asking for `"indirect"`, `"direct"` or `"enterprise"` makes the layer build die with `WebAuthnConfigError`.
 - **The stored credential is the attested one.** Its id is the credential id inside the attestation, which must equal `response.credentialId`; an id already registered, to any user, is refused rather than overwritten. ES256 keys must be on P-256, and a `clientDataJSON` with `crossOrigin: true` is refused.
 
 ## OAuth 2.0 social login
 
 ```typescript
-import { Effect, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
+import { FetchHttpClient } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 const providers = {
@@ -575,9 +582,13 @@ const providers = {
 
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
 // OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
-// unproven sign-up's password) and SessionService; a storage adapter
-// such as @thomasfosterau/effect-auth/sql provides the stores.
-const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
+// unproven sign-up's password), SessionService and RootSecret (which seals the
+// provider tokens and derives the PKCE verifier); a storage adapter such as
+// @thomasfosterau/effect-auth/sql provides the stores. The token, userinfo and
+// JWKS requests go through effect/http's HttpClient.
+const OAuthLive = Auth.OAuth.OAuthService.layer(providers).pipe(
+  Layer.provide(FetchHttpClient.layer),
+);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
 const begin = Effect.gen(function* () {
@@ -629,6 +640,7 @@ An application behind [Cloudflare Access](https://developers.cloudflare.com/clou
 
 ```typescript
 import { Effect, Layer, Option } from "effect";
+import { FetchHttpClient } from "effect/http";
 import { CloudflareAccess, SessionResolution } from "@thomasfosterau/effect-auth";
 
 const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
@@ -636,7 +648,7 @@ const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
   audience: "<the Access application's AUD tag>",
   // Read the browser cookie too, for pages Access does not gate.
   sources: ["header", "cookie"],
-});
+}).pipe(Layer.provide(FetchHttpClient.layer));
 
 // Per request: the identity, if any, and the effect-auth user it belongs to.
 const viewer = (request: Request) =>
@@ -740,16 +752,17 @@ const Sms = Auth.SmsSender.layerConnect().pipe(
 const Delivery = Layer.mergeAll(Email, Sms).pipe(Layer.provide(FetchHttpClient.layer));
 ```
 
-| Flow                                                                                 | Send                  | Why                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign-up: verification email and existing-account notice                              | off the response path | Under `antiEnumeration` a fresh address gets the verification email and a held one the notice (or nothing), so neither answer may wait on the vendor. The send is advisory: a lost one is resent through `POST /email-verifications`. |
-| Magic link with `disableSignUp`                                                      | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
-| Email OTP `sign-in` with `disableSignUp`, and `forget-password`                      | off the response path | Only a known address gets the code.                                                                                                                                                                                                   |
-| Phone OTP `sign-in` with `disableSignUp`                                             | off the response path | Only a known number gets the code.                                                                                                                                                                                                    |
-| Password reset request                                                               | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
-| Magic link and OTP sign-in with sign-up enabled, OTP `email-verification`            | inline                | Every address gets the message, and the user is waiting on it: a failed send is answered, not dropped.                                                                                                                                |
-| Verification email sent directly (`createVerification`, `POST /email-verifications`) | inline                | No account is being hidden.                                                                                                                                                                                                           |
-| Change email, delete account, second-factor OTP, organization invitations            | inline                | The caller is signed in; nothing is hidden.                                                                                                                                                                                           |
+| Flow                                                                      | Send                  | Why                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-up: verification email and existing-account notice                   | off the response path | Under `antiEnumeration` a fresh address gets the verification email and a held one the notice (or nothing), so neither answer may wait on the vendor. The send is advisory: a lost one is resent through `POST /email-verifications`. |
+| Magic link with `disableSignUp`                                           | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
+| Email OTP `sign-in` with `disableSignUp`, and `forget-password`           | off the response path | Only a known address gets the code.                                                                                                                                                                                                   |
+| Phone OTP `sign-in` with `disableSignUp`                                  | off the response path | Only a known number gets the code.                                                                                                                                                                                                    |
+| Password reset request                                                    | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
+| Magic link and OTP sign-in with sign-up enabled, OTP `email-verification` | inline                | Every address gets the message, and the user is waiting on it: a failed send is answered, not dropped.                                                                                                                                |
+| Verification resend (`POST /email-verifications`)                         | off the response path | Only an unverified account gets the message.                                                                                                                                                                                          |
+| Verification email sent directly (`createVerification`)                   | inline                | No account is being hidden.                                                                                                                                                                                                           |
+| Change email, delete account, second-factor OTP, organization invitations | inline                | The caller is signed in; nothing is hidden.                                                                                                                                                                                           |
 
 A send off the response path never fails the request. Its failure is logged, counted on `effect_auth_delivery_sends_total` (by purpose and outcome) and passed to the `afterDeliveryFailure` hook, which `AuditPlugin` logs as `auth.deliveryFailure`. The message's parameters (its token or code) are in none of them.
 
@@ -776,15 +789,26 @@ Detaching does not make the two sign-up answers identical: the fresh branch stil
 ## Rate limiting
 
 ```typescript
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer, Result } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// Use a shared store (Redis, SQL) when you run more than one instance.
+// An in-process store: one instance only. Use a shared store (`/sql`, Redis)
+// when you run more than one, where `increment` must be one atomic statement.
 const counts = new Map<string, Auth.RateLimitEntry>();
 const rateLimitStore: typeof Auth.RateLimitStore.Service = {
   get: (key) => Effect.sync(() => counts.get(key) ?? null),
   set: (key, entry, _ttl) => Effect.sync(() => void counts.set(key, entry)),
-  increment: (_key, _ttl) => Effect.succeed(1), // must be atomic in a real store
+  // Count one request, opening a new window when there is none or it has ended.
+  increment: (key, ttlSeconds) =>
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      const entry = counts.get(key);
+      const next =
+        entry === undefined || now >= entry.resetAt
+          ? { key, count: 1, resetAt: now + ttlSeconds * 1000 }
+          : { ...entry, count: entry.count + 1 };
+      counts.set(key, next);
+      return next.count;
+    }),
   delete: (key) => Effect.sync(() => void counts.delete(key)),
 };
 
@@ -808,7 +832,13 @@ const strict: Auth.RateLimitConfig = {
   blockDurationMs: 5 * 60 * 1000, // then block for 5 minutes
 };
 
-await Effect.runPromise(Effect.provide(guardSignIn("192.0.2.1"), RateLimiterLive));
+// Five sign-ins from one address pass; the sixth is refused.
+const attempts = await Effect.runPromise(
+  Effect.forEach(Array.from({ length: 6 }), () => Effect.result(guardSignIn("192.0.2.1"))).pipe(
+    Effect.provide(RateLimiterLive),
+  ),
+);
+console.log(attempts.map(Result.isSuccess)); // [true, true, true, true, true, false]
 export { strict };
 ```
 
@@ -1043,7 +1073,11 @@ JWTs already issued (`Jwt`) cannot be revoked and expire on their own. Short-liv
 
 ## Configuration
 
-Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` or `TWO_FACTOR_ENCRYPT_SECRET` **unset** to keep it off. A variable that is set but empty (for example `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`) fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError` naming the variable, because Effect rc.118 reads an empty value as absent and would otherwise silently store the data unencrypted. A value that is only whitespace (for example `"   "` or a lone newline) counts as empty and fails the same way; a secret with surrounding spaces but other content is accepted unchanged. The check reads the active `ConfigProvider`, so it also applies to map providers. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) is not detected and reads as unset.
+Every deployment sets one root secret: `AUTH_SECRET`, at least 32 bytes (`openssl rand -hex 32`), read by `RootSecret.layerConfig` (or given to `RootSecret.layer(secret)`), which fails at startup with `RootSecretError` when it is missing or short. Each keyed primitive gets its own key from it through HKDF-SHA256 with a purpose string, so no two share a key: the pepper for email, phone and second-factor OTPs and backup codes (stored as HMAC-SHA256, so a database read alone cannot brute-force a six-digit code), the PKCE `code_verifier` (derived from the OAuth `state`, never stored), and the encryption keys for TOTP secrets, OAuth provider tokens and JWT private keys. Those three are always sealed at rest with AES-256-GCM, bound to the purpose and the row they are stored in, so a ciphertext copied to another row does not open: TOTP secrets and OAuth tokens as `v2.` + base64url with the row as associated data, JWT private keys as a compact JWE (`dir` + `A256GCM`) whose protected header names the key id. `MultiFactorService`, `OtpSecondFactorService`, `EmailOtpService`, `PhoneOtpService`, `OAuthService`, `SsoService` and `JwtService` require `RootSecret`; `Testing.memoryStores` provides a fixed test secret. Raw change-email, account-deletion and pending second-factor tokens, and the OAuth `state`, are stored as SHA-256 digests, as the other bearer tokens are.
+
+`JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` and `TWO_FACTOR_ENCRYPT_SECRET` (or `encryptPrivateKey` / `encryptTokens` / `encryptSecret: { secret }`) override the root secret's key for one purpose; the key is derived from the override the same way. A variable that is set but empty (for example `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`) fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError` naming the variable, because Effect rc.118 reads an empty value as absent and would otherwise silently fall back to the root secret's key. A value that is only whitespace (for example `"   "` or a lone newline) counts as empty and fails the same way; a secret with surrounding spaces but other content is accepted unchanged. The check reads the active `ConfigProvider`, so it also applies to map providers. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) is not detected and reads as unset.
+
+Upgrading from a release without the root secret: rows stay readable while they are rewritten. A stored value without the current format's `v2.` prefix is opened with the override secret's earlier cipher when one is set, and is otherwise read as the plaintext an unencrypted deployment wrote; the next write seals it. Backup codes stored under their bare SHA-256 digest still redeem. Email, phone and second-factor OTPs that are live at the upgrade stop verifying (they are minutes old; the user requests a new one), and so do OAuth states, pending second-factor challenges and change-email and account-deletion links issued before it.
 
 ## API
 
@@ -1053,7 +1087,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@thomasfosterau/effect-auth`                | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, …                                                                    |
 | `@thomasfosterau/effect-auth/email`          | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                             |
-| `@thomasfosterau/effect-auth/password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2, scrypt), password reset, `HaveIBeenPwnedPlugin`                                                                                                             |
+| `@thomasfosterau/effect-auth/password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2), password reset, `HaveIBeenPwnedPlugin`                                                                                                                     |
 | `@thomasfosterau/effect-auth/multifactor`    | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
 | `@thomasfosterau/effect-auth/oauth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
 | `@thomasfosterau/effect-auth/plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
@@ -1063,6 +1097,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | `@thomasfosterau/effect-auth/client/testing` | — (subpath only)   | An in-process server fixture and cookie-jar `fetch` for client tests                                                                                                                  |
 | `@thomasfosterau/effect-auth/sql`            | — (subpath only)   | Every store contract it covers over `effect/sql`'s `SqlClient`, plus the DDL ([below](#sql-storage-sql))                                                                              |
 | `@thomasfosterau/effect-auth/saml`           | — (subpath only)   | The `SamlVerifier` over `@node-saml/node-saml`; Node-only ([below](#saml-saml))                                                                                                       |
+| `@thomasfosterau/effect-auth/scrypt`         | — (subpath only)   | `scryptHasher` and its layer, to verify and rehash scrypt hashes; Node-only                                                                                                           |
 | `@thomasfosterau/effect-auth/ladder`         | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                                                                                       |
 | `@thomasfosterau/effect-auth/testing`        | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
 
@@ -1392,7 +1427,7 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 | `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                                                      |
 | `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`                                                |
 | `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`                                        |
-| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`                                       |
+| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`, `auth_webauthn_credential_flags`     |
 | `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`                                               |
 | `Auth.MultiFactor.PendingMultiFactorStore` | `makePendingMultiFactorStore` / `PendingMultiFactorStoreLayer` | `auth_pending_multi_factor`, `auth_pending_multi_factor_attempts` |
 | `Auth.OAuth.OAuthStateStore`               | `makeOAuthStateStore` / `OAuthStateStoreLayer`                 | `auth_oauth_states`                                               |
@@ -1428,7 +1463,7 @@ Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 o
 - `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes the `auth_magic_links` and `auth_email_otps` rows whose `expires_at` has passed, and the `auth_rate_limits` rows whose `reset_at` and `blocked_until` have both passed (read from the `Clock`), and reports how many went from each. A rate-limit row inside its window or still blocked stays. No store deletes them on its own: a code or link nobody redeems stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address, so without a purge those tables grow with every distinct address a caller tries. Schedule it from the host: a cron trigger on Workers, a timer or job on a long-lived server. The services already refuse an expired row, so a purge changes no outcome.
 - `purgeExpiredWith(options?)` — `purgeExpired` with `PurgeExpiredOptions`: `limit` (a positive integer) caps the rows deleted from each table in one run, as `DELETE … WHERE <expired> AND key IN (SELECT key … WHERE <expired> LIMIT n)` (the outer `<expired>` keeps a row refreshed concurrently after the subquery picked it), so a Workers cron tick does bounded work; call it until every count is `0`, or once per tick. Omitted, it is `purgeExpired`. Any other `limit` fails with `AuthError` before a statement runs.
 
-Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction, and `OAuthStateStore.consume` and the single-use token stores' `consume` (email verification, password reset, magic link, pending multi-factor challenge) are each one `DELETE … RETURNING`, so a state or token is handed out once; `MultiFactorStore.useTotpCounter` / `useBackupCode` are compare-and-set `UPDATE … RETURNING`s. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
+Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction, and `OAuthStateStore.consume` and the single-use token stores' `consume` (email verification, password reset, magic link, pending multi-factor challenge) are each one `DELETE … RETURNING`, so a state or token is handed out once; `MultiFactorStore.useTotpCounter` / `useBackupCode` are compare-and-set `UPDATE … RETURNING`s. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `CredentialStore`'s writes, which keep the backup flags and AAGUID in `auth_webauthn_credential_flags`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
 
 ### Authorization
 
@@ -1515,6 +1550,7 @@ sessions. Only the XML job lives here.
 
 ```ts
 import { Layer } from "effect";
+import { FetchHttpClient } from "effect/http";
 import * as Saml from "@thomasfosterau/effect-auth/saml";
 import { SamlReplayStore, SsoService, memorySamlReplayStore } from "@thomasfosterau/effect-auth";
 
@@ -1523,7 +1559,9 @@ const samlSupport = Layer.mergeAll(
   Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
 );
 
-const ssoLayer = SsoService.layer().pipe(Layer.provide(samlSupport));
+// OIDC connections reach the IdP (discovery, token, userinfo, JWKS) through
+// effect/http's HttpClient.
+const ssoLayer = SsoService.layer().pipe(Layer.provide([samlSupport, FetchHttpClient.layer]));
 ```
 
 Register a connection, then start and finish sign-ins:
@@ -1594,6 +1632,7 @@ rejection, not a warning:
 | `SubjectConfirmationData` `NotOnOrAfter`                              | `/saml`                    |
 | `Destination` equals the ACS URL                                      | `/saml`                    |
 | Signed `InResponseTo` agrees with the `Response` attribute            | `/saml`                    |
+| `InResponseTo` read only from signed content                          | `/saml`                    |
 | Signature/digest algorithms on an allow-list (SHA-256+ by default)    | `/saml`                    |
 | HMAC signature methods refused outright                               | `/saml`                    |
 | Encrypted assertions refused with an actionable message               | `/saml`                    |

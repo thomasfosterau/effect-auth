@@ -16,6 +16,7 @@
  * hard-deletes that row, which takes the address with it.
  */
 
+import { createHash } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { eq } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
@@ -32,6 +33,9 @@ import {
 } from "./SingleTableIdentifierStore.ts";
 import { USER, USER_CREATED_AT } from "./testing/IdentifierStoreContract.ts";
 import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
+
+/** The key the service stores an account token under. */
+const digest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 const appUsers = pgTable("app_users_email_change", {
   userId: uuid("id").primaryKey(),
@@ -239,7 +243,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(user.id).toBe(USER.ada);
       expect(await readRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
       expect(await readRow(USER.grace)).toEqual({ email: null, emailVerified: false });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(false);
     });
 
     it("an address another user claims between the confirm-time check and the write fails with AccountTokenError; the previous address and the token stay", async () => {
@@ -271,7 +275,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(err.message).toBe("Email already in use");
       expect(await readRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
       expect(await readRow(USER.grace)).toEqual({ email: NEW, emailVerified: true });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(true);
     });
 
     it("a row a concurrent write already moved to the new address, unverified, ends verified, and the token is consumed", async () => {
@@ -302,7 +306,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       expect(user.id).toBe(USER.ada);
       expect(await readRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(false);
     });
 
     it("an address another user claims after the change is requested fails with AccountTokenError and the previous address stays", async () => {
@@ -340,7 +344,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(user.id).toBe(USER.ada);
       expect(await readStrictRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
       expect(await readStrictRow(USER.grace)).toEqual({ email: GRACE, emailVerified: false });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(false);
     });
 
     it("an address another user claims between the confirm-time check and the write fails with AccountTokenError; the previous address and the token stay", async () => {
@@ -365,7 +369,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(err).toBeInstanceOf(Auth.AccountTokenError);
       expect(err.message).toBe("Email already in use");
       expect(await readStrictRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(true);
     });
 
     it("a row a concurrent write already moved to the new address, unverified, ends verified, and the token is consumed", async () => {
@@ -392,7 +396,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       expect(user.id).toBe(USER.ada);
       expect(await readStrictRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(false);
     });
 
     it("account deletion completes: the user row and its address go, the token is consumed, and the other user is untouched", async () => {
@@ -404,7 +408,7 @@ describe("single-table IdentifierStore: email change", () => {
       expect(deleted).toEqual({ userId: USER.ada });
       expect(await readStrictRow(USER.ada)).toBeNull();
       expect(await readStrictRow(USER.grace)).toEqual({ email: GRACE, emailVerified: false });
-      expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+      expect(MutableHashMap.has(h.tokens, digest(token))).toBe(false);
     });
   });
 });

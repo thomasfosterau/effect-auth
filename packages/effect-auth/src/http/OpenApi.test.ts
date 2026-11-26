@@ -344,6 +344,13 @@ describe("HttpServer.make docs routes", () => {
     const html = await refRes.text();
     expect(html).toContain("api-reference");
     expect(html).toContain("openapi.json");
+    // The CDN script is an exact version with an integrity hash, so a changed
+    // file is refused rather than run on the auth origin.
+    expect(html).toMatch(
+      /src="https:\/\/cdn\.jsdelivr\.net\/npm\/@scalar\/api-reference@\d+\.\d+\.\d+\//,
+    );
+    expect(html).toMatch(/integrity="sha384-[A-Za-z0-9+/]{64}"/);
+    expect(html).toContain('crossorigin="anonymous"');
   });
 
   it("serves docs at the root when no prefix is configured", async () => {

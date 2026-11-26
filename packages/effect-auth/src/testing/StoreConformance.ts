@@ -67,6 +67,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { type AccountToken, AccountManagementStore } from "../AccountManagement.ts";
 import * as ApiKey from "../ApiKey.ts";
 import { type EmailVerification, EmailVerificationStore } from "../email/EmailVerification.ts";
@@ -2064,11 +2065,33 @@ const makePasskey = (userId: string): WebAuthnCredential => ({
   algorithm: -7,
   counter: 0,
   createdAt: at().getTime(),
+  backupEligible: true,
+  backupState: true,
+  aaguid: "fbfc3007-154e-4ecc-8c0b-6e020557d7bd",
 });
 
+const passkeyById: Order.Order<WebAuthnCredential> = Order.mapInput(
+  Order.String,
+  (passkey: WebAuthnCredential) => passkey.id,
+);
+
+const passkeyDelete: PerUserDelete<typeof CredentialStore.Service, WebAuthnCredential> = {
+  records: "passkeys",
+  make: makePasskey,
+  write: (store, passkey) => store.create(passkey),
+  read: (store, passkey) => store.get(passkey.id),
+  purge: (store, userId) => store.deleteByUserId(userId),
+};
+
 /**
- * The WebAuthn `CredentialStore` per-user delete: `deleteByUserId`
- * removes every passkey of that user, and only theirs.
+ * The WebAuthn `CredentialStore` contract: a passkey round-trips through
+ * `get`, `getByCredentialId` and `listByUserId` with every field, its backup
+ * flags (BE, BS) and AAGUID included, and with them absent when they were
+ * never recorded; `update` writes the counter and the flags; `delete`
+ * removes it, and the id can be registered again; and `deleteByUserId`
+ * removes every passkey of that user, and only theirs. The service refuses
+ * an assertion whose BE differs from the stored one, so a store that drops or
+ * defaults the flags fails here.
  *
  * @since 0.5.0
  * @category suites
@@ -2076,13 +2099,109 @@ const makePasskey = (userId: string): WebAuthnCredential => ({
 export const credentialStoreConformance = <E = never, R = never>(
   options?: ConformanceOptions<E, R>,
 ): ConformanceSuite<E, R | CredentialStore> =>
-  perUserDeleteSuite("CredentialStore", options, CredentialStore, {
-    records: "passkeys",
-    make: makePasskey,
-    write: (store, passkey) => store.create(passkey),
-    read: (store, passkey) => store.get(passkey.id),
-    purge: (store, userId) => store.deleteByUserId(userId),
-  });
+  suite<E, R, CredentialStore>("CredentialStore", options, [
+    perUserDeleteCase<CredentialStore, typeof CredentialStore.Service, WebAuthnCredential, E, R>(
+      CredentialStore,
+      passkeyDelete,
+    ),
+    {
+      name: "create returns the passkey, and every read gives it back with its backup flags and AAGUID, or without them when never recorded",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* CredentialStore;
+          const userId = yield* newUser();
+          const full: WebAuthnCredential = {
+            ...makePasskey(userId),
+            backupEligible: false,
+            backupState: false,
+            name: "Security key",
+            transports: ["usb", "nfc"],
+          };
+          const bare: WebAuthnCredential = Struct.omit(makePasskey(userId), [
+            "backupEligible",
+            "backupState",
+            "aaguid",
+          ]);
+          yield* Effect.forEach(
+            [full, bare],
+            (passkey) =>
+              Effect.gen(function* () {
+                yield* expectEqual("create", yield* store.create(passkey), passkey);
+                yield* expectEqual("get", yield* store.get(passkey.id), passkey);
+                yield* expectEqual(
+                  "getByCredentialId",
+                  yield* store.getByCredentialId(passkey.id),
+                  passkey,
+                );
+              }),
+            { concurrency: 1, discard: true },
+          );
+          const listed = yield* store.listByUserId(userId);
+          yield* expectEqual(
+            "listByUserId",
+            Arr.sort(listed, passkeyById),
+            Arr.sort([full, bare], passkeyById),
+          );
+          yield* expectEqual("get of an unknown id", yield* store.get(digest()), null);
+        }),
+    },
+    {
+      name: "update writes the counter and the backup flags, including on a passkey that had none",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* CredentialStore;
+          const userId = yield* newUser();
+          const passkey = makePasskey(userId);
+          yield* store.create(passkey);
+          const signedIn: WebAuthnCredential = { ...passkey, counter: 7, backupState: false };
+          yield* store.update(signedIn);
+          yield* expectEqual("get after update", yield* store.get(passkey.id), signedIn);
+
+          const legacy: WebAuthnCredential = Struct.omit(makePasskey(userId), [
+            "backupEligible",
+            "backupState",
+          ]);
+          yield* store.create(legacy);
+          const recorded: WebAuthnCredential = {
+            ...legacy,
+            counter: 1,
+            backupEligible: true,
+            backupState: true,
+          };
+          yield* store.update(recorded);
+          yield* expectEqual(
+            "get after recording the flags",
+            yield* store.get(legacy.id),
+            recorded,
+          );
+        }),
+    },
+    {
+      name: "delete removes the passkey, and its id can be registered again with new flags",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* CredentialStore;
+          const userId = yield* newUser();
+          const passkey = makePasskey(userId);
+          yield* store.create(passkey);
+          yield* store.delete(passkey.id);
+          yield* store.delete(digest());
+          yield* expectEqual("get of the deleted passkey", yield* store.get(passkey.id), null);
+          const again: WebAuthnCredential = {
+            ...passkey,
+            backupEligible: false,
+            backupState: false,
+            aaguid: "00000000-0000-0000-0000-000000000000",
+          };
+          yield* store.create(again);
+          yield* expectEqual(
+            "get of the re-registered passkey",
+            yield* store.get(passkey.id),
+            again,
+          );
+        }),
+    },
+  ]);
 
 const makeEnrolment = (userId: string): MultiFactorRecord => ({
   userId,
@@ -2261,8 +2380,54 @@ const makeOidcToken = (userId: string): OidcToken => ({
 });
 
 /**
+ * A group delete of `OidcTokenStore` (`deleteByFamily`, `deleteByClientId`):
+ * every kind of record in the group goes, a record outside it stays, and an
+ * unknown group is a no-op.
+ */
+const oidcTokenGroupDeleteCase = <E, R>(
+  method: string,
+  field: "familyId" | "clientId",
+  purge: (
+    store: typeof OidcTokenStore.Service,
+    group: string,
+  ) => Effect.Effect<void, Errors.AuthError>,
+) => ({
+  name: `${method} removes that ${field === "familyId" ? "family" : "client"}'s tokens only, and is a no-op for one with none`,
+  run: (newUser: () => Effect.Effect<string, E, R>) =>
+    Effect.gen(function* () {
+      const store = yield* OidcTokenStore;
+      const userId = yield* newUser();
+      const group = uuid();
+      const inGroup = (kind: OidcToken["kind"]): OidcToken => ({
+        ...makeOidcToken(userId),
+        kind,
+        familyId: uuid(),
+        [field]: group,
+      });
+      const mine = [inGroup("access"), inGroup("refresh"), inGroup("rotated")];
+      const other: OidcToken = { ...makeOidcToken(userId), familyId: uuid() };
+      yield* Effect.forEach([...mine, other], (token) => store.create(token), {
+        concurrency: 1,
+        discard: true,
+      });
+      yield* purge(store, group);
+      yield* purge(store, uuid());
+      yield* Effect.forEach(
+        mine,
+        (token) =>
+          Effect.flatMap(store.get(token.tokenHash), (found) =>
+            expectEqual(`a ${token.kind} token of the deleted group`, found, null),
+          ),
+        { concurrency: 1, discard: true },
+      );
+      yield* expectEqual("a token outside the group", yield* store.get(other.tokenHash), other);
+    }),
+});
+
+/**
  * The `OidcTokenStore` per-user delete: `deleteByUserId` removes
- * every access and refresh token issued to that user, and only theirs. And
+ * every access and refresh token issued to that user, and only theirs. Its
+ * group deletes, `deleteByFamily` and `deleteByClientId`, likewise. And
  * its single-use `consume`, which refresh rotation spends a token
  * with: handed out once, to exactly one of concurrent callers.
  *
@@ -2282,6 +2447,12 @@ export const oidcTokenStoreConformance = <E = never, R = never>(
         read: (store, token) => store.get(token.tokenHash),
         purge: (store, userId) => store.deleteByUserId(userId),
       },
+    ),
+    oidcTokenGroupDeleteCase<E, R>("deleteByFamily", "familyId", (store, familyId) =>
+      store.deleteByFamily(familyId),
+    ),
+    oidcTokenGroupDeleteCase<E, R>("deleteByClientId", "clientId", (store, clientId) =>
+      store.deleteByClientId(clientId),
     ),
     ...consumeCases<OidcTokenStore, typeof OidcTokenStore.Service, OidcToken, E, R>(
       OidcTokenStore,

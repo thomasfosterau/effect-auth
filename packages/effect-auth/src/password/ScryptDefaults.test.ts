@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
 import { Effect, Result } from "effect";
 import * as Arr from "effect/Array";
-import { PasswordHasher, scryptHasher } from "./Password.ts";
+import { PasswordHasher } from "./Password.ts";
+import * as Scrypt from "./Scrypt.ts";
+import { scryptHasher } from "./Scrypt.ts";
 
 // Pins scrypt's production defaults (N = 2^17, r = 8, p = 1) without running
 // a 128 MiB key derivation: `crypto.scrypt` is replaced by a stub that records
@@ -60,14 +62,14 @@ describe("scrypt defaults", () => {
     expectDefaultHash(hash);
   });
 
-  it("PasswordHasher.layerScrypt() uses the same defaults", async () => {
+  it("Scrypt.layer() uses the same defaults", async () => {
     const { hash } = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const hasher = yield* PasswordHasher;
           return yield* hasher.hash("default-params");
         }),
-        PasswordHasher.layerScrypt(),
+        Scrypt.layer(),
       ),
     );
     expectDefaultHash(hash);

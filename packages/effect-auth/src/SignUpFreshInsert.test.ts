@@ -9,6 +9,7 @@
  * Each flow must then fail, leave the owner's identifier as it was, and mint no
  * session.
  */
+import { sha256Hex } from "./testing/Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import {
@@ -21,7 +22,7 @@ import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Cipher from "./Cipher.ts";
+import { testJwsKeyPair, testSignJws } from "./testing/TestJws.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import {
@@ -31,9 +32,8 @@ import {
   makeIdentifier,
   memoryIdentifierStore,
 } from "./Identifier.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { SessionService } from "./SessionService.ts";
-import { hashToken } from "./TokenHash.ts";
 import { type CreateUserResult, UserStore } from "./UserStore.ts";
 import * as MagicLink from "./MagicLink.ts";
 import * as EmailOtp from "./email/EmailOtp.ts";
@@ -51,6 +51,7 @@ import {
 } from "./Saml.ts";
 import { type Member, OrganizationStore } from "./Organization.ts";
 import type * as Types from "./Types.ts";
+import { runPromiseHttp } from "./testing/HttpClient.ts";
 
 const EMAIL = "owner@acme.test";
 const PHONE = "+15555550123";
@@ -126,7 +127,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Layer.succeed(RateLimitStore)(memoryRateLimitStore()),
     Hooks.Default,
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   return {
@@ -175,7 +176,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const ONE_TAP_CLIENT = "client-1.apps.googleusercontent.com";
 const ONE_TAP_JWKS = "https://fake-google.test/fresh-insert/certs";
-const oneTapKeys = Cipher.generateJwsKeyPair("ES256");
+const oneTapKeys = testJwsKeyPair("ES256");
 
 const b64 = (value: Schema.Json): string =>
   Buffer.from(encodeJson(value), "utf8").toString("base64url");
@@ -188,12 +189,12 @@ const signGoogleCredential = (nonce: string): string => {
     sub: "google-owner",
     email: EMAIL,
     email_verified: true,
-    nonce: hashToken(nonce),
+    nonce: sha256Hex(nonce),
     exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
     iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
   };
   const signingInput = `${b64(header)}.${b64(claims)}`;
-  const signature = Cipher.signJws(
+  const signature = testSignJws(
     "ES256",
     Buffer.from(signingInput, "utf8"),
     oneTapKeys.privateKeyPem,
@@ -372,7 +373,7 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(OAuthUserStore)(oauthUserStore(world)),
       );
       return withGoogleJwks(() =>
-        Effect.runPromise(
+        runPromiseHttp(
           Effect.gen(function* () {
             const service = yield* GoogleOneTap.make({
               clientId: ONE_TAP_CLIENT,
@@ -421,7 +422,7 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(SamlVerifier)(stubSamlVerifier(requests)),
         Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
       );
-      return Effect.runPromise(
+      return runPromiseHttp(
         Effect.gen(function* () {
           const sso = yield* Sso.make();
           const provider = yield* sso.registerSamlProvider("admin", {
@@ -503,7 +504,7 @@ const cases: ReadonlyArray<Case> = [
           const connection: Scim.ScimConnection = {
             id: "conn-1",
             organizationId: "org-1",
-            tokenHash: hashToken("token"),
+            tokenHash: sha256Hex("token"),
             createdAt: yield* Clock.currentTimeMillis,
           };
           const error = yield* Effect.flip(scim.createUser(connection, { userName: EMAIL }));

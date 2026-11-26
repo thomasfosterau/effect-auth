@@ -9,7 +9,7 @@
  * @module magic-link
  */
 import { Clock, Context, DateTime, Duration, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "./Identifier.ts";
 import {
@@ -27,7 +27,7 @@ import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
@@ -245,12 +245,14 @@ export const make = (
   | Hooks
   | RateLimitStore
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
     const disableSignUp = config.disableSignUp ?? false;
     const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
     const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
+    const hashToken = yield* tokenHasher;
 
     const store = yield* MagicLinkStore;
     const userStore = yield* MagicLinkUserStore;
@@ -320,7 +322,7 @@ export const make = (
         const rawToken = yield* generateMagicLinkToken(crypto);
         const magicLink: MagicLinkToken = {
           // Store the hash — the raw token is delivered to the user via sendMagicLink.
-          token: hashToken(rawToken),
+          token: yield* hashToken(rawToken),
           email,
           createdAt: yield* Clock.currentTimeMillis,
           expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
@@ -358,7 +360,7 @@ export const make = (
         rawToken: string,
         options?: MagicLinkVerifyOptions,
       ) {
-        const tokenHash = hashToken(rawToken);
+        const tokenHash = yield* hashToken(rawToken);
         const magicLink = rawToken ? yield* store.get(tokenHash) : null;
         if (!magicLink) {
           // Unkeyed: the token names no address, but the per-IP limit still

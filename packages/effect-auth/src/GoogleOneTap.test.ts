@@ -6,11 +6,11 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import * as Cipher from "./Cipher.ts";
+import { testJwsKeyPair, testSignJws } from "./testing/TestJws.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { hashToken } from "./TokenHash.ts";
+import { sha256Hex } from "./testing/Sha256.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
@@ -33,13 +33,14 @@ import * as GoogleOneTap from "./GoogleOneTap.ts";
 import type * as Types from "./Types.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
+import { globalFetchHttpClient, runPromiseHttp } from "./testing/HttpClient.ts";
 
 const CLIENT_ID = "client-123.apps.googleusercontent.com";
 const JWKS_ENDPOINT = "https://fake-google.test/certs";
 
 // --- A fake Google: an ES256 key + JWT signer + JWKS document -----------------
 
-const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
+const { publicKeyJwk, privateKeyPem } = testJwsKeyPair("ES256");
 const KID = "test-key-1";
 const JWKS = {
   keys: [{ ...publicKeyJwk, kid: KID, alg: "ES256" }],
@@ -63,12 +64,12 @@ const b64 = (value: Schema.Json): string =>
 const signCredential = (claims: Schema.JsonObject): string => {
   const header = { alg: "ES256", kid: KID, typ: "JWT" };
   const signingInput = `${b64(header)}.${b64(claims)}`;
-  const signature = Cipher.signJws("ES256", Buffer.from(signingInput, "utf8"), privateKeyPem);
+  const signature = testSignJws("ES256", Buffer.from(signingInput, "utf8"), privateKeyPem);
   return `${signingInput}.${Buffer.from(signature).toString("base64url")}`;
 };
 
 /** Hash a nonce the same way GoogleOneTap.ts does (SHA-256 hex). */
-const hashNonce = hashToken;
+const hashNonce = sha256Hex;
 
 const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject =>
   Object.assign(
@@ -196,7 +197,7 @@ describe("GoogleOneTapService", () => {
 
   it("verifies a credential and provisions the user once", async () => {
     const { layer, users, identifiers, createdWith, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonce1 = "test-nonce-1";
     const nonce2 = "test-nonce-2";
@@ -246,7 +247,7 @@ describe("GoogleOneTapService", () => {
 
   it("accepts the bare `accounts.google.com` issuer", async () => {
     const { layer, identifiers, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "test-nonce-bare-iss";
     await Effect.runPromise(
       nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
@@ -269,7 +270,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects wrong audience, wrong issuer, expiry, unverified email, and bad signatures", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonces = ["n1", "n2", "n3", "n4", "n5"];
     await Arr.reduce(nonces, Promise.resolve(), async (previous, n) => {
@@ -360,7 +361,7 @@ describe("GoogleOneTapService", () => {
       }),
     );
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       Effect.provide(
         GoogleOneTap.make(config).pipe(Effect.provideService(ApiKeyStore, apiKeys)),
         layer,
@@ -388,7 +389,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects a replayed id_token (nonce already consumed)", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "replay-nonce";
     await Effect.runPromise(
       nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
@@ -411,7 +412,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects a nonce that was never issued", async () => {
     const { layer } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "never-issued";
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
@@ -424,7 +425,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects an expired nonce", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "expired-nonce";
     // Create with a timestamp that is already in the past
     await Effect.runPromise(
@@ -441,7 +442,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects when nonce in id_token does not match the supplied nonce", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "correct-nonce";
     await Effect.runPromise(
       nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000),
@@ -547,7 +548,7 @@ const makeHttpFixture = () => {
 
   const oneTapLayer = Layer.mergeAll(
     GoogleOneTapService.layer({ clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT }).pipe(
-      Layer.provide(oneTapDeps),
+      Layer.provide([oneTapDeps, globalFetchHttpClient]),
     ),
     Layer.succeed(OAuthUserStore)(oauthUserStore),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),

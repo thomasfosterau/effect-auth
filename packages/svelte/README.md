@@ -72,6 +72,8 @@ The package ships the six forms almost every app needs, so a login screen is a c
 
 Each form owns its own submit, pending and error state, and calls `onSuccess(result)` / `onError(error)` instead of navigating or reloading — where to go next is your router's business, not the form's.
 
+`SignInForm` and `EmailOtpForm` call `onSuccess` only when the answer carries a session. When the account has multi-factor on, the server answers with a second-factor challenge instead, and the form calls `onSecondFactor(challenge)`; redeem it with `client.multiFactor.continueChallenge(challenge)`.
+
 ### Context setup
 
 Put the client in context once, high in the tree, and every form below finds it.
@@ -100,6 +102,7 @@ Put the client in context once, high in the tree, and every form below finds it.
 <SignInForm
   labels={{ email: "Work email", submit: "Continue" }}
   onSuccess={() => goto("/app")}
+  onSecondFactor={({ token }) => goto(`/login/second-factor?challenge=${token}`)}
   onError={(error) => reportToSentry(error)}
 />
 ```

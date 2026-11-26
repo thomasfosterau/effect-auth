@@ -56,7 +56,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -65,7 +65,7 @@ import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
+import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
@@ -1409,6 +1409,7 @@ export const make = (
   | EmailPasswordStore
   | SessionService
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
@@ -1424,6 +1425,7 @@ export const make = (
       Object.hasOwn(roles, role) ? (roles[role] ?? null) : null;
 
     const store = yield* OrganizationStore;
+    const hashToken = yield* tokenHasher;
     const identifiers = yield* IdentifierStore;
     const passwords = yield* EmailPasswordStore;
     const sessions = yield* SessionService;
@@ -1808,7 +1810,7 @@ export const make = (
       const token = yield* randomBase64UrlToken(crypto);
       const deliver = (invitation: Invitation, organization: Organization) =>
         send({ invitation, organization, token });
-      return { tokenHash: hashToken(token), deliver };
+      return { tokenHash: yield* hashToken(token), deliver };
     });
 
     /** The pending, unexpired invitations addressed to `email`. */
@@ -1847,7 +1849,7 @@ export const make = (
         const proved =
           input.token === undefined
             ? Option.isSome(identifier)
-            : constantTimeHashEqual(hashToken(input.token), invitation.tokenHash);
+            : constantTimeHashEqual(yield* hashToken(input.token), invitation.tokenHash);
         if (!proved) {
           return yield* new OrganizationError({ message: "Invitation not found" });
         }

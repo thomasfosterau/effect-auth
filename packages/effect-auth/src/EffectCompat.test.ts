@@ -1,4 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
+import { testRootSecretLayer } from "./testing/RootSecret.ts";
 import { ConfigProvider, Effect, Layer, Redacted, Struct } from "effect";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
@@ -103,6 +104,7 @@ describe("Effect floor compatibility", () => {
     const stores = Layer.mergeAll(
       Layer.succeed(JwtKeyStore, {} as never),
       Layer.succeed(TrustedDeviceStore, {} as never),
+      testRootSecretLayer,
     );
     const env = withEnv({
       JWT_ISSUER: "https://issuer.test",
@@ -118,7 +120,9 @@ describe("Effect floor compatibility", () => {
     const exit = await Effect.runPromiseExit(
       Effect.scoped(Layer.build(JwtService.layerFromEnv)).pipe(
         // SAFETY: the build fails on the missing variable before it reads the store.
-        Effect.provide(Layer.mergeAll(Layer.succeed(JwtKeyStore, {} as never), withEnv({}))),
+        Effect.provide(
+          Layer.mergeAll(Layer.succeed(JwtKeyStore, {} as never), testRootSecretLayer, withEnv({})),
+        ),
       ),
     );
     expect(exit._tag).toBe("Failure");

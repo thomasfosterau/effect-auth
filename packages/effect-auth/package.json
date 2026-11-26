@@ -81,6 +81,10 @@
       "types": "./dist/sql/index.d.ts",
       "import": "./dist/sql/index.js"
     },
+    "./scrypt": {
+      "types": "./dist/password/Scrypt.d.ts",
+      "import": "./dist/password/Scrypt.js"
+    },
     "./saml": {
       "types": "./dist/saml/index.d.ts",
       "import": "./dist/saml/index.js"

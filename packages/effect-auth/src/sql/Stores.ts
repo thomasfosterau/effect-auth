@@ -645,13 +645,20 @@ interface ChallengeRow {
 }
 
 /** A row whose ceremony is not one the core knows reads as missing. */
-const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge | null => {
+const rowToChallenge = (
+  row: ChallengeRow,
+): Effect.Effect<Auth.MultiFactor.WebAuthnChallenge | null, Auth.AuthError> => {
   const { ceremony } = row;
-  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return null;
-  const challenge = fromBase64(row.challenge);
-  return row.user_id == null
-    ? { challenge, ceremony, expiresAt: row.expires_at }
-    : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return Effect.succeed(null);
+  return Effect.try({
+    try: () => {
+      const challenge = fromBase64(row.challenge);
+      return row.user_id == null
+        ? { challenge, ceremony, expiresAt: row.expires_at }
+        : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+    },
+    catch: (cause) => new Auth.AuthError({ message: "challenge decode failed", cause }),
+  });
 };
 
 /**
@@ -703,7 +710,7 @@ export const makeChallengeStore: Effect.Effect<
           FROM auth_webauthn_challenges c
           JOIN auth_webauthn_challenge_ceremonies k ON k.challenge = c.challenge
           WHERE c.challenge = ${toBase64(challenge)}`,
-      ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
+      ).pipe(Effect.flatMap((row) => (row ? rowToChallenge(row) : Effect.succeed(null)))),
     delete: (challenge) =>
       withTx("challenge.delete", remove("challenge.delete", toBase64(challenge))),
   } satisfies typeof Auth.MultiFactor.ChallengeStore.Service;
@@ -718,6 +725,9 @@ interface CredentialRow {
   readonly created_at: number;
   readonly name: string | null;
   readonly transports: string | null;
+  readonly backup_eligible: number | null;
+  readonly backup_state: number | null;
+  readonly aaguid: string | null;
 }
 
 const rowToCredential = (
@@ -733,58 +743,134 @@ const rowToCredential = (
       createdAt: row.created_at,
       ...(row.name != null ? { name: row.name } : {}),
       ...(row.transports != null ? { transports: decodeStringList(row.transports) } : {}),
+      ...(row.backup_eligible != null ? { backupEligible: row.backup_eligible !== 0 } : {}),
+      ...(row.backup_state != null ? { backupState: row.backup_state !== 0 } : {}),
+      ...(row.aaguid != null ? { aaguid: row.aaguid } : {}),
     }),
     catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
   });
 
-/** `Auth.MultiFactor.CredentialStore` over the `auth_webauthn_credentials` table; requires `SqlClient`. */
+const optionalFlag = (flag: boolean | undefined): number | null =>
+  flag === undefined ? null : flag ? 1 : 0;
+
+/**
+ * `Auth.MultiFactor.CredentialStore` over the `auth_webauthn_credentials`
+ * table and each credential's backup flags and AAGUID, in
+ * `auth_webauthn_credential_flags`; requires `SqlClient`.
+ */
 export const makeCredentialStore: Effect.Effect<
   typeof Auth.MultiFactor.CredentialStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
+  const withTx = makeTx(sql);
   const getById = (credentialId: string, label: string) =>
     firstRow(
       label,
-      sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
+      sql<CredentialRow>`SELECT c.*, f.backup_eligible, f.backup_state, f.aaguid
+        FROM auth_webauthn_credentials c
+        LEFT JOIN auth_webauthn_credential_flags f ON f.credential_id = c.id
+        WHERE c.id = ${credentialId}`,
     ).pipe(Effect.flatMap((row) => (row ? rowToCredential(row) : Effect.succeed(null))));
+  // An upsert: a flags row left by a delete interrupted between its
+  // statements is overwritten, never a conflict.
+  const writeFlags = (label: string, credential: Auth.MultiFactor.WebAuthnCredential) =>
+    asVoid(
+      label,
+      sql`INSERT INTO auth_webauthn_credential_flags (credential_id, backup_eligible, backup_state, aaguid)
+            VALUES (${credential.id}, ${optionalFlag(credential.backupEligible)}, ${optionalFlag(credential.backupState)}, ${credential.aaguid ?? null})
+            ON CONFLICT (credential_id) DO UPDATE SET
+              backup_eligible = excluded.backup_eligible,
+              backup_state = excluded.backup_state,
+              aaguid = excluded.aaguid`,
+    );
 
   return {
+    // The credential row goes first: a create interrupted between the
+    // statements leaves a credential with its flags absent, which its next
+    // sign-in records.
     create: (credential) =>
-      asVoid(
+      withTx(
         "credential.create",
-        sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
-              VALUES (${credential.id}, ${credential.userId}, ${toBase64(credential.publicKey)}, ${credential.algorithm}, ${credential.counter}, ${credential.createdAt}, ${credential.name ?? null}, ${credential.transports ? encodeStringList(credential.transports) : null})`,
-      ).pipe(Effect.as(credential)),
+        Effect.gen(function* () {
+          yield* asVoid(
+            "credential.create",
+            sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
+                  VALUES (${credential.id}, ${credential.userId}, ${toBase64(credential.publicKey)}, ${credential.algorithm}, ${credential.counter}, ${credential.createdAt}, ${credential.name ?? null}, ${credential.transports ? encodeStringList(credential.transports) : null})`,
+          );
+          yield* writeFlags("credential.create", credential);
+          return credential;
+        }),
+      ),
     get: (credentialId) => getById(credentialId, "credential.get"),
     // The credential `id` IS the base64url-encoded WebAuthn credential ID, so
     // the discoverable-login lookup is the same query.
     getByCredentialId: (credentialId) => getById(credentialId, "credential.getByCredentialId"),
+    // The flags row is written only for a credential that exists, so an
+    // update of a deleted credential recreates nothing.
     update: (credential) =>
-      asVoid(
+      withTx(
         "credential.update",
-        sql`UPDATE auth_webauthn_credentials
-              SET user_id = ${credential.userId}, public_key = ${toBase64(credential.publicKey)}, algorithm = ${credential.algorithm}, counter = ${credential.counter}, created_at = ${credential.createdAt}, name = ${credential.name ?? null}, transports = ${credential.transports ? encodeStringList(credential.transports) : null}
-              WHERE id = ${credential.id}`,
-      ).pipe(Effect.as(credential)),
+        Effect.gen(function* () {
+          const updated = yield* allRows(
+            "credential.update",
+            sql<{ readonly id: string }>`UPDATE auth_webauthn_credentials
+                  SET user_id = ${credential.userId}, public_key = ${toBase64(credential.publicKey)}, algorithm = ${credential.algorithm}, counter = ${credential.counter}, created_at = ${credential.createdAt}, name = ${credential.name ?? null}, transports = ${credential.transports ? encodeStringList(credential.transports) : null}
+                  WHERE id = ${credential.id}
+                  RETURNING id`,
+          );
+          if (Arr.isReadonlyArrayNonEmpty(updated)) {
+            yield* writeFlags("credential.update", credential);
+          }
+          return credential;
+        }),
+      ),
+    // The credential row goes first: a delete interrupted between the
+    // statements leaves only an orphaned flags row, which a later create of
+    // the same id overwrites.
     delete: (credentialId) =>
-      asVoid(
+      withTx(
         "credential.delete",
-        sql`DELETE FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
+        Effect.gen(function* () {
+          yield* asVoid(
+            "credential.delete",
+            sql`DELETE FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
+          );
+          yield* asVoid(
+            "credential.delete",
+            sql`DELETE FROM auth_webauthn_credential_flags WHERE credential_id = ${credentialId}`,
+          );
+        }),
       ),
     listByUserId: (userId) =>
       allRows(
         "credential.listByUserId",
-        sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
+        sql<CredentialRow>`SELECT c.*, f.backup_eligible, f.backup_state, f.aaguid
+          FROM auth_webauthn_credentials c
+          LEFT JOIN auth_webauthn_credential_flags f ON f.credential_id = c.id
+          WHERE c.user_id = ${userId}`,
       ).pipe(
         Effect.flatMap((rows) =>
           Effect.forEach(rows, (row) => rowToCredential(row), { concurrency: 1 }),
         ),
       ),
+    // The flags rows go first here, since they are found through the
+    // credential rows; an interrupted delete leaves credentials whose next
+    // sign-in records their flags again.
     deleteByUserId: (userId) =>
-      asVoid(
+      withTx(
         "credential.deleteByUserId",
-        sql`DELETE FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
+        Effect.gen(function* () {
+          yield* asVoid(
+            "credential.deleteByUserId",
+            sql`DELETE FROM auth_webauthn_credential_flags
+                  WHERE credential_id IN (SELECT id FROM auth_webauthn_credentials WHERE user_id = ${userId})`,
+          );
+          yield* asVoid(
+            "credential.deleteByUserId",
+            sql`DELETE FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
+          );
+        }),
       ),
   } satisfies typeof Auth.MultiFactor.CredentialStore.Service;
 });

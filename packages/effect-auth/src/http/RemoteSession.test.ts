@@ -1,3 +1,4 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Exit } from "effect";
 import * as Option from "effect/Option";
@@ -8,7 +9,6 @@ import * as RemoteSession from "./RemoteSession.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import * as SessionContext from "../SessionContext.ts";
 import { CurrentUser } from "../SessionContext.ts";
-import { hashToken } from "../TokenHash.ts";
 import { makeServerFixture } from "../client/testing/fixture.ts";
 
 // ---------------------------------------------------------------------------
@@ -1030,7 +1030,7 @@ describe("RemoteSession over a real Http.make handler", () => {
     );
 
     assert(Option.isSome(result.session));
-    expect(result.session.value.session.id).toBe(hashToken(token));
+    expect(result.session.value.session.id).toBe(sha256Hex(token));
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).not.toContain(token);
   });

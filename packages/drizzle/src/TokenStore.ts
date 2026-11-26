@@ -7,7 +7,9 @@
  * The two contracts have the same shape (`create`, `get`, `delete`,
  * `deleteByUserId` over `{ token, userId, email, createdAt, expiresAt }`;
  * `EmailVerificationStore` adds `getLatestByUserId`, served for both), so
- * one `tokens` table holds both, told apart by its `purpose` column. Every
+ * one `tokens` table holds both, told apart by its `purpose` column: a
+ * dialect's {@link Tables}, or an application's own table mapped with
+ * `defineTokenTable` (so the application owns its `user_id` foreign key). Every
  * read and delete is scoped to the store's own purpose: a password-reset
  * request, which first clears the user's pending resets, never clears a
  * pending email verification.
@@ -32,10 +34,19 @@
 import { and, desc, eq } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { DrizzleDatabase } from "./Database.ts";
+import {
+  resolveTokenTable,
+  type TokenColumns,
+  type TokenTableInput,
+  writeValues,
+} from "./Columns.ts";
+import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
 import { affectedRows, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { Tables, TokenPurpose, TokenRow } from "./Schema.ts";
+import type { TokenPurpose } from "./Schema.ts";
+
+/** What a token read projects, under the store's own field names. */
+type TokenRow = DrizzleSelected<TokenColumns>;
 
 /** The record both token contracts store. */
 interface TokenRecord {
@@ -73,39 +84,43 @@ const toRecord = (row: TokenRow): TokenRecord => ({
 /** One purpose's view of the tokens table. */
 const makeFor = (
   purpose: TokenPurpose,
-  tables: Tables,
+  tables: TokenTableInput,
 ): Effect.Effect<TokenStoreShape<TokenRecord>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
     const query = makeQuery(handle);
-    const table = tables.tokens;
-    const byToken = (token: string) => and(eq(table.token, token), eq(table.purpose, purpose));
-    const byUser = (userId: string) => and(eq(table.userId, userId), eq(table.purpose, purpose));
+    const schema = resolveTokenTable(tables);
+    const table = schema.table;
+    const column = schema.columns;
+    const byToken = (token: string) => and(eq(column.token, token), eq(column.purpose, purpose));
+    const byUser = (userId: string) => and(eq(column.userId, userId), eq(column.purpose, purpose));
 
     return {
       create: (record) =>
         query(`${purpose}.create`, (db) =>
           db
             .insert(table)
-            .values({
-              token: record.token,
-              purpose,
-              userId: record.userId,
-              email: record.email,
-              createdAt: instant(record.createdAt),
-              expiresAt: instant(record.expiresAt),
-            })
+            .values(
+              writeValues(schema, {
+                token: record.token,
+                purpose,
+                userId: record.userId,
+                email: record.email,
+                createdAt: instant(record.createdAt),
+                expiresAt: instant(record.expiresAt),
+              }),
+            )
             .execute(),
         ).pipe(Effect.as(record)),
 
       get: (token) =>
         query(`${purpose}.get`, (db) =>
-          db.select().from(table).where(byToken(token)).limit(1).execute(),
+          db.select(column).from(table).where(byToken(token)).limit(1).execute(),
         ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
 
       consume: (token) =>
         Effect.gen(function* () {
           const rows = yield* query(`${purpose}.consume.read`, (db) =>
-            db.select().from(table).where(byToken(token)).limit(1).execute(),
+            db.select(column).from(table).where(byToken(token)).limit(1).execute(),
           );
           const row = rows[0];
           if (row === undefined) return null;
@@ -130,38 +145,43 @@ const makeFor = (
       // `orderBy`; a user holds only the few rows each resend leaves.
       getLatestByUserId: (userId) =>
         query(`${purpose}.getLatestByUserId`, (db) =>
-          db.select().from(table).where(byUser(userId)).orderBy(desc(table.createdAt)).execute(),
+          db
+            .select(column)
+            .from(table)
+            .where(byUser(userId))
+            .orderBy(desc(column.createdAt))
+            .execute(),
         ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
     };
   });
 
 /** Build an `EmailVerificationStore` over the ambient {@link DrizzleDatabase}. */
 export const makeEmailVerificationStore = (
-  tables: Tables = defaultTables,
+  tables: TokenTableInput = defaultTables,
 ): Effect.Effect<typeof Auth.Email.EmailVerificationStore.Service, never, DrizzleDatabase> =>
   makeFor("email-verification", tables);
 
 /** Build a `PasswordResetStore` over the ambient {@link DrizzleDatabase}. */
 export const makePasswordResetStore = (
-  tables: Tables = defaultTables,
+  tables: TokenTableInput = defaultTables,
 ): Effect.Effect<typeof Auth.Password.PasswordResetStore.Service, never, DrizzleDatabase> =>
   makeFor("password-reset", tables);
 
 /** `EmailVerificationStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const emailVerificationLayer = (
-  tables: Tables = defaultTables,
+  tables: TokenTableInput = defaultTables,
 ): Layer.Layer<Auth.Email.EmailVerificationStore, never, DrizzleDatabase> =>
   Layer.effect(Auth.Email.EmailVerificationStore, makeEmailVerificationStore(tables));
 
 /** `PasswordResetStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const passwordResetLayer = (
-  tables: Tables = defaultTables,
+  tables: TokenTableInput = defaultTables,
 ): Layer.Layer<Auth.Password.PasswordResetStore, never, DrizzleDatabase> =>
   Layer.effect(Auth.Password.PasswordResetStore, makePasswordResetStore(tables));
 
 /** Both token stores, over one `tokens` table. */
 export const layer = (
-  tables: Tables = defaultTables,
+  tables: TokenTableInput = defaultTables,
 ): Layer.Layer<
   Auth.Email.EmailVerificationStore | Auth.Password.PasswordResetStore,
   never,

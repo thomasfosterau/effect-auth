@@ -219,6 +219,16 @@ export const schemaStatements: readonly string[] = [
     challenge TEXT PRIMARY KEY,
     ceremony TEXT NOT NULL
   )`,
+  // Each passkey's backup flags and AAGUID, a table of its own because the
+  // DDL is append-only. A credential with no row here (one stored before the
+  // table existed) reads with the three absent, and its next sign-in records
+  // the flags.
+  `CREATE TABLE IF NOT EXISTS auth_webauthn_credential_flags (
+    credential_id TEXT PRIMARY KEY,
+    backup_eligible INTEGER,
+    backup_state INTEGER,
+    aaguid TEXT
+  )`,
 ];
 
 const CREATE_TABLE = /create\s+table\s+if\s+not\s+exists\s+(\w+)/i;

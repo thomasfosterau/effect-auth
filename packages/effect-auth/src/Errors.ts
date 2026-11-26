@@ -663,6 +663,24 @@ export class ServicesBuildPendingError extends Data.TaggedError("ServicesBuildPe
 }> {}
 
 /**
+ * `Http.make` (or `Http.makeAsync`) was given `strict: true` and a
+ * `signUpAttributes` list naming a key of `SIGN_UP_PROTECTED_ATTRIBUTES`
+ * (the ban, SCIM and anonymous-user keys). A sign-up never stores those
+ * whatever the list says, so naming one does nothing; without `strict` the
+ * handler logs a warning instead. `attributes` lists the protected keys named.
+ *
+ * Exported from the package root and from the `./http` subpath as
+ * `SignUpAttributesConfigError`. Both names are the same class.
+ *
+ * @since 0.9.0
+ * @category errors
+ */
+export class SignUpAttributesConfigError extends Data.TaggedError("SignUpAttributesConfigError")<{
+  readonly message: string;
+  readonly attributes: ReadonlyArray<string>;
+}> {}
+
+/**
  * Magic link send/verify failure (infrastructure or token mismatch).
  */
 export class MagicLinkError extends Data.TaggedError("MagicLinkError")<{
