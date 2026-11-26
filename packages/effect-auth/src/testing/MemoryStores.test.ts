@@ -32,7 +32,11 @@ const register = <E, R>(
 ): void => {
   describe(`${suite.contract} conformance over the memory store`, () => {
     Arr.forEach(suite.cases, (testCase) => {
-      it(testCase.name, () => Effect.runPromise(testCase.run.pipe(Effect.provide(layer()))));
+      it(testCase.name, () =>
+        expect(
+          Effect.runPromise(testCase.run.pipe(Effect.provide(layer()))),
+        ).resolves.toBeUndefined(),
+      );
     });
   });
 };

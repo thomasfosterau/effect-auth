@@ -160,8 +160,9 @@ describe("RateLimiter.consumeToken", () => {
   });
 
   it("starts a new window once the old one has expired", async () => {
-    const { layer } = makeStore({ key: "old", count: 99, resetAt: 1 });
+    const { layer, stored } = makeStore({ key: "old", count: 99, resetAt: 1 });
     await Effect.runPromise(consume(layer, "old", config));
+    expect(Option.getOrUndefined(MutableHashMap.get(stored, "old"))?.count).toBe(1);
   });
 
   it("refuses a blocked key even after its window has expired", async () => {

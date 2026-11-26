@@ -104,9 +104,10 @@ export default defineConfig({
       "unicorn/consistent-function-scoping": "warn", // 148
       "typescript/no-unsafe-type-assertion": "warn", // 124
       "eslint/no-shadow": "warn", // 120
-      // Type tests (expect-error directives) and tests that assert by running
-      // an Effect that fails on a mismatch.
-      "vitest/expect-expect": "warn", // 29
+
+      // Assertion helpers are named `expect<What>` (`expectAgreement`,
+      // `expectProviderError`, …) and assert inside.
+      "vitest/expect-expect": ["error", { assertFunctionNames: ["expect", "expect*"] }],
 
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.

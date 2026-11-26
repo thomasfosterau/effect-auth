@@ -60,7 +60,11 @@ const register = <E, R>(
 ): void => {
   describe(`${suite.contract} conformance`, () => {
     Arr.forEach(suite.cases, (testCase) => {
-      it(testCase.name, () => Effect.runPromise(testCase.run.pipe(Effect.provide(layer()))));
+      it(testCase.name, () =>
+        expect(
+          Effect.runPromise(testCase.run.pipe(Effect.provide(layer()))),
+        ).resolves.toBeUndefined(),
+      );
     });
   });
 };
@@ -104,7 +108,7 @@ register(Testing.oneTimeTokenStoreConformance(), () =>
 describe("the suites share one store", () => {
   it("runs every case of a suite against a single store instance", async () => {
     const layer = Layer.succeed(SessionStore, sessionStore());
-    await Arr.reduce(
+    const allCases = Arr.reduce(
       Testing.sessionStoreConformance().cases,
       Promise.resolve(),
       async (previous, testCase) => {
@@ -112,6 +116,7 @@ describe("the suites share one store", () => {
         await Effect.runPromise(testCase.run.pipe(Effect.provide(layer)));
       },
     );
+    await expect(allCases).resolves.toBeUndefined();
   });
 
   it("calls seedUser for every user a case touches", async () => {

@@ -1,6 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import { testRootSecretLayer } from "./testing/RootSecret.ts";
-import { ConfigProvider, Effect, Layer, Redacted, Struct } from "effect";
+import { ConfigProvider, Context, Effect, Layer, Redacted, Struct } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { JwtKeyStore, JwtService, jwtServiceConfig } from "./Jwt.ts";
@@ -113,7 +114,11 @@ describe("Effect floor compatibility", () => {
     const built = Layer.mergeAll(JwtService.layerFromEnv, TrustedDeviceService.layerFromEnv).pipe(
       Layer.provide(stores),
     );
-    await Effect.runPromise(Effect.scoped(Layer.build(built)).pipe(Effect.provide(env)));
+    const services = await Effect.runPromise(
+      Effect.scoped(Layer.build(built)).pipe(Effect.provide(env)),
+    );
+    expect(Option.isSome(Context.getOption(services, JwtService))).toBe(true);
+    expect(Option.isSome(Context.getOption(services, TrustedDeviceService))).toBe(true);
   });
 
   it("fails the layer with a config error, not a crash, when a required variable is missing", async () => {

@@ -58,7 +58,9 @@ describe("Scope", () => {
 
   describe("requireScope", () => {
     it("succeeds when granted", async () => {
-      await Effect.runPromise(requireScope("read:user write:repo", "write:repo"));
+      await expect(
+        Effect.runPromise(requireScope("read:user write:repo", "write:repo")),
+      ).resolves.toBeUndefined();
     });
 
     it("fails with InsufficientScopeError when missing", async () => {
@@ -76,7 +78,9 @@ describe("Scope", () => {
 
   describe("requireAllScopes", () => {
     it("succeeds when all granted", async () => {
-      await Effect.runPromise(requireAllScopes("a b c", ["a", "b"]));
+      await expect(
+        Effect.runPromise(requireAllScopes("a b c", ["a", "b"])),
+      ).resolves.toBeUndefined();
     });
 
     it("reports missing scopes", async () => {

@@ -7,7 +7,7 @@
  */
 
 import type { Effect } from "effect";
-import { describe, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import type * as Testing from "@thomasfosterau/effect-auth/testing";
 
 export const conformance = <E, R>(
@@ -17,7 +17,7 @@ export const conformance = <E, R>(
 ): void => {
   describe(`${label}: ${suite.contract} conformance`, () => {
     suite.cases.forEach((testCase) => {
-      it(testCase.name, () => run(testCase.run));
+      it(testCase.name, () => expect(run(testCase.run)).resolves.toBeUndefined());
     });
   });
 };

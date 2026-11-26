@@ -212,10 +212,10 @@ describe("SignInForm", () => {
       props: { client: stub({}), labels: { email: "Work email", submit: "Continue" } },
     });
 
-    screen.getByLabelText("Work email");
-    screen.getByRole("button", { name: "Continue" });
+    expect(screen.getByLabelText("Work email")).toBeInstanceOf(HTMLInputElement);
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInstanceOf(HTMLButtonElement);
     // Unspecified labels keep their defaults.
-    screen.getByLabelText("Password");
+    expect(screen.getByLabelText("Password")).toBeInstanceOf(HTMLInputElement);
   });
 
   it("throws when no client is in context and none is passed", () => {

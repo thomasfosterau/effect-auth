@@ -1349,25 +1349,33 @@ describe("OAuthService unlinkAccount guard", () => {
       ),
     );
 
-    await Effect.runPromise(service.unlinkAccount("user-1", "github"));
+    await expect(
+      Effect.runPromise(service.unlinkAccount("user-1", "github")),
+    ).resolves.toBeUndefined();
   });
 
   it("succeeds when the user has a password (hasPassword returns true)", async () => {
     const service = await buildService(makeAccountLayer([baseAccount()], true));
 
-    await Effect.runPromise(service.unlinkAccount("user-1", "github"));
+    await expect(
+      Effect.runPromise(service.unlinkAccount("user-1", "github")),
+    ).resolves.toBeUndefined();
   });
 
   it("fails open: permits unlinking the last account when hasPassword is not implemented", async () => {
     const service = await buildService(makeAccountLayer([baseAccount()]));
 
-    await Effect.runPromise(service.unlinkAccount("user-1", "github"));
+    await expect(
+      Effect.runPromise(service.unlinkAccount("user-1", "github")),
+    ).resolves.toBeUndefined();
   });
 
   it("succeeds with allowUnlinkingAll: true even when the account is the only credential", async () => {
     const service = await buildService(makeAccountLayer([baseAccount()], false));
 
-    await Effect.runPromise(service.unlinkAccount("user-1", "github", { allowUnlinkingAll: true }));
+    await expect(
+      Effect.runPromise(service.unlinkAccount("user-1", "github", { allowUnlinkingAll: true })),
+    ).resolves.toBeUndefined();
   });
 
   it("fails with OAuthAccountNotFoundError when the provider is not linked", async () => {
