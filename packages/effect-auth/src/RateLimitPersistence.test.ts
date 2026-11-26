@@ -2,8 +2,14 @@ import { assert, describe, it, expect } from "vite-plus/test";
 import { Duration, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
+import { TestClock } from "effect/testing";
 import * as RateLimitPersistence from "./RateLimitPersistence.ts";
-import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.ts";
+import {
+  RATE_LIMIT_EXCEEDED_MESSAGE,
+  RateLimiter,
+  RateLimitStore,
+  RateLimitPresets,
+} from "./RateLimit.ts";
 import { RateLimitError } from "./Errors.ts";
 
 /**
@@ -93,5 +99,70 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
       }),
     );
     expect(result).toBeInstanceOf(RateLimitError);
+  });
+
+  it("applies blockDurationMs: the key stays refused after its window resets, until the block ends", async () => {
+    const config = { maxRequests: 2, windowMs: 60_000, blockDurationMs: 600_000 };
+    const outcomes = await Effect.runPromise(
+      Effect.gen(function* () {
+        const rl = yield* RateLimiter;
+        const attempt = Effect.match(rl.consumeToken("blocked", config), {
+          onFailure: (e) => (e instanceof RateLimitError ? e : "fault"),
+          onSuccess: () => "ok" as const,
+        });
+        yield* TestClock.setTime(1_000_000);
+        const first = [yield* attempt, yield* attempt, yield* attempt];
+        // Past the window, inside the block.
+        yield* TestClock.adjust(Duration.minutes(2));
+        const inBlock = yield* attempt;
+        const remaining = yield* rl.getRemainingTokens("blocked", config);
+        const checked = yield* Effect.flip(rl.checkLimit("blocked", config));
+        // Past the block.
+        yield* TestClock.adjust(Duration.minutes(9));
+        const after = yield* attempt;
+        return { first, inBlock, remaining, checked, after };
+      }).pipe(Effect.provide(Layer.mergeAll(Live, TestClock.layer()))),
+    );
+    expect(outcomes.first.slice(0, 2)).toEqual(["ok", "ok"]);
+    const refused = outcomes.first[2];
+    assert.instanceOf(refused, RateLimitError);
+    expect(Duration.toMillis(refused.retryAfter ?? Duration.zero)).toBe(600_000);
+    assert.instanceOf(outcomes.inBlock, RateLimitError);
+    expect(Duration.toMillis(outcomes.inBlock.retryAfter ?? Duration.zero)).toBe(480_000);
+    expect(outcomes.remaining).toBe(0);
+    expect(outcomes.checked._tag).toBe("RateLimitError");
+    expect(outcomes.after).toBe("ok");
+  });
+
+  it("without blockDurationMs, admits the key again once its window resets", async () => {
+    const config = { maxRequests: 1, windowMs: 60_000 };
+    const outcomes = await Effect.runPromise(
+      Effect.gen(function* () {
+        const rl = yield* RateLimiter;
+        const attempt = Effect.match(rl.consumeToken("unblocked", config), {
+          onFailure: () => "refused" as const,
+          onSuccess: () => "ok" as const,
+        });
+        yield* TestClock.setTime(1_000_000);
+        const first = [yield* attempt, yield* attempt];
+        yield* TestClock.adjust(Duration.minutes(2));
+        return [...first, yield* attempt];
+      }).pipe(Effect.provide(Layer.mergeAll(Live, TestClock.layer()))),
+    );
+    expect(outcomes).toEqual(["ok", "refused", "ok"]);
+  });
+
+  it("refuses with a fixed message that names no key", async () => {
+    const config = { maxRequests: 0, windowMs: 60_000 };
+    const error = await run(
+      Effect.flip(
+        Effect.gen(function* () {
+          const rl = yield* RateLimiter;
+          yield* rl.consumeToken("ip:signin:203.0.113.7", config);
+        }),
+      ),
+    );
+    expect(error.message).toBe(RATE_LIMIT_EXCEEDED_MESSAGE);
+    expect(error.message).not.toContain("203.0.113.7");
   });
 });
