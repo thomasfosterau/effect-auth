@@ -50,7 +50,8 @@ export interface Argon2Options {
   readonly parallelism?: number | undefined;
   /**
    * Refuse to verify a stored hash whose `m` exceeds this many KiB. Default
-   * `131072` (128 MiB, a Workers isolate's whole memory).
+   * `131072` (128 MiB); on Cloudflare Workers `65536` (64 MiB, half the
+   * isolate), or `memoryCost` when that is higher.
    */
   readonly maxMemoryKiB?: number | undefined;
   /** Refuse to verify a stored hash whose `t` exceeds this. Default `10`. */
@@ -123,12 +124,42 @@ export const defaultVerifyLimits: Argon2VerifyLimits = {
   maxParallelism: 8,
 };
 
-/** Fill in any unset verify limit from {@link defaultVerifyLimits}. */
-export const resolveVerifyLimits = (options?: Argon2Options): Argon2VerifyLimits => ({
-  maxMemoryKiB: options?.maxMemoryKiB ?? defaultVerifyLimits.maxMemoryKiB,
-  maxIterations: options?.maxIterations ?? defaultVerifyLimits.maxIterations,
-  maxParallelism: options?.maxParallelism ?? defaultVerifyLimits.maxParallelism,
-});
+/**
+ * The verify ceiling on Cloudflare Workers (m ≤ 64 MiB, t ≤ 10, p ≤ 8). A
+ * Workers isolate has 128 MiB in all, so a verify at the general default's
+ * 128 MiB would exhaust it; 64 MiB still covers {@link serverProfile} and
+ * leaves the isolate half its memory. A configured `memoryCost` above it
+ * raises it to that cost, so the hasher's own hashes always verify.
+ */
+export const workerdVerifyLimits: Argon2VerifyLimits = {
+  maxMemoryKiB: 65536,
+  maxIterations: 10,
+  maxParallelism: 8,
+};
+
+/** True inside workerd, the Cloudflare Workers runtime, which names itself in `navigator.userAgent`. */
+const isWorkerd = (): boolean =>
+  P.hasProperty(globalThis, "navigator") &&
+  P.hasProperty(globalThis.navigator, "userAgent") &&
+  globalThis.navigator.userAgent === "Cloudflare-Workers";
+
+/**
+ * Fill in any unset verify limit from {@link defaultVerifyLimits}, or on
+ * Cloudflare Workers from {@link workerdVerifyLimits}, whose `maxMemoryKiB`
+ * is raised to a configured `memoryCost` above it.
+ */
+export const resolveVerifyLimits = (options?: Argon2Options): Argon2VerifyLimits => {
+  const workerd = isWorkerd();
+  const defaults = workerd ? workerdVerifyLimits : defaultVerifyLimits;
+  const memoryCost = options?.memoryCost ?? defaultProfile.memoryCost;
+  return {
+    maxMemoryKiB:
+      options?.maxMemoryKiB ??
+      (workerd ? Math.max(defaults.maxMemoryKiB, memoryCost) : defaults.maxMemoryKiB),
+    maxIterations: options?.maxIterations ?? defaults.maxIterations,
+    maxParallelism: options?.maxParallelism ?? defaults.maxParallelism,
+  };
+};
 
 /** Salt length in bytes. Matches `@node-rs/argon2`'s default. */
 export const SALT_LENGTH = 16;

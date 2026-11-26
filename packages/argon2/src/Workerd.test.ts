@@ -14,7 +14,8 @@
  * and at 2023-01-01 with `allow_eval_during_startup`, and hashes and verifies
  * inside `fetch`; it also pins that the 2023 date without the flag refuses
  * the worker at startup, and that a stored hash over the verify ceiling
- * is refused inside `fetch` while the isolate keeps serving.
+ * (workerd's own, 64 MiB) is refused inside `fetch` while the isolate keeps
+ * serving.
  */
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -308,7 +309,7 @@ describe.each(SERVED_NAMES)("workerd, the %s worker", (name) => {
     expect(await callWorker(Verified, name, "/verify", { password, hash: HUGE_MEMORY })).toEqual({
       ok: false,
       tag: "HashingError",
-      message: `Argon2 hash exceeds the verify ceiling: m=${HUGE_M} is over maxMemoryKiB=131072`,
+      message: `Argon2 hash exceeds the verify ceiling: m=${HUGE_M} is over maxMemoryKiB=65536`,
       cause: "undefined",
     });
     expect(await callWorker(Verified, name, "/verify", { password, hash: fixture.hash })).toEqual({

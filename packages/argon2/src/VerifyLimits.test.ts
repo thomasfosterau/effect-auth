@@ -6,7 +6,7 @@
  * The kernel's `verifyArgon2` is wrapped in a spy that still runs the real
  * kernel, so each test can say whether verify reached it.
  */
-import { assert, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Effect } from "effect";
 import * as Arr from "effect/Array";
 import { Password } from "@thomasfosterau/effect-auth";
@@ -100,6 +100,41 @@ describe("the default verify ceiling", () => {
   it.each(hashWasmFixtures)("still verifies the hash-wasm fixture: $label", async (fixture) => {
     expect(await run(Argon2.argon2Hasher().verify(fixture.password, fixture.hash))).toBe(true);
     expect(kernel).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the verify ceiling on Cloudflare Workers", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("defaults maxMemoryKiB to 65536, half the isolate, still above serverProfile", () => {
+    expect(Argon2.resolveVerifyLimits()).toEqual(Argon2.workerdVerifyLimits);
+    expect(Argon2.workerdVerifyLimits).toEqual({
+      maxMemoryKiB: 65536,
+      maxIterations: 10,
+      maxParallelism: 8,
+    });
+    expect(Argon2.resolveVerifyLimits(Argon2.serverProfile).maxMemoryKiB).toBe(65536);
+  });
+
+  it("refuses a stored hash over 64 MiB that the general default would run", async () => {
+    const error = await run(Effect.flip(Argon2.argon2Hasher().verify("x", stored(65537, 1, 1))));
+    expect(error.message).toMatch(/m=65537 is over maxMemoryKiB=65536/);
+    expect(kernel).not.toHaveBeenCalled();
+  });
+
+  it("rises to a configured memoryCost above it, so the hasher's own hashes verify", () => {
+    expect(Argon2.resolveVerifyLimits({ memoryCost: 98304 }).maxMemoryKiB).toBe(98304);
+    expect(() => Argon2.argon2Hasher({ memoryCost: 98304 })).not.toThrow();
+  });
+
+  it("yields to a configured maxMemoryKiB", () => {
+    expect(Argon2.resolveVerifyLimits({ maxMemoryKiB: 131072 }).maxMemoryKiB).toBe(131072);
+    expect(Argon2.resolveVerifyLimits({ maxMemoryKiB: 19456 }).maxMemoryKiB).toBe(19456);
   });
 });
 

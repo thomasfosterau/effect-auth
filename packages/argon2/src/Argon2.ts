@@ -31,6 +31,7 @@ import * as R from "effect/Record";
 import { HashingError, Password } from "@thomasfosterau/effect-auth";
 import {
   ARGON2ID,
+  HASH_LENGTH,
   SALT_LENGTH,
   isWithinMaxLength,
   resolveVerifyLimits,
@@ -121,8 +122,33 @@ const parseCosts = (
 const overCeiling = (detail: string): Effect.Effect<never, HashingError> =>
   Effect.fail(new HashingError({ message: `Argon2 hash exceeds the verify ceiling: ${detail}` }));
 
+/** What a stored PHC string's header states, once {@link readHash} accepts it. */
+interface StoredHash {
+  readonly variant: string;
+  readonly costs: Argon2Profile;
+  /** Salt length in bytes, from its unpadded base64 length. */
+  readonly saltBytes: number;
+  /** Digest length in bytes, from its unpadded base64 length. */
+  readonly digestBytes: number;
+}
+
+/** A refused header: why, and whether only the verify ceiling refused it. */
+interface RefusedHash {
+  readonly refused: string;
+  readonly overCeiling: boolean;
+}
+
+type ReadHash = { readonly stored: StoredHash } | RefusedHash;
+
+const malformedHeader = (detail: string): RefusedHash => ({ refused: detail, overCeiling: false });
+const overCeilingHeader = (detail: string): RefusedHash => ({ refused: detail, overCeiling: true });
+
+/** Bytes an unpadded base64 string of `length` characters decodes to. */
+const base64Bytes = (length: number): number => Math.floor((length * 3) / 4);
+
 /**
- * Check a stored PHC string's header before handing it to the kernel.
+ * Read a stored PHC string's header before handing it to the kernel, or say
+ * why it is refused (`overCeiling` when only the verify ceiling refuses it).
  *
  * Deliberately tolerant about the order of the `m`/`t`/`p` parameters (the PHC
  * spec does not fix it) and about which Argon2 variant produced the hash, but
@@ -140,42 +166,68 @@ const overCeiling = (detail: string): Effect.Effect<never, HashingError> =>
  * before anything is copied into linear memory, and one whose parameters
  * repeat or add a name (so the ceiling reads the costs the kernel would).
  */
+const readHash = (hash: string, limits: Argon2VerifyLimits): ReadHash => {
+  if (hash.length > MAX_STORED_HASH_LENGTH) {
+    return malformedHeader(`longer than ${MAX_STORED_HASH_LENGTH} characters`);
+  }
+  const segments = hash.split("$");
+  // "$argon2id$v=19$m=..,t=..,p=..$salt$digest" splits into a leading empty
+  // segment plus five fields.
+  if (segments.length !== 6 || segments[0] !== "") {
+    return malformedHeader("expected $argon2<variant>$v=19$m=...,t=...,p=...$salt$hash");
+  }
+  // The length check above guarantees all six segments exist, so the
+  // defaults are never used.
+  const [, variant = "", version = "", parameters = "", salt = "", digest = ""] = segments;
+
+  if (!Arr.contains(variants, variant)) return malformedHeader(`unsupported variant "${variant}"`);
+  if (version !== "v=19") {
+    return malformedHeader(`unsupported version "${version}" (only v=19 is supported)`);
+  }
+
+  const parsed = parseCosts(parameters);
+  if ("refused" in parsed) return malformedHeader(parsed.refused);
+  const { memoryCost, timeCost, parallelism } = parsed.costs;
+  if (memoryCost > limits.maxMemoryKiB) {
+    return overCeilingHeader(`m=${memoryCost} is over maxMemoryKiB=${limits.maxMemoryKiB}`);
+  }
+  if (timeCost > limits.maxIterations) {
+    return overCeilingHeader(`t=${timeCost} is over maxIterations=${limits.maxIterations}`);
+  }
+  if (parallelism > limits.maxParallelism) {
+    return overCeilingHeader(`p=${parallelism} is over maxParallelism=${limits.maxParallelism}`);
+  }
+  return {
+    stored: {
+      variant,
+      costs: parsed.costs,
+      saltBytes: base64Bytes(salt.length),
+      digestBytes: base64Bytes(digest.length),
+    },
+  };
+};
+
+/** {@link readHash} as an effect: a refused header is a `HashingError`. */
 const checkHash = (hash: string, limits: Argon2VerifyLimits): Effect.Effect<void, HashingError> =>
   Effect.suspend(() => {
-    if (hash.length > MAX_STORED_HASH_LENGTH) {
-      return invalidHash(`longer than ${MAX_STORED_HASH_LENGTH} characters`);
-    }
-    const segments = hash.split("$");
-    // "$argon2id$v=19$m=..,t=..,p=..$salt$digest" splits into a leading empty
-    // segment plus five fields.
-    if (segments.length !== 6 || segments[0] !== "") {
-      return invalidHash("expected $argon2<variant>$v=19$m=...,t=...,p=...$salt$hash");
-    }
-    // The length check above guarantees all six segments exist, so the
-    // defaults are never used.
-    const [, variant = "", version = "", parameters = ""] = segments;
-
-    if (!Arr.contains(variants, variant)) {
-      return invalidHash(`unsupported variant "${variant}"`);
-    }
-    if (version !== "v=19") {
-      return invalidHash(`unsupported version "${version}" (only v=19 is supported)`);
-    }
-
-    const parsed = parseCosts(parameters);
-    if ("refused" in parsed) return invalidHash(parsed.refused);
-    const { memoryCost, timeCost, parallelism } = parsed.costs;
-    if (memoryCost > limits.maxMemoryKiB) {
-      return overCeiling(`m=${memoryCost} is over maxMemoryKiB=${limits.maxMemoryKiB}`);
-    }
-    if (timeCost > limits.maxIterations) {
-      return overCeiling(`t=${timeCost} is over maxIterations=${limits.maxIterations}`);
-    }
-    if (parallelism > limits.maxParallelism) {
-      return overCeiling(`p=${parallelism} is over maxParallelism=${limits.maxParallelism}`);
-    }
-    return Effect.void;
+    const read = readHash(hash, limits);
+    if ("stored" in read) return Effect.void;
+    return read.overCeiling ? overCeiling(read.refused) : invalidHash(read.refused);
   });
+
+/**
+ * True when `stored` is weaker than what the hasher writes now: another
+ * variant, or a lower `m`, `t` or `p`, or a shorter salt or digest. A stored
+ * set stronger in every respect is kept; one weaker in any is replaced,
+ * even where it was stronger in another.
+ */
+const isWeaker = (stored: StoredHash, costs: Argon2Profile): boolean =>
+  stored.variant !== ARGON2ID ||
+  stored.costs.memoryCost < costs.memoryCost ||
+  stored.costs.timeCost < costs.timeCost ||
+  stored.costs.parallelism < costs.parallelism ||
+  stored.saltBytes < SALT_LENGTH ||
+  stored.digestBytes < HASH_LENGTH;
 
 const isPositiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 
@@ -227,6 +279,13 @@ const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits):
  * `RangeError` when a limit is not a positive integer, or when the configured
  * costs exceed the ceiling, since their hashes would not verify.
  *
+ * `needsRehash` is true for a stored hash `verify` refuses, and for one weaker
+ * than the configured costs: another variant (argon2i, argon2d), a lower `m`,
+ * `t` or `p`, or a shorter salt or digest. The core's sign-in flows call it
+ * after a successful verify and store a fresh hash, so raising the costs
+ * upgrades each user on their next sign-in. A hash at least as strong in
+ * every parameter is kept.
+ *
  * @example
  * ```ts
  * import { argon2Hasher, argon2HasherLayer, serverProfile } from "@thomasfosterau/effect-auth-argon2";
@@ -242,6 +301,11 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
 
   return {
     algorithm: ARGON2ID,
+
+    needsRehash: (hash: string): boolean => {
+      const read = readHash(hash, limits);
+      return "refused" in read || isWeaker(read.stored, costs);
+    },
 
     hash: Effect.fn("effect-auth.password.hash", {
       attributes: { algorithm: ARGON2ID },
