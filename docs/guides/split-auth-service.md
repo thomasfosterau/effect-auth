@@ -172,7 +172,14 @@ Http.make({
 
 The endpoint checks no permissions; check the key's `permissions` through the policy
 kernel. Configure the header once and pass it to both sides: `cookie.apiKeyHeaders` on the
-auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`.
+auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`. The client
+forwards every `apiKeyHeaders` name on every call, so don't list a key header in
+`headers.also` instead: forwarded from there, it would not count as a key, and its caller
+would be handed cookies.
+
+A caller with an API key or a bearer token (`Bearer` or `Token`) never receives a
+`Set-Cookie`, from `relay` or from `read` and `resolveAtEdge`: a refreshed cache cookie
+would only land in whatever cookie jar its HTTP client keeps.
 
 ### Header forwarding is the library's job
 

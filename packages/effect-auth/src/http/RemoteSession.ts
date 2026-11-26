@@ -57,10 +57,13 @@
  * A request bearing an API key or a bearer token is not a browser. Handing it
  * a `Set-Cookie` plants session state in whatever cookie jar its HTTP client
  * happens to keep, for no benefit — the key or token, not a session, is its
- * credential. The relay drops `Set-Cookie` whenever the *inbound* request
- * carries a machine credential, including the mixed case where it carries both
- * a cookie and a key or token. Every other caller receives it, a browser with
- * no cookie yet included, so a first sign-in through the relay signs in.
+ * credential. The relay and the session read drop `Set-Cookie` whenever the
+ * *inbound* request carries a machine credential, including the mixed case
+ * where it carries both a cookie and a key or token. Every other caller
+ * receives it, a browser with no cookie yet included, so a first sign-in
+ * through the relay signs in. What counts as an API key is
+ * `credentials.apiKeyHeaders`, and those headers are forwarded on every call,
+ * so the rule and the forwarded set cannot drift apart.
  *
  * ### A key resolves to its user, not to a session
  *
@@ -352,7 +355,8 @@ export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
  *
  * Replay `setCookie` onto your outgoing response. When the signed cookie cache
  * is enabled this is how it keeps refreshing; drop it and the cache stops
- * refreshing after its first window.
+ * refreshing after its first window. It is empty for a request carrying an
+ * API key or a bearer token, by the same rule as {@link relayResponse}.
  *
  * @since 0.1.0
  * @category models
@@ -524,6 +528,10 @@ export const fromSessionWithUserView = (
     })),
   );
 
+/** The machine-caller rule: a request carrying an API key or a bearer token gets no cookie. */
+const mayReceiveCookies = (inbound: SessionResolution.CredentialPresence): boolean =>
+  !inbound.hasApiKey && !inbound.hasBearer;
+
 /**
  * Configuration for {@link make}.
  *
@@ -543,7 +551,12 @@ export interface RemoteSessionOptions {
   readonly prefix?: string;
   /** Header forward policy. See {@link defaultForwardedHeaders}. */
   readonly headers?: HeaderPolicy;
-  /** Cookie naming and API-key spellings, shared with the credential predicates. */
+  /**
+   * Cookie naming and API-key spellings, shared with the credential predicates.
+   * Every `apiKeyHeaders` name is forwarded on every call, so a key header
+   * belongs here rather than in `headers.also`: one listed only there would
+   * be forwarded without counting as a machine credential.
+   */
   readonly credentials?: SessionResolution.CredentialConfig;
   /**
    * The client's address for an inbound request, as the app's runtime knows
@@ -720,11 +733,20 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
     else headers.set(addressHeader, address);
     return headers;
   };
-  const outboundHeaders = (
-    request: Request,
-    context: RequestContext | undefined,
-    policy: HeaderPolicy | undefined = options.headers,
-  ): Headers => withClientAddress(forwardedHeaders(request, policy), request, context);
+  // The headers that count as an API key are the ones forwarded as one: a key
+  // header rides along on every call whether or not `headers` names it, so a
+  // forwarded key can never be invisible to the machine-caller rule.
+  const apiKeyHeaders = options.credentials?.apiKeyHeaders ?? ["x-api-key"];
+  const headerPolicy: HeaderPolicy = {
+    ...options.headers,
+    also: [...(options.headers?.also ?? []), ...apiKeyHeaders],
+  };
+  const outboundHeaders = (request: Request, context: RequestContext | undefined): Headers =>
+    withClientAddress(forwardedHeaders(request, headerPolicy), request, context);
+
+  /** `Set-Cookie` lines a caller may receive: none for a machine caller. */
+  const cookiesFor = (request: Request, setCookie: ReadonlyArray<string>): ReadonlyArray<string> =>
+    mayReceiveCookies(credential(request)) ? setCookie : [];
 
   const read = (
     request: Request,
@@ -741,7 +763,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       });
 
       const response = yield* promiseOrDie(() => send(outbound));
-      const setCookie = response.headers.getSetCookie();
+      const setCookie = cookiesFor(request, response.headers.getSetCookie());
 
       // 401 is "ran, nobody was signed in" — an expected answer, not a fault.
       // Its Set-Cookie still matters: it is how a stale cache cookie is cleared.
@@ -775,8 +797,6 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       return { session, setCookie };
     }).pipe(Effect.withSpan(spanNames.remoteSessionRead));
 
-  const apiKeyHeaders = options.credentials?.apiKeyHeaders ?? ["x-api-key"];
-
   const readApiKey = (
     request: Request,
     context?: RequestContext,
@@ -785,10 +805,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       // The key headers ride along (the configured spellings too); the session
       // cookie and a bearer token never do, so the auth service cannot answer
       // for the session instead of the key.
-      const headers = outboundHeaders(request, context, {
-        ...options.headers,
-        also: [...(options.headers?.also ?? []), ...apiKeyHeaders],
-      });
+      const headers = outboundHeaders(request, context);
       headers.delete("cookie");
       if (!Arr.some(apiKeyHeaders, (name) => name.toLowerCase() === "authorization")) {
         headers.delete("authorization");
@@ -900,8 +917,7 @@ export const relayResponse = (
   // request carrying both a cookie and a key or token — is excluded too: the
   // machine credential is its credential, so the session state has nowhere
   // useful to go. A cookie is not required: a first sign-in has none yet.
-  const mayReceiveCookies = !inbound.hasApiKey && !inbound.hasBearer;
-  if (mayReceiveCookies) return noStoreWithSetCookie(upstream);
+  if (mayReceiveCookies(inbound)) return noStoreWithSetCookie(upstream);
 
   const headers = new Headers(upstream.headers);
   headers.delete("set-cookie");

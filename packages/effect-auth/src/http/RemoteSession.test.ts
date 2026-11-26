@@ -789,6 +789,109 @@ const clearing = (cacheControl?: string) =>
     },
   });
 
+describe("the machine-caller rule covers session reads and every key spelling", () => {
+  const refreshed = "__Host-conduit_session_data=fresh; Path=/; HttpOnly";
+  const machineCallers: ReadonlyArray<readonly [string, Record<string, string>]> = [
+    ["a bearer token", { authorization: "Bearer tok" }],
+    ["the Token scheme", { authorization: "Token tok" }],
+    ["a bearer token beside a cookie", { ...withSession, authorization: "Bearer tok" }],
+  ];
+
+  it.each(machineCallers)("read hands %s no refreshed cookie", async (_, headers) => {
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    const result = await Effect.runPromise(client.read(inbound(headers)));
+    expect(Option.isSome(result.session)).toBe(true);
+    expect(result.setCookie).toStrictEqual([]);
+  });
+
+  it("read hands a 401's cookie-clearing line to no bearer caller either", async () => {
+    const clear = "__Host-conduit_session=; Path=/; Max-Age=0";
+    const { fetcher } = spy(
+      () => new Response(null, { status: 401, headers: { "set-cookie": clear } }),
+    );
+    const client = RemoteSession.make({ fetcher });
+
+    expect(
+      (await Effect.runPromise(client.read(inbound({ authorization: "Bearer tok" })))).setCookie,
+    ).toStrictEqual([]);
+    expect((await Effect.runPromise(client.read(inbound(withSession)))).setCookie).toStrictEqual([
+      clear,
+    ]);
+  });
+
+  it("resolveAtEdge replays no cookie for a bearer caller", async () => {
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    const edge = await Effect.runPromise(
+      RemoteSession.resolveAtEdge({ client, request: inbound({ authorization: "Bearer tok" }) }),
+    );
+    expect(edge.outcome).toBe("resolved");
+    expect(edge.credentialClass).toBe("machine");
+    expect(edge.setCookie).toStrictEqual([]);
+  });
+
+  it("a browser's read still receives its refreshed cookie", async () => {
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    expect((await Effect.runPromise(client.read(inbound(withSession)))).setCookie).toStrictEqual([
+      refreshed,
+    ]);
+  });
+
+  it("the Token scheme through relay receives no Set-Cookie", async () => {
+    const { fetcher } = spy(() => signInResponse());
+    const client = RemoteSession.make({ fetcher });
+    const request = new Request("https://app.example.com/auth/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/vnd.api+json", authorization: "Token tok" },
+      body: "{}",
+    });
+
+    const response = await Effect.runPromise(client.relay(request, "/sessions"));
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+  });
+
+  it("a custom apiKeyHeaders name is forwarded and counts as a key, without headers.also", async () => {
+    const { calls, fetcher } = spy(() => signInResponse());
+    const client = RemoteSession.make({
+      fetcher,
+      credentials: { apiKeyHeaders: ["x-service-key"] },
+    });
+    const request = new Request("https://app.example.com/auth/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/vnd.api+json", "x-service-key": "k" },
+      body: "{}",
+    });
+
+    const response = await Effect.runPromise(client.relay(request, "/sessions"));
+    expect(calls[0]?.headers["x-service-key"]).toBe("k");
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+
+    const { calls: reads, fetcher: readFetcher } = spy(() => okSession([refreshed]));
+    const reader = RemoteSession.make({
+      fetcher: readFetcher,
+      credentials: { apiKeyHeaders: ["x-service-key"] },
+    });
+    const result = await Effect.runPromise(
+      reader.read(inbound({ ...withSession, "x-service-key": "k" })),
+    );
+    expect(reads[0]?.headers["x-service-key"]).toBe("k");
+    expect(result.setCookie).toStrictEqual([]);
+  });
+
+  it("a key header survives a forward list that leaves it out", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({ fetcher, headers: { forward: ["cookie"] } });
+
+    await Effect.runPromise(client.read(inbound({ ...withSession, "x-api-key": "k" })));
+    expect(calls[0]?.headers["x-api-key"]).toBe("k");
+  });
+});
+
 describe("a relayed response carrying Set-Cookie is no-store", () => {
   it("marks a relayed session cookie no-store, first sign-in and cookie-bearing alike", () => {
     expect(relayed(signInResponse()).headers.get("cache-control")).toBe("no-store");
