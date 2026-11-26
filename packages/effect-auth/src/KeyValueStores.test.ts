@@ -15,9 +15,12 @@ import {
   MagicLinkStoreKV,
   EmailOtpStoreKV,
   PendingMultiFactorStoreKV,
+  GoogleOneTapNonceStoreKV,
   KeyValueStoreKeys,
   layerMemoryKeyValueStore,
   purgeExpiredKV,
+  purgeExpiredKVWith,
+  type PurgeExpiredKVResult,
 } from "./KeyValueStores.ts";
 import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.ts";
 import { ChallengeStore, type WebAuthnChallenge } from "./multifactor/WebAuthn.ts";
@@ -32,6 +35,7 @@ import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { EmailOtpStore, type EmailOtpRecord } from "./email/EmailOtp.ts";
 import { PendingMultiFactorStore, type PendingMultiFactor } from "./multifactor/MultiFactor.ts";
 import { Hooks } from "./Hooks.ts";
+import { GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as Errors from "./Errors.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
@@ -509,6 +513,18 @@ describe("KeyValueStores", () => {
 
   describe("purgeExpiredKV", () => {
     const now = 1_000_000;
+    const nothingPurged: PurgeExpiredKVResult = {
+      oauthStates: 0,
+      webauthnChallenges: 0,
+      pendingMultiFactor: 0,
+      emailVerifications: 0,
+      passwordResets: 0,
+      magicLinks: 0,
+      emailOtps: 0,
+      emailOtpFailures: 0,
+      rateLimits: 0,
+      googleOneTapNonces: 0,
+    };
     const runPurge = <A, E>(
       effect: Effect.Effect<
         A,
@@ -586,7 +602,7 @@ describe("KeyValueStores", () => {
           };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 2, rateLimits: 0 });
+      expect(result.purged).toEqual({ ...nothingPurged, magicLinks: 2, emailOtps: 2 });
       expect(result.old).toBeNull();
       expect(result.gone).toBeNull();
       expect(result.fresh?.token).toBe("new");
@@ -608,13 +624,13 @@ describe("KeyValueStores", () => {
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
           const limits = yield* RateLimitStore;
-          yield* limits.set("window-over", limit("window-over", now - 1), 60);
+          yield* limits.set("window-over", limit("window-over", now - 1), 0);
           // `RateLimiter` opens a fresh window once `now >= resetAt` and lifts a
           // block once `now >= blockedUntil`, so both edges are spent at `now`.
-          yield* limits.set("edges-now", limit("edges-now", now, now), 60);
-          yield* limits.set("block-over", limit("block-over", now - 60_000, now - 1), 60);
-          yield* limits.set("in-window", limit("in-window", now + 1), 60);
-          yield* limits.set("still-blocked", limit("still-blocked", now - 60_000, now + 1), 60);
+          yield* limits.set("edges-now", limit("edges-now", now, now), 0);
+          yield* limits.set("block-over", limit("block-over", now - 60_000, now - 1), 0);
+          yield* limits.set("in-window", limit("in-window", now + 1), 0);
+          yield* limits.set("still-blocked", limit("still-blocked", now - 60_000, now + 1), 0);
           const purged = yield* purgeExpiredKV;
           const again = yield* purgeExpiredKV;
           return {
@@ -628,8 +644,8 @@ describe("KeyValueStores", () => {
           };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 3 });
-      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result.purged).toEqual({ ...nothingPurged, rateLimits: 3 });
+      expect(result.again).toEqual({ ...nothingPurged });
       expect(result.inWindow).toEqual(limit("in-window", now + 1));
       expect(result.stillBlocked).toEqual(limit("still-blocked", now - 60_000, now + 1));
       expect(Arr.sort(result.remaining, Order.String)).toEqual([
@@ -648,27 +664,157 @@ describe("KeyValueStores", () => {
           return yield* purgeExpiredKV;
         }),
       );
-      expect(result).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(result).toEqual({ ...nothingPurged });
     });
 
-    it("leaves the other stores' records alone, expired or not", async () => {
+    it("leaves keys outside the stores' prefixes alone", async () => {
       const result = await runPurge(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const states = yield* OAuthStateStore;
-          yield* states.create({
-            state: "s1",
-            provider: "google",
-            codeVerifier: "v",
-            createdAt: 0,
-            expiresAt: now - 1,
-          });
+          const kv = yield* KeyValueStore.KeyValueStore;
+          yield* kv.set("app:session", '{"expiresAt":0}');
           const purged = yield* purgeExpiredKV;
-          return { purged, state: yield* states.consume("s1") };
+          return { purged, kept: yield* kv.get("app:session") };
         }),
       );
-      expect(result.purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
-      expect(result.state?.state).toBe("s1");
+      expect(result.purged).toEqual(nothingPurged);
+      expect(result.kept).toBeDefined();
+    });
+
+    it("deletes every store's expired records, their indexes with them, and keeps live ones", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const states = yield* OAuthStateStore;
+          const challenges = yield* ChallengeStore;
+          const pending = yield* PendingMultiFactorStore;
+          const verifications = yield* EmailVerificationStore;
+          const resets = yield* PasswordResetStore;
+          const nonces = yield* GoogleOneTapNonceStore;
+          yield* Effect.forEach(
+            [
+              ["stale", now - 1],
+              ["live", now + 60_000],
+            ] as const,
+            ([id, expiresAt]) =>
+              Effect.gen(function* () {
+                yield* states.create({
+                  state: `state-${id}`,
+                  provider: "p",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* challenges.create({
+                  challenge: new TextEncoder().encode(`challenge-${id}`),
+                  ceremony: "registration",
+                  userId: "u",
+                  expiresAt,
+                });
+                yield* pending.create({
+                  token: `pending-${id}`,
+                  userId: "u",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* pending.recordFailedAttempt(`pending-${id}`);
+                yield* verifications.create({
+                  token: `verify-${id}`,
+                  userId: "u",
+                  email: "a@example.com",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* resets.create({
+                  token: `reset-${id}`,
+                  userId: "u",
+                  email: "a@example.com",
+                  createdAt: 0,
+                  expiresAt,
+                });
+                yield* nonces.create(`nonce-${id}`, expiresAt);
+              }),
+            { concurrency: 1, discard: true },
+          );
+          const purged = yield* purgeExpiredKV;
+          const again = yield* purgeExpiredKV;
+          const kv = yield* KeyValueStore.KeyValueStore;
+          return {
+            purged,
+            again,
+            remaining: Arr.sort(yield* (yield* KeyValueStoreKeys).list(""), Order.String),
+            verificationIndex: yield* kv.get("email-verification:user:u"),
+            resetIndex: yield* kv.get("password-reset:user:u"),
+          };
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              Layer.provideMerge(
+                Layer.merge(layerKV, GoogleOneTapNonceStoreKV),
+                layerMemoryKeyValueStore,
+              ),
+              TestClock.layer(),
+            ),
+          ),
+        ),
+      );
+      expect(result.purged).toEqual({
+        ...nothingPurged,
+        oauthStates: 1,
+        webauthnChallenges: 1,
+        pendingMultiFactor: 1,
+        emailVerifications: 1,
+        passwordResets: 1,
+        googleOneTapNonces: 1,
+      });
+      expect(result.again).toEqual(nothingPurged);
+      // The live record of each of the six stores (a challenge's key is its
+      // bytes in base64), and the two user indexes.
+      expect(result.remaining.length).toBe(8);
+      expect(result.remaining.every((key) => !key.includes("stale"))).toBe(true);
+      expect(result.verificationIndex).toBe('["verify-live"]');
+      expect(result.resetIndex).toBe('["reset-live"]');
+    });
+
+    it("keeps a rate-limit entry until the TTL it was set with has passed", async () => {
+      const result = await runPurge(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(now);
+          const limits = yield* RateLimitStore;
+          yield* limits.set("ttl", limit("ttl", now - 1), 60);
+          const within = yield* purgeExpiredKV;
+          yield* TestClock.setTime(now + 60_000);
+          const after = yield* purgeExpiredKV;
+          return { within, after };
+        }),
+      );
+      expect(result.within).toEqual(nothingPurged);
+      expect(result.after).toEqual({ ...nothingPurged, rateLimits: 1 });
+    });
+
+    it("drops an OTP failure budget once its latest wrong code is older than the retention", async () => {
+      const hour = 60 * 60 * 1000;
+      const start = 100 * hour;
+      const result = await runPurge(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(start);
+          const otps = yield* EmailOtpStore;
+          yield* otps.recordFailure("old@example.com", "sign-in", start - 26 * hour);
+          yield* otps.recordFailure("recent@example.com", "sign-in", start - 2 * hour);
+          const byDefault = yield* purgeExpiredKV;
+          const shorter = yield* purgeExpiredKVWith({ otpFailureRetention: "1 hour" });
+          const refused = yield* Effect.flip(purgeExpiredKVWith({ otpFailureRetention: -1 }));
+          return {
+            byDefault,
+            shorter,
+            refused: refused._tag,
+            recent: yield* otps.getFailures("recent@example.com", "sign-in"),
+          };
+        }),
+      );
+      expect(result.byDefault).toEqual({ ...nothingPurged, emailOtpFailures: 1 });
+      expect(result.shorter).toEqual({ ...nothingPurged, emailOtpFailures: 1 });
+      expect(result.refused).toBe("AuthError");
+      expect(result.recent).toBeNull();
     });
 
     it("skips a listed key that is gone by the time it is read", async () => {
@@ -684,7 +830,7 @@ describe("KeyValueStores", () => {
           ),
         ),
       );
-      expect(purged).toEqual({ magicLinks: 0, emailOtps: 0, rateLimits: 0 });
+      expect(purged).toEqual({ ...nothingPurged });
     });
 
     it("surfaces a listing failure as the AuthError it is", async () => {
@@ -732,7 +878,7 @@ describe("KeyValueStores", () => {
           ),
         ),
       );
-      expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 1, rateLimits: 0 });
+      expect(result.purged).toEqual({ ...nothingPurged, magicLinks: 1, emailOtps: 1 });
       expect(result.old).toBeNull();
       expect(result.fresh?.token).toBe("new");
       expect(Arr.sort(result.remaining, Order.String)).toEqual([

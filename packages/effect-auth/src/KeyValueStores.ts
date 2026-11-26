@@ -26,10 +26,17 @@
  * A key-value store cannot scan by user id or email, so stores with
  * `deleteByUserId`/`deleteByEmail` maintain a secondary index key (e.g.
  * `email-verification:user:${userId}` holding a JSON array of live tokens).
- * The index is updated on create/delete. Tokens that simply expire (without
- * being read or deleted) leave garbage entries behind until the next
- * create/delete for the same user/email — this is safe because every
- * consuming service already checks `expiresAt` before honouring a record.
+ * The index is updated on create/delete, and {@link purgeExpiredKV} removes
+ * an expired token from its index as it deletes the token, so an index holds
+ * at most its key's unexpired tokens and the ones the next purge will take.
+ *
+ * ## Expiry
+ *
+ * `KeyValueStore` has no per-entry TTL, so every record that expires is
+ * written in an envelope carrying its expiry (`{ "~expiresAt": ms, value }`),
+ * and {@link purgeExpiredKV}, scheduled by the host, deletes the spent ones.
+ * Reads open the envelope and return the record whether or not it has
+ * expired; the services judge expiry, as over every other store.
  *
  * ## Atomicity caveat
  *
@@ -61,6 +68,7 @@ import {
   Clock,
   Context,
   DateTime,
+  Duration,
   Effect,
   Layer,
   MutableHashMap,
@@ -120,25 +128,63 @@ const decodeJsonText = Schema.decodeEffect(JsonText);
 const encodeJsonText = Schema.encodeSync(JsonText);
 
 /**
+ * The member an expiring entry's JSON carries beside its `value`: the epoch-ms
+ * instant after which the entry counts for nothing. No record shape in this
+ * module has a member of that name, so an entry without it is a bare record
+ * (one written before envelopes, or one that never expires).
+ */
+const EXPIRES_AT = "~expiresAt";
+
+/** A decoded entry: its value, and its expiry when it was written with one. */
+interface StoredEntry<A> {
+  readonly value: A;
+  readonly expiresAt: number | undefined;
+}
+
+/** An entry's JSON as `writeExpiring` writes it. */
+const isEnvelope = Schema.is(Schema.Struct({ [EXPIRES_AT]: Schema.Number, value: Schema.Unknown }));
+
+/**
  * Small JSON codec over a raw {@link KeyValueStore.KeyValueStore}, mapping
  * storage failures to {@link Errors.AuthError}.
+ *
+ * `writeExpiring` wraps the record in an expiry envelope that `read` opens:
+ * `KeyValueStore` has no per-entry TTL, so the envelope is what tells
+ * {@link purgeExpiredKV} an entry is spent, whatever its record shape.
  */
 const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
-  const read = <A>(key: string, label: string): Effect.Effect<A | null, Errors.AuthError> =>
+  /** The entry under `key`, expired or not, with its envelope opened. */
+  const readEntry = <A>(
+    key: string,
+    label: string,
+  ): Effect.Effect<StoredEntry<A> | null, Errors.AuthError> =>
     kv.get(key).pipe(
       Effect.mapError(toAuthError(label)),
       Effect.flatMap((value) =>
         value === undefined
           ? Effect.succeed(null)
           : decodeJsonText(value).pipe(
-              // SAFETY: every key is namespaced to one record shape and written
-              // only by `write` with a value of that shape, so the JSON under
-              // `key` round-trips to the `A` its caller wrote there.
-              Effect.map((parsed) => parsed as A),
+              // SAFETY: every key is namespaced to one record shape and
+              // written only by `write` / `writeExpiring` with a value of that
+              // shape, so the JSON under a key round-trips to the `A` its
+              // caller wrote there.
+              Effect.map((parsed): StoredEntry<A> =>
+                isEnvelope(parsed)
+                  ? { value: parsed.value as A, expiresAt: parsed[EXPIRES_AT] }
+                  : { value: parsed as A, expiresAt: undefined },
+              ),
               Effect.mapError(toAuthError(label)),
             ),
       ),
     );
+
+  /**
+   * The record under `key`, or `null`. An entry past its envelope's expiry is
+   * still returned: stores are dumb persistence, and the services judge expiry
+   * from the record itself, as they do over every other store.
+   */
+  const read = <A>(key: string, label: string): Effect.Effect<A | null, Errors.AuthError> =>
+    readEntry<A>(key, label).pipe(Effect.map((entry) => (entry === null ? null : entry.value)));
 
   const write = (
     key: string,
@@ -146,6 +192,14 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
     label: string,
   ): Effect.Effect<void, Errors.AuthError> =>
     kv.set(key, encodeJsonText(value)).pipe(Effect.mapError(toAuthError(label)));
+
+  /** Write `value` in an envelope that expires after `expiresAt` (epoch ms). */
+  const writeExpiring = (
+    key: string,
+    value: object,
+    expiresAt: number,
+    label: string,
+  ): Effect.Effect<void, Errors.AuthError> => write(key, { [EXPIRES_AT]: expiresAt, value }, label);
 
   const remove = (key: string, label: string): Effect.Effect<void, Errors.AuthError> =>
     kv.remove(key).pipe(Effect.mapError(toAuthError(label)));
@@ -184,7 +238,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
       }),
     );
 
-  return { read, write, remove, readIndex, indexAdd, indexRemove };
+  return { readEntry, read, write, writeExpiring, remove, readIndex, indexAdd, indexRemove };
 };
 
 /**
@@ -231,7 +285,9 @@ export const oauthStateStoreKV: Effect.Effect<
   const consumeLock = Semaphore.makeUnsafe(1);
   return {
     create: (state) =>
-      kv.write(oauthStateKey(state.state), state, "oauthState.create").pipe(Effect.as(state)),
+      kv
+        .writeExpiring(oauthStateKey(state.state), state, state.expiresAt, "oauthState.create")
+        .pipe(Effect.as(state)),
     consume: (state) =>
       consumeLock.withPermit(
         kv
@@ -291,7 +347,7 @@ export const challengeStoreKV: Effect.Effect<
   return {
     create: (challenge) =>
       kv
-        .write(
+        .writeExpiring(
           challengeKey(challenge.challenge),
           {
             challenge: toBase64(challenge.challenge),
@@ -299,6 +355,7 @@ export const challengeStoreKV: Effect.Effect<
             expiresAt: challenge.expiresAt,
             ...(challenge.userId !== undefined ? { userId: challenge.userId } : {}),
           } satisfies StoredChallenge,
+          challenge.expiresAt,
           "challenge.create",
         )
         .pipe(Effect.as(challenge)),
@@ -323,6 +380,10 @@ export const ChallengeStoreKV: Layer.Layer<ChallengeStore, never, KeyValueStore.
 
 const rateLimitKey = (key: string) => `rate-limit:${key}`;
 
+/** When an entry stops counting: its window, its block and `until`, whichever ends last. */
+const rateLimitExpiry = (entry: RateLimitEntry, until: number): number =>
+  Math.max(entry.resetAt, entry.blockedUntil ?? 0, until);
+
 /**
  * Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
  *
@@ -343,18 +404,31 @@ export const rateLimitStoreKV: Effect.Effect<
   const readEntry = (key: string) => kv.read<RateLimitEntry>(rateLimitKey(key), "rateLimit.get");
   return {
     get: (key) => readEntry(key).pipe(Effect.orDie),
-    set: (key, entry, _ttl) => kv.write(rateLimitKey(key), entry, "rateLimit.set"),
+    set: (key, entry, ttl) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        kv.writeExpiring(
+          rateLimitKey(key),
+          entry,
+          rateLimitExpiry(entry, now + ttl * 1000),
+          "rateLimit.set",
+        ),
+      ),
     increment: (key, ttlSeconds) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const existing = yield* readEntry(key);
         if (existing == null || now >= existing.resetAt) {
           const entry: RateLimitEntry = { key, count: 1, resetAt: now + ttlSeconds * 1000 };
-          yield* kv.write(rateLimitKey(key), entry, "rateLimit.increment");
+          yield* kv.writeExpiring(rateLimitKey(key), entry, entry.resetAt, "rateLimit.increment");
           return 1;
         }
         const updated: RateLimitEntry = { ...existing, count: existing.count + 1 };
-        yield* kv.write(rateLimitKey(key), updated, "rateLimit.increment");
+        yield* kv.writeExpiring(
+          rateLimitKey(key),
+          updated,
+          rateLimitExpiry(updated, updated.resetAt),
+          "rateLimit.increment",
+        );
         return updated.count;
       }),
     delete: (key) => kv.remove(rateLimitKey(key), "rateLimit.delete"),
@@ -393,9 +467,10 @@ export const emailVerificationStoreKV: Effect.Effect<
   const self = {
     create: (verification) =>
       Effect.gen(function* () {
-        yield* kv.write(
+        yield* kv.writeExpiring(
           emailVerificationTokenKey(verification.token),
           verification,
+          verification.expiresAt,
           "emailVerification.create",
         );
         yield* kv.indexAdd(
@@ -491,7 +566,12 @@ export const passwordResetStoreKV: Effect.Effect<
   const self = {
     create: (reset) =>
       Effect.gen(function* () {
-        yield* kv.write(passwordResetTokenKey(reset.token), reset, "passwordReset.create");
+        yield* kv.writeExpiring(
+          passwordResetTokenKey(reset.token),
+          reset,
+          reset.expiresAt,
+          "passwordReset.create",
+        );
         yield* kv.indexAdd(passwordResetUserKey(reset.userId), reset.token, "passwordReset.create");
         return reset;
       }),
@@ -556,7 +636,12 @@ export const magicLinkStoreKV: Effect.Effect<
   const self = {
     create: (token) =>
       Effect.gen(function* () {
-        yield* kv.write(magicLinkTokenKey(token.token), token, "magicLink.create");
+        yield* kv.writeExpiring(
+          magicLinkTokenKey(token.token),
+          token,
+          token.expiresAt,
+          "magicLink.create",
+        );
         yield* kv.indexAdd(magicLinkEmailKey(token.email), token.token, "magicLink.create");
         return token;
       }),
@@ -609,7 +694,7 @@ export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.
 // ---------------------------------------------------------------------------
 
 const emailOtpKey = (email: string, purpose: EmailOtpPurpose) => `email-otp:${purpose}:${email}`;
-/** The pair's failure budget: a key of its own, outside the `email-otp:` prefix `purgeExpiredKV` sweeps. */
+/** The pair's failure budget: a key of its own, outside the `email-otp:` prefix the codes live under. */
 const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
   `email-otp-failures:${purpose}:${email}`;
 
@@ -619,8 +704,8 @@ const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
  * There is at most one active OTP per email + purpose pair, so the pair is
  * the key itself and no secondary index is needed. The pair's failure budget
  * lives under its own `email-otp-failures:` key, so replacing or
- * deleting the OTP leaves it, and it carries no expiry: only `clearFailures`
- * removes it. `incrementAttempts` and `recordFailure` are read-modify-write
+ * deleting the OTP leaves it; `clearFailures` removes it, and
+ * {@link purgeExpiredKV} once its backoff has long decayed. `incrementAttempts` and `recordFailure` are read-modify-write
  * (see the module docs on atomicity).
  */
 export const emailOtpStoreKV: Effect.Effect<
@@ -633,7 +718,12 @@ export const emailOtpStoreKV: Effect.Effect<
   return {
     upsert: (record) =>
       kv
-        .write(emailOtpKey(record.email, record.purpose), record, "emailOtp.upsert")
+        .writeExpiring(
+          emailOtpKey(record.email, record.purpose),
+          record,
+          record.expiresAt,
+          "emailOtp.upsert",
+        )
         .pipe(Effect.as(record)),
     get: (email, purpose) => kv.read<EmailOtpRecord>(emailOtpKey(email, purpose), "emailOtp.get"),
     delete: (email, purpose) => kv.remove(emailOtpKey(email, purpose), "emailOtp.delete"),
@@ -646,7 +736,12 @@ export const emailOtpStoreKV: Effect.Effect<
           );
           if (record == null) return null;
           const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
-          yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
+          yield* kv.writeExpiring(
+            emailOtpKey(email, purpose),
+            updated,
+            updated.expiresAt,
+            "emailOtp.incrementAttempts",
+          );
           return updated.attempts;
         }),
       ),
@@ -760,12 +855,36 @@ export const layerMemoryKeyValueStore: Layer.Layer<
  * How many expired records one {@link purgeExpiredKV} run deleted, per store.
  */
 export interface PurgeExpiredKVResult {
+  /** OAuth states deleted (`OAuthStateStoreKV`). */
+  readonly oauthStates: number;
+  /** WebAuthn challenges deleted (`ChallengeStoreKV`). */
+  readonly webauthnChallenges: number;
+  /** Pending second-factor challenges deleted, with their counts (`PendingMultiFactorStoreKV`). */
+  readonly pendingMultiFactor: number;
+  /** Email verification tokens deleted (`EmailVerificationStoreKV`). */
+  readonly emailVerifications: number;
+  /** Password reset tokens deleted (`PasswordResetStoreKV`). */
+  readonly passwordResets: number;
   /** Magic-link tokens deleted (`MagicLinkStoreKV`). */
   readonly magicLinks: number;
   /** Email OTP records deleted (`EmailOtpStoreKV`). */
   readonly emailOtps: number;
-  /** Rate-limit entries deleted (`RateLimitStoreKV`): their window and block have both passed. */
+  /** Email OTP failure budgets deleted (`EmailOtpStoreKV`): no wrong code for `otpFailureRetention`. */
+  readonly emailOtpFailures: number;
+  /** Rate-limit entries deleted (`RateLimitStoreKV`): their window, block and TTL have all passed. */
   readonly rateLimits: number;
+  /** Google One Tap nonces deleted (`GoogleOneTapNonceStoreKV`). */
+  readonly googleOneTapNonces: number;
+}
+
+/** Options for {@link purgeExpiredKVWith}. */
+export interface PurgeExpiredKVOptions {
+  /**
+   * How long an email-OTP failure budget outlives its latest wrong code.
+   * Default 25 hours: the default backoff cap (`backoff.maxDelay`, a day) and
+   * an hour's margin. Keep it at least your `maxDelay`.
+   */
+  readonly otpFailureRetention?: Duration.Input | undefined;
 }
 
 /** The listing a store's own `keys` gives: every key, kept under `prefix`. */
@@ -780,34 +899,37 @@ const storeKeys = (store: KeyValueStore.KeyValueStore): typeof KeyValueStoreKeys
 });
 
 /**
- * The services refuse a record once `now > expiresAt`, so a record with
- * `expiresAt === now` is still live and stays.
+ * The services refuse a record once `now > expiresAt`, so an entry whose
+ * expiry is `now` is still live and stays. The envelope's expiry is the
+ * record's own `expiresAt`; an entry written before envelopes has only the
+ * record's.
  */
 const hasExpired =
   (now: number) =>
-  (record: { readonly expiresAt: number }): boolean =>
-    record.expiresAt < now;
+  (entry: StoredEntry<{ readonly expiresAt: number }>): boolean =>
+    (entry.expiresAt ?? entry.value.expiresAt) < now;
 
 /**
  * `RateLimiter` opens a fresh window once `now >= resetAt` and lifts a block
  * once `now >= blockedUntil`, so an entry past both counts for nothing: the
- * limiter treats its key as one it has never seen (as `./sql`'s does).
+ * limiter treats its key as one it has never seen (as `./sql`'s does). The
+ * envelope also carries the TTL `set` was given, which the entry outlives too.
  */
 const isSpentRateLimit =
   (now: number) =>
-  (entry: RateLimitEntry): boolean =>
-    entry.resetAt <= now && (entry.blockedUntil === undefined || entry.blockedUntil <= now);
+  ({ value: entry, expiresAt }: StoredEntry<RateLimitEntry>): boolean =>
+    entry.resetAt <= now &&
+    (entry.blockedUntil === undefined || entry.blockedUntil <= now) &&
+    (expiresAt === undefined || expiresAt <= now);
 
 const purgeExpiredRecords = <A>(options: {
   readonly kv: ReturnType<typeof jsonKv>;
   readonly keys: typeof KeyValueStoreKeys.Service;
   readonly prefix: string;
   readonly label: string;
-  /** Whether the record can go: the services would no longer honour it. */
-  readonly isPurgeable: (record: A) => boolean;
-  /** Read the record under `key` (from {@link jsonKv}'s `read`, typed to the store's record). */
-  readonly read: (key: string) => Effect.Effect<A | null, Errors.AuthError>;
-  readonly onRemoved: (record: A, key: string) => Effect.Effect<void, Errors.AuthError>;
+  /** Whether the entry can go: the services would no longer honour it. */
+  readonly isPurgeable: (entry: StoredEntry<A>) => boolean;
+  readonly onRemoved?: ((record: A) => Effect.Effect<void, Errors.AuthError>) | undefined;
 }): Effect.Effect<number, Errors.AuthError> =>
   options.keys.list(options.prefix).pipe(
     Effect.flatMap((keys) =>
@@ -816,10 +938,10 @@ const purgeExpiredRecords = <A>(options: {
         () => 0,
         (removed, key) =>
           Effect.gen(function* () {
-            const record = yield* options.read(key);
-            if (record == null || !options.isPurgeable(record)) return removed;
+            const entry = yield* options.kv.readEntry<A>(key, options.label);
+            if (entry == null || !options.isPurgeable(entry)) return removed;
             yield* options.kv.remove(key, options.label);
-            yield* options.onRemoved(record, key);
+            if (options.onRemoved !== undefined) yield* options.onRemoved(entry.value);
             return removed + 1;
           }),
       ),
@@ -827,28 +949,30 @@ const purgeExpiredRecords = <A>(options: {
   );
 
 /**
- * Delete the magic-link tokens and email OTP records whose `expiresAt` has
- * passed, and the rate-limit entries whose window and block have both passed,
- * from the `KeyValueStore`-backed stores (`MagicLinkStoreKV`,
- * `EmailOtpStoreKV`, `RateLimitStoreKV`, and so `layerKV` and the testing
- * package's `memoryStores`); requires the `KeyValueStore`. It finds the records through
+ * Delete every expired record from the `KeyValueStore`-backed stores (the
+ * `*StoreKV` layers, and so `layerKV` and the testing package's
+ * `memoryStores`); requires the `KeyValueStore`. It finds the records through
  * {@link KeyValueStoreKeys} when one is provided, and through the store's own
- * `keys` otherwise.
+ * `keys` otherwise, and reads only the prefixes those stores write, so a
+ * namespace shared with other data loses nothing else.
  *
- * No store deletes these records on its own: a code or link nobody redeems
- * stays until a later send for the same address replaces it, and the sends
- * that hide whether an account exists write one for any address. Schedule this
- * from the host (a cron trigger on Workers, a timer on a long-lived server) so
- * the store stays bounded. The services already refuse an expired record, so a
- * purge changes no outcome; it only reclaims the space. Expiry is read from the
- * `Clock`. A deleted magic link also leaves its address's index.
+ * `KeyValueStore` has no per-entry expiry, so no record goes on its own, and
+ * most are written for unauthenticated requests: an OAuth state per authorize
+ * redirect, a WebAuthn challenge per begin, a rate-limit entry per key counted,
+ * a code or link per send. Schedule this from the host (a cron trigger on
+ * Workers, a timer on a long-lived server) so the store stays bounded. Expiry
+ * is read from the `Clock`, and a purge changes no outcome:
  *
- * `KeyValueStore` has no per-entry expiry, so rate-limit entries (one per key,
- * IP, identifier and, recipient and purpose ever counted) stay
- * until this purge too. It deletes an entry once its `resetAt` is not
- * after now and its `blockedUntil` is unset or not after now: the limiter then
- * treats the key as one it has never seen. An entry inside its window or still
- * blocked stays.
+ * - An OAuth state, WebAuthn challenge, pending second factor (its failure
+ *   count with it), email verification, password reset, magic link, email OTP
+ *   or One Tap nonce goes once its expiry is before now; the services already
+ *   refuse it. A deleted token also leaves its user's or address's index.
+ * - A rate-limit entry goes once its `resetAt`, its `blockedUntil` and the TTL
+ *   it was `set` with are all not after now: the limiter then treats the key as
+ *   one it has never seen.
+ * - An email-OTP failure budget goes once its latest wrong code is
+ *   `otpFailureRetention` old ({@link purgeExpiredKVWith}): past the backoff
+ *   cap the delay has fully decayed.
  *
  * Like the stores' other multi-step writes, this is read-then-delete, not
  * atomic (see the module docs): an OTP re-sent for the same address and
@@ -880,7 +1004,7 @@ const purgeExpiredRecords = <A>(options: {
  *   yield* otps.upsert({ ...record, purpose: "forget-password", expiresAt: 60_000 })
  *
  *   const purged = yield* Auth.purgeExpiredKV
- *   assert.deepEqual(purged, { magicLinks: 0, emailOtps: 1, rateLimits: 0 })
+ *   assert.equal(purged.emailOtps, 1)
  *   assert.equal(yield* otps.get("a@example.com", "sign-in"), null)
  *   assert.notEqual(yield* otps.get("a@example.com", "forget-password"), null)
  * })
@@ -894,51 +1018,111 @@ export const purgeExpiredKV: Effect.Effect<
   PurgeExpiredKVResult,
   Errors.AuthError,
   KeyValueStore.KeyValueStore
-> = KeyValueStore.KeyValueStore.use((store) =>
-  Effect.flatMap(Effect.serviceOption(KeyValueStoreKeys), (listing) => {
-    const keys = Option.getOrElse(listing, () => storeKeys(store));
-    return Effect.flatMap(Clock.currentTimeMillis, (now) => {
+> = Effect.suspend(() => purgeExpiredKVWith());
+
+/** {@link PurgeExpiredKVOptions.otpFailureRetention}'s default. */
+export const DEFAULT_KV_OTP_FAILURE_RETENTION: Duration.Duration = Duration.hours(25);
+
+/**
+ * {@link purgeExpiredKV} with options; requires the `KeyValueStore`. A
+ * retention that is negative or infinite fails with `AuthError` before
+ * anything is read.
+ */
+export const purgeExpiredKVWith = (
+  options?: PurgeExpiredKVOptions,
+): Effect.Effect<PurgeExpiredKVResult, Errors.AuthError, KeyValueStore.KeyValueStore> => {
+  const retention = Duration.toMillis(
+    options?.otpFailureRetention ?? DEFAULT_KV_OTP_FAILURE_RETENTION,
+  );
+  if (!(Number.isFinite(retention) && retention >= 0)) {
+    return Effect.fail(
+      new Errors.AuthError({
+        message: "purgeExpiredKV otpFailureRetention must be a finite, non-negative duration",
+      }),
+    );
+  }
+  return KeyValueStore.KeyValueStore.use((store) =>
+    Effect.gen(function* () {
+      const listing = yield* Effect.serviceOption(KeyValueStoreKeys);
+      const keys = Option.getOrElse(listing, () => storeKeys(store));
+      const now = yield* Clock.currentTimeMillis;
       const kv = jsonKv(store);
-      return Effect.all(
-        {
-          magicLinks: purgeExpiredRecords({
-            kv,
-            keys,
-            prefix: magicLinkTokenKey(""),
-            label: "purgeExpired.magicLinks",
-            isPurgeable: hasExpired(now),
-            read: (key) => kv.read<MagicLinkToken>(key, "purgeExpired.magicLinks"),
-            onRemoved: (token) =>
-              kv.indexRemove(
-                magicLinkEmailKey(token.email),
-                token.token,
-                "purgeExpired.magicLinks",
-              ),
-          }),
-          emailOtps: purgeExpiredRecords({
-            kv,
-            keys,
-            prefix: "email-otp:",
-            label: "purgeExpired.emailOtps",
-            isPurgeable: hasExpired(now),
-            read: (key) => kv.read<EmailOtpRecord>(key, "purgeExpired.emailOtps"),
-            onRemoved: () => Effect.void,
-          }),
-          rateLimits: purgeExpiredRecords({
-            kv,
-            keys,
-            prefix: rateLimitKey(""),
-            label: "purgeExpired.rateLimits",
-            isPurgeable: isSpentRateLimit(now),
-            read: (key) => kv.read<RateLimitEntry>(key, "purgeExpired.rateLimits"),
-            onRemoved: () => Effect.void,
-          }),
-        },
-        { concurrency: 1 },
-      );
-    });
-  }),
-);
+      const expired = hasExpired(now);
+      const purge = <A>(
+        label: string,
+        prefix: string,
+        isPurgeable: (entry: StoredEntry<A>) => boolean,
+        onRemoved?: (record: A) => Effect.Effect<void, Errors.AuthError>,
+      ) =>
+        purgeExpiredRecords<A>({
+          kv,
+          keys,
+          prefix,
+          label: `purgeExpired.${label}`,
+          isPurgeable,
+          onRemoved,
+        });
+      return {
+        oauthStates: yield* purge<OAuthState>("oauthStates", oauthStateKey(""), expired),
+        webauthnChallenges: yield* purge<StoredChallenge>(
+          "webauthnChallenges",
+          "webauthn-challenge:",
+          expired,
+        ),
+        pendingMultiFactor: yield* purge<StoredPendingMultiFactor>(
+          "pendingMultiFactor",
+          pendingMultiFactorKey(""),
+          expired,
+        ),
+        emailVerifications: yield* purge<EmailVerification>(
+          "emailVerifications",
+          emailVerificationTokenKey(""),
+          expired,
+          (verification) =>
+            kv.indexRemove(
+              emailVerificationUserKey(verification.userId),
+              verification.token,
+              "purgeExpired.emailVerifications",
+            ),
+        ),
+        passwordResets: yield* purge<PasswordResetToken>(
+          "passwordResets",
+          passwordResetTokenKey(""),
+          expired,
+          (reset) =>
+            kv.indexRemove(
+              passwordResetUserKey(reset.userId),
+              reset.token,
+              "purgeExpired.passwordResets",
+            ),
+        ),
+        magicLinks: yield* purge<MagicLinkToken>(
+          "magicLinks",
+          magicLinkTokenKey(""),
+          expired,
+          (token) =>
+            kv.indexRemove(magicLinkEmailKey(token.email), token.token, "purgeExpired.magicLinks"),
+        ),
+        emailOtps: yield* purge<EmailOtpRecord>("emailOtps", "email-otp:", expired),
+        emailOtpFailures: yield* purge<OtpFailures>(
+          "emailOtpFailures",
+          "email-otp-failures:",
+          ({ value }) => value.lastFailureAt < now - retention,
+        ),
+        rateLimits: yield* purge<RateLimitEntry>(
+          "rateLimits",
+          rateLimitKey(""),
+          isSpentRateLimit(now),
+        ),
+        googleOneTapNonces: yield* purge<GoogleOneTapNonceEntry>(
+          "googleOneTapNonces",
+          googleOneTapNonceKey(""),
+          expired,
+        ),
+      } satisfies PurgeExpiredKVResult;
+    }),
+  );
+};
 
 // ---------------------------------------------------------------------------
 // PendingMultiFactorStore
@@ -970,9 +1154,10 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
   const self = {
     create: (pending) =>
       kv
-        .write(
+        .writeExpiring(
           pendingMultiFactorKey(pending.token),
           { ...pending, failedAttempts: 0 } satisfies StoredPendingMultiFactor,
+          pending.expiresAt,
           "pendingMultiFactor.create",
         )
         .pipe(Effect.as(pending)),
@@ -994,9 +1179,10 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
             });
           }
           const failedAttempts = (stored.failedAttempts ?? 0) + 1;
-          yield* kv.write(
+          yield* kv.writeExpiring(
             pendingMultiFactorKey(token),
             { ...stored, failedAttempts },
+            stored.expiresAt,
             "pendingMultiFactor.recordFailedAttempt",
           );
           return failedAttempts;
@@ -1243,9 +1429,10 @@ export const googleOneTapNonceStoreKV: Effect.Effect<
   const kv = jsonKv(store);
   return {
     create: (nonce, expiresAt) =>
-      kv.write(
+      kv.writeExpiring(
         googleOneTapNonceKey(nonce),
         { expiresAt } satisfies GoogleOneTapNonceEntry,
+        expiresAt,
         "googleOneTapNonce.create",
       ),
     get: (nonce) =>

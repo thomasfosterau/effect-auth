@@ -58,9 +58,8 @@ export const migrate = (
   Sql.migrate.pipe(Effect.provide(D1Client.layer({ db: database })));
 
 /**
- * Delete the expired magic-link and email-OTP rows, and the rate-limit rows
- * whose window and block have both passed, from a D1 database, through
- * `@thomasfosterau/effect-auth/sql`'s `purgeExpired`.
+ * Delete every expired row from a D1 database, through
+ * `@thomasfosterau/effect-auth/sql`'s `purgeExpired` (which lists them).
  *
  * Nothing else deletes them, so schedule this from the Worker (a cron
  * trigger's `scheduled` handler) to keep those tables bounded.

@@ -1,6 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { TestClock } from "effect/testing";
 import { ApiKeyStore } from "../ApiKey.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
@@ -236,7 +237,8 @@ describe("memoryStores", () => {
         };
       }).pipe(Effect.provide(Layer.merge(Testing.memoryStores, TestClock.layer()))),
     );
-    expect(result.purged).toEqual({ magicLinks: 1, emailOtps: 0, rateLimits: 0 });
+    expect(result.purged.magicLinks).toBe(1);
+    expect(Arr.reduce(R.values(result.purged), 0, (sum, n) => sum + n)).toBe(1);
     expect(result.link).toBeNull();
     expect(result.otp?.expiresAt).toBe(20_000);
   });

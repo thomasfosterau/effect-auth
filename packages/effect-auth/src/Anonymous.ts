@@ -16,7 +16,8 @@
  * anonymous user and the freshly-created user; the `linkAccount` config
  * callback migrates any data, then the anonymous user is deleted.
  */
-import { Context, Effect, Layer, MutableHashSet } from "effect";
+import { Clock, Context, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
+import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 import * as Option from "effect/Option";
 import { AccountManagementStore } from "./AccountManagement.ts";
 import * as Errors from "./Errors.ts";
@@ -103,6 +104,9 @@ export class AnonymousService extends Context.Service<
 export const isAnonymousUser = (user: Types.User): boolean =>
   user.attributes["isAnonymous"] === true;
 
+/** How long `linkAccount` remembers a completed link, for idempotency. */
+const LINKED_GUEST_MEMORY_MS = 60 * 60 * 1000;
+
 const make = (
   config: AnonymousConfig = {},
 ): Effect.Effect<typeof AnonymousService.Service, never, AnonymousUserStore | SessionService> =>
@@ -119,9 +123,12 @@ const make = (
 
     // Tracks IDs currently being linked (single-flight) and already linked
     // (idempotency). Both are needed: inFlight prevents concurrent races;
-    // done prevents re-running a completed migration on a second call.
+    // done prevents re-running a completed migration on a repeated call. A
+    // linked guest is deleted, so only a repeat soon after can name it again:
+    // `done` forgets a link after an hour, pruned as it grows.
     const inFlight = MutableHashSet.empty<string>();
-    const done = MutableHashSet.empty<string>();
+    const done = MutableHashMap.empty<string, number>();
+    const pruneDone = makeAmortizedPrune(done);
 
     return {
       signInAnonymous: Effect.fn("AnonymousService.signInAnonymous")(function* (
@@ -152,7 +159,7 @@ const make = (
         }
 
         // Idempotent: already successfully linked.
-        if (MutableHashSet.has(done, anonymousUser.id)) return yield* Effect.void;
+        if (MutableHashMap.has(done, anonymousUser.id)) return yield* Effect.void;
 
         // Single-flight: another fiber is already migrating this user.
         if (MutableHashSet.has(inFlight, anonymousUser.id)) return yield* Effect.void;
@@ -165,7 +172,9 @@ const make = (
 
           yield* purgeUser(purgeServices, anonymousUser.id);
 
-          MutableHashSet.add(done, anonymousUser.id);
+          const linkedAt = yield* Clock.currentTimeMillis;
+          pruneDone((at) => at + LINKED_GUEST_MEMORY_MS <= linkedAt);
+          MutableHashMap.set(done, anonymousUser.id, linkedAt);
         }).pipe(
           Effect.ensuring(Effect.sync(() => MutableHashSet.remove(inFlight, anonymousUser.id))),
         );
