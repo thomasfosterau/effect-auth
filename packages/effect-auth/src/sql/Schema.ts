@@ -202,8 +202,9 @@ export const schemaStatements: readonly string[] = [
     attempts INTEGER NOT NULL
   )`,
   // Wrong email-OTP codes per (email, purpose), kept across resends.
-  // A table of its own so `emailOtp.upsert`'s DELETE + INSERT and
-  // `purgeExpired` leave it; only a successful verification deletes the row.
+  // A table of its own so `emailOtp.upsert`'s DELETE + INSERT leave it; a
+  // successful verification deletes the row, and `purgeExpired` deletes one
+  // whose backoff has long decayed.
   `CREATE TABLE IF NOT EXISTS auth_email_otp_failures (
     email TEXT NOT NULL,
     purpose TEXT NOT NULL,
@@ -229,6 +230,24 @@ export const schemaStatements: readonly string[] = [
     backup_state INTEGER,
     aaguid TEXT
   )`,
+  // The latest attempt per lockout key, so `purgeExpired` can drop a failure
+  // counter nobody has touched for a while; a table of its own because the DDL
+  // is append-only.
+  `CREATE TABLE IF NOT EXISTS auth_account_lockout_attempts (
+    key TEXT PRIMARY KEY,
+    last_attempt_at BIGINT NOT NULL
+  )`,
+  // `purgeExpired` deletes by expiry from these too.
+  `CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_oauth_states_expires_idx ON auth_oauth_states (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_webauthn_challenges_expires_idx ON auth_webauthn_challenges (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_pending_multi_factor_expires_idx ON auth_pending_multi_factor (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_email_verifications_expires_idx ON auth_email_verifications (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_password_resets_expires_idx ON auth_password_resets (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_rate_limits_reset_idx ON auth_rate_limits (reset_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_account_lockouts_locked_idx ON auth_account_lockouts (locked_until)`,
+  `CREATE INDEX IF NOT EXISTS auth_account_lockout_attempts_last_idx ON auth_account_lockout_attempts (last_attempt_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_email_otp_failures_last_idx ON auth_email_otp_failures (last_failure_at)`,
 ];
 
 const CREATE_TABLE = /create\s+table\s+if\s+not\s+exists\s+(\w+)/i;

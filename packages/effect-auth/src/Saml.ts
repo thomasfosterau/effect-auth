@@ -45,6 +45,7 @@
  */
 import { Clock, Context, Data, Effect, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
+import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */
@@ -266,23 +267,29 @@ export class SamlReplayStore extends Context.Service<
  */
 export const memorySamlReplayStore = (
   records: MutableHashMap.MutableHashMap<string, SamlReplayRecord> = MutableHashMap.empty(),
-): typeof SamlReplayStore.Service => ({
-  create: (record) =>
-    Effect.flatMap(Clock.currentTimeMillis, (now) =>
-      Effect.sync(() => {
-        const existing = Option.getOrUndefined(MutableHashMap.get(records, record.id));
-        if (existing !== undefined && now <= existing.expiresAt) return null;
-        MutableHashMap.set(records, record.id, record);
-        return record;
-      }),
-    ),
-  consume: (id) =>
-    Effect.flatMap(Clock.currentTimeMillis, (now) =>
-      Effect.sync(() => {
-        const existing = Option.getOrUndefined(MutableHashMap.get(records, id));
-        if (existing === undefined) return null;
-        MutableHashMap.remove(records, id);
-        return now > existing.expiresAt ? null : existing;
-      }),
-    ),
-});
+): typeof SamlReplayStore.Service => {
+  const prune = makeAmortizedPrune(records);
+  return {
+    create: (record) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        Effect.sync(() => {
+          // Every unauthenticated sign-in adds a record; expired ones go once
+          // the map has doubled, so it stays bounded by its live records.
+          prune((stored) => now > stored.expiresAt);
+          const existing = Option.getOrUndefined(MutableHashMap.get(records, record.id));
+          if (existing !== undefined && now <= existing.expiresAt) return null;
+          MutableHashMap.set(records, record.id, record);
+          return record;
+        }),
+      ),
+    consume: (id) =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        Effect.sync(() => {
+          const existing = Option.getOrUndefined(MutableHashMap.get(records, id));
+          if (existing === undefined) return null;
+          MutableHashMap.remove(records, id);
+          return now > existing.expiresAt ? null : existing;
+        }),
+      ),
+  };
+};

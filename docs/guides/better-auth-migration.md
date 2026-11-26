@@ -138,7 +138,7 @@ Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiF
 
 ### API keys
 
-`Auth.ApiKeyService` (`create`, `verify`, `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys` and `/api-keys/:id` (the plaintext only in the create's `meta.key`). Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
+`Auth.ApiKeyService` (`create`, `verify`, `check` (verify without spending a use), `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys` and `/api-keys/:id` (the plaintext only in the create's `meta.key`). Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
 
 ### Enterprise SSO (as a relying party) and the OIDC provider
 

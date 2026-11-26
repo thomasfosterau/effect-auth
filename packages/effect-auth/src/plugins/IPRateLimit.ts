@@ -44,14 +44,14 @@
  *   ClientIP,
  *   composePlugins,
  *   Hooks,
- *   layerKV,
  *   RateLimiter,
  *   RateLimitPresets,
+ *   RateLimitStoreKV,
  * } from "@thomasfosterau/effect-auth"
  * import { IPRateLimitPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
- * // The rate-limit store: the in-memory KeyValueStore behind the ephemeral stores.
- * const rateLimitStore = layerKV.pipe(Layer.provide(KeyValueStore.layerMemory))
+ * // A single-process rate-limit store; in production use effect-auth/sql's.
+ * const rateLimitStore = RateLimitStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory))
  *
  * const layer = composePlugins([IPRateLimitPlugin()])
  *   .pipe(Layer.provide(Hooks.Default))

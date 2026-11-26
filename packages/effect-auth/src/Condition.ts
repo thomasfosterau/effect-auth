@@ -20,6 +20,7 @@
 import { Match } from "effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Entity from "./Entity.ts";
 
@@ -119,15 +120,15 @@ export interface Has {
  */
 export type Condition = And | Or | Not | Eq | Compare | Contains | In | Has;
 
-export const Condition: Schema.Codec<Condition> = Schema.Union([
+const ConditionNode: Schema.Codec<Condition> = Schema.Union([
   Schema.TaggedStruct("And", {
-    conditions: Schema.Array(Schema.suspend((): Schema.Codec<Condition> => Condition)),
+    conditions: Schema.Array(Schema.suspend((): Schema.Codec<Condition> => ConditionNode)),
   }),
   Schema.TaggedStruct("Or", {
-    conditions: Schema.Array(Schema.suspend((): Schema.Codec<Condition> => Condition)),
+    conditions: Schema.Array(Schema.suspend((): Schema.Codec<Condition> => ConditionNode)),
   }),
   Schema.TaggedStruct("Not", {
-    condition: Schema.suspend((): Schema.Codec<Condition> => Condition),
+    condition: Schema.suspend((): Schema.Codec<Condition> => ConditionNode),
   }),
   Schema.TaggedStruct("Eq", { left: Operand, right: Operand }),
   Schema.TaggedStruct("Compare", {
@@ -142,6 +143,51 @@ export const Condition: Schema.Codec<Condition> = Schema.Union([
     path: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
   }),
 ]);
+
+/**
+ * The deepest a condition may nest, counting every object and array in it
+ * (`not(has(...))` is 3 levels deep: the Not, the Has and its path array; an
+ * `and` adds two, itself and its array).
+ */
+export const maxDepth = 64;
+
+/** The most objects and arrays a condition may contain in total. */
+export const maxNodes = 4096;
+
+/**
+ * Walks one level of containers at a time, so it recurses at most
+ * {@link maxDepth} + 1 times however deep the input is.
+ */
+const levelsWithinBounds = (level: ReadonlyArray<unknown>, depth: number, nodes: number): boolean =>
+  Arr.match(Arr.filter(level, P.isObjectOrArray), {
+    onEmpty: () => true,
+    onNonEmpty: (containers) => {
+      const total = nodes + containers.length;
+      if (depth > maxDepth || total > maxNodes) return false;
+      const children = Arr.flatMap(containers, (container) =>
+        Arr.isArray(container) ? container : R.values(container),
+      );
+      return levelsWithinBounds(children, depth + 1, total);
+    },
+  });
+
+/**
+ * Is `condition` within {@link maxDepth} and {@link maxNodes}? Use it to
+ * validate a built condition before storing it; decoding through the
+ * {@link Condition} schema checks the same bounds on untrusted input.
+ */
+export const isWithinBounds = (condition: Condition): boolean =>
+  levelsWithinBounds([condition], 1, 0);
+
+/**
+ * The condition schema. It checks {@link isWithinBounds} on the encoded input
+ * before decoding it, so a stored condition nested too deeply for the
+ * recursive decoder and evaluator is a `SchemaError`, never a stack overflow.
+ */
+export const Condition: Schema.Codec<Condition> = Schema.declare(
+  (input): input is Condition => levelsWithinBounds([input], 1, 0),
+  { expected: `a condition at most ${maxDepth} levels deep with at most ${maxNodes} nodes` },
+).pipe(Schema.decodeTo(ConditionNode));
 
 // ---------------------------------------------------------------------------
 // eDSL builders (the TS authoring of the same subset)

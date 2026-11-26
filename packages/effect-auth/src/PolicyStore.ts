@@ -35,6 +35,20 @@
  * *forbid* link would be a silent privilege escalation; refusing to produce a
  * policy set at all is the safe failure.
  *
+ * The cost is that **one broken link fails every decision**, for every
+ * tenant: the policy set is global, so a bad row anywhere is an outage
+ * everywhere. If tenants can write policies, templates or links:
+ *
+ * - validate on write: decode through {@link PolicyDocument} /
+ *   {@link TemplateDocument} (which rejects a condition beyond
+ *   `Condition.maxDepth` / `Condition.maxNodes`), check against your model
+ *   with `AuthorizationModel.validatePolicies` / {@link validateTemplates},
+ *   and {@link instantiate} a link against its template before storing it;
+ * - scope per tenant: every decision loads every policy and link in the
+ *   store, so give each tenant's policies a principal or resource scope
+ *   inside that tenant (or a store of its own), or one tenant's policy can
+ *   decide another tenant's requests.
+ *
  * @module policy-store
  */
 import { Context, Effect, Match, MutableHashMap } from "effect";
@@ -323,6 +337,11 @@ export const decodeTemplateDocument = (
  * so leaving orphans behind would take the whole authorization path down.
  * Implementations must perform the cascade (ideally in one transaction, or
  * via an `ON DELETE CASCADE` foreign key).
+ *
+ * Implementations must also reject, with `AuthError`, a policy or template
+ * whose `when` fails `Condition.isWithinBounds`, so that no stored condition
+ * is too deep to decode or evaluate. Decoding through {@link PolicyDocument}
+ * or {@link TemplateDocument} does this.
  */
 export class PolicyStore extends Context.Service<
   PolicyStore,
@@ -401,7 +420,11 @@ export class PolicyStore extends Context.Service<
  * the template's slots, fails the effect with an {@link Errors.AuthError}
  * naming the link. Skipping the broken link would drop a grant silently —
  * and, for a `forbid` template, would turn a storage inconsistency into an
- * over-permissive decision.
+ * over-permissive decision. So one broken link fails every decision; see the
+ * module docs for validating tenant-written rows.
+ *
+ * Reads the store three times (`listPolicies`, `listLinks`, `listTemplates`)
+ * however many links there are.
  */
 export const effectivePolicies = (
   store: typeof PolicyStore.Service,
@@ -409,24 +432,30 @@ export const effectivePolicies = (
   Effect.gen(function* () {
     const stored = yield* store.listPolicies();
     const links = yield* store.listLinks();
+    // One `listTemplates` for every link, not a `getTemplate` per link.
+    const templates = MutableHashMap.fromIterable(
+      Arr.map(yield* store.listTemplates(), (found) => [found.id, found] as const),
+    );
     const linked = yield* Effect.forEach(
       links,
-      (link) =>
-        Effect.gen(function* () {
-          const found = yield* store.getTemplate(link.templateId);
-          if (found === null) {
-            return yield* new Errors.AuthError({
+      (link) => {
+        const found = MutableHashMap.get(templates, link.templateId);
+        if (Option.isNone(found)) {
+          return Effect.fail(
+            new Errors.AuthError({
               message: `Template link "${link.id}" references unknown template "${link.templateId}"`,
-            });
-          }
-          const result = instantiate(found, link);
-          if (!result.ok) {
-            return yield* new Errors.AuthError({
-              message: `Template link "${link.id}" could not be instantiated: ${result.error.message}`,
-            });
-          }
-          return result.value;
-        }),
+            }),
+          );
+        }
+        const result = instantiate(found.value, link);
+        return result.ok
+          ? Effect.succeed(result.value)
+          : Effect.fail(
+              new Errors.AuthError({
+                message: `Template link "${link.id}" could not be instantiated: ${result.error.message}`,
+              }),
+            );
+      },
       { concurrency: 1 },
     );
     return [...stored, ...linked];
@@ -441,7 +470,8 @@ export const effectivePolicies = (
  * Id uniqueness is enforced by construction (synchronous, single-threaded):
  * the `create*` operations fail with `AuthError` when the id is taken,
  * mirroring a SQL unique-index violation. `deleteTemplate` cascades to links,
- * per the contract.
+ * and writes reject a condition beyond `Condition.isWithinBounds`, per the
+ * contract.
  *
  * Pass your own `MutableHashMap`s (each keyed by record id) to inspect or pre-seed state
  * in tests.
@@ -472,6 +502,19 @@ export const memoryPolicyStore = (
       return Effect.succeed(value);
     });
 
+  const bounded = <B>(
+    label: string,
+    value: { readonly id: string; readonly when?: Condition.Condition | undefined },
+    write: Effect.Effect<B, Errors.AuthError>,
+  ): Effect.Effect<B, Errors.AuthError> =>
+    value.when === undefined || Condition.isWithinBounds(value.when)
+      ? write
+      : Effect.fail(
+          new Errors.AuthError({
+            message: `${label} "${value.id}" has a condition deeper than ${Condition.maxDepth} levels or larger than ${Condition.maxNodes} nodes`,
+          }),
+        );
+
   const replace = <A extends { readonly id: string }>(
     store: MutableHashMap.MutableHashMap<string, A>,
     value: A,
@@ -485,14 +528,15 @@ export const memoryPolicyStore = (
   return {
     getPolicy: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(policies, id))),
     listPolicies: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(policies))),
-    createPolicy: (policy) => insert(policies, "Policy", policy),
-    updatePolicy: (policy) => replace(policies, policy),
+    createPolicy: (policy) => bounded("Policy", policy, insert(policies, "Policy", policy)),
+    updatePolicy: (policy) => bounded("Policy", policy, replace(policies, policy)),
     deletePolicy: (id) => Effect.sync(() => void MutableHashMap.remove(policies, id)),
 
     getTemplate: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(templates, id))),
     listTemplates: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(templates))),
-    createTemplate: (value) => insert(templates, "Policy template", value),
-    updateTemplate: (value) => replace(templates, value),
+    createTemplate: (value) =>
+      bounded("Policy template", value, insert(templates, "Policy template", value)),
+    updateTemplate: (value) => bounded("Policy template", value, replace(templates, value)),
     deleteTemplate: (id) =>
       Effect.sync(() => {
         MutableHashMap.remove(templates, id);

@@ -647,18 +647,29 @@ const memberResource = (m: Member): R.OrganizationMember =>
     },
   });
 
-/** The `organization-domains` resource of a stored domain claim. */
+/** A stored domain claim's `organization-domains` attributes. */
+const domainAttributes = (d: OrganizationDomain) => ({
+  domain: d.domain,
+  verificationState: d.verificationState,
+  verificationStrategy: d.verificationStrategy,
+  ...(d.verificationToken !== undefined && { verificationToken: d.verificationToken }),
+  createdAt: d.createdAt,
+  ...(d.verifiedAt !== undefined && { verifiedAt: d.verifiedAt }),
+});
+
+/** The `organization-domains` resource of a stored domain claim, as a tenant reads it. */
 const domainResource = (d: OrganizationDomain): R.OrganizationDomain =>
   R.OrganizationDomain.make({
     id: d.id,
-    attributes: {
-      domain: d.domain,
-      verificationState: d.verificationState,
-      verificationStrategy: d.verificationStrategy,
-      ...(d.verificationToken !== undefined && { verificationToken: d.verificationToken }),
-      createdAt: d.createdAt,
-      ...(d.verifiedAt !== undefined && { verifiedAt: d.verifiedAt }),
-    },
+    attributes: domainAttributes(d),
+    relationships: { organization: { data: R.Organization.ref(d.organizationId) } },
+  });
+
+/** The `organization-domains` resource of a stored domain claim, with its attester. */
+const operatorDomainResource = (d: OrganizationDomain): R.OperatorOrganizationDomain =>
+  R.OperatorOrganizationDomain.make({
+    id: d.id,
+    attributes: domainAttributes(d),
     relationships: {
       organization: { data: R.Organization.ref(d.organizationId) },
       attester: { data: d.attestedBy === undefined ? null : R.User.ref(d.attestedBy) },
@@ -3027,7 +3038,7 @@ export const organizationMembersGroupLayer = (
 
 /**
  * Layer implementing the `organization-domains` group: one domain claim, by
- * id, and the operator's attestation and release (see
+ * id, and the operator's attestation, lookup and release (see
  * `organizationDomainsGroup` in `HttpApi.ts`).
  */
 export const organizationDomainsGroupLayer = (
@@ -3070,7 +3081,19 @@ export const organizationDomainsGroupLayer = (
               { attestedBy: admin.id },
             ),
           );
-          return Handlers.data(domainResource(attested));
+          return Handlers.data(operatorDomainResource(attested));
+        }).pipe(JsonApiErrors.mapHttpErrors),
+      )
+      // The operator's lookup of every organization's claim on a domain,
+      // gated as the attestation is, before the domain is read.
+      .handle("lookup", ({ query, request }) =>
+        Effect.gen(function* () {
+          yield* requireAdminCaller(request, cfg);
+          const org = yield* resolveOrganization;
+          const claims = yield* refusedBadRequest(
+            org.service.listDomainClaims(query.filter?.domain ?? ""),
+          );
+          return Handlers.collection(claims.map(operatorDomainResource));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       // The operator's release of any organization's claim, gated as

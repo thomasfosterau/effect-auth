@@ -1,8 +1,8 @@
 /**
  * Domain claims over HTTP: an organization proves a domain through DNS
  * only, and manual attestation is the operator's, at the admin-gated
- * `POST /admin/organization-domains`, as is the release of any claim at
- * `DELETE /admin/organization-domains/:id`. Runs the real `Http.make`
+ * `POST /admin/organization-domains`, as are the lookup of every claim on a
+ * domain and the release of any claim. Runs the real `Http.make`
  * handler of the `./client/testing` fixture.
  */
 import { MutableHashMap, MutableHashSet } from "effect";
@@ -220,14 +220,99 @@ describe("HTTP domain claims", () => {
     ).toMatchObject({
       attestedBy: user.id,
     });
-    // The organization reads who attested its claim; a DNS claim names no one.
-    const listed = await owner.client.organization.listDomains(org.id);
-    expect(listed).toEqual([expect.objectContaining({ id: pending.id, attestedBy: user.id })]);
+    // The operator reads who attested the claim; a DNS claim names no one.
     const dns = await owner.client.organization.addDomain(org.id, { domain: "acme-corp.test" });
     MutableHashSet.add(server.publishedDnsDomains, "acme-corp.test");
-    const proved = await owner.client.organization.verifyDomain(dns.id);
-    expect(proved.verificationState).toBe("verified");
-    expect("attestedBy" in proved).toBe(false);
+    await owner.client.organization.verifyDomain(dns.id);
+    expect(await operator.client.admin.lookupDomain("acme.test")).toEqual([
+      expect.objectContaining({ id: pending.id, attestedBy: user.id }),
+    ]);
+    const [proved] = await operator.client.admin.lookupDomain("acme-corp.test");
+    expect(proved).toMatchObject({ id: dns.id, verificationState: "verified" });
+    expect(proved !== undefined && "attestedBy" in proved).toBe(false);
+  });
+
+  it("never shows the organization who attested its claim", async () => {
+    const { server, browser } = withServer();
+    const owner = await signUp(server, browser, "owner@acme.test");
+    const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
+    const operator = await signUp(server, browser, "ops@platform.test", true);
+    const attested = await operator.client.admin.attestDomain({
+      organizationId: org.id,
+      domain: "acme.test",
+    });
+    assert(attested.attestedBy !== undefined, "the operator's view names the attester");
+
+    // Not even as `null`: the tenant's documents carry no `attester` at all.
+    const listed = await owner.fetch(`${BASE}/organizations/${org.id}/domains`, {
+      headers: { accept: "application/vnd.api+json" },
+    });
+    expect(listed.status).toBe(200);
+    const body = await listed.text();
+    expect(body).toContain(attested.id);
+    expect(body).not.toContain("attester");
+    expect(body).not.toContain(attested.attestedBy);
+    expect(await owner.client.organization.listDomains(org.id)).toEqual([
+      expect.not.objectContaining({ attestedBy: expect.anything() }),
+    ]);
+  });
+
+  it("lets a platform admin look up every organization's claim on a domain", async () => {
+    const { server, browser } = withServer();
+    const first = await signUp(server, browser, "owner@first.test");
+    const firstOrg = await first.client.organization.create({ name: "First", slug: "first" });
+    const second = await signUp(server, browser, "owner@second.test");
+    const secondOrg = await second.client.organization.create({ name: "Second", slug: "second" });
+    const operator = await signUp(server, browser, "ops@platform.test", true);
+
+    const held = await operator.client.admin.attestDomain({
+      organizationId: firstOrg.id,
+      domain: "acme.test",
+    });
+    const pending = await second.client.organization.addDomain(secondOrg.id, {
+      domain: "acme.test",
+    });
+    await first.client.organization.addDomain(firstOrg.id, { domain: "other.test" });
+
+    // Every state, every organization, and the domain normalized as a claim's is.
+    const claims = await operator.client.admin.lookupDomain(" ACME.test ");
+    expect(
+      claims.map((claim) => [claim.id, claim.organizationId, claim.verificationState]),
+    ).toEqual([
+      [held.id, firstOrg.id, "verified"],
+      [pending.id, secondOrg.id, "pending"],
+    ]);
+    // What a dispute needs: the id to release.
+    await operator.client.admin.releaseDomain(held.id);
+    expect((await operator.client.admin.lookupDomain("acme.test")).map((c) => c.id)).toEqual([
+      pending.id,
+    ]);
+    expect(await operator.client.admin.lookupDomain("unclaimed.test")).toEqual([]);
+
+    // A missing or invalid domain is a 400.
+    const lookup = (search: string) =>
+      operator.fetch(`${BASE}/admin/organization-domains${search}`, {
+        headers: { accept: "application/vnd.api+json" },
+      });
+    expect((await lookup("")).status).toBe(400);
+    expect((await lookup("?filter[domain]=not-a-domain")).status).toBe(400);
+  });
+
+  it("refuses the lookup endpoint to anyone but a platform admin", async () => {
+    const { server, browser } = withServer();
+    const owner = await signUp(server, browser, "owner@acme.test");
+    const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
+    await owner.client.organization.addDomain(org.id, { domain: "acme.test" });
+
+    // The organization's owner, looking up its own domain, is still refused.
+    expect(await refusal(owner.client.admin.lookupDomain("acme.test"))).toBe(403);
+    // The admin check comes before the domain is read.
+    expect(await refusal(owner.client.admin.lookupDomain("not-a-domain"))).toBe(403);
+    const anonymous = await makeCookieJarFetch(server.handler)(
+      `${BASE}/admin/organization-domains?filter[domain]=acme.test`,
+      { headers: { accept: "application/vnd.api+json" } },
+    );
+    expect(anonymous.status).toBe(401);
   });
 
   it("lets a platform admin release any organization's claim, settling a dispute", async () => {

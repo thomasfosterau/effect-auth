@@ -1087,12 +1087,21 @@ export type DomainAttestationDocument = typeof DomainAttestationDocument.Type;
  *   server's admin rule (the mounted `AdminService`'s `AdminConfig`, else
  *   role `admin`), never an organization permission; `201` with the
  *   organization's claim, now `verified` with the `manual` strategy and the
- *   admin as its `attester`. A refusal (an unknown organization, an invalid
- *   domain, a domain verified for another organization) answers `400`.
+ *   admin as its `attester` (the operator's view,
+ *   `OperatorOrganizationDomain`). A refusal (an unknown organization, an
+ *   invalid domain, a domain verified for another organization) answers
+ *   `400`.
+ * - `GET /admin/organization-domains?filter[domain]=…`: the operator's
+ *   lookup of every organization's claim on the domain, in any state, oldest
+ *   first, each with its `attester` (`OrganizationService.listDomainClaims`),
+ *   so a dispute can find the claim id to release. Gated as the attestation
+ *   is; a missing or invalid domain answers `400`.
  * - `DELETE /admin/organization-domains/:id`: the operator's release of any
  *   organization's claim, whatever its state, for disputes
  *   (`OrganizationService.releaseDomain`). Gated as the attestation is;
  *   `204`.
+ *
+ * The tenant endpoints answer the tenant's view, without `attester`.
  *
  * A tenant's refusal, or a server with no `OrganizationDomainStore`, answers
  * `403`; an unknown id gets the same `403` and body as another tenant's claim
@@ -1103,10 +1112,16 @@ export const organizationDomainsGroup = Group.make(
   R.OrganizationDomain,
   Endpoint.delete(R.OrganizationDomain, { errors: resourceErrors }),
   itemAction("verify", "/organization-domains/:id/verifications", R.OrganizationDomain, 200),
-  Endpoint.create(R.OrganizationDomain, {
+  Endpoint.create(R.OperatorOrganizationDomain, {
     name: "attest",
     path: "/admin/organization-domains",
     payload: DomainAttestationDocument,
+    errors: resourceErrors,
+  }),
+  Endpoint.list(R.OperatorOrganizationDomain, {
+    name: "lookup",
+    path: "/admin/organization-domains",
+    filter: { domain: Schema.optionalKey(Schema.String) },
     errors: resourceErrors,
   }),
   Endpoint.delete(R.OrganizationDomain, {
