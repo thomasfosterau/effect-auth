@@ -412,7 +412,7 @@ describe("magic link and one-time codes under an account lock", () => {
         return { ada, session, lock: yield* lockoutRecord(ada.id) };
       }).pipe(Effect.provide(passwordless(lockout({ maxAttempts: 3 })))),
     );
-    expect(result.session.userId).toBe(result.ada.id);
+    expect(result.session?.userId).toBe(result.ada.id);
     expect(result.lock).toBeNull();
   });
 
@@ -429,7 +429,7 @@ describe("magic link and one-time codes under an account lock", () => {
         return { ada, session };
       }).pipe(Effect.provide(passwordless(lockout({ maxAttempts: 3 })))),
     );
-    expect(result.session.userId).toBe(result.ada.id);
+    expect(result.session?.userId).toBe(result.ada.id);
   });
 
   it("gives an attacker who knows the handle no guesses past the code limit and the backoff", async () => {

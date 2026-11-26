@@ -191,8 +191,8 @@ directories, each with its own `index.ts` barrel and matching
 - **`saml/`** (the `./saml` subpath only; Node-only): `Verifier.ts`, the
   `SamlVerifier` over the optional peer `@node-saml/node-saml`.
 - **`multifactor/` cluster** (also the `Auth.MultiFactor` namespace):
-  `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in
-  via the `SecondFactorGate` seam), `OtpSecondFactor.ts` (OTP-based
+  `MultiFactor.ts` (TOTP + backup codes, integrating into every sign-in
+  method via the `SecondFactorGate` seam), `OtpSecondFactor.ts` (OTP-based
   alternative second-factor gate), `WebAuthn.ts` (passkeys, merged from
   `WebAuthnService.ts`), `Otp.ts` (RFC 6238/4226 TOTP/HOTP primitives).
 - **Sign-in methods** (root, not yet clustered): `Username.ts`,

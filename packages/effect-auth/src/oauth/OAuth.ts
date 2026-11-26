@@ -40,7 +40,11 @@ import {
 import { type HookError } from "../Hooks.ts";
 import { type OAuthAccount, OAuthAccountStore } from "./OAuthAccount.ts";
 export { type OAuthAccount, OAuthAccountStore } from "./OAuthAccount.ts";
-import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "../email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
@@ -180,15 +184,12 @@ export interface OAuthCreateUserInput {
  * Result of a complete OAuth sign-in (callback handled, user resolved or
  * created, account linked, session issued).
  */
-export interface OAuthSignInResult {
+export type OAuthSignInResult = {
   readonly user: Types.User;
   readonly account: OAuthAccount;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
   readonly isNewUser: boolean;
   readonly returnTo?: string;
-}
+} & SessionOrChallenge;
 
 /**
  * OAuth provider interface
@@ -1475,13 +1476,12 @@ export const make = (
               yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
               const user = yield* userStore.getUser(updatedAccount.userId);
-              const { session, token } = yield* sessionManager.createSession(user.id);
+              const issued = yield* sessionOrChallenge(sessionManager, user, "oauth");
 
               return {
                 user,
                 account: updatedAccount,
-                session,
-                token,
+                ...issued,
                 isNewUser: false,
                 ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
               } satisfies OAuthSignInResult;
@@ -1517,13 +1517,12 @@ export const make = (
             };
             yield* accountStore.create(yield* encryptAccount(account));
 
-            const { session, token } = yield* sessionManager.createSession(user.id);
+            const issued = yield* sessionOrChallenge(sessionManager, user, "oauth");
 
             return {
               user,
               account,
-              session,
-              token,
+              ...issued,
               isNewUser,
               ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
             } satisfies OAuthSignInResult;

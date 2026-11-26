@@ -16,7 +16,13 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  exemptFromSecondFactor,
+  type SecondFactorGate,
+} from "./email/EmailPassword.ts";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
@@ -238,11 +244,43 @@ describe("GoogleOneTapService", () => {
       { type: "email", value: "alice@gmail.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
     expect(first.user.name).toBe("Alice");
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
     expect(first.claims["sub"]).toBe("google-user-1");
     expect(second.isNewUser).toBe(false);
     expect(second.user.id).toBe(first.user.id);
     expect(MutableHashMap.size(users)).toBe(1);
+  });
+
+  it("answers a second-factor challenge for an enrolled user unless One Tap is exempt", async () => {
+    const { layer, nonceStore } = makeStores();
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const challenged: Array<string> = [];
+    const signIn = (nonce: string, gate: Layer.Layer<SecondFactorGate>) =>
+      Effect.gen(function* () {
+        yield* nonceStore.create(nonce, DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000);
+        return yield* service.signIn(
+          signCredential(validClaims({ nonce: hashNonce(nonce) })),
+          nonce,
+        );
+      }).pipe(Effect.provide(Layer.merge(layer, gate)));
+
+    const gated = await withJwks(() =>
+      Effect.runPromise(signIn("test-nonce-gated", enrolledGate(challenged))),
+    );
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.session).toBeUndefined();
+    expect(challenged).toEqual([gated.user.id]);
+
+    const exempt = await withJwks(() =>
+      Effect.runPromise(
+        signIn(
+          "test-nonce-exempt",
+          Layer.merge(enrolledGate(challenged), exemptFromSecondFactor("google-one-tap")),
+        ),
+      ),
+    );
+    expect(exempt.secondFactor).toBeUndefined();
+    expect(exempt.session?.userId).toBe(gated.user.id);
   });
 
   it("accepts the bare `accounts.google.com` issuer", async () => {

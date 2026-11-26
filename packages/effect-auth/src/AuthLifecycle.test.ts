@@ -36,6 +36,7 @@ import {
   type EmailPasswordConfig,
 } from "./email/EmailPassword.ts";
 import * as EmailPassword from "./email/EmailPassword.ts";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
 import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
@@ -605,6 +606,32 @@ describe("AuthLifecycleService", () => {
     expect(result.needsEmailVerification).toBe(false);
     // The email identifier was promoted to verified.
     expect(findEmailIdentifier("verify@example.com")?.verified).toBe(true);
+  });
+
+  it("answers the sign-in after verification with a challenge when the gate requires one", async () => {
+    const testContext = await makeTestContext();
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+    const user: User = { id: "user-gated", createdAt: now, updatedAt: now, attributes: {} };
+    MutableHashMap.set(users, user.id, user);
+    addEmailIdentifier(user.id, "gated@example.com", false);
+    const challenged: Array<string> = [];
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const verification = yield* EmailVerificationService;
+          const created = yield* verification.createVerification(user.id, "gated@example.com");
+          const service = yield* AuthLifecycle.make({ autoSignInAfterVerification: true });
+          return yield* service.verifyEmail({ token: created.token });
+        }),
+        testContext,
+      ).pipe(Effect.provide(Layer.merge(TestHooks, enrolledGate(challenged)))),
+    );
+
+    expect(result.secondFactor).toEqual(testChallenge);
+    expect(result.session).toBeUndefined();
+    expect(challenged).toEqual([user.id]);
+    expect(findEmailIdentifier("gated@example.com")?.verified).toBe(true);
   });
 
   it("should sign in verified users normally", async () => {

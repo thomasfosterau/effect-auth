@@ -202,10 +202,11 @@ export interface SecondFactorChallenge {
 }
 
 /**
- * Optional seam consulted by password sign-in after the first factor
- * succeeds. When present in context (see `MultiFactorGateLayer` in the
- * MultiFactor module) and `required` reports true, sign-in returns a
- * {@link SecondFactorChallenge} instead of a session.
+ * Optional seam consulted by every sign-in method after the first factor
+ * succeeds (see {@link secondFactorChallenge}). When present in context (see
+ * `MultiFactorGateLayer` in the MultiFactor module) and `required` reports
+ * true, sign-in returns a {@link SecondFactorChallenge} instead of a session,
+ * unless the method is in {@link SecondFactorExemptMethods}.
  */
 export class SecondFactorGate extends Context.Service<
   SecondFactorGate,
@@ -214,6 +215,122 @@ export class SecondFactorGate extends Context.Service<
     readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
   }
 >()("@effect-auth/SecondFactorGate") {}
+
+/**
+ * The sign-in methods that issue a session and so consult the
+ * {@link SecondFactorGate}: password sign-in by email (`"email-password"`) or
+ * username (`"username"`), the magic link, the email and SMS one-time codes,
+ * `redeemOneTimeTokenForSession` (`"one-time-token"`), the sign-in that
+ * follows an email verification (`"email-verification"`), OAuth, SSO (OIDC
+ * and SAML), Google One Tap and passkeys (`"passkey"`, for a host that issues
+ * the session itself after `WebAuthnService.verifyAuthentication`).
+ */
+export type SignInMethod =
+  | "email-password"
+  | "username"
+  | "magic-link"
+  | "email-otp"
+  | "phone-otp"
+  | "one-time-token"
+  | "email-verification"
+  | "oauth"
+  | "sso"
+  | "google-one-tap"
+  | "passkey";
+
+/**
+ * The sign-in methods the {@link SecondFactorGate} lets through on their
+ * own: a user enrolled in a second factor who signs in with one of them gets
+ * a session, not a challenge. Empty by default, so every method is gated.
+ * Provide it with {@link exemptFromSecondFactor}, for instance to treat an IdP
+ * that enforces its own multi-factor policy as sufficient.
+ */
+export const SecondFactorExemptMethods: Context.Reference<ReadonlyArray<SignInMethod>> =
+  Context.Reference<ReadonlyArray<SignInMethod>>("@effect-auth/SecondFactorExemptMethods", {
+    defaultValue: () => [],
+  });
+
+/**
+ * Exempt `methods` from the {@link SecondFactorGate}: provide the layer
+ * beside the sign-in services.
+ *
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect } from "effect"
+ * import {
+ *   SecondFactorExemptMethods,
+ *   exemptFromSecondFactor,
+ * } from "@thomasfosterau/effect-auth/email"
+ *
+ * const program = Effect.gen(function* () {
+ *   assert.deepEqual(yield* SecondFactorExemptMethods, ["sso", "passkey"])
+ * })
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(exemptFromSecondFactor("sso", "passkey"))))
+ * ```
+ */
+export const exemptFromSecondFactor = (
+  ...methods: ReadonlyArray<SignInMethod>
+): Layer.Layer<never> => Layer.succeed(SecondFactorExemptMethods, methods);
+
+/**
+ * Consult the {@link SecondFactorGate} for `user` signing in with `method`,
+ * after the first factor succeeded and before a session is created. Answers
+ * the challenge to return instead of a session, or `undefined` when there is
+ * no gate, the method is exempt ({@link SecondFactorExemptMethods}) or the
+ * gate does not require a second factor for this user.
+ *
+ * Every session-issuing sign-in in the core calls it; a host that issues a
+ * session itself (a passkey sign-in, say) calls it too.
+ */
+export const secondFactorChallenge = (
+  user: Types.User,
+  method: SignInMethod,
+): Effect.Effect<SecondFactorChallenge | undefined, Errors.AuthError> =>
+  Effect.gen(function* () {
+    const gate = yield* Effect.serviceOption(SecondFactorGate);
+    if (Option.isNone(gate)) return undefined;
+    if ((yield* SecondFactorExemptMethods).includes(method)) return undefined;
+    if (!(yield* gate.value.required(user))) return undefined;
+    return yield* gate.value.begin(user);
+  });
+
+/**
+ * What a gated sign-in answers: the new session and its raw token, or, when
+ * the {@link SecondFactorGate} requires a second factor, the challenge to
+ * redeem for one instead.
+ */
+export type SessionOrChallenge =
+  | {
+      readonly session: Types.Session;
+      /** The raw session token, the credential the client presents; `session.id` is its digest. */
+      readonly token: string;
+      readonly secondFactor?: never;
+    }
+  | {
+      readonly session?: never;
+      readonly token?: never;
+      /** The challenge to redeem with the second factor for a session. */
+      readonly secondFactor: SecondFactorChallenge;
+    };
+
+/**
+ * Sign `user` in with `method`: the challenge {@link secondFactorChallenge}
+ * answers when the gate requires one, else a new session.
+ */
+export const sessionOrChallenge = (
+  sessions: typeof SessionService.Service,
+  user: Types.User,
+  method: SignInMethod,
+  attributes?: Types.Attributes,
+): Effect.Effect<SessionOrChallenge, Errors.AuthError | HookError> =>
+  Effect.flatMap(
+    secondFactorChallenge(user, method),
+    (secondFactor): Effect.Effect<SessionOrChallenge, Errors.AuthError | HookError> =>
+      secondFactor === undefined
+        ? sessions.createSession(user.id, attributes)
+        : Effect.succeed({ secondFactor }),
+  );
 
 /**
  * Outcome of a sign-in or sign-up.
@@ -634,9 +751,8 @@ export const make = (
 
           // Second factor: when a gate is present and required for this user,
           // return a challenge instead of a session.
-          const gate = yield* Effect.serviceOption(SecondFactorGate);
-          if (Option.isSome(gate) && (yield* gate.value.required(user))) {
-            const secondFactor = yield* gate.value.begin(user);
+          const secondFactor = yield* secondFactorChallenge(user, "email-password");
+          if (secondFactor !== undefined) {
             return yield* hooks.afterSignIn({
               user,
               secondFactor,
