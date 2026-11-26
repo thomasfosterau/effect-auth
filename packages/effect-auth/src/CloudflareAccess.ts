@@ -32,7 +32,6 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Formatter from "effect/Formatter";
@@ -87,18 +86,20 @@ export const ACCESS_JWT_COOKIE = "CF_Authorization";
  * @since 0.6.0
  * @category errors
  */
-export type CloudflareAccessFailure =
-  | "config"
-  | "malformed"
-  | "algorithm"
-  | "key"
-  | "jwks"
-  | "signature"
-  | "issuer"
-  | "audience"
-  | "expired"
-  | "not-yet-valid"
-  | "claims";
+export const CloudflareAccessFailure = Schema.Literals([
+  "config",
+  "malformed",
+  "algorithm",
+  "key",
+  "jwks",
+  "signature",
+  "issuer",
+  "audience",
+  "expired",
+  "not-yet-valid",
+  "claims",
+]);
+export type CloudflareAccessFailure = typeof CloudflareAccessFailure.Type;
 
 /**
  * A refused Access token, an unreachable key set, or an invalid configuration.
@@ -107,11 +108,14 @@ export type CloudflareAccessFailure =
  * @since 0.6.0
  * @category errors
  */
-export class CloudflareAccessError extends Data.TaggedError("CloudflareAccessError")<{
-  readonly reason: CloudflareAccessFailure;
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class CloudflareAccessError extends Schema.TaggedError<
+  CloudflareAccessError,
+  { readonly brand: unique symbol }
+>()("CloudflareAccessError", {
+  reason: CloudflareAccessFailure,
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 // ---------------------------------------------------------------------------
 // Config and identity

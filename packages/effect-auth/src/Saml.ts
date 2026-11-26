@@ -8,7 +8,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
@@ -16,10 +16,13 @@ import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */
-export class SamlError extends Data.TaggedError("SamlError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class SamlError extends Schema.TaggedError<SamlError, { readonly brand: unique symbol }>()(
+  "SamlError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * Digest strength accepted for XML-DSig signature and digest methods, named the

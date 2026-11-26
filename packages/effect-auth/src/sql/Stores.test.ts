@@ -1,6 +1,5 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Clock from "effect/Clock";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -35,7 +34,12 @@ import { purgeUser, userPurgeStores } from "../UserPurge.ts";
 // ---------------------------------------------------------------------------
 
 /** The failure the broken test connection reports. */
-class SimulatedFailure extends Data.TaggedError("SimulatedFailure")<{ readonly message: string }> {}
+class SimulatedFailure extends Schema.TaggedError<
+  SimulatedFailure,
+  { readonly brand: unique symbol }
+>()("SimulatedFailure", {
+  message: Schema.String,
+}) {}
 
 const driverError = (cause: unknown): SqlError.SqlError =>
   new SqlError.SqlError({

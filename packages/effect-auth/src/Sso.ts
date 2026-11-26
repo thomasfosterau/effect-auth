@@ -9,7 +9,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -66,10 +66,13 @@ import type * as Types from "./Types.ts";
 import { normalizeDomain, normalizeEmail } from "./utils.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
-export class SsoError extends Data.TaggedError("SsoError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class SsoError extends Schema.TaggedError<SsoError, { readonly brand: unique symbol }>()(
+  "SsoError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * A registered **OIDC** SSO connection. Endpoints may be supplied directly or

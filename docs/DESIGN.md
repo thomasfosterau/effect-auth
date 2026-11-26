@@ -223,12 +223,11 @@ inconsistencies: `AuthError` → 409 in `signUp` but → 500 in `signIn`
 
 **Decision.**
 
-1. **Mechanism:** domain errors stay `Data.TaggedError`; HTTP boundary errors
-   stay `Schema.TaggedErrorClass` (they must serialize and carry status). A
-   module may switch a domain error to `Schema.TaggedErrorClass` only when it
-   crosses the wire as-is. (A wholesale migration to Schema errors is _not_
-   proposed: it buys serialization the library doesn't need internally and
-   would churn 37 classes.)
+1. **Mechanism:** every error is a `Schema.TaggedError` class. Domain errors
+   carry a stable `code`; HTTP boundary errors also carry a status
+   (`HttpApiSchema.status`). (Amended: domain errors were `Data.TaggedError`
+   until the lint rules moved to `error`; a schema-backed error validates its
+   fields when constructed and can cross the wire as-is.)
 2. **Taxonomy rules:** `AuthError` means _infrastructure/unexpected_ failure
    only — never a flow outcome. A flow outcome gets a specific tagged error.
    Central `Errors.ts` holds errors shared by ≥2 modules; a module-local error
@@ -290,8 +289,7 @@ endpoints, uniform `AuthError` → 500, the typed `EmailInUseError` (now in
 shared `Errors.ts`) carrying signUp's duplicate-email 409, and the full
 flow-outcome error taxonomy above.
 
-**Rationale.** `Data.TaggedError` vs `Schema.TaggedErrorClass` split follows
-what each layer needs; the mapping table removes the per-handler drift that
+**Rationale.** One error mechanism for both layers; the mapping table removes the per-handler drift that
 makes client error handling guesswork; 429 is the semantically correct status
 and clients (`retryAfter` field already exists on `RateLimitError`) can act on it.
 

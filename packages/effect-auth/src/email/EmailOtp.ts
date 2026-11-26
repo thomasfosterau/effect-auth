@@ -9,7 +9,7 @@
  * @module email-otp
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -39,10 +39,13 @@ import { definedKeys } from "../DefinedKeys.ts";
 /**
  * Email OTP error
  */
-export class EmailOtpError extends Data.TaggedError("EmailOtpError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class EmailOtpError extends Schema.TaggedError<
+  EmailOtpError,
+  { readonly brand: unique symbol }
+>()("EmailOtpError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * The purposes an email OTP can be issued for

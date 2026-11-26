@@ -5,7 +5,7 @@
  * email sign-in's error, `beforeAuthenticate` hook and `SecondFactorGate`.
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -38,9 +38,12 @@ import type * as Types from "./Types.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /** Raised for invalid or already-taken usernames. */
-export class UsernameError extends Data.TaggedError("UsernameError")<{
-  readonly message: string;
-}> {}
+export class UsernameError extends Schema.TaggedError<
+  UsernameError,
+  { readonly brand: unique symbol }
+>()("UsernameError", {
+  message: Schema.String,
+}) {}
 
 /** Configuration for {@link UsernameService}. */
 export interface UsernameConfig {

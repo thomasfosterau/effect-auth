@@ -9,7 +9,7 @@
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -39,10 +39,13 @@ import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 /**
  * Two-factor error
  */
-export class MultiFactorError extends Data.TaggedError("MultiFactorError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class MultiFactorError extends Schema.TaggedError<
+  MultiFactorError,
+  { readonly brand: unique symbol }
+>()("MultiFactorError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * `MultiFactorService.enable` on a user whose enrolment is already verified.
@@ -50,11 +53,12 @@ export class MultiFactorError extends Data.TaggedError("MultiFactorError")<{
  * without a second factor until (or unless) the new one is confirmed, so the
  * user removes the enrolment with `disable` first.
  */
-export class MultiFactorAlreadyEnabledError extends Data.TaggedError(
-  "MultiFactorAlreadyEnabledError",
-)<{
-  readonly message: string;
-}> {}
+export class MultiFactorAlreadyEnabledError extends Schema.TaggedError<
+  MultiFactorAlreadyEnabledError,
+  { readonly brand: unique symbol }
+>()("MultiFactorAlreadyEnabledError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Persistent multi-factor state for a user.

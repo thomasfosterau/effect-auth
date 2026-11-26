@@ -8,7 +8,7 @@
  * @module argon2/wasm
  * @internal
  */
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
@@ -72,10 +72,13 @@ const decoder = new TextDecoder();
  * returned `-1`), or it `"trapped"` (an allocation failure aborts the Rust
  * side). The hasher wraps it in a `HashingError`.
  */
-export class KernelError extends Data.TaggedError("KernelError")<{
-  readonly reason: "rejected" | "trapped";
-  readonly cause?: unknown;
-}> {}
+export class KernelError extends Schema.TaggedError<
+  KernelError,
+  { readonly brand: unique symbol }
+>()("KernelError", {
+  reason: Schema.Literals(["rejected", "trapped"]),
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /** A buffer copied into module memory: its pointer and length. */
 type Input = readonly [pointer: number, length: number];

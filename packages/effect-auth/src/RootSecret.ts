@@ -8,7 +8,7 @@
  */
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -41,9 +41,12 @@ export const MIN_ROOT_SECRET_BYTES = 32;
 export const ROOT_SECRET_ENV = "AUTH_SECRET";
 
 /** The root secret is missing or shorter than {@link MIN_ROOT_SECRET_BYTES}. */
-export class RootSecretError extends Data.TaggedError("RootSecretError")<{
-  readonly message: string;
-}> {}
+export class RootSecretError extends Schema.TaggedError<
+  RootSecretError,
+  { readonly brand: unique symbol }
+>()("RootSecretError", {
+  message: Schema.String,
+}) {}
 
 const encoder = new TextEncoder();
 

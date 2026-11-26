@@ -38,7 +38,7 @@
  * @module rbac
  */
 
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
@@ -108,9 +108,12 @@ export interface RbacConfig {
  * `principal in Role::"…"`, never reaches a system principal, whatever parents
  * a resolver gives it.)
  */
-class ReservedPrincipalTypeError extends Data.TaggedError("ReservedPrincipalTypeError")<{
-  readonly message: string;
-}> {}
+class ReservedPrincipalTypeError extends Schema.TaggedError<
+  ReservedPrincipalTypeError,
+  { readonly brand: unique symbol }
+>()("ReservedPrincipalTypeError", {
+  message: Schema.String,
+}) {}
 
 const principalTypeOf = (config: RbacConfig): string => {
   const principalType = config.principalType ?? DefaultPrincipalType;

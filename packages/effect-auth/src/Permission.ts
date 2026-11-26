@@ -4,12 +4,15 @@
  * stores, policies, tests and application code.
  */
 
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 
 /** Thrown by {@link parsePermission} for a malformed permission string. */
-class InvalidPermissionStringError extends Data.TaggedError("InvalidPermissionStringError")<{
-  readonly message: string;
-}> {}
+class InvalidPermissionStringError extends Schema.TaggedError<
+  InvalidPermissionStringError,
+  { readonly brand: unique symbol }
+>()("InvalidPermissionStringError", {
+  message: Schema.String,
+}) {}
 
 /**
  * A permission reference: a resource paired with an action.

@@ -7,7 +7,6 @@
  *
  * @module plugins/captcha
  */
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
@@ -44,9 +43,12 @@ export type CaptchaEndpoint = "signUp" | "signIn" | "sendCode";
  *
  * @since 0.9.0
  */
-export class CaptchaConfigError extends Data.TaggedError("CaptchaConfigError")<{
-  readonly message: string;
-}> {}
+export class CaptchaConfigError extends Schema.TaggedError<
+  CaptchaConfigError,
+  { readonly brand: unique symbol }
+>()("CaptchaConfigError", {
+  message: Schema.String,
+}) {}
 
 /** Whether an attempt is a password sign-in, the attempts a captcha token rides on. */
 const isPasswordSignIn = (attempt: AuthenticateAttempt): boolean =>

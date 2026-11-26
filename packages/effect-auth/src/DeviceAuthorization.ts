@@ -6,7 +6,6 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
@@ -105,30 +104,40 @@ export class DeviceAuthorizationStore extends Context.Service<
 >()("@effect-auth/DeviceAuthorizationStore") {}
 
 /** RFC 8628 polling errors, mapped to the standard OAuth `error` codes. */
-export class DevicePollError extends Data.TaggedError("DevicePollError")<{
-  readonly error:
-    | "authorization_pending"
-    | "slow_down"
-    | "expired_token"
-    | "access_denied"
-    | "invalid_grant";
-  readonly message: string;
-}> {}
+export class DevicePollError extends Schema.TaggedError<
+  DevicePollError,
+  { readonly brand: unique symbol }
+>()("DevicePollError", {
+  error: Schema.Literals([
+    "authorization_pending",
+    "slow_down",
+    "expired_token",
+    "access_denied",
+    "invalid_grant",
+  ]),
+  message: Schema.String,
+}) {}
 
 /** Raised when a user code is unknown, expired or already decided at lookup, approve or deny time. */
-export class DeviceCodeError extends Data.TaggedError("DeviceCodeError")<{
-  readonly message: string;
-}> {}
+export class DeviceCodeError extends Schema.TaggedError<
+  DeviceCodeError,
+  { readonly brand: unique symbol }
+>()("DeviceCodeError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Raised when a device authorization request names a client that is not
  * registered (`invalid_client`) or a scope the client is not registered for
  * (`invalid_scope`), the OAuth error codes RFC 8628 §3.2 answers with.
  */
-export class DeviceClientError extends Data.TaggedError("DeviceClientError")<{
-  readonly error: "invalid_client" | "invalid_scope";
-  readonly message: string;
-}> {}
+export class DeviceClientError extends Schema.TaggedError<
+  DeviceClientError,
+  { readonly brand: unique symbol }
+>()("DeviceClientError", {
+  error: Schema.Literals(["invalid_client", "invalid_scope"]),
+  message: Schema.String,
+}) {}
 
 /** A client allowed to start the device grant. */
 export interface DeviceClient {

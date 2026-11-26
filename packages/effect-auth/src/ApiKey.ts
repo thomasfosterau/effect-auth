@@ -9,7 +9,7 @@
 
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Duration from "effect/Duration";
@@ -30,10 +30,13 @@ import { definedKeys } from "./DefinedKeys.ts";
 /**
  * API key error
  */
-export class ApiKeyError extends Data.TaggedError("ApiKeyError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class ApiKeyError extends Schema.TaggedError<
+  ApiKeyError,
+  { readonly brand: unique symbol }
+>()("ApiKeyError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * Persistent API key record.

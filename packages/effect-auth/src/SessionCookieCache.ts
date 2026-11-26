@@ -5,7 +5,6 @@
  * standing attributes are never cached. Change `version` to invalidate every
  * cookie.
  */
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
@@ -64,9 +63,12 @@ export interface ResolvedSessionCache {
 const MIN_SECRET_LENGTH = 32;
 
 /** The session cache is enabled with an HMAC secret that is too short. */
-class SessionCacheConfigError extends Data.TaggedError("SessionCacheConfigError")<{
-  readonly message: string;
-}> {}
+class SessionCacheConfigError extends Schema.TaggedError<
+  SessionCacheConfigError,
+  { readonly brand: unique symbol }
+>()("SessionCacheConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Validate a {@link SessionCacheConfig}: `undefined` when the cache is disabled, otherwise the resolved settings. Throws when the secret is shorter than 32 characters.

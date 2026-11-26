@@ -9,7 +9,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as HashMap from "effect/HashMap";
 import * as Layer from "effect/Layer";
@@ -34,20 +34,26 @@ import { isInGoodStanding } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register a client or process an authorization request. */
-export class OidcProviderError extends Data.TaggedError("OidcProviderError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class OidcProviderError extends Schema.TaggedError<
+  OidcProviderError,
+  { readonly brand: unique symbol }
+>()("OidcProviderError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * Token endpoint failure carrying an RFC 6749 error code
  * (`invalid_request`, `invalid_client`, `invalid_grant`,
  * `unsupported_grant_type`, `invalid_scope`, `server_error`).
  */
-export class OidcTokenError extends Data.TaggedError("OidcTokenError")<{
-  readonly error: string;
-  readonly description?: string;
-}> {}
+export class OidcTokenError extends Schema.TaggedError<
+  OidcTokenError,
+  { readonly brand: unique symbol }
+>()("OidcTokenError", {
+  error: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+}) {}
 
 /**
  * Dynamic client registration failure carrying an RFC 7591 §3.2.2 error code
@@ -55,10 +61,13 @@ export class OidcTokenError extends Data.TaggedError("OidcTokenError")<{
  * guarded endpoints need: `invalid_token` (bad initial-access or registration
  * access token → 401) and `access_denied` (refused outright → 403).
  */
-export class OidcRegistrationError extends Data.TaggedError("OidcRegistrationError")<{
-  readonly error: string;
-  readonly description?: string;
-}> {}
+export class OidcRegistrationError extends Schema.TaggedError<
+  OidcRegistrationError,
+  { readonly brand: unique symbol }
+>()("OidcRegistrationError", {
+  error: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+}) {}
 
 // -----------------------------------------------------------------------------
 // Records + stores

@@ -23,7 +23,6 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { rolldown, type Plugin } from "vite/rolldown";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { Base64Url } from "effect/encoding";
 import * as Option from "effect/Option";
@@ -52,10 +51,13 @@ const DATES: Readonly<Record<DateName, string>> = {
 };
 
 /** workerd stopped before every socket listened. */
-class WorkerdExited extends Data.TaggedError("WorkerdExited")<{
-  readonly code: number | null;
-  readonly stderr: string;
-}> {}
+class WorkerdExited extends Schema.TaggedError<WorkerdExited, { readonly brand: unique symbol }>()(
+  "WorkerdExited",
+  {
+    code: Schema.NullOr(Schema.Finite),
+    stderr: Schema.String,
+  },
+) {}
 
 const srcDir = fileURLToPath(new URL(".", import.meta.url));
 // A path beside the sources, so the entry's relative imports resolve here.

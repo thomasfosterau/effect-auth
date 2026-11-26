@@ -8,7 +8,6 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -72,14 +71,17 @@ import { normalizeEmail } from "./utils.ts";
  * `scimType: "uniqueness"` is how an IdP learns to reconcile rather than retry,
  * and `400` with `invalidPath` is how it learns to stop sending an operation.
  */
-export class ScimError extends Data.TaggedError("ScimError")<{
-  readonly message: string;
-  /** HTTP status for this failure (400, 401, 404, 409, …). */
-  readonly status: number;
-  /** RFC 7644 §3.12 detail code, when one applies. */
-  readonly scimType?: string;
-  readonly cause?: unknown;
-}> {}
+export class ScimError extends Schema.TaggedError<ScimError, { readonly brand: unique symbol }>()(
+  "ScimError",
+  {
+    message: Schema.String,
+    /** HTTP status for this failure (400, 401, 404, 409, …). */
+    status: Schema.Finite,
+    /** RFC 7644 §3.12 detail code, when one applies. */
+    scimType: Schema.optionalKey(Schema.String),
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 const badRequest = (message: string, scimType?: string): ScimError =>
   new ScimError({ message, status: 400, ...(scimType !== undefined && { scimType }) });

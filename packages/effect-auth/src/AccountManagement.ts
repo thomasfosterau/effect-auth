@@ -5,7 +5,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -71,9 +71,12 @@ export class AccountManagementStore extends Context.Service<
 >()("@effect-auth/AccountManagementStore") {}
 
 /** Raised when a confirm token is missing, expired, or of the wrong purpose. */
-export class AccountTokenError extends Data.TaggedError("AccountTokenError")<{
-  readonly message: string;
-}> {}
+export class AccountTokenError extends Schema.TaggedError<
+  AccountTokenError,
+  { readonly brand: unique symbol }
+>()("AccountTokenError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Configuration for {@link AccountManagementService}.

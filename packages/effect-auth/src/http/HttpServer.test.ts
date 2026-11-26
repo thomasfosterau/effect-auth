@@ -11,7 +11,6 @@ import {
   onTestFinished,
 } from "vite-plus/test";
 import * as Clock from "effect/Clock";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -908,9 +907,12 @@ const SignUpBody = Schema.Struct({
 });
 
 /** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
-class PromiseRejection extends Data.TaggedError("PromiseRejection")<{
-  readonly cause: unknown;
-}> {}
+class PromiseRejection extends Schema.TaggedError<
+  PromiseRejection,
+  { readonly brand: unique symbol }
+>()("PromiseRejection", {
+  cause: Schema.Unknown,
+}) {}
 
 /**
  * Run a promise whose rejection is a defect, as `Effect.promise` does: the
@@ -922,7 +924,12 @@ const promiseOrDie = <A>(evaluate: () => Promise<A>): Effect.Effect<A> =>
   );
 
 /** A test failure raised where a test needs an error value of its own. */
-class TestFailure extends Data.TaggedError("TestFailure")<{ readonly message: string }> {}
+class TestFailure extends Schema.TaggedError<TestFailure, { readonly brand: unique symbol }>()(
+  "TestFailure",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const jsonRequest = (
   path: string,
@@ -5158,7 +5165,12 @@ const macrotasks = async (count: number): Promise<void> => {
   await macrotasks(count - 1);
 };
 
-class BootError extends Data.TaggedError("BootError")<{ readonly reason: string }> {}
+class BootError extends Schema.TaggedError<BootError, { readonly brand: unique symbol }>()(
+  "BootError",
+  {
+    reason: Schema.String,
+  },
+) {}
 
 describe("make builds services synchronously, up to their exit", () => {
   it("returns while a fiber that services forked keeps running, and dispose stops it", async () => {

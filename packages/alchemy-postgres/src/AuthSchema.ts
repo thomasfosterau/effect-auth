@@ -13,7 +13,7 @@
  */
 
 import * as Clock from "effect/Clock";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import type * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
@@ -77,13 +77,16 @@ export const AuthSchema = Resource<AuthSchema>(AUTH_SCHEMA_TYPE);
  * would leave the schema unapplied, and a silently-skipped `delete` would
  * break the {@link AuthSchemaProps.dropOnDelete} contract.
  */
-export class UnknownDatabaseError extends Data.TaggedError("UnknownDatabaseError")<{
-  readonly message: string;
+export class UnknownDatabaseError extends Schema.TaggedError<
+  UnknownDatabaseError,
+  { readonly brand: unique symbol }
+>()("UnknownDatabaseError", {
+  message: Schema.String,
   /** The database name the resource asked for. */
-  readonly database: string;
+  database: Schema.String,
   /** The names the provider was built with. */
-  readonly registered: readonly string[];
-}> {}
+  registered: Schema.Array(Schema.String),
+}) {}
 
 /**
  * A Postgres database an {@link AuthSchemaProvider} reconciles: the

@@ -10,7 +10,7 @@
 
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -39,10 +39,13 @@ import { normalizeDomain, normalizeEmail } from "./utils.ts";
 /**
  * Organization error
  */
-export class OrganizationError extends Data.TaggedError("OrganizationError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class OrganizationError extends Schema.TaggedError<
+  OrganizationError,
+  { readonly brand: unique symbol }
+>()("OrganizationError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * An organization (team / tenant).
