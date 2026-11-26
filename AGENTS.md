@@ -20,6 +20,12 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - **The alchemy runtime suites** (`AuthSchema.test.ts`, alchemy-postgres's `Postgres.test.ts`) run in `test:alchemy`, not `test:unit`. The Postgres cases skip without `DATABASE_URL`; say so when you report gates.
 - **`check:dist` proves every published floor** (`scripts/check-dist.ts`). It packs each package (checking `repository.directory`, which npm resolves README links against), installs it with pnpm beside the lowest `effect` and third-party peer versions its packed ranges admit (one scratch project per floor; `autoInstallPeers` off, so it re-checks every installed range itself), imports every entry, and runs the core's behaviour phase (env layers, `protectedField`) and drizzle's query smoke and strict consumer type-check, on the floor and on `drizzleApplicationsPin`. Importing alone misses APIs that moved inside the range, so a new call near a floor joins the behaviour phase. A floor npm never published fails by name.
 
+## Pull requests
+
+- **Write the PR body with the `pr` skill** from Matt Pocock's skills (`mattpocock-skills:pr`), filling in the repository's pull request template where there is one.
+- **Resolve merge conflicts before you hand a PR over.** Rebase onto `origin/trunk` and push; a PR that conflicts with `trunk` isn't finished.
+- **Mark the PR ready for review as soon as the initial draft is finished.** Don't wait for CI to run, for reviews, or for the owner to do it. Keep fixing CI failures and review findings on the ready PR.
+
 ## Fallow
 
 The pre-commit hook runs `vp run fallow:audit` (a full coverage run, then the audit); fix a `fail` verdict rather than skipping the hook. Only findings your change introduces count. Before deleting "unused" code, trace it: `vp exec fallow dead-code --trace <file>:<export>`.
