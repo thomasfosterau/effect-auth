@@ -261,3 +261,28 @@ describe("signJws / verifyJws against the KeyObject implementation", () => {
     });
   });
 });
+
+describe("jwkSuitsAlgorithm", () => {
+  const ec = Cipher.generateJwsKeyPair("ES256").publicKeyJwk;
+  const ed = Cipher.generateJwsKeyPair("EdDSA").publicKeyJwk;
+  const rsa: Types.JsonObject = { kty: "RSA", n: "AQAB", e: "AQAB" };
+
+  it("accepts each algorithm's own key type", () => {
+    expect(Cipher.jwkSuitsAlgorithm("ES256", ec)).toBe(true);
+    expect(Cipher.jwkSuitsAlgorithm("EdDSA", ed)).toBe(true);
+    expect(Cipher.jwkSuitsAlgorithm("RS256", rsa)).toBe(true);
+  });
+
+  it.each([
+    ["RS256", ec],
+    ["RS256", ed],
+    ["ES256", rsa],
+    ["ES256", ed],
+    ["ES256", { ...ec, crv: "P-384" }],
+    ["EdDSA", ec],
+    ["EdDSA", { ...ed, crv: "X25519" }],
+    ["ES256", { ...ec, alg: "RS256" }],
+  ] as const)("refuses %s with a mismatched key", (algorithm, jwk) => {
+    expect(Cipher.jwkSuitsAlgorithm(algorithm, jwk)).toBe(false);
+  });
+});

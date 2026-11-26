@@ -300,7 +300,23 @@ export const signJws = (
     : crypto.sign("sha256", data, { key: privateKeyPem, dsaEncoding: "ieee-p1363" });
 
 /**
- * Verify `signature` over `data` against a public JWK. ES256 uses the raw
+ * Whether `jwk` is a key for `algorithm`: `kty` `RSA` for RS256, `EC` on
+ * `P-256` for ES256, `OKP` on `Ed25519` for EdDSA, and a declared `alg`, when
+ * present, equal to it. A key of another type must never verify a token
+ * whose header names this algorithm.
+ */
+export const jwkSuitsAlgorithm = (algorithm: JwsAlgorithm, jwk: Types.JsonObject): boolean => {
+  const declared = jwk["alg"];
+  if (declared !== undefined && declared !== algorithm) return false;
+  if (algorithm === "RS256") return jwk["kty"] === "RSA";
+  if (algorithm === "ES256") return jwk["kty"] === "EC" && jwk["crv"] === "P-256";
+  return jwk["kty"] === "OKP" && jwk["crv"] === "Ed25519";
+};
+
+/**
+ * Verify `signature` over `data` against a public JWK. It does not check the
+ * key's type: callers that take a key from a set check
+ * {@link jwkSuitsAlgorithm} first. ES256 uses the raw
  * JOSE `r || s` encoding (`dsaEncoding: "ieee-p1363"`), with the JWK as a
  * `{ key, format: "jwk" }` input for the reason {@link signJws} gives; EdDSA
  * verifies with a null digest; RS256 is plain RSASSA-PKCS1-v1_5 over SHA-256.
