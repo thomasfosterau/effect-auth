@@ -66,11 +66,11 @@ const ORG_B = "org-b";
  */
 const makeStores = (
   options: {
-    readonly oneEmailPerUser?: boolean | undefined;
+    readonly oneEmailPerUser?: boolean;
     /** Give the organization store `listMembersByOrganizationPage`. */
-    readonly pagedMembers?: boolean | undefined;
+    readonly pagedMembers?: boolean;
     /** Seed organization A's verified acme.test claim. Default `true`. */
-    readonly claimAcme?: boolean | undefined;
+    readonly claimAcme?: boolean;
   } = {},
 ) => {
   const usersById = MutableHashMap.empty<string, Types.User>();

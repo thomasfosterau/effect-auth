@@ -95,7 +95,7 @@ export interface OidcSsoProvider {
    * `true`; set `false` only for an IdP that never sends the claim and
    * verifies every address it holds.
    */
-  readonly requireEmailVerified?: boolean | undefined;
+  readonly requireEmailVerified?: boolean;
   /** Organization to add the user to on first login (with {@link defaultRole}). */
   readonly organizationId?: string;
   /** User id of the admin who registered the connection. */
@@ -189,7 +189,7 @@ export interface RegisterProviderInput {
   readonly scopes?: readonly string[];
   readonly usePKCE?: boolean;
   /** See {@link OidcSsoProvider.requireEmailVerified}. Default `true`. */
-  readonly requireEmailVerified?: boolean | undefined;
+  readonly requireEmailVerified?: boolean;
   readonly organizationId?: string;
 }
 

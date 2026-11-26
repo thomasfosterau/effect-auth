@@ -17,6 +17,7 @@ import type * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
 import * as Policy from "./Policy.ts";
 import type * as ReadScope from "./ReadScope.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * The facts a read of one reference row is decided from.
@@ -26,11 +27,11 @@ import type * as ReadScope from "./ReadScope.ts";
  */
 export interface ReferenceRow {
   /** Absent: the view has no visibility axis, so the row is visible. */
-  readonly visibility?: OwnedAccess.Visibility | undefined;
+  readonly visibility?: OwnedAccess.Visibility;
   /** The account whose followers (and itself) may read a `followers` row; absent or undefined: nobody. */
-  readonly followersOf?: string | undefined;
+  readonly followersOf?: string;
   /** The group whose members may read a `group` row; absent or undefined: none. */
-  readonly groupId?: string | undefined;
+  readonly groupId?: string;
 }
 
 /**
@@ -91,8 +92,8 @@ const holds = (fact: string): Condition.Condition =>
 
 /** The seam questions a reference row can be decided by. */
 const questionsFor = (row: ReferenceRow): OwnedAccess.RelationQuestions => {
-  if (row.visibility === "followers") return { followersOf: row.followersOf };
-  return row.visibility === "group" ? { groupId: row.groupId } : {};
+  if (row.visibility === "followers") return definedKeys({ followersOf: row.followersOf });
+  return row.visibility === "group" ? definedKeys({ groupId: row.groupId }) : {};
 };
 
 /**

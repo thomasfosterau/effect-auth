@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Str from "effect/String";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { HttpClient, HttpClientRequest } from "effect/http";
@@ -179,13 +180,13 @@ export interface OAuthCreateUserInput {
    * Server-set attributes for the new user, such as the SSO provisioning
    * stamp. OAuth sign-up passes none.
    */
-  readonly attributes?: Types.Attributes | undefined;
+  readonly attributes?: Types.Attributes;
   /**
    * The login handle the user is created with: a store that keeps it on the
    * user row writes it there on insert, and any other store ignores it (see
    * {@link NewUserIdentifier}).
    */
-  readonly identifier?: NewUserIdentifier | undefined;
+  readonly identifier?: NewUserIdentifier;
 }
 
 /**
@@ -1865,10 +1866,10 @@ const githubPrimaryEmail = (
       const primary = Array.isArray(body)
         ? body.find((entry) => isJsonObject(entry) && entry["primary"] === true)
         : undefined;
-      const email = isJsonObject(primary) ? str(primary["email"]) : undefined;
-      return email === undefined || !isJsonObject(primary)
+      const email = isJsonObject(primary) ? str(primary["email"]) : Option.none();
+      return Option.isNone(email) || !isJsonObject(primary)
         ? undefined
-        : { email, verified: primary["verified"] === true };
+        : { email: email.value, verified: primary["verified"] === true };
     }),
   );
 
@@ -1896,7 +1897,7 @@ export const GitHubProvider = (config: {
         profile(raw, {
           id: raw["id"],
           email: str(raw["email"]),
-          name: str(raw["name"]) ?? str(raw["login"]),
+          name: Option.orElse(str(raw["name"]), () => str(raw["login"])),
           picture: str(raw["avatar_url"]),
         }),
     },
@@ -1963,9 +1964,9 @@ export const MicrosoftProvider = (config: {
         const upn = str(raw["userPrincipalName"]);
         return profile(raw, {
           id: raw["id"],
-          email:
-            str(raw["mail"]) ??
-            (upn !== undefined && upn.includes("@") && !upn.includes("#EXT#") ? upn : undefined),
+          email: Option.orElse(str(raw["mail"]), () =>
+            Option.filter(upn, (name) => name.includes("@") && !name.includes("#EXT#")),
+          ),
           name: str(raw["displayName"]),
         });
       },
@@ -1980,8 +1981,8 @@ export interface OAuthClientConfig {
   readonly redirectUri: string;
 }
 
-/** Coerce a value to `string` — returns `undefined` for non-strings. */
-export const str = (v: unknown): string | undefined => (P.isString(v) ? v : undefined);
+/** A value as a `string`: `None` for anything else. */
+export const str = (v: unknown): Option.Option<string> => Option.liftPredicate(v, P.isString);
 
 /**
  * Safely traverse a nested object by a chain of keys. Returns `undefined`
@@ -1998,8 +1999,7 @@ export const nested = (v: unknown, ...path: string[]): unknown =>
 
 /**
  * Build an {@link OAuthUserInfo} from a base record plus normalized identity
- * fields, omitting any that are `undefined` (satisfies
- * `exactOptionalPropertyTypes`).
+ * fields, leaving out any that are absent or `None`.
  *
  * @example
  * profile(raw, { id: raw["id"], email: str(raw["email"]), name: str(raw["name"]) })
@@ -2008,19 +2008,24 @@ export const profile = (
   base: Types.JsonObject,
   fields: {
     readonly id: unknown;
-    readonly email?: string | undefined;
-    readonly name?: string | undefined;
-    readonly picture?: string | undefined;
-    readonly email_verified?: boolean | undefined;
+    readonly email?: Option.Option<string>;
+    readonly name?: Option.Option<string>;
+    readonly picture?: Option.Option<string>;
+    readonly email_verified?: boolean;
   },
-): OAuthUserInfo => ({
-  ...base,
-  id: idString(fields.id),
-  ...(fields.email !== undefined && { email: fields.email }),
-  ...(fields.name !== undefined && { name: fields.name }),
-  ...(fields.picture !== undefined && { picture: fields.picture }),
-  ...(fields.email_verified !== undefined && { email_verified: fields.email_verified }),
-});
+): OAuthUserInfo => {
+  const email = Option.getOrUndefined(fields.email ?? Option.none());
+  const name = Option.getOrUndefined(fields.name ?? Option.none());
+  const picture = Option.getOrUndefined(fields.picture ?? Option.none());
+  return {
+    ...base,
+    id: idString(fields.id),
+    ...(email !== undefined && { email }),
+    ...(name !== undefined && { name }),
+    ...(picture !== undefined && { picture }),
+    ...(fields.email_verified !== undefined && { email_verified: fields.email_verified }),
+  };
+};
 
 /**
  * Profile-mapping helpers for use in custom {@link OAuthProviderConfig.mapProfile}
@@ -2206,7 +2211,7 @@ export const SpotifyProvider = (config: OAuthClientConfig): OAuthProvider =>
       tokenAuthMethod: "basic",
       mapProfile: (raw) => {
         const images = raw["images"];
-        const picture = Array.isArray(images) ? str(nested(images[0], "url")) : undefined;
+        const picture = Array.isArray(images) ? str(nested(images[0], "url")) : Option.none();
         return profile(raw, {
           id: raw["id"],
           email: str(raw["email"]),
@@ -2351,11 +2356,11 @@ export const ZoomProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["user:read"],
       tokenAuthMethod: "basic",
       mapProfile: (raw) => {
-        const name = [str(raw["first_name"]), str(raw["last_name"])].filter(Boolean).join(" ");
+        const name = Arr.join(Arr.getSomes([str(raw["first_name"]), str(raw["last_name"])]), " ");
         return profile(raw, {
           id: raw["id"],
           email: str(raw["email"]),
-          name: name === "" ? undefined : name,
+          name: Option.liftPredicate(name, Str.isNonEmpty),
           picture: str(raw["pic_url"]),
         });
       },
@@ -2506,18 +2511,20 @@ export const discoverOAuthEndpoints = (
         provider: issuerUrl,
       });
     }
-    const authorization = str(doc["authorization_endpoint"]);
-    const token = str(doc["token_endpoint"]);
-    if (!authorization || !token) {
+    const authorization = Option.getOrUndefined(
+      Option.filter(str(doc["authorization_endpoint"]), Str.isNonEmpty),
+    );
+    const token = Option.getOrUndefined(Option.filter(str(doc["token_endpoint"]), Str.isNonEmpty));
+    if (authorization === undefined || token === undefined) {
       return yield* new OAuthProviderError({
         message: "OIDC discovery document is missing authorization_endpoint or token_endpoint",
         provider: issuerUrl,
       });
     }
-    const userInfo = str(doc["userinfo_endpoint"]);
-    const jwks = str(doc["jwks_uri"]);
+    const userInfo = Option.getOrUndefined(str(doc["userinfo_endpoint"]));
+    const jwks = Option.getOrUndefined(str(doc["jwks_uri"]));
     return {
-      issuer: str(doc["issuer"]) ?? base,
+      issuer: Option.getOrElse(str(doc["issuer"]), () => base),
       authorizationEndpoint: authorization,
       tokenEndpoint: token,
       ...(userInfo !== undefined && { userInfoEndpoint: userInfo }),

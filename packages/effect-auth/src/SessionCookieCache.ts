@@ -35,14 +35,14 @@ export interface SessionCacheConfig {
    * on a cache hit the expected value would be computed from the cached
    * payload itself, so it always agrees with itself and invalidates nothing.
    */
-  readonly version?: string | undefined;
+  readonly version?: string;
   /**
    * Encrypt the payload (AES-256-GCM, under a key derived from `secret`
    * separately from the HMAC key), so the browser cannot read the session and
    * user data. Default `false`: signed only. Turning it on or off invalidates
    * every outstanding cache cookie.
    */
-  readonly encrypt?: boolean | undefined;
+  readonly encrypt?: boolean;
 }
 
 /** Resolved cache config used internally by the HTTP layer. */

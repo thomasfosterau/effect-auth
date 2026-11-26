@@ -9,6 +9,7 @@
 import { Effect } from "effect";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
+import { definedKeys } from "./DefinedKeys.ts";
 import { type EmailOtpPurpose, EmailOtpStore } from "./email/EmailOtp.ts";
 import type * as Errors from "./Errors.ts";
 import type { Identifier, IdentifierStore } from "./Identifier.ts";
@@ -27,9 +28,9 @@ import {
  * again, and sign its holder into the new account.
  */
 export interface AddressProofStores {
-  readonly magicLinks?: Pick<typeof MagicLinkStore.Service, "deleteByEmail"> | undefined;
-  readonly emailOtps?: Pick<typeof EmailOtpStore.Service, "delete"> | undefined;
-  readonly phoneOtps?: Pick<typeof PhoneOtpStore.Service, "delete"> | undefined;
+  readonly magicLinks?: Pick<typeof MagicLinkStore.Service, "deleteByEmail">;
+  readonly emailOtps?: Pick<typeof EmailOtpStore.Service, "delete">;
+  readonly phoneOtps?: Pick<typeof PhoneOtpStore.Service, "delete">;
 }
 
 /** Every stored purpose of a code, so the purge leaves none behind. */
@@ -61,12 +62,13 @@ export const userPurgeStores: Effect.Effect<UserPurgeStores> = Effect.map(
     },
     { concurrency: 1 },
   ),
-  (found) => ({
-    ...found.credentials,
-    magicLinks: Option.getOrUndefined(found.magicLinks),
-    emailOtps: Option.getOrUndefined(found.emailOtps),
-    phoneOtps: Option.getOrUndefined(found.phoneOtps),
-  }),
+  (found) =>
+    definedKeys({
+      ...found.credentials,
+      magicLinks: Option.getOrUndefined(found.magicLinks),
+      emailOtps: Option.getOrUndefined(found.emailOtps),
+      phoneOtps: Option.getOrUndefined(found.phoneOtps),
+    }),
 );
 
 /**
@@ -112,10 +114,10 @@ const deleteAddressProofs = (
 
 /** What {@link purgeUser} writes through. */
 export interface UserPurgeServices extends UserPurgeStores {
-  /** `undefined` only where users hold no identifiers (anonymous users). */
-  readonly identifiers:
-    | Pick<typeof IdentifierStore.Service, "listByUser" | "deleteByUser">
-    | undefined;
+  /** `None` only where users hold no identifiers (anonymous users). */
+  readonly identifiers: Option.Option<
+    Pick<typeof IdentifierStore.Service, "listByUser" | "deleteByUser">
+  >;
   /** Revoke every session of the user (`SessionService.invalidateUserSessions`). */
   readonly revokeSessions: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   /** Delete the user row. */
@@ -143,14 +145,14 @@ export const purgeUser = (
   Effect.gen(function* () {
     yield* deleteCredentials(services, userId);
     const { identifiers } = services;
-    if (identifiers !== undefined) {
+    if (Option.isSome(identifiers)) {
       yield* Effect.forEach(
-        yield* identifiers.listByUser(userId),
+        yield* identifiers.value.listByUser(userId),
         (identifier) => deleteAddressProofs(services, identifier),
         { concurrency: 1, discard: true },
       );
     }
     yield* services.revokeSessions(userId);
-    if (identifiers !== undefined) yield* identifiers.deleteByUser(userId);
+    if (Option.isSome(identifiers)) yield* identifiers.value.deleteByUser(userId);
     yield* services.deleteUser(userId);
   });

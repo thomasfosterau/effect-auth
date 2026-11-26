@@ -181,7 +181,7 @@ export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
    * `beforeSignUp` hooks returned, which can differ from the submitted one.
    * Never sent over HTTP.
    */
-  readonly email?: string | undefined;
+  readonly email?: string;
 }> {
   get code(): typeof ErrorCode.EMAIL_IN_USE {
     return ErrorCode.EMAIL_IN_USE;
@@ -305,7 +305,7 @@ export class CaptchaError extends Data.TaggedError("CaptchaError")<{
  */
 export class AccountLockedError extends Data.TaggedError("AccountLockedError")<{
   readonly message: string;
-  readonly retryAfter?: Duration.Duration | undefined;
+  readonly retryAfter?: Duration.Duration;
 }> {
   get code(): typeof ErrorCode.ACCOUNT_LOCKED {
     return ErrorCode.ACCOUNT_LOCKED;
@@ -580,7 +580,7 @@ export class ResendTooSoonError extends Data.TaggedError("ResendTooSoonError")<{
 export class RateLimitError extends Data.TaggedError("RateLimitError")<{
   readonly message: string;
   readonly key: string;
-  readonly retryAfter?: Duration.Duration | undefined;
+  readonly retryAfter?: Duration.Duration;
 }> {
   get code(): typeof ErrorCode.RATE_LIMIT_EXCEEDED {
     return ErrorCode.RATE_LIMIT_EXCEEDED;

@@ -23,6 +23,7 @@ import {
   type UserCredentialStores,
   userCredentialStores,
 } from "./UserCredentials.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * The credential stores {@link proveAddress} sweeps on a first proof, each
@@ -60,16 +61,18 @@ export interface FirstProofServices extends FirstProofCredentials {
 export const firstProofServices = (
   base: Omit<FirstProofServices, keyof FirstProofCredentials>,
 ): Effect.Effect<FirstProofServices> =>
-  Effect.map(userCredentialStores, (stores) => ({
-    ...base,
-    oauthAccounts: stores.oauthAccounts,
-    passkeys: stores.passkeys,
-    apiKeys: stores.apiKeys,
-    multiFactor: stores.multiFactor,
-    trustedDevices: stores.trustedDevices,
-    oidcTokens: stores.oidcTokens,
-    oidcConsents: stores.oidcConsents,
-  }));
+  Effect.map(userCredentialStores, (stores) =>
+    definedKeys({
+      ...base,
+      oauthAccounts: stores.oauthAccounts,
+      passkeys: stores.passkeys,
+      apiKeys: stores.apiKeys,
+      multiFactor: stores.multiFactor,
+      trustedDevices: stores.trustedDevices,
+      oidcTokens: stores.oidcTokens,
+      oidcConsents: stores.oidcConsents,
+    }),
+  );
 
 /**
  * Remove the phone identifiers `userId` never verified: whoever added
@@ -90,7 +93,7 @@ const removeUnverifiedPhones = (
 /** Remove every credential `userId` holds other than its password, phone identifiers and sessions. */
 const removeCredentials = (credentials: FirstProofCredentials, userId: string) =>
   deleteCredentials(
-    {
+    definedKeys({
       oauthAccounts: credentials.oauthAccounts,
       passkeys: credentials.passkeys,
       apiKeys: credentials.apiKeys,
@@ -98,7 +101,7 @@ const removeCredentials = (credentials: FirstProofCredentials, userId: string) =
       trustedDevices: credentials.trustedDevices,
       oidcTokens: credentials.oidcTokens,
       oidcConsents: credentials.oidcConsents,
-    },
+    }),
     userId,
   );
 

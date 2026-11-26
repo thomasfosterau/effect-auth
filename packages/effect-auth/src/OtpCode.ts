@@ -36,12 +36,12 @@ export interface CodeStore<P, A extends CodeRecord = CodeRecord> extends OtpFail
 
 /** The configuration both flows take for their codes. */
 export interface CodeConfig {
-  readonly otpLength?: number | undefined;
-  readonly expiresIn?: number | undefined;
-  readonly maxAttempts?: number | undefined;
-  readonly disableSignUp?: boolean | undefined;
-  readonly resendCooldown?: number | undefined;
-  readonly backoff?: OtpBackoffConfig | undefined;
+  readonly otpLength?: number;
+  readonly expiresIn?: number;
+  readonly maxAttempts?: number;
+  readonly disableSignUp?: boolean;
+  readonly resendCooldown?: number;
+  readonly backoff?: OtpBackoffConfig;
 }
 
 /** {@link CodeConfig} with its defaults applied. */

@@ -128,6 +128,7 @@ import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 import { memoryMultiFactorStore, memoryOtpFailures } from "../testing/MemoryStores.ts";
 import { memoryDeviceAuthorizationStore, memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -181,23 +182,25 @@ interface Fixture {
 const makeFixture = (
   options: {
     /** The `Hooks` stack in `services`. Default `Hooks.Default`. */
-    readonly hooks?: Layer.Layer<Hooks> | undefined;
+    readonly hooks?: Layer.Layer<Hooks>;
     /** Build the device service with `allowMissingRateLimiter: true`. */
-    readonly deviceAllowMissingRateLimiter?: boolean | undefined;
+    readonly deviceAllowMissingRateLimiter?: boolean;
     /** Shared config for the magic-link, email OTP and phone OTP services. */
-    readonly passwordless?:
-      | { readonly disableSignUp: boolean; readonly resendCooldown?: number | undefined }
-      | undefined;
+    readonly passwordless?: {
+      readonly disableSignUp: boolean;
+      readonly resendCooldown?: number | undefined;
+    };
     /** The `EmailVerificationService` `resendCooldown`. Default the service's 60 s. */
-    readonly verificationResendCooldown?: number | undefined;
+    readonly verificationResendCooldown?: number;
     /** Replaces the `EmailVerificationService` send, which records the token by default. */
-    readonly verificationSendEmail?:
-      | ((to: string, token: string) => Effect.Effect<void, EmailVerificationError>)
-      | undefined;
+    readonly verificationSendEmail?: (
+      to: string,
+      token: string,
+    ) => Effect.Effect<void, EmailVerificationError>;
     /** The `EmailPasswordService` config. Default `{}`. */
-    readonly emailPassword?: EmailPasswordConfig | undefined;
+    readonly emailPassword?: EmailPasswordConfig;
     /** The `AuthLifecycleService` config. Default `{}`. */
-    readonly lifecycle?: AuthLifecycleConfig | undefined;
+    readonly lifecycle?: AuthLifecycleConfig;
     /**
      * Replace the `EmailPasswordStore`, given the fixture's own and a way to
      * create users and email identifiers in the fixture's shared state.
@@ -665,7 +668,7 @@ const makeFixture = (
       clients: [{ id: "cli", name: "Example CLI", scopes: ["read"] }],
       // interval 0 so back-to-back polls in a single test don't hit slow_down.
       interval: 0,
-      allowMissingRateLimiter: options.deviceAllowMissingRateLimiter,
+      ...definedKeys({ allowMissingRateLimiter: options.deviceAllowMissingRateLimiter }),
     }).pipe(Layer.provide(featureBase)),
     PhoneOtpService.layer({
       ...passwordless,
@@ -4225,12 +4228,12 @@ describe("client IP at the HTTP boundary", () => {
   // test can see which bucket (if any) a request was counted under.
   const limitedHandler = (
     options: {
-      readonly trustedProxy?: TrustedProxyConfig | undefined;
-      readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
+      readonly trustedProxy?: TrustedProxyConfig;
+      readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig;
       /** Fail every rate-limit store call, as a down store does. */
-      readonly storeDown?: boolean | undefined;
+      readonly storeDown?: boolean;
       /** A layer merged into the services, such as a log collector. */
-      readonly layer?: Layer.Layer<never> | undefined;
+      readonly layer?: Layer.Layer<never>;
     } = {},
   ): { readonly handler: Handler; readonly keys: MutableHashSet.MutableHashSet<string> } => {
     const entries = MutableHashMap.empty<string, RateLimitEntry>();
@@ -4273,7 +4276,7 @@ describe("client IP at the HTTP boundary", () => {
       services,
       cookie: { secure: false },
       ipRateLimit: options.ipRateLimit ?? signInOncePerHour,
-      trustedProxy: options.trustedProxy,
+      ...definedKeys({ trustedProxy: options.trustedProxy }),
     }).handler;
     return { handler, keys };
   };
@@ -4426,9 +4429,6 @@ describe("client IP at the HTTP boundary", () => {
   it("fails the build when ipRateLimit has no trustedProxy and no opt-out", () => {
     // A Web Request has no socket address, so the limiter would have nothing to key on.
     expect(() => limitedHandler()).toThrow(HttpServer.ClientAddressConfigError);
-    expect(() => limitedHandler({ trustedProxy: undefined })).toThrow(
-      HttpServer.ClientAddressConfigError,
-    );
   });
 
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(

@@ -88,7 +88,7 @@ export interface IPRateLimitPluginConfig {
    * IP-keyed rate limit for second-factor redemptions. Default:
    * {@link RateLimitPresets.totpVerification}.
    */
-  readonly secondFactor?: RateLimitConfig | undefined;
+  readonly secondFactor?: RateLimitConfig;
   /** IP-keyed rate limit for sign-up. Default: {@link RateLimitPresets.registration}. */
   readonly signUp?: RateLimitConfig;
   /** IP-keyed rate limit for password-reset requests. Default: {@link RateLimitPresets.passwordReset}. */
@@ -100,7 +100,7 @@ export interface IPRateLimitPluginConfig {
    * `64` ({@link DEFAULT_IPV6_RATE_LIMIT_PREFIX}). Any other value makes the
    * layer build die with `RateLimiterConfigError`.
    */
-  readonly ipv6PrefixLength?: number | undefined;
+  readonly ipv6PrefixLength?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -428,7 +428,7 @@ describe("ownedListFilter agrees with canView and ReadScope.compile on the group
                   visibility: decodeVisibility(row.visibility),
                   draft: row.draft,
                   unapproved: row.unapproved,
-                  groupId: row.groupId ?? undefined,
+                  ...(row.groupId !== null && { groupId: row.groupId }),
                 }),
                 viewer,
                 follower,

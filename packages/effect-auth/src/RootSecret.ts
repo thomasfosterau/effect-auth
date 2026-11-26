@@ -159,13 +159,12 @@ export const pkceVerifier: Effect.Effect<
  */
 export type Encryption =
   | { readonly secret: Redacted.Redacted }
-  | { readonly cipher: Cipher.TokenCipher }
-  | undefined;
+  | { readonly cipher: Cipher.TokenCipher };
 
 /** The {@link Cipher.SecretSealer} for `purpose` under `encryption`. */
 export const sealerFor = (
   purpose: Purpose,
-  encryption: Encryption,
+  encryption?: Encryption,
 ): Effect.Effect<
   Cipher.SecretSealer,
   never,

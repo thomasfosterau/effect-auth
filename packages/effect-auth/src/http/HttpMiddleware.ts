@@ -322,7 +322,7 @@ export interface OptionalAuthOptions {
    * anonymous ones. As with `SessionResolution.resolveFailOpen`'s
    * `onDegraded`, choosing to degrade means naming where it is reported.
    */
-  readonly onDegraded?: ((cause: Cause.Cause<AuthError>) => Effect.Effect<void>) | undefined;
+  readonly onDegraded?: (cause: Cause.Cause<AuthError>) => Effect.Effect<void>;
 }
 
 // =============================================================================

@@ -32,6 +32,7 @@ import {
   replaceIdentifier,
   type Identifier,
 } from "./Identifier.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /** Which flow a pending token belongs to. */
 export type AccountTokenPurpose = "change-email" | "delete-account";
@@ -142,13 +143,13 @@ export interface AccountManagementConfig {
  */
 export interface EmailChangeReauthentication {
   /** The account's current password. Required when the account has one. */
-  readonly currentPassword?: string | undefined;
+  readonly currentPassword?: string;
   /**
    * The session the request arrives on. For an account without a password it
    * must be the user's own, created within `reauthenticationMaxAge`, and not
    * an impersonation.
    */
-  readonly session?: Types.Session | undefined;
+  readonly session?: Types.Session;
 }
 
 /** Result of confirming an email change. */
@@ -304,7 +305,7 @@ const make = (
     const purgeServices = {
       ...(yield* userPurgeStores),
       accountTokens: store,
-      identifiers,
+      identifiers: Option.some(identifiers),
       revokeSessions: sessions.invalidateUserSessions,
       deleteUser: users.delete,
     };
@@ -659,13 +660,13 @@ export const accountDeletionLayer: Layer.Layer<
   Effect.gen(function* () {
     const users = yield* UserServiceStore;
     const sessions = yield* SessionService;
-    const purgeServices = {
+    const purgeServices = definedKeys({
       ...(yield* userPurgeStores),
       accountTokens: Option.getOrUndefined(yield* Effect.serviceOption(AccountManagementStore)),
-      identifiers: yield* IdentifierStore,
+      identifiers: Option.some(yield* IdentifierStore),
       revokeSessions: sessions.invalidateUserSessions,
       deleteUser: users.delete,
-    };
+    });
     return {
       deleteUser: Effect.fn("AccountDeletion.deleteUser")((userId: string) =>
         purgeUser(purgeServices, userId),

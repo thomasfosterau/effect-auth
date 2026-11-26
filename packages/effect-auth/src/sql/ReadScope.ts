@@ -22,7 +22,7 @@ export interface ReadScopeBinding {
   /** Each attribute's column: an identifier (`sql("owner_id")`) or a fragment (`sql.literal("s.owner_id")`). */
   readonly columns: Readonly<Record<string, Statement.Fragment | Statement.Identifier>>;
   /** Each named set as a subquery selecting one column (`sql\`SELECT followee FROM follows WHERE …\``). */
-  readonly sets?: Readonly<Record<string, Statement.Fragment>> | undefined;
+  readonly sets?: Readonly<Record<string, Statement.Fragment>>;
 }
 
 /**

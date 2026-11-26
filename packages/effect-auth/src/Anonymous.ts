@@ -15,6 +15,7 @@ import { IdentifierStore } from "./Identifier.ts";
 import { SessionService } from "./SessionService.ts";
 import { type HookError } from "./Hooks.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * Persistence for anonymous users. The implementer generates an id and sets
@@ -102,13 +103,13 @@ const make = (
   Effect.gen(function* () {
     const store = yield* AnonymousUserStore;
     const sessionManager = yield* SessionService;
-    const purgeServices = {
+    const purgeServices = definedKeys({
       ...(yield* userPurgeStores),
       accountTokens: Option.getOrUndefined(yield* Effect.serviceOption(AccountManagementStore)),
-      identifiers: Option.getOrUndefined(yield* Effect.serviceOption(IdentifierStore)),
+      identifiers: yield* Effect.serviceOption(IdentifierStore),
       revokeSessions: sessionManager.invalidateUserSessions,
       deleteUser: store.deleteUser,
-    };
+    });
 
     // Tracks IDs currently being linked (single-flight) and already linked
     // (idempotency). Both are needed: inFlight prevents concurrent races;

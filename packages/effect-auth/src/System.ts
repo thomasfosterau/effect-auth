@@ -95,9 +95,9 @@ export interface GrantOptions {
   /** The resources the grant allows the action on. `Policy.any` is every resource. */
   readonly resource: Policy.Scope;
   /** An optional extra condition on the request, ANDed onto the grant. */
-  readonly when?: Condition.Condition | undefined;
+  readonly when?: Condition.Condition;
   /** An optional human-readable description. */
-  readonly description?: string | undefined;
+  readonly description?: string;
 }
 
 /**

@@ -35,13 +35,6 @@ describe("pbkdf2 defaults", () => {
     expect(counts()[0]).toBe(600000);
   });
 
-  it("an undefined iterations option is the default", async () => {
-    const { hash } = await Effect.runPromise(
-      pbkdf2Hasher({ iterations: undefined }).hash("default-params"),
-    );
-    expect(hash.startsWith("pbkdf2-sha256$600000$")).toBe(true);
-  });
-
   it("PasswordHasher.layer() uses the same default", async () => {
     const { hash } = await Effect.runPromise(
       Effect.provide(

@@ -191,7 +191,7 @@ export interface MultiFactorConfig {
    * wrong code does, so a caller cannot tell a capped challenge from a wrong
    * code; the user signs in again for a fresh challenge.
    */
-  readonly maxFailedAttempts?: number | undefined;
+  readonly maxFailedAttempts?: number;
   /**
    * Mark the record verified immediately on enable, skipping the
    * `confirmEnable` TOTP confirmation step (default: false).

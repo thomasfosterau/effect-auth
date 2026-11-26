@@ -208,8 +208,8 @@ const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
  */
 export const requestForCurrent = (input: {
   readonly action: Entity.EntityRef | string;
-  readonly resource?: Entity.EntityRef | undefined;
-  readonly context?: Readonly<Record<string, Entity.AttributeValue>> | undefined;
+  readonly resource?: Entity.EntityRef;
+  readonly context?: Readonly<Record<string, Entity.AttributeValue>>;
 }): Effect.Effect<Policy.PolicyRequest, never, CurrentPrincipal> =>
   Effect.gen(function* () {
     const principal = yield* CurrentPrincipal;

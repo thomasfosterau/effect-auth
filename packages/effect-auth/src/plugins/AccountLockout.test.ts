@@ -12,12 +12,13 @@ import {
 } from "./AccountLockout.ts";
 import { AccountLockedError, AuthError } from "../Errors.ts";
 import type * as Types from "../Types.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /** A password attempt by email, resolved to `userId` when one is given. */
 const byEmail = (email: string, userId?: string): AuthenticateAttempt => ({
   method: "email-password",
   identifier: { type: "email", value: email },
-  userId,
+  ...definedKeys({ userId }),
 });
 
 const session = (userId: string, attributes: Types.Attributes = {}): Types.Session => {

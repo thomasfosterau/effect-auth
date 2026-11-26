@@ -43,7 +43,8 @@ Run `vp run ci` (CI runs exactly that, on Node LTS and latest). The pre-commit h
 - Domain errors are `Data.TaggedError`; HTTP-boundary errors are `Schema.TaggedError` classes ([DESIGN.md](DESIGN.md)).
 - Helper modules are namespace imports under their canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`, `Bool`); everything else comes from the `effect` barrel.
 - Exports follow Effect v4's layout: `index.ts` exports PascalCase namespaces (`export * as Session from "./Session.ts"`), and each module is also importable through a PascalCase subpath (`./Session`). The current flat root barrel predates this; new modules follow the layout.
-- Optional properties are `?: T | undefined` (`exactOptionalPropertyTypes` is on). Relative imports carry `.ts`.
+- "Nothing" is an `Option`: a lookup, result or field that may be absent is `Option<T>`, never `T | null` or `T | undefined` (`effect/prefer-option-over-null` is an error). Members of an options object are `readonly x?: T` with no `| undefined` (`exactOptionalPropertyTypes` is on), so a caller holding a value that may be `undefined` leaves the key out, with a conditional spread (`...(x !== undefined && { x })`) or, inside the core, `definedKeys`. Use `x?: Option<T>` only for a member whose absence callers inspect and pass along. Optional function parameters are plain `x?: T`. Wire-shape schemas keep their native optionals, and values a third party spells `null` (JSON, SQL rows, node-saml) keep it behind a scoped override in `vite.config.ts`; convert at the boundary (`Option.fromNullishOr` in, `Option.getOrNull` out).
+- Relative imports carry `.ts`.
 - Compare secrets with `constantTimeHashEqual` / `timingSafeEqualBytes`, draw randomness from `SecureRandom`, store tokens as digests, and never log a credential. Keep `node:crypto` inside `Password.ts`, `TokenHash.ts` and `Cipher.ts`.
 - Fix lint findings in code. A rule is turned off only in `vite.config.ts`, with the reason.
 

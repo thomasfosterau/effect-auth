@@ -60,7 +60,7 @@ export class PasswordHasher extends Context.Service<
    * (see {@link pbkdf2Hasher}). `options.iterations` overrides the 600,000
    * default, e.g. a cheap count in tests; production should keep the default.
    */
-  static readonly layer = (options?: { readonly iterations?: number | undefined }) =>
+  static readonly layer = (options?: { readonly iterations?: number }) =>
     Layer.succeed(PasswordHasher, pbkdf2Hasher(options));
 }
 
@@ -393,9 +393,9 @@ const PBKDF2_ITERATIONS_CAP = 5000000;
  * `SecureRandom`; `options.kdf` and `options.random` substitute either.
  */
 export const pbkdf2Hasher = (options?: {
-  readonly iterations?: number | undefined;
-  readonly kdf?: typeof Kdf.Kdf.Service | undefined;
-  readonly random?: typeof SecureRandom.SecureRandom.Service | undefined;
+  readonly iterations?: number;
+  readonly kdf?: typeof Kdf.Kdf.Service;
+  readonly random?: typeof SecureRandom.SecureRandom.Service;
 }): typeof PasswordHasher.Service => {
   const kdf = options?.kdf ?? PlatformCrypto.kdf();
   const random = options?.random ?? PlatformCrypto.instance;

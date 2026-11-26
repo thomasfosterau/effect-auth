@@ -16,6 +16,7 @@ import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
 import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /** A pending password reset, keyed by the SHA-256 digest of its token. */
 export interface PasswordResetToken {
@@ -79,7 +80,7 @@ export interface PasswordResetConfig {
    * account alike, so the refusal reveals nothing about which emails are
    * registered.
    */
-  readonly recipientSendLimit?: RecipientSendLimit | false | undefined;
+  readonly recipientSendLimit?: RecipientSendLimit | false;
   readonly sendResetPassword: (
     email: string,
     token: string,
@@ -208,12 +209,14 @@ export const make = (
 
         // The send gate (captcha) runs before the address is looked up, so
         // it answers alike for every address.
-        yield* hooks.beforeSendCode({
-          method: "password-reset",
-          purpose: "password-reset",
-          address: normalizedEmail,
-          captchaToken: options?.captchaToken,
-        });
+        yield* hooks.beforeSendCode(
+          definedKeys({
+            method: "password-reset",
+            purpose: "password-reset",
+            address: normalizedEmail,
+            captchaToken: options?.captchaToken,
+          }),
+        );
 
         // The per-recipient cap, counted before the lookup, so an
         // unknown email is capped exactly as a known one.

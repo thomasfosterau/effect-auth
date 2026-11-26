@@ -31,6 +31,7 @@ import { normalizeUsername } from "./utils.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /** Raised for invalid or already-taken usernames. */
 export class UsernameError extends Data.TaggedError("UsernameError")<{
@@ -71,7 +72,7 @@ export interface UsernameSignInInput {
   readonly password: string;
   readonly sessionAttributes?: Types.Attributes;
   /** Optional captcha token, consumed by the `CaptchaPlugin` on the `beforeAuthenticate` hook. */
-  readonly captchaToken?: string | undefined;
+  readonly captchaToken?: string;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
    * (a browser-session cookie). See `SignInInput.rememberMe` for details.
@@ -266,12 +267,14 @@ const make = (
           : yield* users.get(identifier.value.userId);
         // The same gate as email and password sign-in: lockout, rate limits
         // and captcha key on the resolved user.
-        yield* hooks.beforeAuthenticate({
-          method: "username",
-          identifier: { type: "username", value: username },
-          userId: Option.getOrUndefined(Option.map(found, (user) => user.id)),
-          captchaToken: input.captchaToken,
-        });
+        yield* hooks.beforeAuthenticate(
+          definedKeys({
+            method: "username",
+            identifier: { type: "username", value: username },
+            userId: Option.getOrUndefined(Option.map(found, (user) => user.id)),
+            captchaToken: input.captchaToken,
+          }),
+        );
         const passwordHash = Option.isSome(found)
           ? yield* emailPasswordStore.getPasswordHash(found.value.id)
           : Option.none<string>();

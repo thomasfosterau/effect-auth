@@ -182,7 +182,7 @@ export class UserService extends Context.Service<
      * implementation that leaves it unset is read as
      * {@link DEFAULT_SERVER_ONLY_ATTRIBUTES}.
      */
-    readonly serverOnlyAttributes?: ReadonlyArray<string> | undefined;
+    readonly serverOnlyAttributes?: ReadonlyArray<string>;
   }
 >()("@effect-auth/UserService") {
   /**

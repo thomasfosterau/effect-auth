@@ -46,6 +46,7 @@ import {
 } from "./multifactor/WebAuthn.ts";
 import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import type { OtpFailures } from "./Types.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs & helpers
@@ -969,7 +970,7 @@ export interface PurgeExpiredKVOptions {
    * Default 25 hours: the default backoff cap (`backoff.maxDelay`, a day) and
    * an hour's margin. Keep it at least your `maxDelay`.
    */
-  readonly otpFailureRetention?: Duration.Input | undefined;
+  readonly otpFailureRetention?: Duration.Input;
 }
 
 /** The listing a store's own `keys` gives: every key, kept under `prefix`. */
@@ -1014,7 +1015,7 @@ const purgeExpiredRecords = <A>(options: {
   readonly label: string;
   /** Whether the entry can go: the services would no longer honour it. */
   readonly isPurgeable: (entry: StoredEntry<A>) => boolean;
-  readonly onRemoved?: ((record: A) => Effect.Effect<void, Errors.AuthError>) | undefined;
+  readonly onRemoved?: (record: A) => Effect.Effect<void, Errors.AuthError>;
 }): Effect.Effect<number, Errors.AuthError> =>
   options.keys.list(options.prefix).pipe(
     Effect.flatMap((keys) =>
@@ -1145,7 +1146,7 @@ export const purgeExpiredKVWith = (
           prefix,
           label: `purgeExpired.${label}`,
           isPurgeable,
-          onRemoved,
+          ...definedKeys({ onRemoved }),
         });
       return {
         oauthStates: yield* purge<OAuthState>("oauthStates", oauthStateKey(""), expired),
@@ -1221,7 +1222,7 @@ const pendingMultiFactorKey = (token: string) => `pending-multi-factor:${token}`
  * written before the count existed read as zero attempts.
  */
 interface StoredPendingMultiFactor extends PendingMultiFactor {
-  readonly failedAttempts?: number | undefined;
+  readonly failedAttempts?: number;
 }
 
 const withoutAttempts = (stored: StoredPendingMultiFactor): PendingMultiFactor =>

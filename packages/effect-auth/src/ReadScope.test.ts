@@ -27,7 +27,7 @@ interface AppUser {
 }
 /** A viewer of the corpus; `principalType` overrides the guards' own type. */
 interface CorpusViewer extends AppUser {
-  readonly principalType?: string | undefined;
+  readonly principalType?: string;
 }
 class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
   "@test/ReadScope/CurrentViewer",
