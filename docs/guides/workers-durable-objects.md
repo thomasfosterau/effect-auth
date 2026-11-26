@@ -14,7 +14,7 @@ This guide gives copyable code for three objects:
 
 ## 1. A strict rate limiter
 
-effect-auth has two `RateLimiter` implementations. `RateLimiter.layer()` is built over the `RateLimitStore` contract (§2). It reads the count, decides, and then increments. So concurrent requests at the limit all read the same count and all pass, even when the store's increment is atomic. `rateLimiterPersistenceLayer` is built over `effect/persistence`'s `RateLimiter`, which asks its store for one atomic `fixedWindow` operation and decides from the count that operation returns. Over a Durable Object, that is strict: in the check below, 50 concurrent sign-in attempts against a limit of 5 let exactly 5 through.
+effect-auth has two `RateLimiter` implementations. `RateLimiter.layer()` is built over the `RateLimitStore` contract (§2). It reads the count, decides, and then increments. So concurrent requests at the limit all read the same count and all pass, even when the store's increment is atomic. `rateLimiterPersistenceLayer` is built over `effect/persistence`'s `RateLimiter`, which asks its store for one atomic `fixedWindow` operation and decides from the count that operation returns. Over a Durable Object, that is strict: in the check below, 50 concurrent sign-in attempts against a limit of 5 let exactly 5 through. A rule's `blockDurationMs` is applied too: the first refusal opens a second counter, `<key>:blocked`, in the same store, and the key is refused until it ends, even after its window resets.
 
 One object per key holds the counter. The semantics are those of `effect/persistence`'s in-memory store: each token holds the counter open for one refill interval (window ÷ limit), and a request over the limit is refused without changing the counter.
 

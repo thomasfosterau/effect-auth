@@ -27,7 +27,7 @@ import type * as Types from "./Types.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
 
-const hasher = Password.scryptHasher({ cost: 1024 });
+const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 1000 * 60 * 60, idlePeriod: 1000 * 60 * 60 },
 };
@@ -286,7 +286,7 @@ describe("UsernameService", () => {
 
   it("calls passwordHasher.verify even for an unknown username (constant-work)", async () => {
     let verifyCalls = 0;
-    const realHasher = Password.scryptHasher({ cost: 1024 });
+    const realHasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),

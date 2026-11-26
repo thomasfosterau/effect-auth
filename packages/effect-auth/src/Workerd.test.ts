@@ -1,16 +1,13 @@
 /**
- * The core's `node:crypto` corral inside a real workerd, the runtime
- * the README claims for everything but `./saml`.
- *
- * workerd's `node:crypto` rejects `{ key: KeyObject, dsaEncoding }` with
- * `ERR_INVALID_ARG_TYPE`, so ES256 JWS hands `crypto.sign` / `crypto.verify`
- * the PEM or the JWK itself; and `nodejs_compat` sets no `Buffer` global on
- * a Worker dated before 2024-09-23, so the corral imports `Buffer` from
- * `node:buffer`. This suite bundles a worker around the corral's callers,
+ * The core's crypto inside a real workerd, the runtime the README claims
+ * for everything but `./saml`: JWS through `effect/jose`, JWT, passwords,
+ * AES-GCM and the `node:crypto` corral. `nodejs_compat` sets no `Buffer`
+ * global on a Worker dated before 2024-09-23, so the corral imports `Buffer`
+ * from `node:buffer`. This suite bundles a worker around those callers,
  * serves it from the `workerd` binary at workerd's newest compatibility date
  * and at the core's supported minimum, and checks every primitive inside a
- * `fetch` handler. The tokens the worker signs are verified here in Node
- * with the former `KeyObject` form, and the worker verifies tokens Node
+ * `fetch` handler. The tokens the worker signs are verified here with Node's
+ * own `KeyObject` verifier, and the worker verifies tokens Node
  * signed, so the two runtimes agree byte for byte where the algorithm is
  * deterministic. The worker's global outbound is a network service that
  * allows nothing, so no step can reach the internet.
@@ -31,7 +28,9 @@ import { Base64Url } from "effect/encoding";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { aes256GcmCipher, hashToken, type JwsAlgorithm } from "./index.ts";
+import { aes256GcmCipher } from "./index.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { sha256Hex } from "./testing/Sha256.ts";
 import { pbkdf2Hasher } from "./password/index.ts";
 import * as Rfc7515 from "./testing/Rfc7515.ts";
 
@@ -70,22 +69,24 @@ import {
   aes256GcmOpen,
   aes256GcmSeal,
   constantTimeHashEqual,
-  generateJwsKeyPair,
   hashToken,
   hmac,
   JwtKeyStore,
   JwtService,
   jwkToSpkiDer,
+  RootSecret,
   sha256,
-  signJws,
-  verifyDerSignature,
-  verifyJws,
+  verifySpkiSignature,
 } from "./index.ts";
+import { signWithPkcs8, verifiesWithJwk } from "./JwsSignature.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { appleClientSecret } from "./oauth/index.ts";
-import { pbkdf2Hasher, scryptHasher } from "./password/index.ts";
+import { pbkdf2Hasher } from "./password/index.ts";
+import { scryptHasher } from "./password/Scrypt.ts";
 import { memoryJwtKeyStore } from "./testing/index.ts";
 
 const enc = (text) => new TextEncoder().encode(text);
+const runCrypto = (effect) => Effect.runPromise(PlatformCrypto.provide(effect));
 const b64 = (bytes) => Base64Url.encode(new Uint8Array(bytes));
 const unb64 = (text) => {
   const decoded = Base64Url.decode(text);
@@ -105,38 +106,37 @@ const tamper = (token) => {
   const at = token.lastIndexOf(".") + 1;
   return token.slice(0, at) + (token[at] === "A" ? "B" : "A") + token.slice(at + 1);
 };
-const flip = (bytes) => {
-  const copy = new Uint8Array(bytes);
-  copy[copy.length - 1] ^= 1;
-  return copy;
-};
 
-const jws = (algorithm) => {
-  const { publicKeyJwk, privateKeyPem } = generateJwsKeyPair(algorithm);
-  const data = enc("header.payload-" + algorithm);
-  const signature = signJws(algorithm, data, privateKeyPem);
+// workerd from 2025-12-03 exports every absent JWK member as undefined.
+const definedMembers = (jwk) => Object.fromEntries(Object.entries(jwk).filter(([, v]) => v !== undefined));
+
+const keyPair = (algorithm) => {
+  const { publicKey, privateKey } =
+    algorithm === "ES256"
+      ? crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
+      : algorithm === "EdDSA"
+        ? crypto.generateKeyPairSync("ed25519")
+        : crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   return {
-    jwk: publicKeyJwk,
-    privateKeyPem,
-    data: b64(data),
-    signature: b64(signature),
-    verifies: verifyJws(algorithm, data, signature, publicKeyJwk),
-    rejectsTampered: !verifyJws(algorithm, data, flip(signature), publicKeyJwk),
+    jwk: definedMembers(publicKey.export({ format: "jwk" })),
+    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
   };
 };
 
-const rs256 = () => {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const jwk = publicKey.export({ format: "jwk" });
-  const data = enc("header.payload-RS256");
-  const signature = crypto.sign("sha256", data, privateKey);
+const signCompact = (algorithm, payload, privateKeyPem) =>
+  runCrypto(signWithPkcs8(enc(payload), Redacted.make(privateKeyPem), algorithm, { typ: "JWT" }));
+const verifiesCompact = (algorithm, token, jwk) =>
+  Effect.runPromise(verifiesWithJwk(token, jwk, algorithm));
+
+const jws = async (algorithm) => {
+  const { jwk, privateKeyPem } = keyPair(algorithm);
+  const token = await signCompact(algorithm, "payload-" + algorithm, privateKeyPem);
   return {
     jwk,
-    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
-    data: b64(data),
-    signature: b64(signature),
-    verifies: verifyJws("RS256", data, signature, jwk),
-    rejectsTampered: !verifyJws("RS256", data, flip(signature), jwk),
+    privateKeyPem,
+    token,
+    verifies: await verifiesCompact(algorithm, token, jwk),
+    rejectsTampered: !(await verifiesCompact(algorithm, tamper(token), jwk)),
   };
 };
 
@@ -152,14 +152,19 @@ const jwtService = (algorithm) =>
     }).pipe(
       Effect.provide(
         JwtService.layer({ issuer: "https://app.example.com", algorithm }).pipe(
-          Layer.provide(Layer.succeed(JwtKeyStore, memoryJwtKeyStore())),
+          Layer.provide(
+            Layer.merge(
+              Layer.succeed(JwtKeyStore, memoryJwtKeyStore()),
+              Layer.orDie(RootSecret.RootSecret.layer("0123456789abcdef".repeat(4))),
+            ),
+          ),
         ),
       ),
     ),
   );
 
 const apple = async () => {
-  const { publicKeyJwk, privateKeyPem } = generateJwsKeyPair("ES256");
+  const { jwk, privateKeyPem } = keyPair("ES256");
   const token = await Effect.runPromise(
     appleClientSecret({
       teamId: "TEAM",
@@ -169,12 +174,7 @@ const apple = async () => {
       now: 1_700_000_000_000,
     }),
   );
-  const [header, payload, signature] = token.split(".");
-  return {
-    token,
-    jwk: publicKeyJwk,
-    verifies: verifyJws("ES256", enc(header + "." + payload), unb64(signature), publicKeyJwk),
-  };
+  return { token, jwk, verifies: await verifiesCompact("ES256", token, jwk) };
 };
 
 const password = (hasher) =>
@@ -190,56 +190,56 @@ const password = (hasher) =>
   );
 
 const aes = () =>
-  Effect.runPromise(
+  runCrypto(
     Effect.gen(function* () {
-      const cipher = aes256GcmCipher("workerd-secret");
+      const cipher = yield* aes256GcmCipher("workerd-secret");
       const sealed = yield* cipher.encrypt("refresh-token-123");
       const opened = yield* cipher.decrypt(sealed);
       const tampered = yield* Effect.result(cipher.decrypt(tamper(sealed)));
-      const key = sha256("cookie-key");
-      const cookie = aes256GcmSeal(key, "cached-session");
+      const key = yield* sha256("cookie-key");
+      const cookie = yield* aes256GcmSeal(key, "cached-session");
       return {
         sealed,
         opened,
         rejectsTampered: tampered._tag === "Failure",
-        cookieOpened: aes256GcmOpen(key, cookie),
-        cookieRejectsWrongKey: aes256GcmOpen(sha256("other"), cookie) === null,
+        cookieOpened: yield* aes256GcmOpen(key, cookie),
+        cookieRejectsWrongKey: (yield* aes256GcmOpen(yield* sha256("other"), cookie)) === null,
       };
     }),
   );
 
-const der = () => {
+const der = async () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
-  const spki = jwkToSpkiDer(publicKey.export({ format: "jwk" }));
+  const spki = await runCrypto(jwkToSpkiDer("ES256", publicKey.export({ format: "jwk" })));
   const message = enc("authenticator-data");
   const signature = new Uint8Array(crypto.sign("sha256", message, privateKey));
   const ed = crypto.generateKeyPairSync("ed25519");
-  const edSpki = jwkToSpkiDer(ed.publicKey.export({ format: "jwk" }));
+  const edSpki = await runCrypto(jwkToSpkiDer("EdDSA", ed.publicKey.export({ format: "jwk" })));
+  const edSignature = new Uint8Array(crypto.sign(null, message, ed.privateKey));
   return {
-    es256: verifyDerSignature("sha256", spki, message, signature),
-    eddsa: verifyDerSignature(null, edSpki, message, new Uint8Array(crypto.sign(null, message, ed.privateKey))),
+    es256: await runCrypto(verifySpkiSignature("ES256", spki, message, signature)),
+    eddsa: await runCrypto(verifySpkiSignature("EdDSA", edSpki, message, edSignature)),
   };
 };
 
 // ES256 signatures a JOSE verifier must refuse: DER (crypto.sign's default
 // encoding), and r || s one byte short or long.
-const es256Malformed = () => {
-  const { publicKeyJwk, privateKeyPem } = generateJwsKeyPair("ES256");
-  const data = enc("header.payload-malformed");
-  const signature = signJws("ES256", data, privateKeyPem);
+const es256Malformed = async () => {
+  const { jwk, privateKeyPem } = keyPair("ES256");
+  const token = await signCompact("ES256", "payload-malformed", privateKeyPem);
+  const input = token.slice(0, token.lastIndexOf("."));
+  const signature = unb64(token.slice(token.lastIndexOf(".") + 1));
+  const withSignature = (bytes) => verifiesCompact("ES256", input + "." + b64(bytes), jwk);
   return {
-    der: verifyJws("ES256", data, new Uint8Array(crypto.sign("sha256", data, privateKeyPem)), publicKeyJwk),
-    short: verifyJws("ES256", data, signature.subarray(0, 63), publicKeyJwk),
-    long: verifyJws("ES256", data, new Uint8Array([...signature, 0]), publicKeyJwk),
+    der: await withSignature(crypto.sign("sha256", enc(input), privateKeyPem)),
+    short: await withSignature(signature.subarray(0, 63)),
+    long: await withSignature(new Uint8Array([...signature, 0])),
   };
 };
 
 // A compact JWS Node sends, verified against its public JWK: RFC 7515
 // Appendix A.3, a signature neither runtime produced.
-const verifyCompact = ({ jws, jwk }) => {
-  const [header, payload, signature] = jws.split(".");
-  return verifyJws("ES256", enc(header + "." + payload), unb64(signature), jwk);
-};
+const verifyCompact = ({ jws, jwk }) => verifiesCompact("ES256", jws, jwk);
 
 // globalOutbound is a network service that allows nothing, so even the
 // worker's own listener, which answers /ping, is out of reach.
@@ -252,18 +252,20 @@ const run = async (probe) => ({
   bufferGlobal: typeof globalThis.Buffer,
   es256: await attempt(() => jws("ES256")),
   eddsa: await attempt(() => jws("EdDSA")),
-  rs256: await attempt(rs256),
+  rs256: await attempt(() => jws("RS256")),
   jwtES256: await attempt(() => jwtService("ES256")),
   jwtEdDSA: await attempt(() => jwtService("EdDSA")),
   apple: await attempt(apple),
   pbkdf2: await attempt(() => password(pbkdf2Hasher())),
   scrypt: await attempt(() => password(scryptHasher({ cost: 16384 }))),
-  tokenHash: await attempt(() => ({
-    digest: hashToken("raw-token"),
-    equal: constantTimeHashEqual(hashToken("a"), hashToken("a")),
-    unequal: !constantTimeHashEqual(hashToken("a"), hashToken("b")),
+  tokenHash: await attempt(async () => {
+    const [raw, a, b] = await runCrypto(Effect.forEach(["raw-token", "a", "b"], hashToken));
+    return { digest: raw, equal: constantTimeHashEqual(a, a), unequal: !constantTimeHashEqual(a, b) };
+  }),
+  hmac: await attempt(async () => ({
+    sha1: b64(await runCrypto(hmac("sha1", "key", "data"))),
+    sha256: b64(await runCrypto(sha256("data"))),
   })),
-  hmac: await attempt(() => ({ sha1: b64(hmac("sha1", "key", "data")), sha256: b64(sha256("data")) })),
   aes: await attempt(aes),
   der: await attempt(der),
   es256Malformed: await attempt(es256Malformed),
@@ -272,11 +274,9 @@ const run = async (probe) => ({
 
 /** Verify what Node made: JWS signatures, an AES-GCM ciphertext and a PBKDF2 hash. */
 const check = async (input) => ({
-  jws: input.jws.map(({ algorithm, jwk, data, signature }) =>
-    verifyJws(algorithm, unb64(data), unb64(signature), jwk),
-  ),
-  eddsaSignature: b64(signJws("EdDSA", unb64(input.eddsa.data), input.eddsa.privateKeyPem)),
-  decrypted: await Effect.runPromise(aes256GcmCipher(input.aes.secret).decrypt(input.aes.sealed)),
+  jws: await Promise.all(input.jws.map(({ algorithm, jwk, token }) => verifiesCompact(algorithm, token, jwk))),
+  eddsaToken: await signCompact("EdDSA", "node.signed-EdDSA", input.eddsa.privateKeyPem),
+  decrypted: await runCrypto(Effect.flatMap(aes256GcmCipher(input.aes.secret), (cipher) => cipher.decrypt(input.aes.sealed))),
   pbkdf2: await Effect.runPromise(pbkdf2Hasher().verify(input.pbkdf2.password, input.pbkdf2.hash)),
 });
 
@@ -284,7 +284,8 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/ping") return new Response("pong");
-    if (url.pathname === "/verify") return Response.json(verifyCompact(await request.json()));
+    if (url.pathname === "/verify") return Response.json(await verifyCompact(await request.json()));
+    if (url.pathname === "/pbkdf2") return Response.json(await password(pbkdf2Hasher()));
     const body =
       url.pathname === "/check"
         ? await check(await request.json())
@@ -411,8 +412,7 @@ const Jwk = Schema.Record(Schema.String, Schema.Json);
 const SignedJws = Schema.Struct({
   jwk: Jwk,
   privateKeyPem: Schema.String,
-  data: Schema.String,
-  signature: Schema.String,
+  token: Schema.String,
   verifies: Schema.Boolean,
   rejectsTampered: Schema.Boolean,
 });
@@ -465,8 +465,7 @@ const NodeSigned = Schema.Struct({
   algorithm: Schema.Literals(["ES256", "EdDSA", "RS256"]),
   jwk: Jwk,
   privateKeyPem: Schema.String,
-  data: Schema.String,
-  signature: Schema.String,
+  token: Schema.String,
 });
 
 const encodeCheckInput = Schema.encodeSync(
@@ -488,7 +487,7 @@ const encodeCompactJws = Schema.encodeSync(
 
 const Check = Schema.Struct({
   jws: Schema.Array(Schema.Boolean),
-  eddsaSignature: Schema.String,
+  eddsaToken: Schema.String,
   decrypted: Schema.String,
   pbkdf2: Schema.Boolean,
 });
@@ -505,20 +504,36 @@ const valueOf = <A>(
 const bytes = (text: string): Uint8Array =>
   Result.getOrElse(Base64Url.decode(text), () => new Uint8Array(0));
 
-/** The former verifier: a `KeyObject` with `dsaEncoding`, which Node accepts and workerd does not. */
-const keyObjectVerify = (
+type JwsAlgorithm = "ES256" | "EdDSA" | "RS256";
+
+/** Node's own verifier, over a `KeyObject`: the signing input and signature of a compact JWS. */
+const keyObjectVerifies = (
   algorithm: JwsAlgorithm,
-  data: Uint8Array,
-  signature: Uint8Array,
+  token: string,
   jwk: crypto.JsonWebKeyInput["key"],
 ): boolean => {
+  const at = token.lastIndexOf(".");
+  const data = new TextEncoder().encode(token.slice(0, at));
+  const signature = bytes(token.slice(at + 1));
   const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
   if (algorithm === "ES256")
     return crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, signature);
   return crypto.verify(algorithm === "RS256" ? "sha256" : null, data, key, signature);
 };
 
-/** A JWS signed in Node with the former `KeyObject` form. */
+/** The signature segment Node's Ed25519 signer gives `token`'s signing input. */
+const nodeEd25519Signature = (token: string, privateKeyPem: string): string =>
+  Base64Url.encode(
+    new Uint8Array(
+      crypto.sign(
+        null,
+        new TextEncoder().encode(token.slice(0, token.lastIndexOf("."))),
+        privateKeyPem,
+      ),
+    ),
+  );
+
+/** A compact JWS signed in Node with a `KeyObject`. */
 const nodeSigned = (algorithm: JwsAlgorithm) => {
   const { publicKey, privateKey } =
     algorithm === "ES256"
@@ -526,7 +541,9 @@ const nodeSigned = (algorithm: JwsAlgorithm) => {
       : algorithm === "EdDSA"
         ? crypto.generateKeyPairSync("ed25519")
         : crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const data = new TextEncoder().encode(`node.signed-${algorithm}`);
+  const encode = (text: string) => Base64Url.encode(new TextEncoder().encode(text));
+  const input = `${encode(`{"alg":"${algorithm}"}`)}.${encode(`node.signed-${algorithm}`)}`;
+  const data = new TextEncoder().encode(input);
   const signature =
     algorithm === "ES256"
       ? crypto.sign("sha256", data, { key: privateKey, dsaEncoding: "ieee-p1363" })
@@ -535,8 +552,7 @@ const nodeSigned = (algorithm: JwsAlgorithm) => {
     algorithm,
     jwk: decodeJwk(publicKey.export({ format: "jwk" })),
     privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
-    data: Base64Url.encode(data),
-    signature: Base64Url.encode(new Uint8Array(signature)),
+    token: `${input}.${Base64Url.encode(new Uint8Array(signature))}`,
   };
 };
 
@@ -560,21 +576,21 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
         alg === "es256" ? "ES256" : alg === "eddsa" ? "EdDSA" : "RS256";
       expect(signed.verifies).toBe(true);
       expect(signed.rejectsTampered).toBe(true);
-      expect(
-        keyObjectVerify(algorithm, bytes(signed.data), bytes(signed.signature), signed.jwk),
-      ).toBe(true);
+      expect(keyObjectVerifies(algorithm, signed.token, signed.jwk)).toBe(true);
     },
   );
 
   it("emits ES256 signatures in raw JOSE r || s form", () => {
-    expect(bytes(valueOf(run.es256).signature)).toHaveLength(64);
+    const { token } = valueOf(run.es256);
+    expect(bytes(token.slice(token.lastIndexOf(".") + 1))).toHaveLength(64);
   });
 
   it("signs the Ed25519 bytes Node signs from the same key", () => {
     // Ed25519 is deterministic, so the two runtimes must agree byte for byte.
     const signed = valueOf(run.eddsa);
-    const nodeSignature = crypto.sign(null, bytes(signed.data), signed.privateKeyPem);
-    expect(Base64Url.encode(new Uint8Array(nodeSignature))).toBe(signed.signature);
+    expect(nodeEd25519Signature(signed.token, signed.privateKeyPem)).toBe(
+      signed.token.slice(signed.token.lastIndexOf(".") + 1),
+    );
   });
 
   it.each(["jwtES256", "jwtEdDSA"] as const)(
@@ -583,23 +599,17 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
       const jwt = valueOf(run[name]);
       expect(jwt.sub).toBe("u-1");
       expect(jwt.rejectsTampered).toBe(true);
-      const [header, payload, signature] = jwt.token.split(".");
-      assert(header !== undefined && payload !== undefined && signature !== undefined);
       const [jwk] = jwt.jwks.keys;
       assert(jwk !== undefined, "the JWKS has the signing key");
-      const signingInput = new TextEncoder().encode(`${header}.${payload}`);
       const algorithm = name === "jwtES256" ? "ES256" : "EdDSA";
-      expect(keyObjectVerify(algorithm, signingInput, bytes(signature), jwk)).toBe(true);
+      expect(keyObjectVerifies(algorithm, jwt.token, jwk)).toBe(true);
     },
   );
 
   it("builds an Apple client secret that verifies in both runtimes", () => {
     const apple = valueOf(run.apple);
     expect(apple.verifies).toBe(true);
-    const [header, payload, signature] = apple.token.split(".");
-    assert(header !== undefined && payload !== undefined && signature !== undefined);
-    const signingInput = new TextEncoder().encode(`${header}.${payload}`);
-    expect(keyObjectVerify("ES256", signingInput, bytes(signature), apple.jwk)).toBe(true);
+    expect(keyObjectVerifies("ES256", apple.token, apple.jwk)).toBe(true);
   });
 
   it.each(["pbkdf2", "scrypt"] as const)("hashes and verifies a password with %s", (name) => {
@@ -610,7 +620,7 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
 
   it("hashes tokens, HMACs and digests as Node does", () => {
     const tokenHash = valueOf(run.tokenHash);
-    expect(tokenHash).toEqual({ digest: hashToken("raw-token"), equal: true, unequal: true });
+    expect(tokenHash).toEqual({ digest: sha256Hex("raw-token"), equal: true, unequal: true });
     expect(valueOf(run.hmac)).toEqual({
       sha1: Base64Url.encode(
         new Uint8Array(crypto.createHmac("sha1", "key").update("data").digest()),
@@ -627,7 +637,11 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
       cookieOpened: "cached-session",
       cookieRejectsWrongKey: true,
     });
-    const opened = await Effect.runPromise(aes256GcmCipher("workerd-secret").decrypt(aes.sealed));
+    const opened = await Effect.runPromise(
+      PlatformCrypto.provide(
+        Effect.flatMap(aes256GcmCipher("workerd-secret"), (cipher) => cipher.decrypt(aes.sealed)),
+      ),
+    );
     expect(opened).toBe("refresh-token-123");
   });
 
@@ -648,10 +662,33 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     expect(valueOf(run.der)).toEqual({ es256: true, eddsa: true });
   });
 
+  it("hashes with PBKDF2 at its default 600,000 iterations within a Worker's CPU budget", async () => {
+    // One hash and two verifies, about 75 ms each in local workerd: inside
+    // Workers' limits, but a large share of a request's CPU. The bound leaves
+    // room for a slow CI runner; the first call warms the isolate.
+    const timed = async () => {
+      const started = performance.now();
+      const result = await callWorker(PasswordRun, date, "/pbkdf2");
+      return { result, elapsed: performance.now() - started };
+    };
+    await timed();
+    const { result, elapsed } = await timed();
+    expect(result).toMatchObject({ verifies: true, rejectsWrong: true });
+    expect(result.hash.split("$").slice(0, 2)).toEqual(["pbkdf2-sha256", "600000"]);
+    expect(
+      await Effect.runPromise(pbkdf2Hasher().verify("correct horse battery staple", result.hash)),
+    ).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
   it("verifies what Node signed, sealed and hashed", async () => {
     const jws = (["ES256", "EdDSA", "RS256"] as const).map(nodeSigned);
     const eddsa = nodeSigned("EdDSA");
-    const sealed = await Effect.runPromise(aes256GcmCipher("node-secret").encrypt("from-node"));
+    const sealed = await Effect.runPromise(
+      PlatformCrypto.provide(
+        Effect.flatMap(aes256GcmCipher("node-secret"), (cipher) => cipher.encrypt("from-node")),
+      ),
+    );
     const { hash } = await Effect.runPromise(pbkdf2Hasher().hash("node password"));
     const body = encodeCheckInput({
       jws,
@@ -660,11 +697,15 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
       pbkdf2: { password: "node password", hash },
     });
     const checked = await callWorker(Check, date, "/check", body);
-    expect(checked).toEqual({
+    expect(checked).toMatchObject({
       jws: [true, true, true],
-      eddsaSignature: eddsa.signature,
       decrypted: "from-node",
       pbkdf2: true,
     });
+    // Ed25519 is deterministic: Node signs the worker's signing input to the same bytes.
+    expect(keyObjectVerifies("EdDSA", checked.eddsaToken, eddsa.jwk)).toBe(true);
+    expect(nodeEd25519Signature(checked.eddsaToken, eddsa.privateKeyPem)).toBe(
+      checked.eddsaToken.slice(checked.eddsaToken.lastIndexOf(".") + 1),
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { TestClock } from "effect/testing";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Order, Result } from "effect";
@@ -30,7 +31,6 @@ import { PasswordHasher } from "./password/Password.ts";
 import { make, SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
-import { hashToken } from "./TokenHash.ts";
 import type { Attributes, Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
@@ -191,7 +191,7 @@ const makeTestContext = async (
           Context.make(SessionStore, sessionStore),
           Context.make(UserStore, sessionUserStore),
         ),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(hooksLayer)),
   );
@@ -593,7 +593,7 @@ describe("AdminService", () => {
       (service) => service.impersonateUser(admin, "user-1"),
     );
     // The record carries the stored id; the token travels beside it.
-    expect(session.id).toBe(hashToken(token));
+    expect(session.id).toBe(sha256Hex(token));
 
     expect(session.userId).toBe("user-1");
     expect(session.attributes["impersonatedBy"]).toBe("admin-1");

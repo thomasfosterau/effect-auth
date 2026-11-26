@@ -1,10 +1,10 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
 import { authenticateGate } from "../testing/AuthenticateGate.ts";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { testCryptoContext } from "../testing/TestCrypto.ts";
 import { OtpSecondFactorStore, type OtpSecondFactorRecord } from "./OtpSecondFactor.ts";
 import * as OtpSecondFactor from "./OtpSecondFactor.ts";
 import { make, SessionService } from "../SessionService.ts";
@@ -106,7 +106,7 @@ const makeTestContext = async () => {
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        testCryptoContext(),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
@@ -116,7 +116,7 @@ const makeTestContext = async () => {
       Context.make(SessionService, sessionManager),
       Context.make(OtpSecondFactorStore, otpStore),
     ),
-    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+    testCryptoContext(),
   );
 };
 
@@ -167,7 +167,9 @@ describe("OtpSecondFactorService", () => {
     expect(recorded(sentOtps).user.id).toBe(testUser.id);
     expect(recorded(sentOtps).otp).toMatch(/^\d{6}$/);
     // Only the hash is stored
-    const stored = Option.getOrUndefined(MutableHashMap.get(otpRecords, challenge.token));
+    const stored = Option.getOrUndefined(
+      MutableHashMap.get(otpRecords, sha256Hex(challenge.token)),
+    );
     assert(stored !== undefined, "the challenge stored an OTP record");
     expect(stored.otpHash).not.toBe(recorded(sentOtps).otp);
     expect(stored.attempts).toBe(0);

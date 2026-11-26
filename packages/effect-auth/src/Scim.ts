@@ -65,7 +65,7 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import { flow } from "effect/Function";
 import * as Errors from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -86,7 +86,7 @@ import {
 } from "./UserStore.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 
@@ -715,12 +715,14 @@ export const make = (
   | OrganizationStore
   | SessionService
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const baseUrl = (config.baseUrl ?? "/scim/v2").replace(/\/+$/, "");
     const maxPageSize = config.maxPageSize ?? 100;
 
     const connections = yield* ScimConnectionStore;
+    const hashToken = yield* tokenHasher;
     const users = yield* ScimUserStore;
     const identifiers = yield* IdentifierStore;
     const orgs = yield* OrganizationStore;
@@ -1184,7 +1186,7 @@ export const make = (
         const connection: ScimConnection = {
           id: yield* randomId(),
           organizationId,
-          tokenHash: hashToken(token),
+          tokenHash: yield* hashToken(token),
           createdAt: yield* Clock.currentTimeMillis,
         };
         return { connection: yield* connections.create(connection), token };
@@ -1206,7 +1208,7 @@ export const make = (
           status: 401,
         });
         if (token.trim() === "") return yield* unauthorized;
-        const connection = yield* connections.getByTokenHash(hashToken(token));
+        const connection = yield* connections.getByTokenHash(yield* hashToken(token));
         if (connection === null) return yield* unauthorized;
         // Best-effort activity stamp: a failed touch must not fail the request
         // the IdP actually made.

@@ -31,9 +31,9 @@
  * - `defineSchema` / `fromTables` / `AuthSchema` and the `*ColumnNames` types —
  *   how to point the stores at tables this package did not define.
  * - `ladderCheck` — a role column's `CHECK`, derived from the app's `Ladder`.
- * - `ownedListFilter` / `isFollowerLayer` — `Auth.OwnedAccess`'s read scope
- *   rendered as a `WHERE`, and its follower seam over an application's own
- *   follow table.
+ * - `ownedListFilter` / `isFollowerLayer` / `isMemberLayer` — `Auth.OwnedAccess`'s
+ *   read scope rendered as a `WHERE`, and its follower and member seams over an
+ *   application's own follow and membership tables.
  *
  * @example
  * ```ts
@@ -107,7 +107,12 @@ export * from "./Database.ts";
 export * from "./Schema.ts";
 export { layer } from "./Layers.ts";
 export { ladderCheck } from "./LadderCheck.ts";
-export { isFollowerLayer, ownedListFilter, type OwnedColumns } from "./OwnedListFilter.ts";
+export {
+  isFollowerLayer,
+  isMemberLayer,
+  ownedListFilter,
+  type OwnedColumns,
+} from "./OwnedListFilter.ts";
 
 export * as ApiKeyStore from "./ApiKeyStore.ts";
 export * as EmailPasswordStore from "./EmailPasswordStore.ts";

@@ -21,6 +21,8 @@
  *
  * @module testing
  */
+import type { RootSecret } from "../RootSecret.ts";
+import { testRootSecretLayer } from "./RootSecret.ts";
 import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -713,7 +715,8 @@ export type MemoryStores =
   | OidcConsentStore
   | Layer.Success<typeof layerKV>
   | KeyValueStore.KeyValueStore
-  | KeyValueStoreKeys;
+  | KeyValueStoreKeys
+  | RootSecret;
 
 /**
  * Every in-memory store over fresh, shared state: the user-writing stores
@@ -722,8 +725,9 @@ export type MemoryStores =
  * state, WebAuthn challenges, rate limits, verification, reset and magic-link
  * tokens, email OTPs, pending multi-factor challenges) run over an in-memory
  * `KeyValueStore`, which the layer also provides with its `KeyValueStoreKeys`
- * listing, so `purgeExpiredKV` runs against it. Each build of the layer starts
- * empty.
+ * listing, so `purgeExpiredKV` runs against it. It also provides the public
+ * test {@link RootSecret} (`testRootSecretLayer`). Each build of the layer
+ * starts empty.
  *
  * @example
  * ```ts
@@ -768,6 +772,7 @@ export const layer: Layer.Layer<MemoryStores> = Layer.unwrap(
       Layer.succeed(OidcTokenStore, memoryOidcTokenStore()),
       Layer.succeed(OidcConsentStore, memoryOidcConsentStore()),
       Layer.provideMerge(layerKV, layerMemoryKeyValueStore),
+      testRootSecretLayer,
     );
   }),
 );

@@ -9,6 +9,7 @@
  */
 import * as Auth from "../../index.ts";
 import * as Http from "../../http/index.ts";
+import { testRootSecretLayer } from "../../testing/RootSecret.ts";
 import {
   memoryApiKeyStore,
   memoryPhoneOtpStore,
@@ -21,8 +22,8 @@ import * as Option from "effect/Option";
 
 const HOUR = 60 * 60 * 1000;
 
-// Low scrypt cost keeps the suite fast while exercising real hashing.
-const hasher = Auth.Password.scryptHasher({ cost: 16384 });
+// A low PBKDF2 count keeps the suite fast while exercising real hashing.
+const hasher = Auth.Password.pbkdf2Hasher({ iterations: 1000 });
 
 /**
  * Which optional modules the fixture's server mounts. Everything is off by
@@ -554,7 +555,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     options.organization === true ? organizationLayer : Layer.empty,
     options.apiKeys === true ? apiKeyLayer : Layer.empty,
     options.layer ?? Layer.empty,
-  ).pipe(Layer.provide(rateLimitStoreLayer));
+  ).pipe(Layer.provide(Layer.merge(rateLimitStoreLayer, testRootSecretLayer)));
 
   // The fixture runs one in-process client, with no client address, so the
   // per-address IP limit `Http.make` applies by default is off: it would

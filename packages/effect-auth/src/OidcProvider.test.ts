@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import {
   Clock,
@@ -18,11 +19,10 @@ import * as Schema from "effect/Schema";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { SessionService } from "./SessionService.ts";
-import { hashToken } from "./TokenHash.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import {
@@ -53,7 +53,6 @@ import {
   OidcConsentStore,
   OidcProviderError,
   OidcRegistrationError,
-  hashOidcSecret,
   mcpProviderPreset,
   type OidcAuthorizationCode,
   type OidcClient,
@@ -197,7 +196,7 @@ describe("OidcProviderService", () => {
       get: () => Effect.succeed(null),
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
-      Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
+      Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
     );
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
@@ -207,7 +206,7 @@ describe("OidcProviderService", () => {
       Layer.succeed(UserStore)(userStore),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
-      PlatformCrypto.layer,
+      testCryptoLayer,
     );
     return { stores, layer };
   };
@@ -233,7 +232,7 @@ describe("OidcProviderService", () => {
 
     assert(web.clientSecret !== undefined, "a web client gets a secret");
     expect(web.client.type).toBe("web");
-    expect(web.client.clientSecretHash).toBe(hashOidcSecret(web.clientSecret));
+    expect(web.client.clientSecretHash).toBe(sha256Hex(web.clientSecret));
     expect(native.clientSecret).toBeUndefined();
     expect(native.client.type).toBe("native");
   });
@@ -621,9 +620,9 @@ describe("OidcProviderService token state", () => {
       }),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       JwtService.layer({ issuer: ISSUER }).pipe(
-        Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
+        Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
       ),
-      PlatformCrypto.layer,
+      testCryptoLayer,
     );
     // Each call is a fresh provider instance over the same stores, as after a
     // restart or on another instance.
@@ -843,7 +842,7 @@ describe("OidcProviderService dynamic client registration", () => {
       get: () => Effect.succeed(null),
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
-      Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
+      Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
     );
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
@@ -853,7 +852,7 @@ describe("OidcProviderService dynamic client registration", () => {
       Layer.succeed(UserStore)(userStore),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
-      PlatformCrypto.layer,
+      testCryptoLayer,
     );
     const config = {
       ...baseConfig,
@@ -883,7 +882,7 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(publicClient.registrationAccessToken).toBeTruthy();
     // Both one-time secrets are stored only as digests.
     expect(publicClient.client.registrationAccessTokenHash).toBe(
-      hashOidcSecret(publicClient.registrationAccessToken),
+      sha256Hex(publicClient.registrationAccessToken),
     );
 
     // RFC 7591 §2: an omitted token_endpoint_auth_method means client_secret_basic.
@@ -894,7 +893,7 @@ describe("OidcProviderService dynamic client registration", () => {
     assert(confidential.clientSecret !== undefined);
     expect(confidential.client.type).toBe("web");
     expect(confidential.client.tokenEndpointAuthMethod).toBe("client_secret_basic");
-    expect(confidential.client.clientSecretHash).toBe(hashOidcSecret(confidential.clientSecret));
+    expect(confidential.client.clientSecretHash).toBe(sha256Hex(confidential.clientSecret));
     // The default scope is the provider's full allowed set.
     expect(confidential.client.scope).toBe("openid profile email offline_access");
   });
@@ -1091,7 +1090,7 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(updated.name).toBe("Renamed");
     expect(updated.redirectUris).toEqual(["http://127.0.0.1:9876/callback", "https://rp.test/cb"]);
     // The secret and registration access token survive an update untouched.
-    expect(updated.registrationAccessTokenHash).toBe(hashOidcSecret(rat));
+    expect(updated.registrationAccessTokenHash).toBe(sha256Hex(rat));
 
     // A client cannot promote itself from public to confidential.
     const promote = await Effect.runPromise(
@@ -1245,7 +1244,7 @@ const makeHttpFixture = (
     const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(12))).toString(
       "hex",
     );
-    const tokenHash = hashToken(rawToken);
+    const tokenHash = sha256Hex(rawToken);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     MutableHashMap.set(sessions, tokenHash, {
       id: tokenHash,
@@ -1315,7 +1314,7 @@ const makeHttpFixture = (
 
   const jwtKeyStoreLayer = Layer.succeed(JwtKeyStore)(oidc.jwtKeyStore);
   const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
-    Layer.provide(jwtKeyStoreLayer),
+    Layer.provide(Layer.merge(jwtKeyStoreLayer, testCryptoLayer)),
   );
 
   // `OidcProviderService` resolves the OIDC stores, the core `UserStore`, and
@@ -1458,7 +1457,11 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 // The response bodies several tests read.
 /** A JSON object's own fields, read one by one. */
 const JsonFields = Schema.Record(Schema.String, Schema.Json);
-const MessageBody = Schema.Struct({ message: Schema.String });
+/** An RFC 6749 §5.2 token-endpoint error response. */
+const OAuthErrorBody = Schema.Struct({
+  error: Schema.String,
+  error_description: Schema.optional(Schema.String),
+});
 /** What `POST /oauth-clients` answers: the client, its secret (if any) in `meta`. */
 const CreatedClientBody = Schema.Struct({
   data: Schema.Struct({ id: Schema.String }),
@@ -1601,7 +1604,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1681,6 +1684,10 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(wrongClient.headers.get("cache-control")).toBe("no-store");
     const malformed = await fx.handler(post("/oauth2/token", { code }));
     expect(malformed.status).toBe(400);
+    expect((await jsonBody(malformed, OAuthErrorBody)).error).toBe("invalid_request");
+    const wrongType = await fx.handler(post("/oauth2/token", { grant_type: 42 }));
+    expect(wrongType.status).toBe(400);
+    expect((await jsonBody(wrongType, OAuthErrorBody)).error).toBe("invalid_request");
     expect(malformed.headers.get("cache-control")).toBe("no-store");
 
     // 4. Verify the id_token against the published JWKS.
@@ -1750,7 +1757,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(reuse.status).toBe(400);
-    expect((await jsonBody(reuse, MessageBody)).message).toBe("invalid_grant");
+    expect((await jsonBody(reuse, OAuthErrorBody)).error).toBe("invalid_grant");
 
     // Replaying it revoked the family, the rotated access token with it.
     const userinfo2 = await fx.handler(
@@ -1770,6 +1777,8 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(malformedBasic.status).toBe(401);
+    expect((await jsonBody(malformedBasic, OAuthErrorBody)).error).toBe("invalid_client");
+    expect(malformedBasic.headers.get("www-authenticate")).toBe('Basic realm="oauth"');
   });
 
   it("walks unauthenticated users through the login page and consent through the consent page", async () => {
@@ -1878,7 +1887,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorizeOnce = async () => {
       const res = await fx.handler(
         get(
@@ -1909,7 +1918,10 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badVerifier.status).toBe(400);
-    expect((await jsonBody(badVerifier, MessageBody)).message).toBe("invalid_grant");
+    expect(badVerifier.headers.get("www-authenticate")).toBeNull();
+    const invalidGrant = await jsonBody(badVerifier, OAuthErrorBody);
+    expect(invalidGrant.error).toBe("invalid_grant");
+    expect(invalidGrant.error_description).toBe("PKCE verification failed");
 
     // Wrong client secret -> 401 invalid_client.
     const badSecret = await fx.handler(
@@ -1923,7 +1935,11 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badSecret.status).toBe(401);
-    expect((await jsonBody(badSecret, MessageBody)).message).toBe("invalid_client");
+    expect(badSecret.headers.get("www-authenticate")).toBe('Basic realm="oauth"');
+    expect(badSecret.headers.get("cache-control")).toBe("no-store");
+    const invalidClient = await expectSpecJson(badSecret, "application/json", ["error"]);
+    expect(invalidClient["error"]).toBe("invalid_client");
+    expect(invalidClient["message"]).toBeUndefined();
 
     // Unsupported grant type -> 400.
     const badGrant = await fx.handler(
@@ -1934,7 +1950,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(badGrant.status).toBe(400);
-    expect((await jsonBody(badGrant, MessageBody)).message).toBe("unsupported_grant_type");
+    expect((await jsonBody(badGrant, OAuthErrorBody)).error).toBe("unsupported_grant_type");
   });
 
   it("accepts a form-urlencoded token request", async () => {
@@ -2022,7 +2038,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2111,7 +2127,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2181,7 +2197,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2211,7 +2227,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const { refresh_token: rt } = await jsonBody(tokenRes, RefreshTokenBody);
 
     // Expire the token by mutating absoluteExpiresAt to the past.
-    const hash = hashOidcSecret(rt);
+    const hash = sha256Hex(rt);
     const stored = Option.getOrUndefined(MutableHashMap.get(fx.oidcTokenStore, hash));
     assert(stored !== undefined, "the refresh token is stored");
     MutableHashMap.set(fx.oidcTokenStore, hash, {
@@ -2229,7 +2245,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(expired.status).toBe(400);
-    expect((await jsonBody(expired, MessageBody)).message).toBe("invalid_grant");
+    expect((await jsonBody(expired, OAuthErrorBody)).error).toBe("invalid_grant");
   });
 
   it("allows scope down-scoping on refresh token grant", async () => {
@@ -2245,7 +2261,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2303,7 +2319,7 @@ describe("HTTP OIDC provider endpoints", () => {
       }),
     );
     expect(upScoped.status).toBe(400);
-    expect((await jsonBody(upScoped, MessageBody)).message).toBe("invalid_scope");
+    expect((await jsonBody(upScoped, OAuthErrorBody)).error).toBe("invalid_scope");
   });
 
   it("prompt=none on authorize returns login_required for unauthenticated users", async () => {
@@ -2422,7 +2438,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     expect(client.client_id_issued_at).toBeGreaterThan(0);
 
     // 2. Authorization code with PKCE S256 — no client secret anywhere.
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",

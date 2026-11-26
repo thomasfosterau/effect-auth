@@ -134,6 +134,7 @@ import {
   RateLimiterConfigError,
   ServicesBuildPendingError,
 } from "../Errors.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
@@ -565,7 +566,6 @@ const resolveAdmin = resolveOptional(AdminService, "Admin is not enabled");
 /** Resolve the API-key service, or fail with 404. */
 const resolveApiKey = resolveOptional(ApiKeyService, "API keys are not enabled");
 
-/** Resolve the JWT service, or fail with 404. */
 /** `decodeURIComponent`, with a malformed percent-escape as `None` rather than a throw. */
 const decodeUriComponent: (encoded: string) => Option.Option<string> =
   Option.liftThrowable(decodeURIComponent);
@@ -581,7 +581,8 @@ const tokenClientCredentials = (
   body: { readonly client_id?: string | undefined; readonly client_secret?: string | undefined },
 ): Effect.Effect<
   { readonly clientId: string | undefined; readonly clientSecret: string | undefined },
-  S.Unauthorized
+  S.OAuthError | S.OAuthInvalidClient,
+  HttpServerRequest.HttpServerRequest
 > => {
   const fromBody = { clientId: body.client_id, clientSecret: body.client_secret };
   if (authorization === undefined || !authorization.startsWith("Basic ")) {
@@ -594,9 +595,10 @@ const tokenClientCredentials = (
   const secret = decodeUriComponent(decoded.slice(sep + 1));
   return Option.isSome(id) && Option.isSome(secret)
     ? Effect.succeed({ clientId: id.value, clientSecret: secret.value })
-    : Effect.fail(new S.Unauthorized({ message: "invalid_client" }));
+    : tokenError("invalid_client", "Malformed client credentials");
 };
 
+/** Resolve the JWT service, or fail with 404. */
 const resolveJwt = resolveOptional(JwtService, "JWT is not enabled");
 
 /** Resolve the SSO service, or fail with 404. */
@@ -843,6 +845,28 @@ const registrationError = (
       ...(e.description !== undefined && { error_description: e.description }),
     }),
   );
+};
+
+/**
+ * An RFC 6749 §5.2 token-endpoint refusal: `{ error, error_description? }`,
+ * `401` with `WWW-Authenticate` for `invalid_client`, `400` for the rest.
+ */
+const tokenError = (
+  error: string,
+  description: string | undefined,
+): Effect.Effect<
+  never,
+  S.OAuthError | S.OAuthInvalidClient,
+  HttpServerRequest.HttpServerRequest
+> => {
+  const body = { ...(description !== undefined && { error_description: description }) };
+  return error === "invalid_client"
+    ? HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(
+          HttpServerResponse.setHeader(response, "WWW-Authenticate", 'Basic realm="oauth"'),
+        ),
+      ).pipe(Effect.andThen(Effect.fail(new S.OAuthInvalidClient({ error, ...body }))))
+    : Effect.fail(new S.OAuthError({ error, ...body }));
 };
 
 /** The `Authorization: Bearer` value of a request, if any. */
@@ -1488,6 +1512,10 @@ const clearSessionCookies = (
     }
   });
 
+/** The SHA-256 digest a session token is stored under. */
+const digestToken = (token: string): Effect.Effect<string> =>
+  PlatformCrypto.provide(hashToken(token));
+
 /**
  * Layer implementing the `sessions` group: list, read and revoke the
  * signed-in user's sessions (see `sessionsGroup` in `HttpApi.ts`).
@@ -1530,13 +1558,13 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
           // On a store validation (cache miss) refresh the signed cache cookie
           // so subsequent reads within `maxAge` skip the store.
           if (cfg.cache !== undefined && !cacheHit) {
-            const value = encodeSessionCacheCookie(
+            const value = yield* encodeSessionCacheCookie(
               resolved,
               cfg.cache,
               yield* Clock.currentTimeMillis,
               resolved.session.id,
               yield* sessionCacheGateAttributes,
-            );
+            ).pipe(PlatformCrypto.provide, Effect.orDie);
             // A user holding a server-only attribute is never snapshotted.
             if (value !== undefined) {
               yield* setResponseCookie(
@@ -1562,7 +1590,7 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
           const presented = sessionIdFromRequest(request, cfg);
           const signsOut =
             params.id === CURRENT ||
-            (presented !== undefined && hashToken(presented) === params.id);
+            (presented !== undefined && (yield* digestToken(presented)) === params.id);
           if (signsOut) {
             // Signing out answers 204 whether or not the session was still
             // valid: the cookies are cleared either way.
@@ -2554,8 +2582,13 @@ const organizationTarget =
     });
 
 /** The device's session token whose hash is the listed device-session `id`. */
-const deviceTokenFor = (tokens: ReadonlyArray<string>, id: string): Option.Option<string> =>
-  Arr.findFirst(tokens, (token) => hashToken(token) === id);
+const deviceTokenFor = (
+  tokens: ReadonlyArray<string>,
+  id: string,
+): Effect.Effect<Option.Option<string>> =>
+  Effect.map(Effect.forEach(tokens, digestToken, { concurrency: "unbounded" }), (digests) =>
+    Arr.findFirst(tokens, (_, i) => digests[i] === id),
+  );
 
 /**
  * Layer implementing the `device-sessions` group: the accounts signed in on
@@ -2589,6 +2622,7 @@ export const deviceSessionsGroupLayer = (
       .handle("list", ({ request }) =>
         Effect.gen(function* () {
           const { active, tokens } = yield* deviceTokens(request);
+          const activeId = active === undefined ? undefined : yield* digestToken(active);
           const sessionManager = yield* SessionService;
           const valid = Arr.getSomes(
             yield* Effect.forEach(
@@ -2620,7 +2654,7 @@ export const deviceSessionsGroupLayer = (
               R.DeviceSession.make({
                 id: session.id,
                 attributes: {
-                  active: active !== undefined && session.id === hashToken(active),
+                  active: activeId !== undefined && session.id === activeId,
                   expiresAt: session.expiresAt,
                   createdAt: session.createdAt,
                   lastActivityAt: session.lastActivityAt,
@@ -2643,7 +2677,7 @@ export const deviceSessionsGroupLayer = (
                 "Name the device session to switch to; sign out with DELETE /sessions/current",
             });
           }
-          const token = deviceTokenFor(tokens, target.id);
+          const token = yield* deviceTokenFor(tokens, target.id);
           if (Option.isNone(token)) {
             return yield* new S.BadRequest({ message: "Session is not on this device" });
           }
@@ -2670,7 +2704,7 @@ export const deviceSessionsGroupLayer = (
       .handle("delete", ({ params, request }) =>
         Effect.gen(function* () {
           const { active, tokens } = yield* deviceTokens(request);
-          const token = deviceTokenFor(tokens, params.id);
+          const token = yield* deviceTokenFor(tokens, params.id);
           if (Option.isNone(token)) {
             return yield* new S.NotFound({ message: "Session is not on this device" });
           }
@@ -3840,7 +3874,7 @@ export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSess
         const { token, expiresAt } = yield* storeFailure(jwt.service.sign(resolved.user));
         // A token is not stored: its id is its digest, never the token itself.
         return Handlers.data(
-          R.Token.make({ id: hashToken(token), attributes: { token, expiresAt } }),
+          R.Token.make({ id: yield* digestToken(token), attributes: { token, expiresAt } }),
         );
       }).pipe(JsonApiErrors.mapHttpErrors),
     ),
@@ -4216,13 +4250,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                // RFC 6749 error codes: invalid_client -> 401, the rest -> 400.
-                OidcTokenError: (e) =>
-                  Effect.fail(
-                    e.error === "invalid_client"
-                      ? new S.Unauthorized({ message: e.error })
-                      : new S.BadRequest({ message: e.error }),
-                  ),
+                OidcTokenError: (e) => tokenError(e.error, e.description),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -4328,6 +4356,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         // 404 when the OIDC provider is disabled.
         Effect.andThen(resolveOidcProvider, jwksDocument()),
       ),
+  ).pipe(
+    // `/oauth2/token` answers a request it cannot decode as RFC 6749 §5.2 does.
+    Layer.provide(S.OAuthTokenSchemaErrors.layer),
   );
 };
 
@@ -4879,13 +4910,13 @@ const resolveSession = (
     }
     const cached = cfg.cache === undefined ? undefined : request.cookies[dataCookieName(cfg)];
     if (cfg.cache !== undefined && cached !== undefined) {
-      const resolved = decodeSessionCacheCookie(
+      const resolved = yield* decodeSessionCacheCookie(
         cached,
         cfg.cache,
         yield* Clock.currentTimeMillis,
-        hashToken(token),
+        yield* digestToken(token),
         yield* sessionCacheGateAttributes,
-      );
+      ).pipe(PlatformCrypto.provide);
       if (resolved !== null) return { resolved, cacheHit: true, token };
     }
     const sessionManager = yield* SessionService;

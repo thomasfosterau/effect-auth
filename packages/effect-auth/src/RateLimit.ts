@@ -109,6 +109,15 @@ const recordRateLimitHit =
     );
 
 /** The time from `now` until `until` (both epoch milliseconds), never negative. */
+/**
+ * The message of every `RateLimitError` a limiter raises. It is the same for
+ * every key, so an HTTP answer that forwards it names no internal key, client
+ * address or device user code; the key stays on the error's `key`.
+ *
+ * @since 0.9.0
+ */
+export const RATE_LIMIT_EXCEEDED_MESSAGE = "Rate limit exceeded";
+
 const retryAfter = (until: number, now: number): Duration.Duration =>
   Duration.millis(Math.max(0, until - now));
 
@@ -129,7 +138,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           // Check if blocked
           if (entry?.blockedUntil && now < entry.blockedUntil) {
             return yield* new RateLimitError({
-              message: `Rate limit exceeded for ${key}`,
+              message: RATE_LIMIT_EXCEEDED_MESSAGE,
               key,
               retryAfter: retryAfter(entry.blockedUntil, now),
             });
@@ -153,7 +162,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
             }
 
             return yield* new RateLimitError({
-              message: `Rate limit exceeded for ${key}`,
+              message: RATE_LIMIT_EXCEEDED_MESSAGE,
               key,
               retryAfter: retryAfter(entry.resetAt, now),
             });
@@ -172,7 +181,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           const entry = yield* store.get(key);
           if (entry?.blockedUntil && now < entry.blockedUntil) {
             return yield* new RateLimitError({
-              message: `Rate limit exceeded for ${key}`,
+              message: RATE_LIMIT_EXCEEDED_MESSAGE,
               key,
               retryAfter: retryAfter(entry.blockedUntil, now),
             });
@@ -200,7 +209,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           }
 
           return yield* new RateLimitError({
-            message: `Rate limit exceeded for ${key}`,
+            message: RATE_LIMIT_EXCEEDED_MESSAGE,
             key,
             retryAfter: retryAfter(resetAt, now),
           });
