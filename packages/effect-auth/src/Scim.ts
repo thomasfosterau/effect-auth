@@ -51,10 +51,8 @@
  * revoked. Reactivation (`PATCH {"active": true}`) is then a single write, which
  * is what an IdP expects when someone returns from leave.
  *
- * Revoking sessions closes the door on anyone already signed in; to keep it
- * closed for *new* sign-ins, wire {@link ScimDeactivatedPlugin} into your hooks
- * stack. It mirrors `BannedUserPlugin` — a deactivated user fails session
- * validation instead of being silently let back in.
+ * Deactivation also revokes the user's API keys and OIDC grants, and
+ * `SessionService` refuses a deactivated user a session, with no plugin needed.
  *
  * @module scim
  */
@@ -87,6 +85,7 @@ import {
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { tokenHasher } from "./TokenHash.ts";
+import { revokeStandingAccess, userCredentialStores } from "./UserCredentials.ts";
 import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 
@@ -142,23 +141,12 @@ export { SCIM_DEACTIVATED_ATTRIBUTE, isScimDeactivated };
 export const SCIM_EXTERNAL_ID_ATTRIBUTE = "scimExternalId";
 
 /**
- * Hooks plugin that blocks SCIM-deactivated users at session validation.
+ * A no-op, kept so existing hook stacks still compose: `SessionService`
+ * refuses a SCIM-deactivated user's sessions itself.
  *
- * {@link ScimService} already revokes a user's sessions the moment the IdP
- * deactivates them, which handles everyone already signed in. This plugin
- * closes the other half — it stops a deactivated user from establishing a new
- * session at all, in exactly the way `BannedUserPlugin` stops a banned one.
- *
- * Zero-dependency, so compose it like any other plugin:
- * `ScimDeactivatedPlugin.pipe(Layer.provide(Hooks.Default))`, or as one entry
- * in a `composePlugins([...])` stack.
+ * @deprecated Drop it from your hook stack; deactivation is enforced without it.
  */
-export const ScimDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
-  afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
-    isScimDeactivated(sessionWithUser.user)
-      ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been deactivated" }))
-      : Effect.succeed(sessionWithUser),
-});
+export const ScimDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({});
 
 // ---------------------------------------------------------------------------
 // Connections
@@ -727,6 +715,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const orgs = yield* OrganizationStore;
     const sessions = yield* SessionService;
+    const credentials = yield* userCredentialStores;
     const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
@@ -869,8 +858,9 @@ export const make = (
       );
 
     /**
-     * Flip a user's `active` state. Deactivation revokes every live session, so
-     * the door closes now rather than whenever the session would have expired.
+     * Flip a user's `active` state. Deactivation revokes every live session,
+     * API key and OIDC grant, so the door closes now rather than whenever they
+     * would have expired; `SessionService` refuses the user a new session.
      */
     const setActive = (user: Types.User, active: boolean) =>
       Effect.gen(function* () {
@@ -881,7 +871,10 @@ export const make = (
           attributes[SCIM_DEACTIVATED_ATTRIBUTE] = true;
         }
         const updated = yield* writeAttributes(user, attributes);
-        if (!active) yield* sessions.invalidateUserSessions(user.id);
+        if (!active) {
+          yield* sessions.invalidateUserSessions(user.id);
+          yield* revokeStandingAccess(credentials, user.id);
+        }
         return updated;
       });
 

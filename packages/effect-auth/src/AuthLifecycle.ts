@@ -8,6 +8,7 @@ import {
   answeredByStandIn,
   EmailPasswordService,
   type SecondFactorChallenge,
+  sessionOrChallenge,
   type SignInInput,
   type SignUpInput,
 } from "./email/EmailPassword.ts";
@@ -430,15 +431,16 @@ export const make = (
           } satisfies AuthLifecycleResult;
         }
 
-        const { session, token } = yield* sessionManager.createSession(
-          verificationRecord.userId,
+        const issued = yield* sessionOrChallenge(
+          sessionManager,
+          verifiedUser,
+          "email-verification",
           input.sessionAttributes,
         );
 
         return {
           user: verifiedUser,
-          session,
-          token,
+          ...issued,
           needsEmailVerification: false,
         } satisfies AuthLifecycleResult;
       }),

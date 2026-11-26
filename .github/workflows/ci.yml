@@ -26,7 +26,8 @@ jobs:
     # For alchemy-postgres's `test:alchemy`, which fails rather than skips without it under CI.
     services:
       postgres:
-        image: postgres:17
+        # Pinned by digest; move it by hand.
+        image: postgres:17@sha256:87c8b42f423b45d5247e6aa8fdb2e7762fec164c68a50fe3eb07e7bfcaf4dbcf
         env:
           POSTGRES_USER: auth
           POSTGRES_PASSWORD: auth

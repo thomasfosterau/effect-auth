@@ -40,6 +40,10 @@ import {
 } from "../KeyValueStores.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
+import {
+  type DeviceAuthorizationRecord,
+  DeviceAuthorizationStore,
+} from "../DeviceAuthorization.ts";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { MultiFactorStore, type MultiFactorRecord } from "../multifactor/MultiFactor.ts";
 import { CredentialStore, type WebAuthnCredential } from "../multifactor/WebAuthn.ts";
@@ -686,6 +690,66 @@ export const memoryOidcConsentStore = (
     deleteByUserId: (userId) =>
       Effect.sync(() => {
         removeWhere(consents, (consent) => consent.userId === userId);
+      }),
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Device authorization
+// ---------------------------------------------------------------------------
+
+/**
+ * `DeviceAuthorizationStore` over a `MutableHashMap` keyed by the device-code
+ * digest. `settle`, `touch` and `claimApproval` each read and write in one
+ * synchronous step, so they hold the store's conditional-write contract.
+ *
+ * @since 0.9.0
+ * @category constructors
+ */
+export const memoryDeviceAuthorizationStore = (
+  records: MutableHashMap.MutableHashMap<
+    string,
+    DeviceAuthorizationRecord
+  > = MutableHashMap.empty(),
+): typeof DeviceAuthorizationStore.Service => {
+  const byUserCode = (userCode: string) =>
+    Arr.findFirst(MutableHashMap.values(records), (r) => r.userCode === userCode);
+  return {
+    create: (record) =>
+      Effect.sync(() => {
+        MutableHashMap.set(records, record.deviceCode, record);
+        return record;
+      }),
+    getByDeviceCode: (deviceCode) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, deviceCode))),
+    getByUserCode: (userCode) => Effect.sync(() => Option.getOrNull(byUserCode(userCode))),
+    settle: (userCode, decision, now) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(byUserCode(userCode));
+        if (record === null || record.status !== "pending" || record.expiresAt < now) return null;
+        const settled: DeviceAuthorizationRecord = {
+          ...record,
+          status: decision.status,
+          userId: decision.userId,
+        };
+        MutableHashMap.set(records, record.deviceCode, settled);
+        return settled;
+      }),
+    touch: (deviceCode, touch) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(records, deviceCode));
+        if (record === null) return null;
+        const touched: DeviceAuthorizationRecord = { ...record, ...touch };
+        MutableHashMap.set(records, deviceCode, touched);
+        return touched;
+      }),
+    delete: (deviceCode) => Effect.sync(() => void MutableHashMap.remove(records, deviceCode)),
+    claimApproval: (deviceCode) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(records, deviceCode));
+        if (record === null || record.status !== "approved") return null;
+        MutableHashMap.remove(records, deviceCode);
+        return record;
       }),
   };
 };

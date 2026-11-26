@@ -1,12 +1,15 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, HashSet, Redacted } from "effect";
+import { DateTime, Effect, HashSet, Layer, Redacted } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
   resolveSessionCache,
+  sessionCacheGateAttributes,
   type ResolvedSessionCache,
 } from "./SessionCookieCache.ts";
+import { UserService, UserServiceStore } from "./User.ts";
+import { memoryUserServiceStore } from "./testing/MemoryStores.ts";
 import type * as Types from "./Types.ts";
 
 const SECRET = "a".repeat(32);
@@ -274,6 +277,38 @@ describe("server-only attributes", () => {
     const cookie = await mustEncode(admin, cache, now, SESSION_ID, HashSet.empty());
     expect(await decode(cookie, cache, now, SESSION_ID, HashSet.empty())).not.toBeNull();
     expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+  });
+});
+
+describe("standing attributes", () => {
+  const holding = (attributes: Types.Attributes): Types.SessionWithUser => ({
+    session: makeSession(),
+    user: makeUser({ attributes }),
+  });
+
+  it.each([{ banned: true }, { banned: false }, { banExpires: 0 }, { scimDeactivated: true }])(
+    "never snapshots or serves a user holding %o",
+    async (attributes) => {
+      expect(await encode(holding(attributes), cache, now, SESSION_ID)).toBeUndefined();
+      const cookie = await mustEncode(holding(attributes), cache, now, SESSION_ID, HashSet.empty());
+      expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+    },
+  );
+
+  it("gates them even when the app configures no server-only attributes", () => {
+    const gate = Effect.runSync(
+      sessionCacheGateAttributes.pipe(
+        Effect.provide(
+          UserService.layer({ serverOnlyAttributes: [] }).pipe(
+            Layer.provide(Layer.succeed(UserServiceStore)(memoryUserServiceStore())),
+          ),
+        ),
+      ),
+    );
+    expect(HashSet.has(gate, "banned")).toBe(true);
+    expect(HashSet.has(gate, "banExpires")).toBe(true);
+    expect(HashSet.has(gate, "scimDeactivated")).toBe(true);
+    expect(HashSet.has(gate, "role")).toBe(false);
   });
 });
 

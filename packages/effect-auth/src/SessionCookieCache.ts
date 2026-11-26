@@ -32,8 +32,9 @@
  * holds any of `UserService`'s server-only attributes
  * (`UserServiceConfig.serverOnlyAttributes`, default `["role"]`) is never
  * snapshotted, and a cookie that carries one is never served, so a demoted
- * admin's `role` always comes from the store. The cache then helps only users
- * with no such attribute. Keep `maxAge` short (default 5 minutes) all the same,
+ * admin's `role` always comes from the store. The ban and SCIM standing keys
+ * (`banned`, `banExpires`, `scimDeactivated`) are gated the same way, whatever
+ * the config. The cache then helps only users with no such attribute. Keep `maxAge` short (default 5 minutes) all the same,
  * since a revoked session's window is not narrowed by this.
  *
  * **To invalidate every outstanding cache cookie at once** (a role-ladder
@@ -56,6 +57,7 @@ import * as Cipher from "./Cipher.ts";
 import type { AuthError } from "./Errors.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
 import { timingSafeEqualBytes } from "./TokenHash.ts";
+import { STANDING_ATTRIBUTES } from "./UserStanding.ts";
 import * as Types from "./Types.ts";
 
 /** Cookie-cache configuration (part of `CookieConfig`). */
@@ -169,19 +171,23 @@ const SerializedPayload = Schema.Struct({
 /** Marks an encrypted payload; base64url never contains it. */
 const ENCRYPTED_PREFIX = "~";
 
+const gateOf = (serverOnly: ReadonlyArray<string>): HashSet.HashSet<string> =>
+  HashSet.fromIterable([...serverOnly, ...STANDING_ATTRIBUTES]);
+
+const defaultGate = gateOf(DEFAULT_SERVER_ONLY_ATTRIBUTES);
+
 /**
- * The server-only attributes the cache keeps out of its snapshots: those of the
- * `UserService` in context, or {@link DEFAULT_SERVER_ONLY_ATTRIBUTES} without
- * one.
+ * The attributes the cache keeps out of its snapshots: the server-only
+ * attributes of the `UserService` in context (or
+ * {@link DEFAULT_SERVER_ONLY_ATTRIBUTES} without one), plus the ban and SCIM
+ * standing keys, whatever the config.
  */
 export const sessionCacheGateAttributes: Effect.Effect<HashSet.HashSet<string>> = Effect.map(
   Effect.serviceOption(UserService),
   (service) =>
-    HashSet.fromIterable(
-      Option.isSome(service)
-        ? (service.value.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES)
-        : DEFAULT_SERVER_ONLY_ATTRIBUTES,
-    ),
+    Option.isSome(service) && service.value.serverOnlyAttributes !== undefined
+      ? gateOf(service.value.serverOnlyAttributes)
+      : defaultGate,
 );
 
 const holdsGateAttribute = (user: Types.User, gate: HashSet.HashSet<string>): boolean =>
@@ -195,7 +201,8 @@ const decodePayloadJson = Schema.decodeUnknownOption(Schema.fromJsonString(Seria
 /**
  * Serialize + sign a `SessionWithUser` into the cache cookie value. Returns
  * `undefined`, and nothing should be cached, when the user holds one of the
- * `gateAttributes` (default {@link DEFAULT_SERVER_ONLY_ATTRIBUTES}).
+ * `gateAttributes` (default {@link DEFAULT_SERVER_ONLY_ATTRIBUTES} and the
+ * standing keys).
  * `primarySessionId` is the primary session's stored id (the digest of its
  * token), as {@link decodeSessionCacheCookie} is given it.
  */
@@ -204,7 +211,7 @@ export const encodeSessionCacheCookie = (
   cache: ResolvedSessionCache,
   now: number,
   primarySessionId: string,
-  gateAttributes: HashSet.HashSet<string> = HashSet.fromIterable(DEFAULT_SERVER_ONLY_ATTRIBUTES),
+  gateAttributes: HashSet.HashSet<string> = defaultGate,
 ): Effect.Effect<string | undefined, AuthError, Mac.Mac | Aead.Aead | SecureRandom.SecureRandom> =>
   Effect.gen(function* () {
     const s = value.session;
@@ -239,14 +246,15 @@ export const encodeSessionCacheCookie = (
  * validation) on a bad signature, a version, epoch or expiry mismatch, an
  * encryption setting the cookie was not issued under, an expired underlying
  * session, a `sid` that doesn't match `primarySessionId`, or a user holding
- * one of the `gateAttributes` (default {@link DEFAULT_SERVER_ONLY_ATTRIBUTES}).
+ * one of the `gateAttributes` (default {@link DEFAULT_SERVER_ONLY_ATTRIBUTES} and the
+ * standing keys).
  */
 export const decodeSessionCacheCookie = (
   cookie: string,
   cache: ResolvedSessionCache,
   now: number,
   primarySessionId: string,
-  gateAttributes: HashSet.HashSet<string> = HashSet.fromIterable(DEFAULT_SERVER_ONLY_ATTRIBUTES),
+  gateAttributes: HashSet.HashSet<string> = defaultGate,
 ): Effect.Effect<Types.SessionWithUser | null, never, Mac.Mac | Aead.Aead> =>
   Effect.gen(function* () {
     const dot = cookie.lastIndexOf(".");

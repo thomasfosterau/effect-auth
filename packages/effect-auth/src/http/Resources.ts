@@ -791,6 +791,35 @@ export const SsoAuthorization = Resource.make("sso-authorizations", {
 export type SsoAuthorization = typeof SsoAuthorization.Type;
 
 /**
+ * A device authorization request as the verification page shows it
+ * (`device-authorizations`): the registered client that asks, its display
+ * name, the scopes it asks for, and the request's status. The id is the
+ * digest of the device code, never the device code or the user code;
+ * `expiresAt` is in epoch milliseconds.
+ *
+ * @since 0.9.0
+ * @category resources
+ */
+export const DeviceAuthorization = Resource.make("device-authorizations", {
+  id: Schema.String,
+  attributes: {
+    clientId: Resource.readOnlyAttribute(Schema.String),
+    clientName: Resource.readOnlyAttribute(Schema.String),
+    scopes: Resource.readOnlyAttribute(Schema.Array(Schema.String)),
+    status: Resource.readOnlyAttribute(Schema.Literals(["pending", "approved", "denied"])),
+    expiresAt: epochMillis,
+  },
+});
+
+/**
+ * The decoded `device-authorizations` resource object.
+ *
+ * @since 0.9.0
+ * @category resources
+ */
+export type DeviceAuthorization = typeof DeviceAuthorization.Type;
+
+/**
  * A signed JWT for the signed-in user (`tokens`): what `POST /tokens` answers.
  * A token is not stored, so its id is the SHA-256 digest of the token, never
  * the token itself; `token` is the compact JWS and `expiresAt` its `exp`, in

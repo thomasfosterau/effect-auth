@@ -24,6 +24,7 @@ import { SessionStore, type SessionTouch } from "./SessionStore.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import { UserStore } from "./UserStore.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
+import { sessionCredentialClass } from "./Types.ts";
 
 // Mock implementations for testing
 const mockSessionStore = {
@@ -280,6 +281,42 @@ describe("SessionService", () => {
     // The raw token names no stored session.
     assert(Result.isFailure(result.byToken));
     expect(result.byToken.failure._tag).toBe("SessionNotFoundError");
+  });
+
+  it("setSessionAttributes never changes how the session was issued", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+
+    const updated = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const machine = yield* manager.createSession("user1", {
+            credentialClass: "machine",
+            deviceGrant: { clientId: "cli", scopes: ["read"] },
+          });
+          const interactive = yield* manager.createSession("user1");
+          return {
+            machine: yield* manager.setSessionAttributes(machine.session.id, {
+              credentialClass: "interactive",
+              deviceGrant: { clientId: "other", scopes: ["admin"] },
+              theme: "dark",
+            }),
+            interactive: yield* manager.setSessionAttributes(interactive.session.id, {
+              credentialClass: "machine",
+            }),
+          };
+        }),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+    );
+
+    expect(updated.machine.attributes).toEqual({
+      credentialClass: "machine",
+      deviceGrant: { clientId: "cli", scopes: ["read"] },
+      theme: "dark",
+    });
+    expect(sessionCredentialClass(updated.machine)).toBe("machine");
+    expect(updated.interactive.attributes).toEqual({});
   });
 
   it("afterSignOut observes the stored id, never the token", async () => {
@@ -877,5 +914,73 @@ describe("session config and best-effort writes", () => {
           log.line.includes("store write failed"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("user standing, enforced with no plugin", () => {
+  const standing = (id: string, attributes: User["attributes"]): User => ({
+    id,
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    attributes,
+  });
+  const run = <A, E>(
+    program: (manager: Effect.Success<ReturnType<typeof make>>) => Effect.Effect<A, E>,
+  ) =>
+    Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(make(sessionConfig), program),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+    );
+  const setUser = (user: User) => MutableHashMap.set(mockUserStore.users, user.id, user);
+
+  beforeEach(() => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+  });
+
+  it.each([
+    ["banned", { banned: true }, "Your account has been suspended"],
+    ["SCIM-deactivated", { scimDeactivated: true }, "Your account has been deactivated"],
+  ])("refuses to create a session for a %s user", async (_, attributes, message) => {
+    setUser(standing("standing-user", attributes));
+    const result = await run((manager) => Effect.result(manager.createSession("standing-user")));
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("UserBannedError");
+    expect(result.failure.message).toBe(message);
+    expect(MutableHashMap.size(mockSessionStore.sessions)).toBe(0);
+  });
+
+  it.each([
+    ["banned", { banned: true }],
+    ["SCIM-deactivated", { scimDeactivated: true }],
+  ])(
+    "refuses a session a %s user still presents, and serves it once reinstated",
+    async (_, attributes) => {
+      setUser(standing("standing-user", {}));
+      const result = await run((manager) =>
+        Effect.gen(function* () {
+          const { token } = yield* manager.createSession("standing-user");
+          setUser(standing("standing-user", attributes));
+          const refused = yield* Effect.result(manager.validateSession(token));
+          setUser(standing("standing-user", {}));
+          const served = yield* manager.validateSession(token);
+          return { refused, served };
+        }),
+      );
+      assert(Result.isFailure(result.refused));
+      expect(result.refused.failure._tag).toBe("UserBannedError");
+      expect(result.served.user.id).toBe("standing-user");
+    },
+  );
+
+  it("serves a user whose ban has lapsed", async () => {
+    setUser(standing("standing-user", { banned: true, banExpires: 0 }));
+    const result = await run((manager) =>
+      Effect.flatMap(manager.createSession("standing-user"), ({ token }) =>
+        manager.validateSession(token),
+      ),
+    );
+    expect(result.user.id).toBe("standing-user");
   });
 });
