@@ -369,6 +369,10 @@ export function base64UrlDecode(str: string): Uint8Array {
 /** A ceremony response that fails a verification step. */
 const verificationError = (message: string) => new Errors.WebAuthnVerificationError({ message });
 
+// Reading the COSE key throws on a malformed one.
+const invalidKey = (cause: unknown) =>
+  new Errors.WebAuthnVerificationError({ message: "Invalid credential public key", cause });
+
 /**
  * Create a WebAuthn service
  */
@@ -582,9 +586,6 @@ export const make = (
           `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
         );
       }
-      // Reading the COSE key throws on a malformed one.
-      const invalidKey = (cause: unknown) =>
-        new Errors.WebAuthnVerificationError({ message: "Invalid credential public key", cause });
       const publicKey = yield* Effect.try({
         try: () => serializePublicKey(attested.publicKey, algorithm),
         catch: invalidKey,

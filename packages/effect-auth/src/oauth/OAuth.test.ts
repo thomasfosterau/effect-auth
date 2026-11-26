@@ -358,24 +358,24 @@ describe("OAuth token exchange", () => {
   });
 });
 
+const html = () =>
+  new Response("<html>Service Unavailable</html>", {
+    status: 200,
+    headers: { "content-type": "text/html" },
+  });
+
+const expectProviderError = async <A, E>(run: Effect.Effect<A, E, HttpClient.HttpClient>) => {
+  const exit = await runPromiseExitHttp(run);
+  assert(Exit.isFailure(exit), "the call fails");
+  // A typed failure, not a defect.
+  const failure = Cause.findErrorOption(exit.cause);
+  assert(Option.isSome(failure), "the failure is typed");
+  expect(failure.value).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+};
+
 // --- Invalid provider bodies -------------------------------------------------
 
 describe("OAuth provider bodies", () => {
-  const html = () =>
-    new Response("<html>Service Unavailable</html>", {
-      status: 200,
-      headers: { "content-type": "text/html" },
-    });
-
-  const expectProviderError = async <A, E>(run: Effect.Effect<A, E, HttpClient.HttpClient>) => {
-    const exit = await runPromiseExitHttp(run);
-    assert(Exit.isFailure(exit), "the call fails");
-    // A typed failure, not a defect.
-    const failure = Cause.findErrorOption(exit.cause);
-    assert(Option.isSome(failure), "the failure is typed");
-    expect(failure.value).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
-  };
-
   it("a 2xx token body that is not JSON is an OAuthProviderError", () =>
     withFetch(html, () => expectProviderError(GitLabProvider(CLIENT).exchangeCode("the-code"))));
 
@@ -445,21 +445,21 @@ describe("OAuth provider bodies", () => {
     ));
 });
 
+const getProfile = (provider: OAuthProvider, body: Schema.Json, method = "GET") =>
+  withFetch(
+    () => json(body),
+    async (calls) => {
+      const info = await runPromiseHttp(
+        provider.getProfile({ access_token: "at", token_type: "bearer" }),
+      );
+      expect(calls[0]?.method).toBe(method);
+      return info;
+    },
+  );
+
 // --- Provider-specific profile mapping --------------------------------------
 
 describe("OAuth profile mapping", () => {
-  const getProfile = (provider: OAuthProvider, body: Schema.Json, method = "GET") =>
-    withFetch(
-      () => json(body),
-      async (calls) => {
-        const info = await runPromiseHttp(
-          provider.getProfile({ access_token: "at", token_type: "bearer" }),
-        );
-        expect(calls[0]?.method).toBe(method);
-        return info;
-      },
-    );
-
   it("facebook: flattens picture.data.url", async () => {
     const info = await getProfile(FacebookProvider(CLIENT), {
       id: "fb-1",
@@ -719,6 +719,16 @@ const baseClaims = (now: number) => ({
   iat: Math.floor(now / 1000),
 });
 
+const expectFailure = async (
+  token: string,
+  jwks: { keys: unknown[] },
+  params: Parameters<typeof verifyIdToken>[1],
+) =>
+  withFetch(
+    () => json(jwks),
+    () => runPromiseHttp(Effect.flip(verifyIdToken(token, params))),
+  );
+
 describe("verifyIdToken", () => {
   const now = 1_700_000_000_000;
 
@@ -768,16 +778,6 @@ describe("verifyIdToken", () => {
     );
     expect(calls).toBe(1);
   });
-
-  const expectFailure = async (
-    token: string,
-    jwks: { keys: unknown[] },
-    params: Parameters<typeof verifyIdToken>[1],
-  ) =>
-    withFetch(
-      () => json(jwks),
-      () => runPromiseHttp(Effect.flip(verifyIdToken(token, params))),
-    );
 
   it("rejects a tampered signature", async () => {
     const key = await makeSigningKey("ES256");
@@ -1022,6 +1022,55 @@ describe("Cipher.aes256GcmCipher", () => {
   });
 });
 
+const makeAccountStore = () => {
+  const stored = MutableHashMap.empty<string, OAuthAccount>();
+  const layer = Layer.succeed(OAuthAccountStore, {
+    create: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
+        return a;
+      }),
+    get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
+    getByUserId: (uid) =>
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
+      ),
+    update: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
+        return Option.fromNullishOr(a);
+      }),
+    linkToUser: (uid, a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
+      }),
+    deleteByUserId: () => Effect.void,
+    unlinkFromUser: (uid, p) =>
+      Effect.sync(() => {
+        MutableHashMap.forEach(stored, (v, k) => {
+          if (v.userId === uid && v.provider === p) MutableHashMap.remove(stored, k);
+        });
+      }),
+    delete: (p, id) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(stored, `${p}:${id}`);
+      }),
+  });
+  return { stored, layer };
+};
+
+/** Open a stored token as the service would, under `encryption`. */
+const openStored = (
+  stored: string,
+  row: string,
+  encryption?: RootSecret.Encryption,
+): Promise<string> =>
+  Effect.runPromise(
+    Effect.flatMap(RootSecret.sealerFor("oauth-tokens", encryption), (sealer) =>
+      sealer.open(stored, row),
+    ).pipe(Effect.provide(testCryptoLayer)),
+  );
+
 describe("OAuthService encryptTokens", () => {
   // SAFETY: OAuth.make resolves OAuthStateStore | OAuthAccountStore |
   // OAuthUserStore | IdentifierStore | UserStore | EmailPasswordStore |
@@ -1038,43 +1087,6 @@ describe("OAuthService encryptTokens", () => {
     testCryptoLayer,
   );
 
-  const makeAccountStore = () => {
-    const stored = MutableHashMap.empty<string, OAuthAccount>();
-    const layer = Layer.succeed(OAuthAccountStore, {
-      create: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return a;
-        }),
-      get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
-      getByUserId: (uid) =>
-        Effect.succeed(
-          Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
-        ),
-      update: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return Option.fromNullishOr(a);
-        }),
-      linkToUser: (uid, a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
-        }),
-      deleteByUserId: () => Effect.void,
-      unlinkFromUser: (uid, p) =>
-        Effect.sync(() => {
-          MutableHashMap.forEach(stored, (v, k) => {
-            if (v.userId === uid && v.provider === p) MutableHashMap.remove(stored, k);
-          });
-        }),
-      delete: (p, id) =>
-        Effect.sync(() => {
-          MutableHashMap.remove(stored, `${p}:${id}`);
-        }),
-    });
-    return { stored, layer };
-  };
-
   const githubProvider = OAuth.provider(
     "github",
     {
@@ -1088,18 +1100,6 @@ describe("OAuthService encryptTokens", () => {
     },
     false,
   );
-
-  /** Open a stored token as the service would, under `encryption`. */
-  const openStored = (
-    stored: string,
-    row: string,
-    encryption?: RootSecret.Encryption,
-  ): Promise<string> =>
-    Effect.runPromise(
-      Effect.flatMap(RootSecret.sealerFor("oauth-tokens", encryption), (sealer) =>
-        sealer.open(stored, row),
-      ).pipe(Effect.provide(testCryptoLayer)),
-    );
   const accessRow = "github\u0000gh-1\u0000access";
 
   it("reads tokens the override secret's legacy cipher wrote, and rewrites them sealed to their row", async () => {
@@ -1258,6 +1258,56 @@ describe("OAuthService encryptTokens", () => {
   });
 });
 
+const baseAccount = (overrides?: Partial<OAuthAccount>): OAuthAccount => ({
+  id: "acc-1",
+  userId: "user-1",
+  provider: "github",
+  providerId: "gh-1",
+  accessToken: "at",
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  ...overrides,
+});
+
+const makeLinkedAccountLayer = (accounts: OAuthAccount[], hasPassword?: boolean) => {
+  const stored = MutableHashMap.fromIterable<string, OAuthAccount>(
+    accounts.map((a) => [`${a.provider}:${a.providerId}`, a]),
+  );
+  return Layer.succeed(OAuthAccountStore, {
+    create: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
+        return a;
+      }),
+    get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
+    getByUserId: (uid) =>
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
+      ),
+    update: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
+        return Option.fromNullishOr(a);
+      }),
+    linkToUser: (uid, a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
+      }),
+    deleteByUserId: () => Effect.void,
+    unlinkFromUser: (uid, p) =>
+      Effect.sync(() => {
+        MutableHashMap.forEach(stored, (v, k) => {
+          if (v.userId === uid && v.provider === p) MutableHashMap.remove(stored, k);
+        });
+      }),
+    delete: (p, id) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(stored, `${p}:${id}`);
+      }),
+    ...(hasPassword !== undefined && { hasPassword: () => Effect.succeed(hasPassword) }),
+  });
+};
+
 // ---------------------------------------------------------------------------
 // unlinkAccount — last-credential lockout guard
 // ---------------------------------------------------------------------------
@@ -1289,56 +1339,6 @@ describe("OAuthService unlinkAccount guard", () => {
     testCryptoLayer,
   );
 
-  const baseAccount = (overrides?: Partial<OAuthAccount>): OAuthAccount => ({
-    id: "acc-1",
-    userId: "user-1",
-    provider: "github",
-    providerId: "gh-1",
-    accessToken: "at",
-    createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-    updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-    ...overrides,
-  });
-
-  const makeAccountLayer = (accounts: OAuthAccount[], hasPassword?: boolean) => {
-    const stored = MutableHashMap.fromIterable<string, OAuthAccount>(
-      accounts.map((a) => [`${a.provider}:${a.providerId}`, a]),
-    );
-    return Layer.succeed(OAuthAccountStore, {
-      create: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return a;
-        }),
-      get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
-      getByUserId: (uid) =>
-        Effect.succeed(
-          Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
-        ),
-      update: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return Option.fromNullishOr(a);
-        }),
-      linkToUser: (uid, a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
-        }),
-      deleteByUserId: () => Effect.void,
-      unlinkFromUser: (uid, p) =>
-        Effect.sync(() => {
-          MutableHashMap.forEach(stored, (v, k) => {
-            if (v.userId === uid && v.provider === p) MutableHashMap.remove(stored, k);
-          });
-        }),
-      delete: (p, id) =>
-        Effect.sync(() => {
-          MutableHashMap.remove(stored, `${p}:${id}`);
-        }),
-      ...(hasPassword !== undefined && { hasPassword: () => Effect.succeed(hasPassword) }),
-    });
-  };
-
   const buildService = (accountLayer: Layer.Layer<OAuthAccountStore>) =>
     runPromiseHttp(
       OAuth.make({ github: githubProvider }).pipe(
@@ -1347,7 +1347,7 @@ describe("OAuthService unlinkAccount guard", () => {
     );
 
   it("fails with OAuthLastCredentialError when the account is the only credential (no password)", async () => {
-    const service = await buildService(makeAccountLayer([baseAccount()], false));
+    const service = await buildService(makeLinkedAccountLayer([baseAccount()], false));
 
     const err = await Effect.runPromise(Effect.flip(service.unlinkAccount("user-1", "github")));
 
@@ -1356,7 +1356,7 @@ describe("OAuthService unlinkAccount guard", () => {
 
   it("succeeds when the user has another linked OAuth account", async () => {
     const service = await buildService(
-      makeAccountLayer(
+      makeLinkedAccountLayer(
         [baseAccount(), baseAccount({ id: "acc-2", provider: "google", providerId: "gl-1" })],
         false,
       ),
@@ -1368,7 +1368,7 @@ describe("OAuthService unlinkAccount guard", () => {
   });
 
   it("succeeds when the user has a password (hasPassword returns true)", async () => {
-    const service = await buildService(makeAccountLayer([baseAccount()], true));
+    const service = await buildService(makeLinkedAccountLayer([baseAccount()], true));
 
     await expect(
       Effect.runPromise(service.unlinkAccount("user-1", "github")),
@@ -1376,7 +1376,7 @@ describe("OAuthService unlinkAccount guard", () => {
   });
 
   it("fails open: permits unlinking the last account when hasPassword is not implemented", async () => {
-    const service = await buildService(makeAccountLayer([baseAccount()]));
+    const service = await buildService(makeLinkedAccountLayer([baseAccount()]));
 
     await expect(
       Effect.runPromise(service.unlinkAccount("user-1", "github")),
@@ -1384,7 +1384,7 @@ describe("OAuthService unlinkAccount guard", () => {
   });
 
   it("succeeds with allowUnlinkingAll: true even when the account is the only credential", async () => {
-    const service = await buildService(makeAccountLayer([baseAccount()], false));
+    const service = await buildService(makeLinkedAccountLayer([baseAccount()], false));
 
     await expect(
       Effect.runPromise(service.unlinkAccount("user-1", "github", { allowUnlinkingAll: true })),
@@ -1392,7 +1392,7 @@ describe("OAuthService unlinkAccount guard", () => {
   });
 
   it("fails with OAuthAccountNotFoundError when the provider is not linked", async () => {
-    const service = await buildService(makeAccountLayer([]));
+    const service = await buildService(makeLinkedAccountLayer([]));
 
     const err = await Effect.runPromise(Effect.flip(service.unlinkAccount("user-1", "github")));
 
@@ -1415,165 +1415,180 @@ const refusedClaim = (localVerified: boolean) => ({
   address: { userId: "user-existing", verified: localVerified },
 });
 
-describe("OAuthService linking controls", () => {
-  const makeTestProvider = (name: string) =>
-    OAuth.provider(
-      name,
-      {
-        clientId: "c",
-        clientSecret: Redacted.make("s"),
-        redirectUri: "https://app/cb",
-        authorizationEndpoint: `https://${name}.example/authorize`,
-        tokenEndpoint: `https://${name}.example/token`,
-        userInfoEndpoint: `https://${name}.example/userinfo`,
-        scopes: ["profile"],
-      },
-      false,
-    );
+const makeTestProvider = (name: string) =>
+  OAuth.provider(
+    name,
+    {
+      clientId: "c",
+      clientSecret: Redacted.make("s"),
+      redirectUri: "https://app/cb",
+      authorizationEndpoint: `https://${name}.example/authorize`,
+      tokenEndpoint: `https://${name}.example/token`,
+      userInfoEndpoint: `https://${name}.example/userinfo`,
+      scopes: ["profile"],
+    },
+    false,
+  );
 
-  const makeState = (provider: string, stateKey = "state-123"): OAuthState => ({
-    state: stateKey,
-    provider,
-    expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
-    createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+const makeState = (provider: string, stateKey = "state-123"): OAuthState => ({
+  state: stateKey,
+  provider,
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+});
+
+const makeStateLayer = (state: OAuthState) =>
+  Layer.succeed(OAuthStateStore, {
+    create: (s) => Effect.succeed(s),
+    consume: (k) =>
+      Effect.succeed(Option.fromNullishOr(k === stateKey(state.state) ? state : null)),
   });
 
-  const makeStateLayer = (state: OAuthState) =>
-    Layer.succeed(OAuthStateStore, {
-      create: (s) => Effect.succeed(s),
-      consume: (k) =>
-        Effect.succeed(Option.fromNullishOr(k === stateKey(state.state) ? state : null)),
-    });
-
-  const makeAccountLayer = (
-    existing?: OAuthAccount,
-    stored = MutableHashMap.fromIterable<string, OAuthAccount>(
-      existing ? [[`${existing.provider}:${existing.providerId}`, existing]] : [],
-    ),
-  ) => {
-    return Layer.succeed(OAuthAccountStore, {
-      create: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return a;
-        }),
-      get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
-      getByUserId: (uid) =>
-        Effect.succeed(
-          Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
-        ),
-      update: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return Option.fromNullishOr(a);
-        }),
-      linkToUser: (uid, a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
-        }),
-      deleteByUserId: () => Effect.void,
-      unlinkFromUser: () => Effect.void,
-      delete: (p, id) =>
-        Effect.sync(() => {
-          MutableHashMap.remove(stored, `${p}:${id}`);
-        }),
-    });
-  };
-
-  const makeUser = (overrides?: Partial<Types.User>): Types.User => ({
-    id: "u1",
-    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    attributes: {},
-    ...overrides,
-  });
-
-  const makeUserLayer = (
-    user: Types.User,
-    onUpdate?: (id: string, u: { name?: string; image?: string }) => void,
-  ) =>
-    Layer.succeed(OAuthUserStore, {
-      getUser: (id) =>
-        id === user.id
-          ? Effect.succeed(user)
-          : Effect.fail(new AuthError({ message: "not found" })),
-      createUser: ({ attributes, ...input }) =>
-        Effect.succeed({
-          user: makeUser({ ...input, ...(attributes !== undefined && { attributes }) }),
-          created: true,
-        }),
-      ...(onUpdate && {
-        updateUser: (id: string, u: { name?: string; image?: string }) => {
-          onUpdate(id, u);
-          return Effect.succeed({ ...user, ...u });
-        },
+const makeAccountLayer = (
+  existing?: OAuthAccount,
+  stored = MutableHashMap.fromIterable<string, OAuthAccount>(
+    existing ? [[`${existing.provider}:${existing.providerId}`, existing]] : [],
+  ),
+) => {
+  return Layer.succeed(OAuthAccountStore, {
+    create: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
+        return a;
       }),
-    });
+    get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
+    getByUserId: (uid) =>
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
+      ),
+    update: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
+        return Option.fromNullishOr(a);
+      }),
+    linkToUser: (uid, a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, { ...a, userId: uid });
+      }),
+    deleteByUserId: () => Effect.void,
+    unlinkFromUser: () => Effect.void,
+    delete: (p, id) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(stored, `${p}:${id}`);
+      }),
+  });
+};
 
-  /**
-   * Identifier fixture: a memory store optionally pre-seeded with email
-   * identifiers (the identifier-model equivalent of the old
-   * `user.email`/`emailVerified` seeding).
-   */
-  const makeIdentifiers = (
-    ...seeds: ReadonlyArray<{ userId: string; email: string; verified?: boolean }>
-  ) => {
-    const records = MutableHashMap.empty<string, Identifier>();
-    Arr.forEach(seeds, (seed) => {
-      const identifier = makeIdentifier({
-        userId: seed.userId,
-        type: "email",
-        value: seed.email,
-        verified: seed.verified ?? true,
-        now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-      });
-      MutableHashMap.set(records, identifier.id, identifier);
+const makeUser = (overrides?: Partial<Types.User>): Types.User => ({
+  id: "u1",
+  createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  attributes: {},
+  ...overrides,
+});
+
+/**
+ * Identifier fixture: a memory store optionally pre-seeded with email
+ * identifiers (the identifier-model equivalent of the old
+ * `user.email`/`emailVerified` seeding).
+ */
+const makeIdentifiers = (
+  ...seeds: ReadonlyArray<{ userId: string; email: string; verified?: boolean }>
+) => {
+  const records = MutableHashMap.empty<string, Identifier>();
+  Arr.forEach(seeds, (seed) => {
+    const identifier = makeIdentifier({
+      userId: seed.userId,
+      type: "email",
+      value: seed.email,
+      verified: seed.verified ?? true,
+      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
     });
-    const store = memoryIdentifierStore(records);
-    return { records, store, layer: Layer.succeed(IdentifierStore)(store) };
+    MutableHashMap.set(records, identifier.id, identifier);
+  });
+  const store = memoryIdentifierStore(records);
+  return { records, store, layer: Layer.succeed(IdentifierStore)(store) };
+};
+
+/** Core user-by-id store used by signInWithCallback's auto-link resolution. */
+const makeCoreUserLayer = (...users: ReadonlyArray<Types.User>) =>
+  Layer.succeed(UserStore, {
+    get: (id) => Effect.succeed(Arr.findFirst(users, (u) => u.id === id)),
+  });
+
+const mockUserInfo = (
+  overrides?: Partial<{
+    email: string;
+    name: string;
+    picture: string;
+    id: string;
+    email_verified: boolean;
+  }>,
+) => ({
+  id: "provider-uid-1",
+  email: "user@example.com",
+  name: "Test User",
+  picture: "https://img/user.jpg",
+  email_verified: true,
+  ...overrides,
+});
+
+const makeUserLayer = (
+  user: Types.User,
+  onUpdate?: (id: string, u: { name?: string; image?: string }) => void,
+) =>
+  Layer.succeed(OAuthUserStore, {
+    getUser: (id) =>
+      id === user.id ? Effect.succeed(user) : Effect.fail(new AuthError({ message: "not found" })),
+    createUser: ({ attributes, ...input }) =>
+      Effect.succeed({
+        user: makeUser({ ...input, ...(attributes !== undefined && { attributes }) }),
+        created: true,
+      }),
+    ...(onUpdate && {
+      updateUser: (id: string, u: { name?: string; image?: string }) => {
+        onUpdate(id, u);
+        return Effect.succeed({ ...user, ...u });
+      },
+    }),
+  });
+
+/**
+ * A `SessionService` stub. `minted` collects the user ids sessions were
+ * created for; `journal` records both mints and revocations, in order.
+ */
+const makeSessionLayer = (
+  userId: string,
+  minted: Array<string> = [],
+  journal: Array<string> = [],
+) => {
+  const session: Types.Session = {
+    id: "sess-test",
+    userId,
+    expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    attributes: {},
   };
+  const user: Types.User = makeUser({ id: userId });
+  return Layer.succeed(SessionService, {
+    createSession: (id) =>
+      Effect.sync(() => {
+        minted.push(id);
+        journal.push(`mint:${id}`);
+        return { session, token: "token-test" };
+      }),
+    validateSession: () => Effect.succeed({ session, user }),
+    invalidateSession: () => Effect.void,
+    invalidateUserSessions: (id) => Effect.sync(() => void journal.push(`revoke:${id}`)),
+    listSessions: () => Effect.succeed([]),
+    revokeSessionById: () => Effect.succeed(false),
+    revokeOtherSessions: () => Effect.void,
+    setSessionAttributes: () => Effect.succeed(session),
+  });
+};
 
-  /** Core user-by-id store used by signInWithCallback's auto-link resolution. */
-  const makeCoreUserLayer = (...users: ReadonlyArray<Types.User>) =>
-    Layer.succeed(UserStore, {
-      get: (id) => Effect.succeed(Arr.findFirst(users, (u) => u.id === id)),
-    });
-
-  /**
-   * A `SessionService` stub. `minted` collects the user ids sessions were
-   * created for; `journal` records both mints and revocations, in order.
-   */
-  const makeSessionLayer = (
-    userId: string,
-    minted: Array<string> = [],
-    journal: Array<string> = [],
-  ) => {
-    const session: Types.Session = {
-      id: "sess-test",
-      userId,
-      expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 3600_000 })),
-      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-      lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-      attributes: {},
-    };
-    const user: Types.User = makeUser({ id: userId });
-    return Layer.succeed(SessionService, {
-      createSession: (id) =>
-        Effect.sync(() => {
-          minted.push(id);
-          journal.push(`mint:${id}`);
-          return { session, token: "token-test" };
-        }),
-      validateSession: () => Effect.succeed({ session, user }),
-      invalidateSession: () => Effect.void,
-      invalidateUserSessions: (id) => Effect.sync(() => void journal.push(`revoke:${id}`)),
-      listSessions: () => Effect.succeed([]),
-      revokeSessionById: () => Effect.succeed(false),
-      revokeOtherSessions: () => Effect.void,
-      setSessionAttributes: () => Effect.succeed(session),
-    });
-  };
-
+describe("OAuthService linking controls", () => {
   // SAFETY: linkAccount never touches SessionService, so the `undefined` stub is
   // never invoked by the tests that use it.
   const noSession = Layer.mock(SessionService, {});
@@ -1582,23 +1597,6 @@ describe("OAuthService linking controls", () => {
   const noPasswordsLayer = Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore());
 
   const mockTokenResponse = { access_token: "at-new", token_type: "bearer" };
-
-  const mockUserInfo = (
-    overrides?: Partial<{
-      email: string;
-      name: string;
-      picture: string;
-      id: string;
-      email_verified: boolean;
-    }>,
-  ) => ({
-    id: "provider-uid-1",
-    email: "user@example.com",
-    name: "Test User",
-    picture: "https://img/user.jpg",
-    email_verified: true,
-    ...overrides,
-  });
 
   const withProviderFetch = <A>(
     userInfo: ReturnType<typeof mockUserInfo>,
@@ -1660,6 +1658,9 @@ describe("OAuthService linking controls", () => {
     expect(account.userId).toBe("u1");
   });
 
+  const noEmail = (providerId: string) => (url: string) =>
+    url.includes("/token") ? json(mockTokenResponse) : json({ id: providerId, name: "Snoo" });
+
   it("a provider without email is link-only: it links, then signs that user in, but never signs up", async () => {
     const user = makeUser();
     const identifiers = makeIdentifiers({ userId: user.id, email: "user@example.com" });
@@ -1678,8 +1679,6 @@ describe("OAuthService linking controls", () => {
     const service = await runPromiseHttp(
       OAuth.make({ reddit: makeTestProvider("reddit") }).pipe(Effect.provide(layer)),
     );
-    const noEmail = (providerId: string) => (url: string) =>
-      url.includes("/token") ? json(mockTokenResponse) : json({ id: providerId, name: "Snoo" });
 
     const strangerError = await withFetch(noEmail("someone-else"), () =>
       Effect.runPromise(Effect.flip(service.signInWithCallback("state-123", "code"))),
@@ -2223,6 +2222,82 @@ describe("OAuthService linking controls", () => {
     expect(updates[0]).toMatchObject({ name: "Updated Name", image: "https://img/new.jpg" });
   });
 });
+
+const makeStateStore = (...seed: ReadonlyArray<OAuthState>) => {
+  const states = MutableHashMap.fromIterable<string, OAuthState>(
+    seed.map((s) => [stateKey(s.state), s]),
+  );
+  const store: typeof OAuthStateStore.Service = {
+    create: (s) =>
+      Effect.sync(() => {
+        MutableHashMap.set(states, s.state, s);
+        return s;
+      }),
+    consume: (k) =>
+      Effect.sync(() => {
+        const entry = Option.getOrNull(MutableHashMap.get(states, k));
+        MutableHashMap.remove(states, k);
+        return Option.fromNullishOr(entry);
+      }),
+  };
+  return { states, store };
+};
+
+const makeAccounts = (...seed: ReadonlyArray<OAuthAccount>) => {
+  const accounts = MutableHashMap.fromIterable<string, OAuthAccount>(
+    seed.map((a) => [`${a.provider}:${a.providerId}`, a]),
+  );
+  const store: typeof OAuthAccountStore.Service = {
+    create: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
+        return a;
+      }),
+    get: (p, id) => Effect.succeed(MutableHashMap.get(accounts, `${p}:${id}`)),
+    getByUserId: (uid) =>
+      Effect.succeed(
+        Arr.fromIterable(MutableHashMap.values(accounts)).filter((a) => a.userId === uid),
+      ),
+    update: (a) =>
+      Effect.sync(() => {
+        MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
+        return Option.fromNullishOr(a);
+      }),
+    linkToUser: () => Effect.void,
+    deleteByUserId: () => Effect.void,
+    unlinkFromUser: () => Effect.void,
+    delete: () => Effect.void,
+  };
+  return { accounts, store };
+};
+
+const liveState = (overrides?: Partial<OAuthState>): OAuthState => ({
+  state: "st-1",
+  provider: "github",
+  createdAt: 0,
+  // Far in the future: 2100-01-01.
+  expiresAt: 4_102_444_800_000,
+  ...overrides,
+});
+
+const providerFetch = <A>(
+  tokens: OAuthTokenResponse,
+  userInfo: {
+    readonly id: string;
+    readonly email?: string;
+    readonly name?: string;
+    readonly picture?: string;
+  },
+  thunk: () => Promise<A>,
+) => withFetch((url) => (url.includes("/token") ? json(tokens) : json(userInfo)), thunk);
+
+/** The real `KeyValueStore`-backed store, holding one live state. */
+const kvStateStore = (): typeof OAuthStateStore.Service => {
+  const store = Effect.runSync(oauthStateStoreKV.pipe(Effect.provide(KeyValueStore.layerMemory)));
+  Effect.runSync(store.create({ ...liveState(), state: stateKey("st-1") }));
+  return store;
+};
+
 describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
   const github = OAuth.provider(
     "github",
@@ -2237,54 +2312,6 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
     },
     false,
   );
-
-  const makeStateStore = (...seed: ReadonlyArray<OAuthState>) => {
-    const states = MutableHashMap.fromIterable<string, OAuthState>(
-      seed.map((s) => [stateKey(s.state), s]),
-    );
-    const store: typeof OAuthStateStore.Service = {
-      create: (s) =>
-        Effect.sync(() => {
-          MutableHashMap.set(states, s.state, s);
-          return s;
-        }),
-      consume: (k) =>
-        Effect.sync(() => {
-          const entry = Option.getOrNull(MutableHashMap.get(states, k));
-          MutableHashMap.remove(states, k);
-          return Option.fromNullishOr(entry);
-        }),
-    };
-    return { states, store };
-  };
-
-  const makeAccounts = (...seed: ReadonlyArray<OAuthAccount>) => {
-    const accounts = MutableHashMap.fromIterable<string, OAuthAccount>(
-      seed.map((a) => [`${a.provider}:${a.providerId}`, a]),
-    );
-    const store: typeof OAuthAccountStore.Service = {
-      create: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
-          return a;
-        }),
-      get: (p, id) => Effect.succeed(MutableHashMap.get(accounts, `${p}:${id}`)),
-      getByUserId: (uid) =>
-        Effect.succeed(
-          Arr.fromIterable(MutableHashMap.values(accounts)).filter((a) => a.userId === uid),
-        ),
-      update: (a) =>
-        Effect.sync(() => {
-          MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
-          return Option.fromNullishOr(a);
-        }),
-      linkToUser: () => Effect.void,
-      deleteByUserId: () => Effect.void,
-      unlinkFromUser: () => Effect.void,
-      delete: () => Effect.void,
-    };
-    return { accounts, store };
-  };
 
   // handleCallback and generateAuthorizationUrl touch only the state and
   // account stores; the services below are resolved at construction only.
@@ -2316,26 +2343,6 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
         ),
       ),
     );
-
-  const liveState = (overrides?: Partial<OAuthState>): OAuthState => ({
-    state: "st-1",
-    provider: "github",
-    createdAt: 0,
-    // Far in the future: 2100-01-01.
-    expiresAt: 4_102_444_800_000,
-    ...overrides,
-  });
-
-  const providerFetch = <A>(
-    tokens: OAuthTokenResponse,
-    userInfo: {
-      readonly id: string;
-      readonly email?: string;
-      readonly name?: string;
-      readonly picture?: string;
-    },
-    thunk: () => Promise<A>,
-  ) => withFetch((url) => (url.includes("/token") ? json(tokens) : json(userInfo)), thunk);
 
   describe("handleCallback", () => {
     it("fails with OAuthStateNotFoundError for an unknown state", async () => {
@@ -2481,13 +2488,6 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       });
     });
   });
-
-  /** The real `KeyValueStore`-backed store, holding one live state. */
-  const kvStateStore = (): typeof OAuthStateStore.Service => {
-    const store = Effect.runSync(oauthStateStoreKV.pipe(Effect.provide(KeyValueStore.layerMemory)));
-    Effect.runSync(store.create({ ...liveState(), state: stateKey("st-1") }));
-    return store;
-  };
 
   describe("the callback state is single-use", () => {
     it("refuses handleCallback replayed after the first exchange failed", async () => {
@@ -2796,15 +2796,15 @@ describe("OAuthService first proof over the real services", () => {
   });
 });
 
-describe("OAuth presets that read the address", () => {
-  const profileFrom = (
-    oauthProvider: OAuthProvider,
-    handler: (url: string, init: RequestInit | undefined) => Response,
-  ) =>
-    withFetch(handler, () =>
-      runPromiseHttp(oauthProvider.getProfile({ access_token: "at", token_type: "bearer" })),
-    );
+const profileFrom = (
+  oauthProvider: OAuthProvider,
+  handler: (url: string, init: RequestInit | undefined) => Response,
+) =>
+  withFetch(handler, () =>
+    runPromiseHttp(oauthProvider.getProfile({ access_token: "at", token_type: "bearer" })),
+  );
 
+describe("OAuth presets that read the address", () => {
   it("google: reads verified_email as email_verified", async () => {
     const info = await profileFrom(OAuth.GoogleProvider(CLIENT), () =>
       json({ id: "g-1", email: "g@gmail.com", verified_email: true, name: "G" }),

@@ -452,6 +452,23 @@ const toOAuthConfig = (provider: OidcSsoProvider): OAuthProviderConfig => ({
       }),
 });
 
+/**
+ * The address to sign the user in as. Prefer an explicit email attribute;
+ * fall back to the `NameID` only when the IdP labelled it as an email
+ * address (or left the format unspecified and sent something that plainly
+ * is one). Both sources sit inside the signature, so either is IdP-attested.
+ */
+const emailFromAssertion = (assertion: SamlAssertion): string | null => {
+  if (assertion.email !== undefined && assertion.email.includes("@")) return assertion.email;
+  const format = assertion.nameIdFormat;
+  const looksLikeEmail = assertion.nameId.includes("@");
+  const emailFormat =
+    format === undefined ||
+    format.endsWith(":emailAddress") ||
+    format.endsWith(":nameid-format:unspecified");
+  return looksLikeEmail && emailFormat ? assertion.nameId : null;
+};
+
 export const make = (
   config: SsoConfig = {},
 ): Effect.Effect<
@@ -761,23 +778,6 @@ export const make = (
       const issued = yield* sessionOrChallenge(sessionManager, user, "sso");
       return { user, ...issued, isNewUser, provider } satisfies SsoSignInResult;
     });
-
-    /**
-     * The address to sign the user in as. Prefer an explicit email attribute;
-     * fall back to the `NameID` only when the IdP labelled it as an email
-     * address (or left the format unspecified and sent something that plainly
-     * is one). Both sources sit inside the signature, so either is IdP-attested.
-     */
-    const emailFromAssertion = (assertion: SamlAssertion): string | null => {
-      if (assertion.email !== undefined && assertion.email.includes("@")) return assertion.email;
-      const format = assertion.nameIdFormat;
-      const looksLikeEmail = assertion.nameId.includes("@");
-      const emailFormat =
-        format === undefined ||
-        format.endsWith(":emailAddress") ||
-        format.endsWith(":nameid-format:unspecified");
-      return looksLikeEmail && emailFormat ? assertion.nameId : null;
-    };
 
     const resolveProvider = (selector: SsoSignInSelector) =>
       Effect.gen(function* () {

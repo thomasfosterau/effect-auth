@@ -113,6 +113,22 @@ const runService = async <A, E>(
   );
 };
 
+const setOwner = (attributes: Record<string, boolean | number>) =>
+  Effect.sync(() =>
+    MutableHashMap.set(users.users, "user-standing", {
+      ...fixtureUser(),
+      id: "user-standing",
+      attributes,
+    }),
+  );
+
+/** A service over `store`, the rest of its context the suite's own. */
+const serviceOver = (store: typeof ApiKeyStore.Service) =>
+  ApiKey.make().pipe(
+    Effect.provideService(ApiKeyStore, store),
+    Effect.provide(PlatformCrypto.layer),
+  );
+
 describe("ApiKeyService", () => {
   beforeEach(() => {
     MutableHashMap.clear(apiKeys);
@@ -176,14 +192,6 @@ describe("ApiKeyService", () => {
 
   describe("an owner out of good standing", () => {
     const refused = { valid: false, error: "Invalid API key", reason: "invalid" };
-    const setOwner = (attributes: Record<string, boolean | number>) =>
-      Effect.sync(() =>
-        MutableHashMap.set(users.users, "user-standing", {
-          ...fixtureUser(),
-          id: "user-standing",
-          attributes,
-        }),
-      );
 
     it.each([
       ["banned", { banned: true }],
@@ -741,12 +749,6 @@ describe("ApiKeyService", () => {
       get: (id) => Effect.tap(apiKeyStore.get(id), () => Effect.yieldNow),
       getByHash: (hash) => Effect.tap(apiKeyStore.getByHash(hash), () => Effect.yieldNow),
     };
-    /** A service over `store`, the rest of its context the suite's own. */
-    const serviceOver = (store: typeof ApiKeyStore.Service) =>
-      ApiKey.make().pipe(
-        Effect.provideService(ApiKeyStore, store),
-        Effect.provide(PlatformCrypto.layer),
-      );
     const withSlowReads = () => serviceOver(slowReads);
 
     it("spends a key with one use left for exactly one of concurrent verifies", async () => {

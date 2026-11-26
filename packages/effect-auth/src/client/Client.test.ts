@@ -202,16 +202,16 @@ describe("createAuthClient", () => {
   });
 });
 
+// `GET /jwks` answers plain JSON (RFC 7517), so it probes the response handling
+// every non-JSON:API endpoint shares.
+/** A client whose every request answers with `response`. */
+const clientReturning = (response: () => Response) =>
+  createAuthClient({ baseUrl: "http://client.test", fetch: () => Promise.resolve(response()) });
+
+const respond = (body: string | null, contentType: string, init?: ResponseInit) =>
+  new Response(body, { ...init, headers: { "content-type": contentType } });
+
 describe("JSON response detection", () => {
-  // `GET /jwks` answers plain JSON (RFC 7517), so it probes the response handling
-  // every non-JSON:API endpoint shares.
-  /** A client whose every request answers with `response`. */
-  const clientReturning = (response: () => Response) =>
-    createAuthClient({ baseUrl: "http://client.test", fetch: () => Promise.resolve(response()) });
-
-  const respond = (body: string | null, contentType: string, init?: ResponseInit) =>
-    new Response(body, { ...init, headers: { "content-type": contentType } });
-
   it("parses a body whose content-type carries parameters", async () => {
     const client = clientReturning(() =>
       respond(toJson([{ id: "s1" }]), "application/json; charset=utf-8"),

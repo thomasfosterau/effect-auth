@@ -986,6 +986,20 @@ const userResource = (id: string, email: string) => ({
 /** A to-one relationship naming `type` `id`, as a document carries it. */
 const linkTo = (type: string, id: string) => ({ data: { type, id } });
 
+const resource = (status: string) => ({
+  data: {
+    type: "device-authorizations",
+    id: "digest",
+    attributes: {
+      clientId: "cli",
+      clientName: "CLI",
+      scopes: ["read"],
+      status,
+      expiresAt: 1,
+    },
+  },
+});
+
 describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
   const apiKey = {
     type: "api-keys",
@@ -1237,19 +1251,6 @@ describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
   });
 
   it("maps device lookup, approval and denial onto the device-authorizations endpoints", async () => {
-    const resource = (status: string) => ({
-      data: {
-        type: "device-authorizations",
-        id: "digest",
-        attributes: {
-          clientId: "cli",
-          clientName: "CLI",
-          scopes: ["read"],
-          status,
-          expiresAt: 1,
-        },
-      },
-    });
     const { calls, fetch } = routedFetch({
       "POST /device-authorizations/lookups": resource("pending"),
       "POST /device-authorizations/decisions": resource("approved"),

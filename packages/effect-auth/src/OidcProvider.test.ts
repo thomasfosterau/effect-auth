@@ -654,6 +654,48 @@ describe("OidcProviderService", () => {
   });
 });
 
+/** Register a confidential client and run a code grant for `u1`. */
+const grant = (service: typeof OidcProviderService.Service, scope: string) =>
+  Effect.gen(function* () {
+    const { client, clientSecret } = yield* service.registerClient({
+      name: "RP",
+      redirectUris: ["https://rp.test/cb"],
+      skipConsent: true,
+    });
+    const authorized = yield* service.authorize(makeUser("u1"), {
+      responseType: "code",
+      clientId: client.clientId,
+      redirectUri: "https://rp.test/cb",
+      scope,
+    });
+    const code = new URL(authorized.redirectTo).searchParams.get("code") ?? "";
+    const credentials = { clientId: client.clientId, clientSecret: clientSecret ?? "" };
+    const tokens = yield* Effect.result(
+      service.token({
+        grantType: "authorization_code",
+        code,
+        redirectUri: "https://rp.test/cb",
+        ...credentials,
+      }),
+    );
+    return { credentials, tokens };
+  });
+
+const refresh = (
+  service: typeof OidcProviderService.Service,
+  credentials: { readonly clientId: string; readonly clientSecret: string },
+  refreshToken: string,
+  scope?: string,
+) =>
+  Effect.result(
+    service.token({
+      grantType: "refresh_token",
+      refreshToken,
+      ...credentials,
+      ...(scope !== undefined && { scope }),
+    }),
+  );
+
 // -----------------------------------------------------------------------------
 // Token state: rotation records, families, user standing, client lifecycle
 // -----------------------------------------------------------------------------
@@ -691,48 +733,6 @@ describe("OidcProviderService token state", () => {
     const provider = () => Effect.runSync(OidcProvider.make(config).pipe(Effect.provide(layer)));
     return { stores, users, provider };
   };
-
-  /** Register a confidential client and run a code grant for `u1`. */
-  const grant = (service: typeof OidcProviderService.Service, scope: string) =>
-    Effect.gen(function* () {
-      const { client, clientSecret } = yield* service.registerClient({
-        name: "RP",
-        redirectUris: ["https://rp.test/cb"],
-        skipConsent: true,
-      });
-      const authorized = yield* service.authorize(makeUser("u1"), {
-        responseType: "code",
-        clientId: client.clientId,
-        redirectUri: "https://rp.test/cb",
-        scope,
-      });
-      const code = new URL(authorized.redirectTo).searchParams.get("code") ?? "";
-      const credentials = { clientId: client.clientId, clientSecret: clientSecret ?? "" };
-      const tokens = yield* Effect.result(
-        service.token({
-          grantType: "authorization_code",
-          code,
-          redirectUri: "https://rp.test/cb",
-          ...credentials,
-        }),
-      );
-      return { credentials, tokens };
-    });
-
-  const refresh = (
-    service: typeof OidcProviderService.Service,
-    credentials: { readonly clientId: string; readonly clientSecret: string },
-    refreshToken: string,
-    scope?: string,
-  ) =>
-    Effect.result(
-      service.token({
-        grantType: "refresh_token",
-        refreshToken,
-        ...credentials,
-        ...(scope !== undefined && { scope }),
-      }),
-    );
 
   it("detects a replayed refresh token on another instance and revokes the family's access tokens", async () => {
     const { provider } = setup();
@@ -950,6 +950,9 @@ describe("OidcProviderService token state", () => {
     expect(service.getMetadata()["end_session_endpoint"]).toBeUndefined();
   });
 });
+
+// Caller overrides win, and merge into (rather than replace) the defaults.
+const policy = () => Effect.succeed(true);
 
 // -----------------------------------------------------------------------------
 // RFC 7591 dynamic client registration / RFC 7592 management (service level)
@@ -1275,9 +1278,6 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(preset.requirePKCE).toBe(true);
     expect(preset.dynamicRegistration?.management).toBe(true);
     expect(preset.dynamicRegistration?.skipConsent).toBe(false);
-
-    // Caller overrides win, and merge into (rather than replace) the defaults.
-    const policy = () => Effect.succeed(true);
     const custom = mcpProviderPreset({
       ...baseConfig,
       requirePKCE: false,
@@ -2995,19 +2995,24 @@ describe("HTTP OIDC provider: the RFC tier keeps its wire format", () => {
   });
 });
 
-describe("HTTP dynamic registration and the per-IP limit", () => {
-  // An anonymous RFC 7591 registration: POST /register, no initial access token.
-  const register = (headers: Record<string, string> = {}): Request =>
-    new Request("http://idp.test/register", {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: encodeJson({
-        redirect_uris: ["http://127.0.0.1:9876/callback"],
-        token_endpoint_auth_method: "none",
-        client_name: "MCP Client",
-      }),
-    });
+// An anonymous RFC 7591 registration: POST /register, no initial access token.
+const register = (headers: Record<string, string> = {}): Request =>
+  new Request("http://idp.test/register", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: encodeJson({
+      redirect_uris: ["http://127.0.0.1:9876/callback"],
+      token_endpoint_auth_method: "none",
+      client_name: "MCP Client",
+    }),
+  });
 
+// The registration limit keys on the ClientIP that Http.make resolves from
+// its trustedProxy, so Http.make checks that source, and the app fails to
+// start rather than refuse every registration.
+const make = () => makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
+
+describe("HTTP dynamic registration and the per-IP limit", () => {
   it("throws from Http.make when registration is enabled with no RateLimiter in services", () => {
     // Registration needs its limit to run, so the app fails to start rather than
     // serve registrations with the limit silently off.
@@ -3020,11 +3025,6 @@ describe("HTTP dynamic registration and the per-IP limit", () => {
   });
 
   it("throws ClientAddressConfigError from Http.make when registration has no address source", () => {
-    // The registration limit keys on the ClientIP that Http.make resolves from
-    // its trustedProxy, so Http.make checks that source, and the app fails to
-    // start rather than refuse every registration.
-    const make = () =>
-      makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
     expect(make).toThrow(ClientAddressConfigError);
     expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
   });
@@ -3121,6 +3121,15 @@ const patch = (clientId: string, attributes: Schema.Json, sessionId?: string): R
     sessionId,
   );
 
+const registerClient = async (fx: ReturnType<typeof makeHttpFixture>, adminSid: string) => {
+  const registered = await fx.handler(
+    registerClientRequest({ name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
+  );
+  expect(registered.status).toBe(201);
+  const { client } = await registeredClient(registered);
+  return client.clientId;
+};
+
 describe("HTTP OIDC client administration: /oauth-clients", () => {
   /** One `oauth-clients` resource, read for what these tests check. */
   const ClientResource = Schema.Struct({
@@ -3135,15 +3144,6 @@ describe("HTTP OIDC client administration: /oauth-clients", () => {
   });
 
   const ClientDocument = Schema.Struct({ data: ClientResource });
-
-  const registerClient = async (fx: ReturnType<typeof makeHttpFixture>, adminSid: string) => {
-    const registered = await fx.handler(
-      registerClientRequest({ name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
-    );
-    expect(registered.status).toBe(201);
-    const { client } = await registeredClient(registered);
-    return client.clientId;
-  };
 
   it("lets an admin update every field of a registered client", async () => {
     const fx = makeHttpFixture();

@@ -281,12 +281,12 @@ describe("ScryptHasher", () => {
   });
 });
 
-describe("scrypt stored parameter limits", () => {
-  // A stored hash with the given N, r and p. The salt and key are placeholders:
-  // verify must refuse the parameters before it derives anything.
-  const stored = (N: string, r: string, p: string) =>
-    `scrypt$${N}$${r}$${p}$${"00".repeat(16)}$${"00".repeat(64)}`;
+// A stored hash with the given N, r and p. The salt and key are placeholders:
+// verify must refuse the parameters before it derives anything.
+const stored = (N: string, r: string, p: string) =>
+  `scrypt$${N}$${r}$${p}$${"00".repeat(16)}$${"00".repeat(64)}`;
 
+describe("scrypt stored parameter limits", () => {
   // Sets that would make an unguarded verify run a huge KDF (p = 1000000,
   // N * r above the memory cap) are tested in ScryptDefaults.test.ts against a
   // stubbed crypto.scrypt, so a regression fails on an assertion, not a timeout.

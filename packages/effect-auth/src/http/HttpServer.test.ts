@@ -171,6 +171,10 @@ interface Fixture {
   readonly userExists: (userId: string) => boolean;
 }
 
+const phoneKey = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
+
+const otpKey = (email: string, purpose: EmailOtpPurpose) => `${purpose}:${email}`;
+
 /**
  * A fully functional fixture: real service implementations over shared
  * in-memory stores. Outbound email is captured into arrays so tests can
@@ -484,7 +488,6 @@ const makeFixture = (
   };
 
   const emailOtps = MutableHashMap.empty<string, EmailOtpRecord>();
-  const otpKey = (email: string, purpose: EmailOtpPurpose) => `${purpose}:${email}`;
   const emailOtpStore: typeof EmailOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
@@ -560,7 +563,6 @@ const makeFixture = (
   };
 
   const phoneRecords = MutableHashMap.empty<string, PhoneOtpRecord>();
-  const phoneKey = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
   const phoneOtpStore: typeof PhoneOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
@@ -1194,34 +1196,36 @@ const signIn = async (handler: Handler, email: string, password: string = PW): P
   return sessionIdFromSetCookie(res.headers.get("set-cookie"));
 };
 
+// As long as VICTIM, so bodies match in length.
+
+const signUpAs = (handler: Handler, email: string) =>
+  handler(
+    authRequest("sign-up", {
+      email,
+      password: PW,
+      name: "Probe",
+      attributes: { plan: "free" },
+    }),
+  );
+
+/**
+ * Everything a caller can compare across two sign-up responses: the status,
+ * every header (and `Set-Cookie` on its own) and the body, byte for byte.
+ * Under `antiEnumeration` no session is issued, so both are a `202` that
+ * names no user.
+ */
+const observeWithCookies = async (res: Response) => ({
+  status: res.status,
+  headers: [...res.headers.entries()],
+  setCookie: res.headers.getSetCookie(),
+  body: await res.text(),
+});
+
 // --- tests --------------------------------------------------------------------
 
 describe("anti-enumeration sign-up over HTTP", () => {
   const VICTIM = "victim@example.com";
-  const FRESH = "fresh1@example.com"; // As long as VICTIM, so bodies match in length.
-
-  const signUpAs = (handler: Handler, email: string) =>
-    handler(
-      authRequest("sign-up", {
-        email,
-        password: PW,
-        name: "Probe",
-        attributes: { plan: "free" },
-      }),
-    );
-
-  /**
-   * Everything a caller can compare across two sign-up responses: the status,
-   * every header (and `Set-Cookie` on its own) and the body, byte for byte.
-   * Under `antiEnumeration` no session is issued, so both are a `202` that
-   * names no user.
-   */
-  const observe = async (res: Response) => ({
-    status: res.status,
-    headers: [...res.headers.entries()],
-    setCookie: res.headers.getSetCookie(),
-    body: await res.text(),
-  });
+  const FRESH = "fresh1@example.com";
 
   // How sign-up finds VICTIM held by another user. The fixture's store holds
   // the owner back until the sign-up for VICTIM reaches `createUser`, after
@@ -1291,14 +1295,14 @@ describe("anti-enumeration sign-up over HTTP", () => {
       });
       const handler = handlerFor(fixture);
 
-      let fresh: Awaited<ReturnType<typeof observe>>;
+      let fresh: Awaited<ReturnType<typeof observeWithCookies>>;
       if (preCheck) {
         // The first sign-up for VICTIM is the fresh one; the second finds it taken.
-        fresh = await observe(await signUpAs(handler, VICTIM));
+        fresh = await observeWithCookies(await signUpAs(handler, VICTIM));
       } else {
-        fresh = await observe(await signUpAs(handler, FRESH));
+        fresh = await observeWithCookies(await signUpAs(handler, FRESH));
       }
-      const taken = await observe(await signUpAs(handler, VICTIM));
+      const taken = await observeWithCookies(await signUpAs(handler, VICTIM));
 
       expect(taken).toEqual(fresh);
       expect(fresh.status).toBe(202);
@@ -2112,6 +2116,39 @@ describe("CSRF protection (trusted origins)", () => {
   });
 });
 
+/** A body streamed in `chunkSize` pieces with no `Content-Length`, counting what was pulled. */
+const streamedBody = (text: string, chunkSize: number) => {
+  const bytes = new TextEncoder().encode(text);
+  let offset = 0;
+  const pulled = { bytes: 0 };
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= bytes.length) return controller.close();
+      const chunk = bytes.slice(offset, offset + chunkSize);
+      offset += chunk.length;
+      pulled.bytes += chunk.length;
+      controller.enqueue(chunk);
+    },
+  });
+  return { stream, pulled };
+};
+
+// `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
+const streamedRequest = (
+  stream: ReadableStream<Uint8Array>,
+  headers: Record<string, string>,
+): Request => {
+  const init: RequestInit & { readonly duplex: "half" } = {
+    method: "POST",
+    headers: { "content-type": "application/vnd.api+json", ...headers },
+    body: stream,
+    duplex: "half",
+  };
+  return new Request("http://test/users", init);
+};
+
+const streamedSignUp = (stream: ReadableStream<Uint8Array>) => streamedRequest(stream, {});
+
 describe("request body size limit", () => {
   it("rejects requests whose Content-Length exceeds maxBodySize with 413", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 100 });
@@ -2132,39 +2169,6 @@ describe("request body size limit", () => {
     const res = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }));
     expect(res.status).toBe(201);
   });
-
-  /** A body streamed in `chunkSize` pieces with no `Content-Length`, counting what was pulled. */
-  const streamedBody = (text: string, chunkSize: number) => {
-    const bytes = new TextEncoder().encode(text);
-    let offset = 0;
-    const pulled = { bytes: 0 };
-    const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (offset >= bytes.length) return controller.close();
-        const chunk = bytes.slice(offset, offset + chunkSize);
-        offset += chunk.length;
-        pulled.bytes += chunk.length;
-        controller.enqueue(chunk);
-      },
-    });
-    return { stream, pulled };
-  };
-
-  // `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
-  const streamedRequest = (
-    stream: ReadableStream<Uint8Array>,
-    headers: Record<string, string>,
-  ): Request => {
-    const init: RequestInit & { readonly duplex: "half" } = {
-      method: "POST",
-      headers: { "content-type": "application/vnd.api+json", ...headers },
-      body: stream,
-      duplex: "half",
-    };
-    return new Request("http://test/users", init);
-  };
-
-  const streamedSignUp = (stream: ReadableStream<Uint8Array>) => streamedRequest(stream, {});
 
   it("counts a body without Content-Length and refuses it with 413 at the limit, creating no user", async () => {
     const handler = handlerFor(makeFixture(), { maxBodySize: 1024 });
@@ -2948,11 +2952,6 @@ describe("HTTP phone OTP", () => {
 // exactly as it answers a known one: the same status, body and headers.
 describe("passwordless send within the resend cooldown", () => {
   /** Everything a caller can observe of a response. */
-  const observe = async (response: Response) => ({
-    status: response.status,
-    headers: Array.from(response.headers.entries()),
-    body: await response.text(),
-  });
 
   const cases = [
     {
@@ -3018,11 +3017,6 @@ describe("passwordless send within the resend cooldown", () => {
 // exactly as it answers a known one: the same status, body and headers.
 describe("send past the per-recipient cap", () => {
   /** Everything a caller can observe of a response. */
-  const observe = async (response: Response) => ({
-    status: response.status,
-    headers: Array.from(response.headers.entries()),
-    body: await response.text(),
-  });
 
   const cases = [
     {
@@ -3109,6 +3103,28 @@ describe("send past the per-recipient cap", () => {
   );
 });
 
+/** Everything a caller can observe of a response. */
+const observe = async (response: Response) => ({
+  status: response.status,
+  headers: Array.from(response.headers.entries()),
+  body: await response.text(),
+});
+
+/** The message of a JSON:API error document: its first error's `detail`. */
+const messageOf = (response: { readonly body: string }) =>
+  Schema.decodeUnknownSync(ErrorDocumentBody)(parseJson(response.body)).errors[0]?.detail;
+
+/** A fixture with one account, holding `member@example.com` and `+15557770001`. */
+const setUp = async (disableSignUp: boolean) => {
+  const fixture = makeFixture({ passwordless: { disableSignUp } });
+  const handler = handlerFor(fixture, { features: true });
+  const up = await handler(authRequest("sign-up", { email: "member@example.com", password: PW }));
+  expect(up.status).toBe(201);
+  const user = (await authBody(up, UserIdBody)).user;
+  fixture.registerPhone(user.id, "+15557770001");
+  return { fixture, handler };
+};
+
 // Where a passwordless send hides whether the address has an account,
 // the verify endpoint must answer an address that holds an outstanding code
 // exactly as it answers one that holds a marker record or nothing at all:
@@ -3122,13 +3138,6 @@ describe("passwordless verify where send hides the account", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  /** Everything a caller can observe of a response. */
-  const observe = async (response: Response) => ({
-    status: response.status,
-    headers: Array.from(response.headers.entries()),
-    body: await response.text(),
   });
 
   const flows = [
@@ -3147,17 +3156,6 @@ describe("passwordless verify where send hides the account", () => {
       verifyPayload: (_email: string, phoneNumber: string) => ({ phoneNumber, otp: wrongCode }),
     },
   ] as const;
-
-  /** A fixture with one account, holding `member@example.com` and `+15557770001`. */
-  const setUp = async (disableSignUp: boolean) => {
-    const fixture = makeFixture({ passwordless: { disableSignUp } });
-    const handler = handlerFor(fixture, { features: true });
-    const up = await handler(authRequest("sign-up", { email: "member@example.com", password: PW }));
-    expect(up.status).toBe(201);
-    const user = (await authBody(up, UserIdBody)).user;
-    fixture.registerPhone(user.id, "+15557770001");
-    return { fixture, handler };
-  };
 
   /** Run `sequence` for one address, requesting a code first when `send` is set. */
   const run = async (
@@ -3186,10 +3184,6 @@ describe("passwordless verify where send hides the account", () => {
     });
     return steps;
   };
-
-  /** The message of a JSON:API error document: its first error's `detail`. */
-  const messageOf = (response: { readonly body: string }) =>
-    Schema.decodeUnknownSync(ErrorDocumentBody)(parseJson(response.body)).errors[0]?.detail;
 
   it.each(
     flows.flatMap((flow) =>
@@ -4227,6 +4221,20 @@ describe("the session token never reaches a response body", () => {
 /** A rate-limit store call that fails as a down store does. */
 const limiterDown = () => Effect.fail(new Root.AuthError({ message: "rate-limit store down" }));
 
+// A sign-in for an unknown account: the limiter runs before the handler, so
+// the response status only shows whether the attempt was refused.
+const attempt = (handler: Handler, cfConnectingIp: string, xForwardedFor: string) =>
+  handler(
+    authRequest(
+      "password",
+      { email: "nobody@example.com", password: PW },
+      {
+        "cf-connecting-ip": cfConnectingIp,
+        "x-forwarded-for": xForwardedFor,
+      },
+    ),
+  );
+
 describe("client IP at the HTTP boundary", () => {
   // One sign-in attempt per window per resolved client address.
   const signInOncePerHour = {
@@ -4289,20 +4297,6 @@ describe("client IP at the HTTP boundary", () => {
     }).handler;
     return { handler, keys };
   };
-
-  // A sign-in for an unknown account: the limiter runs before the handler, so
-  // the response status only shows whether the attempt was refused.
-  const attempt = (handler: Handler, cfConnectingIp: string, xForwardedFor: string) =>
-    handler(
-      authRequest(
-        "password",
-        { email: "nobody@example.com", password: PW },
-        {
-          "cf-connecting-ip": cfConnectingIp,
-          "x-forwarded-for": xForwardedFor,
-        },
-      ),
-    );
 
   it("keys the limit on CF-Connecting-IP and ignores X-Forwarded-For under ClientIP.cloudflare", async () => {
     const { handler } = limitedHandler({ trustedProxy: ClientIP.cloudflare });
@@ -4582,13 +4576,13 @@ const ipLimitedHandler = (ipRateLimit?: HttpServer.HttpIPRateLimitConfig): Handl
     ...(ipRateLimit !== undefined && { ipRateLimit }),
   }).handler;
 
-describe("the IP limit groups IPv6 clients by prefix", () => {
-  const signInOnce = (ipv6PrefixLength?: number) =>
-    ipLimitedHandler({
-      rules: [{ path: "/sessions", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
-      ...(ipv6PrefixLength !== undefined && { ipv6PrefixLength }),
-    });
+const signInOnce = (ipv6PrefixLength?: number) =>
+  ipLimitedHandler({
+    rules: [{ path: "/sessions", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
+    ...(ipv6PrefixLength !== undefined && { ipv6PrefixLength }),
+  });
 
+describe("the IP limit groups IPv6 clients by prefix", () => {
   it("counts every address of one /64 in one bucket by default", async () => {
     const handler = signInOnce();
     expect((await handler(fromAddress("POST", "/sessions", "2001:db8:1:1::1"))).status).not.toBe(
@@ -5177,6 +5171,26 @@ class BootError extends Schema.TaggedError<BootError, { readonly brand: unique s
   },
 ) {}
 
+// The build queues a fork's start (priority 0) and then its own resumption
+// at `priority`. Resuming finishes the build, so the fork runs after make
+// returns when the build resumes first, and during make otherwise.
+const order = (priority: number): Array<string> => {
+  const ran: Array<string> = [];
+  const queued = Layer.effectDiscard(
+    Effect.gen(function* () {
+      yield* Effect.forkScoped(Effect.sync(() => void ran.push("fork")));
+      yield* Effect.yieldNowWith(priority);
+      ran.push("build");
+    }),
+  );
+  HttpServer.make({
+    ipRateLimit: false,
+    services: queued.pipe(Layer.provideMerge(makeFixture().services)),
+    cookie: { secure: false },
+  });
+  return ran;
+};
+
 describe("make builds services synchronously, up to their exit", () => {
   it("returns while a fiber that services forked keeps running, and dispose stops it", async () => {
     // A busy fiber the build forks and never awaits. make must not wait for it.
@@ -5339,25 +5353,6 @@ describe("make builds services synchronously, up to their exit", () => {
   });
 
   it("runs the build's queued tasks by priority, lowest first", async () => {
-    // The build queues a fork's start (priority 0) and then its own resumption
-    // at `priority`. Resuming finishes the build, so the fork runs after make
-    // returns when the build resumes first, and during make otherwise.
-    const order = (priority: number): Array<string> => {
-      const ran: Array<string> = [];
-      const queued = Layer.effectDiscard(
-        Effect.gen(function* () {
-          yield* Effect.forkScoped(Effect.sync(() => void ran.push("fork")));
-          yield* Effect.yieldNowWith(priority);
-          ran.push("build");
-        }),
-      );
-      HttpServer.make({
-        ipRateLimit: false,
-        services: queued.pipe(Layer.provideMerge(makeFixture().services)),
-        cookie: { secure: false },
-      });
-      return ran;
-    };
     const first = order(-1);
     const after = order(1);
     await macrotasks(3);
@@ -5536,13 +5531,25 @@ describe("make builds services synchronously, up to their exit", () => {
   });
 });
 
+/** What `promise` rejects with, or a failed assertion when it resolves. */
+const rejectionOf = (promise: Promise<HttpServer.AuthWebHandler>): Promise<Error> =>
+  promise.then(() => expect.unreachable("expected a rejection"), thrownError);
+
+/** A fiber body that yields once per tick and counts its ticks until `stopped`. */
+const ticker = () => {
+  const state = { ticks: 0, stopped: false };
+  const tick: Effect.Effect<void> = Effect.suspend(() => {
+    if (state.stopped) return Effect.void;
+    state.ticks++;
+    return Effect.andThen(Effect.yieldNow, tick);
+  });
+  return { state, tick };
+};
+
+const unknownPasswordSignIn = () =>
+  authRequest("password", { email: "nobody@example.com", password: PW });
+
 describe("makeAsync builds services fully before it resolves", () => {
-  /** What `promise` rejects with, or a failed assertion when it resolves. */
-  const rejectionOf = (promise: Promise<HttpServer.AuthWebHandler>): Promise<Error> =>
-    promise.then(() => expect.unreachable("expected a rejection"), thrownError);
-
-  const signIn = () => authRequest("password", { email: "nobody@example.com", password: PW });
-
   // `ipRateLimit` with no RateLimiter in services: the startup check refuses it.
   const limitWithoutLimiter = {
     cookie: { secure: false },
@@ -5611,7 +5618,9 @@ describe("makeAsync builds services fully before it resolves", () => {
   Arr.forEach(asynchronous, ([composition, services]) => {
     it(`rejects RateLimiterConfigError for ${composition}, where make takes the fallback`, async () => {
       const made = HttpServer.make({ services: services(), ...limitWithoutLimiter });
-      await expect(made.handler(signIn())).rejects.toBeInstanceOf(RateLimiterConfigError);
+      await expect(made.handler(unknownPasswordSignIn())).rejects.toBeInstanceOf(
+        RateLimiterConfigError,
+      );
       await made.dispose();
 
       const error = await rejectionOf(
@@ -5670,7 +5679,7 @@ describe("makeAsync builds services fully before it resolves", () => {
       services: services(),
       cookie: { secure: false },
     });
-    await expect(made.handler(signIn())).rejects.toBe(failure);
+    await expect(made.handler(unknownPasswordSignIn())).rejects.toBe(failure);
     await made.dispose();
     expect(released).toBe(1);
 
@@ -5820,7 +5829,7 @@ describe("makeAsync builds services fully before it resolves", () => {
       ),
       cookie: { secure: false },
     });
-    const res = await handler(signIn());
+    const res = await handler(unknownPasswordSignIn());
     expect(res.status).toBe(401);
     const running = spins;
     await macrotasks(3);
@@ -5829,17 +5838,6 @@ describe("makeAsync builds services fully before it resolves", () => {
     await dispose();
     expect(interrupted).toBe(true);
   });
-
-  /** A fiber body that yields once per tick and counts its ticks until `stopped`. */
-  const ticker = () => {
-    const state = { ticks: 0, stopped: false };
-    const tick: Effect.Effect<void> = Effect.suspend(() => {
-      if (state.stopped) return Effect.void;
-      state.ticks++;
-      return Effect.andThen(Effect.yieldNow, tick);
-    });
-    return { state, tick };
-  };
 
   /** Yield to the event loop until `state.ticks` reaches `target`, for at most 1,000 turns. */
   const untilTicks = async (
@@ -5904,15 +5902,15 @@ describe("makeAsync builds services fully before it resolves", () => {
   });
 });
 
-describe("signUpAttributes naming a protected attribute", () => {
-  const options = (strict: boolean) => ({
-    services: makeFixture().services,
-    cookie: { secure: false },
-    ipRateLimit: false as const,
-    signUpAttributes: ["nickname", "banned", "scimExternalId"],
-    strict,
-  });
+const options = (strict: boolean) => ({
+  services: makeFixture().services,
+  cookie: { secure: false },
+  ipRateLimit: false as const,
+  signUpAttributes: ["nickname", "banned", "scimExternalId"],
+  strict,
+});
 
+describe("signUpAttributes naming a protected attribute", () => {
   it("warns, naming the protected keys, and starts without strict", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     onTestFinished(() => {
@@ -5948,9 +5946,29 @@ describe("signUpAttributes naming a protected attribute", () => {
   });
 });
 
-describe("make with strict", () => {
-  const signIn = () => authRequest("password", { email: "nobody@example.com", password: PW });
+// A layer whose build records `acquired` and whose release records
+// `released`, merged beside the fixture so it builds before `step` (which
+// runs on the build's own fiber).
+const recordedServices = (
+  events: Array<string>,
+  step: Layer.Layer<never>,
+  names: readonly [acquired: string, released: string] = ["acquired", "released"],
+): Layer.Layer<AuthServices> =>
+  step.pipe(
+    Layer.provideMerge(
+      Layer.merge(
+        makeFixture().services,
+        Layer.effectDiscard(
+          Effect.acquireRelease(
+            Effect.sync(() => void events.push(names[0])),
+            () => Effect.sync(() => void events.push(names[1])),
+          ),
+        ),
+      ),
+    ),
+  );
 
+describe("make with strict", () => {
   // Services whose build has not finished when make has run it synchronously.
   // Each settles without a timer, so the fallback below finishes deterministically.
   const pending: ReadonlyArray<readonly [string, () => Layer.Layer<AuthServices>]> = [
@@ -6005,7 +6023,7 @@ describe("make with strict", () => {
         services: services(),
         cookie: { secure: false },
       });
-      expect((await handler(signIn())).status).toBe(401);
+      expect((await handler(unknownPasswordSignIn())).status).toBe(401);
       await dispose();
 
       // An explicit false is the default.
@@ -6015,7 +6033,7 @@ describe("make with strict", () => {
         cookie: { secure: false },
         strict: false,
       });
-      expect((await off.handler(signIn())).status).toBe(401);
+      expect((await off.handler(unknownPasswordSignIn())).status).toBe(401);
       await off.dispose();
     });
   });
@@ -6027,7 +6045,7 @@ describe("make with strict", () => {
       cookie: { secure: false },
       strict: true,
     });
-    expect((await handler(signIn())).status).toBe(401);
+    expect((await handler(unknownPasswordSignIn())).status).toBe(401);
     await dispose();
   });
 
@@ -6136,28 +6154,6 @@ describe("make with strict", () => {
     await macrotasks(3);
     expect(released).toBe(true);
   });
-
-  // A layer whose build records `acquired` and whose release records
-  // `released`, merged beside the fixture so it builds before `step` (which
-  // runs on the build's own fiber).
-  const recordedServices = (
-    events: Array<string>,
-    step: Layer.Layer<never>,
-    names: readonly [acquired: string, released: string] = ["acquired", "released"],
-  ): Layer.Layer<AuthServices> =>
-    step.pipe(
-      Layer.provideMerge(
-        Layer.merge(
-          makeFixture().services,
-          Layer.effectDiscard(
-            Effect.acquireRelease(
-              Effect.sync(() => void events.push(names[0])),
-              () => Effect.sync(() => void events.push(names[1])),
-            ),
-          ),
-        ),
-      ),
-    );
 
   it("interrupts the build before it releases what the build acquired", () => {
     const events: Array<string> = [];
@@ -6310,7 +6306,7 @@ describe("make with strict", () => {
         cookie: { secure: false },
         strict: true,
       });
-      expect((await handler(signIn())).status).toBe(401);
+      expect((await handler(unknownPasswordSignIn())).status).toBe(401);
       await dispose();
     });
   });

@@ -225,6 +225,33 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
   return user;
 };
 
+const race = async <A, E, RedeemError>(
+  userId: string,
+  redeem: (
+    service: Effect.Success<ReturnType<typeof MultiFactor.make>>,
+    enabled: { readonly secret: string; readonly backupCodes: ReadonlyArray<string> },
+  ) => Effect.Effect<ReadonlyArray<Effect.Effect<A, E>>, RedeemError>,
+) => {
+  const testContext = await makeTestContext();
+  await seedUser(userId, `${userId}@example.com`, "correct-password");
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const service = yield* MultiFactor.make({
+          issuer: "TestApp",
+          skipVerificationOnEnable: true,
+        });
+        const enabled = yield* service.enable(userId, "correct-password");
+        const attempts = yield* redeem(service, enabled);
+        return yield* Effect.forEach(attempts, (attempt) => Effect.result(attempt), {
+          concurrency: "unbounded",
+        });
+      }),
+      testContext,
+    ).pipe(Effect.provide(Hooks.Default)),
+  );
+};
+
 describe("MultiFactorService", () => {
   beforeEach(() => {
     MutableHashMap.clear(users);
@@ -794,33 +821,6 @@ describe("MultiFactorService", () => {
   });
 
   describe("concurrent redemptions", () => {
-    const race = async <A, E, RedeemError>(
-      userId: string,
-      redeem: (
-        service: Effect.Success<ReturnType<typeof MultiFactor.make>>,
-        enabled: { readonly secret: string; readonly backupCodes: ReadonlyArray<string> },
-      ) => Effect.Effect<ReadonlyArray<Effect.Effect<A, E>>, RedeemError>,
-    ) => {
-      const testContext = await makeTestContext();
-      await seedUser(userId, `${userId}@example.com`, "correct-password");
-      return Effect.runPromise(
-        Effect.provide(
-          Effect.gen(function* () {
-            const service = yield* MultiFactor.make({
-              issuer: "TestApp",
-              skipVerificationOnEnable: true,
-            });
-            const enabled = yield* service.enable(userId, "correct-password");
-            const attempts = yield* redeem(service, enabled);
-            return yield* Effect.forEach(attempts, (attempt) => Effect.result(attempt), {
-              concurrency: "unbounded",
-            });
-          }),
-          testContext,
-        ).pipe(Effect.provide(Hooks.Default)),
-      );
-    };
-
     it("accepts one TOTP code once across concurrent challenges", async () => {
       const results = await race("user-2fa-race-totp", (service, { secret }) =>
         Effect.gen(function* () {

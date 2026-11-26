@@ -821,6 +821,14 @@ export interface AuthClient {
   ) => AuthClient & TExtension;
 }
 
+/** A `device-authorizations` document as its view. */
+const deviceAuthorizationView = ({
+  data,
+}: DataDocument<WireDeviceAuthorization>): Http.DeviceAuthorizationView => ({
+  id: data.id,
+  ...data.attributes,
+});
+
 /**
  * Create an auth client for an effect-auth server.
  *
@@ -994,14 +1002,6 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         },
       },
     );
-
-  /** A `device-authorizations` document as its view. */
-  const deviceAuthorizationView = ({
-    data,
-  }: DataDocument<WireDeviceAuthorization>): Http.DeviceAuthorizationView => ({
-    id: data.id,
-    ...data.attributes,
-  });
 
   /**
    * Look up (`POST /device-authorizations/lookups`), approve or deny

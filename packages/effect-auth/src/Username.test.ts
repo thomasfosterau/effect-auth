@@ -357,6 +357,100 @@ describe("UsernameService", () => {
   });
 });
 
+const claimEmail = (userId: string, email: string): void => {
+  const identifier = makeIdentifier({
+    userId,
+    type: "email",
+    value: email,
+    verified: false,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
+  MutableHashMap.set(identifierRecords, identifier.id, identifier);
+};
+
+/**
+ * Run `f` against a `UsernameService` over an `EmailPasswordService` with
+ * `antiEnumeration`, its store and hasher replaceable.
+ */
+const runAntiEnumeration = <A, E>(
+  f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
+  opts: {
+    readonly store?: typeof EmailPasswordStore.Service;
+    readonly identifiers?: typeof IdentifierStore.Service;
+    readonly hasher?: typeof PasswordHasher.Service;
+    readonly emailPassword?: EmailPasswordConfig;
+    readonly decorate?: (
+      service: typeof EmailPasswordService.Service,
+    ) => typeof EmailPasswordService.Service;
+  } = {},
+) => {
+  const stores = Layer.mergeAll(
+    Layer.succeed(IdentifierStore)(opts.identifiers ?? identifierStore),
+    Layer.succeed(EmailPasswordStore)(opts.store ?? emailPasswordStore),
+    Layer.succeed(SessionStore)(sessionStore),
+    Layer.succeed(UserStore)(userStore),
+    Layer.succeed(PasswordHasher)(opts.hasher ?? hasher),
+    Hooks.Default,
+  );
+  const withSessions = Layer.mergeAll(
+    stores,
+    SessionService.layer(sessionConfig).pipe(Layer.provide(stores)),
+  );
+  const emailPassword = EmailPasswordService.layer(
+    opts.emailPassword ?? { antiEnumeration: true },
+  ).pipe(Layer.provide(withSessions));
+  const decorate = opts.decorate;
+  const deps = Layer.mergeAll(
+    withSessions,
+    decorate === undefined
+      ? emailPassword
+      : Layer.effect(
+          EmailPasswordService,
+          Effect.gen(function* () {
+            return decorate(yield* EmailPasswordService);
+          }),
+        ).pipe(Layer.provide(emailPassword)),
+  );
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const svc = yield* UsernameService;
+      return yield* f(svc);
+    }).pipe(
+      Effect.provide(Layer.mergeAll(UsernameService.layer().pipe(Layer.provide(deps)), deps)),
+    ),
+  );
+};
+
+// The same answer: same fields, no session, the submitted address.
+const summary = (result: AuthResult) => ({
+  keys: Arr.sort(Struct.keys(result), Order.String),
+  userKeys: Arr.sort(Struct.keys(result.user), Order.String),
+  session: result.session,
+  method: result.method,
+});
+
+// A wrapper (tracing, auditing, …) that hands back a copy of the result
+// rather than the object `signUp` built.
+const copying = (service: typeof EmailPasswordService.Service) => ({
+  ...service,
+  signUp: (input: Parameters<typeof service.signUp>[0]) =>
+    service.signUp(input).pipe(Effect.map((result) => ({ ...result, user: { ...result.user } }))),
+});
+
+/** A user who already holds `email`, created outside any sign-up. */
+const seedOwner = (email: string): Types.User => {
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+  const owner: Types.User = {
+    id: `owner-${++seq}`,
+    createdAt: now,
+    updatedAt: now,
+    attributes: {},
+  };
+  MutableHashMap.set(usersById, owner.id, owner);
+  claimEmail(owner.id, email);
+  return owner;
+};
+
 describe("UsernameService under anti-enumeration", () => {
   beforeEach(() => {
     MutableHashMap.clear(usersById);
@@ -367,84 +461,6 @@ describe("UsernameService under anti-enumeration", () => {
   });
 
   const PASSWORD = "password-123";
-
-  const claimEmail = (userId: string, email: string): void => {
-    const identifier = makeIdentifier({
-      userId,
-      type: "email",
-      value: email,
-      verified: false,
-      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    });
-    MutableHashMap.set(identifierRecords, identifier.id, identifier);
-  };
-
-  /** A user who already holds `email`, created outside any sign-up. */
-  const seedOwner = (email: string): Types.User => {
-    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    const owner: Types.User = {
-      id: `owner-${++seq}`,
-      createdAt: now,
-      updatedAt: now,
-      attributes: {},
-    };
-    MutableHashMap.set(usersById, owner.id, owner);
-    claimEmail(owner.id, email);
-    return owner;
-  };
-
-  /**
-   * Run `f` against a `UsernameService` over an `EmailPasswordService` with
-   * `antiEnumeration`, its store and hasher replaceable.
-   */
-  const runAntiEnumeration = <A, E>(
-    f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
-    opts: {
-      readonly store?: typeof EmailPasswordStore.Service;
-      readonly identifiers?: typeof IdentifierStore.Service;
-      readonly hasher?: typeof PasswordHasher.Service;
-      readonly emailPassword?: EmailPasswordConfig;
-      readonly decorate?: (
-        service: typeof EmailPasswordService.Service,
-      ) => typeof EmailPasswordService.Service;
-    } = {},
-  ) => {
-    const stores = Layer.mergeAll(
-      Layer.succeed(IdentifierStore)(opts.identifiers ?? identifierStore),
-      Layer.succeed(EmailPasswordStore)(opts.store ?? emailPasswordStore),
-      Layer.succeed(SessionStore)(sessionStore),
-      Layer.succeed(UserStore)(userStore),
-      Layer.succeed(PasswordHasher)(opts.hasher ?? hasher),
-      Hooks.Default,
-    );
-    const withSessions = Layer.mergeAll(
-      stores,
-      SessionService.layer(sessionConfig).pipe(Layer.provide(stores)),
-    );
-    const emailPassword = EmailPasswordService.layer(
-      opts.emailPassword ?? { antiEnumeration: true },
-    ).pipe(Layer.provide(withSessions));
-    const decorate = opts.decorate;
-    const deps = Layer.mergeAll(
-      withSessions,
-      decorate === undefined
-        ? emailPassword
-        : Layer.effect(
-            EmailPasswordService,
-            Effect.gen(function* () {
-              return decorate(yield* EmailPasswordService);
-            }),
-          ).pipe(Layer.provide(emailPassword)),
-    );
-    return Effect.runPromise(
-      Effect.gen(function* () {
-        const svc = yield* UsernameService;
-        return yield* f(svc);
-      }).pipe(
-        Effect.provide(Layer.mergeAll(UsernameService.layer().pipe(Layer.provide(deps)), deps)),
-      ),
-    );
-  };
 
   // The ways sign-up finds the address held by another user. Each seeds the
   // owner for `victim@example.com` and returns the store sign-up runs with.
@@ -518,14 +534,6 @@ describe("UsernameService under anti-enumeration", () => {
         { store: arranged.store },
       );
       const owner = arranged.owner;
-
-      // The same answer: same fields, no session, the submitted address.
-      const summary = (result: AuthResult) => ({
-        keys: Arr.sort(Struct.keys(result), Order.String),
-        userKeys: Arr.sort(Struct.keys(result.user), Order.String),
-        session: result.session,
-        method: result.method,
-      });
       expect(summary(taken)).toEqual(summary(fresh));
       expect(fresh.identifier).toEqual({ type: "email", value: "fresh@example.com" });
       expect(taken.identifier).toEqual({ type: "email", value: VICTIM });
@@ -550,15 +558,6 @@ describe("UsernameService under anti-enumeration", () => {
   );
 
   it("a decorated EmailPasswordService that copies the result still claims no username for the stand-in", async () => {
-    // A wrapper (tracing, auditing, …) that hands back a copy of the result
-    // rather than the object `signUp` built.
-    const copying = (service: typeof EmailPasswordService.Service) => ({
-      ...service,
-      signUp: (input: Parameters<typeof service.signUp>[0]) =>
-        service
-          .signUp(input)
-          .pipe(Effect.map((result) => ({ ...result, user: { ...result.user } }))),
-    });
     const owner = seedOwner(VICTIM);
     const fresh = await runAntiEnumeration(
       (svc) =>

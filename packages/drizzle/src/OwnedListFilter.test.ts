@@ -219,6 +219,21 @@ const withSeam = <A>(
 const describeViewer = (viewer: AppUser | null) =>
   viewer === null ? "anonymous" : `${viewer.id} (${viewer.role})`;
 
+const listFor = async (viewer: AppUser | null) => {
+  const scope = await Effect.runPromise(withSeam(owned.readScope, viewer, "database"));
+  const rows = await db
+    .select({ id: posts.id })
+    .from(posts)
+    .where(
+      ownedListFilter({
+        owner: posts.ownerId,
+        visibility: posts.visibility,
+        draft: posts.draft,
+      })(scope),
+    );
+  return MutableHashSet.fromIterable(rows.map((row) => row.id));
+};
+
 describe("ownedListFilter agrees with canView, row for row", () => {
   Arr.forEach(["database", "absent", "never"] as const, (seam) => {
     Arr.forEach(VIEWERS, (viewer) => {
@@ -294,20 +309,6 @@ describe("ownedListFilter agrees with canView, row for row", () => {
   });
 
   it("is not vacuous: each audience sees what it should, not nothing and not everything", async () => {
-    const listFor = async (viewer: AppUser | null) => {
-      const scope = await Effect.runPromise(withSeam(owned.readScope, viewer, "database"));
-      const rows = await db
-        .select({ id: posts.id })
-        .from(posts)
-        .where(
-          ownedListFilter({
-            owner: posts.ownerId,
-            visibility: posts.visibility,
-            draft: posts.draft,
-          })(scope),
-        );
-      return MutableHashSet.fromIterable(rows.map((row) => row.id));
-    };
     // Anonymous: the three published public rows.
     expect(Arr.sort(await listFor(null), Order.String)).toEqual([
       "alice:public:published",

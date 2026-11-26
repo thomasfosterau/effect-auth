@@ -293,6 +293,44 @@ const nothingPurged: Sql.PurgeExpiredResult = {
   accountLockouts: 0,
 };
 
+const verification = (token: string, userId: string): Auth.Email.EmailVerification => ({
+  token,
+  userId,
+  email: `${userId}@example.com`,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 86_400_000,
+});
+
+const reset = (token: string, userId: string): Auth.Password.PasswordResetToken => ({
+  token,
+  userId,
+  email: `${userId}@example.com`,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
+});
+
+const magicLink = (token: string, email: string): Auth.MagicLinkToken => ({
+  token,
+  email,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
+});
+
+const at = (ms: number) => DateTime.toDateUtc(DateTime.makeUnsafe(ms));
+
+const lockoutOptions = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60_000, now });
+
+const simulatedFailure = () => driverError(new SimulatedFailure({ message: "simulated failure" }));
+
+const userEmail = (userId: string, value: string, verified = false) =>
+  Auth.makeIdentifier({
+    userId,
+    type: "email",
+    value,
+    verified,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
+
 const storeContract = (engine: StoreEngine): void => {
   /** Run an effect against a migrated database with every store layer. */
   const run = <A, E>(effect: Effect.Effect<A, E, StoreServices>): Promise<A> =>
@@ -638,13 +676,6 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("EmailVerificationStore roundtrips and deletes by user id", async () => {
-      const verification = (token: string, userId: string): Auth.Email.EmailVerification => ({
-        token,
-        userId,
-        email: `${userId}@example.com`,
-        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 86_400_000,
-      });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.Email.EmailVerificationStore;
@@ -922,13 +953,6 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("PasswordResetStore roundtrips and deletes by user id", async () => {
-      const reset = (token: string, userId: string): Auth.Password.PasswordResetToken => ({
-        token,
-        userId,
-        email: `${userId}@example.com`,
-        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
-      });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.Password.PasswordResetStore;
@@ -949,19 +973,13 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("MagicLinkStore roundtrips and deletes by email", async () => {
-      const link = (token: string, email: string): Auth.MagicLinkToken => ({
-        token,
-        email,
-        createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-        expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
-      });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.MagicLinkStore;
           const userStore = yield* Auth.MagicLinkUserStore;
-          yield* store.create(link("ml-1", "a@example.com"));
-          yield* store.create(link("ml-2", "a@example.com"));
-          yield* store.create(link("ml-3", "b@example.com"));
+          yield* store.create(magicLink("ml-1", "a@example.com"));
+          yield* store.create(magicLink("ml-2", "a@example.com"));
+          yield* store.create(magicLink("ml-3", "b@example.com"));
           const loaded = yield* store.get("ml-1");
           yield* store.delete("ml-1");
           yield* store.deleteByEmail("a@example.com");
@@ -1212,7 +1230,6 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("purgeExpired deletes every expired token, state, challenge and session, and keeps live ones", async () => {
       const now = 1_000_000;
-      const at = (ms: number) => DateTime.toDateUtc(DateTime.makeUnsafe(ms));
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
@@ -1341,23 +1358,22 @@ const storeContract = (engine: StoreEngine): void => {
     it("purgeExpired drops an ended lock and an idle counter, and keeps an active lock and a recent counter", async () => {
       const day = 24 * 60 * 60 * 1000;
       const start = 10 * day;
-      const options = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60_000, now });
       const result = await run(
         Effect.gen(function* () {
           const lockouts = yield* Auth.Plugins.AccountLockoutStore;
           yield* TestClock.setTime(start);
           // Idle: one failure, then nothing for over a day.
-          yield* lockouts.registerAttempt("idle", options(start));
+          yield* lockouts.registerAttempt("idle", lockoutOptions(start));
           // Ended: locked at the start, the lock long over.
-          yield* lockouts.registerAttempt("ended", options(start));
-          yield* lockouts.registerAttempt("ended", options(start));
+          yield* lockouts.registerAttempt("ended", lockoutOptions(start));
+          yield* lockouts.registerAttempt("ended", lockoutOptions(start));
           const now = start + day + 1;
           yield* TestClock.setTime(now);
           // Active: locked just now.
-          yield* lockouts.registerAttempt("active", options(now));
-          yield* lockouts.registerAttempt("active", options(now));
+          yield* lockouts.registerAttempt("active", lockoutOptions(now));
+          yield* lockouts.registerAttempt("active", lockoutOptions(now));
           // Recent: one failure just now.
-          yield* lockouts.registerAttempt("recent", options(now));
+          yield* lockouts.registerAttempt("recent", lockoutOptions(now));
           const purged = yield* Sql.purgeExpired;
           const left = yield* Effect.forEach(
             ["idle", "ended", "active", "recent"],
@@ -1620,23 +1636,15 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("IdentifierStore.replace swaps a user's identifier in one transaction, and keeps it on any refusal", async () => {
-      const email = (userId: string, value: string, verified = false) =>
-        Auth.makeIdentifier({
-          userId,
-          type: "email",
-          value,
-          verified,
-          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
-          const ada = yield* store.create(email("user-ada", "ada@example.com", true));
-          yield* store.create(email("user-grace", "grace@example.com"));
+          const ada = yield* store.create(userEmail("user-ada", "ada@example.com", true));
+          yield* store.create(userEmail("user-grace", "grace@example.com"));
 
           const foundReplaced = yield* store.replace(
             ada,
-            email("user-ada", "ada-new@example.com", true),
+            userEmail("user-ada", "ada-new@example.com", true),
           );
           assert(Option.isSome(foundReplaced), "the first replace succeeds");
           const replaced = foundReplaced.value;
@@ -1648,23 +1656,23 @@ const storeContract = (engine: StoreEngine): void => {
           // A value another user holds: the INSERT is refused by the unique
           // index and the transaction rolls back, so the user keeps their address.
           const takenRaw = yield* Effect.flip(
-            store.replace(replaced, email("user-ada", "grace@example.com")),
+            store.replace(replaced, userEmail("user-ada", "grace@example.com")),
           );
           const taken = yield* Effect.flip(
-            Auth.replaceIdentifier(store, replaced, email("user-ada", "grace@example.com")),
+            Auth.replaceIdentifier(store, replaced, userEmail("user-ada", "grace@example.com")),
           );
           // `from` is no longer held: null, and nothing is written.
-          const stale = yield* store.replace(ada, email("user-ada", "ada-other@example.com"));
+          const stale = yield* store.replace(ada, userEmail("user-ada", "ada-other@example.com"));
           const staleTyped = yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada, email("user-ada", "ada-other@example.com")),
+            Auth.replaceIdentifier(store, ada, userEmail("user-ada", "ada-other@example.com")),
           );
           // Another user's replacement, or one reusing `from`'s id, is refused outright.
           const wrongUser = yield* Effect.flip(
-            store.replace(replaced, email("user-grace", "x@example.com")),
+            store.replace(replaced, userEmail("user-grace", "x@example.com")),
           );
           const sameId = yield* Effect.flip(
             store.replace(replaced, {
-              ...email("user-ada", "y@example.com"),
+              ...userEmail("user-ada", "y@example.com"),
               id: replaced.id,
             }),
           );
@@ -1705,14 +1713,6 @@ const storeContract = (engine: StoreEngine): void => {
       // concurrent second sees on PostgreSQL once the first's row lock is
       // released: its INSERT lands, its guarded DELETE matches nothing, and the
       // claim is taken back.
-      const email = (value: string) =>
-        Auth.makeIdentifier({
-          userId: "user-ada",
-          type: "email",
-          value,
-          verified: true,
-          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        });
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -1961,8 +1961,6 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("store gets surface AuthError (not defect) on SQL failure", async () => {
-      const simulatedFailure = () =>
-        driverError(new SimulatedFailure({ message: "simulated failure" }));
       const brokenConnection: SqlConnection.Connection = {
         execute: () => Effect.fail(simulatedFailure()),
         executeRaw: () => Effect.fail(simulatedFailure()),
@@ -2123,6 +2121,31 @@ storeContract(postgres);
 storeContract(postgresBigint);
 storeContract(postgresString);
 
+const email = (value: string) =>
+  Auth.makeIdentifier({
+    userId: "user-ada",
+    type: "email",
+    value,
+    verified: true,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
+
+const replaceUnder = (trigger: string) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      yield* migrate;
+      const sql = yield* SqlClient.SqlClient;
+      const store = yield* Auth.IdentifierStore;
+      const ada = yield* store.create(email("ada@example.com"));
+      yield* sql.unsafe(trigger);
+      const outcome = yield* Effect.result(store.replace(ada, email("ada-new@example.com")));
+      const rows = yield* sql<{
+        readonly value: string;
+      }>`SELECT value FROM auth_identifiers WHERE user_id = ${"user-ada"} ORDER BY value`;
+      return { outcome, values: rows.map((row) => row.value) };
+    }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(sqlClientLayer())))),
+  );
+
 // ---------------------------------------------------------------------------
 // IdentifierStore.replace inside its transaction (SQLite)
 //
@@ -2132,31 +2155,6 @@ storeContract(postgresString);
 // ---------------------------------------------------------------------------
 
 describe("@thomasfosterau/effect-auth/sql IdentifierStore.replace on SQLite: transaction and order", () => {
-  const email = (value: string) =>
-    Auth.makeIdentifier({
-      userId: "user-ada",
-      type: "email",
-      value,
-      verified: true,
-      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    });
-
-  const replaceUnder = (trigger: string) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        yield* migrate;
-        const sql = yield* SqlClient.SqlClient;
-        const store = yield* Auth.IdentifierStore;
-        const ada = yield* store.create(email("ada@example.com"));
-        yield* sql.unsafe(trigger);
-        const outcome = yield* Effect.result(store.replace(ada, email("ada-new@example.com")));
-        const rows = yield* sql<{
-          readonly value: string;
-        }>`SELECT value FROM auth_identifiers WHERE user_id = ${"user-ada"} ORDER BY value`;
-        return { outcome, values: rows.map((row) => row.value) };
-      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(sqlClientLayer())))),
-    );
-
   it("a failed release rolls the claim back: only the old row remains", async () => {
     const result = await replaceUnder(`
       CREATE TRIGGER refuse_release BEFORE DELETE ON auth_identifiers

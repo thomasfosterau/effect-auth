@@ -690,6 +690,14 @@ describe("parseAttestationObject", () => {
   });
 });
 
+const toBytes = (value: bigint, length: number): Uint8Array => {
+  const hex = value.toString(16).padStart(length * 2, "0");
+  return new Uint8Array(Arr.makeBy(length, (i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)));
+};
+
+const run = <A, E>(effect: Effect.Effect<A, E, PlatformCrypto.Services>) =>
+  Effect.runPromise(PlatformCrypto.provide(effect));
+
 // --- Signature verification --------------------------------------------------
 
 describe("assertion signature verification", () => {
@@ -697,12 +705,6 @@ describe("assertion signature verification", () => {
     const { privateKey, cose } = await buildKey(-7);
     const [key] = decodeCOSEPublicKey(new Uint8Array(cose));
     const ec2 = key.ec2();
-    const toBytes = (value: bigint, length: number): Uint8Array => {
-      const hex = value.toString(16).padStart(length * 2, "0");
-      return new Uint8Array(Arr.makeBy(length, (i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)));
-    };
-    const run = <A, E>(effect: Effect.Effect<A, E, PlatformCrypto.Services>) =>
-      Effect.runPromise(PlatformCrypto.provide(effect));
     const spki = await run(
       Cipher.jwkToSpkiDer("ES256", {
         kty: "EC",

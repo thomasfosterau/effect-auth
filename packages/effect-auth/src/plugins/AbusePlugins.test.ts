@@ -172,6 +172,14 @@ describe("HaveIBeenPwnedPlugin", () => {
   });
 });
 
+const passes = async (cfg: Parameters<typeof CaptchaPlugin>[0], answer: Schema.Json) => {
+  const client = stubHttpClient(() => Response.json(answer));
+  const result = await drive(CaptchaPlugin(cfg), client, (hooks) =>
+    Effect.result(hooks.beforeSignUp(signUp("pw", "tok"))),
+  );
+  return Result.isSuccess(result);
+};
+
 describe("CaptchaPlugin", () => {
   const config = {
     provider: "cloudflare-turnstile" as const,
@@ -238,14 +246,6 @@ describe("CaptchaPlugin", () => {
   });
 
   describe("checks what the token was minted for", () => {
-    const passes = async (cfg: Parameters<typeof CaptchaPlugin>[0], answer: Schema.Json) => {
-      const client = stubHttpClient(() => Response.json(answer));
-      const result = await drive(CaptchaPlugin(cfg), client, (hooks) =>
-        Effect.result(hooks.beforeSignUp(signUp("pw", "tok"))),
-      );
-      return Result.isSuccess(result);
-    };
-
     it("refuses a score below minScore, and a missing score", async () => {
       const cfg = { ...config, minScore: 0.5 };
       expect(await passes(cfg, { success: true, score: 0.9 })).toBe(true);

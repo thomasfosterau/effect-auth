@@ -688,6 +688,8 @@ export const memoryOidcTokenStore = (
     }),
 });
 
+const key = (userId: string, clientId: string) => `${userId}\u0000${clientId}`;
+
 /**
  * `OidcConsentStore` over a `MutableHashMap` keyed by `(userId, clientId)`.
  *
@@ -697,7 +699,6 @@ export const memoryOidcTokenStore = (
 export const memoryOidcConsentStore = (
   consents: MutableHashMap.MutableHashMap<string, OidcConsent> = MutableHashMap.empty(),
 ): typeof OidcConsentStore.Service => {
-  const key = (userId: string, clientId: string) => `${userId}\u0000${clientId}`;
   return {
     get: (userId, clientId) =>
       Effect.sync(() => MutableHashMap.get(consents, key(userId, clientId))),

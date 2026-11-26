@@ -102,6 +102,20 @@ export const roleRef = (organizationId: string, role: string): Entity.EntityRef 
   Entity.ref(RoleEntityType, orgRoleId(organizationId, role));
 
 /**
+ * Keyed by `refKey`: each key keeps its first position and its last entity
+ * (the `Map.set` semantics the breadth-first walk relies on).
+ */
+const byKey = (entities: ReadonlyArray<Entity.Entity>): ReadonlyArray<Entity.Entity> =>
+  Arr.map(
+    Arr.dedupeWith(entities, (a, b) => Entity.refKey(a.ref) === Entity.refKey(b.ref)),
+    (first) =>
+      Option.getOrElse(
+        Arr.findLast(entities, (entity) => Entity.refKey(entity.ref) === Entity.refKey(first.ref)),
+        () => first,
+      ),
+  );
+
+/**
  * An {@link EntityResolver} backed by an {@link OrganizationStore}, projecting
  * users, teams and organizations as described in the module documentation.
  * Unknown references (including `Role::` and every application-defined type)
@@ -200,23 +214,6 @@ export const organizationEntityResolver = (
       );
     });
   };
-
-  /**
-   * Keyed by `refKey`: each key keeps its first position and its last entity
-   * (the `Map.set` semantics the breadth-first walk relies on).
-   */
-  const byKey = (entities: ReadonlyArray<Entity.Entity>): ReadonlyArray<Entity.Entity> =>
-    Arr.map(
-      Arr.dedupeWith(entities, (a, b) => Entity.refKey(a.ref) === Entity.refKey(b.ref)),
-      (first) =>
-        Option.getOrElse(
-          Arr.findLast(
-            entities,
-            (entity) => Entity.refKey(entity.ref) === Entity.refKey(first.ref),
-          ),
-          () => first,
-        ),
-    );
 
   return {
     resolve: Effect.fn("OrganizationEntities.resolve")(function* (

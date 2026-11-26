@@ -2153,6 +2153,10 @@ const signInWith = ({ credential, rememberMe }: typeof SignInDocument.Type.data.
     }),
   );
 
+// A failed second factor is a failed authentication attempt: `401`.
+const secondFactorRejected = (e: { readonly message: string }) =>
+  Effect.fail(new S.Unauthorized({ message: e.message }));
+
 /** Redeem a second-factor challenge with a TOTP or backup code. */
 const verifySecondFactor = (
   token: string,
@@ -2160,14 +2164,11 @@ const verifySecondFactor = (
 ) =>
   Effect.gen(function* () {
     const multiFactor = yield* resolveMultiFactor;
-    // A failed second factor is a failed authentication attempt: `401`.
-    const rejected = (e: { readonly message: string }) =>
-      Effect.fail(new S.Unauthorized({ message: e.message }));
     const result =
       attributes.method === "totp"
         ? yield* multiFactor.service.verifyTotp(token, attributes.code).pipe(
             Effect.catchTags({
-              MultiFactorError: rejected,
+              MultiFactorError: secondFactorRejected,
               HashingError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
               ...hookFailures,
@@ -2175,7 +2176,7 @@ const verifySecondFactor = (
           )
         : yield* multiFactor.service.verifyBackupCode(token, attributes.code).pipe(
             Effect.catchTags({
-              MultiFactorError: rejected,
+              MultiFactorError: secondFactorRejected,
               AuthError: (e) => internalServerError(e),
               ...hookFailures,
             }),
@@ -2260,6 +2261,9 @@ export const secondFactorChallengesGroupLayer = (
   );
 };
 
+const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
+  Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
+
 /** Layer implementing the `otp-challenges` group: send a code or a magic link. */
 export const otpChallengesGroupLayer = HttpApiBuilder.group(AuthApi, "otp-challenges", (handlers) =>
   handlers.handle("create", ({ payload }) =>
@@ -2267,8 +2271,6 @@ export const otpChallengesGroupLayer = HttpApiBuilder.group(AuthApi, "otp-challe
       // Anti-enumeration: each service succeeds silently for an unknown
       // address or number; only store and delivery failures surface (500).
       const challenge = payload.data.attributes;
-      const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
-        Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
       // The send gate (`beforeSendCode`, the captcha).
       const options = definedKeys({ captchaToken: challenge.captchaToken });
       return yield* Match.value(challenge).pipe(
@@ -4307,6 +4309,15 @@ export const authGroupLayer = (
   const ssoErrorRedirectTo = ssoRedirect?.errorRedirectTo ?? ssoRedirectTo;
   const ssoSecondFactorRedirectTo = ssoRedirect?.secondFactorRedirectTo ?? ssoRedirectTo;
 
+  const refused = (error: string) => (cause: Cause.YieldableError) =>
+    Effect.logWarning("[effect-auth] SAML response refused", cause).pipe(
+      Effect.as(
+        HttpServerResponse.redirect(withErrorParam(ssoErrorRedirectTo, error), {
+          status: 303,
+        }),
+      ),
+    );
+
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
       .handle("deviceCode", ({ payload }) =>
@@ -4410,14 +4421,6 @@ export const authGroupLayer = (
       .handle("samlAcs", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const sso = yield* resolveSso;
-          const refused = (error: string) => (cause: Cause.YieldableError) =>
-            Effect.logWarning("[effect-auth] SAML response refused", cause).pipe(
-              Effect.as(
-                HttpServerResponse.redirect(withErrorParam(ssoErrorRedirectTo, error), {
-                  status: 303,
-                }),
-              ),
-            );
           return yield* sso.service
             .handleSamlCallback(params.providerId, payload.SAMLResponse, payload.RelayState, {
               browserState: readSsoStateCookie(request, cfg),
@@ -4821,6 +4824,12 @@ const encodeScimGroup = (resource: ScimGroupResource, baseUrl: string): S.ScimGr
   meta: scimMeta("Group", baseUrl, resource.id, resource.createdAt, resource.updatedAt),
 });
 
+const parseInteger = (raw: string | undefined): number | null | undefined => {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : null;
+};
+
 /**
  * SCIM list parameters arrive as query strings. `startIndex` and `count` must
  * be integers; anything else is a client bug worth reporting rather than
@@ -4831,11 +4840,6 @@ const scimListQuery = (query: {
   readonly startIndex?: string;
   readonly count?: string;
 }): Effect.Effect<ScimListQuery, S.ScimBadRequest> => {
-  const parseInteger = (raw: string | undefined): number | null | undefined => {
-    if (raw === undefined || raw.trim() === "") return undefined;
-    const value = Number(raw);
-    return Number.isInteger(value) ? value : null;
-  };
   const startIndex = parseInteger(query.startIndex);
   if (startIndex === null) {
     return Effect.fail(scimBadRequest("startIndex must be an integer", "invalidValue"));
@@ -4950,33 +4954,33 @@ const scimResourceTypes = (baseUrl: string): S.ScimDocumentView => {
   };
 };
 
+const attribute = (
+  name: string,
+  type: string,
+  options: {
+    readonly multiValued?: boolean;
+    readonly required?: boolean;
+    readonly uniqueness?: string;
+    readonly mutability?: string;
+    readonly subAttributes?: ReadonlyArray<unknown>;
+  } = {},
+) => ({
+  name,
+  type,
+  multiValued: options.multiValued ?? false,
+  required: options.required ?? false,
+  caseExact: false,
+  mutability: options.mutability ?? "readWrite",
+  returned: "default",
+  uniqueness: options.uniqueness ?? "none",
+  ...(options.subAttributes !== undefined && { subAttributes: options.subAttributes }),
+});
+
 /**
  * `GET /Schemas` (RFC 7643 §7) — the attributes of the two resources, limited
  * to the ones this server actually reads and writes.
  */
 const scimSchemas = (baseUrl: string): S.ScimDocumentView => {
-  const attribute = (
-    name: string,
-    type: string,
-    options: {
-      readonly multiValued?: boolean;
-      readonly required?: boolean;
-      readonly uniqueness?: string;
-      readonly mutability?: string;
-      readonly subAttributes?: ReadonlyArray<unknown>;
-    } = {},
-  ) => ({
-    name,
-    type,
-    multiValued: options.multiValued ?? false,
-    required: options.required ?? false,
-    caseExact: false,
-    mutability: options.mutability ?? "readWrite",
-    returned: "default",
-    uniqueness: options.uniqueness ?? "none",
-    ...(options.subAttributes !== undefined && { subAttributes: options.subAttributes }),
-  });
-
   const resources = [
     {
       id: S.SCIM_USER_SCHEMA,

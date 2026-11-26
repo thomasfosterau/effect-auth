@@ -274,27 +274,28 @@ const replaceStores: ReadonlyArray<readonly [string, () => Layer.Layer<Identifie
   ["IdentifierStoreKV", testLayer],
 ];
 
+const emailIdentifier = (userId: string, value: string, verified = false) =>
+  makeIdentifier({
+    userId,
+    type: "email",
+    value,
+    verified,
+    now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  });
+
 Arr.forEach(replaceStores, ([label, makeLayer]) => {
   const runOn = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
     Effect.runPromise(effect.pipe(Effect.provide(makeLayer())));
-  const email = (userId: string, value: string, verified = false) =>
-    makeIdentifier({
-      userId,
-      type: "email",
-      value,
-      verified,
-      now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    });
 
   describe(`${label}: replace`, () => {
     it("swaps the user's identifier for the new one and releases the old value", async () => {
       const result = await runOn(
         Effect.gen(function* () {
           const store = yield* IdentifierStore;
-          const alice = yield* store.create(email("user-1", "alice@example.com"));
+          const alice = yield* store.create(emailIdentifier("user-1", "alice@example.com"));
           const replaced = yield* store.replace(
             alice,
-            email("user-1", "alice-new@example.com", true),
+            emailIdentifier("user-1", "alice-new@example.com", true),
           );
           return {
             replaced,
@@ -314,12 +315,14 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
       const result = await runOn(
         Effect.gen(function* () {
           const store = yield* IdentifierStore;
-          const alice = yield* store.create(email("user-1", "alice@example.com", true));
-          yield* store.create(email("user-2", "bob@example.com"));
+          const alice = yield* store.create(emailIdentifier("user-1", "alice@example.com", true));
+          yield* store.create(emailIdentifier("user-2", "bob@example.com"));
           return {
-            refused: yield* Effect.flip(store.replace(alice, email("user-1", "bob@example.com"))),
+            refused: yield* Effect.flip(
+              store.replace(alice, emailIdentifier("user-1", "bob@example.com")),
+            ),
             taken: yield* Effect.flip(
-              replaceIdentifier(store, alice, email("user-1", "bob@example.com")),
+              replaceIdentifier(store, alice, emailIdentifier("user-1", "bob@example.com")),
             ),
             listed: yield* store.listByUser("user-1"),
             bob: yield* store.getByValue("email", "bob@example.com"),
@@ -338,12 +341,15 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
       const result = await runOn(
         Effect.gen(function* () {
           const store = yield* IdentifierStore;
-          const alice = yield* store.create(email("user-1", "alice@example.com"));
+          const alice = yield* store.create(emailIdentifier("user-1", "alice@example.com"));
           const stale = { ...alice, value: "alice-old@example.com" };
           return {
-            replaced: yield* store.replace(stale, email("user-1", "alice-new@example.com")),
+            replaced: yield* store.replace(
+              stale,
+              emailIdentifier("user-1", "alice-new@example.com"),
+            ),
             notFound: yield* Effect.flip(
-              replaceIdentifier(store, stale, email("user-1", "alice-new@example.com")),
+              replaceIdentifier(store, stale, emailIdentifier("user-1", "alice-new@example.com")),
             ),
             listed: yield* store.listByUser("user-1"),
           };
@@ -358,9 +364,11 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
       const result = await runOn(
         Effect.gen(function* () {
           const store = yield* IdentifierStore;
-          const alice = yield* store.create(email("user-1", "alice@example.com"));
+          const alice = yield* store.create(emailIdentifier("user-1", "alice@example.com"));
           return {
-            otherUser: yield* Effect.flip(store.replace(alice, email("user-2", "x@example.com"))),
+            otherUser: yield* Effect.flip(
+              store.replace(alice, emailIdentifier("user-2", "x@example.com")),
+            ),
             otherType: yield* Effect.flip(
               store.replace(
                 alice,
@@ -375,10 +383,13 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
             // Reusing `from`'s id would make the claim overwrite `from`, so the
             // release would take the replacement with it.
             sameId: yield* Effect.flip(
-              store.replace(alice, { ...email("user-1", "alice-new@example.com"), id: alice.id }),
+              store.replace(alice, {
+                ...emailIdentifier("user-1", "alice-new@example.com"),
+                id: alice.id,
+              }),
             ),
             sameValue: yield* Effect.flip(
-              store.replace(alice, email("user-1", "alice@example.com", true)),
+              store.replace(alice, emailIdentifier("user-1", "alice@example.com", true)),
             ),
             listed: yield* store.listByUser("user-1"),
           };

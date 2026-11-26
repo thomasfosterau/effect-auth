@@ -439,21 +439,21 @@ describe("MagicLinkForm", () => {
   });
 });
 
-describe("EmailOtpForm", () => {
-  const otpClient = (calls: unknown[]) =>
-    stub({
-      emailOtp: {
-        send: (payload) => {
-          calls.push(["send", payload]);
-          return Promise.resolve(ok);
-        },
-        signIn: (payload) => {
-          calls.push(["signIn", payload]);
-          return Promise.resolve(authSuccess);
-        },
+const otpClient = (calls: unknown[]) =>
+  stub({
+    emailOtp: {
+      send: (payload) => {
+        calls.push(["send", payload]);
+        return Promise.resolve(ok);
       },
-    });
+      signIn: (payload) => {
+        calls.push(["signIn", payload]);
+        return Promise.resolve(authSuccess);
+      },
+    },
+  });
 
+describe("EmailOtpForm", () => {
   it("sends the captcha token with the code request only", async () => {
     const calls: unknown[] = [];
     const { container } = render(EmailOtpForm, {

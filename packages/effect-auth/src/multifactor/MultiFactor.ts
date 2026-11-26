@@ -440,6 +440,16 @@ const hashedPendingStore = (
   delete: (token) => Effect.flatMap(hash(token), store.delete),
 });
 
+/** Trace a second-factor verification and count its outcome. */
+const observeVerification =
+  (type: "totp" | "backup-code") =>
+  <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    self.pipe(
+      Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type } }),
+      Effect.tap(() => Obs.recordMultiFactorVerification(type, "success")),
+      Effect.tapError(() => Obs.recordMultiFactorVerification(type, "failure")),
+    );
+
 /**
  * Create a multi-factor service
  */
@@ -636,16 +646,6 @@ export const make = (
         );
         return { userId, session, token } satisfies MultiFactorVerifyResult;
       });
-
-    /** Trace a second-factor verification and count its outcome. */
-    const observeVerification =
-      (type: "totp" | "backup-code") =>
-      <A, E, R>(self: Effect.Effect<A, E, R>) =>
-        self.pipe(
-          Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type } }),
-          Effect.tap(() => Obs.recordMultiFactorVerification(type, "success")),
-          Effect.tapError(() => Obs.recordMultiFactorVerification(type, "failure")),
-        );
 
     /**
      * Load the verified multi-factor record for a user, failing if multi-factor

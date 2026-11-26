@@ -372,6 +372,12 @@ describe("resolveClientIP — trustedProxyCidrs", () => {
   });
 });
 
+const fromSocket = (remote: string) =>
+  resolveClientIP({ headers: {}, remoteAddress: Option.some(remote) });
+
+const fromHeader = (value: string) =>
+  resolveClientIP(edge({ "cf-connecting-ip": value }, null), ClientIP.cloudflare);
+
 // ---------------------------------------------------------------------------
 // IPv6 normalization in end-to-end resolution
 // ---------------------------------------------------------------------------
@@ -385,10 +391,6 @@ describe("resolveClientIP — IPv6", () => {
   });
 
   it("canonicalises the socket address as it does a header entry", () => {
-    const fromSocket = (remote: string) =>
-      resolveClientIP({ headers: {}, remoteAddress: Option.some(remote) });
-    const fromHeader = (value: string) =>
-      resolveClientIP(edge({ "cf-connecting-ip": value }, null), ClientIP.cloudflare);
     Arr.forEach(["2001:DB8:0:0:0:0:0:1", "2001:db8::0:1", "2001:db8:0000::1"], (spelling) => {
       expect(fromSocket(spelling)).toBe("2001:db8::1");
       expect(fromSocket(spelling)).toBe(fromHeader(spelling));
@@ -419,6 +421,12 @@ const edge = (
   headers,
   remoteAddress: remote !== null ? Option.some(remote) : Option.none(),
 });
+
+const resolveCloudflare = (value: string) =>
+  resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
+
+const resolve = (value: string) =>
+  resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
 
 describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
   it("uses CF-Connecting-IP when it holds one IP", () => {
@@ -485,21 +493,17 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
   });
 
   it("accepts IPv4, IPv6 and IPv4-mapped literals, normalised like other resolved addresses", () => {
-    const resolve = (value: string) =>
-      resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
-    expect(resolve("198.51.100.7")).toBe("198.51.100.7");
-    expect(resolve("  198.51.100.7  ")).toBe("198.51.100.7");
-    expect(resolve("2001:DB8::1")).toBe("2001:db8::1");
-    expect(resolve("::1")).toBe("::1");
+    expect(resolveCloudflare("198.51.100.7")).toBe("198.51.100.7");
+    expect(resolveCloudflare("  198.51.100.7  ")).toBe("198.51.100.7");
+    expect(resolveCloudflare("2001:DB8::1")).toBe("2001:db8::1");
+    expect(resolveCloudflare("::1")).toBe("::1");
     // RFC 5952: a single zero group is not compressed.
-    expect(resolve("1:2:3:4:5:6:7::")).toBe("1:2:3:4:5:6:7:0");
-    expect(resolve("::FFFF:203.0.113.7")).toBe("203.0.113.7");
-    expect(resolve("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(resolveCloudflare("1:2:3:4:5:6:7::")).toBe("1:2:3:4:5:6:7:0");
+    expect(resolveCloudflare("::FFFF:203.0.113.7")).toBe("203.0.113.7");
+    expect(resolveCloudflare("::ffff:203.0.113.7")).toBe("203.0.113.7");
   });
 
   it("canonicalises IPv6 (RFC 5952) so one visitor gets one key however the address is written", () => {
-    const resolve = (value: string) =>
-      resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
     expect(resolve("2001:0db8:0000:0000:0000:0000:0000:0001")).toBe("2001:db8::1");
     expect(resolve("2001:0db8::0001")).toBe("2001:db8::1");
     expect(resolve("2001:db8:0:0:1:0:0:1")).toBe("2001:db8::1:0:0:1");
@@ -534,10 +538,8 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
   });
 
   it("trims only HTTP whitespace (SP and HTAB) around the value", () => {
-    const resolve = (value: string) =>
-      resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
-    expect(resolve("\t203.0.113.7 ")).toBe("203.0.113.7");
-    expect(resolve("\u00a0203.0.113.7")).toBe("10.0.0.50");
+    expect(resolveCloudflare("\t203.0.113.7 ")).toBe("203.0.113.7");
+    expect(resolveCloudflare("\u00a0203.0.113.7")).toBe("10.0.0.50");
   });
 
   it("accepts an IPv6 address with an embedded IPv4 tail, in hex-group form", () => {

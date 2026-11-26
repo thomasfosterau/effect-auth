@@ -377,49 +377,49 @@ describe("stores over an application's own schema", () => {
   });
 });
 
-describe("defineSchema's promoted attributes", () => {
-  /** The application's schema with `users.promoted` set to `promoted`. */
-  const withPromoted = (
-    promoted: Readonly<Record<string, "key" | "displayName" | "avatar" | "role">>,
-  ) =>
-    defineSchema({
-      sessions: {
-        table: appSessions,
-        columns: {
-          id: "digest",
-          userId: "account",
-          expiresAt: "expires",
-          createdAt: "born",
-          lastActivityAt: "lastSeen",
-          attributes: "meta",
-        },
+/** The application's schema with `users.promoted` set to `promoted`. */
+const withPromoted = (
+  promoted: Readonly<Record<string, "key" | "displayName" | "avatar" | "role">>,
+) =>
+  defineSchema({
+    sessions: {
+      table: appSessions,
+      columns: {
+        id: "digest",
+        userId: "account",
+        expiresAt: "expires",
+        createdAt: "born",
+        lastActivityAt: "lastSeen",
+        attributes: "meta",
       },
-      users: {
-        table: appUsers,
-        columns: {
-          id: "key",
-          name: "displayName",
-          image: "avatar",
-          attributes: "meta",
-          createdAt: "born",
-          updatedAt: "touched",
-        },
-        promoted,
+    },
+    users: {
+      table: appUsers,
+      columns: {
+        id: "key",
+        name: "displayName",
+        image: "avatar",
+        attributes: "meta",
+        createdAt: "born",
+        updatedAt: "touched",
       },
-      identifiers: {
-        table: appIdentifiers,
-        columns: {
-          id: "key",
-          userId: "account",
-          type: "kind",
-          value: "normalized",
-          verified: "confirmed",
-          verifiedAt: "confirmedOn",
-          createdAt: "born",
-        },
+      promoted,
+    },
+    identifiers: {
+      table: appIdentifiers,
+      columns: {
+        id: "key",
+        userId: "account",
+        type: "kind",
+        value: "normalized",
+        verified: "confirmed",
+        verifiedAt: "confirmedOn",
+        createdAt: "born",
       },
-    });
+    },
+  });
 
+describe("defineSchema's promoted attributes", () => {
   // `createdAt`, `updatedAt` and the bag are refused at the type level: a
   // promoted column must read back as a string, number, boolean or null.
   it.each([

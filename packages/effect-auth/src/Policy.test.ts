@@ -234,6 +234,13 @@ describe("fail-closed error semantics", () => {
   });
 });
 
+const failing = (id: string, effect: Policy.PolicyEffect) =>
+  Policy.custom({
+    id,
+    effect,
+    predicate: () => Effect.fail(new Errors.AuthError({ message: "store down" })),
+  });
+
 describe("custom policies", () => {
   it("participates in decisions and carries its requirements", async () => {
     const evenMinute = Policy.custom({
@@ -248,12 +255,6 @@ describe("custom policies", () => {
   });
 
   it("a failing custom permit cannot grant; a failing custom forbid denies", async () => {
-    const failing = (id: string, effect: Policy.PolicyEffect) =>
-      Policy.custom({
-        id,
-        effect,
-        predicate: () => Effect.fail(new Errors.AuthError({ message: "store down" })),
-      });
     const denied = await Effect.runPromise(
       Policy.decide([failing("p", "permit")], requestFor(alice, readDoc, doc1)),
     );

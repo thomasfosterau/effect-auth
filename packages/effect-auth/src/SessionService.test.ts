@@ -913,24 +913,26 @@ describe("session config and best-effort writes", () => {
   });
 });
 
-describe("user standing, enforced with no plugin", () => {
-  const standing = (id: string, attributes: User["attributes"]): User => ({
-    id,
-    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-    attributes,
-  });
-  const run = <A, E>(
-    program: (manager: Effect.Success<ReturnType<typeof make>>) => Effect.Effect<A, E>,
-  ) =>
-    Effect.runPromise(
-      Effect.provide(
-        Effect.flatMap(make(sessionConfig), program),
-        Context.merge(SessionStoreTest, UserStoreTest),
-      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
-    );
-  const setUser = (user: User) => MutableHashMap.set(mockUserStore.users, user.id, user);
+const standing = (id: string, attributes: User["attributes"]): User => ({
+  id,
+  createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+  attributes,
+});
 
+const run = <A, E>(
+  program: (manager: Effect.Success<ReturnType<typeof make>>) => Effect.Effect<A, E>,
+) =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.flatMap(make(sessionConfig), program),
+      Context.merge(SessionStoreTest, UserStoreTest),
+    ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+  );
+
+const setUser = (user: User) => MutableHashMap.set(mockUserStore.users, user.id, user);
+
+describe("user standing, enforced with no plugin", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockSessionStore.sessions);
   });

@@ -151,6 +151,10 @@ const failures = async <E, R>(
   return failed;
 };
 
+const accountKey = (account: OAuthAccount) => `${account.provider}\u0000${account.providerId}`;
+
+const key = (account: OAuthAccount) => `${account.provider}\u0000${account.providerId}`;
+
 describe("a broken store fails its suite", () => {
   it("a SessionStore that drops attributes fails the round trip with a ConformanceError", async () => {
     const failed = await failures(Testing.sessionStoreConformance(), () => {
@@ -248,7 +252,6 @@ describe("a broken store fails its suite", () => {
   it("an OAuthAccountStore whose create and update upsert on (provider, providerId) fails its suite", async () => {
     const failed = await failures(Testing.oauthAccountStoreConformance(), () => {
       const accounts = MutableHashMap.empty<string, OAuthAccount>();
-      const key = (account: OAuthAccount) => `${account.provider}\u0000${account.providerId}`;
       const upsert = (account: OAuthAccount) =>
         Effect.sync(() => (MutableHashMap.set(accounts, key(account), account), account));
       return Layer.succeed(OAuthAccountStore, {
@@ -266,14 +269,13 @@ describe("a broken store fails its suite", () => {
   it("an OAuthAccountStore whose linkToUser moves another user's link fails its suite", async () => {
     const failed = await failures(Testing.oauthAccountStoreConformance(), () => {
       const accounts = MutableHashMap.empty<string, OAuthAccount>();
-      const key = (account: OAuthAccount) => `${account.provider}\u0000${account.providerId}`;
       return Layer.succeed(OAuthAccountStore, {
         ...Testing.memoryOAuthAccountStore(undefined, accounts),
         linkToUser: (userId, account) =>
           Effect.sync(() => {
-            const stored = MutableHashMap.get(accounts, key(account));
+            const stored = MutableHashMap.get(accounts, accountKey(account));
             if (Option.isSome(stored)) {
-              MutableHashMap.set(accounts, key(account), { ...stored.value, userId });
+              MutableHashMap.set(accounts, accountKey(account), { ...stored.value, userId });
             }
           }),
       });

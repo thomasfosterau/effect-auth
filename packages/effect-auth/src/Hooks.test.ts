@@ -279,36 +279,36 @@ describe("Hooks - transform short-circuit", () => {
   });
 });
 
-describe("RateLimitPlugin - dependency composition + short-circuit", () => {
-  const makeRateLimitStoreLayer = () => {
-    const entries = MutableHashMap.empty<string, RateLimitEntry>();
-    return Layer.succeed(RateLimitStore, {
-      get: (key: string) => Effect.succeed(MutableHashMap.get(entries, key)),
-      set: (key: string, entry: RateLimitEntry) =>
+const makeRateLimitStoreLayer = () => {
+  const entries = MutableHashMap.empty<string, RateLimitEntry>();
+  return Layer.succeed(RateLimitStore, {
+    get: (key: string) => Effect.succeed(MutableHashMap.get(entries, key)),
+    set: (key: string, entry: RateLimitEntry) =>
+      Effect.sync(() => {
+        MutableHashMap.set(entries, key, entry);
+      }),
+    increment: (key: string, ttl: number) =>
+      // Starts a new window when there is none or it has expired, as the
+      // RateLimitStore contract requires.
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
-          MutableHashMap.set(entries, key, entry);
+          const existing = Option.getOrUndefined(MutableHashMap.get(entries, key));
+          const next: RateLimitEntry =
+            existing === undefined || now >= existing.resetAt
+              ? { key, count: 1, resetAt: now + ttl * 1000 }
+              : { ...existing, count: existing.count + 1 };
+          MutableHashMap.set(entries, key, next);
+          return next.count;
         }),
-      increment: (key: string, ttl: number) =>
-        // Starts a new window when there is none or it has expired, as the
-        // RateLimitStore contract requires.
-        Effect.flatMap(Clock.currentTimeMillis, (now) =>
-          Effect.sync(() => {
-            const existing = Option.getOrUndefined(MutableHashMap.get(entries, key));
-            const next: RateLimitEntry =
-              existing === undefined || now >= existing.resetAt
-                ? { key, count: 1, resetAt: now + ttl * 1000 }
-                : { ...existing, count: existing.count + 1 };
-            MutableHashMap.set(entries, key, next);
-            return next.count;
-          }),
-        ),
-      delete: (key: string) =>
-        Effect.sync(() => {
-          MutableHashMap.remove(entries, key);
-        }),
-    });
-  };
+      ),
+    delete: (key: string) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(entries, key);
+      }),
+  });
+};
 
+describe("RateLimitPlugin - dependency composition + short-circuit", () => {
   it("allows attempts up to the limit, then fails with RateLimitError", async () => {
     // RateLimitPlugin declares its own deps: Layer<Hooks, never, Hooks | RateLimiter | RateLimitStore>.
     const layer = composePlugins([RateLimitPlugin]).pipe(

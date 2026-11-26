@@ -144,6 +144,10 @@ describe("databaseLayer doors", () => {
   });
 });
 
+const seed = async (db: PgliteDatabase, userId: string): Promise<void> => {
+  await db.insert(tables.sessions).values(makeSession("shared", userId)).execute();
+};
+
 describe("overlapping requests", () => {
   /**
    * One instance per "request", each opened in a hook of its own, so that a
@@ -186,12 +190,22 @@ describe("overlapping requests", () => {
     // One store layer, built once, shared by both requests: the handle is not
     // in it.
     const stores = storesLayer(tables).pipe(Layer.provide(databaseLayer(RequestDatabase)));
-
-    const seed = async (db: PgliteDatabase, userId: string): Promise<void> => {
-      await db.insert(tables.sessions).values(makeSession("shared", userId)).execute();
-    };
     await seed(firstDb, "first-request");
     await seed(secondDb, "second-request");
+
+    const request = (
+      db: PgliteDatabase,
+      arrived: Latch.Latch,
+      other: Latch.Latch,
+    ): Effect.Effect<ReadonlyArray<Option.Option<Auth.Session>>, Auth.AuthError, StoreServices> =>
+      Effect.gen(function* () {
+        const sessions = yield* Auth.SessionStore;
+        const before = yield* sessions.get("shared");
+        yield* Latch.open(arrived);
+        yield* other.await;
+        const after = yield* sessions.get("shared");
+        return [before, after];
+      }).pipe(Effect.provide(Context.make(RequestDatabase, db)));
 
     const [firstReads, secondReads] = await Effect.runPromise(
       Effect.gen(function* () {
@@ -199,24 +213,6 @@ describe("overlapping requests", () => {
         // again — so the two are provably in flight at the same time.
         const firstHasRead = yield* Latch.make(false);
         const secondHasRead = yield* Latch.make(false);
-
-        const request = (
-          db: PgliteDatabase,
-          arrived: Latch.Latch,
-          other: Latch.Latch,
-        ): Effect.Effect<
-          ReadonlyArray<Option.Option<Auth.Session>>,
-          Auth.AuthError,
-          StoreServices
-        > =>
-          Effect.gen(function* () {
-            const sessions = yield* Auth.SessionStore;
-            const before = yield* sessions.get("shared");
-            yield* Latch.open(arrived);
-            yield* other.await;
-            const after = yield* sessions.get("shared");
-            return [before, after];
-          }).pipe(Effect.provide(Context.make(RequestDatabase, db)));
 
         return yield* Effect.all(
           [

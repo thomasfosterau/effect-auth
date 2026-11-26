@@ -320,17 +320,18 @@ describe("AccountManagement — change email", () => {
   });
 });
 
+const nothingSent = (h: Harness) => {
+  expect(h.notices).toEqual([]);
+  expect(h.changeEmails).toEqual([]);
+  expect(MutableHashMap.size(h.tokens)).toBe(0);
+};
+
 describe("AccountManagement — change email: re-authentication", () => {
   const withPassword = async (extra: Partial<HarnessOptions> = {}) =>
     makeHarness(undefined, {
       passwordHashes: { "user-1": await hashOf(PASSWORD) },
       ...extra,
     });
-  const nothingSent = (h: Harness) => {
-    expect(h.notices).toEqual([]);
-    expect(h.changeEmails).toEqual([]);
-    expect(MutableHashMap.size(h.tokens)).toBe(0);
-  };
 
   it("an account with a password must give it, even on a fresh session", async () => {
     const h = await withPassword();
@@ -436,12 +437,64 @@ describe("AccountManagement — change email: the old address is told at request
   });
 });
 
+// A double submit: a second confirmation of the same token completes the
+// replace between this request's read and its own replace. `verified` is
+// the state the concurrent write leaves the new address in.
+const doubleSubmit =
+  (rejectTakenFirst: boolean, verified = true) =>
+  (store: typeof IdentifierStore.Service): typeof IdentifierStore.Service => ({
+    ...store,
+    replace: (from, to) =>
+      Effect.gen(function* () {
+        yield* store.replace(
+          from,
+          makeIdentifier({
+            userId: to.userId,
+            type: "email",
+            value: to.value,
+            verified,
+            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+          }),
+        );
+        // A store that claims `to` before it looks at `from` (effect-auth/sql's
+        // INSERT first) refuses the now-held value instead of resolving to null.
+        if (rejectTakenFirst && Option.isSome(yield* store.getByValue(to.type, to.value))) {
+          return yield* new AuthError({ message: "unique index violation" });
+        }
+        return yield* store.replace(from, to);
+      }),
+  });
+
+// A user with no email; `owner` claims the new address, unverified, after
+// the confirm-time check and before this request's own claim.
+const claimedMidConfirm = (owner: string): Harness => {
+  const h = makeHarness((store, records) => ({
+    ...store,
+    create: (identifier) =>
+      Effect.suspend(() => {
+        const concurrent = makeIdentifier({
+          userId: owner,
+          type: "email",
+          value: identifier.value,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        });
+        MutableHashMap.set(records, concurrent.id, concurrent);
+        return store.create(identifier);
+      }),
+  }));
+  MutableHashMap.forEach(h.identifiers, (identifier, id) => {
+    if (identifier.userId === "user-1") MutableHashMap.remove(h.identifiers, id);
+  });
+  return h;
+};
+
+const userEmails = (h: Harness, userId: string) =>
+  Arr.fromIterable(MutableHashMap.values(h.identifiers))
+    .filter((identifier) => identifier.userId === userId && identifier.type === "email")
+    .map((identifier) => ({ value: identifier.value, verified: identifier.verified }));
+
 describe("AccountManagement — change email: failed claims keep the previous address", () => {
   const NEW_EMAIL = "alice-new@example.com";
-  const userEmails = (h: Harness, userId: string) =>
-    Arr.fromIterable(MutableHashMap.values(h.identifiers))
-      .filter((identifier) => identifier.userId === userId && identifier.type === "email")
-      .map((identifier) => ({ value: identifier.value, verified: identifier.verified }));
 
   it("a claim taken by another account mid-confirm leaves the previous address in place and verified", async () => {
     // Another account claims the new address after the confirm-time check and
@@ -607,34 +660,6 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(h.notifiedOld).toEqual([]);
   });
 
-  // A double submit: a second confirmation of the same token completes the
-  // replace between this request's read and its own replace. `verified` is
-  // the state the concurrent write leaves the new address in.
-  const doubleSubmit =
-    (rejectTakenFirst: boolean, verified = true) =>
-    (store: typeof IdentifierStore.Service): typeof IdentifierStore.Service => ({
-      ...store,
-      replace: (from, to) =>
-        Effect.gen(function* () {
-          yield* store.replace(
-            from,
-            makeIdentifier({
-              userId: to.userId,
-              type: "email",
-              value: to.value,
-              verified,
-              now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-            }),
-          );
-          // A store that claims `to` before it looks at `from` (effect-auth/sql's
-          // INSERT first) refuses the now-held value instead of resolving to null.
-          if (rejectTakenFirst && Option.isSome(yield* store.getByValue(to.type, to.value))) {
-            return yield* new AuthError({ message: "unique index violation" });
-          }
-          return yield* store.replace(from, to);
-        }),
-    });
-
   Arr.forEach(
     [
       ["resolves to null", false],
@@ -784,29 +809,6 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
     expect(h.notifiedOld).toEqual([{ oldEmail: Option.none(), newEmail: NEW_EMAIL }]);
   });
-
-  // A user with no email; `owner` claims the new address, unverified, after
-  // the confirm-time check and before this request's own claim.
-  const claimedMidConfirm = (owner: string): Harness => {
-    const h = makeHarness((store, records) => ({
-      ...store,
-      create: (identifier) =>
-        Effect.suspend(() => {
-          const concurrent = makeIdentifier({
-            userId: owner,
-            type: "email",
-            value: identifier.value,
-            now: DateTime.toDateUtc(DateTime.nowUnsafe()),
-          });
-          MutableHashMap.set(records, concurrent.id, concurrent);
-          return store.create(identifier);
-        }),
-    }));
-    MutableHashMap.forEach(h.identifiers, (identifier, id) => {
-      if (identifier.userId === "user-1") MutableHashMap.remove(h.identifiers, id);
-    });
-    return h;
-  };
 
   it("a double-submitted confirmation by a user with no email converges to success, with the address verified", async () => {
     const h = claimedMidConfirm("user-1");

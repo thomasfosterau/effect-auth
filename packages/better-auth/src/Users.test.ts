@@ -245,14 +245,15 @@ describe("IdentifierStore over BetterAuth", () => {
   });
 });
 
+const user = (role: Auth.Json): Auth.User => ({
+  id: "u",
+  createdAt: at(0),
+  updatedAt: at(0),
+  attributes: { role },
+});
+
 describe("rolesOf", () => {
   it("splits the admin plugin's comma-separated roles", () => {
-    const user = (role: Auth.Json): Auth.User => ({
-      id: "u",
-      createdAt: at(0),
-      updatedAt: at(0),
-      attributes: { role },
-    });
     expect(rolesOf(user("admin, user"))).toEqual(["admin", "user"]);
     expect(rolesOf(user("admin"))).toEqual(["admin"]);
     expect(rolesOf(user(",,"))).toEqual([]);

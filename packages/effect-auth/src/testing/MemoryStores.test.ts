@@ -119,6 +119,14 @@ const services = Layer.mergeAll(
   ),
 );
 
+const key = (id: string) => ({
+  id,
+  algorithm: "ES256" as const,
+  publicKey: { kty: "EC", crv: "P-256", x: "", y: "" } as const,
+  privateKey: "",
+  createdAt: 0,
+});
+
 describe("memoryStores", () => {
   it("builds the service graphs the docs examples need, and they run", async () => {
     const result = await runPromiseHttp(
@@ -203,13 +211,6 @@ describe("memoryStores", () => {
 
   it("the JWT key store makes the newest key active and lists them all", async () => {
     const store = Testing.memoryJwtKeyStore();
-    const key = (id: string) => ({
-      id,
-      algorithm: "ES256" as const,
-      publicKey: { kty: "EC", crv: "P-256", x: "", y: "" } as const,
-      privateKey: "",
-      createdAt: 0,
-    });
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const empty = yield* store.getActive;

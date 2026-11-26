@@ -703,6 +703,48 @@ interface PatchEntry {
   readonly value: unknown;
 }
 
+// --- Reads -------------------------------------------------------------
+
+const emailIdentifiers = (
+  all: ReadonlyArray<Identifier.Identifier>,
+): ReadonlyArray<Identifier.Identifier> => all.filter((identifier) => identifier.type === "email");
+
+/**
+ * Project a core user + its identifiers into a SCIM `User`.
+ *
+ * `userName` is the pinned primary address (see
+ * {@link SCIM_USERNAME_ATTRIBUTE}), falling back to the earliest verified
+ * email for users this module did not create, and finally to the user id so
+ * the resource is always well-formed.
+ */
+const toUserResource = (
+  user: Types.User,
+  all: ReadonlyArray<Identifier.Identifier>,
+  active: boolean = !isScimDeactivated(user),
+): ScimUserResource => {
+  const emails = emailIdentifiers(all);
+  const pinned = user.attributes[SCIM_USERNAME_ATTRIBUTE];
+  const userName =
+    P.isString(pinned) && emails.some((e) => e.value === pinned)
+      ? pinned
+      : Option.getOrElse(Identifier.primaryEmailValue(all), () => emails[0]?.value ?? user.id);
+  const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
+  return {
+    id: user.id,
+    userName,
+    ...(user.name !== undefined && { displayName: user.name }),
+    ...(P.isString(externalId) && { externalId }),
+    emails: emails.map((identifier) =>
+      identifier.value === userName
+        ? { value: identifier.value, primary: true, type: "work" }
+        : { value: identifier.value, type: "work" },
+    ),
+    active,
+    createdAt: user.createdAt.getTime(),
+    updatedAt: user.updatedAt.getTime(),
+  };
+};
+
 export const make = (
   config: ScimConfig = {},
 ): Effect.Effect<
@@ -749,49 +791,6 @@ export const make = (
               () => "member",
             ),
           );
-
-    // --- Reads -------------------------------------------------------------
-
-    const emailIdentifiers = (
-      all: ReadonlyArray<Identifier.Identifier>,
-    ): ReadonlyArray<Identifier.Identifier> =>
-      all.filter((identifier) => identifier.type === "email");
-
-    /**
-     * Project a core user + its identifiers into a SCIM `User`.
-     *
-     * `userName` is the pinned primary address (see
-     * {@link SCIM_USERNAME_ATTRIBUTE}), falling back to the earliest verified
-     * email for users this module did not create, and finally to the user id so
-     * the resource is always well-formed.
-     */
-    const toUserResource = (
-      user: Types.User,
-      all: ReadonlyArray<Identifier.Identifier>,
-      active: boolean = !isScimDeactivated(user),
-    ): ScimUserResource => {
-      const emails = emailIdentifiers(all);
-      const pinned = user.attributes[SCIM_USERNAME_ATTRIBUTE];
-      const userName =
-        P.isString(pinned) && emails.some((e) => e.value === pinned)
-          ? pinned
-          : Option.getOrElse(Identifier.primaryEmailValue(all), () => emails[0]?.value ?? user.id);
-      const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
-      return {
-        id: user.id,
-        userName,
-        ...(user.name !== undefined && { displayName: user.name }),
-        ...(P.isString(externalId) && { externalId }),
-        emails: emails.map((identifier) =>
-          identifier.value === userName
-            ? { value: identifier.value, primary: true, type: "work" }
-            : { value: identifier.value, type: "work" },
-        ),
-        active,
-        createdAt: user.createdAt.getTime(),
-        updatedAt: user.updatedAt.getTime(),
-      };
-    };
 
     const readUserResource = (target: ScimTarget) =>
       Effect.map(identifiers.listByUser(target.user.id), (all) =>

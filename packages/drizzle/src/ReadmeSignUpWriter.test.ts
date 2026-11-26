@@ -57,6 +57,18 @@ const region = async (file: string): Promise<string> => {
   return body;
 };
 
+const read = async (id: string) =>
+  (
+    await drizzle({ client })
+      .select({
+        email: nullableUsers.email,
+        emailVerified: nullableUsers.emailVerified,
+        emailVerifiedAt: nullableUsers.emailVerifiedAt,
+      })
+      .from(nullableUsers)
+      .where(eq(nullableUsers.userId, id))
+  )[0];
+
 describe("README: sign-up writer examples", () => {
   it("the guide shows each compiled writer verbatim", async () => {
     const readme = await readFile(
@@ -101,17 +113,6 @@ describe("README: sign-up writer examples", () => {
 
     expect([without.created, withAddress.created]).toEqual([true, true]);
     expect([without.user.name, withAddress.user.name]).toEqual([undefined, "Ada"]);
-    const read = async (id: string) =>
-      (
-        await drizzle({ client })
-          .select({
-            email: nullableUsers.email,
-            emailVerified: nullableUsers.emailVerified,
-            emailVerifiedAt: nullableUsers.emailVerifiedAt,
-          })
-          .from(nullableUsers)
-          .where(eq(nullableUsers.userId, id))
-      )[0];
     expect(await read(without.user.id)).toEqual({
       email: null,
       emailVerified: false,

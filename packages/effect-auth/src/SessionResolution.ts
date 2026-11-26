@@ -260,6 +260,9 @@ export const extractSessionToken = (
   return cookie === null || cookie === "" ? undefined : (cookie ?? undefined);
 };
 
+const nonEmpty = (value: string | null | undefined): boolean =>
+  value !== null && value !== undefined && value !== "";
+
 /**
  * Classify the credentials a request carries, with no Effect runtime and no
  * restated cookie name.
@@ -297,8 +300,6 @@ export const detectCredential = (
   config?: CredentialConfig,
 ): CredentialPresence => {
   const names = SessionCookies.cookieNames(config);
-  const nonEmpty = (value: string | null | undefined): boolean =>
-    value !== null && value !== undefined && value !== "";
 
   const hasCookie = nonEmpty(source.cookie(names.session));
   const hasCacheCookie = nonEmpty(source.cookie(names.data));

@@ -200,38 +200,40 @@ type AddressOptions = Pick<
   "clientAddress" | "clientAddressHeader" | "forwardClientIpHeaders"
 >;
 
-describe("submitCredential's client address", () => {
-  const options = (extra?: AddressOptions) => ({
-    fetch: async () => new Response(null, { status: 401 }),
-    endpoint: "https://auth.internal/api/auth/sessions",
-    body: () => ({}),
-    fields: () => ({}),
-    fallback: "/",
-    ...extra,
-  });
-  const spoofing = (getClientAddress: () => string = () => "203.0.113.9"): ActionEvent => ({
-    request: new Request("https://app.example/login", {
-      method: "POST",
-      headers: { "x-forwarded-for": "198.51.100.66", "cf-connecting-ip": "198.51.100.67" },
-    }),
-    url: new URL("https://app.example/login"),
-    getClientAddress,
-    cookies: { set: () => undefined },
-  });
-  const sent = async (event: ActionEvent, extra?: AddressOptions): Promise<Headers> => {
-    const seen: Array<Request> = [];
-    await submitCredential(event, undefined, {
-      ...options(extra),
-      fetch: async (request: Request) => {
-        seen.push(request);
-        return new Response(null, { status: 401 });
-      },
-    });
-    const [request] = seen;
-    assert(request !== undefined);
-    return request.headers;
-  };
+const handleOptions = (extra?: AddressOptions) => ({
+  fetch: async () => new Response(null, { status: 401 }),
+  endpoint: "https://auth.internal/api/auth/sessions",
+  body: () => ({}),
+  fields: () => ({}),
+  fallback: "/",
+  ...extra,
+});
 
+const spoofing = (getClientAddress: () => string = () => "203.0.113.9"): ActionEvent => ({
+  request: new Request("https://app.example/login", {
+    method: "POST",
+    headers: { "x-forwarded-for": "198.51.100.66", "cf-connecting-ip": "198.51.100.67" },
+  }),
+  url: new URL("https://app.example/login"),
+  getClientAddress,
+  cookies: { set: () => undefined },
+});
+
+const sent = async (event: ActionEvent, extra?: AddressOptions): Promise<Headers> => {
+  const seen: Array<Request> = [];
+  await submitCredential(event, undefined, {
+    ...handleOptions(extra),
+    fetch: async (request: Request) => {
+      seen.push(request);
+      return new Response(null, { status: 401 });
+    },
+  });
+  const [request] = seen;
+  assert(request !== undefined);
+  return request.headers;
+};
+
+describe("submitCredential's client address", () => {
   it("sends getClientAddress() in one header, never the browser's address headers", async () => {
     const headers = await sent(spoofing());
     expect(headers.get("x-forwarded-for")).toBe("203.0.113.9");

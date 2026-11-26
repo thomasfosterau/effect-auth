@@ -1400,41 +1400,41 @@ describe("WebAuthn user verification", () => {
   });
 });
 
+/** Register a passkey with registration flags `flags`; answers its key and id. */
+const register = async (flags: number, aaguid?: Uint8Array<ArrayBuffer>) => {
+  const { privateKey, cose } = await buildKey(-7);
+  const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+  const attestationObj = await attestationObject(cose, credentialId, flags, aaguid);
+  const registration = await withService((service) =>
+    Effect.gen(function* () {
+      const reg = yield* service.generateRegistrationChallenge(testUser);
+      return yield* service.verifyRegistration(testUser.id, reg.challenge, {
+        credentialId,
+        attestationObject: attestationObj,
+        clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+      });
+    }),
+  );
+  return { privateKey, credentialId, registration };
+};
+
+const signIn = (privateKey: CryptoKey, credentialId: Uint8Array, flags: number, counter = 1) =>
+  withService((service) =>
+    Effect.gen(function* () {
+      const login = yield* service.generateAuthenticationChallenge();
+      const response = yield* assertion(privateKey, credentialId, login.challenge, {
+        flags,
+        counter,
+      });
+      return yield* Effect.result(service.verifyAuthentication(login.challenge, response));
+    }),
+  );
+
 describe("WebAuthn backup flags and AAGUID", () => {
   beforeEach(() => {
     MutableHashMap.clear(mockChallengeStore.challenges);
     MutableHashMap.clear(mockCredentialStore.credentials);
   });
-
-  /** Register a passkey with registration flags `flags`; answers its key and id. */
-  const register = async (flags: number, aaguid?: Uint8Array<ArrayBuffer>) => {
-    const { privateKey, cose } = await buildKey(-7);
-    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
-    const attestationObj = await attestationObject(cose, credentialId, flags, aaguid);
-    const registration = await withService((service) =>
-      Effect.gen(function* () {
-        const reg = yield* service.generateRegistrationChallenge(testUser);
-        return yield* service.verifyRegistration(testUser.id, reg.challenge, {
-          credentialId,
-          attestationObject: attestationObj,
-          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
-        });
-      }),
-    );
-    return { privateKey, credentialId, registration };
-  };
-
-  const signIn = (privateKey: CryptoKey, credentialId: Uint8Array, flags: number, counter = 1) =>
-    withService((service) =>
-      Effect.gen(function* () {
-        const login = yield* service.generateAuthenticationChallenge();
-        const response = yield* assertion(privateKey, credentialId, login.challenge, {
-          flags,
-          counter,
-        });
-        return yield* Effect.result(service.verifyAuthentication(login.challenge, response));
-      }),
-    );
 
   it("stores BE, BS and the AAGUID at registration", async () => {
     const aaguid = new Uint8Array([

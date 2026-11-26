@@ -420,6 +420,44 @@ export const effectivePolicies = (
     return [...stored, ...linked];
   });
 
+const replace = <A extends { readonly id: string }>(
+  store: MutableHashMap.MutableHashMap<string, A>,
+  value: A,
+): Effect.Effect<Option.Option<A>, Errors.AuthError> =>
+  Effect.sync(() => {
+    if (!MutableHashMap.has(store, value.id)) return Option.none();
+    MutableHashMap.set(store, value.id, value);
+    return Option.some(value);
+  });
+
+const bounded = <B>(
+  label: string,
+  value: { readonly id: string; readonly when?: Condition.Condition | undefined },
+  write: Effect.Effect<B, Errors.AuthError>,
+): Effect.Effect<B, Errors.AuthError> =>
+  value.when === undefined || Condition.isWithinBounds(value.when)
+    ? write
+    : Effect.fail(
+        new Errors.AuthError({
+          message: `${label} "${value.id}" has a condition deeper than ${Condition.maxDepth} levels or larger than ${Condition.maxNodes} nodes`,
+        }),
+      );
+
+const insert = <A extends { readonly id: string }>(
+  store: MutableHashMap.MutableHashMap<string, A>,
+  label: string,
+  value: A,
+): Effect.Effect<A, Errors.AuthError> =>
+  Effect.suspend(() => {
+    if (MutableHashMap.has(store, value.id)) {
+      return Effect.fail(
+        new Errors.AuthError({ message: `${label} "${value.id}" already exists` }),
+      );
+    }
+    MutableHashMap.set(store, value.id, value);
+    return Effect.succeed(value);
+  });
+
 // ---------------------------------------------------------------------------
 // In-memory implementation
 // ---------------------------------------------------------------------------
@@ -445,44 +483,6 @@ export const memoryPolicyStore = (
   const policies = records.policies ?? MutableHashMap.empty<string, Policy.DeclarativePolicy>();
   const templates = records.templates ?? MutableHashMap.empty<string, PolicyTemplate>();
   const links = records.links ?? MutableHashMap.empty<string, TemplateLink>();
-
-  const insert = <A extends { readonly id: string }>(
-    store: MutableHashMap.MutableHashMap<string, A>,
-    label: string,
-    value: A,
-  ): Effect.Effect<A, Errors.AuthError> =>
-    Effect.suspend(() => {
-      if (MutableHashMap.has(store, value.id)) {
-        return Effect.fail(
-          new Errors.AuthError({ message: `${label} "${value.id}" already exists` }),
-        );
-      }
-      MutableHashMap.set(store, value.id, value);
-      return Effect.succeed(value);
-    });
-
-  const bounded = <B>(
-    label: string,
-    value: { readonly id: string; readonly when?: Condition.Condition | undefined },
-    write: Effect.Effect<B, Errors.AuthError>,
-  ): Effect.Effect<B, Errors.AuthError> =>
-    value.when === undefined || Condition.isWithinBounds(value.when)
-      ? write
-      : Effect.fail(
-          new Errors.AuthError({
-            message: `${label} "${value.id}" has a condition deeper than ${Condition.maxDepth} levels or larger than ${Condition.maxNodes} nodes`,
-          }),
-        );
-
-  const replace = <A extends { readonly id: string }>(
-    store: MutableHashMap.MutableHashMap<string, A>,
-    value: A,
-  ): Effect.Effect<Option.Option<A>, Errors.AuthError> =>
-    Effect.sync(() => {
-      if (!MutableHashMap.has(store, value.id)) return Option.none();
-      MutableHashMap.set(store, value.id, value);
-      return Option.some(value);
-    });
 
   return {
     getPolicy: (id) => Effect.sync(() => MutableHashMap.get(policies, id)),
@@ -517,6 +517,12 @@ export const memoryPolicyStore = (
   } satisfies typeof PolicyStore.Service;
 };
 
+const scope = (s: TemplateScope): Policy.Scope =>
+  Match.value(s).pipe(
+    Match.tag("eqSlot", "inSlot", (): Policy.Scope => Policy.any),
+    Match.orElse((scope) => scope),
+  );
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -529,11 +535,6 @@ export const memoryPolicyStore = (
  * duplicating it.
  */
 const erased = (value: PolicyTemplate): Policy.DeclarativePolicy => {
-  const scope = (s: TemplateScope): Policy.Scope =>
-    Match.value(s).pipe(
-      Match.tag("eqSlot", "inSlot", (): Policy.Scope => Policy.any),
-      Match.orElse((scope) => scope),
-    );
   return {
     _tag: "DeclarativePolicy",
     id: value.id,

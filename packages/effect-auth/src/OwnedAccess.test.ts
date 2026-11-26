@@ -129,16 +129,14 @@ describe("canView (the owned-material read predicate)", () => {
   });
 });
 
-describe("readScope (the owned-material list scope)", () => {
-  const scope = (viewer: AppUser | null, follower?: Layer.Layer<OwnedAccess.IsFollower>) => {
-    const withViewer = owned.readScope.pipe(
-      Effect.provide(SessionContext.viewerLayer(CurrentViewer, viewer)),
-    );
-    return Effect.runSync(
-      follower === undefined ? withViewer : Effect.provide(withViewer, follower),
-    );
-  };
+const scope = (viewer: AppUser | null, follower?: Layer.Layer<OwnedAccess.IsFollower>) => {
+  const withViewer = owned.readScope.pipe(
+    Effect.provide(SessionContext.viewerLayer(CurrentViewer, viewer)),
+  );
+  return Effect.runSync(follower === undefined ? withViewer : Effect.provide(withViewer, follower));
+};
 
+describe("readScope (the owned-material list scope)", () => {
   it("anonymous is public", () => {
     expect(scope(null)).toEqual({ kind: "public" });
   });
@@ -194,26 +192,26 @@ describe("the policies canView decides", () => {
   });
 });
 
-describe("handed to an Authorizer, the policies decide reads and nothing else", () => {
-  /** `owned.policies` alone, as an application's Authorizer would hold them. */
-  const authorize = (
-    principal: Entity.EntityRef,
-    action: string,
-    resource: Entity.EntityRef,
-    resolved: ReadonlyArray<Entity.Entity>,
-    follows: boolean,
-  ): Promise<boolean> =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const authorizer = yield* Authorizer.Authorizer;
-        return yield* authorizer.check({ action, resource, context: { follows } });
-      }).pipe(
-        Authorizer.CurrentPrincipal.provide(principal),
-        Effect.provide(Authorizer.Authorizer.layer({ policies: owned.policies })),
-        Effect.provideService(Authorizer.EntityResolver, Authorizer.memoryEntityResolver(resolved)),
-      ),
-    );
+/** `owned.policies` alone, as an application's Authorizer would hold them. */
+const authorize = (
+  principal: Entity.EntityRef,
+  action: string,
+  resource: Entity.EntityRef,
+  resolved: ReadonlyArray<Entity.Entity>,
+  follows: boolean,
+): Promise<boolean> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const authorizer = yield* Authorizer.Authorizer;
+      return yield* authorizer.check({ action, resource, context: { follows } });
+    }).pipe(
+      Authorizer.CurrentPrincipal.provide(principal),
+      Effect.provide(Authorizer.Authorizer.layer({ policies: owned.policies })),
+      Effect.provideService(Authorizer.EntityResolver, Authorizer.memoryEntityResolver(resolved)),
+    ),
+  );
 
+describe("handed to an Authorizer, the policies decide reads and nothing else", () => {
   const memberEntity = Entity.entity(Entity.ref("User", member.id), {
     attributes: { role: member.role },
   });

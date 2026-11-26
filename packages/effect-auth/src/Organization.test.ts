@@ -3214,19 +3214,19 @@ describe("OrganizationService - domains", () => {
   });
 });
 
+/** An organization with an operator-attested domain, JIT off until a test turns it on. */
+const withVerifiedDomain = (service: typeof OrganizationService.Service) =>
+  Effect.gen(function* () {
+    const organization = yield* service.createOrganization("owner-1", {
+      name: "Acme",
+      slug: "acme",
+    });
+    yield* service.attestDomain(organization.id, "acme.test");
+    return organization;
+  });
+
 describe("OrganizationService - JIT provisioning", () => {
   beforeEach(resetStores);
-
-  /** An organization with an operator-attested domain, JIT off until a test turns it on. */
-  const withVerifiedDomain = (service: typeof OrganizationService.Service) =>
-    Effect.gen(function* () {
-      const organization = yield* service.createOrganization("owner-1", {
-        name: "Acme",
-        slug: "acme",
-      });
-      yield* service.attestDomain(organization.id, "acme.test");
-      return organization;
-    });
 
   it("adds a member with the organization's default role, once JIT is enabled", async () => {
     const result = await runService({}, (service) =>
@@ -3315,6 +3315,23 @@ describe("OrganizationService - JIT provisioning", () => {
   });
 });
 
+const pagedStore = (
+  slice: (members: ReadonlyArray<Member>, offset: number, limit: number) => ReadonlyArray<Member>,
+): typeof OrganizationStore.Service => ({
+  ...organizationStore,
+  listMembersByOrganizationPage: (organizationId, { offset, limit }) =>
+    Effect.map(organizationStore.listMembersByOrganization(organizationId), (members) =>
+      slice(
+        Arr.sort(
+          members,
+          Order.mapInput(Order.Number, (member: Member) => member.createdAt),
+        ),
+        offset,
+        limit,
+      ),
+    ),
+});
+
 // The membership half of the store contract, `getMemberById` included, over
 // this file's in-memory store; and a store that loses the id-keyed lookup,
 // which the suite must fail.
@@ -3329,22 +3346,6 @@ describe("OrganizationStore conformance", () => {
   const pagedCase = suite.cases.find((testCase) =>
     testCase.name.startsWith("listMembersByOrganizationPage"),
   );
-  const pagedStore = (
-    slice: (members: ReadonlyArray<Member>, offset: number, limit: number) => ReadonlyArray<Member>,
-  ): typeof OrganizationStore.Service => ({
-    ...organizationStore,
-    listMembersByOrganizationPage: (organizationId, { offset, limit }) =>
-      Effect.map(organizationStore.listMembersByOrganization(organizationId), (members) =>
-        slice(
-          Arr.sort(
-            members,
-            Order.mapInput(Order.Number, (member: Member) => member.createdAt),
-          ),
-          offset,
-          limit,
-        ),
-      ),
-  });
 
   it("passes a store whose listMembersByOrganizationPage pages oldest first", async () => {
     assert(pagedCase !== undefined, "the suite has a paging case");
@@ -3439,30 +3440,30 @@ describe("OrganizationService - role names that are prototype members", () => {
   });
 });
 
+/** An organization owned by `owner-1`, with `admin-1` as an admin. */
+const acme = (service: typeof OrganizationService.Service) =>
+  Effect.gen(function* () {
+    const organization = yield* service.createOrganization("owner-1", {
+      name: "Acme",
+      slug: "acme",
+    });
+    yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
+    return organization;
+  });
+
+/** Make a sent invitation's latest email look `ms` older than it is. */
+const ageSend = (invitationId: string, ms: number) =>
+  Effect.sync(() =>
+    Option.map(MutableHashMap.get(invitations, invitationId), (invitation) =>
+      MutableHashMap.set(invitations, invitationId, {
+        ...invitation,
+        sentAt: (invitation.sentAt ?? invitation.createdAt) - ms,
+      }),
+    ),
+  );
+
 describe("OrganizationService membership and invitation limits", () => {
   beforeEach(resetStores);
-
-  /** An organization owned by `owner-1`, with `admin-1` as an admin. */
-  const acme = (service: typeof OrganizationService.Service) =>
-    Effect.gen(function* () {
-      const organization = yield* service.createOrganization("owner-1", {
-        name: "Acme",
-        slug: "acme",
-      });
-      yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
-      return organization;
-    });
-
-  /** Make a sent invitation's latest email look `ms` older than it is. */
-  const ageSend = (invitationId: string, ms: number) =>
-    Effect.sync(() =>
-      Option.map(MutableHashMap.get(invitations, invitationId), (invitation) =>
-        MutableHashMap.set(invitations, invitationId, {
-          ...invitation,
-          sentAt: (invitation.sentAt ?? invitation.createdAt) - ms,
-        }),
-      ),
-    );
 
   it("adds only a user the organization manages, refusing an unknown user alike", async () => {
     MutableHashSet.add(unmanagedUsers, "outsider-1");

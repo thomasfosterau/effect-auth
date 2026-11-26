@@ -188,17 +188,15 @@ describe("MySQL / UserServiceStore", () => {
   });
 });
 
-describe("MySQL / ApiKeyStore recordUse", () => {
-  const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKeyUse) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const store = yield* Auth.ApiKeyStore;
-        return yield* store.recordUse("key-1", use);
-      }).pipe(
-        Effect.provide(ApiKeyStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
-      ),
-    );
+const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKeyUse) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* Auth.ApiKeyStore;
+      return yield* store.recordUse("key-1", use);
+    }).pipe(Effect.provide(ApiKeyStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db))))),
+  );
 
+describe("MySQL / ApiKeyStore recordUse", () => {
   it("is one guarded UPDATE that computes remaining in SQL, then a read of the row it matched", async () => {
     const proxy = recording([]);
     await recordUse(proxy, {

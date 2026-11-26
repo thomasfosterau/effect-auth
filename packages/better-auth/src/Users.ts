@@ -175,6 +175,9 @@ const refusedStoreWrite = (method: string) =>
 /** The column a by-value lookup reads for each identifier type. */
 const VALUE_COLUMN = { email: "email", username: "username", phone: "phoneNumber" } as const;
 
+const identifierOf = (user: BetterAuthUser | null, type: Auth.IdentifierType) =>
+  user === null ? Option.none() : Arr.findFirst(identifiersOf(user), (id) => id.type === type);
+
 /**
  * A read-only `IdentifierStore`. Identifiers are derived from the user row
  * (`email` and `emailVerified`; `username` from the `username()` plugin;
@@ -193,11 +196,6 @@ export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, Bett
   Layer.effect(
     Auth.IdentifierStore,
     Effect.map(Effect.service(BetterAuthInstance), ({ context }) => {
-      const identifierOf = (user: BetterAuthUser | null, type: Auth.IdentifierType) =>
-        user === null
-          ? Option.none()
-          : Arr.findFirst(identifiersOf(user), (id) => id.type === type);
-
       const byValue = (type: Auth.IdentifierType, value: string) => {
         if (type === "email") {
           return Effect.map(

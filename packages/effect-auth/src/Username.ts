@@ -144,6 +144,9 @@ export class UsernameService extends Context.Service<
 
 const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
+const invalid = () =>
+  Effect.fail(new Errors.InvalidCredentialsError({ message: "Invalid username or password" }));
+
 const make = (
   config: UsernameConfig = {},
 ): Effect.Effect<
@@ -252,11 +255,6 @@ const make = (
       }),
 
       signIn: Effect.fn("UsernameService.signIn")(function* (input: UsernameSignInInput) {
-        const invalid = () =>
-          Effect.fail(
-            new Errors.InvalidCredentialsError({ message: "Invalid username or password" }),
-          );
-
         const username = normalizeUsername(input.username);
         if (!username) {
           return yield* invalid();

@@ -677,6 +677,22 @@ describe("AuthLifecycleService", () => {
   });
 });
 
+/** A `Hooks` layer recording the user id each verification hook sees. */
+const recordingVerificationHooks = (calls: Array<readonly [string, string]>) =>
+  Layer.effect(
+    Hooks,
+    Effect.gen(function* () {
+      const base = yield* Hooks;
+      return {
+        ...base,
+        beforeCreateVerification: (args) =>
+          Effect.sync(() => void calls.push(["before", args.userId])).pipe(Effect.as(args)),
+        afterCreateVerification: (args) =>
+          Effect.sync(() => void calls.push(["after", args.userId])).pipe(Effect.as(args)),
+      } satisfies typeof Hooks.Service;
+    }),
+  ).pipe(Layer.provide(Hooks.Default));
+
 describe("AuthLifecycleService.signUp for a held address under antiEnumeration", () => {
   const HELD = "held@example.com";
   const FRESH = "fresh@example.com";
@@ -715,22 +731,6 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration",
       const held = yield* service.signUp({ email: HELD, password: PASSWORD, name: "Probe" });
       return { fresh, held };
     }).pipe(Effect.provide(context), Effect.provide(TestHooks));
-
-  /** A `Hooks` layer recording the user id each verification hook sees. */
-  const recordingVerificationHooks = (calls: Array<readonly [string, string]>) =>
-    Layer.effect(
-      Hooks,
-      Effect.gen(function* () {
-        const base = yield* Hooks;
-        return {
-          ...base,
-          beforeCreateVerification: (args) =>
-            Effect.sync(() => void calls.push(["before", args.userId])).pipe(Effect.as(args)),
-          afterCreateVerification: (args) =>
-            Effect.sync(() => void calls.push(["after", args.userId])).pipe(Effect.as(args)),
-        } satisfies typeof Hooks.Service;
-      }),
-    ).pipe(Layer.provide(Hooks.Default));
 
   it.each([
     { holder: "verified", verified: true },
@@ -870,6 +870,10 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration",
   });
 });
 
+const sessionsOf = (userId: string) =>
+  Arr.fromIterable(MutableHashMap.values(sessions)).filter((session) => session.userId === userId)
+    .length;
+
 describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
   const VICTIM = "victim@example.com";
   const ATTACKER_PASSWORD = "attacker-password-123";
@@ -886,10 +890,6 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
 
   it("a squatter's password and sessions do not survive the victim's verification", async () => {
     const context = await makeTestContext({ requireEmailVerification: true });
-    const sessionsOf = (userId: string) =>
-      Arr.fromIterable(MutableHashMap.values(sessions)).filter(
-        (session) => session.userId === userId,
-      ).length;
 
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1058,6 +1058,16 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
   });
 });
 
+const seed = (id: string, email: string, verified: boolean) => {
+  MutableHashMap.set(users, id, {
+    id,
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    attributes: {},
+  });
+  addEmailIdentifier(id, email, verified);
+};
+
 describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hooks chose", () => {
   const PASSWORD = "strong-password-123";
 
@@ -1082,16 +1092,6 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
       } satisfies typeof Hooks.Service;
     }),
   ).pipe(Layer.provide(Hooks.Default));
-
-  const seed = (id: string, email: string, verified: boolean) => {
-    MutableHashMap.set(users, id, {
-      id,
-      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-      attributes: {},
-    });
-    addEmailIdentifier(id, email, verified);
-  };
 
   const signUp = async (email: string) => {
     const context = await makeTestContext({}, { hooks: stripTagHooks });
