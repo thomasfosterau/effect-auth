@@ -115,8 +115,6 @@ export default defineConfig({
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.
       "effect/avoid-data-tagged-error": "off",
-      // Vendor adapters and the client use plain `fetch` to stay Workers-safe.
-      "effect/avoid-native-fetch": "off",
       // Optional properties are `?: T | undefined`, and a conditional spread
       // is how a value is omitted under `exactOptionalPropertyTypes`.
       "effect/prefer-option-over-null": "off",
@@ -282,6 +280,20 @@ export default defineConfig({
         },
       },
       {
+        // The edge, where plain `fetch` is the API being adapted: the
+        // browser client has no Effect runtime, the test `HttpClient` defers
+        // to the global a suite swaps, and the workerd and Web-handler suites
+        // call the server they start. Core code goes through `HttpClient`.
+        files: [
+          "packages/effect-auth/src/client/Client.ts",
+          "packages/effect-auth/src/testing/HttpClient.ts",
+          "packages/effect-auth/src/http/DomainAttestation.test.ts",
+          "packages/effect-auth/src/Workerd.test.ts",
+          "packages/argon2/src/Workerd.test.ts",
+        ],
+        rules: { "effect/avoid-native-fetch": "off" },
+      },
+      {
         // The Promise-facing web handler is an entrypoint: it runs effects.
         // `PlatformCrypto.context` builds its resource-free default layer
         // once, synchronously, for callers with no layer of their own.
@@ -307,28 +319,13 @@ export default defineConfig({
   run: {
     tasks: {
       build: { command: "vp run -r build" },
-      // The release job's publish script (.github/workflows/release.yml),
-      // after `build` on the same commit: pnpm packs (rewriting `catalog:` and
-      // `workspace:` specifiers) and publishes every public package whose
-      // version is not on npm yet, in dependency order, under OIDC trusted
-      // publishing with provenance; then `changeset git-tag` tags each version
-      // not tagged yet and reports the new tags to `changesets/action` through
-      // `CHANGESETS_OUTPUT`, which pushes them and creates the GitHub releases.
-      // A failed publish stops before tagging; a re-run publishes only what is
-      // missing. Uncached, so the OIDC request variables reach pnpm. It runs
-      // with `id-token: write`, so it depends only on the build: `check:dist`
-      // installs from the registry and stays in CI.
-      release: {
-        command: [
-          "vp pm publish -r --access public --no-git-checks -- --ignore-scripts",
-          "changeset git-tag",
-        ],
-        dependsOn: ["build"],
-        cache: false,
-      },
-      // What `release` would publish, without publishing or tagging.
-      "release:dry-run": {
-        command: "vp pm publish -r --access public --dry-run --no-git-checks -- --ignore-scripts",
+      // The Release workflow's `build` job (.github/workflows/release.yml):
+      // packs each public package whose version is not on npm into
+      // `release/` (pnpm rewrites `catalog:` and `workspace:` specifiers) and
+      // lists them in `release/manifest.json`. It publishes nothing, so it is
+      // also the dry run.
+      "release:pack": {
+        command: "vpx scripts/release.ts pack",
         dependsOn: ["build"],
         cache: false,
       },

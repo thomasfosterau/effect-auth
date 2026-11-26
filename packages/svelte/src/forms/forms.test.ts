@@ -8,7 +8,7 @@ import PasswordResetConfirmForm from "./PasswordResetConfirmForm.svelte";
 import PasswordResetRequestForm from "./PasswordResetRequestForm.svelte";
 import SignInForm from "./SignInForm.svelte";
 import SignUpForm from "./SignUpForm.svelte";
-import type { AuthSuccess, StatusResponse } from "./internal.ts";
+import type { AuthSuccess, SecondFactorChallenge, StatusResponse } from "./internal.ts";
 
 const EMAIL = "alice@svelte.test";
 const PW = "password-123";
@@ -94,6 +94,30 @@ describe("SignInForm", () => {
     await waitFor(() => expect(calls).toEqual([{ email: EMAIL, password: PW }]));
     expect(seen).toEqual([authSuccess]);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("hands a second-factor challenge to onSecondFactor, never onSuccess", async () => {
+    const challenge = { token: "challenge-1", expiresAt: now + 60_000 };
+    const succeeded: AuthSuccess[] = [];
+    const challenged: SecondFactorChallenge[] = [];
+    const client = stub({
+      signIn: () => Promise.resolve({ needsEmailVerification: false, secondFactor: challenge }),
+    });
+
+    const { container } = render(SignInForm, {
+      props: {
+        onSuccess: (result: AuthSuccess) => succeeded.push(result),
+        onSecondFactor: (next: SecondFactorChallenge) => challenged.push(next),
+      },
+      context: withClient(client),
+    });
+
+    await type("Email", EMAIL);
+    await type("Password", PW);
+    await fireEvent.submit(formOf(container));
+
+    await waitFor(() => expect(challenged).toEqual([challenge]));
+    expect(succeeded).toEqual([]);
   });
 
   it("renders accessible markup with the documented class hooks", () => {

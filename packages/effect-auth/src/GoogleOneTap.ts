@@ -29,6 +29,7 @@
 import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
 import * as P from "effect/Predicate";
 import { Digest, SecureRandom } from "effect/crypto";
+import { HttpClient } from "effect/http";
 import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -170,8 +171,10 @@ export const make = (
   | EmailPasswordStore
   | SecureRandom.SecureRandom
   | Digest.Digest
+  | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
     const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
     const issuers = config.issuers ?? GOOGLE_ISSUERS;
     const nonceTtlMs = config.nonceTtlMs ?? 600_000;
@@ -230,7 +233,10 @@ export const make = (
           jwksEndpoint,
           audience: config.clientId,
           nonce: yield* hashNonce(nonce),
-        }).pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));
+        }).pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })),
+        );
 
         if (!P.isString(claims["iss"]) || !issuers.includes(claims["iss"])) {
           return yield* new GoogleOneTapError({ message: "id_token issuer mismatch" });

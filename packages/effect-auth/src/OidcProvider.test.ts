@@ -68,6 +68,7 @@ import type * as Types from "./Types.ts";
 import { expectSpecJson, JSON_API_MEDIA_TYPE, mediaTypeOf } from "./testing/WireFormat.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
+import { runPromiseHttp } from "./testing/HttpClient.ts";
 
 const ISSUER = "http://idp.test/api/auth";
 
@@ -1761,7 +1762,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(jwks.keys.length).toBeGreaterThan(0);
 
     const claims = await withJwksFetch(jwks, () =>
-      Effect.runPromise(
+      runPromiseHttp(
         verifyIdToken(tokens.id_token, {
           provider: "test",
           jwksEndpoint: "http://idp.test/api/auth/.well-known/jwks.json",

@@ -2,15 +2,18 @@
   Email (or username) + password sign-in.
 
   ```svelte
-  <SignInForm onSuccess={() => goto("/app")} />
+  <SignInForm onSuccess={() => goto("/app")} onSecondFactor={(challenge) => ...} />
   ```
+
+  `onSuccess` fires only when the answer carries a session; a second-factor
+  challenge goes to `onSecondFactor`.
 -->
 <script lang="ts">
   import { resolveAuthClient } from "../context.ts";
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
   import SubmitButton from "./SubmitButton.svelte";
-  import { isInvalid, mergeLabels, resolveClasses } from "./internal.ts";
+  import { isInvalid, mergeLabels, resolveClasses, routeSignInResult } from "./internal.ts";
   import { createSubmission } from "./submission.svelte.ts";
   import { SIGN_IN_LABELS, type SignInFormProps } from "./props.ts";
 
@@ -18,6 +21,7 @@
     variant = "email",
     client: clientProp = undefined,
     onSuccess = undefined,
+    onSecondFactor = undefined,
     onError = undefined,
     class: className = undefined,
     classes: classOverrides = undefined,
@@ -42,7 +46,7 @@
         isUsername
           ? client.signInUsername({ username: identifier, password })
           : client.signIn({ email: identifier, password }),
-      { fallback: labels.error, onSuccess, onError },
+      { fallback: labels.error, onSuccess: routeSignInResult(onSuccess, onSecondFactor), onError },
     );
   };
 </script>

@@ -19,6 +19,8 @@ The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-
 - the **`nodejs_compat`** compatibility flag (on by default from compatibility date 2026-08-04), and
 - a **compatibility date of 2023-01-01 or later**.
 
+Outbound requests (the OAuth and OIDC provider endpoints, SSO discovery, Cloudflare Access's key set, Google One Tap's JWKS) go through `effect/http`'s `HttpClient`, so the layers that make them require one: provide `FetchHttpClient.layer`, which works on Workers, Node and in browsers, or a stub in tests. `RemoteJwksVerifier.layer` provides fetch itself; `layerHttpClient` takes yours.
+
 Argon2id (`Password.argon2idHasherLayer`) is the exception: it derives through Effect's `Kdf` service, which only `NodeCrypto.layerKdf` (`@effect/platform-node` or `-bun`, on Node.js 24.7+ or Bun 1.4+) provides with Argon2id. On Workers use `@thomasfosterau/effect-auth-argon2`.
 
 Password hashing is the costly step on Workers. PBKDF2 at its default 600,000 iterations takes about 75 ms of CPU per hash or verify in workerd, so a sign-in that verifies a password fits a paid plan's CPU limit but not the Free plan's 10 ms; lowering `iterations` trades away resistance to offline cracking. Keep the scrypt verifier (`./scrypt`) off Workers: at its default cost (N = 2^17, r = 8) it needs about 128 MiB, the whole memory of an isolate.
@@ -555,12 +557,14 @@ What the service enforces:
 - **A challenge is bound to its ceremony.** Each stored `WebAuthnChallenge` carries `ceremony: "registration" | "authentication"`; `verifyRegistration` refuses an authentication challenge and `verifyAuthentication` a registration one, leaving it in place. A registration challenge is also bound to the user it was issued to, which must be the `userId` passed to `verifyRegistration`. A `ChallengeStore` must persist the ceremony; a stored challenge without a known one reads as `null` (`Testing.challengeStoreConformance` pins the contract).
 - **`userVerification: "required"` is enforced**, not only advertised: a registration or assertion without the UV flag is refused. Under `"preferred"` (the default) or `"discouraged"`, both results report `userVerified`, with the backup flags `backupEligible` and `backupState`, for the host to act on (for example, to require a second factor when `userVerified` is `false`).
 - **The backup flags and AAGUID are stored.** A registered `WebAuthnCredential` carries `backupEligible` (BE), `backupState` (BS) and the authenticator's `aaguid` (a lowercase hyphenated UUID; under `none` attestation it is the authenticator's claim). BE never changes for a credential (WebAuthn Level 3 §6.1.3), so an assertion reporting another BE is refused; each sign-in records BS. A credential stored before the flags were has them absent, and its next sign-in records them. A `CredentialStore` must persist all three (`Testing.credentialStoreConformance` pins it).
+- **Only `none` attestation is supported.** The attestation object is parsed for the credential, but its attestation statement (`packed`, `tpm`, `fido-u2f`, …) is never verified, so a registration says nothing about the authenticator's make or model. The registration options always carry `attestation: "none"`, and a `WebAuthnConfig` asking for `"indirect"`, `"direct"` or `"enterprise"` makes the layer build die with `WebAuthnConfigError`.
 - **The stored credential is the attested one.** Its id is the credential id inside the attestation, which must equal `response.credentialId`; an id already registered, to any user, is refused rather than overwritten. ES256 keys must be on P-256, and a `clientDataJSON` with `crossOrigin: true` is refused.
 
 ## OAuth 2.0 social login
 
 ```typescript
-import { Effect, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
+import { FetchHttpClient } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 const providers = {
@@ -580,8 +584,11 @@ const providers = {
 // OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
 // unproven sign-up's password), SessionService and RootSecret (which seals the
 // provider tokens and derives the PKCE verifier); a storage adapter such as
-// @thomasfosterau/effect-auth/sql provides the stores.
-const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
+// @thomasfosterau/effect-auth/sql provides the stores. The token, userinfo and
+// JWKS requests go through effect/http's HttpClient.
+const OAuthLive = Auth.OAuth.OAuthService.layer(providers).pipe(
+  Layer.provide(FetchHttpClient.layer),
+);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
 const begin = Effect.gen(function* () {
@@ -633,6 +640,7 @@ An application behind [Cloudflare Access](https://developers.cloudflare.com/clou
 
 ```typescript
 import { Effect, Layer, Option } from "effect";
+import { FetchHttpClient } from "effect/http";
 import { CloudflareAccess, SessionResolution } from "@thomasfosterau/effect-auth";
 
 const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
@@ -640,7 +648,7 @@ const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
   audience: "<the Access application's AUD tag>",
   // Read the browser cookie too, for pages Access does not gate.
   sources: ["header", "cookie"],
-});
+}).pipe(Layer.provide(FetchHttpClient.layer));
 
 // Per request: the identity, if any, and the effect-auth user it belongs to.
 const viewer = (request: Request) =>
@@ -1542,6 +1550,7 @@ sessions. Only the XML job lives here.
 
 ```ts
 import { Layer } from "effect";
+import { FetchHttpClient } from "effect/http";
 import * as Saml from "@thomasfosterau/effect-auth/saml";
 import { SamlReplayStore, SsoService, memorySamlReplayStore } from "@thomasfosterau/effect-auth";
 
@@ -1550,7 +1559,9 @@ const samlSupport = Layer.mergeAll(
   Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
 );
 
-const ssoLayer = SsoService.layer().pipe(Layer.provide(samlSupport));
+// OIDC connections reach the IdP (discovery, token, userinfo, JWKS) through
+// effect/http's HttpClient.
+const ssoLayer = SsoService.layer().pipe(Layer.provide([samlSupport, FetchHttpClient.layer]));
 ```
 
 Register a connection, then start and finish sign-ins:

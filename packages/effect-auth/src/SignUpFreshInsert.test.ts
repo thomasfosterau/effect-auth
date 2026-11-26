@@ -51,6 +51,7 @@ import {
 } from "./Saml.ts";
 import { type Member, OrganizationStore } from "./Organization.ts";
 import type * as Types from "./Types.ts";
+import { runPromiseHttp } from "./testing/HttpClient.ts";
 
 const EMAIL = "owner@acme.test";
 const PHONE = "+15555550123";
@@ -372,7 +373,7 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(OAuthUserStore)(oauthUserStore(world)),
       );
       return withGoogleJwks(() =>
-        Effect.runPromise(
+        runPromiseHttp(
           Effect.gen(function* () {
             const service = yield* GoogleOneTap.make({
               clientId: ONE_TAP_CLIENT,
@@ -421,7 +422,7 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(SamlVerifier)(stubSamlVerifier(requests)),
         Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
       );
-      return Effect.runPromise(
+      return runPromiseHttp(
         Effect.gen(function* () {
           const sso = yield* Sso.make();
           const provider = yield* sso.registerSamlProvider("admin", {

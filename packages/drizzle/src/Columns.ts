@@ -100,8 +100,9 @@ import {
   type InferSelectModel,
   type Table,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type * as Auth from "@thomasfosterau/effect-auth";
-import type { Tables } from "./Schema.ts";
+import type { ApiKeyPermissions, Tables, TokenPurpose } from "./Schema.ts";
 
 // ---------------------------------------------------------------------------
 // Picking a column by the value it reads back as
@@ -445,13 +446,14 @@ export const resolveSchema = (input: SchemaInput): AuthSchema =>
  * The values are checked against the resolved columns on the way through —
  * `GetColumnData` in `query` mode is what each column reads and writes,
  * nullability included — so a store cannot put a `Date` where its mapping named
- * a text column.
+ * a text column. A value may also be a `SQL` expression over the row
+ * (`remaining - 1`), which every dialect's `set` accepts.
  *
  * @internal
  */
 export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
   schema: TableSchema<TColumns>,
-  values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K]> }>,
+  values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K]> | SQL }>,
 ): InferInsertModel<Table> => {
   const names: Readonly<Record<string, string | undefined>> = schema.names;
   return R.mapKeys(
@@ -459,3 +461,223 @@ export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
     (field) => names[field] ?? field,
   );
 };
+
+// ---------------------------------------------------------------------------
+// The stores beyond sign-in: API keys, one-time tokens, rate limits
+// ---------------------------------------------------------------------------
+
+/** Which of `TTable`'s columns hold each field of an API key. */
+export interface ApiKeyColumnNames<TTable extends Table> {
+  readonly id: ColumnKey<TTable, string>;
+  /** The owner: the column an application points its foreign key at `users.id` from. */
+  readonly userId: ColumnKey<TTable, string>;
+  readonly name: ColumnKey<TTable, string | null>;
+  readonly prefix: ColumnKey<TTable, string | null>;
+  readonly start: ColumnKey<TTable, string>;
+  /** SHA-256 hex digest of the full key, never the key; give it a unique index. */
+  readonly keyHash: ColumnKey<TTable, string>;
+  readonly enabled: ColumnKey<TTable, boolean>;
+  readonly expiresAt: ColumnKey<TTable, Date | null>;
+  readonly lastUsedAt: ColumnKey<TTable, Date | null>;
+  readonly permissions: ColumnKey<TTable, ApiKeyPermissions | null>;
+  readonly metadata: ColumnKey<TTable, Auth.JsonObject | null>;
+  readonly remaining: ColumnKey<TTable, number | null>;
+  readonly refillAmount: ColumnKey<TTable, number | null>;
+  readonly refillInterval: ColumnKey<TTable, number | null>;
+  readonly refillMax: ColumnKey<TTable, number | null>;
+  readonly lastRefillAt: ColumnKey<TTable, Date | null>;
+  readonly rateLimitMaxRequests: ColumnKey<TTable, number | null>;
+  readonly rateLimitWindowMs: ColumnKey<TTable, number | null>;
+  readonly createdAt: ColumnKey<TTable, Date>;
+  readonly updatedAt: ColumnKey<TTable, Date>;
+}
+
+/** Which of `TTable`'s columns hold each field of a pending one-time token. */
+export interface TokenColumnNames<TTable extends Table> {
+  /** SHA-256 hex digest of the token, never the token; the primary key. */
+  readonly token: ColumnKey<TTable, string>;
+  /**
+   * `"email-verification"` or `"password-reset"`: one table serves both
+   * stores. A plain `text` column maps fine.
+   */
+  readonly purpose: ColumnKey<TTable, string>;
+  /** The owner: the column an application points its foreign key at `users.id` from. */
+  readonly userId: ColumnKey<TTable, string>;
+  readonly email: ColumnKey<TTable, string>;
+  readonly createdAt: ColumnKey<TTable, Date>;
+  readonly expiresAt: ColumnKey<TTable, Date>;
+}
+
+/** Which of `TTable`'s columns hold each field of a rate-limit counter. */
+export interface RateLimitColumnNames<TTable extends Table> {
+  /** The rate-limit key; the primary key (the upsert conflicts on it). */
+  readonly key: ColumnKey<TTable, string>;
+  readonly count: ColumnKey<TTable, number>;
+  readonly resetAt: ColumnKey<TTable, Date>;
+  readonly blockedUntil: ColumnKey<TTable, Date | null>;
+}
+
+/** The API key columns, resolved to drizzle column objects. */
+export type ApiKeyColumns = {
+  readonly id: StoreColumn<string>;
+  readonly userId: StoreColumn<string>;
+  readonly name: NullableColumn<string>;
+  readonly prefix: NullableColumn<string>;
+  readonly start: StoreColumn<string>;
+  readonly keyHash: StoreColumn<string>;
+  readonly enabled: StoreColumn<boolean>;
+  readonly expiresAt: NullableColumn<Date>;
+  readonly lastUsedAt: NullableColumn<Date>;
+  readonly permissions: NullableColumn<ApiKeyPermissions>;
+  readonly metadata: NullableColumn<Auth.JsonObject>;
+  readonly remaining: NullableColumn<number>;
+  readonly refillAmount: NullableColumn<number>;
+  readonly refillInterval: NullableColumn<number>;
+  readonly refillMax: NullableColumn<number>;
+  readonly lastRefillAt: NullableColumn<Date>;
+  readonly rateLimitMaxRequests: NullableColumn<number>;
+  readonly rateLimitWindowMs: NullableColumn<number>;
+  readonly createdAt: StoreColumn<Date>;
+  readonly updatedAt: StoreColumn<Date>;
+};
+
+/** The token columns, resolved to drizzle column objects. */
+export type TokenColumns = {
+  readonly token: StoreColumn<string>;
+  /** Read back as a `TokenPurpose`; the stores write no other value. */
+  readonly purpose: StoreColumn<TokenPurpose>;
+  readonly userId: StoreColumn<string>;
+  readonly email: StoreColumn<string>;
+  readonly createdAt: StoreColumn<Date>;
+  readonly expiresAt: StoreColumn<Date>;
+};
+
+/** The rate-limit columns, resolved to drizzle column objects. */
+export type RateLimitColumns = {
+  readonly key: StoreColumn<string>;
+  readonly count: StoreColumn<number>;
+  readonly resetAt: StoreColumn<Date>;
+  readonly blockedUntil: NullableColumn<Date>;
+};
+
+/** What `ApiKeyStore` addresses: one table and its mapping. */
+export type ApiKeySchema = TableSchema<ApiKeyColumns> & { readonly _tag: "ApiKeySchema" };
+/** What the token stores address: one table and its mapping. */
+export type TokenSchema = TableSchema<TokenColumns> & { readonly _tag: "TokenSchema" };
+/** What `RateLimitStore` addresses: one table and its mapping. */
+export type RateLimitSchema = TableSchema<RateLimitColumns> & { readonly _tag: "RateLimitSchema" };
+
+/**
+ * Point `ApiKeyStore` at an application's own API keys table, so the
+ * application owns its migration and its `user_id` foreign key (with
+ * `ON DELETE CASCADE`, deleting a user revokes their keys in the database as
+ * well as through core's account deletion).
+ *
+ * Every field is mapped, since the store writes every one. The `keyHash`
+ * column needs a unique index; an extra required column the store knows
+ * nothing about needs a database default.
+ *
+ * @example
+ * ```ts
+ * const appApiKeys = pgTable("api_keys", {
+ *   id: text("id").primaryKey(),
+ *   owner: uuid("owner_id").notNull().references(() => appUsers.userId, { onDelete: "cascade" }),
+ *   // ... the other columns, under the application's own names
+ * });
+ *
+ * const apiKeys = defineApiKeyTable({
+ *   table: appApiKeys,
+ *   columns: { id: "id", userId: "owner", keyHash: "digest", ... },
+ * });
+ *
+ * const store = ApiKeyStore.layer(apiKeys).pipe(Layer.provide(databaseLayer(db)));
+ * ```
+ */
+export const defineApiKeyTable = <TTable extends Table>(
+  spec: TableSpec<TTable, ApiKeyColumnNames<TTable>>,
+): ApiKeySchema => ({ _tag: "ApiKeySchema", ...resolveTable<ApiKeyColumns>(spec) });
+
+/**
+ * Point `TokenStore`'s email-verification and password-reset stores at an
+ * application's own tokens table, so the application owns its `user_id`
+ * foreign key: with `ON DELETE CASCADE`, deleting a user drops their pending
+ * tokens in the database too.
+ *
+ * The table holds both purposes, told apart by the mapped `purpose` column,
+ * with `token` as its primary key; an index on `(purpose, user_id)` serves the
+ * per-user reads and deletes.
+ */
+export const defineTokenTable = <TTable extends Table>(
+  spec: TableSpec<TTable, TokenColumnNames<TTable>>,
+): TokenSchema => ({ _tag: "TokenSchema", ...resolveTable<TokenColumns>(spec) });
+
+/**
+ * Point `RateLimitStore` (and its `purgeExpired`) at an application's own
+ * rate-limit table. `key` must be the primary key or carry a unique index:
+ * `increment` and `set` are upserts that conflict on it.
+ */
+export const defineRateLimitTable = <TTable extends Table>(
+  spec: TableSpec<TTable, RateLimitColumnNames<TTable>>,
+): RateLimitSchema => ({ _tag: "RateLimitSchema", ...resolveTable<RateLimitColumns>(spec) });
+
+/** What `ApiKeyStore` accepts: a dialect's tables, or a mapped API keys table. */
+export type ApiKeyTableInput = Tables | ApiKeySchema;
+/** What the token stores accept: a dialect's tables, or a mapped tokens table. */
+export type TokenTableInput = Tables | TokenSchema;
+/** What `RateLimitStore` accepts: a dialect's tables, or a mapped rate-limit table. */
+export type RateLimitTableInput = Tables | RateLimitSchema;
+
+/** The identity mapping over a dialect's API keys table. @internal */
+export const resolveApiKeyTable = (input: ApiKeyTableInput): ApiKeySchema =>
+  "_tag" in input
+    ? input
+    : defineApiKeyTable({
+        table: input.apiKeys,
+        columns: {
+          id: "id",
+          userId: "userId",
+          name: "name",
+          prefix: "prefix",
+          start: "start",
+          keyHash: "keyHash",
+          enabled: "enabled",
+          expiresAt: "expiresAt",
+          lastUsedAt: "lastUsedAt",
+          permissions: "permissions",
+          metadata: "metadata",
+          remaining: "remaining",
+          refillAmount: "refillAmount",
+          refillInterval: "refillInterval",
+          refillMax: "refillMax",
+          lastRefillAt: "lastRefillAt",
+          rateLimitMaxRequests: "rateLimitMaxRequests",
+          rateLimitWindowMs: "rateLimitWindowMs",
+          createdAt: "createdAt",
+          updatedAt: "updatedAt",
+        },
+      });
+
+/** The identity mapping over a dialect's tokens table. @internal */
+export const resolveTokenTable = (input: TokenTableInput): TokenSchema =>
+  "_tag" in input
+    ? input
+    : defineTokenTable({
+        table: input.tokens,
+        columns: {
+          token: "token",
+          purpose: "purpose",
+          userId: "userId",
+          email: "email",
+          createdAt: "createdAt",
+          expiresAt: "expiresAt",
+        },
+      });
+
+/** The identity mapping over a dialect's rate-limit table. @internal */
+export const resolveRateLimitTable = (input: RateLimitTableInput): RateLimitSchema =>
+  "_tag" in input
+    ? input
+    : defineRateLimitTable({
+        table: input.rateLimits,
+        columns: { key: "key", count: "count", resetAt: "resetAt", blockedUntil: "blockedUntil" },
+      });

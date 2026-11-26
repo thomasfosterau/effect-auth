@@ -1,6 +1,8 @@
 /**
  * Drizzle-backed implementation of effect-auth's `ApiKeyStore`, over the
- * `apiKeys` table of any dialect's {@link Tables}.
+ * `apiKeys` table of any dialect's {@link Tables}, or an application's own
+ * table mapped with `defineApiKeyTable` (so the application owns its
+ * `user_id` foreign key).
  *
  * ### Contract notes
  *
@@ -29,10 +31,18 @@ import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
 import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { DrizzleDatabase } from "./Database.ts";
+import {
+  type ApiKeyColumns,
+  type ApiKeyTableInput,
+  resolveApiKeyTable,
+  writeValues,
+} from "./Columns.ts";
+import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
 import { affectedRows, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { ApiKeyRow, Tables } from "./Schema.ts";
+
+/** What a key read projects, under the store's own field names. */
+type ApiKeyRow = DrizzleSelected<ApiKeyColumns>;
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));
 
@@ -70,7 +80,7 @@ const toApiKey = (row: ApiKeyRow): Auth.ApiKey => ({
   keyHash: row.keyHash,
   userId: row.userId,
   enabled: row.enabled,
-  metadata: row.metadata,
+  metadata: row.metadata ?? {},
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   ...optionalFields(row),
@@ -101,14 +111,16 @@ const mutableValues = (apiKey: Auth.ApiKey) => ({
 
 /** Build an `ApiKeyStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
-  tables: Tables = defaultTables,
+  tables: ApiKeyTableInput = defaultTables,
 ): Effect.Effect<typeof Auth.ApiKeyStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = makeQuery(yield* DrizzleDatabase);
-    const table = tables.apiKeys;
+    const schema = resolveApiKeyTable(tables);
+    const table = schema.table;
+    const column = schema.columns;
 
     const one = (label: string, where: ReturnType<typeof eq>) =>
-      query(label, (db) => db.select().from(table).where(where).limit(1).execute()).pipe(
+      query(label, (db) => db.select(column).from(table).where(where).limit(1).execute()).pipe(
         Effect.map((rows) => (rows[0] === undefined ? null : toApiKey(rows[0]))),
       );
 
@@ -117,21 +129,27 @@ export const make = (
         query("apiKey.create", (db) =>
           db
             .insert(table)
-            .values({
-              id: apiKey.id,
-              createdAt: instant(apiKey.createdAt),
-              ...mutableValues(apiKey),
-            })
+            .values(
+              writeValues(schema, {
+                id: apiKey.id,
+                createdAt: instant(apiKey.createdAt),
+                ...mutableValues(apiKey),
+              }),
+            )
             .execute(),
         ).pipe(Effect.as(apiKey)),
 
-      get: (id) => one("apiKey.get", eq(table.id, id)),
+      get: (id) => one("apiKey.get", eq(column.id, id)),
 
-      getByHash: (keyHash) => one("apiKey.getByHash", eq(table.keyHash, keyHash)),
+      getByHash: (keyHash) => one("apiKey.getByHash", eq(column.keyHash, keyHash)),
 
       update: (apiKey) =>
         query("apiKey.update", (db) =>
-          db.update(table).set(mutableValues(apiKey)).where(eq(table.id, apiKey.id)).execute(),
+          db
+            .update(table)
+            .set(writeValues(schema, mutableValues(apiKey)))
+            .where(eq(column.id, apiKey.id))
+            .execute(),
         ).pipe(Effect.as(apiKey)),
 
       recordUse: (id, use) =>
@@ -139,55 +157,59 @@ export const make = (
           const refill = use.refill;
           const topped =
             refill === undefined
-              ? sql`${table.remaining}`
+              ? sql`${column.remaining}`
               : refill.max === undefined
-                ? sql`${table.remaining} + ${refill.amount}`
-                : sql`case when ${table.remaining} + ${refill.amount} > ${refill.max} then ${refill.max} else ${table.remaining} + ${refill.amount} end`;
+                ? sql`${column.remaining} + ${refill.amount}`
+                : sql`case when ${column.remaining} + ${refill.amount} > ${refill.max} then ${refill.max} else ${column.remaining} + ${refill.amount} end`;
           const matched = yield* affectedRows(
             "apiKey.recordUse",
             query("apiKey.recordUse", (db) =>
               db
                 .update(table)
-                .set({
-                  remaining: sql`${topped} - 1`,
-                  ...(refill !== undefined && { lastRefillAt: instant(refill.to) }),
-                  lastUsedAt: instant(use.usedAt),
-                  updatedAt: instant(use.usedAt),
-                })
+                .set(
+                  writeValues(schema, {
+                    remaining: sql`${topped} - 1`,
+                    ...(refill !== undefined && { lastRefillAt: instant(refill.to) }),
+                    lastUsedAt: instant(use.usedAt),
+                    updatedAt: instant(use.usedAt),
+                  }),
+                )
                 .where(
                   and(
-                    eq(table.id, id),
-                    eq(table.enabled, true),
-                    or(isNull(table.expiresAt), gte(table.expiresAt, instant(use.usedAt))),
-                    or(isNull(table.remaining), sql`${topped} > 0`),
-                    refill === undefined ? undefined : eq(table.lastRefillAt, instant(refill.from)),
+                    eq(column.id, id),
+                    eq(column.enabled, true),
+                    or(isNull(column.expiresAt), gte(column.expiresAt, instant(use.usedAt))),
+                    or(isNull(column.remaining), sql`${topped} > 0`),
+                    refill === undefined
+                      ? undefined
+                      : eq(column.lastRefillAt, instant(refill.from)),
                   ),
                 )
                 .execute(),
             ),
           );
-          return matched > 0 ? yield* one("apiKey.recordUse.read", eq(table.id, id)) : null;
+          return matched > 0 ? yield* one("apiKey.recordUse.read", eq(column.id, id)) : null;
         }),
 
       delete: (id) =>
-        query("apiKey.delete", (db) => db.delete(table).where(eq(table.id, id)).execute()).pipe(
+        query("apiKey.delete", (db) => db.delete(table).where(eq(column.id, id)).execute()).pipe(
           Effect.asVoid,
         ),
 
       listByUserId: (userId) =>
         query("apiKey.listByUserId", (db) =>
-          db.select().from(table).where(eq(table.userId, userId)).execute(),
+          db.select(column).from(table).where(eq(column.userId, userId)).execute(),
         ).pipe(Effect.map((rows) => rows.map(toApiKey))),
 
       deleteByUserId: (userId) =>
         query("apiKey.deleteByUserId", (db) =>
-          db.delete(table).where(eq(table.userId, userId)).execute(),
+          db.delete(table).where(eq(column.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
     } satisfies typeof Auth.ApiKeyStore.Service;
   });
 
 /** `ApiKeyStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
-  tables: Tables = defaultTables,
+  tables: ApiKeyTableInput = defaultTables,
 ): Layer.Layer<Auth.ApiKeyStore, never, DrizzleDatabase> =>
   Layer.effect(Auth.ApiKeyStore, make(tables));

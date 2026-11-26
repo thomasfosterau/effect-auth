@@ -22,6 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 import * as ApiKeyStore from "../ApiKeyStore.ts";
+import type { ApiKeySchema, RateLimitSchema, TokenSchema } from "../Columns.ts";
 import type { DrizzleDatabase } from "../Database.ts";
 import * as EmailPasswordStore from "../EmailPasswordStore.ts";
 import * as IdentifierStore from "../IdentifierStore.ts";
@@ -59,14 +60,27 @@ export type AuthStores =
   | Auth.UserServiceStore
   | Auth.IdentifierStore;
 
-/** The stores over one dialect's tables, still needing the database. */
-export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, DrizzleDatabase> =>
+/** Application tables standing in for the dialect's API key, token and rate-limit tables. */
+export interface MappedTables {
+  readonly apiKeys?: ApiKeySchema | undefined;
+  readonly tokens?: TokenSchema | undefined;
+  readonly rateLimits?: RateLimitSchema | undefined;
+}
+
+/**
+ * The stores over one dialect's tables, still needing the database; `mapped`
+ * swaps in an application's own tables for the stores that take one.
+ */
+export const authStoresLayer = (
+  tables: Tables,
+  mapped: MappedTables = {},
+): Layer.Layer<AuthStores, never, DrizzleDatabase> =>
   Layer.mergeAll(
-    ApiKeyStore.layer(tables),
+    ApiKeyStore.layer(mapped.apiKeys ?? tables),
     EmailPasswordStore.layer(tables),
     EmailPasswordStore.passwordResetUserLayer(tables),
-    RateLimitStore.layer(tables),
-    TokenStore.layer(tables),
+    RateLimitStore.layer(mapped.rateLimits ?? tables),
+    TokenStore.layer(mapped.tokens ?? tables),
     SessionStore.layer(tables),
     UserStore.layer(tables),
     UserServiceStore.layer(tables),
@@ -76,7 +90,9 @@ export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, 
       Effect.map(
         Effect.context<DrizzleDatabase>(),
         (context) => (options?: RateLimitStore.PurgeExpiredOptions) =>
-          RateLimitStore.purgeExpired(tables, options).pipe(Effect.provide(context)),
+          RateLimitStore.purgeExpired(mapped.rateLimits ?? tables, options).pipe(
+            Effect.provide(context),
+          ),
       ),
     ),
   );

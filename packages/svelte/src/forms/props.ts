@@ -13,8 +13,20 @@ import type {
   AuthFormBaseProps,
   AuthSuccess,
   EmailOtpPurpose,
+  SecondFactorChallenge,
   StatusResponse,
 } from "./internal.ts";
+
+/** The second-factor callback of the forms that sign in. */
+export interface SecondFactorProps {
+  /**
+   * Called instead of `onSuccess` when the server answers with a second-factor
+   * challenge (`202`): the account has multi-factor on and no session exists
+   * yet. Redeem the challenge with `client.multiFactor.continueChallenge`.
+   * Without it, such an answer calls neither callback.
+   */
+  readonly onSecondFactor?: ((challenge: SecondFactorChallenge) => void) | undefined;
+}
 
 /** Every visible string `SignInForm` renders. */
 export interface SignInLabels extends Record<string, string> {
@@ -38,7 +50,7 @@ export const SIGN_IN_LABELS: SignInLabels = {
 };
 
 /** Props for `SignInForm`. */
-export interface SignInFormProps extends AuthFormBaseProps<AuthSuccess> {
+export interface SignInFormProps extends AuthFormBaseProps<AuthSuccess>, SecondFactorProps {
   /**
    * Which identifier to sign in with. `"email"` (the default) calls
    * `client.signIn`; `"username"` calls `client.signInUsername`, which the
@@ -198,7 +210,8 @@ export const EMAIL_OTP_LABELS: EmailOtpLabels = {
 };
 
 /** Props for `EmailOtpForm`. */
-export interface EmailOtpFormProps extends AuthFormBaseProps<AuthSuccess>, SendCaptchaProps {
+export interface EmailOtpFormProps
+  extends AuthFormBaseProps<AuthSuccess>, SendCaptchaProps, SecondFactorProps {
   /**
    * What the emailed code is for. Defaults to `"sign-in"`, the only purpose
    * whose verification issues a session.
