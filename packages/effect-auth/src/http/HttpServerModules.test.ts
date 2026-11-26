@@ -5,7 +5,7 @@ import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Cipher from "../Cipher.ts";
+import { testVerifyJws } from "../testing/TestJws.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
 import { SessionStore } from "../SessionStore.ts";
@@ -2088,7 +2088,7 @@ describe("HTTP JWT endpoints", () => {
     expect(header.alg).toBe("ES256");
     const jwk = keys.find((k) => k["kid"] === header.kid);
     assert(jwk !== undefined, "the token's kid is published");
-    const valid = Cipher.verifyJws(
+    const valid = testVerifyJws(
       "ES256",
       Buffer.from(`${headerSeg}.${payloadSeg}`),
       Buffer.from(sigSeg, "base64url"),

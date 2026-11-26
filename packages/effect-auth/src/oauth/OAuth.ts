@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
-import * as Cipher from "../Cipher.ts";
+import { signWithPkcs8, verifiesWithJwk } from "../JwsSignature.ts";
 import * as Obs from "../Observability.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as RootSecret from "../RootSecret.ts";
@@ -380,9 +380,6 @@ const decodeJwtSegmentJson = Schema.decodeSync(Schema.fromJsonString(Schema.Json
 /** Decodes base64url text to its UTF-8 string; throws on invalid input. */
 const decodeBase64UrlText = Schema.decodeSync(Schema.StringFromBase64Url);
 
-/** Decodes base64url text to its bytes; throws on invalid input. */
-const decodeBase64UrlBytes = Schema.decodeSync(Schema.Uint8ArrayFromBase64Url);
-
 const decodeJwtSegment = (segment: string): Types.JsonObject =>
   decodeJwtSegmentJson(decodeBase64UrlText(segment));
 
@@ -591,7 +588,7 @@ const verifyIdTokenClaims = (
     if (segments === undefined) {
       return yield* fail("Malformed id_token");
     }
-    const [headerSeg, payloadSeg, signatureSeg] = segments;
+    const [headerSeg, payloadSeg] = segments;
 
     const { header, payload } = yield* Effect.try({
       try: (): { header: Types.JsonObject; payload: Types.JsonObject } => ({
@@ -613,19 +610,16 @@ const verifyIdTokenClaims = (
 
     const jwk = yield* fetchIdTokenJwk(params, header);
 
-    const verified = yield* Effect.try({
-      try: () => {
-        const signingInput = new TextEncoder().encode(`${headerSeg}.${payloadSeg}`);
-        const signature = decodeBase64UrlBytes(signatureSeg);
-        return Cipher.verifyJws(alg, signingInput, signature, jwk);
-      },
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: "id_token signature verification failed",
-          provider: params.provider,
-          cause,
-        }),
-    });
+    const verified = yield* verifiesWithJwk(idToken, jwk, alg).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: "id_token signature verification failed",
+            provider: params.provider,
+            cause,
+          }),
+      ),
+    );
     if (!verified) {
       return yield* fail("Invalid id_token signature");
     }
@@ -1924,38 +1918,32 @@ export const appleClientSecret = (params: {
   readonly expiresIn?: number;
   readonly now?: number;
 }): Effect.Effect<string, OAuthProviderError> =>
-  Effect.flatMap(Clock.currentTimeMillis, (millis) =>
-    Effect.try({
-      try: () => {
-        const iat = Math.floor((params.now ?? millis) / 1000);
-        const exp = iat + (params.expiresIn ?? 15777000);
-        const header = { alg: "ES256", kid: params.keyId, typ: "JWT" };
-        const payload = {
-          iss: params.teamId,
-          iat,
-          exp,
-          aud: "https://appleid.apple.com",
-          sub: params.clientId,
-        };
-        const encode = (obj: Schema.Json): string => Base64Url.encode(encodeJsonString(obj));
-        const signingInput = `${encode(header)}.${encode(payload)}`;
-        const signature = Base64Url.encode(
-          Cipher.signJws(
-            "ES256",
-            new TextEncoder().encode(signingInput),
-            Redacted.value(params.privateKey),
-          ),
-        );
-        return `${signingInput}.${signature}`;
-      },
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: "Failed to sign Apple client secret",
-          provider: "apple",
-          cause,
-        }),
-    }),
-  );
+  Effect.flatMap(Clock.currentTimeMillis, (millis) => {
+    const iat = Math.floor((params.now ?? millis) / 1000);
+    const payload = {
+      iss: params.teamId,
+      iat,
+      exp: iat + (params.expiresIn ?? 15777000),
+      aud: "https://appleid.apple.com",
+      sub: params.clientId,
+    };
+    return signWithPkcs8(
+      new TextEncoder().encode(encodeJsonString(payload)),
+      Redacted.make(Redacted.value(params.privateKey)),
+      "ES256",
+      { kid: params.keyId, typ: "JWT" },
+    ).pipe(
+      PlatformCrypto.provide,
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: "Failed to sign Apple client secret",
+            provider: "apple",
+            cause,
+          }),
+      ),
+    );
+  });
 
 /** Facebook Login (Graph API userinfo; `picture` is nested under `data.url`). */
 export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>

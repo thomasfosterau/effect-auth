@@ -40,7 +40,7 @@
  * any session cookie (a trusted-origin check, a `SameSite` cookie).
  *
  * This module runs on Workers (`nodejs_compat`), in Node and anywhere else the
- * core does: signature verification goes through `Cipher.verifyJws`.
+ * core does: signature verification goes through `effect/jose`.
  *
  * @example
  * ```ts
@@ -74,7 +74,7 @@ import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "./Authorizer.ts";
-import * as Cipher from "./Cipher.ts";
+import { verifiesWithJwk } from "./JwsSignature.ts";
 import type { AuthError } from "./Errors.ts";
 import { IdentifierStore, lookupIdentifier } from "./Identifier.ts";
 import type { CredentialSource } from "./SessionResolution.ts";
@@ -476,12 +476,12 @@ export const make = (
       ) {
         return yield* fail("malformed", "Malformed Access token");
       }
-      const { header, payload, signature } = yield* Effect.try({
-        try: () => ({
-          header: decodeSegment(headerSeg),
-          payload: decodeSegment(payloadSeg),
-          signature: decodeBase64UrlBytes(signatureSeg),
-        }),
+      const { header, payload } = yield* Effect.try({
+        try: () => {
+          // A signature segment that is not base64url is malformed, not a bad signature.
+          decodeBase64UrlBytes(signatureSeg);
+          return { header: decodeSegment(headerSeg), payload: decodeSegment(payloadSeg) };
+        },
         catch: (cause) => fail("malformed", "Malformed Access token", cause),
       });
       if (header["alg"] !== "RS256") {
@@ -495,16 +495,11 @@ export const make = (
         return yield* fail("key", "Access token has no kid");
       }
       const jwk = yield* keyFor(kid);
-      const verified = yield* Effect.try({
-        try: () =>
-          Cipher.verifyJws(
-            "RS256",
-            new TextEncoder().encode(`${headerSeg}.${payloadSeg}`),
-            signature,
-            jwk,
-          ),
-        catch: (cause) => fail("signature", "Access token signature verification failed", cause),
-      });
+      const verified = yield* verifiesWithJwk(token, jwk, "RS256").pipe(
+        Effect.mapError((cause) =>
+          fail("signature", "Access token signature verification failed", cause),
+        ),
+      );
       if (!verified) return yield* fail("signature", "Invalid Access token signature");
 
       const failure = claimFailure(

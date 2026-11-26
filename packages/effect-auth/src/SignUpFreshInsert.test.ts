@@ -22,7 +22,7 @@ import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Cipher from "./Cipher.ts";
+import { testJwsKeyPair, testSignJws } from "./testing/TestJws.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import {
@@ -175,7 +175,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const ONE_TAP_CLIENT = "client-1.apps.googleusercontent.com";
 const ONE_TAP_JWKS = "https://fake-google.test/fresh-insert/certs";
-const oneTapKeys = Cipher.generateJwsKeyPair("ES256");
+const oneTapKeys = testJwsKeyPair("ES256");
 
 const b64 = (value: Schema.Json): string =>
   Buffer.from(encodeJson(value), "utf8").toString("base64url");
@@ -193,7 +193,7 @@ const signGoogleCredential = (nonce: string): string => {
     iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
   };
   const signingInput = `${b64(header)}.${b64(claims)}`;
-  const signature = Cipher.signJws(
+  const signature = testSignJws(
     "ES256",
     Buffer.from(signingInput, "utf8"),
     oneTapKeys.privateKeyPem,

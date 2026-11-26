@@ -195,8 +195,8 @@ describe("memoryStores", () => {
     const key = (id: string) => ({
       id,
       algorithm: "ES256" as const,
-      publicKeyJwk: {},
-      privateKeyPem: "",
+      publicKey: { kty: "EC", crv: "P-256", x: "", y: "" } as const,
+      privateKey: "",
       createdAt: 0,
     });
     const result = await Effect.runPromise(

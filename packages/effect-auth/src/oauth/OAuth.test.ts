@@ -19,6 +19,7 @@ import {
   OAuthEmailMismatchError,
 } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
+import { testJwsKeyPair, testVerifyJws } from "../testing/TestJws.ts";
 import {
   IdentifierStore,
   lookupIdentifier,
@@ -855,7 +856,7 @@ describe("discoverOAuthEndpoints", () => {
 
 describe("OAuth.appleClientSecret", () => {
   it("produces a verifiable ES256 JWT with Apple's claims", async () => {
-    const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
+    const { publicKeyJwk, privateKeyPem } = testJwsKeyPair("ES256");
     const now = 1_700_000_000_000;
     const secret = await Effect.runPromise(
       OAuth.appleClientSecret({
@@ -890,7 +891,7 @@ describe("OAuth.appleClientSecret", () => {
     });
     expect(payload.exp).toBeGreaterThan(payload.iat);
 
-    const valid = Cipher.verifyJws(
+    const valid = testVerifyJws(
       "ES256",
       Buffer.from(`${headerSeg}.${payloadSeg}`),
       Buffer.from(signatureSeg, "base64url"),

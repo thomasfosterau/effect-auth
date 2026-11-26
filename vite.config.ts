@@ -246,15 +246,11 @@ export default defineConfig({
         },
       },
       {
-        // Direct `node:crypto` use is corralled in these two modules (scrypt,
-        // which `effect/crypto` lacks, and the JWS helpers). They import
-        // `Buffer` from `node:buffer` where they need it, so the global stays
-        // banned here too: `nodejs_compat` sets no `Buffer` global on Workers
-        // dated before 2024-09-23.
-        files: [
-          "packages/effect-auth/src/password/Scrypt.ts",
-          "packages/effect-auth/src/Cipher.ts",
-        ],
+        // Direct `node:crypto` use is corralled in scrypt, which
+        // `effect/crypto` lacks. It imports `Buffer` from `node:buffer` where
+        // it needs it, so the global stays banned here too: `nodejs_compat`
+        // sets no `Buffer` global on Workers dated before 2024-09-23.
+        files: ["packages/effect-auth/src/password/Scrypt.ts"],
         rules: { "effect/avoid-node-imports": "off" },
       },
       {

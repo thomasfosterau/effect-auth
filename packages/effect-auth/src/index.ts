@@ -110,6 +110,7 @@ export {
   JwtError,
   type JwtAlgorithm,
   type JwtKeyPair,
+  type GeneratedJwtKeyPair,
   JwtKeyStore,
   type JwtConfig,
   type JwtSignResult,
