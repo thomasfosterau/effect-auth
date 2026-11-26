@@ -8,12 +8,12 @@
  * @module testing
  */
 import type * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as Ladder from "../Ladder.ts";
 import type * as SessionContext from "../SessionContext.ts";
 import { runAsViewer, type ViewerFixture } from "./RunAs.ts";
@@ -24,14 +24,22 @@ import { runAsViewer, type ViewerFixture } from "./RunAs.ts";
  * @since 0.1.0
  * @category models
  */
-export interface GuardMismatch {
+export const GuardMismatch = Schema.Struct({
   /** Which viewer ran: `"anonymous"`, `"below <rung>"`, `"at <rung>"`, `"owner"`. */
-  readonly case: string;
+  case: Schema.String,
   /** `"allowed"`, or the `_tag` of the expected failure. */
-  readonly expected: string;
+  expected: Schema.String,
   /** `"allowed"`, the `_tag` of the failure, `"failure"` for an untagged one, or `"defect"`. */
-  readonly actual: string;
-}
+  actual: Schema.String,
+});
+
+/**
+ * One case whose outcome was not the expected one.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type GuardMismatch = typeof GuardMismatch.Type;
 
 /**
  * An operation's guard did not behave as expected.
@@ -39,10 +47,13 @@ export interface GuardMismatch {
  * @since 0.1.0
  * @category errors
  */
-export class GuardExpectationError extends Data.TaggedError("GuardExpectationError")<{
-  readonly message: string;
-  readonly mismatches: ReadonlyArray<GuardMismatch>;
-}> {}
+export class GuardExpectationError extends Schema.TaggedError<GuardExpectationError>()(
+  "GuardExpectationError",
+  {
+    message: Schema.String,
+    mismatches: Schema.Array(GuardMismatch),
+  },
+) {}
 
 /**
  * Whether the operation is a write (refusals are 401 / 403) or a read

@@ -2,7 +2,6 @@ import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -746,9 +745,9 @@ const getRpIdHash = async (): Promise<Uint8Array> => {
 };
 
 /** `signAssertion` rejected; a test-setup failure, surfaced as a defect. */
-class SignAssertionError extends Data.TaggedError("SignAssertionError")<{
-  readonly cause: unknown;
-}> {}
+class SignAssertionError extends Schema.TaggedError<SignAssertionError>()("SignAssertionError", {
+  cause: Schema.Unknown,
+}) {}
 
 const encodeClientDataJSON = Schema.encodeSync(
   Schema.fromJsonString(

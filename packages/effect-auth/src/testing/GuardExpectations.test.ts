@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Option from "effect/Option";
@@ -17,7 +17,7 @@ class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser
   "@test/CurrentViewer",
 ) {}
 
-class NotFound extends Data.TaggedError("NotFound")<{}> {}
+class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {}) {}
 
 const Roles = Ladder.make(["user", "contributor", "moderator", "admin"]);
 const Axes = Roles.axes({ moderate: "moderator" });

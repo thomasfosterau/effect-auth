@@ -111,8 +111,6 @@ export default defineConfig({
       "vitest/expect-expect": ["error", { assertFunctionNames: ["expect", "expect*"] }],
 
       // ---- Effect preset: rules this codebase's conventions cut across ----
-      // DESIGN.md D4: domain errors are `Data.TaggedError`.
-      "effect/avoid-data-tagged-error": "off",
       // "Nothing" is an `Option`; an options-object member is `readonly x?: T`
       // and a value that may be `undefined` is forwarded by leaving its key
       // out, which a conditional spread does.

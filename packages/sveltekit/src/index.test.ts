@@ -1,5 +1,4 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -184,7 +183,7 @@ describe("handle replays the lookup's Set-Cookie", () => {
 });
 
 /** What an adapter's `getClientAddress` throws when it cannot tell. */
-class NoClientAddress extends Data.TaggedError("NoClientAddress") {}
+class NoClientAddress extends Schema.TaggedError<NoClientAddress>()("NoClientAddress", {}) {}
 
 describe("submitCredential's client address", () => {
   const options = (extra: object = {}) => ({

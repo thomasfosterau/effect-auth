@@ -1,5 +1,5 @@
 import * as Clock from "effect/Clock";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -64,14 +64,17 @@ export interface OtpUriParams {
 }
 
 /** A character outside the RFC 4648 base32 alphabet; the `cause` of a failed {@link decodeBase32}. */
-class InvalidBase32CharacterError extends Data.TaggedError("InvalidBase32CharacterError")<{
-  readonly message: string;
-}> {}
+class InvalidBase32CharacterError extends Schema.TaggedError<InvalidBase32CharacterError>()(
+  "InvalidBase32CharacterError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /** An {@link OtpUriParams} that {@link generateOtpUri} cannot encode. */
-class OtpUriError extends Data.TaggedError("OtpUriError")<{
-  readonly message: string;
-}> {}
+class OtpUriError extends Schema.TaggedError<OtpUriError>()("OtpUriError", {
+  message: Schema.String,
+}) {}
 
 const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 

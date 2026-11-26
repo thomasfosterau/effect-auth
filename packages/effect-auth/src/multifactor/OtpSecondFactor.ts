@@ -8,7 +8,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -33,10 +33,13 @@ import { randomBase64UrlToken } from "../RandomToken.ts";
 /**
  * Failure of the OTP second factor: an expired, unknown or exhausted challenge, a wrong code, or a failed send.
  */
-export class OtpSecondFactorError extends Data.TaggedError("OtpSecondFactorError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class OtpSecondFactorError extends Schema.TaggedError<OtpSecondFactorError>()(
+  "OtpSecondFactorError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 // ---------------------------------------------------------------------------
 // Record + Store

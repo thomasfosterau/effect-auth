@@ -4,7 +4,7 @@
  * the application's; the default `normalizePhoneNumber` only trims.
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -41,10 +41,10 @@ import { SessionService } from "./SessionService.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /** Error raised by phone OTP verification failures. */
-export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class PhoneOtpError extends Schema.TaggedError<PhoneOtpError>()("PhoneOtpError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /** The purposes a phone OTP can be issued for. */
 export type PhoneOtpPurpose = "sign-in" | "phone-verification";

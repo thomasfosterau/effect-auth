@@ -7,7 +7,7 @@
  *
  * @module system
  */
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -25,9 +25,12 @@ import * as Policy from "./Policy.ts";
 export const entityType = Entity.systemType;
 
 /** `ref` was given an empty (or all-whitespace) name. */
-class SystemPrincipalNameError extends Data.TaggedError("SystemPrincipalNameError")<{
-  readonly message: string;
-}> {}
+class SystemPrincipalNameError extends Schema.TaggedError<SystemPrincipalNameError>()(
+  "SystemPrincipalNameError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * The entity reference of the named system principal: `System::"<name>"`.

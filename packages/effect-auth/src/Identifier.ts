@@ -5,7 +5,6 @@
  * IdentifierStore}.
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Order from "effect/Order";
@@ -50,20 +49,26 @@ export type Identifier = typeof Identifier.Type;
 // ---------------------------------------------------------------------------
 
 /** Raised by services that need a specific identifier and find none. */
-export class IdentifierNotFoundError extends Data.TaggedError("IdentifierNotFoundError")<{
-  readonly message: string;
-  readonly id?: string;
-}> {}
+export class IdentifierNotFoundError extends Schema.TaggedError<IdentifierNotFoundError>()(
+  "IdentifierNotFoundError",
+  {
+    message: Schema.String,
+    id: Schema.optionalKey(Schema.String),
+  },
+) {}
 
 /**
  * Raised by {@link claimIdentifier} when the `(type, value)` pair already
  * belongs to another user. The value is deliberately omitted so the error can
  * be logged without leaking the handle.
  */
-export class IdentifierTakenError extends Data.TaggedError("IdentifierTakenError")<{
-  readonly message: string;
-  readonly identifierType: IdentifierType;
-}> {}
+export class IdentifierTakenError extends Schema.TaggedError<IdentifierTakenError>()(
+  "IdentifierTakenError",
+  {
+    message: Schema.String,
+    identifierType: Schema.Literals(["email", "username", "phone"]),
+  },
+) {}
 
 /**
  * Raised by an {@link IdentifierStore} `create` that refuses an identifier it
@@ -73,10 +78,13 @@ export class IdentifierTakenError extends Data.TaggedError("IdentifierTakenError
  * the value; this store's shape rules it out. The value is omitted, as in
  * {@link IdentifierTakenError}.
  */
-export class IdentifierRefusedError extends Data.TaggedError("IdentifierRefusedError")<{
-  readonly message: string;
-  readonly identifierType: IdentifierType;
-}> {}
+export class IdentifierRefusedError extends Schema.TaggedError<IdentifierRefusedError>()(
+  "IdentifierRefusedError",
+  {
+    message: Schema.String,
+    identifierType: Schema.Literals(["email", "username", "phone"]),
+  },
+) {}
 
 /**
  * The `AuthError` a flow reports for an {@link IdentifierRefusedError} it does

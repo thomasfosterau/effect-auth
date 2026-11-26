@@ -24,7 +24,6 @@
  * @since 0.9.0
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -82,11 +81,14 @@ export const OutboundLimits: Context.Reference<Limits> = Context.Reference<Limit
  * @since 0.9.0
  * @category errors
  */
-export class OutboundHttpError extends Data.TaggedError("OutboundHttpError")<{
-  readonly reason: "refused-url" | "transport" | "timeout" | "too-large";
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class OutboundHttpError extends Schema.TaggedError<OutboundHttpError>()(
+  "OutboundHttpError",
+  {
+    reason: Schema.Literals(["refused-url", "transport", "timeout", "too-large"]),
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * A response read within the {@link Limits}: its status, headers and body as

@@ -1,6 +1,5 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -98,7 +97,10 @@ const makeWebRequest = (headers: Record<string, string> = {}) =>
 /** Anything a guard's result fails with besides its own `Forbidden`. */
 const isUnhandled = <E>(error: E | S.Forbidden): error is E => !Schema.is(S.Forbidden)(error);
 
-class PrincipalNotProvided extends Data.TaggedError("PrincipalNotProvided") {}
+class PrincipalNotProvided extends Schema.TaggedError<PrincipalNotProvided>()(
+  "PrincipalNotProvided",
+  {},
+) {}
 const unreadablePrincipal: Entity.EntityRef = {
   get type(): string {
     throw new PrincipalNotProvided();

@@ -5,7 +5,6 @@
 
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -127,9 +126,12 @@ export type AttestationConveyancePreference = "none" | "indirect" | "direct" | "
  * does not give; the layer build dies with this error, so the app fails to
  * start.
  */
-export class WebAuthnConfigError extends Data.TaggedError("WebAuthnConfigError")<{
-  readonly message: string;
-}> {}
+export class WebAuthnConfigError extends Schema.TaggedError<WebAuthnConfigError>()(
+  "WebAuthnConfigError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Configuration for WebAuthn service
@@ -927,9 +929,12 @@ export class WebAuthnService extends Context.Service<
 }
 
 /** A COSE algorithm outside {@link SUPPORTED_COSE_ALGORITHMS} reached key handling. */
-class UnsupportedAlgorithmError extends Data.TaggedError("UnsupportedAlgorithmError")<{
-  readonly message: string;
-}> {}
+class UnsupportedAlgorithmError extends Schema.TaggedError<UnsupportedAlgorithmError>()(
+  "UnsupportedAlgorithmError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const b64url = (bytes: Uint8Array): string => Base64Url.encode(bytes);
 

@@ -7,7 +7,6 @@
  * @module testing
  */
 import type * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -69,13 +68,13 @@ import { UserStore } from "../UserStore.ts";
  * @since 0.1.0
  * @category errors
  */
-export class ConformanceError extends Data.TaggedError("ConformanceError")<{
-  readonly message: string;
+export class ConformanceError extends Schema.TaggedError<ConformanceError>()("ConformanceError", {
+  message: Schema.String,
   /** The contract, as `ConformanceSuite.contract` names it. */
-  readonly contract: string;
+  contract: Schema.String,
   /** The case, as `ConformanceCase.name` names it. */
-  readonly case: string;
-}> {}
+  case: Schema.String,
+}) {}
 
 /**
  * One executable case of a suite.
@@ -118,7 +117,9 @@ export interface ConformanceOptions<E = never, R = never> {
 // Assertion plumbing
 // ---------------------------------------------------------------------------
 
-class Mismatch extends Data.TaggedError("Mismatch")<{ readonly message: string }> {}
+class Mismatch extends Schema.TaggedError<Mismatch>()("Mismatch", {
+  message: Schema.String,
+}) {}
 
 /**
  * A value with `Date`s as their instants, undefined properties dropped and

@@ -10,7 +10,6 @@
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -38,10 +37,10 @@ import * as Obs from "./Observability.ts";
 /**
  * JWT error
  */
-export class JwtError extends Data.TaggedError("JwtError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class JwtError extends Schema.TaggedError<JwtError>()("JwtError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * Supported signing algorithms

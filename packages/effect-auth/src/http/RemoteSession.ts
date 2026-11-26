@@ -6,7 +6,6 @@
  *
  * @module remote-session
  */
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
@@ -47,9 +46,9 @@ export interface Fetcher {
 export type FetcherLike = Fetcher | ((request: Request) => Promise<Response>);
 
 /** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
-class PromiseRejection extends Data.TaggedError("PromiseRejection")<{
-  readonly cause: unknown;
-}> {}
+class PromiseRejection extends Schema.TaggedError<PromiseRejection>()("PromiseRejection", {
+  cause: Schema.Unknown,
+}) {}
 
 /**
  * Run a promise whose rejection is a defect, as `Effect.promise` does: the
@@ -271,11 +270,14 @@ export const forwardedHeaders = (inbound: Request | Headers, policy?: HeaderPoli
  * @since 0.1.0
  * @category errors
  */
-export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
-  readonly message: string;
-  readonly status?: number;
-  readonly cause?: unknown;
-}> {}
+export class RemoteSessionError extends Schema.TaggedError<RemoteSessionError>()(
+  "RemoteSessionError",
+  {
+    message: Schema.String,
+    status: Schema.optionalKey(Schema.Finite),
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 // ---------------------------------------------------------------------------
 // Session reads

@@ -8,7 +8,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -34,10 +34,13 @@ import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
-export class GoogleOneTapError extends Data.TaggedError("GoogleOneTapError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class GoogleOneTapError extends Schema.TaggedError<GoogleOneTapError>()(
+  "GoogleOneTapError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /** Google's JWKS document location. */
 export const GOOGLE_JWKS_ENDPOINT = "https://www.googleapis.com/oauth2/v3/certs";

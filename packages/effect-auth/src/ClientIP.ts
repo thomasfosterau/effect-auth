@@ -9,7 +9,7 @@
  * @module client-ip
  */
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
@@ -23,9 +23,12 @@ import { HttpServerRequest } from "effect/http";
 // ---------------------------------------------------------------------------
 
 /** Thrown by `ClientIP.trustedHeader` for a malformed header name. */
-class InvalidHeaderNameError extends Data.TaggedError("InvalidHeaderNameError")<{
-  readonly message: string;
-}> {}
+class InvalidHeaderNameError extends Schema.TaggedError<InvalidHeaderNameError>()(
+  "InvalidHeaderNameError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Trust forwarded-IP headers from a fixed number of proxy hops.
