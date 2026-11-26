@@ -119,9 +119,6 @@ export default defineConfig({
       // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
       "effect/prefer-namespace-imports": "error",
-      // Renaming these would change the published API or the wire format.
-      // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
-      "effect/avoid-object-type": "off",
       // The only `makeFilter` calls probe config keys; they are not reusable checks.
       "effect/require-filter-metadata": "off",
       "effect/casting-awareness": "error",
