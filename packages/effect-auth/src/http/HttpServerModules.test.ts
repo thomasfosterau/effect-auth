@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { testVerifyJws } from "../testing/TestJws.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
+import { MAX_ATTRIBUTES_BYTES, MAX_NAME_LENGTH } from "./HttpApiSchema.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
@@ -55,7 +56,7 @@ const HOUR = 60 * 60 * 1000;
  * Build a handler wired with real org/admin/api-key/jwt services + in-memory
  * stores; `admin`, when given, replaces the `AdminService`'s config.
  */
-const makeFixture = (admin?: AdminConfig) => {
+const makeFixture = (admin?: AdminConfig, clientHiddenAttributes?: ReadonlyArray<string>) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const sessions = MutableHashMap.empty<string, Types.Session>();
@@ -413,7 +414,12 @@ const makeFixture = (admin?: AdminConfig) => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   );
-  const { handler } = HttpServer.make({ services, cookie: { secure: false }, ipRateLimit: false });
+  const { handler } = HttpServer.make({
+    services,
+    cookie: { secure: false },
+    ipRateLimit: false,
+    ...(clientHiddenAttributes !== undefined && { clientHiddenAttributes }),
+  });
 
   /** The token the invitation's latest email carried. */
   const tokenFor = (invitationId: string): string =>
@@ -678,6 +684,35 @@ const deliverInvitation: ByIdRequest = (id, sessionId) =>
   apiReq("POST", `/invitations/${id}/deliveries`, undefined, sessionId);
 
 describe("HTTP organization endpoints", () => {
+  it("refuses an oversized name or metadata bag with 400 and creates nothing", async () => {
+    const fx = makeFixture();
+    fx.seedUser("u1", "owner@test.com");
+    const sid = fx.makeSession("u1");
+    const create = (attributes: Types.Attributes) =>
+      fx.handler(
+        apiReq("POST", "/organizations", { data: { type: "organizations", attributes } }, sid),
+      );
+
+    expect((await create({ name: "x".repeat(MAX_NAME_LENGTH + 1), slug: "a" })).status).toBe(400);
+    const metadata = { notes: "m".repeat(MAX_ATTRIBUTES_BYTES) };
+    expect((await create({ name: "Acme", slug: "acme", metadata })).status).toBe(400);
+    const list = await fx.handler(apiReq("GET", "/organizations", undefined, sid));
+    expect((await jsonBody(list, collectionBody({}))).data).toEqual([]);
+
+    const created = await create({ name: "Acme", slug: "acme", metadata: { notes: "small" } });
+    expect(created.status).toBe(201);
+    const id = (await jsonBody(created, resourceBody({}))).data.id;
+    const patched = await fx.handler(
+      apiReq(
+        "PATCH",
+        `/organizations/${id}`,
+        { data: { type: "organizations", id, attributes: { metadata } } },
+        sid,
+      ),
+    );
+    expect(patched.status).toBe(400);
+  });
+
   it("runs a full organization lifecycle", async () => {
     const fx = makeFixture();
     fx.seedUser("u1", "owner@test.com");
@@ -1704,6 +1739,54 @@ const adminFixture = () => {
 
 /** A to-one relationship naming user `userId`, as a write document carries it. */
 const userLink = (userId: string) => ({ user: { data: { type: "users", id: userId } } });
+
+describe("client-hidden attributes", () => {
+  const serverState = {
+    role: "member",
+    banned: false,
+    banReason: "spam",
+    banExpires: 1,
+    scimUserName: "ada",
+    scimExternalId: "ext-1",
+    scimDeactivated: false,
+    internalNote: "vip",
+  };
+  const CurrentUser = Schema.Struct({ included: Schema.Tuple([UserResource]) });
+
+  it("leaves the ban and SCIM keys out of the user a client reads", async () => {
+    const fx = makeFixture();
+    fx.seedUser("u", "u@test.com", serverState);
+    const res = await fx.handler(
+      apiReq("GET", "/sessions/current?include=user", undefined, fx.makeSession("u")),
+    );
+    expect(res.status).toBe(200);
+    const [user] = (await jsonBody(res, CurrentUser)).included;
+    expect(user.attributes.attributes).toStrictEqual({ role: "member", internalNote: "vip" });
+  });
+
+  it("shows the whole bag on the admin endpoints", async () => {
+    const fx = makeFixture();
+    fx.seedUser("admin", "admin@test.com", { role: "admin" });
+    fx.seedUser("u", "u@test.com", serverState);
+    const res = await fx.handler(apiReq("GET", "/admin/users", undefined, fx.makeSession("admin")));
+    expect(res.status).toBe(200);
+    const listed = await jsonBody(res, Schema.Struct({ data: Schema.Array(UserResource) }));
+    expect(listed.data.find((user) => user.id === "u")?.attributes.attributes).toStrictEqual(
+      serverState,
+    );
+  });
+
+  it("hides exactly the configured keys", async () => {
+    const fx = makeFixture(undefined, ["internalNote"]);
+    fx.seedUser("u", "u@test.com", serverState);
+    const res = await fx.handler(
+      apiReq("GET", "/sessions/current?include=user", undefined, fx.makeSession("u")),
+    );
+    const [user] = (await jsonBody(res, CurrentUser)).included;
+    const { internalNote: _hidden, ...visible } = serverState;
+    expect(user.attributes.attributes).toStrictEqual(visible);
+  });
+});
 
 describe("HTTP admin endpoints", () => {
   it("lists users, filtered by email and paged, and refuses non-admins", async () => {

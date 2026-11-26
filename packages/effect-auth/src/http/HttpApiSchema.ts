@@ -1,5 +1,6 @@
-import * as Schema from "effect/Schema";
 import { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import { HttpApiMiddleware, HttpApiSchema } from "effect/http-api";
 import { Forbidden, Unauthorized } from "../Guard.ts";
 import * as Identifier from "../Identifier.ts";
@@ -18,6 +19,138 @@ import * as Types from "../Types.ts";
 /** Arbitrary JSON attributes bag. */
 export const Attributes = Types.Attributes;
 export type Attributes = typeof Attributes.Type;
+
+/**
+ * The most characters a login handle in a request may have (an email address,
+ * username or phone number): 320, an address's 64-octet local part, `@` and
+ * 255-octet domain.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const MAX_IDENTIFIER_LENGTH = 320;
+
+/**
+ * The most characters a name in a request may have (a user's, an
+ * organization's or team's name and slug, a role, an API key's name or
+ * prefix, a client name): 256.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const MAX_NAME_LENGTH = 256;
+
+/**
+ * The most characters a token, code or other opaque value in a request may
+ * have (a link or challenge token, a one-time code, a captcha token, an id):
+ * 4096, room for the longest captcha tokens.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const MAX_TOKEN_LENGTH = 4096;
+
+/**
+ * The most characters a URL in a request may have (an image, a logo, a
+ * redirect URI): 2048.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const MAX_URL_LENGTH = 2048;
+
+/**
+ * The most an attribute or metadata bag in a request may take, as JSON text
+ * in UTF-8: 8192 bytes.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const MAX_ATTRIBUTES_BYTES = 8192;
+
+const utf8 = new TextEncoder();
+
+/**
+ * A bound checked only when a request is decoded: a value already stored is
+ * still encoded into an answer whatever its size, so tightening a bound never
+ * makes a record unreadable.
+ */
+const decodeBound = <S extends Schema.Top>(
+  schema: S,
+  within: (value: S["Type"]) => boolean,
+  message: string,
+) =>
+  schema.pipe(
+    Schema.decodeTo(Schema.toType(schema), {
+      decode: SchemaGetter.checkEffect((value: S["Type"]) =>
+        Effect.succeed(within(value) || message),
+      ),
+      encode: SchemaGetter.passthrough(),
+    }),
+  );
+
+/**
+ * A request string of at most `maxLength` characters (UTF-16 code units).
+ *
+ * @since 0.9.0
+ * @category schemas
+ */
+export const boundedString = (maxLength: number) =>
+  decodeBound(
+    Schema.String,
+    (value) => value.length <= maxLength,
+    `Expected at most ${maxLength} characters`,
+  );
+
+/**
+ * A request's login handle: an email address, username or phone number.
+ *
+ * @since 0.9.0
+ * @category schemas
+ */
+export const IdentifierInput = boundedString(MAX_IDENTIFIER_LENGTH);
+
+/**
+ * A request's name, slug, role or label.
+ *
+ * @since 0.9.0
+ * @category schemas
+ */
+export const NameInput = boundedString(MAX_NAME_LENGTH);
+
+/**
+ * A request's token, code, id or other opaque value.
+ *
+ * @since 0.9.0
+ * @category schemas
+ */
+export const TokenInput = boundedString(MAX_TOKEN_LENGTH);
+
+/**
+ * A request's URL.
+ *
+ * @since 0.9.0
+ * @category schemas
+ */
+export const UrlInput = boundedString(MAX_URL_LENGTH);
+
+const encodeJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+const jsonWithin = (value: Schema.Json, maxBytes: number): boolean =>
+  utf8.encode(encodeJsonText(value)).length <= maxBytes;
+
+/**
+ * An attribute or metadata bag a request may carry: at most
+ * {@link MAX_ATTRIBUTES_BYTES} as JSON.
+ *
+ * @since 0.9.0
+ * @category schemas
+ */
+export const AttributesInput = decodeBound(
+  Attributes,
+  (value) => jsonWithin(value, MAX_ATTRIBUTES_BYTES),
+  `Expected at most ${MAX_ATTRIBUTES_BYTES} bytes as JSON`,
+);
 
 /** Public view of a login-handle identifier (timestamps as epoch millis). */
 export const IdentifierView = Schema.Struct({
@@ -75,25 +208,25 @@ export type SessionWithUserView = typeof SessionWithUserView.Type;
 
 /** Request body for sign-up. */
 export const SignUpPayload = Schema.Struct({
-  email: Schema.String,
+  email: IdentifierInput,
   password: Schema.String,
-  name: Schema.optional(Schema.String),
+  name: Schema.optional(NameInput),
   /**
    * Attributes for the new user. The server keeps only the keys `Http.make`'s
    * `signUpAttributes` allows (default none) and drops the rest.
    */
   attributes: Schema.optional(Attributes),
   /** Optional captcha token consumed by the `CaptchaPlugin`. */
-  captchaToken: Schema.optional(Schema.String),
+  captchaToken: Schema.optional(TokenInput),
 });
 export type SignUpPayload = typeof SignUpPayload.Type;
 
 /** Request body for sign-in. */
 export const SignInPayload = Schema.Struct({
-  email: Schema.String,
+  email: IdentifierInput,
   password: Schema.String,
   /** Optional captcha token consumed by the `CaptchaPlugin`. */
-  captchaToken: Schema.optional(Schema.String),
+  captchaToken: Schema.optional(TokenInput),
   /**
    * When `false`, the response sets a browser-session cookie (no
    * `Max-Age`/`Expires`) that is cleared when the browser is closed. Omit or
@@ -134,25 +267,25 @@ export type StatusResponse = typeof StatusResponse.Type;
 
 /** Request body for sending/resending an email verification. */
 export const SendVerificationEmailPayload = Schema.Struct({
-  email: Schema.String,
+  email: IdentifierInput,
 });
 export type SendVerificationEmailPayload = typeof SendVerificationEmailPayload.Type;
 
 /** Request body for verifying an email with a token. */
 export const VerifyEmailPayload = Schema.Struct({
-  token: Schema.String,
+  token: TokenInput,
 });
 export type VerifyEmailPayload = typeof VerifyEmailPayload.Type;
 
 /** Request body for requesting a password reset email. */
 export const RequestPasswordResetPayload = Schema.Struct({
-  email: Schema.String,
+  email: IdentifierInput,
 });
 export type RequestPasswordResetPayload = typeof RequestPasswordResetPayload.Type;
 
 /** Request body for completing a password reset. */
 export const ResetPasswordPayload = Schema.Struct({
-  token: Schema.String,
+  token: TokenInput,
   newPassword: Schema.String,
 });
 export type ResetPasswordPayload = typeof ResetPasswordPayload.Type;
@@ -171,8 +304,8 @@ export type ChangePasswordPayload = typeof ChangePasswordPayload.Type;
 
 /** Request body for updating the authenticated user's profile. */
 export const UpdateUserPayload = Schema.Struct({
-  name: Schema.optional(Schema.String),
-  image: Schema.optional(Schema.String),
+  name: Schema.optional(NameInput),
+  image: Schema.optional(UrlInput),
 });
 export type UpdateUserPayload = typeof UpdateUserPayload.Type;
 
@@ -182,19 +315,19 @@ export type SessionListView = typeof SessionListView.Type;
 
 /** Request body for requesting a magic link email. */
 export const MagicLinkSendPayload = Schema.Struct({
-  email: Schema.String,
+  email: IdentifierInput,
 });
 export type MagicLinkSendPayload = typeof MagicLinkSendPayload.Type;
 
 /** Request body for redeeming a magic link token. */
 export const MagicLinkVerifyPayload = Schema.Struct({
-  token: Schema.String,
+  token: TokenInput,
 });
 export type MagicLinkVerifyPayload = typeof MagicLinkVerifyPayload.Type;
 
 /** Request body for requesting an email change (authenticated). */
 export const ChangeEmailRequestPayload = Schema.Struct({
-  newEmail: Schema.String,
+  newEmail: IdentifierInput,
   /** The current password; required when the account has one. */
   currentPassword: Schema.optional(Schema.String),
 });
@@ -202,13 +335,13 @@ export type ChangeEmailRequestPayload = typeof ChangeEmailRequestPayload.Type;
 
 /** Request body for confirming an email change by token. */
 export const ChangeEmailConfirmPayload = Schema.Struct({
-  token: Schema.String,
+  token: TokenInput,
 });
 export type ChangeEmailConfirmPayload = typeof ChangeEmailConfirmPayload.Type;
 
 /** Request body for confirming account deletion by token. */
 export const DeleteUserConfirmPayload = Schema.Struct({
-  token: Schema.String,
+  token: TokenInput,
 });
 export type DeleteUserConfirmPayload = typeof DeleteUserConfirmPayload.Type;
 
@@ -222,7 +355,7 @@ export type EmailOtpPurpose = typeof EmailOtpPurpose.Type;
 
 /** Request body for sending an email OTP. */
 export const EmailOtpSendPayload = Schema.Struct({
-  email: Schema.String,
+  email: IdentifierInput,
   purpose: EmailOtpPurpose,
 });
 export type EmailOtpSendPayload = typeof EmailOtpSendPayload.Type;
@@ -233,15 +366,15 @@ export type PhoneOtpPurpose = typeof PhoneOtpPurpose.Type;
 
 /** Request body for sending a phone (SMS) OTP. */
 export const PhoneOtpSendPayload = Schema.Struct({
-  phoneNumber: Schema.String,
+  phoneNumber: IdentifierInput,
   purpose: PhoneOtpPurpose,
 });
 export type PhoneOtpSendPayload = typeof PhoneOtpSendPayload.Type;
 
 /** Request body for signing in with a phone OTP. */
 export const PhoneOtpSignInPayload = Schema.Struct({
-  phoneNumber: Schema.String,
-  otp: Schema.String,
+  phoneNumber: IdentifierInput,
+  otp: TokenInput,
 });
 export type PhoneOtpSignInPayload = typeof PhoneOtpSignInPayload.Type;
 
@@ -251,13 +384,13 @@ export type MultiSessionListView = typeof MultiSessionListView.Type;
 
 /** Request body for multi-session set-active / revoke. */
 export const MultiSessionActionPayload = Schema.Struct({
-  sessionId: Schema.String,
+  sessionId: TokenInput,
 });
 export type MultiSessionActionPayload = typeof MultiSessionActionPayload.Type;
 
 /** Request body for starting a device authorization request. */
 export const DeviceCodePayload = Schema.Struct({
-  clientId: Schema.optional(Schema.String),
+  clientId: Schema.optional(TokenInput),
   scopes: Schema.optional(Schema.Array(Schema.String)),
 });
 export type DeviceCodePayload = typeof DeviceCodePayload.Type;
@@ -274,22 +407,22 @@ export type DeviceCodeView = typeof DeviceCodeView.Type;
 
 /** Request body for polling the device token endpoint. */
 export const DeviceTokenPayload = Schema.Struct({
-  deviceCode: Schema.String,
+  deviceCode: TokenInput,
 });
 export type DeviceTokenPayload = typeof DeviceTokenPayload.Type;
 
 /** Request body for approving/denying a device user code. */
 export const DeviceUserCodePayload = Schema.Struct({
-  userCode: Schema.String,
+  userCode: TokenInput,
 });
 export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
 
 /** Request body for signing in with a username + password. */
 export const UsernameSignInPayload = Schema.Struct({
-  username: Schema.String,
+  username: IdentifierInput,
   password: Schema.String,
   /** Optional captcha token consumed by the `CaptchaPlugin`. */
-  captchaToken: Schema.optional(Schema.String),
+  captchaToken: Schema.optional(TokenInput),
   /**
    * When `false`, the response sets a browser-session cookie. See
    * `SignInPayload.rememberMe` for details.
@@ -300,8 +433,8 @@ export type UsernameSignInPayload = typeof UsernameSignInPayload.Type;
 
 /** Request body for signing in with an email OTP. */
 export const EmailOtpSignInPayload = Schema.Struct({
-  email: Schema.String,
-  otp: Schema.String,
+  email: IdentifierInput,
+  otp: TokenInput,
 });
 export type EmailOtpSignInPayload = typeof EmailOtpSignInPayload.Type;
 
@@ -316,7 +449,7 @@ export type MultiFactorPasswordPayload = typeof MultiFactorPasswordPayload.Type;
 
 /** Request body for confirming multi-factor enrollment with a TOTP code. */
 export const MultiFactorConfirmPayload = Schema.Struct({
-  code: Schema.String,
+  code: TokenInput,
 });
 export type MultiFactorConfirmPayload = typeof MultiFactorConfirmPayload.Type;
 
@@ -325,8 +458,8 @@ export type MultiFactorConfirmPayload = typeof MultiFactorConfirmPayload.Type;
  * `token` (from sign-in's `secondFactor`) plus a TOTP or backup `code`.
  */
 export const MultiFactorVerifyPayload = Schema.Struct({
-  token: Schema.String,
-  code: Schema.String,
+  token: TokenInput,
+  code: TokenInput,
 });
 export type MultiFactorVerifyPayload = typeof MultiFactorVerifyPayload.Type;
 
@@ -415,16 +548,16 @@ export type SsoProviderView = typeof SsoProviderView.Type;
 export const SsoRegisterOidcAttributes = Schema.Struct({
   /** Optional for backwards compatibility: OIDC is the default protocol. */
   protocol: Schema.optional(Schema.Literal("oidc")),
-  issuer: Schema.String,
-  domain: Schema.String,
-  clientId: Schema.String,
-  clientSecret: Schema.String,
-  redirectUri: Schema.String,
+  issuer: UrlInput,
+  domain: IdentifierInput,
+  clientId: TokenInput,
+  clientSecret: TokenInput,
+  redirectUri: UrlInput,
   discover: Schema.optional(Schema.Boolean),
-  authorizationEndpoint: Schema.optional(Schema.String),
-  tokenEndpoint: Schema.optional(Schema.String),
-  userInfoEndpoint: Schema.optional(Schema.String),
-  jwksEndpoint: Schema.optional(Schema.String),
+  authorizationEndpoint: Schema.optional(UrlInput),
+  tokenEndpoint: Schema.optional(UrlInput),
+  userInfoEndpoint: Schema.optional(UrlInput),
+  jwksEndpoint: Schema.optional(UrlInput),
   scopes: Schema.optional(Schema.Array(Schema.String)),
   usePKCE: Schema.optional(Schema.Boolean),
 });
@@ -433,12 +566,12 @@ export type SsoRegisterOidcAttributes = typeof SsoRegisterOidcAttributes.Type;
 /** The attributes of a `POST /sso-providers` registering a **SAML 2.0** connection (admin-gated). */
 export const SsoRegisterSamlAttributes = Schema.Struct({
   protocol: Schema.Literal("saml"),
-  domain: Schema.String,
-  entityId: Schema.String,
-  ssoUrl: Schema.String,
+  domain: IdentifierInput,
+  entityId: UrlInput,
+  ssoUrl: UrlInput,
   idpCertificates: Schema.Array(Schema.String),
-  spEntityId: Schema.String,
-  acsUrl: Schema.String,
+  spEntityId: UrlInput,
+  acsUrl: UrlInput,
   signatureAlgorithms: Schema.optional(Schema.Array(Schema.Literals(["sha1", "sha256", "sha512"]))),
   wantAssertionsSigned: Schema.optional(Schema.Boolean),
   wantAuthnResponseSigned: Schema.optional(Schema.Boolean),
@@ -453,14 +586,14 @@ export type SsoRegisterSamlAttributes = typeof SsoRegisterSamlAttributes.Type;
  */
 export const SsoRegisterOidcPayload = Schema.Struct({
   ...SsoRegisterOidcAttributes.fields,
-  organizationId: Schema.optional(Schema.String),
+  organizationId: Schema.optional(TokenInput),
 });
 export type SsoRegisterOidcPayload = typeof SsoRegisterOidcPayload.Type;
 
 /** Request body for registering a **SAML 2.0** SSO connection, as the typed client takes it. */
 export const SsoRegisterSamlPayload = Schema.Struct({
   ...SsoRegisterSamlAttributes.fields,
-  organizationId: Schema.optional(Schema.String),
+  organizationId: Schema.optional(TokenInput),
 });
 export type SsoRegisterSamlPayload = typeof SsoRegisterSamlPayload.Type;
 
@@ -481,9 +614,9 @@ export type SsoRegisterAttributes = typeof SsoRegisterAttributes.Type;
 
 /** Request body for starting an SSO sign-in (any one of the fields). */
 export const SsoSignInPayload = Schema.Struct({
-  email: Schema.optional(Schema.String),
-  domain: Schema.optional(Schema.String),
-  providerId: Schema.optional(Schema.String),
+  email: Schema.optional(IdentifierInput),
+  domain: Schema.optional(IdentifierInput),
+  providerId: Schema.optional(TokenInput),
 });
 export type SsoSignInPayload = typeof SsoSignInPayload.Type;
 
@@ -496,8 +629,8 @@ export type SsoUrlView = typeof SsoUrlView.Type;
 
 /** Request body for completing an SSO callback. */
 export const SsoCallbackPayload = Schema.Struct({
-  state: Schema.String,
-  code: Schema.String,
+  state: TokenInput,
+  code: TokenInput,
 });
 export type SsoCallbackPayload = typeof SsoCallbackPayload.Type;
 
@@ -510,7 +643,7 @@ export type SsoCallbackPayload = typeof SsoCallbackPayload.Type;
  */
 export const SamlAcsPayload = Schema.Struct({
   SAMLResponse: Schema.String,
-  RelayState: Schema.optional(Schema.String),
+  RelayState: Schema.optional(TokenInput),
 }).pipe(HttpApiSchema.asFormUrlEncoded());
 export type SamlAcsPayload = typeof SamlAcsPayload.Type;
 
@@ -587,46 +720,46 @@ export type InvitationListView = typeof InvitationListView.Type;
 
 /** Request body for creating an organization. */
 export const CreateOrganizationPayload = Schema.Struct({
-  name: Schema.String,
-  slug: Schema.String,
-  logo: Schema.optional(Schema.String),
-  metadata: Schema.optional(Attributes),
+  name: NameInput,
+  slug: NameInput,
+  logo: Schema.optional(UrlInput),
+  metadata: Schema.optional(AttributesInput),
 });
 export type CreateOrganizationPayload = typeof CreateOrganizationPayload.Type;
 
 /** Request body for updating an organization. */
 export const UpdateOrganizationPayload = Schema.Struct({
-  name: Schema.optional(Schema.String),
-  slug: Schema.optional(Schema.String),
-  logo: Schema.optional(Schema.String),
-  metadata: Schema.optional(Attributes),
+  name: Schema.optional(NameInput),
+  slug: Schema.optional(NameInput),
+  logo: Schema.optional(UrlInput),
+  metadata: Schema.optional(AttributesInput),
   jitProvisioning: Schema.optional(Schema.Boolean),
 });
 export type UpdateOrganizationPayload = typeof UpdateOrganizationPayload.Type;
 
 /** Request body for setting the organization's default role (owner-only). */
 export const SetDefaultRolePayload = Schema.Struct({
-  role: Schema.String,
+  role: NameInput,
 });
 export type SetDefaultRolePayload = typeof SetDefaultRolePayload.Type;
 
 /** Request body for inviting a member. */
 export const InviteMemberPayload = Schema.Struct({
-  email: Schema.String,
-  role: Schema.String,
+  email: IdentifierInput,
+  role: NameInput,
 });
 export type InviteMemberPayload = typeof InviteMemberPayload.Type;
 
 /** Request body for adding a member directly (role defaults to the org's). */
 export const AddMemberPayload = Schema.Struct({
-  userId: Schema.String,
-  role: Schema.optional(Schema.String),
+  userId: TokenInput,
+  role: Schema.optional(NameInput),
 });
 export type AddMemberPayload = typeof AddMemberPayload.Type;
 
 /** The new role for a membership (`PATCH /organization-members/:id`). */
 export const UpdateMemberRolePayload = Schema.Struct({
-  role: Schema.String,
+  role: NameInput,
 });
 export type UpdateMemberRolePayload = typeof UpdateMemberRolePayload.Type;
 
@@ -659,19 +792,19 @@ export type TeamMemberListView = typeof TeamMemberListView.Type;
 
 /** Request body for creating a team. */
 export const CreateTeamPayload = Schema.Struct({
-  name: Schema.String,
+  name: NameInput,
 });
 export type CreateTeamPayload = typeof CreateTeamPayload.Type;
 
 /** Request body for updating a team. */
 export const UpdateTeamPayload = Schema.Struct({
-  name: Schema.optional(Schema.String),
+  name: Schema.optional(NameInput),
 });
 export type UpdateTeamPayload = typeof UpdateTeamPayload.Type;
 
 /** Request body for adding a user to a team. */
 export const AddTeamMemberPayload = Schema.Struct({
-  userId: Schema.String,
+  userId: TokenInput,
 });
 export type AddTeamMemberPayload = typeof AddTeamMemberPayload.Type;
 
@@ -698,7 +831,7 @@ export type UpsertOrgRolePayload = typeof UpsertOrgRolePayload.Type;
 
 /** A new custom organization role: its name and permissions (`POST /organizations/:id/roles`). */
 export const CreateOrgRolePayload = Schema.Struct({
-  role: Schema.String,
+  role: NameInput,
   permissions: Schema.Array(Schema.String),
 });
 export type CreateOrgRolePayload = typeof CreateOrgRolePayload.Type;
@@ -735,7 +868,7 @@ export type OrganizationDomainListView = typeof OrganizationDomainListView.Type;
  * is refused (`400`), since manual attestation is the operator's.
  */
 export const AddOrganizationDomainPayload = Schema.Struct({
-  domain: Schema.String,
+  domain: IdentifierInput,
   verificationStrategy: Schema.optional(Schema.Literal("dns")),
 });
 export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.Type;
@@ -745,14 +878,14 @@ export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.T
  * (`POST /admin/organization-domains`, admin-gated).
  */
 export const AdminAttestDomainPayload = Schema.Struct({
-  organizationId: Schema.String,
-  domain: Schema.String,
+  organizationId: TokenInput,
+  domain: IdentifierInput,
 });
 export type AdminAttestDomainPayload = typeof AdminAttestDomainPayload.Type;
 
 /** Request body for setting the session's active organization (null clears it). */
 export const SetActiveOrganizationPayload = Schema.Struct({
-  organizationId: Schema.NullOr(Schema.String),
+  organizationId: Schema.NullOr(TokenInput),
 });
 export type SetActiveOrganizationPayload = typeof SetActiveOrganizationPayload.Type;
 
@@ -771,28 +904,28 @@ export type AdminUserListView = typeof AdminUserListView.Type;
 export const AdminListUsersPayload = Schema.Struct({
   limit: Schema.optional(Schema.Number),
   offset: Schema.optional(Schema.Number),
-  searchEmail: Schema.optional(Schema.String),
+  searchEmail: Schema.optional(IdentifierInput),
 });
 export type AdminListUsersPayload = typeof AdminListUsersPayload.Type;
 
 /** Request body for setting a user's role (admin). */
 export const AdminSetRolePayload = Schema.Struct({
-  userId: Schema.String,
-  role: Schema.String,
+  userId: TokenInput,
+  role: NameInput,
 });
 export type AdminSetRolePayload = typeof AdminSetRolePayload.Type;
 
 /** Request body for banning a user (admin). */
 export const AdminBanUserPayload = Schema.Struct({
-  userId: Schema.String,
-  reason: Schema.optional(Schema.String),
+  userId: TokenInput,
+  reason: Schema.optional(TokenInput),
   expiresIn: Schema.optional(Schema.Number),
 });
 export type AdminBanUserPayload = typeof AdminBanUserPayload.Type;
 
 /** Request body identifying a target user (admin). */
 export const AdminUserActionPayload = Schema.Struct({
-  userId: Schema.String,
+  userId: TokenInput,
 });
 export type AdminUserActionPayload = typeof AdminUserActionPayload.Type;
 
@@ -839,11 +972,11 @@ export type ApiKeyListView = typeof ApiKeyListView.Type;
 
 /** Request body for creating an API key. */
 export const ApiKeyCreatePayload = Schema.Struct({
-  name: Schema.optional(Schema.String),
-  prefix: Schema.optional(Schema.String),
+  name: Schema.optional(NameInput),
+  prefix: Schema.optional(NameInput),
   expiresIn: Schema.optional(Schema.Number),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
-  metadata: Schema.optional(Attributes),
+  metadata: Schema.optional(AttributesInput),
   remaining: Schema.optional(Schema.Number),
   rateLimit: Schema.optional(ApiKeyRateLimit),
 });
@@ -851,11 +984,11 @@ export type ApiKeyCreatePayload = typeof ApiKeyCreatePayload.Type;
 
 /** Request body for updating an API key. */
 export const ApiKeyUpdatePayload = Schema.Struct({
-  name: Schema.optional(Schema.String),
+  name: Schema.optional(NameInput),
   enabled: Schema.optional(Schema.Boolean),
   expiresAt: Schema.optional(Schema.Number),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
-  metadata: Schema.optional(Attributes),
+  metadata: Schema.optional(AttributesInput),
   remaining: Schema.optional(Schema.Number),
   rateLimit: Schema.optional(ApiKeyRateLimit),
 });
@@ -875,12 +1008,12 @@ export type GoogleOneTapNonceView = typeof GoogleOneTapNonceView.Type;
 /** Request body for a Google One Tap sign-in. */
 export const GoogleOneTapPayload = Schema.Struct({
   /** The One Tap `credential` (a Google-signed id_token). */
-  credential: Schema.String,
+  credential: TokenInput,
   /**
    * The **unhashed** nonce returned by `POST /google-one-tap-nonces`.
    * Must match the nonce claim embedded by Google in the id_token.
    */
-  nonce: Schema.String,
+  nonce: TokenInput,
 });
 export type GoogleOneTapPayload = typeof GoogleOneTapPayload.Type;
 
@@ -915,27 +1048,27 @@ export type OidcClientListView = typeof OidcClientListView.Type;
 
 /** Request body for registering an OIDC client (admin-gated). */
 export const OidcRegisterClientPayload = Schema.Struct({
-  name: Schema.String,
+  name: NameInput,
   redirectUris: Schema.Array(Schema.String),
   type: Schema.optional(Schema.Literals(["web", "native"])),
   skipConsent: Schema.optional(Schema.Boolean),
-  metadata: Schema.optional(Attributes),
+  metadata: Schema.optional(AttributesInput),
 });
 export type OidcRegisterClientPayload = typeof OidcRegisterClientPayload.Type;
 
 /** Request body for updating an OIDC client (admin-gated). */
 export const OidcClientUpdatePayload = Schema.Struct({
-  name: Schema.optional(Schema.String),
+  name: Schema.optional(NameInput),
   redirectUris: Schema.optional(Schema.Array(Schema.String)),
   skipConsent: Schema.optional(Schema.Boolean),
   disabled: Schema.optional(Schema.Boolean),
-  metadata: Schema.optional(Attributes),
+  metadata: Schema.optional(AttributesInput),
 });
 export type OidcClientUpdatePayload = typeof OidcClientUpdatePayload.Type;
 
 /** Request body for resolving a pending consent request. */
 export const OidcConsentPayload = Schema.Struct({
-  consentCode: Schema.String,
+  consentCode: TokenInput,
   accept: Schema.Boolean,
 });
 export type OidcConsentPayload = typeof OidcConsentPayload.Type;
@@ -952,14 +1085,14 @@ export type OidcRedirectView = typeof OidcRedirectView.Type;
  * from a Basic Authorization header.
  */
 export const OidcTokenPayload = Schema.Struct({
-  grant_type: Schema.String,
-  code: Schema.optional(Schema.String),
-  redirect_uri: Schema.optional(Schema.String),
-  code_verifier: Schema.optional(Schema.String),
-  refresh_token: Schema.optional(Schema.String),
-  client_id: Schema.optional(Schema.String),
-  client_secret: Schema.optional(Schema.String),
-  scope: Schema.optional(Schema.String),
+  grant_type: TokenInput,
+  code: Schema.optional(TokenInput),
+  redirect_uri: Schema.optional(UrlInput),
+  code_verifier: Schema.optional(TokenInput),
+  refresh_token: Schema.optional(TokenInput),
+  client_id: Schema.optional(TokenInput),
+  client_secret: Schema.optional(TokenInput),
+  scope: Schema.optional(TokenInput),
 });
 export type OidcTokenPayload = typeof OidcTokenPayload.Type;
 
@@ -986,11 +1119,11 @@ export type OidcTokenView = typeof OidcTokenView.Type;
  */
 export const OidcRegistrationPayload = Schema.Struct({
   redirect_uris: Schema.Array(Schema.String),
-  token_endpoint_auth_method: Schema.optional(Schema.String),
+  token_endpoint_auth_method: Schema.optional(TokenInput),
   grant_types: Schema.optional(Schema.Array(Schema.String)),
   response_types: Schema.optional(Schema.Array(Schema.String)),
-  client_name: Schema.optional(Schema.String),
-  scope: Schema.optional(Schema.String),
+  client_name: Schema.optional(NameInput),
+  scope: Schema.optional(TokenInput),
 });
 export type OidcRegistrationPayload = typeof OidcRegistrationPayload.Type;
 
@@ -1148,14 +1281,14 @@ export type ScimDocumentView = typeof ScimDocumentView.Type;
  */
 export const ScimUserPayload = Schema.Struct({
   schemas: Schema.optional(Schema.Array(Schema.String)),
-  externalId: Schema.optional(Schema.String),
-  userName: Schema.String,
-  displayName: Schema.optional(Schema.String),
+  externalId: Schema.optional(TokenInput),
+  userName: IdentifierInput,
+  displayName: Schema.optional(NameInput),
   name: Schema.optional(
     Schema.Struct({
-      formatted: Schema.optional(Schema.String),
-      givenName: Schema.optional(Schema.String),
-      familyName: Schema.optional(Schema.String),
+      formatted: Schema.optional(NameInput),
+      givenName: Schema.optional(NameInput),
+      familyName: Schema.optional(NameInput),
     }),
   ),
   emails: Schema.optional(Schema.Array(ScimEmailView)),
@@ -1166,8 +1299,8 @@ export type ScimUserPayload = typeof ScimUserPayload.Type;
 /** A `Group` write body (`POST`/`PUT`). */
 export const ScimGroupPayload = Schema.Struct({
   schemas: Schema.optional(Schema.Array(Schema.String)),
-  externalId: Schema.optional(Schema.String),
-  displayName: Schema.String,
+  externalId: Schema.optional(TokenInput),
+  displayName: NameInput,
   members: Schema.optional(
     Schema.Array(Schema.Struct({ value: Schema.String, display: Schema.optional(Schema.String) })),
   ),

@@ -113,3 +113,23 @@ export const deleteCredentials = (
     ],
     { concurrency: 1, discard: true },
   );
+
+/**
+ * Revoke the bearer access `userId` holds outside a session: their API keys
+ * and the OIDC provider's access and refresh tokens and consents. A ban and a
+ * SCIM deactivation run it after revoking the sessions, so nothing the user
+ * held before keeps working once the flag is lifted. JWTs already issued
+ * cannot be revoked and are left to expire.
+ */
+export const revokeStandingAccess = (
+  stores: UserCredentialStores,
+  userId: string,
+): Effect.Effect<void, Errors.AuthError> =>
+  Effect.all(
+    [
+      perUser(stores.apiKeys, userId),
+      perUser(stores.oidcTokens, userId),
+      perUser(stores.oidcConsents, userId),
+    ],
+    { concurrency: 1, discard: true },
+  );

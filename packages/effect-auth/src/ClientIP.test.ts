@@ -9,6 +9,7 @@ import {
   clientIPLayer,
   normalizeIp,
   cidrContains,
+  rateLimitAddressKey,
   resolveClientIP,
   type IPResolvableRequest,
 } from "./ClientIP.ts";
@@ -597,5 +598,37 @@ describe("clientIPLayer with a trusted header", () => {
       ),
     );
     expect(ip).toBe("203.0.113.7");
+  });
+});
+
+describe("rateLimitAddressKey", () => {
+  it("keys IPv4 as it is, whatever the prefix length", () => {
+    expect(rateLimitAddressKey("203.0.113.7")).toBe("203.0.113.7");
+    expect(rateLimitAddressKey("203.0.113.7", 48)).toBe("203.0.113.7");
+    expect(rateLimitAddressKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+  });
+
+  it("keys every address of one /64 alike by default", () => {
+    const keys = Arr.makeBy(14, (i) => rateLimitAddressKey(`2001:db8:1:1::${i.toString(16)}`));
+    expect(Arr.dedupe(keys)).toEqual(["2001:db8:1:1::/64"]);
+    expect(rateLimitAddressKey("2001:DB8:1:1:ffff:ffff:ffff:ffff")).toBe("2001:db8:1:1::/64");
+    expect(rateLimitAddressKey("2001:db8:1:2::1")).toBe("2001:db8:1:2::/64");
+  });
+
+  it("masks to the configured prefix length", () => {
+    expect(rateLimitAddressKey("2001:db8:1:ff::1", 56)).toBe("2001:db8:1::/56");
+    expect(rateLimitAddressKey("2001:db8:1:100::1", 56)).toBe("2001:db8:1:100::/56");
+    expect(rateLimitAddressKey("2001:db8:abcd:1234::1", 48)).toBe("2001:db8:abcd::/48");
+    expect(rateLimitAddressKey("2001:db8::7", 127)).toBe("2001:db8::6/127");
+    expect(rateLimitAddressKey("fe80::1", 1)).toBe("8000::/1");
+  });
+
+  it("keys the whole address, canonical, at 128", () => {
+    expect(rateLimitAddressKey("2001:0DB8:0:0:0:0:0:1", 128)).toBe("2001:db8::1");
+  });
+
+  it("returns a value it cannot key as normalised", () => {
+    expect(rateLimitAddressKey("not-an-ip")).toBe("not-an-ip");
+    expect(rateLimitAddressKey("2001:db8::1", 0)).toBe("2001:db8::1");
   });
 });

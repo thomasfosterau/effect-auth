@@ -100,20 +100,12 @@ Which email is "primary" is pinned in `attributes.scimUserName`. Without it, a `
 `PATCH {"active": false}` and `DELETE /Users/:id` both deactivate:
 
 - `attributes.scimDeactivated` is set to `true`,
-- every live session for that user is revoked,
+- every live session, API key and OIDC grant (access and refresh tokens, consents) the user holds is revoked,
 - the account, its identifiers, its organization membership and its audit trail all stay put.
 
 Reactivation (`PATCH {"active": true}`) is then a single write — which is what an IdP expects when somebody returns from leave, and what a hard delete would have made impossible.
 
-Revoking sessions closes the door on anyone already signed in. To keep it closed for _new_ sign-ins, add the plugin:
-
-```ts
-import { ScimDeactivatedPlugin, Hooks, composePlugins } from "@thomasfosterau/effect-auth";
-
-const hooks = composePlugins([ScimDeactivatedPlugin]).pipe(Layer.provide(Hooks.Default));
-```
-
-It mirrors `BannedUserPlugin`: a deactivated user fails session validation instead of being quietly let back in. Build it into the `Hooks` instance your `SessionService` is constructed with — `SessionService` resolves hooks once, at construction time.
+`SessionService` refuses a deactivated user a new session and refuses any session they still present, with no plugin to wire: `validateSession` and `createSession` fail with `UserBannedError`. The OIDC provider mints no tokens for them and its userinfo endpoint refuses them. JWTs already issued cannot be revoked and run to their expiry. `ScimDeactivatedPlugin` is now a deprecated no-op.
 
 ## 6. What is deliberately not supported
 

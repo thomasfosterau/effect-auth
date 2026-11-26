@@ -374,6 +374,29 @@ describe("parseClientDataJSON", () => {
     expect(parsed.challenge).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 
+  it("decodes challenges of every length as Node's base64url does", () => {
+    Arr.forEach(Arr.range(0, 66), (size) => {
+      const challenge = Uint8Array.from({ length: size }, (_, i) => (i * 37 + size) & 0xff);
+      const parsed = parseClientDataJSON(
+        encodeJson({
+          type: "webauthn.get",
+          challenge: Buffer.from(challenge).toString("base64url"),
+          origin: "https://example.com",
+        }),
+      );
+      expect(parsed.challenge).toEqual(challenge);
+    });
+  });
+
+  it("rejects a challenge whose trailing bits are not zero", () => {
+    // "AQ" is 0x01 with four zero bits; "AR" sets one of them.
+    expect(() =>
+      parseClientDataJSON(
+        encodeJson({ type: "webauthn.get", challenge: "AR", origin: "https://example.com" }),
+      ),
+    ).toThrow(ClientDataParseError);
+  });
+
   it("rejects invalid JSON", () => {
     expect(() => parseClientDataJSON(bytes(0x7b, 0x7b))).toThrow(ClientDataParseError);
     expect(() => parseClientDataJSON(new Uint8Array(0))).toThrow(

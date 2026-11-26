@@ -77,7 +77,7 @@ The set of services `Http.makeAsync` requires is `AuthServices` in `http/HttpSer
 
 ### Plugins vs hooks
 
-Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`, plus `BannedUserPlugin` from `Admin.ts` and `ScimDeactivatedPlugin` from `Scim.ts`. Register them where you would have provided `Auth.Hooks.Default`.
+Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`. Register them where you would have provided `Auth.Hooks.Default`.
 
 ## 3. Storage: adapters → store contracts
 
@@ -126,7 +126,7 @@ The default hasher is PBKDF2-SHA256; Argon2id is `Password.argon2idHasherLayer` 
 
 `Auth.MultiFactor.MultiFactorService` (`enable`, `confirmEnable`, `disable`, `isEnabled`, `beginChallenge`, `verifyTotp`, `verifyBackupCode`, `regenerateBackupCodes`) over `MultiFactorStore` + `PendingMultiFactorStore`, on `POST /multi-factor-enrollments` (enable), `PATCH` / `DELETE /multi-factor-enrollments/current` (confirm, disable), `POST /second-factor-challenges/verifications` (verify a TOTP or backup code) and `POST /backup-code-sets` (regenerate), as JSON:API resources. TOTP/HOTP primitives are in `Auth.MultiFactor` (`generateTotp`, `verifyTotp`, `generateHotp`, `verifyHotp`, `generateOtpUri`).
 
-Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiFactorGateLayer` (or `OtpSecondFactorGateLayer` for emailed/texted codes, or `TrustedDeviceWithMultiFactorGateLayer` / `TrustedDeviceWithOtpSecondFactorGateLayer` to honour remembered devices) and `signIn` returns a challenge instead of a session until the second factor clears. That replaces Better Auth's `twoFactor()` plugin plus its `trustDevice` option.
+Every sign-in method integrates through the `SecondFactorGate` seam (password, magic link, the one-time codes, OAuth, SSO and One Tap alike; `exemptFromSecondFactor` lists the methods sufficient alone, none by default): provide `MultiFactorGateLayer` (or `OtpSecondFactorGateLayer` for emailed/texted codes, or `TrustedDeviceWithMultiFactorGateLayer` / `TrustedDeviceWithOtpSecondFactorGateLayer` to honour remembered devices) and `signIn` returns a challenge instead of a session until the second factor clears. That replaces Better Auth's `twoFactor()` plugin plus its `trustDevice` option.
 
 ### Organizations and teams
 
@@ -134,7 +134,7 @@ Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiF
 
 ### Admin
 
-`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/users` (list with `filter[email]` and `page[offset]` / `page[limit]`, `PATCH` a `role`, `DELETE` a user or `/admin/users/:id/sessions`), `/user-bans` (ban, lift) and `/impersonations` (start, `DELETE /impersonations/current` to end). Pair it with `BannedUserPlugin` so a ban takes effect on the next request rather than at session expiry.
+`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/users` (list with `filter[email]` and `page[offset]` / `page[limit]`, `PATCH` a `role`, `DELETE` a user or `/admin/users/:id/sessions`), `/user-bans` (ban, lift) and `/impersonations` (start, `DELETE /impersonations/current` to end). A ban takes effect on the next request with no plugin: `SessionService` refuses a banned user's sessions, and the ban revokes their sessions, API keys and OIDC grants.
 
 ### API keys
 

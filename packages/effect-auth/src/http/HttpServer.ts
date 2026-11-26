@@ -14,6 +14,7 @@ import {
   Result,
   Scheduler,
   Scope,
+  Stream,
 } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -42,7 +43,14 @@ import {
   type SignInDocument,
 } from "./HttpApi.ts";
 import * as SessionCookies from "../SessionCookies.ts";
-import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
+import {
+  ClientIP,
+  DEFAULT_IPV6_RATE_LIMIT_PREFIX,
+  isIpv6RateLimitPrefix,
+  rateLimitAddressKey,
+  resolveClientIP,
+  type TrustedProxyConfig,
+} from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import { isRecipientSendCapped } from "../RecipientSendLimit.ts";
 import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
@@ -53,7 +61,7 @@ import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
 import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
-import { EmailPasswordService } from "../email/EmailPassword.ts";
+import { EmailPasswordService, type SessionOrChallenge } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
 import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
@@ -71,7 +79,13 @@ import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
-import { onlyAttributes, SIGN_UP_PROTECTED_ATTRIBUTES, UserService } from "../User.ts";
+import {
+  BAN_ATTRIBUTES,
+  onlyAttributes,
+  SIGN_UP_PROTECTED_ATTRIBUTES,
+  UserService,
+  withoutAttributes,
+} from "../User.ts";
 import {
   missingPermission,
   notAMember,
@@ -356,16 +370,23 @@ const lastMethodCookieOptions = (cfg: ResolvedCookieConfig, maxAge: number) =>
 /** Name of the device session-list cookie. */
 const multiCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_multi`;
 
-/** Parse the comma-separated device session-id list from the request. */
+/**
+ * Parse the device session-id list from the request: its distinct ids, at
+ * most `maximumSessions` of them (the newest, which the writer appends last),
+ * so a forged cookie cannot make one request validate more.
+ */
 const readDeviceSessionIds = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
 ): string[] => {
   const raw = request.cookies[multiCookieName(cfg)];
-  if (raw === undefined || raw === "") return [];
+  if (cfg.multiSession === undefined || raw === undefined || raw === "") return [];
   // "." separates ids: safe inside a cookie value (session ids are hex /
   // base64url) and, unlike ",", it doesn't confuse Set-Cookie parsing.
-  return raw.split(".").filter(Str.isNonEmpty);
+  return Arr.takeRight(
+    Arr.dedupe(raw.split(".").filter(Str.isNonEmpty)),
+    cfg.multiSession.maximumSessions,
+  );
 };
 
 /**
@@ -1094,7 +1115,7 @@ const refuseWithoutRateLimiter = (limit: string): Effect.Effect<never, S.TooMany
  *
  * A caller with no resolvable client address (or no `ClientIP` service in
  * scope) is refused, never keyed under a shared bucket and never let through
- * uncounted.
+ * uncounted. An IPv6 caller is keyed on its /64.
  */
 const applyRegistrationRateLimit = (
   limit: RateLimitConfig,
@@ -1107,7 +1128,11 @@ const applyRegistrationRateLimit = (
     const clientIp = yield* Effect.serviceOption(ClientIP);
     const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
     if (ip === undefined) return yield* new S.TooManyRequests({ message: NO_CLIENT_ADDRESS });
-    return yield* consumeRateLimitToken(rateLimiterOpt.value, `oidc-register:${ip}`, limit);
+    return yield* consumeRateLimitToken(
+      rateLimiterOpt.value,
+      `oidc-register:${rateLimitAddressKey(ip)}`,
+      limit,
+    );
   });
 
 /**
@@ -1415,7 +1440,53 @@ const setResponseCookie = (
     ),
   );
 
-/** The `users` resource of a user, its `email` fields derived from `identifiers`. */
+/**
+ * The attribute keys a user's `users` resource leaves out by default: the ban
+ * state (`banned`, `banReason`, `banExpires`) and the SCIM provisioning keys
+ * (`scimUserName`, `scimExternalId`, `scimDeactivated`). Server-side state the
+ * account holder has no use for, which an admin reads through `/admin/users`
+ * and `/user-bans`. `isAnonymous` and `role` stay visible: the client and the
+ * browser `Ladder` read them.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const CLIENT_HIDDEN_ATTRIBUTES: ReadonlyArray<string> = [
+  ...BAN_ATTRIBUTES,
+  "scimUserName",
+  "scimExternalId",
+  "scimDeactivated",
+];
+
+/**
+ * The attribute keys every `users` resource and user view this tier answers
+ * with leaves out, except on the admin endpoints. `Http.make` provides
+ * {@link AuthWebHandlerOptions.clientHiddenAttributes} here per request; the
+ * exported group layers, served some other way, read the default,
+ * {@link CLIENT_HIDDEN_ATTRIBUTES}.
+ *
+ * @since 0.9.0
+ * @category services
+ */
+export const ClientHiddenAttributes: Context.Reference<ReadonlyArray<string>> = Context.Reference<
+  ReadonlyArray<string>
+>("@effect-auth/http/ClientHiddenAttributes", { defaultValue: () => CLIENT_HIDDEN_ATTRIBUTES });
+
+/** `user` without the attribute keys `hidden` names. */
+const withoutHiddenAttributes = (user: Types.User, hidden: ReadonlyArray<string>): Types.User =>
+  Arr.isReadonlyArrayEmpty(hidden)
+    ? user
+    : { ...user, attributes: withoutAttributes(user.attributes, hidden) };
+
+/** `user` as a client may see it: without the {@link ClientHiddenAttributes}. */
+const clientUser = (user: Types.User): Effect.Effect<Types.User> =>
+  Effect.map(ClientHiddenAttributes, (hidden) => withoutHiddenAttributes(user, hidden));
+
+/**
+ * The `users` resource of a user, its `email` fields derived from
+ * `identifiers`. The whole attribute bag: callers pass a {@link clientUser}
+ * unless the reader is an admin.
+ */
 const userResource = (user: Types.User, identifiers?: ReadonlyArray<Identifier>): R.User => {
   const view = S.encodeUser(user, identifiers);
   return R.User.make({
@@ -1433,10 +1504,19 @@ const userResource = (user: Types.User, identifiers?: ReadonlyArray<Identifier>)
 };
 
 /**
- * {@link userResource} with the user's identifiers read from the store. As in
- * {@link encodeUserView}, a failed lookup only leaves the `email` fields out.
+ * {@link userResource} of the {@link clientUser}, with the user's identifiers
+ * read from the store. As in {@link encodeUserView}, a failed lookup only
+ * leaves the `email` fields out.
  */
 const loadUserResource = (user: Types.User): Effect.Effect<R.User, never, IdentifierStore> =>
+  Effect.flatMap(clientUser(user), loadAdminUserResource);
+
+/**
+ * {@link userResource} with the whole attribute bag, for the admin endpoints
+ * (`/admin/users`, `/user-bans`), with the identifiers read as in
+ * {@link loadUserResource}.
+ */
+const loadAdminUserResource = (user: Types.User): Effect.Effect<R.User, never, IdentifierStore> =>
   Effect.map(userIdentifiers(user), (list) => userResource(user, list));
 
 /**
@@ -1589,7 +1669,7 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
           // A cache-served answer deliberately skips the store round-trip, so
           // the derived email fields are omitted there.
           const user = cacheHit
-            ? userResource(resolved.user)
+            ? userResource(yield* clientUser(resolved.user))
             : yield* loadUserResource(resolved.user);
           return withUser
             ? Handlers.data(sessionResource(resolved.session), { included: [user] })
@@ -1957,7 +2037,7 @@ const invalidCode = (e: { readonly message: string }) =>
 /** The outcome of a passwordless sign-in, which never awaits a verification. */
 const passwordless =
   (method: string) =>
-  (result: { readonly user: Types.User } & Types.IssuedSession): SignInOutcome => ({
+  (result: { readonly user: Types.User } & SessionOrChallenge): SignInOutcome => ({
     ...result,
     needsEmailVerification: false,
     method,
@@ -2118,7 +2198,7 @@ const signUpWith = (payload: S.SignUpPayload, allowedAttributes: ReadonlyArray<s
       ...result,
       method: "email-password",
       ...(result.identifier?.type === "email" && {
-        userResource: signUpUserResource(result.user, result.identifier.value),
+        userResource: signUpUserResource(yield* clientUser(result.user), result.identifier.value),
       }),
     } satisfies SignInOutcome;
   });
@@ -2253,11 +2333,12 @@ export const emailVerificationsGroupLayer = (
                 ...hookFailures,
               }),
             );
-          // `201` with the session when verification signs the user in.
-          const { session, token } = result;
-          if (session === undefined || token === undefined) return yield* Effect.void;
-          yield* issueSession({ session, token }, cfg, "email-password", undefined);
-          return yield* signedIn({ ...result, session, method: "email-password" });
+          // `201` with the session when verification signs the user in, `202`
+          // with the challenge when the second-factor gate stops it.
+          if (result.session === undefined && result.secondFactor === undefined) {
+            return yield* Effect.void;
+          }
+          return yield* answerSignIn({ ...result, method: "email-password" }, cfg);
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -3496,7 +3577,9 @@ export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: Multi
         Effect.gen(function* () {
           const { admin, actor } = yield* adminActor(request, cfg);
           const result = yield* asAdmin(admin.listUsers(actor, listUsersQuery(query)));
-          const users = yield* Effect.forEach(result.users, loadUserResource, { concurrency: 1 });
+          const users = yield* Effect.forEach(result.users, loadAdminUserResource, {
+            concurrency: 1,
+          });
           return Handlers.collection(users, { meta: { total: result.total } });
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
@@ -3506,7 +3589,7 @@ export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: Multi
           const user = yield* asAdmin(
             admin.setRole(actor, params.id, payload.data.attributes.role),
           );
-          return Handlers.data(yield* loadUserResource(user));
+          return Handlers.data(yield* loadAdminUserResource(user));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle(
@@ -3554,7 +3637,7 @@ export const userBansGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
             ),
           );
           return Handlers.data(userBanResource(banned), {
-            included: [yield* loadUserResource(banned)],
+            included: [yield* loadAdminUserResource(banned)],
           });
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
@@ -4128,11 +4211,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 ),
             }),
           );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result, cfg, "sso");
+          return yield* answerIdpSignIn(result, cfg, "sso");
         }),
       )
       // SAML assertion consumer service. The IdP form-POSTs here through the
@@ -4174,11 +4253,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                   ),
               }),
             );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result, cfg, "sso");
+          return yield* answerIdpSignIn(result, cfg, "sso");
         }),
       )
       .handle("samlMetadata", ({ params }) =>
@@ -4895,7 +4970,9 @@ export const scimGroupLayer = () =>
  * (with a warning) rather than failing a flow that already succeeded.
  */
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
-  Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
+  Effect.flatMap(clientUser(user), (visible) =>
+    Effect.map(userIdentifiers(visible), (list) => S.encodeUser(visible, list)),
+  );
 
 /**
  * A `validateSession` failure as the HTTP tier answers it. A refusal
@@ -5003,6 +5080,27 @@ const requireInteractiveCredential = (
  * The server-side session lifetime is unchanged; orphaned sessions expire via
  * the normal idle/absolute-lifetime checks.
  */
+/**
+ * Answer an identity-provider callback: the session cookie, or, when the
+ * second-factor gate stopped the sign-in, the challenge in `secondFactor`
+ * (`no-store`, like every answer that hands one over) and no cookie.
+ */
+const answerIdpSignIn = (
+  result: { readonly user: Types.User } & SessionOrChallenge,
+  cfg: ResolvedCookieConfig,
+  method: string,
+) =>
+  Effect.gen(function* () {
+    const body: S.AuthSuccess = {
+      user: yield* encodeUserView(result.user),
+      needsEmailVerification: false,
+      ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
+    };
+    if (result.session !== undefined) return yield* withSessionCookie(body, result, cfg, method);
+    yield* noStore;
+    return yield* HttpServerResponse.json(body).pipe(Effect.orDie);
+  });
+
 const withSessionCookie = (
   body: S.AuthSuccess,
   issued: Types.IssuedSession,
@@ -5141,6 +5239,14 @@ export interface HttpIPRateLimitConfig {
    * (availability over abuse protection), as `AccountLockoutPlugin`'s option.
    */
   readonly onStoreError?: "fail-closed" | "fail-open" | undefined;
+  /**
+   * How many leading bits of an IPv6 address make one client: every address
+   * in that prefix counts in one bucket, so a customer's /64 cannot mint a
+   * fresh budget per address. An integer from 1 to 128; `128` keys each
+   * address on its own. IPv4 addresses are keyed as they are. Default `64`.
+   * Any other value makes `make` throw `RateLimiterConfigError`.
+   */
+  readonly ipv6PrefixLength?: number | undefined;
 }
 
 const MINUTE_MS = 60 * 1000;
@@ -5291,6 +5397,7 @@ const noRateLimiterResponse = (): Effect.Effect<HttpServerResponse.HttpServerRes
 const consumeEndpointLimit = (
   rule: EndpointRateLimitRule,
   failOpen: boolean,
+  ipv6PrefixLength: number,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse | undefined> =>
   Effect.gen(function* () {
     const limiter = yield* Effect.serviceOption(RateLimiter);
@@ -5301,7 +5408,7 @@ const consumeEndpointLimit = (
       return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
     }
     const denied = yield* limiter.value
-      .consumeToken(`ip:${ruleKey(rule)}:${ip}`, {
+      .consumeToken(`ip:${ruleKey(rule)}:${rateLimitAddressKey(ip, ipv6PrefixLength)}`, {
         maxRequests: rule.maxRequests,
         windowMs: rule.windowMs,
         ...(rule.blockDurationMs !== undefined && { blockDurationMs: rule.blockDurationMs }),
@@ -5340,14 +5447,21 @@ const limiterStoreFaultResponse = (): HttpServerResponse.HttpServerResponse =>
  * request or runs any auth logic, and finds its rule by the matched endpoint's
  * path template and method, so no spelling of the path escapes it.
  */
-const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>, failOpen: boolean) =>
+const endpointRateLimit = (
+  rules: ReadonlyArray<EndpointRateLimitRule>,
+  failOpen: boolean,
+  ipv6PrefixLength: number,
+) =>
   HttpRouter.middleware((effect) =>
     Effect.gen(function* () {
       const { route } = yield* HttpRouter.RouteContext;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const method = route.method === "*" ? request.method.toUpperCase() : route.method;
       const rule = findEndpointRule(rules, openApiTemplate(route.path), method);
-      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule, failOpen);
+      const refused =
+        rule === undefined
+          ? undefined
+          : yield* consumeEndpointLimit(rule, failOpen, ipv6PrefixLength);
       return refused ?? (yield* effect);
     }),
   ).layer;
@@ -5369,6 +5483,11 @@ const tokenEndpointsNoStore = HttpRouter.middleware((effect) =>
     return yield* effect;
   }),
 ).layer;
+
+/** The IPv6 prefix `ipRateLimit` groups a client by: its own, else /64. */
+const ipv6PrefixLength = (ipRateLimit: HttpIPRateLimitConfig | false | undefined): number =>
+  (ipRateLimit === false ? undefined : ipRateLimit?.ipv6PrefixLength) ??
+  DEFAULT_IPV6_RATE_LIMIT_PREFIX;
 
 /** The rules `ipRateLimit` puts in force: none for `false`, else its own or the defaults. */
 const endpointRules = (
@@ -5446,6 +5565,20 @@ export interface AuthWebHandlerOptions {
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
   /**
+   * The keys of a user's `attributes` left out of every `users` resource and
+   * user view the handler answers with, except on the admin endpoints
+   * (`/admin/users`, `/user-bans`), which show the whole bag. Default
+   * {@link CLIENT_HIDDEN_ATTRIBUTES}: the ban and SCIM keys. Hiding a key only
+   * hides it; it does not refuse writes (`UserServiceConfig.serverOnlyAttributes`
+   * does that). Add server-side keys of your own with
+   * `[...CLIENT_HIDDEN_ATTRIBUTES, "internalNote"]`.
+   *
+   * `RemoteSession` reads users through `/sessions/current` and
+   * `/api-keys/current`, so an app that authorizes on a hidden key over it
+   * needs that key left visible here.
+   */
+  readonly clientHiddenAttributes?: ReadonlyArray<string> | undefined;
+  /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
    */
@@ -5469,13 +5602,12 @@ export interface AuthWebHandlerOptions {
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
   /**
-   * Maximum allowed request-body size in bytes. Requests whose
-   * `Content-Length` header exceeds this limit are rejected with `413 Payload
-   * Too Large` before the body is read or decoded. Default `65536` (64 KiB).
-   *
-   * Note: `Content-Length` is advisory — a client that omits it or sends a
-   * chunked body bypasses this check. Pair with a reverse-proxy body-size
-   * limit for a complete defence.
+   * Maximum allowed request-body size in bytes. Default `65536` (64 KiB).
+   * A request whose `Content-Length` exceeds it is refused with `413 Payload
+   * Too Large` before its body is read; any other body is counted as it
+   * streams in and refused with `413` as soon as it passes the limit, so an
+   * omitted or understated `Content-Length` (a chunked body) does not bypass
+   * it. The body is read into memory before it is decoded.
    */
   readonly maxBodySize?: number;
   /**
@@ -5710,12 +5842,13 @@ export interface AuthWebHandler {
  * keyed by client address needs an address source. A Web Request has no socket
  * address, so `trustedProxy` must be configured; `allowMissingClientIp: true`
  * without it would refuse every request to a limited endpoint, so it is
- * refused too.
+ * refused too. Its IPv6 prefix length must be one it can key on.
  */
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
-): ClientAddressConfigError | undefined =>
+): ClientAddressConfigError | RateLimiterConfigError | undefined =>
   trustedProxyError(options) ??
+  ipv6PrefixError(options) ??
   (options.ipRateLimit !== false && options.trustedProxy === undefined
     ? new ClientAddressConfigError({
         message:
@@ -5725,6 +5858,16 @@ const ipRateLimitAddressError = (
           allowMissingClientIpNote(options),
       })
     : undefined);
+
+/** An `ipRateLimit.ipv6PrefixLength` that is not an integer from 1 to 128. */
+const ipv6PrefixError = (options: AuthWebHandlerOptions): RateLimiterConfigError | undefined => {
+  const length = ipv6PrefixLength(options.ipRateLimit);
+  return isIpv6RateLimitPrefix(length)
+    ? undefined
+    : new RateLimiterConfigError({
+        message: `ipRateLimit.ipv6PrefixLength must be an integer from 1 to 128, got ${String(length)}.`,
+      });
+};
 
 /**
  * A `trustedProxy` that can never resolve an address: a `hopCount` that is not
@@ -5829,6 +5972,7 @@ const serve = (
       endpointRateLimit(
         endpointRules(options.ipRateLimit),
         options.ipRateLimit !== false && options.ipRateLimit?.onStoreError === "fail-open",
+        ipv6PrefixLength(options.ipRateLimit),
       ),
     ),
     Layer.provide(tokenEndpointsNoStore),
@@ -5841,6 +5985,7 @@ const serve = (
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
   const appLayer = apiLayer.pipe(Layer.provideMerge(services));
 
+  const clientHiddenAttributes = options.clientHiddenAttributes ?? CLIENT_HIDDEN_ATTRIBUTES;
   const web = HttpRouter.toWebHandler(appLayer, {
     // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
     // `context` parameter of `web.handler` optional.
@@ -5852,7 +5997,10 @@ const serve = (
         const ip = resolveClientIP(req, options.trustedProxy);
         // Provide the resolved ClientIP to all downstream effects (the IP
         // limit, hooks, handlers).
-        return yield* effect.pipe(Effect.provideService(ClientIP, { ip }));
+        return yield* effect.pipe(
+          Effect.provideService(ClientIP, { ip }),
+          Effect.provideService(ClientHiddenAttributes, clientHiddenAttributes),
+        );
       }) as Effect.Effect<HttpServerResponse.HttpServerResponse>,
   });
 
@@ -5884,9 +6032,8 @@ const serve = (
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
 
-    // Reject bodies that exceed the configured limit before parsing.
-    // Content-Length is advisory; complement with a proxy-level limit for full
-    // coverage of chunked / omitted-length bodies.
+    // A declared length over the limit is refused before anything is read;
+    // `readBodyWithin` below counts the bytes that actually arrive.
     const contentLength = request.headers.get("content-length");
     if (contentLength !== null) {
       const bytes = parseInt(contentLength, 10);
@@ -5900,17 +6047,59 @@ const serve = (
       if (inner === "/reference") return Promise.resolve(referenceResponse());
     }
 
-    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`;
-    // the cookie writers above mark theirs, and this holds the rule
-    // for the whole handler.
-    if (inner !== null && prefix !== "") {
-      url.pathname = inner || "/";
-      return web.handler(new Request(url, request), context).then(noStoreWithSetCookie);
-    }
-    return web.handler(request, context).then(noStoreWithSetCookie);
+    return Effect.runPromise(Effect.result(readBodyWithin(request, maxBodySize))).then((read) => {
+      if (Result.isFailure(read)) {
+        return read.failure === "too-large"
+          ? Response.json({ message: "Payload too large" }, { status: 413 })
+          : Response.json({ message: "Bad Request" }, { status: 400 });
+      }
+      // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`;
+      // the cookie writers above mark theirs, and this holds the rule
+      // for the whole handler.
+      if (inner !== null && prefix !== "") {
+        url.pathname = inner || "/";
+        return web.handler(new Request(url, read.success), context).then(noStoreWithSetCookie);
+      }
+      return web.handler(read.success, context).then(noStoreWithSetCookie);
+    });
   };
   const dispose = (): Promise<void> => web.dispose().then(() => Effect.runPromise(release));
   return { handler, dispose };
+};
+
+/** Why {@link readBodyWithin} refused a body: `413` or `400`. */
+type BodyRefusal = "too-large" | "unreadable";
+
+/**
+ * The request with its body read into memory, counting the bytes as they
+ * arrive: refused `"too-large"` as soon as they pass `maxBytes` (the stream
+ * is cancelled, the rest never read), `"unreadable"` when the stream fails.
+ */
+const readBodyWithin = (
+  request: Request,
+  maxBytes: number,
+): Effect.Effect<Request, BodyRefusal> => {
+  const body = request.body;
+  if (body === null) return Effect.succeed(request);
+  let received = 0;
+  return Stream.fromReadableStream({
+    evaluate: () => body,
+    onError: (): BodyRefusal => "unreadable",
+  }).pipe(
+    Stream.mapEffect((chunk) => {
+      received += chunk.byteLength;
+      return received > maxBytes ? Effect.fail<BodyRefusal>("too-large") : Effect.succeed(chunk);
+    }),
+    Stream.runCollect,
+    Effect.map((chunks) => {
+      const bytes = new Uint8Array(received);
+      Arr.reduce(chunks, 0, (offset, chunk) => {
+        bytes.set(chunk, offset);
+        return offset + chunk.byteLength;
+      });
+      return new Request(request, { method: request.method, body: bytes });
+    }),
+  );
 };
 
 /**

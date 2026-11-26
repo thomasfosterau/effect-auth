@@ -25,7 +25,11 @@ import type { RateLimitStore } from "./RateLimit.ts";
 import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -146,12 +150,7 @@ export interface MagicLinkVerifyOptions {
 /**
  * Result of a successful magic link verification
  */
-export interface MagicLinkResult {
-  readonly user: Types.User;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
-}
+export type MagicLinkResult = { readonly user: Types.User } & SessionOrChallenge;
 
 /**
  * Magic link service.
@@ -434,16 +433,13 @@ export const make = (
           yield* proveAddress(firstProof, identifier);
         }
 
-        const { session, token } = yield* sessionManager.createSession(
-          user.id,
+        const issued = yield* sessionOrChallenge(
+          sessionManager,
+          user,
+          "magic-link",
           options?.sessionAttributes,
         );
-
-        return {
-          user,
-          session,
-          token,
-        } satisfies MagicLinkResult;
+        return { user, ...issued } satisfies MagicLinkResult;
       }),
     };
   });

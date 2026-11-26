@@ -169,6 +169,69 @@ describe("ApiKeyService", () => {
     expect(result.stored.lastUsedAt).toBe(result.before.apiKey?.lastUsedAt);
   });
 
+  describe("an owner out of good standing", () => {
+    const refused = { valid: false, error: "Invalid API key", reason: "invalid" };
+    const setOwner = (attributes: Record<string, boolean | number>) =>
+      Effect.sync(() =>
+        MutableHashMap.set(users.users, "user-standing", {
+          ...fixtureUser(),
+          id: "user-standing",
+          attributes,
+        }),
+      );
+
+    it.each([
+      ["banned", { banned: true }],
+      ["banned until a future time", { banned: true, banExpires: Number.MAX_SAFE_INTEGER }],
+      ["SCIM-deactivated", { scimDeactivated: true }],
+    ])(
+      "refuses a key whose owner is %s on both verify paths, spending nothing",
+      async (_, attributes) => {
+        const result = await runService((service) =>
+          Effect.gen(function* () {
+            yield* setOwner({});
+            const created = yield* service.create("user-standing", {
+              remaining: 5,
+              rateLimit: { maxRequests: 1, windowMs: 60_000 },
+            });
+            yield* setOwner(attributes);
+            return {
+              verify: yield* service.verify(created.key),
+              verifyWithRateLimit: yield* service.verifyWithRateLimit(created.key),
+              stored: yield* service.get(created.apiKey.id),
+              // Reinstated, the key works again: the refusal deleted nothing
+              // and took nothing from the per-key bucket.
+              reinstated: yield* setOwner({}).pipe(
+                Effect.andThen(service.verifyWithRateLimit(created.key)),
+              ),
+            };
+          }),
+        );
+        expect(result.verify).toEqual(refused);
+        expect(result.verifyWithRateLimit).toEqual(refused);
+        expect(result.stored.remaining).toBe(5);
+        expect(result.stored.lastUsedAt).toBeUndefined();
+        expect(result.reinstated.valid).toBe(true);
+        expect(result.reinstated.apiKey?.remaining).toBe(4);
+      },
+    );
+
+    it("verifies a key whose owner's ban has lapsed", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          yield* setOwner({ banned: true, banExpires: 0 });
+          const created = yield* service.create("user-standing");
+          return {
+            verify: yield* service.verify(created.key),
+            verifyWithRateLimit: yield* service.verifyWithRateLimit(created.key),
+          };
+        }),
+      );
+      expect(result.verify.valid).toBe(true);
+      expect(result.verifyWithRateLimit.valid).toBe(true);
+    });
+  });
+
   it("should reject unknown keys", async () => {
     const result = await runService((service) => service.verify("ak_does-not-exist"));
     expect(result.valid).toBe(false);

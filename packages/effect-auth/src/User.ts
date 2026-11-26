@@ -98,6 +98,18 @@ export const onlyAttributes = (
   return R.isEmptyRecord(kept) ? undefined : kept;
 };
 
+/**
+ * A copy of `attributes` without the keys `keys` names: how the HTTP tier
+ * leaves its client-hidden attributes out of a user it answers with.
+ *
+ * @since 0.9.0
+ * @category utils
+ */
+export const withoutAttributes = (
+  attributes: Types.Attributes,
+  keys: ReadonlyArray<string>,
+): Types.Attributes => R.filter(attributes, (_, key) => !keys.includes(key));
+
 export interface UserServiceConfig {
   /**
    * Attribute keys `updateUserAttributes` refuses to write, whoever calls it

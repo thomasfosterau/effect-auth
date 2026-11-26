@@ -30,7 +30,6 @@ import * as Scim from "./Scim.ts";
 import {
   memoryScimConnectionStore,
   ScimConnectionStore,
-  ScimDeactivatedPlugin,
   ScimError,
   ScimService,
   ScimUserStore,
@@ -43,6 +42,13 @@ import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { UserService, UserServiceStore } from "./User.ts";
 import type * as Types from "./Types.ts";
 import { expectSpecJson } from "./testing/WireFormat.ts";
+import { ApiKeyStore, type ApiKey } from "./ApiKey.ts";
+import { OidcConsentStore, OidcTokenStore, type OidcToken } from "./OidcProvider.ts";
+import {
+  memoryApiKeyStore,
+  memoryOidcConsentStore,
+  memoryOidcTokenStore,
+} from "./testing/MemoryStores.ts";
 
 const ORG_A = "org-a";
 const ORG_B = "org-b";
@@ -972,42 +978,68 @@ describe("ScimService — groups", () => {
   });
 });
 
-describe("ScimDeactivatedPlugin", () => {
-  it("fails session validation for a deactivated user and passes everyone else", async () => {
-    const active: Types.SessionWithUser = {
-      session: {
-        id: "s1",
-        userId: "u1",
-        expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
-      },
-      user: {
-        id: "u1",
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
-      },
-    };
-    const deactivated: Types.SessionWithUser = {
-      ...active,
-      user: { ...active.user, attributes: { [SCIM_DEACTIVATED_ATTRIBUTE]: true } },
-    };
-
-    const layer = ScimDeactivatedPlugin.pipe(Layer.provide(Hooks.Default));
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
-        return {
-          allowed: yield* hooks.afterValidateSession(active),
-          blocked: yield* Effect.flip(hooks.afterValidateSession(deactivated)),
-        };
-      }).pipe(Effect.provide(layer)),
+describe("ScimService — deactivation revokes access", () => {
+  it("revokes the user's API keys and OIDC tokens and consents, and no one else's", async () => {
+    const stores = makeStores();
+    const keys = MutableHashMap.empty<string, ApiKey>();
+    const tokens = MutableHashMap.empty<string, OidcToken>();
+    const consentStore = memoryOidcConsentStore();
+    const service = await Effect.runPromise(
+      Scim.make({}).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            stores.layer,
+            Layer.succeed(ApiKeyStore)(memoryApiKeyStore(keys)),
+            Layer.succeed(OidcTokenStore)(memoryOidcTokenStore(tokens)),
+            Layer.succeed(OidcConsentStore)(consentStore),
+          ),
+        ),
+      ),
     );
+    const connection = (await Effect.runPromise(service.createConnection(ORG_A))).connection;
+    const ada = await Effect.runPromise(service.createUser(connection, ADA));
+    const grace = await Effect.runPromise(
+      service.createUser(connection, { userName: "grace@acme.test", externalId: "okta-2" }),
+    );
+    const seedGrants = (userId: string) => {
+      MutableHashMap.set(keys, `key-${userId}`, {
+        id: `key-${userId}`,
+        start: "abcdef",
+        keyHash: `hash-${userId}`,
+        userId,
+        enabled: true,
+        metadata: {},
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      MutableHashMap.set(tokens, `token-${userId}`, {
+        tokenHash: `token-${userId}`,
+        kind: "access",
+        clientId: "client",
+        userId,
+        scopes: ["openid"],
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        createdAt: 0,
+      });
+      Effect.runSync(
+        consentStore.upsert({
+          userId,
+          clientId: "client",
+          scopes: ["openid"],
+          createdAt: 0,
+          updatedAt: 0,
+        }),
+      );
+    };
+    seedGrants(ada.id);
+    seedGrants(grace.id);
 
-    expect(result.allowed.user.id).toBe("u1");
-    expect(result.blocked._tag).toBe("UserBannedError");
+    await Effect.runPromise(service.deactivateUser(connection, ada.id));
+
+    expect(Arr.fromIterable(MutableHashMap.keys(keys))).toEqual([`key-${grace.id}`]);
+    expect(Arr.fromIterable(MutableHashMap.keys(tokens))).toEqual([`token-${grace.id}`]);
+    expect(Effect.runSync(consentStore.get(ada.id, "client"))).toBeNull();
+    expect(Effect.runSync(consentStore.get(grace.id, "client"))).not.toBeNull();
   });
 });
 

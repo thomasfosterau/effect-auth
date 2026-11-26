@@ -17,6 +17,7 @@ import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
+import { sessionOrChallenge, type SessionOrChallenge } from "./email/EmailPassword.ts";
 import {
   claimIdentifier,
   IdentifierStore,
@@ -225,12 +226,7 @@ export interface PhoneOtpSignInOptions {
 }
 
 /** The user and session issued by a phone OTP sign-in. */
-export interface PhoneOtpAuthResult {
-  readonly user: Types.User;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
-}
+export type PhoneOtpAuthResult = { readonly user: Types.User } & SessionOrChallenge;
 
 /**
  * Sign-in and phone-number verification by SMS one-time code. Codes are stored hashed, with an attempt limit.
@@ -498,12 +494,13 @@ export const make = (
           yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
         }
 
-        const { session, token } = yield* sessionManager.createSession(
-          user.id,
+        const issued = yield* sessionOrChallenge(
+          sessionManager,
+          user,
+          "phone-otp",
           options?.sessionAttributes,
         );
-
-        return { user, session, token } satisfies PhoneOtpAuthResult;
+        return { user, ...issued } satisfies PhoneOtpAuthResult;
       }),
 
       verifyPhoneNumber: Effect.fn("PhoneOtpService.verifyPhoneNumber")(function* (
