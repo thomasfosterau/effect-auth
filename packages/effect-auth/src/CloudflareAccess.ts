@@ -108,14 +108,14 @@ export type CloudflareAccessFailure = typeof CloudflareAccessFailure.Type;
  * @since 0.6.0
  * @category errors
  */
-export class CloudflareAccessError extends Schema.TaggedError<CloudflareAccessError>()(
-  "CloudflareAccessError",
-  {
-    reason: CloudflareAccessFailure,
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class CloudflareAccessError extends Schema.TaggedError<
+  CloudflareAccessError,
+  { readonly brand: unique symbol }
+>()("CloudflareAccessError", {
+  reason: CloudflareAccessFailure,
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 // ---------------------------------------------------------------------------
 // Config and identity

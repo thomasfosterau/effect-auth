@@ -34,7 +34,10 @@ import { purgeUser, userPurgeStores } from "../UserPurge.ts";
 // ---------------------------------------------------------------------------
 
 /** The failure the broken test connection reports. */
-class SimulatedFailure extends Schema.TaggedError<SimulatedFailure>()("SimulatedFailure", {
+class SimulatedFailure extends Schema.TaggedError<
+  SimulatedFailure,
+  { readonly brand: unique symbol }
+>()("SimulatedFailure", {
   message: Schema.String,
 }) {}
 

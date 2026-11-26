@@ -33,13 +33,13 @@ import { randomBase64UrlToken } from "../RandomToken.ts";
 /**
  * Failure of the OTP second factor: an expired, unknown or exhausted challenge, a wrong code, or a failed send.
  */
-export class OtpSecondFactorError extends Schema.TaggedError<OtpSecondFactorError>()(
-  "OtpSecondFactorError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class OtpSecondFactorError extends Schema.TaggedError<
+  OtpSecondFactorError,
+  { readonly brand: unique symbol }
+>()("OtpSecondFactorError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 // ---------------------------------------------------------------------------
 // Record + Store

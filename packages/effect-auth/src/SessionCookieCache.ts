@@ -63,12 +63,12 @@ export interface ResolvedSessionCache {
 const MIN_SECRET_LENGTH = 32;
 
 /** The session cache is enabled with an HMAC secret that is too short. */
-class SessionCacheConfigError extends Schema.TaggedError<SessionCacheConfigError>()(
-  "SessionCacheConfigError",
-  {
-    message: Schema.String,
-  },
-) {}
+class SessionCacheConfigError extends Schema.TaggedError<
+  SessionCacheConfigError,
+  { readonly brand: unique symbol }
+>()("SessionCacheConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Validate a {@link SessionCacheConfig}: `undefined` when the cache is disabled, otherwise the resolved settings. Throws when the secret is shorter than 32 characters.

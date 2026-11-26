@@ -104,7 +104,10 @@ export class DeviceAuthorizationStore extends Context.Service<
 >()("@effect-auth/DeviceAuthorizationStore") {}
 
 /** RFC 8628 polling errors, mapped to the standard OAuth `error` codes. */
-export class DevicePollError extends Schema.TaggedError<DevicePollError>()("DevicePollError", {
+export class DevicePollError extends Schema.TaggedError<
+  DevicePollError,
+  { readonly brand: unique symbol }
+>()("DevicePollError", {
   error: Schema.Literals([
     "authorization_pending",
     "slow_down",
@@ -116,7 +119,10 @@ export class DevicePollError extends Schema.TaggedError<DevicePollError>()("Devi
 }) {}
 
 /** Raised when a user code is unknown, expired or already decided at lookup, approve or deny time. */
-export class DeviceCodeError extends Schema.TaggedError<DeviceCodeError>()("DeviceCodeError", {
+export class DeviceCodeError extends Schema.TaggedError<
+  DeviceCodeError,
+  { readonly brand: unique symbol }
+>()("DeviceCodeError", {
   message: Schema.String,
 }) {}
 
@@ -125,13 +131,13 @@ export class DeviceCodeError extends Schema.TaggedError<DeviceCodeError>()("Devi
  * registered (`invalid_client`) or a scope the client is not registered for
  * (`invalid_scope`), the OAuth error codes RFC 8628 §3.2 answers with.
  */
-export class DeviceClientError extends Schema.TaggedError<DeviceClientError>()(
-  "DeviceClientError",
-  {
-    error: Schema.Literals(["invalid_client", "invalid_scope"]),
-    message: Schema.String,
-  },
-) {}
+export class DeviceClientError extends Schema.TaggedError<
+  DeviceClientError,
+  { readonly brand: unique symbol }
+>()("DeviceClientError", {
+  error: Schema.Literals(["invalid_client", "invalid_scope"]),
+  message: Schema.String,
+}) {}
 
 /** A client allowed to start the device grant. */
 export interface DeviceClient {

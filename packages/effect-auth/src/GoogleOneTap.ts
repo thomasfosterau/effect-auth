@@ -34,13 +34,13 @@ import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
-export class GoogleOneTapError extends Schema.TaggedError<GoogleOneTapError>()(
-  "GoogleOneTapError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class GoogleOneTapError extends Schema.TaggedError<
+  GoogleOneTapError,
+  { readonly brand: unique symbol }
+>()("GoogleOneTapError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /** Google's JWKS document location. */
 export const GOOGLE_JWKS_ENDPOINT = "https://www.googleapis.com/oauth2/v3/certs";

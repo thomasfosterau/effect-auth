@@ -23,12 +23,12 @@ import { HttpServerRequest } from "effect/http";
 // ---------------------------------------------------------------------------
 
 /** Thrown by `ClientIP.trustedHeader` for a malformed header name. */
-class InvalidHeaderNameError extends Schema.TaggedError<InvalidHeaderNameError>()(
-  "InvalidHeaderNameError",
-  {
-    message: Schema.String,
-  },
-) {}
+class InvalidHeaderNameError extends Schema.TaggedError<
+  InvalidHeaderNameError,
+  { readonly brand: unique symbol }
+>()("InvalidHeaderNameError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Trust forwarded-IP headers from a fixed number of proxy hops.

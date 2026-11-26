@@ -745,7 +745,10 @@ const getRpIdHash = async (): Promise<Uint8Array> => {
 };
 
 /** `signAssertion` rejected; a test-setup failure, surfaced as a defect. */
-class SignAssertionError extends Schema.TaggedError<SignAssertionError>()("SignAssertionError", {
+class SignAssertionError extends Schema.TaggedError<
+  SignAssertionError,
+  { readonly brand: unique symbol }
+>()("SignAssertionError", {
   cause: Schema.Unknown,
 }) {}
 

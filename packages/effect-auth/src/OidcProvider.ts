@@ -34,20 +34,23 @@ import { isInGoodStanding } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register a client or process an authorization request. */
-export class OidcProviderError extends Schema.TaggedError<OidcProviderError>()(
-  "OidcProviderError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class OidcProviderError extends Schema.TaggedError<
+  OidcProviderError,
+  { readonly brand: unique symbol }
+>()("OidcProviderError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * Token endpoint failure carrying an RFC 6749 error code
  * (`invalid_request`, `invalid_client`, `invalid_grant`,
  * `unsupported_grant_type`, `invalid_scope`, `server_error`).
  */
-export class OidcTokenError extends Schema.TaggedError<OidcTokenError>()("OidcTokenError", {
+export class OidcTokenError extends Schema.TaggedError<
+  OidcTokenError,
+  { readonly brand: unique symbol }
+>()("OidcTokenError", {
   error: Schema.String,
   description: Schema.optionalKey(Schema.String),
 }) {}
@@ -58,13 +61,13 @@ export class OidcTokenError extends Schema.TaggedError<OidcTokenError>()("OidcTo
  * guarded endpoints need: `invalid_token` (bad initial-access or registration
  * access token → 401) and `access_denied` (refused outright → 403).
  */
-export class OidcRegistrationError extends Schema.TaggedError<OidcRegistrationError>()(
-  "OidcRegistrationError",
-  {
-    error: Schema.String,
-    description: Schema.optionalKey(Schema.String),
-  },
-) {}
+export class OidcRegistrationError extends Schema.TaggedError<
+  OidcRegistrationError,
+  { readonly brand: unique symbol }
+>()("OidcRegistrationError", {
+  error: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+}) {}
 
 // -----------------------------------------------------------------------------
 // Records + stores

@@ -282,12 +282,12 @@ export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSch
  * onto a column the stores already write as a fixed field (`id`, `name`,
  * `image`, `attributes`, `createdAt`, `updatedAt`, `passwordHash`).
  */
-export class SchemaMappingError extends Schema.TaggedError<SchemaMappingError>()(
-  "SchemaMappingError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class SchemaMappingError extends Schema.TaggedError<
+  SchemaMappingError,
+  { readonly brand: unique symbol }
+>()("SchemaMappingError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Point the stores at tables this package did not define.

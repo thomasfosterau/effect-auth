@@ -126,12 +126,12 @@ export type AttestationConveyancePreference = "none" | "indirect" | "direct" | "
  * does not give; the layer build dies with this error, so the app fails to
  * start.
  */
-export class WebAuthnConfigError extends Schema.TaggedError<WebAuthnConfigError>()(
-  "WebAuthnConfigError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class WebAuthnConfigError extends Schema.TaggedError<
+  WebAuthnConfigError,
+  { readonly brand: unique symbol }
+>()("WebAuthnConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Configuration for WebAuthn service
@@ -929,12 +929,12 @@ export class WebAuthnService extends Context.Service<
 }
 
 /** A COSE algorithm outside {@link SUPPORTED_COSE_ALGORITHMS} reached key handling. */
-class UnsupportedAlgorithmError extends Schema.TaggedError<UnsupportedAlgorithmError>()(
-  "UnsupportedAlgorithmError",
-  {
-    message: Schema.String,
-  },
-) {}
+class UnsupportedAlgorithmError extends Schema.TaggedError<
+  UnsupportedAlgorithmError,
+  { readonly brand: unique symbol }
+>()("UnsupportedAlgorithmError", {
+  message: Schema.String,
+}) {}
 
 const b64url = (bytes: Uint8Array): string => Base64Url.encode(bytes);
 

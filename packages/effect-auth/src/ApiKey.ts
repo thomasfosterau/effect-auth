@@ -30,7 +30,10 @@ import { definedKeys } from "./DefinedKeys.ts";
 /**
  * API key error
  */
-export class ApiKeyError extends Schema.TaggedError<ApiKeyError>()("ApiKeyError", {
+export class ApiKeyError extends Schema.TaggedError<
+  ApiKeyError,
+  { readonly brand: unique symbol }
+>()("ApiKeyError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {}

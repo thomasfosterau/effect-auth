@@ -39,13 +39,13 @@ import { normalizeDomain, normalizeEmail } from "./utils.ts";
 /**
  * Organization error
  */
-export class OrganizationError extends Schema.TaggedError<OrganizationError>()(
-  "OrganizationError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class OrganizationError extends Schema.TaggedError<
+  OrganizationError,
+  { readonly brand: unique symbol }
+>()("OrganizationError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * An organization (team / tenant).

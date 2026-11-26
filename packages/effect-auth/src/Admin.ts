@@ -42,10 +42,13 @@ import { definedKeys } from "./DefinedKeys.ts";
 /**
  * Admin error
  */
-export class AdminError extends Schema.TaggedError<AdminError>()("AdminError", {
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Unknown),
-}) {}
+export class AdminError extends Schema.TaggedError<AdminError, { readonly brand: unique symbol }>()(
+  "AdminError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * Query for listing users

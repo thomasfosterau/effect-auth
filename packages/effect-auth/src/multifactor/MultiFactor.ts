@@ -39,7 +39,10 @@ import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 /**
  * Two-factor error
  */
-export class MultiFactorError extends Schema.TaggedError<MultiFactorError>()("MultiFactorError", {
+export class MultiFactorError extends Schema.TaggedError<
+  MultiFactorError,
+  { readonly brand: unique symbol }
+>()("MultiFactorError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {}
@@ -50,12 +53,12 @@ export class MultiFactorError extends Schema.TaggedError<MultiFactorError>()("Mu
  * without a second factor until (or unless) the new one is confirmed, so the
  * user removes the enrolment with `disable` first.
  */
-export class MultiFactorAlreadyEnabledError extends Schema.TaggedError<MultiFactorAlreadyEnabledError>()(
-  "MultiFactorAlreadyEnabledError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class MultiFactorAlreadyEnabledError extends Schema.TaggedError<
+  MultiFactorAlreadyEnabledError,
+  { readonly brand: unique symbol }
+>()("MultiFactorAlreadyEnabledError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Persistent multi-factor state for a user.

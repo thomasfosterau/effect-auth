@@ -39,7 +39,10 @@ import { definedKeys } from "../DefinedKeys.ts";
 /**
  * Email OTP error
  */
-export class EmailOtpError extends Schema.TaggedError<EmailOtpError>()("EmailOtpError", {
+export class EmailOtpError extends Schema.TaggedError<
+  EmailOtpError,
+  { readonly brand: unique symbol }
+>()("EmailOtpError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {}

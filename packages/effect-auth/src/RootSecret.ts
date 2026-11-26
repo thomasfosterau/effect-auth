@@ -41,7 +41,10 @@ export const MIN_ROOT_SECRET_BYTES = 32;
 export const ROOT_SECRET_ENV = "AUTH_SECRET";
 
 /** The root secret is missing or shorter than {@link MIN_ROOT_SECRET_BYTES}. */
-export class RootSecretError extends Schema.TaggedError<RootSecretError>()("RootSecretError", {
+export class RootSecretError extends Schema.TaggedError<
+  RootSecretError,
+  { readonly brand: unique symbol }
+>()("RootSecretError", {
   message: Schema.String,
 }) {}
 

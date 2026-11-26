@@ -66,10 +66,13 @@ import type * as Types from "./Types.ts";
 import { normalizeDomain, normalizeEmail } from "./utils.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
-export class SsoError extends Schema.TaggedError<SsoError>()("SsoError", {
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Unknown),
-}) {}
+export class SsoError extends Schema.TaggedError<SsoError, { readonly brand: unique symbol }>()(
+  "SsoError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * A registered **OIDC** SSO connection. Endpoints may be supplied directly or

@@ -68,7 +68,10 @@ import { UserStore } from "../UserStore.ts";
  * @since 0.1.0
  * @category errors
  */
-export class ConformanceError extends Schema.TaggedError<ConformanceError>()("ConformanceError", {
+export class ConformanceError extends Schema.TaggedError<
+  ConformanceError,
+  { readonly brand: unique symbol }
+>()("ConformanceError", {
   message: Schema.String,
   /** The contract, as `ConformanceSuite.contract` names it. */
   contract: Schema.String,
@@ -117,9 +120,12 @@ export interface ConformanceOptions<E = never, R = never> {
 // Assertion plumbing
 // ---------------------------------------------------------------------------
 
-class Mismatch extends Schema.TaggedError<Mismatch>()("Mismatch", {
-  message: Schema.String,
-}) {}
+class Mismatch extends Schema.TaggedError<Mismatch, { readonly brand: unique symbol }>()(
+  "Mismatch",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * A value with `Date`s as their instants, undefined properties dropped and

@@ -97,10 +97,10 @@ const makeWebRequest = (headers: Record<string, string> = {}) =>
 /** Anything a guard's result fails with besides its own `Forbidden`. */
 const isUnhandled = <E>(error: E | S.Forbidden): error is E => !Schema.is(S.Forbidden)(error);
 
-class PrincipalNotProvided extends Schema.TaggedError<PrincipalNotProvided>()(
-  "PrincipalNotProvided",
-  {},
-) {}
+class PrincipalNotProvided extends Schema.TaggedError<
+  PrincipalNotProvided,
+  { readonly brand: unique symbol }
+>()("PrincipalNotProvided", {}) {}
 const unreadablePrincipal: Entity.EntityRef = {
   get type(): string {
     throw new PrincipalNotProvided();

@@ -71,12 +71,12 @@ export class AccountManagementStore extends Context.Service<
 >()("@effect-auth/AccountManagementStore") {}
 
 /** Raised when a confirm token is missing, expired, or of the wrong purpose. */
-export class AccountTokenError extends Schema.TaggedError<AccountTokenError>()(
-  "AccountTokenError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class AccountTokenError extends Schema.TaggedError<
+  AccountTokenError,
+  { readonly brand: unique symbol }
+>()("AccountTokenError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Configuration for {@link AccountManagementService}.

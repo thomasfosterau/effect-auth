@@ -64,17 +64,20 @@ export interface OtpUriParams {
 }
 
 /** A character outside the RFC 4648 base32 alphabet; the `cause` of a failed {@link decodeBase32}. */
-class InvalidBase32CharacterError extends Schema.TaggedError<InvalidBase32CharacterError>()(
-  "InvalidBase32CharacterError",
+class InvalidBase32CharacterError extends Schema.TaggedError<
+  InvalidBase32CharacterError,
+  { readonly brand: unique symbol }
+>()("InvalidBase32CharacterError", {
+  message: Schema.String,
+}) {}
+
+/** An {@link OtpUriParams} that {@link generateOtpUri} cannot encode. */
+class OtpUriError extends Schema.TaggedError<OtpUriError, { readonly brand: unique symbol }>()(
+  "OtpUriError",
   {
     message: Schema.String,
   },
 ) {}
-
-/** An {@link OtpUriParams} that {@link generateOtpUri} cannot encode. */
-class OtpUriError extends Schema.TaggedError<OtpUriError>()("OtpUriError", {
-  message: Schema.String,
-}) {}
 
 const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 

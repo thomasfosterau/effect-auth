@@ -25,12 +25,12 @@ import * as Policy from "./Policy.ts";
 export const entityType = Entity.systemType;
 
 /** `ref` was given an empty (or all-whitespace) name. */
-class SystemPrincipalNameError extends Schema.TaggedError<SystemPrincipalNameError>()(
-  "SystemPrincipalNameError",
-  {
-    message: Schema.String,
-  },
-) {}
+class SystemPrincipalNameError extends Schema.TaggedError<
+  SystemPrincipalNameError,
+  { readonly brand: unique symbol }
+>()("SystemPrincipalNameError", {
+  message: Schema.String,
+}) {}
 
 /**
  * The entity reference of the named system principal: `System::"<name>"`.

@@ -46,9 +46,12 @@ export class CBORParseError extends Error {
  * Thrown by the {@link COSEPublicKey} accessors, {@link decodeCOSEPublicKey}
  * and the base64url decoder for input they reject.
  */
-class CodecError extends Schema.TaggedError<CodecError>()("CodecError", {
-  message: Schema.String,
-}) {}
+class CodecError extends Schema.TaggedError<CodecError, { readonly brand: unique symbol }>()(
+  "CodecError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /** The indices `0, 1, …, count - 1` (empty when `count` is 0). */
 const indices = (count: number): ReadonlyArray<number> =>

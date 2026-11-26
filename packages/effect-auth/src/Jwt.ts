@@ -37,10 +37,13 @@ import * as Obs from "./Observability.ts";
 /**
  * JWT error
  */
-export class JwtError extends Schema.TaggedError<JwtError>()("JwtError", {
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Unknown),
-}) {}
+export class JwtError extends Schema.TaggedError<JwtError, { readonly brand: unique symbol }>()(
+  "JwtError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * Supported signing algorithms

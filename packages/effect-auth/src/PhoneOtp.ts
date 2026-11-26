@@ -41,7 +41,10 @@ import { SessionService } from "./SessionService.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /** Error raised by phone OTP verification failures. */
-export class PhoneOtpError extends Schema.TaggedError<PhoneOtpError>()("PhoneOtpError", {
+export class PhoneOtpError extends Schema.TaggedError<
+  PhoneOtpError,
+  { readonly brand: unique symbol }
+>()("PhoneOtpError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {}

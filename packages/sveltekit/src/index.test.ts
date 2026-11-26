@@ -183,7 +183,10 @@ describe("handle replays the lookup's Set-Cookie", () => {
 });
 
 /** What an adapter's `getClientAddress` throws when it cannot tell. */
-class NoClientAddress extends Schema.TaggedError<NoClientAddress>()("NoClientAddress", {}) {}
+class NoClientAddress extends Schema.TaggedError<
+  NoClientAddress,
+  { readonly brand: unique symbol }
+>()("NoClientAddress", {}) {}
 
 describe("submitCredential's client address", () => {
   const options = (extra: object = {}) => ({

@@ -43,12 +43,12 @@ export type CaptchaEndpoint = "signUp" | "signIn" | "sendCode";
  *
  * @since 0.9.0
  */
-export class CaptchaConfigError extends Schema.TaggedError<CaptchaConfigError>()(
-  "CaptchaConfigError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class CaptchaConfigError extends Schema.TaggedError<
+  CaptchaConfigError,
+  { readonly brand: unique symbol }
+>()("CaptchaConfigError", {
+  message: Schema.String,
+}) {}
 
 /** Whether an attempt is a password sign-in, the attempts a captcha token rides on. */
 const isPasswordSignIn = (attempt: AuthenticateAttempt): boolean =>

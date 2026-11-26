@@ -17,7 +17,10 @@ class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser
   "@test/CurrentViewer",
 ) {}
 
-class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {}) {}
+class NotFound extends Schema.TaggedError<NotFound, { readonly brand: unique symbol }>()(
+  "NotFound",
+  {},
+) {}
 
 const Roles = Ladder.make(["user", "contributor", "moderator", "admin"]);
 const Axes = Roles.axes({ moderate: "moderator" });

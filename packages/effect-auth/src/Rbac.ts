@@ -108,12 +108,12 @@ export interface RbacConfig {
  * `principal in Role::"…"`, never reaches a system principal, whatever parents
  * a resolver gives it.)
  */
-class ReservedPrincipalTypeError extends Schema.TaggedError<ReservedPrincipalTypeError>()(
-  "ReservedPrincipalTypeError",
-  {
-    message: Schema.String,
-  },
-) {}
+class ReservedPrincipalTypeError extends Schema.TaggedError<
+  ReservedPrincipalTypeError,
+  { readonly brand: unique symbol }
+>()("ReservedPrincipalTypeError", {
+  message: Schema.String,
+}) {}
 
 const principalTypeOf = (config: RbacConfig): string => {
   const principalType = config.principalType ?? DefaultPrincipalType;

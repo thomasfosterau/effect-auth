@@ -51,10 +51,13 @@ const DATES: Readonly<Record<DateName, string>> = {
 };
 
 /** workerd stopped before every socket listened. */
-class WorkerdExited extends Schema.TaggedError<WorkerdExited>()("WorkerdExited", {
-  code: Schema.NullOr(Schema.Finite),
-  stderr: Schema.String,
-}) {}
+class WorkerdExited extends Schema.TaggedError<WorkerdExited, { readonly brand: unique symbol }>()(
+  "WorkerdExited",
+  {
+    code: Schema.NullOr(Schema.Finite),
+    stderr: Schema.String,
+  },
+) {}
 
 const srcDir = fileURLToPath(new URL(".", import.meta.url));
 // A path beside the sources, so the entry's relative imports resolve here.

@@ -81,10 +81,13 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
  * user-input or flow outcomes (e.g. store unavailability, crypto failure). For
  * flow outcomes use a specific tagged error.
  */
-export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Unknown),
-}) {
+export class AuthError extends Schema.TaggedError<AuthError, { readonly brand: unique symbol }>()(
+  "AuthError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {
   get code(): typeof ErrorCode.AUTH_ERROR {
     return ErrorCode.AUTH_ERROR;
   }
@@ -93,7 +96,10 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 /**
  * Password hashing/verification failed (infrastructure).
  */
-export class HashingError extends Schema.TaggedError<HashingError>()("HashingError", {
+export class HashingError extends Schema.TaggedError<
+  HashingError,
+  { readonly brand: unique symbol }
+>()("HashingError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {
@@ -110,12 +116,12 @@ export class HashingError extends Schema.TaggedError<HashingError>()("HashingErr
  * Submitted credentials are invalid. Always uses the generic "Invalid email or
  * password" message to prevent user enumeration.
  */
-export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentialsError>()(
-  "InvalidCredentialsError",
-  {
-    message: Schema.String,
-  },
-) {
+export class InvalidCredentialsError extends Schema.TaggedError<
+  InvalidCredentialsError,
+  { readonly brand: unique symbol }
+>()("InvalidCredentialsError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.INVALID_CREDENTIALS {
     return ErrorCode.INVALID_CREDENTIALS;
   }
@@ -124,13 +130,13 @@ export class InvalidCredentialsError extends Schema.TaggedError<InvalidCredentia
 /**
  * Session ID not found in the store.
  */
-export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundError>()(
-  "SessionNotFoundError",
-  {
-    message: Schema.String,
-    sessionId: Schema.String,
-  },
-) {
+export class SessionNotFoundError extends Schema.TaggedError<
+  SessionNotFoundError,
+  { readonly brand: unique symbol }
+>()("SessionNotFoundError", {
+  message: Schema.String,
+  sessionId: Schema.String,
+}) {
   get code(): typeof ErrorCode.SESSION_NOT_FOUND {
     return ErrorCode.SESSION_NOT_FOUND;
   }
@@ -139,13 +145,13 @@ export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundErro
 /**
  * Session exists but has expired (absolute lifetime or idle timeout).
  */
-export class SessionExpiredError extends Schema.TaggedError<SessionExpiredError>()(
-  "SessionExpiredError",
-  {
-    message: Schema.String,
-    sessionId: Schema.String,
-  },
-) {
+export class SessionExpiredError extends Schema.TaggedError<
+  SessionExpiredError,
+  { readonly brand: unique symbol }
+>()("SessionExpiredError", {
+  message: Schema.String,
+  sessionId: Schema.String,
+}) {
   get code(): typeof ErrorCode.SESSION_EXPIRED {
     return ErrorCode.SESSION_EXPIRED;
   }
@@ -154,13 +160,13 @@ export class SessionExpiredError extends Schema.TaggedError<SessionExpiredError>
 /**
  * User record not found in the store.
  */
-export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
-  "UserNotFoundError",
-  {
-    message: Schema.String,
-    userId: Schema.String,
-  },
-) {
+export class UserNotFoundError extends Schema.TaggedError<
+  UserNotFoundError,
+  { readonly brand: unique symbol }
+>()("UserNotFoundError", {
+  message: Schema.String,
+  userId: Schema.String,
+}) {
   get code(): typeof ErrorCode.USER_NOT_FOUND {
     return ErrorCode.USER_NOT_FOUND;
   }
@@ -173,13 +179,13 @@ export class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>()(
 /**
  * User has not yet verified their email address.
  */
-export class EmailNotVerifiedError extends Schema.TaggedError<EmailNotVerifiedError>()(
-  "EmailNotVerifiedError",
-  {
-    message: Schema.String,
-    email: Schema.String,
-  },
-) {
+export class EmailNotVerifiedError extends Schema.TaggedError<
+  EmailNotVerifiedError,
+  { readonly brand: unique symbol }
+>()("EmailNotVerifiedError", {
+  message: Schema.String,
+  email: Schema.String,
+}) {
   get code(): typeof ErrorCode.EMAIL_NOT_VERIFIED {
     return ErrorCode.EMAIL_NOT_VERIFIED;
   }
@@ -189,7 +195,10 @@ export class EmailNotVerifiedError extends Schema.TaggedError<EmailNotVerifiedEr
  * The email address is already associated with another account (sign-up or
  * change-email targeting a taken address).
  */
-export class EmailInUseError extends Schema.TaggedError<EmailInUseError>()("EmailInUseError", {
+export class EmailInUseError extends Schema.TaggedError<
+  EmailInUseError,
+  { readonly brand: unique symbol }
+>()("EmailInUseError", {
   message: Schema.String,
   /**
    * The normalized address found taken: for a sign-up, the one the
@@ -206,13 +215,13 @@ export class EmailInUseError extends Schema.TaggedError<EmailInUseError>()("Emai
 /**
  * Email verification operation failed (e.g. token invalid, already used).
  */
-export class EmailVerificationError extends Schema.TaggedError<EmailVerificationError>()(
-  "EmailVerificationError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {
+export class EmailVerificationError extends Schema.TaggedError<
+  EmailVerificationError,
+  { readonly brand: unique symbol }
+>()("EmailVerificationError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {
   get code(): typeof ErrorCode.EMAIL_VERIFICATION_ERROR {
     return ErrorCode.EMAIL_VERIFICATION_ERROR;
   }
@@ -228,29 +237,29 @@ export class EmailVerificationError extends Schema.TaggedError<EmailVerification
  * `code` is `"PASSWORD_TOO_SHORT"` or `"PASSWORD_TOO_LONG"`.
  * `params` carries the policy bounds for message interpolation.
  */
-export class PasswordPolicyError extends Schema.TaggedError<PasswordPolicyError>()(
-  "PasswordPolicyError",
-  {
-    code: Schema.Literals([ErrorCode.PASSWORD_TOO_SHORT, ErrorCode.PASSWORD_TOO_LONG]),
-    message: Schema.String,
-    params: Schema.Struct({
-      minLength: Schema.optionalKey(Schema.Finite),
-      maxLength: Schema.optionalKey(Schema.Finite),
-    }),
-  },
-) {}
+export class PasswordPolicyError extends Schema.TaggedError<
+  PasswordPolicyError,
+  { readonly brand: unique symbol }
+>()("PasswordPolicyError", {
+  code: Schema.Literals([ErrorCode.PASSWORD_TOO_SHORT, ErrorCode.PASSWORD_TOO_LONG]),
+  message: Schema.String,
+  params: Schema.Struct({
+    minLength: Schema.optionalKey(Schema.Finite),
+    maxLength: Schema.optionalKey(Schema.Finite),
+  }),
+}) {}
 
 /**
  * A sensitive change (starting an email change) needs fresh proof that the
  * caller is the account holder: the current password, or for an account
  * without one, a recent sign-in.
  */
-export class ReauthenticationRequiredError extends Schema.TaggedError<ReauthenticationRequiredError>()(
-  "ReauthenticationRequiredError",
-  {
-    message: Schema.String,
-  },
-) {
+export class ReauthenticationRequiredError extends Schema.TaggedError<
+  ReauthenticationRequiredError,
+  { readonly brand: unique symbol }
+>()("ReauthenticationRequiredError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.REAUTHENTICATION_REQUIRED {
     return ErrorCode.REAUTHENTICATION_REQUIRED;
   }
@@ -260,12 +269,12 @@ export class ReauthenticationRequiredError extends Schema.TaggedError<Reauthenti
  * Attempting to set a password for a user that already has one. Callers should
  * use `changePassword` instead.
  */
-export class PasswordAlreadySetError extends Schema.TaggedError<PasswordAlreadySetError>()(
-  "PasswordAlreadySetError",
-  {
-    message: Schema.String,
-  },
-) {
+export class PasswordAlreadySetError extends Schema.TaggedError<
+  PasswordAlreadySetError,
+  { readonly brand: unique symbol }
+>()("PasswordAlreadySetError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.PASSWORD_ALREADY_SET {
     return ErrorCode.PASSWORD_ALREADY_SET;
   }
@@ -274,12 +283,12 @@ export class PasswordAlreadySetError extends Schema.TaggedError<PasswordAlreadyS
 /**
  * The supplied password appears in a known data-breach corpus (HIBP).
  */
-export class PwnedPasswordError extends Schema.TaggedError<PwnedPasswordError>()(
-  "PwnedPasswordError",
-  {
-    message: Schema.String,
-  },
-) {
+export class PwnedPasswordError extends Schema.TaggedError<
+  PwnedPasswordError,
+  { readonly brand: unique symbol }
+>()("PwnedPasswordError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.PWNED_PASSWORD {
     return ErrorCode.PWNED_PASSWORD;
   }
@@ -292,12 +301,12 @@ export class PwnedPasswordError extends Schema.TaggedError<PwnedPasswordError>()
 /**
  * Email/password sign-up has been administratively disabled via config.
  */
-export class SignUpDisabledError extends Schema.TaggedError<SignUpDisabledError>()(
-  "SignUpDisabledError",
-  {
-    message: Schema.String,
-  },
-) {
+export class SignUpDisabledError extends Schema.TaggedError<
+  SignUpDisabledError,
+  { readonly brand: unique symbol }
+>()("SignUpDisabledError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.SIGN_UP_DISABLED {
     return ErrorCode.SIGN_UP_DISABLED;
   }
@@ -307,13 +316,13 @@ export class SignUpDisabledError extends Schema.TaggedError<SignUpDisabledError>
  * A required input field is missing or empty (e.g. blank email after normalization).
  * `field` names the offending field for the HTTP response.
  */
-export class InvalidInputError extends Schema.TaggedError<InvalidInputError>()(
-  "InvalidInputError",
-  {
-    message: Schema.String,
-    field: Schema.String,
-  },
-) {
+export class InvalidInputError extends Schema.TaggedError<
+  InvalidInputError,
+  { readonly brand: unique symbol }
+>()("InvalidInputError", {
+  message: Schema.String,
+  field: Schema.String,
+}) {
   get code(): typeof ErrorCode.INVALID_INPUT {
     return ErrorCode.INVALID_INPUT;
   }
@@ -322,7 +331,10 @@ export class InvalidInputError extends Schema.TaggedError<InvalidInputError>()(
 /**
  * Bot/captcha verification failed. Raised by the `CaptchaPlugin`.
  */
-export class CaptchaError extends Schema.TaggedError<CaptchaError>()("CaptchaError", {
+export class CaptchaError extends Schema.TaggedError<
+  CaptchaError,
+  { readonly brand: unique symbol }
+>()("CaptchaError", {
   message: Schema.String,
 }) {
   get code(): typeof ErrorCode.CAPTCHA_FAILED {
@@ -340,13 +352,13 @@ export class CaptchaError extends Schema.TaggedError<CaptchaError>()("CaptchaErr
  * long the lock has left to run; an HTTP layer that sends it as a
  * `Retry-After` header rounds it up to whole seconds.
  */
-export class AccountLockedError extends Schema.TaggedError<AccountLockedError>()(
-  "AccountLockedError",
-  {
-    message: Schema.String,
-    retryAfter: Schema.optionalKey(Schema.Duration),
-  },
-) {
+export class AccountLockedError extends Schema.TaggedError<
+  AccountLockedError,
+  { readonly brand: unique symbol }
+>()("AccountLockedError", {
+  message: Schema.String,
+  retryAfter: Schema.optionalKey(Schema.Duration),
+}) {
   get code(): typeof ErrorCode.ACCOUNT_LOCKED {
     return ErrorCode.ACCOUNT_LOCKED;
   }
@@ -356,7 +368,10 @@ export class AccountLockedError extends Schema.TaggedError<AccountLockedError>()
  * The user is banned or SCIM-deactivated. `SessionService` raises it when it
  * would create or answer a session for such a user.
  */
-export class UserBannedError extends Schema.TaggedError<UserBannedError>()("UserBannedError", {
+export class UserBannedError extends Schema.TaggedError<
+  UserBannedError,
+  { readonly brand: unique symbol }
+>()("UserBannedError", {
   message: Schema.String,
 }) {
   get code(): typeof ErrorCode.USER_BANNED {
@@ -379,12 +394,12 @@ export class UserBannedError extends Schema.TaggedError<UserBannedError>()("User
  * anonymous context into a typed failure without reaching for the HTTP layer's
  * `Unauthorized`.
  */
-export class NotAuthenticatedError extends Schema.TaggedError<NotAuthenticatedError>()(
-  "NotAuthenticatedError",
-  {
-    message: Schema.String,
-  },
-) {
+export class NotAuthenticatedError extends Schema.TaggedError<
+  NotAuthenticatedError,
+  { readonly brand: unique symbol }
+>()("NotAuthenticatedError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.NOT_AUTHENTICATED {
     return ErrorCode.NOT_AUTHENTICATED;
   }
@@ -393,14 +408,14 @@ export class NotAuthenticatedError extends Schema.TaggedError<NotAuthenticatedEr
 /**
  * Caller lacks the required permission.
  */
-export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedError>()(
-  "PermissionDeniedError",
-  {
-    message: Schema.String,
-    resource: Schema.String,
-    action: Schema.String,
-  },
-) {
+export class PermissionDeniedError extends Schema.TaggedError<
+  PermissionDeniedError,
+  { readonly brand: unique symbol }
+>()("PermissionDeniedError", {
+  message: Schema.String,
+  resource: Schema.String,
+  action: Schema.String,
+}) {
   get code(): typeof ErrorCode.PERMISSION_DENIED {
     return ErrorCode.PERMISSION_DENIED;
   }
@@ -409,14 +424,14 @@ export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedEr
 /**
  * OAuth-style scope check: caller has been granted fewer scopes than required.
  */
-export class InsufficientScopeError extends Schema.TaggedError<InsufficientScopeError>()(
-  "InsufficientScopeError",
-  {
-    message: Schema.String,
-    requiredScope: Schema.String,
-    grantedScopes: Schema.Array(Schema.String),
-  },
-) {
+export class InsufficientScopeError extends Schema.TaggedError<
+  InsufficientScopeError,
+  { readonly brand: unique symbol }
+>()("InsufficientScopeError", {
+  message: Schema.String,
+  requiredScope: Schema.String,
+  grantedScopes: Schema.Array(Schema.String),
+}) {
   get code(): typeof ErrorCode.INSUFFICIENT_SCOPE {
     return ErrorCode.INSUFFICIENT_SCOPE;
   }
@@ -429,12 +444,12 @@ export class InsufficientScopeError extends Schema.TaggedError<InsufficientScope
 /**
  * No pending WebAuthn challenge found for the session.
  */
-export class ChallengeNotFoundError extends Schema.TaggedError<ChallengeNotFoundError>()(
-  "ChallengeNotFoundError",
-  {
-    message: Schema.String,
-  },
-) {
+export class ChallengeNotFoundError extends Schema.TaggedError<
+  ChallengeNotFoundError,
+  { readonly brand: unique symbol }
+>()("ChallengeNotFoundError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.CHALLENGE_NOT_FOUND {
     return ErrorCode.CHALLENGE_NOT_FOUND;
   }
@@ -443,12 +458,12 @@ export class ChallengeNotFoundError extends Schema.TaggedError<ChallengeNotFound
 /**
  * WebAuthn challenge exists but has expired.
  */
-export class ChallengeExpiredError extends Schema.TaggedError<ChallengeExpiredError>()(
-  "ChallengeExpiredError",
-  {
-    message: Schema.String,
-  },
-) {
+export class ChallengeExpiredError extends Schema.TaggedError<
+  ChallengeExpiredError,
+  { readonly brand: unique symbol }
+>()("ChallengeExpiredError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.CHALLENGE_EXPIRED {
     return ErrorCode.CHALLENGE_EXPIRED;
   }
@@ -457,13 +472,13 @@ export class ChallengeExpiredError extends Schema.TaggedError<ChallengeExpiredEr
 /**
  * WebAuthn credential not found.
  */
-export class CredentialNotFoundError extends Schema.TaggedError<CredentialNotFoundError>()(
-  "CredentialNotFoundError",
-  {
-    message: Schema.String,
-    credentialId: Schema.String,
-  },
-) {
+export class CredentialNotFoundError extends Schema.TaggedError<
+  CredentialNotFoundError,
+  { readonly brand: unique symbol }
+>()("CredentialNotFoundError", {
+  message: Schema.String,
+  credentialId: Schema.String,
+}) {
   get code(): typeof ErrorCode.CREDENTIAL_NOT_FOUND {
     return ErrorCode.CREDENTIAL_NOT_FOUND;
   }
@@ -472,13 +487,13 @@ export class CredentialNotFoundError extends Schema.TaggedError<CredentialNotFou
 /**
  * WebAuthn verification step failed (signature, origin, RP ID, ...).
  */
-export class WebAuthnVerificationError extends Schema.TaggedError<WebAuthnVerificationError>()(
-  "WebAuthnVerificationError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {
+export class WebAuthnVerificationError extends Schema.TaggedError<
+  WebAuthnVerificationError,
+  { readonly brand: unique symbol }
+>()("WebAuthnVerificationError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {
   get code(): typeof ErrorCode.WEBAUTHN_VERIFICATION_ERROR {
     return ErrorCode.WEBAUTHN_VERIFICATION_ERROR;
   }
@@ -491,13 +506,13 @@ export class WebAuthnVerificationError extends Schema.TaggedError<WebAuthnVerifi
 /**
  * OAuth CSRF state token not found (unknown or already consumed).
  */
-export class OAuthStateNotFoundError extends Schema.TaggedError<OAuthStateNotFoundError>()(
-  "OAuthStateNotFoundError",
-  {
-    message: Schema.String,
-    state: Schema.String,
-  },
-) {
+export class OAuthStateNotFoundError extends Schema.TaggedError<
+  OAuthStateNotFoundError,
+  { readonly brand: unique symbol }
+>()("OAuthStateNotFoundError", {
+  message: Schema.String,
+  state: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_STATE_NOT_FOUND {
     return ErrorCode.OAUTH_STATE_NOT_FOUND;
   }
@@ -506,13 +521,13 @@ export class OAuthStateNotFoundError extends Schema.TaggedError<OAuthStateNotFou
 /**
  * OAuth CSRF state token has expired.
  */
-export class OAuthStateExpiredError extends Schema.TaggedError<OAuthStateExpiredError>()(
-  "OAuthStateExpiredError",
-  {
-    message: Schema.String,
-    state: Schema.String,
-  },
-) {
+export class OAuthStateExpiredError extends Schema.TaggedError<
+  OAuthStateExpiredError,
+  { readonly brand: unique symbol }
+>()("OAuthStateExpiredError", {
+  message: Schema.String,
+  state: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_STATE_EXPIRED {
     return ErrorCode.OAUTH_STATE_EXPIRED;
   }
@@ -521,14 +536,14 @@ export class OAuthStateExpiredError extends Schema.TaggedError<OAuthStateExpired
 /**
  * External OAuth provider returned an error or unexpected response.
  */
-export class OAuthProviderError extends Schema.TaggedError<OAuthProviderError>()(
-  "OAuthProviderError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {
+export class OAuthProviderError extends Schema.TaggedError<
+  OAuthProviderError,
+  { readonly brand: unique symbol }
+>()("OAuthProviderError", {
+  message: Schema.String,
+  provider: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {
   get code(): typeof ErrorCode.OAUTH_PROVIDER_ERROR {
     return ErrorCode.OAUTH_PROVIDER_ERROR;
   }
@@ -538,13 +553,13 @@ export class OAuthProviderError extends Schema.TaggedError<OAuthProviderError>()
  * OAuth account exists in the store but is not linked to any user. Use
  * `linkAccount` to associate it with a user before signing in.
  */
-export class OAuthAccountNotLinkedError extends Schema.TaggedError<OAuthAccountNotLinkedError>()(
-  "OAuthAccountNotLinkedError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-  },
-) {
+export class OAuthAccountNotLinkedError extends Schema.TaggedError<
+  OAuthAccountNotLinkedError,
+  { readonly brand: unique symbol }
+>()("OAuthAccountNotLinkedError", {
+  message: Schema.String,
+  provider: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_ACCOUNT_NOT_LINKED {
     return ErrorCode.OAUTH_ACCOUNT_NOT_LINKED;
   }
@@ -553,13 +568,13 @@ export class OAuthAccountNotLinkedError extends Schema.TaggedError<OAuthAccountN
 /**
  * The OAuth provider did not return an email address for this account.
  */
-export class OAuthMissingEmailError extends Schema.TaggedError<OAuthMissingEmailError>()(
-  "OAuthMissingEmailError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-  },
-) {
+export class OAuthMissingEmailError extends Schema.TaggedError<
+  OAuthMissingEmailError,
+  { readonly brand: unique symbol }
+>()("OAuthMissingEmailError", {
+  message: Schema.String,
+  provider: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_MISSING_EMAIL {
     return ErrorCode.OAUTH_MISSING_EMAIL;
   }
@@ -568,13 +583,13 @@ export class OAuthMissingEmailError extends Schema.TaggedError<OAuthMissingEmail
 /**
  * The OAuth account is already linked to a different user.
  */
-export class OAuthAccountConflictError extends Schema.TaggedError<OAuthAccountConflictError>()(
-  "OAuthAccountConflictError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-  },
-) {
+export class OAuthAccountConflictError extends Schema.TaggedError<
+  OAuthAccountConflictError,
+  { readonly brand: unique symbol }
+>()("OAuthAccountConflictError", {
+  message: Schema.String,
+  provider: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_ACCOUNT_CONFLICT {
     return ErrorCode.OAUTH_ACCOUNT_CONFLICT;
   }
@@ -583,13 +598,13 @@ export class OAuthAccountConflictError extends Schema.TaggedError<OAuthAccountCo
 /**
  * No OAuth account for the given provider is linked to the user.
  */
-export class OAuthAccountNotFoundError extends Schema.TaggedError<OAuthAccountNotFoundError>()(
-  "OAuthAccountNotFoundError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-  },
-) {
+export class OAuthAccountNotFoundError extends Schema.TaggedError<
+  OAuthAccountNotFoundError,
+  { readonly brand: unique symbol }
+>()("OAuthAccountNotFoundError", {
+  message: Schema.String,
+  provider: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_ACCOUNT_NOT_FOUND {
     return ErrorCode.OAUTH_ACCOUNT_NOT_FOUND;
   }
@@ -598,13 +613,13 @@ export class OAuthAccountNotFoundError extends Schema.TaggedError<OAuthAccountNo
 /**
  * The OAuth account has no stored refresh token.
  */
-export class OAuthNoRefreshTokenError extends Schema.TaggedError<OAuthNoRefreshTokenError>()(
-  "OAuthNoRefreshTokenError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-  },
-) {
+export class OAuthNoRefreshTokenError extends Schema.TaggedError<
+  OAuthNoRefreshTokenError,
+  { readonly brand: unique symbol }
+>()("OAuthNoRefreshTokenError", {
+  message: Schema.String,
+  provider: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_NO_REFRESH_TOKEN {
     return ErrorCode.OAUTH_NO_REFRESH_TOKEN;
   }
@@ -615,13 +630,13 @@ export class OAuthNoRefreshTokenError extends Schema.TaggedError<OAuthNoRefreshT
  * OAuth account remains and the user has no password. Pass
  * `allowUnlinkingAll: true` to `unlinkAccount` to override.
  */
-export class OAuthLastCredentialError extends Schema.TaggedError<OAuthLastCredentialError>()(
-  "OAuthLastCredentialError",
-  {
-    message: Schema.String,
-    userId: Schema.String,
-  },
-) {
+export class OAuthLastCredentialError extends Schema.TaggedError<
+  OAuthLastCredentialError,
+  { readonly brand: unique symbol }
+>()("OAuthLastCredentialError", {
+  message: Schema.String,
+  userId: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_LAST_CREDENTIAL {
     return ErrorCode.OAUTH_LAST_CREDENTIAL;
   }
@@ -631,13 +646,13 @@ export class OAuthLastCredentialError extends Schema.TaggedError<OAuthLastCreden
  * The OAuth account's provider email differs from the user's current account
  * email. Pass `allowDifferentEmails: true` in `OAuthServiceOptions` to override.
  */
-export class OAuthEmailMismatchError extends Schema.TaggedError<OAuthEmailMismatchError>()(
-  "OAuthEmailMismatchError",
-  {
-    message: Schema.String,
-    provider: Schema.String,
-  },
-) {
+export class OAuthEmailMismatchError extends Schema.TaggedError<
+  OAuthEmailMismatchError,
+  { readonly brand: unique symbol }
+>()("OAuthEmailMismatchError", {
+  message: Schema.String,
+  provider: Schema.String,
+}) {
   get code(): typeof ErrorCode.OAUTH_EMAIL_MISMATCH {
     return ErrorCode.OAUTH_EMAIL_MISMATCH;
   }
@@ -654,13 +669,13 @@ export class OAuthEmailMismatchError extends Schema.TaggedError<OAuthEmailMismat
  * Raised by the passwordless send paths when `resendCooldown` is configured in
  * the flow config.
  */
-export class ResendTooSoonError extends Schema.TaggedError<ResendTooSoonError>()(
-  "ResendTooSoonError",
-  {
-    message: Schema.String,
-    retryAfter: Schema.Duration,
-  },
-) {
+export class ResendTooSoonError extends Schema.TaggedError<
+  ResendTooSoonError,
+  { readonly brand: unique symbol }
+>()("ResendTooSoonError", {
+  message: Schema.String,
+  retryAfter: Schema.Duration,
+}) {
   get code(): typeof ErrorCode.RESEND_TOO_SOON {
     return ErrorCode.RESEND_TOO_SOON;
   }
@@ -671,7 +686,10 @@ export class ResendTooSoonError extends Schema.TaggedError<ResendTooSoonError>()
  * must wait before retrying; an HTTP layer that sends it as a `Retry-After`
  * header rounds it up to whole seconds.
  */
-export class RateLimitError extends Schema.TaggedError<RateLimitError>()("RateLimitError", {
+export class RateLimitError extends Schema.TaggedError<
+  RateLimitError,
+  { readonly brand: unique symbol }
+>()("RateLimitError", {
   message: Schema.String,
   key: Schema.String,
   retryAfter: Schema.optionalKey(Schema.Duration),
@@ -704,12 +722,12 @@ export class RateLimitError extends Schema.TaggedError<RateLimitError>()("RateLi
  * Exported from the package root and from the `./http` subpath as
  * `ClientAddressConfigError`. Both names are the same class.
  */
-export class ClientAddressConfigError extends Schema.TaggedError<ClientAddressConfigError>()(
-  "ClientAddressConfigError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class ClientAddressConfigError extends Schema.TaggedError<
+  ClientAddressConfigError,
+  { readonly brand: unique symbol }
+>()("ClientAddressConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * `SessionService.layer` (or `SessionService.make`) was given a
@@ -719,12 +737,12 @@ export class ClientAddressConfigError extends Schema.TaggedError<ClientAddressCo
  * finite number, 0 or more. The layer build dies with it, so the app fails to
  * start instead of issuing sessions that never expire.
  */
-export class SessionConfigError extends Schema.TaggedError<SessionConfigError>()(
-  "SessionConfigError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class SessionConfigError extends Schema.TaggedError<
+  SessionConfigError,
+  { readonly brand: unique symbol }
+>()("SessionConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * A rate limit is configured with no `RateLimiter` in `services`, so it could not
@@ -746,12 +764,12 @@ export class SessionConfigError extends Schema.TaggedError<SessionConfigError>()
  * to 128: `Http.make` throws it for `ipRateLimit.ipv6PrefixLength`, and the
  * `IPRateLimitPlugin` layer build dies with it.
  */
-export class RateLimiterConfigError extends Schema.TaggedError<RateLimiterConfigError>()(
-  "RateLimiterConfigError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class RateLimiterConfigError extends Schema.TaggedError<
+  RateLimiterConfigError,
+  { readonly brand: unique symbol }
+>()("RateLimiterConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * `Http.make` was called with `strict: true`, and the `services` build had not
@@ -780,12 +798,12 @@ export class RateLimiterConfigError extends Schema.TaggedError<RateLimiterConfig
  * Exported from the package root and from the `./http` subpath as
  * `ServicesBuildPendingError`. Both names are the same class.
  */
-export class ServicesBuildPendingError extends Schema.TaggedError<ServicesBuildPendingError>()(
-  "ServicesBuildPendingError",
-  {
-    message: Schema.String,
-  },
-) {}
+export class ServicesBuildPendingError extends Schema.TaggedError<
+  ServicesBuildPendingError,
+  { readonly brand: unique symbol }
+>()("ServicesBuildPendingError", {
+  message: Schema.String,
+}) {}
 
 /**
  * `Http.make` (or `Http.makeAsync`) was given `strict: true` and a
@@ -800,18 +818,21 @@ export class ServicesBuildPendingError extends Schema.TaggedError<ServicesBuildP
  * @since 0.9.0
  * @category errors
  */
-export class SignUpAttributesConfigError extends Schema.TaggedError<SignUpAttributesConfigError>()(
-  "SignUpAttributesConfigError",
-  {
-    message: Schema.String,
-    attributes: Schema.Array(Schema.String),
-  },
-) {}
+export class SignUpAttributesConfigError extends Schema.TaggedError<
+  SignUpAttributesConfigError,
+  { readonly brand: unique symbol }
+>()("SignUpAttributesConfigError", {
+  message: Schema.String,
+  attributes: Schema.Array(Schema.String),
+}) {}
 
 /**
  * Magic link send/verify failure (infrastructure or token mismatch).
  */
-export class MagicLinkError extends Schema.TaggedError<MagicLinkError>()("MagicLinkError", {
+export class MagicLinkError extends Schema.TaggedError<
+  MagicLinkError,
+  { readonly brand: unique symbol }
+>()("MagicLinkError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {
@@ -823,13 +844,13 @@ export class MagicLinkError extends Schema.TaggedError<MagicLinkError>()("MagicL
 /**
  * Password reset send/verify failure (infrastructure or token mismatch).
  */
-export class PasswordResetError extends Schema.TaggedError<PasswordResetError>()(
-  "PasswordResetError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {
+export class PasswordResetError extends Schema.TaggedError<
+  PasswordResetError,
+  { readonly brand: unique symbol }
+>()("PasswordResetError", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {
   get code(): typeof ErrorCode.PASSWORD_RESET_ERROR {
     return ErrorCode.PASSWORD_RESET_ERROR;
   }
@@ -842,12 +863,12 @@ export class PasswordResetError extends Schema.TaggedError<PasswordResetError>()
  * callers cannot distinguish between a token that never existed and one that
  * has already been consumed.
  */
-export class OneTimeTokenError extends Schema.TaggedError<OneTimeTokenError>()(
-  "OneTimeTokenError",
-  {
-    message: Schema.String,
-  },
-) {
+export class OneTimeTokenError extends Schema.TaggedError<
+  OneTimeTokenError,
+  { readonly brand: unique symbol }
+>()("OneTimeTokenError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.ONE_TIME_TOKEN_ERROR {
     return ErrorCode.ONE_TIME_TOKEN_ERROR;
   }

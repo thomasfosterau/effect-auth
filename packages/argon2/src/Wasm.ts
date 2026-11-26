@@ -72,7 +72,10 @@ const decoder = new TextDecoder();
  * returned `-1`), or it `"trapped"` (an allocation failure aborts the Rust
  * side). The hasher wraps it in a `HashingError`.
  */
-export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", {
+export class KernelError extends Schema.TaggedError<
+  KernelError,
+  { readonly brand: unique symbol }
+>()("KernelError", {
   reason: Schema.Literals(["rejected", "trapped"]),
   cause: Schema.optionalKey(Schema.Unknown),
 }) {}

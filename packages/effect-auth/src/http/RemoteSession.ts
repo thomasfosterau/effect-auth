@@ -46,7 +46,10 @@ export interface Fetcher {
 export type FetcherLike = Fetcher | ((request: Request) => Promise<Response>);
 
 /** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
-class PromiseRejection extends Schema.TaggedError<PromiseRejection>()("PromiseRejection", {
+class PromiseRejection extends Schema.TaggedError<
+  PromiseRejection,
+  { readonly brand: unique symbol }
+>()("PromiseRejection", {
   cause: Schema.Unknown,
 }) {}
 
@@ -270,14 +273,14 @@ export const forwardedHeaders = (inbound: Request | Headers, policy?: HeaderPoli
  * @since 0.1.0
  * @category errors
  */
-export class RemoteSessionError extends Schema.TaggedError<RemoteSessionError>()(
-  "RemoteSessionError",
-  {
-    message: Schema.String,
-    status: Schema.optionalKey(Schema.Finite),
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class RemoteSessionError extends Schema.TaggedError<
+  RemoteSessionError,
+  { readonly brand: unique symbol }
+>()("RemoteSessionError", {
+  message: Schema.String,
+  status: Schema.optionalKey(Schema.Finite),
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 // ---------------------------------------------------------------------------
 // Session reads

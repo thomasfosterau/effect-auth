@@ -38,7 +38,10 @@ import type * as Types from "./Types.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /** Raised for invalid or already-taken usernames. */
-export class UsernameError extends Schema.TaggedError<UsernameError>()("UsernameError", {
+export class UsernameError extends Schema.TaggedError<
+  UsernameError,
+  { readonly brand: unique symbol }
+>()("UsernameError", {
   message: Schema.String,
 }) {}
 

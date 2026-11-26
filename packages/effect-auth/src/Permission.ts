@@ -7,12 +7,12 @@
 import * as Schema from "effect/Schema";
 
 /** Thrown by {@link parsePermission} for a malformed permission string. */
-class InvalidPermissionStringError extends Schema.TaggedError<InvalidPermissionStringError>()(
-  "InvalidPermissionStringError",
-  {
-    message: Schema.String,
-  },
-) {}
+class InvalidPermissionStringError extends Schema.TaggedError<
+  InvalidPermissionStringError,
+  { readonly brand: unique symbol }
+>()("InvalidPermissionStringError", {
+  message: Schema.String,
+}) {}
 
 /**
  * A permission reference: a resource paired with an action.

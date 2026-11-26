@@ -16,10 +16,13 @@ import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */
-export class SamlError extends Schema.TaggedError<SamlError>()("SamlError", {
-  message: Schema.String,
-  cause: Schema.optionalKey(Schema.Unknown),
-}) {}
+export class SamlError extends Schema.TaggedError<SamlError, { readonly brand: unique symbol }>()(
+  "SamlError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 /**
  * Digest strength accepted for XML-DSig signature and digest methods, named the

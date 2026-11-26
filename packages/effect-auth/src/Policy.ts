@@ -365,16 +365,16 @@ export interface Decision {
 }
 
 /** Raised by {@link enforce} when the decision is a deny. */
-export class AuthorizationDeniedError extends Schema.TaggedError<AuthorizationDeniedError>()(
-  "AuthorizationDeniedError",
-  {
-    message: Schema.String,
-    // Carried as decided, not re-checked: an invalid request (an empty entity
-    // id or type) is denied too, and `PolicyRequest` would refuse it.
-    request: Schema.declare((u): u is PolicyRequest => P.isObject(u)),
-    decision: Schema.declare((u): u is Decision => P.isObject(u)),
-  },
-) {}
+export class AuthorizationDeniedError extends Schema.TaggedError<
+  AuthorizationDeniedError,
+  { readonly brand: unique symbol }
+>()("AuthorizationDeniedError", {
+  message: Schema.String,
+  // Carried as decided, not re-checked: an invalid request (an empty entity
+  // id or type) is denied too, and `PolicyRequest` would refuse it.
+  request: Schema.declare((u): u is PolicyRequest => P.isObject(u)),
+  decision: Schema.declare((u): u is Decision => P.isObject(u)),
+}) {}
 
 const combineOutcomes = (outcomes: ReadonlyArray<PolicyOutcome>): Decision => {
   // Fail-closed both ways: an errored forbid denies; an errored permit

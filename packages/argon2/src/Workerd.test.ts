@@ -57,10 +57,13 @@ type ServedName = keyof typeof SERVED;
 const SERVED_NAMES = ["current", "legacy"] as const satisfies ReadonlyArray<ServedName>;
 
 /** workerd stopped before every socket listened. */
-class WorkerdExited extends Schema.TaggedError<WorkerdExited>()("WorkerdExited", {
-  code: Schema.NullOr(Schema.Finite),
-  stderr: Schema.String,
-}) {}
+class WorkerdExited extends Schema.TaggedError<WorkerdExited, { readonly brand: unique symbol }>()(
+  "WorkerdExited",
+  {
+    code: Schema.NullOr(Schema.Finite),
+    stderr: Schema.String,
+  },
+) {}
 
 const srcDir = fileURLToPath(new URL(".", import.meta.url));
 // A path beside the sources, so the entry's bare imports resolve from this package.

@@ -41,13 +41,13 @@ export type GuardMismatch = typeof GuardMismatch.Type;
  * @since 0.1.0
  * @category errors
  */
-export class GuardExpectationError extends Schema.TaggedError<GuardExpectationError>()(
-  "GuardExpectationError",
-  {
-    message: Schema.String,
-    mismatches: Schema.Array(GuardMismatch),
-  },
-) {}
+export class GuardExpectationError extends Schema.TaggedError<
+  GuardExpectationError,
+  { readonly brand: unique symbol }
+>()("GuardExpectationError", {
+  message: Schema.String,
+  mismatches: Schema.Array(GuardMismatch),
+}) {}
 
 /**
  * Whether the operation is a write (refusals are 401 / 403) or a read

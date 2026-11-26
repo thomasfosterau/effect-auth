@@ -81,14 +81,14 @@ export const OutboundLimits: Context.Reference<Limits> = Context.Reference<Limit
  * @since 0.9.0
  * @category errors
  */
-export class OutboundHttpError extends Schema.TaggedError<OutboundHttpError>()(
-  "OutboundHttpError",
-  {
-    reason: Schema.Literals(["refused-url", "transport", "timeout", "too-large"]),
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Unknown),
-  },
-) {}
+export class OutboundHttpError extends Schema.TaggedError<
+  OutboundHttpError,
+  { readonly brand: unique symbol }
+>()("OutboundHttpError", {
+  reason: Schema.Literals(["refused-url", "transport", "timeout", "too-large"]),
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * A response read within the {@link Limits}: its status, headers and body as

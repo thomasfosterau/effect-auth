@@ -272,12 +272,12 @@ export interface GuardOptions<Id, User extends ViewerShape, Rung extends string>
 const axisName = (min: string | Ladder.Axis): string => (P.isString(min) ? min : min.name);
 
 /** Thrown by {@link make} for a `principalType` it refuses. */
-class ReservedPrincipalTypeError extends Schema.TaggedError<ReservedPrincipalTypeError>()(
-  "ReservedPrincipalTypeError",
-  {
-    message: Schema.String,
-  },
-) {}
+class ReservedPrincipalTypeError extends Schema.TaggedError<
+  ReservedPrincipalTypeError,
+  { readonly brand: unique symbol }
+>()("ReservedPrincipalTypeError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Build the guard kit for one viewer service and one ladder.
