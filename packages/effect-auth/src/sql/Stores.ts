@@ -60,6 +60,21 @@ const msToDate = (ms: number, label: string): Effect.Effect<Date, Auth.AuthError
     ),
   );
 
+/** A stored enumeration column back to its literal; anything else fails as an `AuthError`. */
+const decodeColumn =
+  <A>(schema: Schema.Decoder<A>) =>
+  (value: string, label: string): Effect.Effect<A, Auth.AuthError> =>
+    Schema.decodeEffect(schema)(value).pipe(
+      Effect.mapError(
+        (cause) => new Auth.AuthError({ message: `${label}: stored value did not decode`, cause }),
+      ),
+    );
+
+const decodeIdentifierType = decodeColumn(Auth.Identifier.fields.type);
+const decodeEmailOtpPurpose = decodeColumn<Auth.Email.EmailOtpPurpose>(
+  Schema.Literals(["sign-in", "email-verification", "forget-password"]),
+);
+
 /**
  * Map a `SqlError` (or any defect from the driver) to the `AuthError` the
  * store interfaces expose, preserving the underlying cause.
@@ -1203,16 +1218,18 @@ interface EmailOtpRow {
   readonly expires_at: number;
 }
 
-const rowToEmailOtp = (row: EmailOtpRow): Auth.Email.EmailOtpRecord => ({
-  email: row.email,
-  // SAFETY: `purpose` is only ever written from an `EmailOtpRecord`'s `purpose`
-  // (see `upsert`), so every stored value is an `EmailOtpPurpose`.
-  purpose: row.purpose as Auth.Email.EmailOtpPurpose,
-  otpHash: row.otp_hash,
-  attempts: row.attempts,
-  createdAt: row.created_at,
-  expiresAt: row.expires_at,
-});
+const rowToEmailOtp = (
+  row: EmailOtpRow,
+  label: string,
+): Effect.Effect<Auth.Email.EmailOtpRecord, Auth.AuthError> =>
+  Effect.map(decodeEmailOtpPurpose(row.purpose, label), (purpose) => ({
+    email: row.email,
+    purpose,
+    otpHash: row.otp_hash,
+    attempts: row.attempts,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  }));
 
 interface EmailOtpFailuresRow {
   readonly failures: number;
@@ -1260,7 +1277,14 @@ export const makeEmailOtpStore: Effect.Effect<
         }),
       ),
     get: (email, purpose) =>
-      read(email, purpose, "emailOtp.get").pipe(Effect.map(Option.map(rowToEmailOtp))),
+      read(email, purpose, "emailOtp.get").pipe(
+        Effect.flatMap((row) =>
+          Option.match(row, {
+            onNone: () => Effect.succeedNone,
+            onSome: (found) => Effect.map(rowToEmailOtp(found, "emailOtp.get"), Option.some),
+          }),
+        ),
+      ),
     delete: (email, purpose) =>
       asVoid(
         "emailOtp.delete",
@@ -1903,15 +1927,14 @@ const rowToIdentifier = (
           ? Effect.asSome(msToDate(row.verified_at, label))
           : Effect.succeedNone,
       createdAt: msToDate(row.created_at, label),
+      type: decodeIdentifierType(row.type, label),
     },
     { concurrency: 1 },
   ).pipe(
-    Effect.map(({ verifiedAt, createdAt }) => ({
+    Effect.map(({ verifiedAt, createdAt, type }) => ({
       id: row.id,
       userId: row.user_id,
-      // SAFETY: `type` is only ever written from an `Identifier`'s `type` (see
-      // `insert`), so every stored value is an `IdentifierType`.
-      type: row.type as Auth.IdentifierType,
+      type,
       value: row.value,
       verified: row.verified !== 0,
       ...(Option.isSome(verifiedAt) ? { verifiedAt: verifiedAt.value } : {}),

@@ -19,9 +19,7 @@ export type DefinedKeys<A> = {
   : never;
 
 /** Drops the keys of `fields` whose value is `undefined`. */
-export const definedKeys = <const A extends object>(fields: A): DefinedKeys<A> => {
-  // SAFETY: an object's own enumerable properties, read as the record they are.
-  const record = fields as R.ReadonlyRecord<string, unknown>;
-  // SAFETY: the record without its `undefined` values is what `DefinedKeys<A>` describes.
-  return R.filter(record, P.isNotUndefined) as DefinedKeys<A>;
-};
+export function definedKeys<const A extends object>(fields: A): DefinedKeys<A>;
+export function definedKeys(fields: R.ReadonlyRecord<string, unknown>): object {
+  return R.filter(fields, P.isNotUndefined);
+}

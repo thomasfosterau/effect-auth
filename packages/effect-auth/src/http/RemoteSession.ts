@@ -319,7 +319,7 @@ export type RemoteApiKey = Omit<
 
 const emptyResult: RemoteSessionResult = { session: Option.none(), setCookie: [] };
 
-const decodeDocument = Schema.decodeUnknownEffect(SessionDocument);
+const decodeDocumentText = Schema.decodeEffect(Schema.fromJsonString(SessionDocument));
 
 const decodeApiKeyDocument = Schema.decodeUnknownEffect(
   Schema.fromJsonString(CurrentApiKeyDocument),
@@ -703,14 +703,12 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       }
 
       const body = yield* Effect.tryPromise({
-        // SAFETY: widening `json()`'s `any` to `unknown` only drops trust in the
-        // body; `decodeDocument` parses it next.
-        try: () => response.json() as Promise<unknown>,
+        try: () => response.text(),
         catch: (cause) =>
-          new RemoteSessionError({ message: "Session read body was not JSON", cause }),
+          new RemoteSessionError({ message: "Session read body was unreadable", cause }),
       });
 
-      const document = yield* decodeDocument(body).pipe(
+      const document = yield* decodeDocumentText(body).pipe(
         Effect.mapError(
           (cause) => new RemoteSessionError({ message: "Session read body did not decode", cause }),
         ),

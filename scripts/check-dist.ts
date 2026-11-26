@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as Schema from "effect/Schema";
 import semver from "semver";
 
 const root = resolve(import.meta.dirname, "..");
@@ -94,12 +95,9 @@ const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
 
 /** The workspace's `packageManager` (`pnpm@<version>`), given to every scratch project. */
 const packageManager = (() => {
-  // SAFETY: the root manifest is this repository's own `package.json`.
-  const value = (
-    JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
-      packageManager?: string;
-    }
-  ).packageManager;
+  const value = Schema.decodeSync(
+    Schema.fromJsonString(Schema.Struct({ packageManager: Schema.optionalKey(Schema.String) })),
+  )(readFileSync(join(root, "package.json"), "utf8")).packageManager;
   if (!value?.startsWith("pnpm@"))
     throw new Error("the root package.json pins no pnpm packageManager");
   return value;
@@ -186,22 +184,35 @@ const unmetEffectRanges = (
   names.flatMap((name) => {
     const path = join(project, "node_modules", name, "package.json");
     if (!existsSync(path)) return [];
-    // SAFETY: an installed package's `package.json` is a manifest: `name` is
-    // always present and every other field `Manifest` reads is optional.
-    const manifest = JSON.parse(readFileSync(path, "utf8")) as Manifest;
+    const manifest = parseManifest(readFileSync(path, "utf8"));
     return [manifest.peerDependencies?.effect, manifest.dependencies?.effect]
       .filter((range): range is string => range !== undefined)
       .filter((range) => !semver.satisfies(installed, range))
       .map((range) => `${name} wants effect ${range}`);
   });
 
-interface Manifest {
-  readonly name: string;
-  readonly repository?: { readonly url?: string; readonly directory?: string };
-  readonly exports?: Record<string, { readonly import?: string } | string>;
-  readonly dependencies?: Record<string, string>;
-  readonly peerDependencies?: Record<string, string>;
-}
+const Dependencies = Schema.optionalKey(Schema.Record(Schema.String, Schema.String));
+
+/** The fields of a `package.json` this script reads. */
+const Manifest = Schema.Struct({
+  name: Schema.String,
+  repository: Schema.optionalKey(
+    Schema.Struct({
+      url: Schema.optionalKey(Schema.String),
+      directory: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  // Only the subpath keys are read; a conditional entry may nest or be `null`.
+  exports: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+  dependencies: Dependencies,
+  peerDependencies: Dependencies,
+});
+type Manifest = typeof Manifest.Type;
+
+const parseManifest = Schema.decodeSync(Schema.fromJsonString(Manifest));
+const parseVersion = Schema.decodeSync(
+  Schema.fromJsonString(Schema.Struct({ version: Schema.String })),
+);
 
 /** A target after `pnpm pack`, with the manifest exactly as it will publish. */
 interface Packed {
@@ -629,11 +640,7 @@ try {
     if (!file?.endsWith(".tgz")) throw new Error(`${dir}: pnpm pack printed no tarball`);
     // The floor comes from the manifest a consumer will see, not a constant
     // here, so a peer range and the version it is checked at cannot drift.
-    // SAFETY: a packed `package.json` is a manifest: `name` is always present and
-    // every other field `Manifest` reads is optional (and checked below).
-    const manifest = JSON.parse(
-      run("tar", ["-xzOf", file, "package/package.json"], scratch),
-    ) as Manifest;
+    const manifest = parseManifest(run("tar", ["-xzOf", file, "package/package.json"], scratch));
     const expectedDirectory = `packages/${dir}`;
     if (!manifest.repository?.url) {
       directoryErrors.push(`${manifest.name}: repository.url is missing`);
@@ -711,11 +718,8 @@ try {
       project,
     );
 
-    // SAFETY: an installed package's manifest always carries its `version`.
-    const installed = (
-      JSON.parse(readFileSync(join(project, "node_modules", "effect", "package.json"), "utf8")) as {
-        version: string;
-      }
+    const installed = parseVersion(
+      readFileSync(join(project, "node_modules", "effect", "package.json"), "utf8"),
     ).version;
     if (installed !== effectVersion) {
       throw new Error(`expected effect ${effectVersion}, installed ${installed}`);
@@ -731,10 +735,9 @@ try {
       throw new Error(`effect ${installed} is outside a declared range:\n${unmet.join("\n")}`);
     }
     for (const [peer, { version }] of peerVersions) {
-      // SAFETY: an installed package's manifest always carries its `version`.
-      const peerManifest = JSON.parse(
+      const peerManifest = parseVersion(
         readFileSync(join(project, "node_modules", peer, "package.json"), "utf8"),
-      ) as { version: string };
+      );
       const installedPeer = peerManifest.version;
       if (!semver.satisfies(installedPeer, version)) {
         throw new Error(`expected ${peer} ${version}, installed ${installedPeer}`);

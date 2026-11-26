@@ -20,7 +20,13 @@ import * as Policy from "./Policy.ts";
 
 // Gardeneria's ladder and axes — the superset of the three applications.
 const Roles = Ladder.make(["user", "contributor", "moderator", "admin"]);
-type Role = Ladder.RungOf<typeof Roles>;
+// The same ladder as an untyped caller sees it: any string passes for a rung.
+const UntypedRoles = Ladder.make<readonly [string, ...Array<string>]>([
+  "user",
+  "contributor",
+  "moderator",
+  "admin",
+]);
 const Axes = Roles.axes({
   corpusWrite: "contributor",
   moderate: "moderator",
@@ -104,13 +110,11 @@ describe("hasAtLeast", () => {
     });
   });
 
-  it("fails closed even against an off-ladder minimum smuggled in by a cast", () => {
-    // SAFETY: deliberately false: the cast smuggles in a value that is not a rung,
-    // which is what an untyped caller could pass; the test checks the runtime.
-    const offLadder = "also-nope" as Role;
-    expect(Roles.hasAtLeast({ role: "nope" }, offLadder)).toBe(false);
-    expect(Roles.hasAtLeast({ role: "admin" }, offLadder)).toBe(true);
-    expect(Roles.atOrAbove(offLadder)).toEqual([]);
+  it("fails closed even against an off-ladder minimum from an untyped caller", () => {
+    const offLadder = "also-nope";
+    expect(UntypedRoles.hasAtLeast({ role: "nope" }, offLadder)).toBe(false);
+    expect(UntypedRoles.hasAtLeast({ role: "admin" }, offLadder)).toBe(true);
+    expect(UntypedRoles.atOrAbove(offLadder)).toEqual([]);
   });
 });
 
@@ -127,9 +131,8 @@ describe("axes", () => {
   });
 
   it("refuse a rung that is not on the ladder", () => {
-    // SAFETY: deliberately false: "moderater" is a typo an untyped caller could
-    // make, and the test checks that `axis` refuses it at runtime.
-    expect(() => Roles.axis("typo", "moderater" as Role)).toThrow(
+    // A typo an untyped caller could make.
+    expect(() => UntypedRoles.axis("typo", "moderater")).toThrow(
       /"moderater", which is not a rung/,
     );
   });

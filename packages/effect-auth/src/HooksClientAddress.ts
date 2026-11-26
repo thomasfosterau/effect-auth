@@ -7,6 +7,8 @@
  * @module HooksClientAddress
  * @internal
  */
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import type { Hooks } from "./Hooks.ts";
 
 const ClientAddressKeyed: unique symbol = Symbol.for(
@@ -23,10 +25,9 @@ interface Recorded {
  * @internal
  */
 export const clientAddressKeyedPlugins = (hooks: typeof Hooks.Service): ReadonlyArray<string> =>
-  // SAFETY: `Recorded` only adds an optional symbol-keyed property that nothing
-  // but `recordClientAddressKeyed` writes, always as a string array; any other
-  // `Hooks` implementation lacks it and reads as `undefined`.
-  (hooks as Recorded)[ClientAddressKeyed] ?? [];
+  ClientAddressKeyed in hooks && Arr.isArray(hooks[ClientAddressKeyed])
+    ? Arr.filter(hooks[ClientAddressKeyed], P.isString)
+    : [];
 
 /**
  * Record that `plugin` keys a limit on the client address.

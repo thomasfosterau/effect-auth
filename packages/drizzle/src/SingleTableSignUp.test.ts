@@ -8,7 +8,7 @@
  */
 
 import type { PGlite } from "@electric-sql/pglite";
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { boolean, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
@@ -89,9 +89,9 @@ signUpContract("single-table PostgreSQL", false, {
       .values({
         ...row,
         userId: row.id,
-        // SAFETY: deliberately unchecked: a row without an address must reach the
-        // database as NULL, which the column's NOT NULL refuses.
-        email: row.email as string,
+        // A row without an address reaches the database as NULL, which the
+        // column's NOT NULL refuses.
+        email: row.email ?? sql`NULL`,
       });
   },
   readUserRow: async (userId) => {

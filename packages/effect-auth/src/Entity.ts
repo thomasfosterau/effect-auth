@@ -146,6 +146,12 @@ const typeName = (value: AttributeValue): string =>
 const namesNoEntity = (value: AttributeValue): boolean =>
   isEntityValue(value) && P.isObject(value.__entity) && !namesEntity(value.__entity);
 
+// An entity value is a record too: one holding `__entity`.
+const isAttributeRecord = (
+  value: AttributeValue,
+): value is { readonly [key: string]: AttributeValue } =>
+  P.isObject(value) && !Array.isArray(value);
+
 /**
  * Deep structural equality over {@link AttributeValue}s. An entity value
  * whose type or id is empty equals nothing, itself included, at
@@ -165,11 +171,9 @@ export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): bool
       Arr.every(Arr.zip(a, b), ([itemA, itemB]) => attributeValueEquals(itemA, itemB))
     );
   }
-  // SAFETY: both are non-null, non-array objects of the AttributeValue domain:
-  // records (an entity value is a record holding `__entity`).
-  const recordA = a as { readonly [key: string]: AttributeValue };
-  // SAFETY: as for `recordA`.
-  const recordB = b as { readonly [key: string]: AttributeValue };
+  if (!isAttributeRecord(a) || !isAttributeRecord(b)) return false;
+  const recordA: { readonly [key: string]: AttributeValue } = a;
+  const recordB: { readonly [key: string]: AttributeValue } = b;
   const entriesA = R.toEntries(recordA);
   if (entriesA.length !== R.keys(recordB).length) return false;
   return Arr.every(
