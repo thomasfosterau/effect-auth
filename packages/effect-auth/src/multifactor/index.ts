@@ -11,6 +11,7 @@ export {
   TrustedDeviceWithOtpSecondFactorGateLayer,
 } from "./OtpSecondFactor.ts";
 export {
+  MultiFactorAlreadyEnabledError,
   MultiFactorError,
   type MultiFactorRecord,
   MultiFactorStore,

@@ -42,6 +42,18 @@ export class MultiFactorError extends Data.TaggedError("MultiFactorError")<{
 }> {}
 
 /**
+ * `MultiFactorService.enable` on a user whose enrolment is already verified.
+ * Re-enrolling would overwrite the record unverified and leave the account
+ * without a second factor until (or unless) the new one is confirmed, so the
+ * user removes the enrolment with `disable` first.
+ */
+export class MultiFactorAlreadyEnabledError extends Data.TaggedError(
+  "MultiFactorAlreadyEnabledError",
+)<{
+  readonly message: string;
+}> {}
+
+/**
  * Persistent multi-factor state for a user.
  *
  * `backupCodes` holds sha256 hex digests of the (normalized) plaintext
@@ -246,6 +258,10 @@ export class MultiFactorService extends Context.Service<
      * TOTP secret plus backup codes, and stores the record (unverified unless
      * `skipVerificationOnEnable`). Returns the plaintext secret, otpauth:// URI
      * (labelled with the user's email) and plaintext backup codes — shown once.
+     *
+     * Fails with `MultiFactorAlreadyEnabledError` when the user already has a
+     * verified enrolment, which stays in force: `disable` it first. An
+     * unverified one (an enrolment never confirmed) is replaced.
      */
     readonly enable: (
       userId: string,
@@ -253,6 +269,7 @@ export class MultiFactorService extends Context.Service<
     ) => Effect.Effect<
       MultiFactorEnableResult,
       | MultiFactorError
+      | MultiFactorAlreadyEnabledError
       | Errors.InvalidCredentialsError
       | Errors.HashingError
       | Errors.AuthError
@@ -579,6 +596,13 @@ export const make = (
     return {
       enable: Effect.fn("MultiFactorService.enable")(function* (userId: string, password: string) {
         yield* verifyPassword(userId, password);
+
+        const existing = yield* store.get(userId);
+        if (existing !== null && existing.verified) {
+          return yield* new MultiFactorAlreadyEnabledError({
+            message: "Two-factor authentication is already enabled; disable it first",
+          });
+        }
 
         // The otpauth:// label is the user's email
         const user = yield* userStore.get(userId);

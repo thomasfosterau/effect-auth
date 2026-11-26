@@ -632,8 +632,9 @@ export const accountDeletionsGroup = Group.make(
  * - `DELETE /multi-factor-enrollments/current`: remove it with the password
  *   (in the document's `meta`); `204`.
  *
- * A wrong password or code answers `400`; `404` when multi-factor is not
- * configured.
+ * A wrong password or code answers `400`, and so does `POST` when the user
+ * already has a confirmed enrolment (remove it first); `404` when
+ * multi-factor is not configured.
  */
 export const multiFactorEnrollmentsGroup = Group.make(
   R.MultiFactorEnrollment,

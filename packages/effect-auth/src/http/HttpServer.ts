@@ -2355,6 +2355,8 @@ export const multiFactorEnrollmentsGroupLayer = (
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
+                MultiFactorAlreadyEnabledError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
                 MultiFactorError: (e) => internalServerError(e),
                 UserNotFoundError: (e) => internalServerError(e),
                 HashingError: (e) => internalServerError(e),
@@ -5478,6 +5480,18 @@ export interface AuthWebHandlerOptions {
   readonly strict?: boolean | undefined;
 }
 
+/**
+ * The Scalar bundle the docs page loads: an exact version with its
+ * Subresource Integrity hash, so a changed file on the CDN is refused rather
+ * than run as same-origin script. Bump both together; the hash is
+ * `openssl dgst -sha384 -binary dist/browser/standalone.js | base64` over the
+ * file in the package's npm tarball.
+ */
+const SCALAR_SCRIPT = {
+  src: "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.78.0/dist/browser/standalone.js",
+  integrity: "sha384-cnEoXciWDGHIneAhs8XGPl143JvH/wcjYOm32qUmBmneG0OUgCS7XTxrI3OLrrbX",
+} as const;
+
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
 const scalarReferenceHtml = `<!doctype html>
 <html>
@@ -5488,7 +5502,12 @@ const scalarReferenceHtml = `<!doctype html>
   </head>
   <body>
     <script id="api-reference" data-url="openapi.json"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script
+      src="${SCALAR_SCRIPT.src}"
+      integrity="${SCALAR_SCRIPT.integrity}"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
   </body>
 </html>
 `;

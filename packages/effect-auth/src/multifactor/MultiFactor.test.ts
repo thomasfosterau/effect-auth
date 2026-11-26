@@ -295,6 +295,58 @@ describe("MultiFactorService", () => {
     ).toBe(false);
   });
 
+  it("refuses to re-enrol a confirmed enrolment and keeps it in force", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-2fa-reenrol", "reenrol@example.com", "correct-password");
+
+    const { first, result, enabledAfter } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({ issuer: "TestApp" });
+          const first = yield* service.enable("user-2fa-reenrol", "correct-password");
+          yield* service.confirmEnable("user-2fa-reenrol", yield* generateTotp(first.secret));
+          const result = yield* Effect.result(
+            service.enable("user-2fa-reenrol", "correct-password"),
+          );
+          const enabledAfter = yield* service.isEnabled("user-2fa-reenrol");
+          return { first, result, enabledAfter };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MultiFactorAlreadyEnabledError");
+    expect(enabledAfter).toBe(true);
+    const record = Option.getOrUndefined(
+      MutableHashMap.get(multiFactorRecords, "user-2fa-reenrol"),
+    );
+    expect(record?.verified).toBe(true);
+    expect(record?.secret).toBe(first.secret);
+  });
+
+  it("replaces an enrolment that was never confirmed", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-2fa-restart", "restart@example.com", "correct-password");
+
+    const { first, second } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({ issuer: "TestApp" });
+          const first = yield* service.enable("user-2fa-restart", "correct-password");
+          const second = yield* service.enable("user-2fa-restart", "correct-password");
+          return { first, second };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(second.secret).not.toBe(first.secret);
+    expect(
+      Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-restart"))?.secret,
+    ).toBe(second.secret);
+  });
+
   it("should fail to enable with a wrong password", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-3", "wrongpw@example.com", "correct-password");
