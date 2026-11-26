@@ -1,11 +1,23 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order } from "effect";
+import {
+  Cause,
+  Clock,
+  Context,
+  Data,
+  Effect,
+  Exit,
+  Layer,
+  MutableHashMap,
+  Order,
+  Result,
+  Struct,
+} from "effect";
 import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
 import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Digest } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
 import * as WebAuthn from "./WebAuthn.ts";
@@ -129,10 +141,7 @@ const dependenciesWith = (hooks: typeof Hooks.Service) =>
       Context.make(CredentialStore, mockCredentialStore),
     ),
     Context.merge(
-      Context.merge(
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-        Context.make(Digest.Digest, platformDigest),
-      ),
+      Context.merge(PlatformCrypto.context(), Context.make(Digest.Digest, platformDigest)),
       Context.make(Hooks, hooks),
     ),
   );
@@ -424,6 +433,29 @@ describe("WebAuthn Service", () => {
       userVerification: "preferred",
     });
     expect(result.excludeCredentials).toEqual([]);
+    expect(result.attestation).toBe("none");
+  });
+
+  // Attestation statements are never verified, so asking for one is refused
+  // at build rather than implying a guarantee.
+  it.for(["indirect", "direct", "enterprise"] as const)(
+    "dies at build with WebAuthnConfigError for attestation %s",
+    async (attestation) => {
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(WebAuthn.make({ ...config, attestation }), dependencies),
+      );
+      assert(Exit.isFailure(exit));
+      const defect = Cause.squash(exit.cause);
+      assert(defect instanceof WebAuthn.WebAuthnConfigError);
+      expect(defect.message).toContain(attestation);
+    },
+  );
+
+  it("accepts attestation none", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(WebAuthn.make({ ...config, attestation: "none" }), dependencies),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
   });
 
   // --- Credential management tests ------------------------------------------
@@ -767,9 +799,10 @@ const attestationObject = async (
   cose: number[],
   credentialId: Uint8Array,
   flags = UP | UV | AT,
+  aaguid = new Uint8Array(16),
 ): Promise<Uint8Array> => {
   const acd = concatBytes(
-    new Uint8Array(16), // aaguid
+    aaguid,
     new Uint8Array([(credentialId.length >> 8) & 0xff, credentialId.length & 0xff]),
     credentialId,
     new Uint8Array(cose),
@@ -1368,6 +1401,116 @@ describe("WebAuthn user verification", () => {
     );
     assert.instanceOf(err, WebAuthnVerificationError);
     expect(err.message).toBe("Backup state set on a credential that is not backup eligible");
+  });
+});
+
+describe("WebAuthn backup flags and AAGUID", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(mockChallengeStore.challenges);
+    MutableHashMap.clear(mockCredentialStore.credentials);
+  });
+
+  /** Register a passkey with registration flags `flags`; answers its key and id. */
+  const register = async (flags: number, aaguid?: Uint8Array<ArrayBuffer>) => {
+    const { privateKey, cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId, flags, aaguid);
+    const registration = await withService((service) =>
+      Effect.gen(function* () {
+        const reg = yield* service.generateRegistrationChallenge(testUser);
+        return yield* service.verifyRegistration(testUser.id, reg.challenge, {
+          credentialId,
+          attestationObject: attestationObj,
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        });
+      }),
+    );
+    return { privateKey, credentialId, registration };
+  };
+
+  const signIn = (privateKey: CryptoKey, credentialId: Uint8Array, flags: number, counter = 1) =>
+    withService((service) =>
+      Effect.gen(function* () {
+        const login = yield* service.generateAuthenticationChallenge();
+        const response = yield* assertion(privateKey, credentialId, login.challenge, {
+          flags,
+          counter,
+        });
+        return yield* Effect.result(service.verifyAuthentication(login.challenge, response));
+      }),
+    );
+
+  it("stores BE, BS and the AAGUID at registration", async () => {
+    const aaguid = new Uint8Array([
+      0xfb, 0xfc, 0x30, 0x07, 0x15, 0x4e, 0x4e, 0xcc, 0x8c, 0x0b, 0x6e, 0x02, 0x05, 0x57, 0xd7,
+      0xbd,
+    ]);
+    const { registration } = await register(UP | UV | BE | BS | AT, aaguid);
+    expect(registration.credential).toMatchObject({
+      backupEligible: true,
+      backupState: true,
+      aaguid: "fbfc3007-154e-4ecc-8c0b-6e020557d7bd",
+    });
+    const stored = Option.getOrNull(
+      MutableHashMap.get(mockCredentialStore.credentials, registration.credential.id),
+    );
+    expect(stored).toMatchObject({
+      backupEligible: true,
+      backupState: true,
+      aaguid: "fbfc3007-154e-4ecc-8c0b-6e020557d7bd",
+    });
+  });
+
+  it("stores the all-zero AAGUID of an authenticator that reports none", async () => {
+    const { registration } = await register(UP | UV | AT);
+    expect(registration.credential.aaguid).toBe("00000000-0000-0000-0000-000000000000");
+    expect(registration.credential.backupEligible).toBe(false);
+  });
+
+  it.for([
+    ["gains", UP | UV | AT, UP | UV | BE],
+    ["loses", UP | UV | BE | AT, UP | UV],
+  ] as const)(
+    "refuses an assertion whose credential %s backup eligibility, and keeps the record",
+    async ([, registrationFlags, assertionFlags]) => {
+      const { privateKey, credentialId, registration } = await register(registrationFlags);
+      const result = await signIn(privateKey, credentialId, assertionFlags);
+      assert(Result.isFailure(result));
+      assert.instanceOf(result.failure, WebAuthnVerificationError);
+      expect(result.failure.message).toBe("Backup eligibility changed for this credential");
+      const stored = Option.getOrNull(
+        MutableHashMap.get(mockCredentialStore.credentials, registration.credential.id),
+      );
+      expect(stored).toEqual(registration.credential);
+    },
+  );
+
+  it("records the backup state each sign-in reports", async () => {
+    const { privateKey, credentialId, registration } = await register(UP | UV | BE | AT);
+    const backedUp = await signIn(privateKey, credentialId, UP | UV | BE | BS, 1);
+    assert(Result.isSuccess(backedUp));
+    expect(backedUp.success.credential.backupState).toBe(true);
+    const lost = await signIn(privateKey, credentialId, UP | UV | BE, 2);
+    assert(Result.isSuccess(lost));
+    const stored = Option.getOrNull(
+      MutableHashMap.get(mockCredentialStore.credentials, registration.credential.id),
+    );
+    expect(stored).toMatchObject({ backupEligible: true, backupState: false, counter: 2 });
+  });
+
+  it("records the flags of a credential stored before they were, then holds BE to them", async () => {
+    const { privateKey, credentialId, registration } = await register(UP | UV | BE | AT);
+    const legacy = Struct.omit(registration.credential, ["backupEligible", "backupState"]);
+    MutableHashMap.set(mockCredentialStore.credentials, legacy.id, legacy);
+
+    const first = await signIn(privateKey, credentialId, UP | UV, 1);
+    assert(Result.isSuccess(first));
+    const stored = Option.getOrNull(MutableHashMap.get(mockCredentialStore.credentials, legacy.id));
+    expect(stored).toMatchObject({ backupEligible: false, backupState: false });
+
+    const changed = await signIn(privateKey, credentialId, UP | UV | BE, 2);
+    assert(Result.isFailure(changed));
+    expect(changed.failure.message).toBe("Backup eligibility changed for this credential");
   });
 });
 

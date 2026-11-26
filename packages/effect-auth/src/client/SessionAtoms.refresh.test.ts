@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import type * as Http from "../http/index.ts";
-import { hashToken } from "../TokenHash.ts";
 import { AtomRegistry } from "effect/reactivity";
 import { createAuthClient } from "./Client.ts";
 import { makeSessionAtoms } from "./SessionAtoms.ts";
@@ -230,7 +230,7 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     expect(token).toBeDefined();
     const session = Arr.findFirst(posted, (message) => message !== null);
     assert(Option.isSome(session), "the sign-in was broadcast");
-    expect(session.value.session.id).toBe(hashToken(token ?? ""));
+    expect(session.value.session.id).toBe(sha256Hex(token ?? ""));
     expect(toJson(posted)).not.toContain(token);
 
     post.mockRestore();

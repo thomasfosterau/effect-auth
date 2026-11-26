@@ -29,11 +29,13 @@
  * - `TableNames` / `defaultTableNames` / `Tables` and the row types — what the
  *   three dialects agree on.
  * - `defineSchema` / `fromTables` / `AuthSchema` and the `*ColumnNames` types —
- *   how to point the stores at tables this package did not define.
+ *   how to point the stores at tables this package did not define;
+ *   `defineApiKeyTable`, `defineTokenTable` and `defineRateLimitTable` do the
+ *   same for `ApiKeyStore`, `TokenStore` and `RateLimitStore`.
  * - `ladderCheck` — a role column's `CHECK`, derived from the app's `Ladder`.
- * - `ownedListFilter` / `isFollowerLayer` — `Auth.OwnedAccess`'s read scope
- *   rendered as a `WHERE`, and its follower seam over an application's own
- *   follow table.
+ * - `ownedListFilter` / `isFollowerLayer` / `isMemberLayer` — `Auth.OwnedAccess`'s
+ *   read scope rendered as a `WHERE`, and its follower and member seams over an
+ *   application's own follow and membership tables.
  *
  * @example
  * ```ts
@@ -84,6 +86,21 @@
  */
 
 export {
+  type ApiKeyColumnNames,
+  type ApiKeyColumns,
+  type ApiKeySchema,
+  type ApiKeyTableInput,
+  defineApiKeyTable,
+  defineRateLimitTable,
+  defineTokenTable,
+  type RateLimitColumnNames,
+  type RateLimitColumns,
+  type RateLimitSchema,
+  type RateLimitTableInput,
+  type TokenColumnNames,
+  type TokenColumns,
+  type TokenSchema,
+  type TokenTableInput,
   type AuthSchema,
   type AuthSchemaSpec,
   type ColumnKey,
@@ -107,7 +124,12 @@ export * from "./Database.ts";
 export * from "./Schema.ts";
 export { layer } from "./Layers.ts";
 export { ladderCheck } from "./LadderCheck.ts";
-export { isFollowerLayer, ownedListFilter, type OwnedColumns } from "./OwnedListFilter.ts";
+export {
+  isFollowerLayer,
+  isMemberLayer,
+  ownedListFilter,
+  type OwnedColumns,
+} from "./OwnedListFilter.ts";
 
 export * as ApiKeyStore from "./ApiKeyStore.ts";
 export * as EmailPasswordStore from "./EmailPasswordStore.ts";

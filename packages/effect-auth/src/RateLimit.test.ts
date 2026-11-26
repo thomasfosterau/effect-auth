@@ -2,7 +2,13 @@ import { describe, it, expect } from "vite-plus/test";
 import { Clock, Duration, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
-import { make, type RateLimitConfig, type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
+import {
+  make,
+  RATE_LIMIT_EXCEEDED_MESSAGE,
+  type RateLimitConfig,
+  type RateLimitEntry,
+  RateLimitStore,
+} from "./RateLimit.ts";
 import { RateLimitError } from "./Errors.ts";
 
 /**
@@ -98,6 +104,13 @@ describe("RateLimiter.checkLimit", () => {
     const error = await refusal(layer, "blocked", config);
     expect(error).toBeInstanceOf(RateLimitError);
     expect(error).toMatchObject({ key: "blocked" });
+  });
+
+  it("refuses with a fixed message, so a forwarded answer names no key", async () => {
+    const key = "ip:signin:203.0.113.7";
+    const { layer } = makeStore({ key, count: 0, resetAt: 1, blockedUntil: OPEN_UNTIL });
+    const error = await refusal(layer, key, config);
+    expect(error).toMatchObject({ message: RATE_LIMIT_EXCEEDED_MESSAGE, key });
   });
 
   it("refuses a key at its limit without blocking it when no block is configured", async () => {

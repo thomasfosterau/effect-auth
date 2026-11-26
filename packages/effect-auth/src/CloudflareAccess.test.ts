@@ -19,6 +19,7 @@ import * as SessionResolution from "./SessionResolution.ts";
 import { memoryUserStore, memoryUserTable } from "./testing/MemoryStores.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
+import { runPromiseHttp } from "./testing/HttpClient.ts";
 
 const TEAM = "example-team.cloudflareaccess.com";
 const ISSUER = `https://${TEAM}`;
@@ -107,7 +108,7 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, CloudflareAccess.CloudflareAccessVerifier>,
   overrides: Partial<CloudflareAccess.CloudflareAccessConfig> = {},
 ) =>
-  Effect.runPromise(
+  runPromiseHttp(
     effect.pipe(
       Effect.provide(CloudflareAccess.CloudflareAccessVerifier.layer({ ...config, ...overrides })),
     ),
@@ -360,7 +361,7 @@ describe("CloudflareAccessVerifier.layer config", () => {
     [{ teamDomain: TEAM, audience: " " }],
     [{ teamDomain: TEAM, audience: AUD, sources: [] }],
   ])("fails to build with %j", async (bad) => {
-    const exit = await Effect.runPromise(
+    const exit = await runPromiseHttp(
       Effect.flip(CloudflareAccess.make(bad)).pipe(Effect.map((e) => e.reason)),
     );
     expect(exit).toBe("config");

@@ -51,7 +51,9 @@ import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { Base64Url } from "effect/encoding";
+import type { Aead, Mac, SecureRandom } from "effect/crypto";
 import * as Cipher from "./Cipher.ts";
+import type { AuthError } from "./Errors.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
 import { timingSafeEqualBytes } from "./TokenHash.ts";
 import * as Types from "./Types.ts";
@@ -89,8 +91,8 @@ export interface ResolvedSessionCache {
   readonly secret: Redacted.Redacted;
   /** {@link SessionCacheConfig.version}, `""` when unset. */
   readonly version: string;
-  /** The AES-256-GCM key when {@link SessionCacheConfig.encrypt} is on. */
-  readonly encryptionKey: Uint8Array | undefined;
+  /** {@link SessionCacheConfig.encrypt}: the payload is sealed under a key derived from `secret`. */
+  readonly encrypt: boolean;
 }
 
 const MIN_SECRET_LENGTH = 32;
@@ -116,12 +118,7 @@ export const resolveSessionCache = (
     maxAge: config.maxAge ?? 5 * 60 * 1000,
     secret: config.secret,
     version: config.version ?? "",
-    // A key of its own, derived from the secret, so the HMAC key is never
-    // also the encryption key.
-    encryptionKey:
-      config.encrypt === true
-        ? Cipher.hmac("sha256", Redacted.value(config.secret), "effect-auth/session-cache/encrypt")
-        : undefined,
+    encrypt: config.encrypt === true,
   };
 };
 
@@ -129,8 +126,13 @@ const PAYLOAD_VERSION = 1;
 
 const b64url = (data: Uint8Array): string => Base64Url.encode(data);
 
-const sign = (data: string, secret: Redacted.Redacted): string =>
-  b64url(Cipher.hmac("sha256", Redacted.value(secret), data));
+const sign = (data: string, secret: Redacted.Redacted): Effect.Effect<string, AuthError, Mac.Mac> =>
+  Effect.map(Cipher.hmac("sha256", Redacted.value(secret), data), b64url);
+
+// A key of its own, derived from the secret, so the HMAC key is never also the
+// encryption key.
+const encryptionKey = (secret: Redacted.Redacted): Effect.Effect<Uint8Array, AuthError, Mac.Mac> =>
+  Cipher.hmac("sha256", Redacted.value(secret), "effect-auth/session-cache/encrypt");
 
 const timingSafeEqualStr = (a: string, b: string): boolean =>
   timingSafeEqualBytes(new TextEncoder().encode(a), new TextEncoder().encode(b));
@@ -203,34 +205,34 @@ export const encodeSessionCacheCookie = (
   now: number,
   primarySessionId: string,
   gateAttributes: HashSet.HashSet<string> = HashSet.fromIterable(DEFAULT_SERVER_ONLY_ATTRIBUTES),
-): string | undefined => {
-  const s = value.session;
-  const u = value.user;
-  if (holdsGateAttribute(u, gateAttributes)) return undefined;
-  const payload = {
-    v: PAYLOAD_VERSION,
-    e: cache.version,
-    exp: now + cache.maxAge,
-    sid: primarySessionId,
-    session: {
-      ...s,
-      expiresAt: s.expiresAt.getTime(),
-      createdAt: s.createdAt.getTime(),
-      lastActivityAt: s.lastActivityAt.getTime(),
-    },
-    user: {
-      ...u,
-      createdAt: u.createdAt.getTime(),
-      updatedAt: u.updatedAt.getTime(),
-    },
-  };
-  const json = encodeJson(payload);
-  const encoded =
-    cache.encryptionKey === undefined
-      ? b64url(new TextEncoder().encode(json))
-      : `${ENCRYPTED_PREFIX}${Cipher.aes256GcmSeal(cache.encryptionKey, json)}`;
-  return `${encoded}.${sign(encoded, cache.secret)}`;
-};
+): Effect.Effect<string | undefined, AuthError, Mac.Mac | Aead.Aead | SecureRandom.SecureRandom> =>
+  Effect.gen(function* () {
+    const s = value.session;
+    const u = value.user;
+    if (holdsGateAttribute(u, gateAttributes)) return undefined;
+    const payload = {
+      v: PAYLOAD_VERSION,
+      e: cache.version,
+      exp: now + cache.maxAge,
+      sid: primarySessionId,
+      session: {
+        ...s,
+        expiresAt: s.expiresAt.getTime(),
+        createdAt: s.createdAt.getTime(),
+        lastActivityAt: s.lastActivityAt.getTime(),
+      },
+      user: {
+        ...u,
+        createdAt: u.createdAt.getTime(),
+        updatedAt: u.updatedAt.getTime(),
+      },
+    };
+    const json = encodeJson(payload);
+    const encoded = cache.encrypt
+      ? `${ENCRYPTED_PREFIX}${yield* Cipher.aes256GcmSeal(yield* encryptionKey(cache.secret), json)}`
+      : b64url(new TextEncoder().encode(json));
+    return `${encoded}.${yield* sign(encoded, cache.secret)}`;
+  });
 
 /**
  * Verify + parse a cache cookie. Returns `null` (falling back to store
@@ -245,25 +247,44 @@ export const decodeSessionCacheCookie = (
   now: number,
   primarySessionId: string,
   gateAttributes: HashSet.HashSet<string> = HashSet.fromIterable(DEFAULT_SERVER_ONLY_ATTRIBUTES),
+): Effect.Effect<Types.SessionWithUser | null, never, Mac.Mac | Aead.Aead> =>
+  Effect.gen(function* () {
+    const dot = cookie.lastIndexOf(".");
+    if (dot <= 0) return null;
+    const encoded = cookie.slice(0, dot);
+    const signature = cookie.slice(dot + 1);
+    const expected = yield* Effect.option(sign(encoded, cache.secret));
+    if (Option.isNone(expected) || !timingSafeEqualStr(signature, expected.value)) return null;
+
+    const json = yield* payloadJson(encoded, cache);
+    if (json === null) return null;
+
+    const parsed = decodePayloadJson(json);
+    if (Option.isNone(parsed)) return null;
+    return restoreSnapshot(parsed.value, cache, now, primarySessionId, gateAttributes);
+  });
+
+/** The signed body's JSON: decrypted under `cache.encrypt`, else base64url-decoded. */
+const payloadJson = (
+  encoded: string,
+  cache: ResolvedSessionCache,
+): Effect.Effect<string | null, never, Aead.Aead | Mac.Mac> =>
+  Effect.gen(function* () {
+    if (encoded.startsWith(ENCRYPTED_PREFIX) !== cache.encrypt) return null;
+    if (!cache.encrypt) return Result.getOrNull(Base64Url.decodeString(encoded));
+    const key = yield* Effect.option(encryptionKey(cache.secret));
+    if (Option.isNone(key)) return null;
+    return yield* Cipher.aes256GcmOpen(key.value, encoded.slice(ENCRYPTED_PREFIX.length));
+  });
+
+/** The snapshot a verified payload carries, or `null` when it may not be served. */
+const restoreSnapshot = (
+  payload: typeof SerializedPayload.Type,
+  cache: ResolvedSessionCache,
+  now: number,
+  primarySessionId: string,
+  gateAttributes: HashSet.HashSet<string>,
 ): Types.SessionWithUser | null => {
-  const dot = cookie.lastIndexOf(".");
-  if (dot <= 0) return null;
-  const encoded = cookie.slice(0, dot);
-  const signature = cookie.slice(dot + 1);
-  if (!timingSafeEqualStr(signature, sign(encoded, cache.secret))) return null;
-
-  const encrypted = encoded.startsWith(ENCRYPTED_PREFIX);
-  if (encrypted !== (cache.encryptionKey !== undefined)) return null;
-  const json =
-    cache.encryptionKey === undefined
-      ? Result.getOrNull(Base64Url.decodeString(encoded))
-      : Cipher.aes256GcmOpen(cache.encryptionKey, encoded.slice(ENCRYPTED_PREFIX.length));
-  if (json === null) return null;
-
-  const parsed = decodePayloadJson(json);
-  if (Option.isNone(parsed)) return null;
-
-  const payload = parsed.value;
   if (now >= payload.exp) return null;
   if ((payload.e ?? "") !== cache.version) return null;
 

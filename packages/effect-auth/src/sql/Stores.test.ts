@@ -308,6 +308,7 @@ const storeContract = (engine: StoreEngine): void => {
         "auth_users",
         "auth_webauthn_challenge_ceremonies",
         "auth_webauthn_challenges",
+        "auth_webauthn_credential_flags",
         "auth_webauthn_credentials",
       ]);
       expect(schemaStatements.length).toBeGreaterThan(0);
@@ -737,6 +738,30 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.updated?.counter).toBe(5);
       expect(result.byUser).toHaveLength(1);
       expect(result.missing).toBeNull();
+    });
+
+    it("CredentialStore reads a credential stored before its flags as having none, and update records them", async () => {
+      // A row written before `auth_webauthn_credential_flags` existed.
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const store = yield* Auth.MultiFactor.CredentialStore;
+          yield* sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
+            VALUES ('legacy-cred', 'user-1', 'CQgH', -7, 3, 0, NULL, NULL)`;
+          const legacy = yield* store.get("legacy-cred");
+          if (legacy === null) return { legacy, updated: null };
+          yield* store.update({ ...legacy, counter: 4, backupEligible: true, backupState: false });
+          return { legacy, updated: yield* store.get("legacy-cred") };
+        }),
+      );
+      expect(result.legacy).not.toBeNull();
+      expect(result.legacy).not.toHaveProperty("backupEligible");
+      expect(result.legacy).not.toHaveProperty("backupState");
+      expect(result.legacy).not.toHaveProperty("aaguid");
+      expect(result.updated?.counter).toBe(4);
+      expect(result.updated?.backupEligible).toBe(true);
+      expect(result.updated?.backupState).toBe(false);
+      expect(result.updated).not.toHaveProperty("aaguid");
     });
 
     it("OAuthStateStore roundtrips states incl. nonce", async () => {

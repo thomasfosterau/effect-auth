@@ -3,7 +3,8 @@
   `client.emailOtp.send({ email, purpose })`, swaps itself for a code field, then
   calls `client.emailOtp.signIn({ email, otp })`.
 
-  `onSuccess` fires only for the second step — the step that yields a session.
+  `onSuccess` fires only for the second step — the step that yields a session —
+  and only when it does; a second-factor challenge goes to `onSecondFactor`.
   The rendered `<form>` carries `data-step="request"` or `data-step="verify"` so
   a stylesheet can tell the two apart.
 -->
@@ -12,7 +13,7 @@
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
   import SubmitButton from "./SubmitButton.svelte";
-  import { isInvalid, mergeLabels, resolveClasses } from "./internal.ts";
+  import { isInvalid, mergeLabels, resolveClasses, routeSignInResult } from "./internal.ts";
   import { createSubmission } from "./submission.svelte.ts";
   import { EMAIL_OTP_LABELS, type EmailOtpFormProps } from "./props.ts";
 
@@ -20,6 +21,7 @@
     purpose = "sign-in",
     client: clientProp = undefined,
     onSuccess = undefined,
+    onSecondFactor = undefined,
     onError = undefined,
     class: className = undefined,
     classes: classOverrides = undefined,
@@ -56,7 +58,7 @@
     event.preventDefault();
     void verify.run(() => client.emailOtp.signIn({ email, otp }), {
       fallback: labels.verifyError,
-      onSuccess,
+      onSuccess: routeSignInResult(onSuccess, onSecondFactor),
       onError,
     });
   };

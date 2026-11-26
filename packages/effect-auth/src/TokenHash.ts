@@ -11,30 +11,57 @@
  *
  * @module token-hash
  */
-import { createHash, timingSafeEqual } from "node:crypto";
-import { Result } from "effect";
+import { Effect, Result } from "effect";
+import { Digest, Mac } from "effect/crypto";
 import { Hex } from "effect/encoding";
+
+const encoder = new TextEncoder();
+
+/** The SHA-256 hex digest of `token` under the given `Digest` service. */
+const digestToken =
+  (digest: typeof Digest.Digest.Service) =>
+  (token: string): Effect.Effect<string> =>
+    digest.digestHex(Digest.sha256, encoder.encode(token));
 
 /**
  * SHA-256 hex digest of a token string.
  *
  * Use for any high-entropy secret that must be stored at rest (bearer tokens,
- * OTPs, API keys, OIDC codes). The same input always produces the same
- * output, so this can be used as a deterministic store key.
+ * API keys, OIDC codes). The same input always produces the same output, so
+ * this can be used as a deterministic store key.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect } from "effect"
+ * import { Digest } from "effect/crypto"
+ * import { hashToken } from "@thomasfosterau/effect-auth"
+ *
+ * const digest = await Effect.runPromise(
+ *   hashToken("abc").pipe(Effect.provide(Digest.layerWebCrypto)),
+ * )
+ * assert.equal(digest, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+ * ```
  */
-export const hashToken = (token: string): string =>
-  createHash("sha256").update(token).digest("hex");
+export const hashToken = (token: string): Effect.Effect<string, never, Digest.Digest> =>
+  Digest.Digest.use((digest) => digestToken(digest)(token));
 
 /**
- * Constant-time comparison of two equal-length byte sequences (raw digests,
- * HMACs, signatures). Every timing-safe comparison in effect-auth routes
- * through this function so `node:crypto`'s `timingSafeEqual` stays corralled
- * to this module.
+ * {@link hashToken} bound to the `Digest` service in context, for a service's
+ * `make` to resolve once so its methods carry `R = never`.
  */
-export const timingSafeEqualBytes = (a: Uint8Array, b: Uint8Array): boolean => {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-};
+export const tokenHasher: Effect.Effect<
+  (token: string) => Effect.Effect<string>,
+  never,
+  Digest.Digest
+> = Digest.Digest.useSync(digestToken);
+
+/**
+ * Constant-time comparison of two byte sequences (raw digests, HMACs,
+ * signatures). Sequences of different lengths are unequal.
+ */
+export const timingSafeEqualBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  Mac.timingSafeEqual(a, b);
 
 /**
  * Constant-time comparison of two hex-encoded SHA-256 digests.

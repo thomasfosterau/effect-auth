@@ -1,3 +1,5 @@
+import { sha256Hex } from "../testing/Sha256.ts";
+import { testRootSecretLayer } from "../testing/RootSecret.ts";
 import {
   assert,
   describe,
@@ -60,7 +62,6 @@ import {
   PasswordResetService,
 } from "../password/PasswordReset.ts";
 import { UserServiceStore, UserService } from "../User.ts";
-import { hashToken } from "../TokenHash.ts";
 import { composePlugins, Hooks, makePlugin } from "../Hooks.ts";
 import {
   IdentifierStore,
@@ -114,8 +115,10 @@ import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import {
   CaptchaError,
   ClientAddressConfigError,
+  EmailVerificationError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
+  SignUpAttributesConfigError,
 } from "../Errors.ts";
 import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
 import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
@@ -137,7 +140,7 @@ const PW2 = "new-password-456";
 
 // One shared (stateless) hasher; low scrypt cost keeps the suite fast while
 // still exercising real hashing end to end.
-const hasher = Password.scryptHasher({ cost: 1024 });
+const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 
 interface Fixture {
   /** The base `AuthServices` layer (no optional features). */
@@ -188,6 +191,10 @@ const makeFixture = (
       | undefined;
     /** The `EmailVerificationService` `resendCooldown`. Default the service's 60 s. */
     readonly verificationResendCooldown?: number | undefined;
+    /** Replaces the `EmailVerificationService` send, which records the token by default. */
+    readonly verificationSendEmail?:
+      | ((to: string, token: string) => Effect.Effect<void, EmailVerificationError>)
+      | undefined;
     /** The `EmailPasswordService` config. Default `{}`. */
     readonly emailPassword?: EmailPasswordConfig | undefined;
     /** The `AuthLifecycleService` config. Default `{}`. */
@@ -416,7 +423,9 @@ const makeFixture = (
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(storeLayer)),
     EmailVerificationService.layer({
-      sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
+      sendEmail:
+        options.verificationSendEmail ??
+        ((_to, token) => Effect.sync(() => void sentVerificationTokens.push(token))),
       ...(options.verificationResendCooldown !== undefined && {
         resendCooldown: options.verificationResendCooldown,
       }),
@@ -666,6 +675,7 @@ const makeFixture = (
   // UserStore/Hooks already provided by `baseServices`).
   const featureBase = Layer.mergeAll(
     baseServices,
+    testRootSecretLayer,
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
     Layer.succeed(DeviceAuthorizationStore)(deviceStore),
     Layer.succeed(PhoneOtpStore)(phoneOtpStore),
@@ -1322,7 +1332,7 @@ describe("anti-enumeration sign-up over HTTP", () => {
         verification ? [preCheck ? VICTIM : FRESH] : [],
       );
       expect(records.every((record) => fixture.userExists(record.userId))).toBe(true);
-      expect(fixture.sentVerificationTokens.map((token) => hashToken(token))).toEqual(
+      expect(fixture.sentVerificationTokens.map((token) => sha256Hex(token))).toEqual(
         records.map((record) => record.token),
       );
       expect(notices).toEqual(verification && notice ? [VICTIM] : []);
@@ -1559,7 +1569,7 @@ describe("session management endpoints", () => {
         body.map((s) => s.id),
         Order.String,
       ),
-    ).toEqual(Arr.sort([hashToken(sid1), hashToken(sid2)], Order.String));
+    ).toEqual(Arr.sort([sha256Hex(sid1), sha256Hex(sid2)], Order.String));
   });
 
   it("requires authentication to list sessions", async () => {
@@ -1574,7 +1584,7 @@ describe("session management endpoints", () => {
     const sid2 = await signIn(handler, "a@b.com");
 
     // A session is revoked by the id the list reports (the token's hash).
-    const res = await handler(deleteRequest(`/sessions/${hashToken(sid2)}`, asCookie(sid1)));
+    const res = await handler(deleteRequest(`/sessions/${sha256Hex(sid2)}`, asCookie(sid1)));
     expect(res.status).toBe(204);
 
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(401);
@@ -1586,7 +1596,7 @@ describe("session management endpoints", () => {
     const sid1 = await signUp(handler, "a@b.com");
     const otherSid = await signUp(handler, "other@b.com");
 
-    const res = await handler(deleteRequest(`/sessions/${hashToken(otherSid)}`, asCookie(sid1)));
+    const res = await handler(deleteRequest(`/sessions/${sha256Hex(otherSid)}`, asCookie(sid1)));
     expect(res.status).toBe(404);
     expect((await jsonBody(res, ErrorDocumentBody)).errors[0]?.status).toBe("404");
     // The other user's session is untouched.
@@ -1860,6 +1870,22 @@ describe("email verification roundtrip", () => {
       authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
     );
     expect(verify.status).toBe(201);
+  });
+
+  // An unverified account's send is detached, so a vendor failure is the
+  // scheduler's to report and the answer is the one any other address gets.
+  it("answers an unverified account alike when its send fails", async () => {
+    const fixture = makeFixture({
+      verificationSendEmail: () =>
+        Effect.fail(new EmailVerificationError({ message: "mail provider down" })),
+    });
+    const handler = handlerFor(fixture);
+    await signUp(handler, "a@b.com");
+
+    const known = await handler(authRequest("send-verification", { email: "a@b.com" }));
+    const unknown = await handler(authRequest("send-verification", { email: "no@one.com" }));
+    expect([known.status, unknown.status]).toEqual([202, 202]);
+    expect(await known.text()).toBe(await unknown.text());
   });
 
   it("acknowledges uniformly for unknown emails (anti-enumeration)", async () => {
@@ -3254,8 +3280,8 @@ describe("HTTP multi-session", () => {
         listed.data.map((s) => s.id),
         Order.String,
       ),
-    ).toEqual(Arr.sort([hashToken(sidA), hashToken(sidB)], Order.String));
-    expect(listed.data.find((s) => s.attributes.active)?.id).toBe(hashToken(sidB));
+    ).toEqual(Arr.sort([sha256Hex(sidA), sha256Hex(sidB)], Order.String));
+    expect(listed.data.find((s) => s.attributes.active)?.id).toBe(sha256Hex(sidB));
     expect(
       Arr.sort(
         listed.included.map((u) => u.attributes.email),
@@ -3270,7 +3296,7 @@ describe("HTTP multi-session", () => {
     const setActive = await handler(
       jsonApiRequest(
         "/device-sessions/active",
-        { data: { type: "device-sessions", id: hashToken(sidA) } },
+        { data: { type: "device-sessions", id: sha256Hex(sidA) } },
         { cookie: deviceCookie },
       ),
     );
@@ -3281,7 +3307,7 @@ describe("HTTP multi-session", () => {
     const foreign = await handler(
       jsonApiRequest(
         "/device-sessions/active",
-        { data: { type: "device-sessions", id: hashToken("not-on-this-device") } },
+        { data: { type: "device-sessions", id: sha256Hex("not-on-this-device") } },
         { cookie: deviceCookie },
       ),
     );
@@ -3293,7 +3319,7 @@ describe("HTTP multi-session", () => {
     // Revoke B (the session this request carries): it drops from the list and
     // the session cookie is cleared; A remains valid.
     const revoke = await handler(
-      deleteRequest(`/device-sessions/${hashToken(sidB)}`, { cookie: deviceCookie }),
+      deleteRequest(`/device-sessions/${sha256Hex(sidB)}`, { cookie: deviceCookie }),
     );
     expect(revoke.status).toBe(204);
     const newMulti = requireSetCookie(revoke, "conduit_session_multi");
@@ -3588,7 +3614,7 @@ const issuedResponse = async (res: Response) => {
 const expectNoToken = (issued: { token: string; text: string; id: string }) => {
   expect(issued.token.length).toBeGreaterThan(0);
   expect(issued.text).not.toContain(issued.token);
-  expect(issued.id).toBe(hashToken(issued.token));
+  expect(issued.id).toBe(sha256Hex(issued.token));
 };
 
 describe("the session token never reaches a response body", () => {
@@ -3617,7 +3643,7 @@ describe("the session token never reaches a response body", () => {
     const text = await current.text();
     expect(text).not.toContain(token);
     const read = Schema.decodeUnknownSync(SessionDocumentBody)(parseJson(text));
-    expect(read.data.id).toBe(hashToken(token));
+    expect(read.data.id).toBe(sha256Hex(token));
 
     // The digest is the session's one id: the list, `GET /sessions/:id` and
     // `DELETE /sessions/:id` all take it.
@@ -3640,7 +3666,7 @@ describe("the session token never reaches a response body", () => {
   it("the digest in a body is not a credential", async () => {
     const handler = handlerFor();
     const token = await signUp(handler, "leak@test.com");
-    const digest = hashToken(token);
+    const digest = sha256Hex(token);
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(digest)))).status).toBe(401);
     expect(
       (await handler(getRequest(CURRENT_SESSION, { authorization: `Bearer ${digest}` }))).status,
@@ -3720,7 +3746,7 @@ describe("the session token never reaches a response body", () => {
     const hitText = await hit.text();
     expect(hitText).not.toContain(token);
     expect(Schema.decodeUnknownSync(SessionDocumentBody)(parseJson(hitText)).data.id).toBe(
-      hashToken(token),
+      sha256Hex(token),
     );
   });
 
@@ -3768,7 +3794,7 @@ describe("the session token never reaches a response body", () => {
     const text = await res.text();
     expect(text).not.toContain(firstToken);
     const listed = Schema.decodeUnknownSync(CollectionBody)(parseJson(text)).data;
-    expect(listed.map((resource) => resource.id)).toEqual([hashToken(firstToken)]);
+    expect(listed.map((resource) => resource.id)).toEqual([sha256Hex(firstToken)]);
     expect(listed[0]?.attributes["active"]).toBe(true);
   });
 });
@@ -5447,6 +5473,50 @@ describe("makeAsync builds services fully before it resolves", () => {
     const atDispose = counter.state.ticks;
     await untilTicks(counter.state, atDispose + 1);
     expect(counter.state.ticks).toBeGreaterThan(atDispose);
+  });
+});
+
+describe("signUpAttributes naming a protected attribute", () => {
+  const options = (strict: boolean) => ({
+    services: makeFixture().services,
+    cookie: { secure: false },
+    ipRateLimit: false as const,
+    signUpAttributes: ["nickname", "banned", "scimExternalId"],
+    strict,
+  });
+
+  it("warns, naming the protected keys, and starts without strict", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    const { dispose } = HttpServer.make(options(false));
+    onTestFinished(dispose);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(/WARN .*signUpAttributes names "banned", "scimExternalId"/s),
+    );
+    expect(logged.join("\n")).not.toContain('"nickname"');
+  });
+
+  it("refuses to start under strict, in make and makeAsync", async () => {
+    const error = thrownBy(() => HttpServer.make(options(true)));
+    expect(error).toBeInstanceOf(SignUpAttributesConfigError);
+    assert(error instanceof SignUpAttributesConfigError);
+    expect(error.attributes).toStrictEqual(["banned", "scimExternalId"]);
+    await expect(HttpServer.makeAsync(options(true))).rejects.toBeInstanceOf(
+      SignUpAttributesConfigError,
+    );
+  });
+
+  it("says nothing about a list of unprotected keys", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    const { dispose } = HttpServer.make({ ...options(true), signUpAttributes: ["nickname"] });
+    onTestFinished(dispose);
+    expect(log.mock.calls.map(String).join("\n")).not.toContain("signUpAttributes");
   });
 });
 

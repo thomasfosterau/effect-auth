@@ -15,17 +15,17 @@ effect-auth is a pnpm workspace of seven `@thomasfosterau/effect-auth*` packages
 
 [Vite+](https://viteplus.dev) (`vp`) manages Node, pnpm and the tools; use it rather than `node`, `npx` or bare `pnpm`. `vp install` installs dependencies and the git hooks (pre-commit formats and lints staged files, then runs `vp run fallow:audit`), and its `prepare` step patches the native `tsc` and oxlint with `@effect/tsgo`.
 
-| Command                  | What it does                                                                                                                                |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vp run build`           | Every package's `dist/`.                                                                                                                    |
-| `vp check`               | Format and lint (type-aware; run after `build`, since lint reads siblings' `dist/`). `--fix` applies fixes.                                 |
-| `vp run check`           | The type gate: every package's `tsc` / `svelte-check`, `vp test --typecheck` and `scripts/`.                                                |
-| `vp run -r test:unit`    | Every package's unit tests.                                                                                                                 |
-| `vp run docs`            | Docgen for the core: type-checks and runs every JSDoc `@example`.                                                                           |
-| `vp run check:dist`      | Packs the packages, installs them from the registry and imports every entry (network). `-- --effect catalog` uses the workspace's `effect`. |
-| `vp run test:coverage`   | One Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads.                                                             |
-| `vp run ci`              | Everything CI runs, in order, stopping at the first failure.                                                                                |
-| `vp run release:dry-run` | Builds, then shows what `vp run release` (the Release workflow's `vp pm publish -r` + `changeset git-tag`) would publish.                   |
+| Command                | What it does                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vp run build`         | Every package's `dist/`.                                                                                                                    |
+| `vp check`             | Format and lint (type-aware; run after `build`, since lint reads siblings' `dist/`). `--fix` applies fixes.                                 |
+| `vp run check`         | The type gate: every package's `tsc` / `svelte-check`, `vp test --typecheck` and `scripts/`.                                                |
+| `vp run -r test:unit`  | Every package's unit tests.                                                                                                                 |
+| `vp run docs`          | Docgen for the core: type-checks and runs every JSDoc `@example`.                                                                           |
+| `vp run check:dist`    | Packs the packages, installs them from the registry and imports every entry (network). `-- --effect catalog` uses the workspace's `effect`. |
+| `vp run test:coverage` | One Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads.                                                             |
+| `vp run ci`            | Everything CI runs, in order, stopping at the first failure.                                                                                |
+| `vp run release:pack`  | Builds, then packs what the Release workflow would publish into `release/` (publishes nothing).                                             |
 
 The alchemy runtime suites (`test:alchemy`) run last in `vp run ci`; alchemy-postgres's server cases need `DATABASE_URL`.
 

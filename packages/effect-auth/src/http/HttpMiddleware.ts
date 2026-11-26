@@ -168,6 +168,7 @@ import {
 } from "./HttpServer.ts";
 import type { AuthError } from "../Errors.ts";
 import { decodeSessionCacheCookie, sessionCacheGateAttributes } from "../SessionCookieCache.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken } from "../TokenHash.ts";
 
 // =============================================================================
@@ -381,13 +382,13 @@ const resolveSessionFromRequest = (
         const cached = request.cookies[dataCookieName(cfg)];
         if (cached !== undefined) {
           const gate = yield* sessionCacheGateAttributes;
-          const resolved = decodeSessionCacheCookie(
+          const resolved = yield* decodeSessionCacheCookie(
             cached,
             cfg.cache,
             yield* Clock.currentTimeMillis,
-            hashToken(primaryId),
+            yield* PlatformCrypto.provide(hashToken(primaryId)),
             gate,
-          );
+          ).pipe(PlatformCrypto.provide);
           if (resolved !== null) return Option.some(resolved);
         }
       }

@@ -2,7 +2,6 @@ import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
 import { Hooks } from "./Hooks.ts";
@@ -48,7 +47,7 @@ const deviceStore = {
 
 const storeCtx = Context.merge(
   Context.make(TrustedDeviceStore, deviceStore),
-  Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+  PlatformCrypto.context(),
 );
 
 const testConfig = { secret: Redacted.make("test-hmac-secret-32bytes-exactly!!") };

@@ -47,6 +47,7 @@ export type {
   AuthSuccess,
   EmailOtpPurpose,
   FormFailure,
+  SecondFactorChallenge,
   StatusResponse,
 } from "./forms/internal.ts";
 export type {
