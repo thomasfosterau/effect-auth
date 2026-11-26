@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { OrganizationStore, type Member, type Organization, type Team } from "./Organization.ts";
 import * as Entity from "./Entity.ts";
@@ -97,11 +98,21 @@ describe("organizationEntityResolver", () => {
     const slice = Entity.slice(resolved);
 
     const alice = Entity.getEntity(slice, OrganizationEntities.userRef("alice"));
-    expect(alice?.parents).toContainEqual(OrganizationEntities.organizationRef(ACME));
-    expect(alice?.parents).toContainEqual(OrganizationEntities.roleRef(ACME, "admin"));
-    expect(alice?.parents).toContainEqual(OrganizationEntities.roleRef(GLOBEX, "member"));
-    expect(alice?.parents).toContainEqual(OrganizationEntities.teamRef("team-eng"));
-    expect(alice?.parents).toContainEqual(OrganizationEntities.teamRef("team-ops"));
+    expect(Option.getOrUndefined(alice)?.parents).toContainEqual(
+      OrganizationEntities.organizationRef(ACME),
+    );
+    expect(Option.getOrUndefined(alice)?.parents).toContainEqual(
+      OrganizationEntities.roleRef(ACME, "admin"),
+    );
+    expect(Option.getOrUndefined(alice)?.parents).toContainEqual(
+      OrganizationEntities.roleRef(GLOBEX, "member"),
+    );
+    expect(Option.getOrUndefined(alice)?.parents).toContainEqual(
+      OrganizationEntities.teamRef("team-eng"),
+    );
+    expect(Option.getOrUndefined(alice)?.parents).toContainEqual(
+      OrganizationEntities.teamRef("team-ops"),
+    );
 
     // Ancestors came along: both organizations and both teams are in the slice,
     // so hierarchy checks decide from it alone.
@@ -142,7 +153,7 @@ describe("organizationEntityResolver", () => {
     const slice = Entity.slice(resolved);
 
     const carol = Entity.getEntity(slice, OrganizationEntities.userRef("carol"));
-    expect(carol?.parents).toEqual([]);
+    expect(Option.getOrUndefined(carol)?.parents).toEqual([]);
     // Neither the parked role nor the one the row currently carries.
     expect(
       Entity.entityIn(
@@ -168,15 +179,20 @@ describe("organizationEntityResolver", () => {
     const slice = Entity.slice(resolved);
 
     const team = Entity.getEntity(slice, OrganizationEntities.teamRef("team-eng"));
-    expect(team?.attributes).toEqual({ name: "Engineering", organizationId: ACME });
-    expect(team?.parents).toEqual([OrganizationEntities.organizationRef(ACME)]);
+    expect(Option.getOrUndefined(team)?.attributes).toEqual({
+      name: "Engineering",
+      organizationId: ACME,
+    });
+    expect(Option.getOrUndefined(team)?.parents).toEqual([
+      OrganizationEntities.organizationRef(ACME),
+    ]);
 
     const acme = Entity.getEntity(slice, OrganizationEntities.organizationRef(ACME));
-    expect(acme?.attributes).toEqual({ name: "Acme", slug: "acme" });
-    expect(acme?.parents).toEqual([]);
+    expect(Option.getOrUndefined(acme)?.attributes).toEqual({ name: "Acme", slug: "acme" });
+    expect(Option.getOrUndefined(acme)?.parents).toEqual([]);
 
     const globex = Entity.getEntity(slice, OrganizationEntities.organizationRef(GLOBEX));
-    expect(globex?.attributes).toEqual({ name: "Globex", slug: "globex" });
+    expect(Option.getOrUndefined(globex)?.attributes).toEqual({ name: "Globex", slug: "globex" });
   });
 
   it("omits references it does not recognize and unknown records", async () => {

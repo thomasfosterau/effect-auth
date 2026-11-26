@@ -2836,7 +2836,7 @@ describe("OrganizationService - domains", () => {
         Effect.andThen(service.provisionJitMembership("user-1", "new@acme.test")),
       ),
     );
-    expect(jit?.organizationId).toBe(claims.owner.id);
+    expect(Option.getOrUndefined(jit)?.organizationId).toBe(claims.owner.id);
   });
 
   it("releases the organization's domain claims when it is deleted", async () => {
@@ -2954,7 +2954,7 @@ describe("OrganizationService - domains", () => {
       "DNS domain verification is not available: provide a DomainVerifier layer",
     );
     expect(Option.getOrUndefined(result.stored)?.verificationState).toBe("pending");
-    expect(result.jit).toBeNull();
+    expect(Option.isNone(result.jit)).toBe(true);
   });
 
   it("refuses to verify a manual claim on the organization's own say-so", async () => {
@@ -3212,7 +3212,7 @@ describe("OrganizationService - domains", () => {
     expect(result.attest._tag).toBe("Failure");
     expect(result.release._tag).toBe("Failure");
     expect(result.lookup._tag).toBe("Failure");
-    expect(result.jit).toBeNull();
+    expect(Option.isNone(result.jit)).toBe(true);
   });
 });
 
@@ -3254,13 +3254,13 @@ describe("OrganizationService - JIT provisioning", () => {
       }),
     );
 
-    expect(result.optedOut).toBeNull();
-    expect(result.provisioned).not.toBeNull();
-    expect(result.provisioned?.role).toBe("contributor");
-    expect(result.provisioned?.status).toBe("active");
+    expect(Option.isNone(result.optedOut)).toBe(true);
+    expect(Option.isNone(result.provisioned)).toBe(false);
+    expect(Option.getOrUndefined(result.provisioned)?.role).toBe("contributor");
+    expect(Option.getOrUndefined(result.provisioned)?.status).toBe("active");
     // Already a member: no second row, no role churn.
-    expect(result.second).toBeNull();
-    expect(result.unrelatedDomain).toBeNull();
+    expect(Option.isNone(result.second)).toBe(true);
+    expect(Option.isNone(result.unrelatedDomain)).toBe(true);
     expect(result.members.members).toHaveLength(2);
   });
 
@@ -3280,7 +3280,7 @@ describe("OrganizationService - JIT provisioning", () => {
       }),
     );
 
-    expect(result.pending).toBeNull();
+    expect(Option.isNone(result.pending)).toBe(true);
     expect(result.members.members).toHaveLength(1);
   });
 
@@ -3301,7 +3301,7 @@ describe("OrganizationService - JIT provisioning", () => {
         return { acme, claim, beforeProof };
       }),
     );
-    expect(claims.beforeProof).toBeNull();
+    expect(Option.isNone(claims.beforeProof)).toBe(true);
     const token = claims.claim.verificationToken;
     assert(token !== undefined);
 
@@ -3313,7 +3313,7 @@ describe("OrganizationService - JIT provisioning", () => {
           .verifyDomain("owner-1", claims.acme.id, claims.claim.id)
           .pipe(Effect.andThen(service.provisionJitMembership("user-1", "new@acme.test"))),
     );
-    expect(provisioned?.organizationId).toBe(claims.acme.id);
+    expect(Option.getOrUndefined(provisioned)?.organizationId).toBe(claims.acme.id);
   });
 });
 

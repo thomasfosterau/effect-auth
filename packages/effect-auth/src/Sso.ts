@@ -649,12 +649,15 @@ export const make = (
       email: string,
       owner: Option.Option<Types.User>,
     ) {
-      const stamp = Option.isNone(owner) ? null : provisionedBy(owner.value);
+      const stamp = Option.flatMap(owner, provisionedBy);
       if (provider.organizationId === undefined) {
-        if (stamp?.kind === "sso" && stamp.connectionId === provider.id) return true;
+        if (Option.exists(stamp, (by) => by.kind === "sso" && by.connectionId === provider.id)) {
+          return true;
+        }
         return isOnDomains(email, [provider.domain]);
       }
-      if (stamp?.organizationId === provider.organizationId) return true;
+      const organizationId = provider.organizationId;
+      if (Option.exists(stamp, (by) => by.organizationId === organizationId)) return true;
       const domainStore = yield* Effect.serviceOption(OrganizationDomainStore);
       const domains = yield* verifiedDomains(
         Option.getOrUndefined(domainStore),

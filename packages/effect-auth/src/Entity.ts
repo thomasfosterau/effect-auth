@@ -229,16 +229,21 @@ export const slice = (entities: ReadonlyArray<Entity> = []): EntitySlice => ({
 /** An empty slice (every entity unknown: no attributes, no parents). */
 export const emptySlice: EntitySlice = slice();
 
-/** Look up an entity in the slice, or `null` when it is not present. */
-export const getEntity = (s: EntitySlice, r: EntityRef): Entity | null =>
-  Option.getOrNull(HashMap.get(s.entities, refKey(r)));
+/** Look up an entity in the slice, or `None` when it is not present. */
+export const getEntity = (s: EntitySlice, r: EntityRef): Option.Option<Entity> =>
+  HashMap.get(s.entities, refKey(r));
 
-/** Read an entity's attribute from the slice (`null` when absent). */
-export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): AttributeValue | null => {
-  const found = getEntity(s, r);
-  if (found === null) return null;
-  return Object.hasOwn(found.attributes, name) ? (found.attributes[name] ?? null) : null;
-};
+/** Read an entity's attribute from the slice (`None` when absent). */
+export const getAttribute = (
+  s: EntitySlice,
+  r: EntityRef,
+  name: string,
+): Option.Option<AttributeValue> =>
+  Option.flatMap(getEntity(s, r), (found) =>
+    Object.hasOwn(found.attributes, name)
+      ? Option.fromUndefinedOr(found.attributes[name])
+      : Option.none(),
+  );
 
 /**
  * Hierarchy membership: is `child` the same entity as `ancestor`, or a

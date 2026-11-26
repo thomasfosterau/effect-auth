@@ -1,5 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Redacted } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
@@ -81,7 +82,7 @@ describe("TrustedDeviceService", () => {
 
     expect(cookieValue).toContain(".");
     expect(expiresAt).toBeGreaterThan(DateTime.toEpochMillis(DateTime.nowUnsafe()));
-    expect(verifiedId).toBe(testUser.id);
+    expect(verifiedId).toEqual(Option.some(testUser.id));
     expect(MutableHashMap.size(deviceRecords)).toBe(1);
   });
 
@@ -120,7 +121,7 @@ describe("TrustedDeviceService", () => {
     }).pipe(Effect.provide(storeCtx));
 
     const result = await Effect.runPromise(Effect.provide(program, Hooks.Default));
-    expect(result).toBeNull();
+    expect(Option.isNone(result)).toBe(true);
   });
 
   it("returns null for an expired token", async () => {
@@ -134,7 +135,7 @@ describe("TrustedDeviceService", () => {
     }).pipe(Effect.provide(storeCtx));
 
     const result = await Effect.runPromise(Effect.provide(program, Hooks.Default));
-    expect(result).toBeNull();
+    expect(Option.isNone(result)).toBe(true);
     // Expired record must be eagerly deleted
     expect(MutableHashMap.size(deviceRecords)).toBe(0);
   });
@@ -148,7 +149,7 @@ describe("TrustedDeviceService", () => {
     }).pipe(Effect.provide(storeCtx));
 
     const result = await Effect.runPromise(Effect.provide(program, Hooks.Default));
-    expect(result).toBeNull();
+    expect(Option.isNone(result)).toBe(true);
     expect(MutableHashMap.size(deviceRecords)).toBe(0);
   });
 
@@ -168,9 +169,9 @@ describe("TrustedDeviceService", () => {
     }).pipe(Effect.provide(storeCtx));
 
     const { v1, v2, v3 } = await Effect.runPromise(Effect.provide(program, Hooks.Default));
-    expect(v1).toBeNull();
-    expect(v2).toBeNull();
-    expect(v3).toBe("other-user");
+    expect(Option.isNone(v1)).toBe(true);
+    expect(Option.isNone(v2)).toBe(true);
+    expect(v3).toEqual(Option.some("other-user"));
   });
 
   it("ignores an unrecognised cookie format gracefully", async () => {
@@ -184,8 +185,8 @@ describe("TrustedDeviceService", () => {
     }).pipe(Effect.provide(storeCtx));
 
     const result = await Effect.runPromise(Effect.provide(program, Hooks.Default));
-    expect(result.empty).toBeNull();
-    expect(result.noSeparator).toBeNull();
+    expect(Option.isNone(result.empty)).toBe(true);
+    expect(Option.isNone(result.noSeparator)).toBe(true);
     // revoke with bad cookie should not throw
   });
 });

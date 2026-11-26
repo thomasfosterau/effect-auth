@@ -24,7 +24,7 @@ console.log(await Effect.runPromise(Effect.provide(program, Auth.Password.Passwo
 TOTP (RFC 6238):
 
 ```typescript
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -44,11 +44,11 @@ const program = Effect.gen(function* () {
   });
 
   // Later, verify the code the user typed (accepts ±1 time step by default).
-  // The result is the matched time step, or `null` for a wrong code: persist
+  // The result is the matched time step, or `None` for a wrong code: persist
   // it and reject a later code with the same or a lower step (replay).
   const code = yield* Auth.MultiFactor.generateTotp(secret);
   const step = yield* Auth.MultiFactor.verifyTotp(code, secret);
-  return { uri, valid: step !== null };
+  return { uri, valid: Option.isSome(step) };
 });
 
 console.log(await Effect.runPromise(Effect.provide(program, SecureRandom.layerWebCrypto)));

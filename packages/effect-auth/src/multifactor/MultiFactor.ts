@@ -692,7 +692,9 @@ export const make = (
         // otpauth URI label: prefer the user's email identifier for a
         // recognizable authenticator entry; fall back to name, then id.
         const label =
-          anyEmailValue(yield* identifierStore.listByUser(user.id)) ?? user.name ?? user.id;
+          Option.getOrUndefined(anyEmailValue(yield* identifierStore.listByUser(user.id))) ??
+          user.name ??
+          user.id;
         const totpUri = yield* Effect.try({
           try: () =>
             generateOtpUri({
@@ -732,13 +734,17 @@ export const make = (
 
         const plainSecret = yield* sealer.open(record.secret, userId);
         const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
-        if (matchedCounter === null) {
+        if (Option.isNone(matchedCounter)) {
           return yield* new MultiFactorError({
             message: "Invalid multi-factor code",
           });
         }
 
-        return yield* store.upsert({ ...record, verified: true, lastUsedCounter: matchedCounter });
+        return yield* store.upsert({
+          ...record,
+          verified: true,
+          lastUsedCounter: matchedCounter.value,
+        });
       }),
 
       disable: Effect.fn("MultiFactorService.disable")(function* (
@@ -792,12 +798,15 @@ export const make = (
 
             const plainSecret = yield* sealer.open(record.secret, pending.userId);
             const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
-            if (matchedCounter === null) {
+            if (Option.isNone(matchedCounter)) {
               return yield* rejectCode(pendingToken, attempts, invalidTotpCode);
             }
 
             // Reject replays: a code whose matched counter has already been used.
-            if (record.lastUsedCounter !== undefined && matchedCounter <= record.lastUsedCounter) {
+            if (
+              record.lastUsedCounter !== undefined &&
+              matchedCounter.value <= record.lastUsedCounter
+            ) {
               return yield* new MultiFactorError({
                 message: "Multi-factor code has already been used",
               });
@@ -806,7 +815,7 @@ export const make = (
             // Spend the time step with one compare-and-set before the session
             // is created: of concurrent submissions of the same code,
             // across challenges too, only one passes.
-            if (!(yield* store.useTotpCounter(pending.userId, matchedCounter))) {
+            if (!(yield* store.useTotpCounter(pending.userId, matchedCounter.value))) {
               return yield* new MultiFactorError({
                 message: "Multi-factor code has already been used",
               });

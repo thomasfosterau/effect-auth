@@ -268,7 +268,7 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
-    expect(await phoneNumberOf(result.user.id)).toBe("+15551231111");
+    expect(await phoneNumberOf(result.user.id)).toEqual(Option.some("+15551231111"));
     const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551231111"));
     expect(Option.getOrUndefined(identifier)?.userId).toBe(result.user.id);
     expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
@@ -372,7 +372,7 @@ describe("PhoneOtpService", () => {
     );
 
     expect(MutableHashMap.size(users)).toBe(before);
-    expect(await phoneNumberOf(result.user.id)).toBe("+15551232222");
+    expect(await phoneNumberOf(result.user.id)).toEqual(Option.some("+15551232222"));
   });
 
   it("rejects a replayed OTP (one-time use)", async () => {
@@ -503,7 +503,7 @@ describe("PhoneOtpService", () => {
         return yield* service.signIn("+15551238888", recorded(sentOtps).otp);
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
-    expect(await phoneNumberOf(result.user.id)).toBe("+15551238888");
+    expect(await phoneNumberOf(result.user.id)).toEqual(Option.some("+15551238888"));
   });
 
   it("fails with ResendTooSoonError when a resend is within the cooldown window", async () => {

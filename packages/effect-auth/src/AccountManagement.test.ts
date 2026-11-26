@@ -41,9 +41,9 @@ interface Harness {
   readonly tokens: MutableHashMap.MutableHashMap<string, AccountToken>;
   readonly revoked: string[];
   readonly changeEmails: Array<{ newEmail: string; token: string }>;
-  readonly deleteSends: Array<{ email: string | null; token: string }>;
+  readonly deleteSends: Array<{ email: Option.Option<string>; token: string }>;
   readonly beforeDeleteCalls: string[];
-  readonly notifiedOld: Array<{ oldEmail: string | null; newEmail: string }>;
+  readonly notifiedOld: Array<{ oldEmail: Option.Option<string>; newEmail: string }>;
   readonly notices: Array<{ oldEmail: string; newEmail: string }>;
 }
 
@@ -121,9 +121,9 @@ const makeHarness = (wrap?: WrapIdentifiers, options: HarnessOptions = {}): Harn
   const tokens = MutableHashMap.empty<string, AccountToken>();
   const revoked: string[] = [];
   const changeEmails: Array<{ newEmail: string; token: string }> = [];
-  const deleteSends: Array<{ email: string | null; token: string }> = [];
+  const deleteSends: Array<{ email: Option.Option<string>; token: string }> = [];
   const beforeDeleteCalls: string[] = [];
-  const notifiedOld: Array<{ oldEmail: string | null; newEmail: string }> = [];
+  const notifiedOld: Array<{ oldEmail: Option.Option<string>; newEmail: string }> = [];
   const notices: Array<{ oldEmail: string; newEmail: string }> = [];
 
   const addUser = (user: Types.User, email: string) => {
@@ -265,7 +265,7 @@ describe("AccountManagement — change email", () => {
     expect(h.revoked).toContain("user-1");
     // Old address notified.
     expect(h.notifiedOld).toEqual([
-      { oldEmail: "alice@example.com", newEmail: "alice-new@example.com" },
+      { oldEmail: Option.some("alice@example.com"), newEmail: "alice-new@example.com" },
     ]);
   });
 
@@ -503,7 +503,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
     expect(user.id).toBe("user-1");
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
+    expect(h.notifiedOld).toEqual([
+      { oldEmail: Option.some("alice@example.com"), newEmail: NEW_EMAIL },
+    ]);
   });
 
   it("a store without transactions that fails between its claim and its release converges on retry", async () => {
@@ -647,7 +649,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
         expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
         expect(h.revoked).toEqual(["user-1"]);
-        expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
+        expect(h.notifiedOld).toEqual([
+          { oldEmail: Option.some("alice@example.com"), newEmail: NEW_EMAIL },
+        ]);
       });
 
       it(`a converged confirmation leaves the new address verified when the concurrent write left it unverified and the store ${label}`, async () => {
@@ -774,7 +778,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     await run(h, (svc) => svc.confirmEmailChange(token));
 
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(h.notifiedOld).toEqual([{ oldEmail: null, newEmail: NEW_EMAIL }]);
+    expect(h.notifiedOld).toEqual([{ oldEmail: Option.none(), newEmail: NEW_EMAIL }]);
   });
 
   // A user with no email; `owner` claims the new address, unverified, after
@@ -812,7 +816,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
     expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
     expect(h.revoked).toEqual(["user-1"]);
-    expect(h.notifiedOld).toEqual([{ oldEmail: null, newEmail: NEW_EMAIL }]);
+    expect(h.notifiedOld).toEqual([{ oldEmail: Option.none(), newEmail: NEW_EMAIL }]);
   });
 
   it("a user with no email whose claim another account wins mid-confirm fails with Email already in use and keeps the token", async () => {
@@ -840,7 +844,7 @@ describe("AccountManagement — delete user", () => {
   it("runs cleanup, revokes sessions, and deletes the user on confirm", async () => {
     const h = makeHarness();
     const { token } = await run(h, (svc) => svc.requestAccountDeletion("user-2"));
-    expect(h.deleteSends).toEqual([{ email: "bob@example.com", token }]);
+    expect(h.deleteSends).toEqual([{ email: Option.some("bob@example.com"), token }]);
 
     const { userId } = await run(h, (svc) => svc.confirmAccountDeletion(token));
     expect(userId).toBe("user-2");

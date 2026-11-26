@@ -243,43 +243,40 @@ const byCreatedAt: Order.Order<Identifier> = Order.mapInput(
 );
 
 /**
- * Return the first verified email identifier for a user, or `null` if none
- * exists. When the user has multiple verified email identifiers the one with
- * the earliest `createdAt` is considered primary.
+ * The user's first verified email identifier, or `None` when there is none.
+ * When the user has several verified email identifiers, the one with the
+ * earliest `createdAt` is primary.
  */
-export const primaryEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | null => {
-  const verified = Arr.sort(
-    identifiers.filter((id) => id.type === "email" && id.verified),
-    byCreatedAt,
+export const primaryEmail = (identifiers: ReadonlyArray<Identifier>): Option.Option<Identifier> =>
+  Arr.head(
+    Arr.sort(
+      identifiers.filter((id) => id.type === "email" && id.verified),
+      byCreatedAt,
+    ),
   );
-  return verified[0] ?? null;
-};
+
+/** The value of {@link primaryEmail}, or `None`. */
+export const primaryEmailValue = (identifiers: ReadonlyArray<Identifier>): Option.Option<string> =>
+  Option.map(primaryEmail(identifiers), (identifier) => identifier.value);
 
 /**
- * Return the primary email _value_ string, or `null`.
- * Convenience wrapper over {@link primaryEmail}.
+ * The user's email of record for delivery and display: the primary (earliest
+ * verified) email identifier when there is one, else the earliest email
+ * identifier of any verification state, else `None`.
  */
-export const primaryEmailValue = (identifiers: ReadonlyArray<Identifier>): string | null =>
-  primaryEmail(identifiers)?.value ?? null;
-
-/**
- * Return the user's email of record for delivery/display: the primary
- * (earliest verified) email identifier when one exists, otherwise the
- * earliest email identifier of any verification state, otherwise `null`.
- */
-export const anyEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | null => {
-  const primary = primaryEmail(identifiers);
-  if (primary !== null) return primary;
-  const emails = Arr.sort(
-    identifiers.filter((id) => id.type === "email"),
-    byCreatedAt,
+export const anyEmail = (identifiers: ReadonlyArray<Identifier>): Option.Option<Identifier> =>
+  Option.orElse(primaryEmail(identifiers), () =>
+    Arr.head(
+      Arr.sort(
+        identifiers.filter((id) => id.type === "email"),
+        byCreatedAt,
+      ),
+    ),
   );
-  return emails[0] ?? null;
-};
 
-/** Convenience wrapper over {@link anyEmail} returning the value string. */
-export const anyEmailValue = (identifiers: ReadonlyArray<Identifier>): string | null =>
-  anyEmail(identifiers)?.value ?? null;
+/** The value of {@link anyEmail}, or `None`. */
+export const anyEmailValue = (identifiers: ReadonlyArray<Identifier>): Option.Option<string> =>
+  Option.map(anyEmail(identifiers), (identifier) => identifier.value);
 
 /**
  * Construct a new (unpersisted) identifier record with a random id.

@@ -5228,7 +5228,7 @@ const resolveSession = (
         yield* digestToken(token),
         yield* sessionCacheGateAttributes,
       ).pipe(PlatformCrypto.provide);
-      if (resolved !== null) return { resolved, cacheHit: true, token };
+      if (Option.isSome(resolved)) return { resolved: resolved.value, cacheHit: true, token };
     }
     const sessionManager = yield* SessionService;
     const resolved = yield* sessionManager

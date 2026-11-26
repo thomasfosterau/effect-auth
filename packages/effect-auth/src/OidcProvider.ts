@@ -1010,7 +1010,7 @@ export const make = (
       Effect.gen(function* () {
         const email = scopes.includes("email")
           ? anyEmail(yield* identifierStore.listByUser(user.id))
-          : null;
+          : Option.none();
         return {
           sub: user.id,
           ...(scopes.includes("profile") && {
@@ -1018,9 +1018,9 @@ export const make = (
             ...(user.image !== undefined && { picture: user.image }),
             updated_at: Math.floor(user.updatedAt.getTime() / 1000),
           }),
-          ...(email !== null && {
-            email: email.value,
-            email_verified: email.verified,
+          ...(Option.isSome(email) && {
+            email: email.value.value,
+            email_verified: email.value.verified,
           }),
         };
       });

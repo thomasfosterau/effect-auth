@@ -2123,11 +2123,13 @@ describe("SSO signs in only managed users", () => {
     const stores = makeStores();
     const first = await signInAs(stores, { email: "worker@acme.test", email_verified: true });
     assert(Result.isSuccess(first));
-    expect(ManagedUser.provisionedBy(first.success.user)).toEqual({
-      kind: "sso",
-      connectionId: first.success.provider.id,
-      organizationId: "org-1",
-    });
+    expect(ManagedUser.provisionedBy(first.success.user)).toEqual(
+      Option.some({
+        kind: "sso",
+        connectionId: first.success.provider.id,
+        organizationId: "org-1",
+      }),
+    );
 
     // A user the organization provisioned keeps signing in under an address
     // it holds outside the claimed domains.
@@ -2182,10 +2184,12 @@ describe("SSO signs in only managed users", () => {
       withoutOrganization,
     );
     assert(Result.isSuccess(onDomain));
-    expect(ManagedUser.provisionedBy(onDomain.success.user)).toEqual({
-      kind: "sso",
-      connectionId: onDomain.success.provider.id,
-    });
+    expect(ManagedUser.provisionedBy(onDomain.success.user)).toEqual(
+      Option.some({
+        kind: "sso",
+        connectionId: onDomain.success.provider.id,
+      }),
+    );
   });
 
   it("requires email_verified to be true unless the connection opts out", async () => {

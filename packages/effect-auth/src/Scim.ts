@@ -23,7 +23,7 @@ import {
   IdentifierStore,
   lookupIdentifier,
   makeIdentifier,
-  primaryEmail,
+  primaryEmailValue,
   type Identifier,
 } from "./Identifier.ts";
 import {
@@ -769,7 +769,7 @@ export const make = (
       const userName =
         P.isString(pinned) && emails.some((e) => e.value === pinned)
           ? pinned
-          : (primaryEmail(all)?.value ?? emails[0]?.value ?? user.id);
+          : Option.getOrElse(primaryEmailValue(all), () => emails[0]?.value ?? user.id);
       const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
       return {
         id: user.id,

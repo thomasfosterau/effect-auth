@@ -85,12 +85,12 @@ export interface AccountManagementConfig {
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
    * Deliver the account-deletion confirmation token to the user's address.
-   * `email` is the user's resolved email identifier value, or `null` when the
+   * `email` is the user's resolved email identifier value, or `None` when the
    * user has no email on file (deliver via another channel or fail).
    */
   readonly sendDeleteAccountVerification: (params: {
     readonly user: Types.User;
-    readonly email: string | null;
+    readonly email: Option.Option<string>;
     readonly token: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
@@ -119,7 +119,8 @@ export interface AccountManagementConfig {
    */
   readonly notifyEmailChanged?: (params: {
     readonly user: Types.User;
-    readonly oldEmail: string | null;
+    /** The address the account held before the change, `None` when it held none. */
+    readonly oldEmail: Option.Option<string>;
     readonly newEmail: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
@@ -365,8 +366,8 @@ const make = (
         // Tell the current address before anything else, so an attempt is
         // reported whether or not the new address turns out to be free.
         const oldEmail = anyEmailValue(yield* identifiers.listByUser(userId));
-        if (oldEmail !== null && oldEmail !== newEmail) {
-          yield* config.sendEmailChangeNotice({ user, oldEmail, newEmail });
+        if (Option.isSome(oldEmail) && oldEmail.value !== newEmail) {
+          yield* config.sendEmailChangeNotice({ user, oldEmail: oldEmail.value, newEmail });
         }
 
         // Uniqueness: reject if another account already owns the address.
@@ -421,7 +422,7 @@ const make = (
         const user = foundUser.value;
         const currentIdentifiers = yield* identifiers.listByUser(user.id);
         const current = anyEmail(currentIdentifiers);
-        const oldEmail = current?.value ?? null;
+        const oldEmail = Option.map(current, (identifier) => identifier.value);
 
         // Re-check uniqueness at confirm time (the address may have been
         // taken between request and confirm).
@@ -436,7 +437,7 @@ const make = (
         // it releases the previous one, or does both at once. A failed claim,
         // whether another account took the address meanwhile or the store
         // failed, leaves the user's previous address in place and verified.
-        let replaced: string | null = null;
+        let replaced: Option.Option<string> = Option.none();
         let held = currentIdentifiers;
         // The identifier holding the confirmed address once this user has it.
         let confirmed: Identifier;
@@ -451,13 +452,13 @@ const make = (
             now: verifiedAt,
           });
           const outcome = yield* (
-            current === null
+            Option.isNone(current)
               ? claimIdentifier(identifiers, next).pipe(
                   Effect.catchTag("IdentifierRefusedError", (error) =>
                     Effect.fail(refusalAuthError(error)),
                   ),
                 )
-              : replaceIdentifier(identifiers, current, next)
+              : replaceIdentifier(identifiers, current.value, next)
           ).pipe(
             Effect.map((identifier) => ({ identifier, converged: null })),
             Effect.catchTags({
@@ -466,10 +467,9 @@ const make = (
               // for this user first: finish that change as this request's own.
               IdentifierTakenError: () =>
                 Effect.gen(function* () {
-                  const found =
-                    current === null
-                      ? yield* lookupIdentifier(identifiers, "email", newEmail)
-                      : Option.none();
+                  const found = Option.isNone(current)
+                    ? yield* lookupIdentifier(identifiers, "email", newEmail)
+                    : Option.none();
                   if (Option.isSome(found) && found.value.userId === user.id) {
                     return { identifier: found.value, converged: currentIdentifiers };
                   }
@@ -491,7 +491,8 @@ const make = (
                 }),
             }),
           );
-          if (outcome.converged === null) replaced = current?.id ?? null;
+          if (outcome.converged === null)
+            replaced = Option.map(current, (identifier) => identifier.id);
           else held = outcome.converged;
           confirmed = outcome.identifier;
         } else {
@@ -520,7 +521,8 @@ const make = (
         yield* Effect.forEach(
           Arr.filter(
             held,
-            (id) => id.type === "email" && id.value !== newEmail && id.id !== replaced,
+            (id) =>
+              id.type === "email" && id.value !== newEmail && !Option.contains(replaced, id.id),
           ),
           (id) => identifiers.delete(id.id),
           { concurrency: 1, discard: true },

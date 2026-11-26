@@ -54,6 +54,7 @@
  * @module delivery
  */
 import { Context, Effect, Layer, Match } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Connect from "@thomasfosterau/effect-connect";
 import * as Errors from "./Errors.ts";
@@ -435,27 +436,30 @@ export const emailCallbacks = (
   /** `AccountManagementConfig.sendDeleteAccountVerification` */
   sendDeleteAccountVerification: (params: {
     readonly user: Types.User;
-    readonly email: string | null;
+    readonly email: Option.Option<string>;
     readonly token: string;
   }) =>
-    params.email === null
-      ? Effect.fail(
+    Option.match(params.email, {
+      onNone: () =>
+        Effect.fail(
           new Errors.AuthError({ message: "User has no email for account-deletion delivery" }),
-        )
-      : sender.send({
-          to: params.email,
+        ),
+      onSome: (to) =>
+        sender.send({
+          to,
           purpose: "delete-account",
           params: { token: params.token },
         }),
+    }),
 
   /** `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's email identifier. */
   sendSecondFactorOtp: (user: Types.User, otp: string) =>
     Effect.gen(function* () {
       const email = anyEmailValue(yield* identifiers.listByUser(user.id));
-      if (email === null) {
+      if (Option.isNone(email)) {
         return yield* new Errors.AuthError({ message: "User has no email for second-factor OTP" });
       }
-      yield* sender.send({ to: email, purpose: "second-factor-otp", params: { otp } });
+      yield* sender.send({ to: email.value, purpose: "second-factor-otp", params: { otp } });
       return undefined;
     }),
 });
@@ -480,12 +484,12 @@ export const smsCallbacks = (
   sendSecondFactorOtp: (user: Types.User, otp: string) =>
     Effect.gen(function* () {
       const phoneNumber = yield* getPhoneNumber(identifiers, user.id);
-      if (phoneNumber === null) {
+      if (Option.isNone(phoneNumber)) {
         return yield* new Errors.AuthError({
           message: "User has no phone number for second-factor OTP",
         });
       }
-      yield* sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
+      yield* sender.send({ to: phoneNumber.value, purpose: "second-factor-otp", params: { otp } });
       return undefined;
     }),
 });

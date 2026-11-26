@@ -1268,7 +1268,7 @@ export class OrganizationService extends Context.Service<
      * the user is not a member yet, add them as an active member with that
      * organization's `defaultRole`.
      *
-     * Answers the new membership, or `null` when nothing applies (no matching
+     * Answers the new membership, or `None` when nothing applies (no matching
      * domain, the claim is not verified, JIT is off, the user is already a
      * member, or no {@link OrganizationDomainStore} is configured). Only a
      * DNS-verified or operator-attested claim counts. Callers must only pass
@@ -1278,7 +1278,7 @@ export class OrganizationService extends Context.Service<
     readonly provisionJitMembership: (
       userId: string,
       email: string,
-    ) => Effect.Effect<Member | null, OrganizationError | Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Member>, OrganizationError | Errors.AuthError>;
 
     /**
      * Create a team inside an organization. Requires the `team:create`
@@ -2847,23 +2847,26 @@ export const make = (
         userId: string,
         email: string,
       ) {
-        if (Option.isNone(domainStoreOption)) return null;
+        if (Option.isNone(domainStoreOption)) return Option.none<Member>();
 
         const domain = yield* domainStoreOption.value.getVerifiedByDomain(domainOfEmail(email));
         // Only a *verified* claim carries authority; a pending one is just a
         // request, and honoring it would let anyone absorb a domain by asking.
-        if (Option.isNone(domain) || domain.value.verificationState !== "verified") return null;
+        if (Option.isNone(domain) || domain.value.verificationState !== "verified")
+          return Option.none<Member>();
 
         const foundOrganization = yield* store.getOrganizationById(domain.value.organizationId);
         if (Option.isNone(foundOrganization) || foundOrganization.value.jitProvisioning !== true)
-          return null;
+          return Option.none<Member>();
         const organization = foundOrganization.value;
 
         const existing = yield* store.getMember(organization.id, userId);
-        if (Option.isSome(existing)) return null;
+        if (Option.isSome(existing)) return Option.none<Member>();
 
         yield* ensureMembershipCapacity(organization.id);
-        return yield* createMembership(organization.id, userId, defaultRoleOf(organization));
+        return Option.some(
+          yield* createMembership(organization.id, userId, defaultRoleOf(organization)),
+        );
       }),
 
       upsertOrgRole: Effect.fn("OrganizationService.upsertOrgRole")(function* (

@@ -1661,11 +1661,13 @@ describe("ScimService — managed users", () => {
     const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
     const user = userOf(fx, ada.id);
     assert(user !== undefined);
-    expect(ManagedUser.provisionedBy(user)).toEqual({
-      kind: "scim",
-      connectionId: fx.a.connection.id,
-      organizationId: ORG_A,
-    });
+    expect(ManagedUser.provisionedBy(user)).toEqual(
+      Option.some({
+        kind: "scim",
+        connectionId: fx.a.connection.id,
+        organizationId: ORG_A,
+      }),
+    );
   });
 
   it("creates no user with an address off the organization's verified domains", async () => {

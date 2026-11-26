@@ -290,10 +290,10 @@ const make = (
 
         if (requireEmailVerification) {
           const userIdentifiers = yield* identifiers.listByUser(user.id);
-          if (primaryEmail(userIdentifiers) === null) {
+          if (Option.isNone(primaryEmail(userIdentifiers))) {
             return yield* new Errors.EmailNotVerifiedError({
               message: "Email must be verified before sign-in",
-              email: anyEmailValue(userIdentifiers) ?? "",
+              email: Option.getOrElse(anyEmailValue(userIdentifiers), () => ""),
             });
           }
         }

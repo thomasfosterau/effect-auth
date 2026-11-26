@@ -301,20 +301,26 @@ export class PhoneOtpService extends Context.Service<
 }
 
 /**
- * Resolve a user's phone number from their `phone` identifier, or `null`.
+ * Resolve a user's phone number from their `phone` identifier, or `None`.
  * Prefers a verified phone identifier; falls back to the earliest unverified
  * one.
  */
 export const getPhoneNumber = (
   identifierStore: typeof IdentifierStore.Service,
   userId: string,
-): Effect.Effect<string | null, Errors.AuthError> =>
+): Effect.Effect<Option.Option<string>, Errors.AuthError> =>
   Effect.map(identifierStore.listByUser(userId), (all) => {
     const phones = Arr.sort(
       all.filter((id) => id.type === "phone"),
       Order.mapInput(Order.Number, (id: (typeof all)[number]) => id.createdAt.getTime()),
     );
-    return (phones.find((id) => id.verified) ?? phones[0])?.value ?? null;
+    return Option.map(
+      Option.orElse(
+        Arr.findFirst(phones, (id) => id.verified),
+        () => Arr.head(phones),
+      ),
+      (id) => id.value,
+    );
   });
 
 export const make = (

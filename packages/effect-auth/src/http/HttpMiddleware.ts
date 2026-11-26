@@ -366,7 +366,7 @@ const resolveSessionFromRequest = (
             yield* PlatformCrypto.provide(hashToken(primaryId)),
             gate,
           ).pipe(PlatformCrypto.provide);
-          if (resolved !== null) return Option.some(resolved);
+          if (Option.isSome(resolved)) return resolved;
         }
       }
     }

@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Result } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Otp from "./Otp.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -199,7 +200,7 @@ describe("TOTP (RFC 6238)", () => {
       Otp.verifyTotp(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
-    expect(counter).not.toBeNull();
+    expect(Option.isNone(counter)).toBe(false);
   });
 
   it("should reject incorrect TOTP token", async () => {
@@ -208,7 +209,7 @@ describe("TOTP (RFC 6238)", () => {
       Otp.verifyTotp("000000", base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
-    expect(counter).toBeNull();
+    expect(Option.isNone(counter)).toBe(true);
   });
 
   it("should work with default config", async () => {
@@ -219,7 +220,7 @@ describe("TOTP (RFC 6238)", () => {
 
     const counter = await Effect.runPromise(Otp.verifyTotp(token, base32Secret));
 
-    expect(counter).not.toBeNull();
+    expect(Option.isNone(counter)).toBe(false);
   });
 
   it("should support different algorithms", async () => {
@@ -239,7 +240,7 @@ describe("TOTP (RFC 6238)", () => {
 
     const counter = await Effect.runPromise(Otp.verifyTotp(token, base32Secret, { period: 60 }));
 
-    expect(counter).not.toBeNull();
+    expect(Option.isNone(counter)).toBe(false);
   });
 
   it("should verify tokens within window", async () => {
@@ -255,7 +256,7 @@ describe("TOTP (RFC 6238)", () => {
       Otp.verifyTotp(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1", window: 1 }),
     );
 
-    expect(counter).not.toBeNull();
+    expect(Option.isNone(counter)).toBe(false);
   });
 });
 
@@ -353,7 +354,7 @@ describe("Integration Tests", () => {
     // Step 4: Verify TOTP
     const counter = await Effect.runPromise(Otp.verifyTotp(token, secret));
 
-    expect(counter).not.toBeNull();
+    expect(Option.isNone(counter)).toBe(false);
   });
 
   it("should work end-to-end for HOTP enrollment", async () => {
@@ -504,7 +505,7 @@ describe("Input Validation and Edge Cases", () => {
       // Verify with zero period should fall back to default (30)
       const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { period: 0 }));
 
-      expect(result).not.toBeNull();
+      expect(Option.isNone(result)).toBe(false);
     });
 
     it("should handle negative period by using default", async () => {
@@ -513,7 +514,7 @@ describe("Input Validation and Edge Cases", () => {
       // Verify with negative period should fall back to default (30)
       const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { period: -10 }));
 
-      expect(result).not.toBeNull();
+      expect(Option.isNone(result)).toBe(false);
     });
 
     it("should handle negative window by using default", async () => {
@@ -522,7 +523,7 @@ describe("Input Validation and Edge Cases", () => {
       // Verify with negative window should fall back to default (1)
       const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { window: -5 }));
 
-      expect(result).not.toBeNull();
+      expect(Option.isNone(result)).toBe(false);
     });
 
     it("should floor non-integer period", async () => {
@@ -531,7 +532,7 @@ describe("Input Validation and Edge Cases", () => {
       // Should floor 30.9 to 30 and work correctly
       const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { period: 30.9 }));
 
-      expect(result).not.toBeNull();
+      expect(Option.isNone(result)).toBe(false);
     });
   });
 

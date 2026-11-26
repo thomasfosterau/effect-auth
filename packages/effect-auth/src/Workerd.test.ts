@@ -64,6 +64,7 @@ const WORKER_SOURCE = `
 import * as crypto from "node:crypto";
 import { Effect, Layer, Redacted } from "effect";
 import { Base64Url } from "effect/encoding";
+import * as Option from "effect/Option";
 import {
   aes256GcmCipher,
   aes256GcmOpen,
@@ -202,8 +203,8 @@ const aes = () =>
         sealed,
         opened,
         rejectsTampered: tampered._tag === "Failure",
-        cookieOpened: yield* aes256GcmOpen(key, cookie),
-        cookieRejectsWrongKey: (yield* aes256GcmOpen(yield* sha256("other"), cookie)) === null,
+        cookieOpened: Option.getOrNull(yield* aes256GcmOpen(key, cookie)),
+        cookieRejectsWrongKey: Option.isNone(yield* aes256GcmOpen(yield* sha256("other"), cookie)),
       };
     }),
   );

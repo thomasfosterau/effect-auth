@@ -398,22 +398,22 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
 
 describe("primaryEmail", () => {
   it("returns null for an empty list", () => {
-    expect(primaryEmail([])).toBeNull();
+    expect(Option.isNone(primaryEmail([]))).toBe(true);
   });
 
   it("returns null when no email identifiers exist", () => {
     const phone = mkIdentifier({ type: "phone", value: "+61400000000", verified: true });
-    expect(primaryEmail([phone])).toBeNull();
+    expect(Option.isNone(primaryEmail([phone]))).toBe(true);
   });
 
   it("returns null when email exists but is unverified", () => {
     const email = mkIdentifier({ type: "email", verified: false });
-    expect(primaryEmail([email])).toBeNull();
+    expect(Option.isNone(primaryEmail([email]))).toBe(true);
   });
 
   it("returns the verified email", () => {
     const email = mkIdentifier({ type: "email", verified: true });
-    expect(primaryEmail([email])).toEqual(email);
+    expect(primaryEmail([email])).toEqual(Option.some(email));
   });
 
   it("returns the earliest verified email when multiple exist", () => {
@@ -431,7 +431,7 @@ describe("primaryEmail", () => {
       verified: true,
       createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-06-01T00:00:00.000Z")),
     });
-    expect(primaryEmail([newer, older])?.id).toBe("id-old");
+    expect(Option.getOrUndefined(primaryEmail([newer, older]))?.id).toBe("id-old");
   });
 
   it("ignores unverified emails when selecting primary", () => {
@@ -449,7 +449,7 @@ describe("primaryEmail", () => {
       verified: true,
       createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-06-01T00:00:00.000Z")),
     });
-    expect(primaryEmail([unverified, verified])?.id).toBe("id-verified");
+    expect(Option.getOrUndefined(primaryEmail([unverified, verified]))?.id).toBe("id-verified");
   });
 });
 
@@ -459,12 +459,12 @@ describe("primaryEmail", () => {
 
 describe("primaryEmailValue", () => {
   it("returns null for empty list", () => {
-    expect(primaryEmailValue([])).toBeNull();
+    expect(Option.isNone(primaryEmailValue([]))).toBe(true);
   });
 
   it("returns the email value string for a verified email", () => {
     const email = mkIdentifier({ type: "email", value: "alice@example.com", verified: true });
-    expect(primaryEmailValue([email])).toBe("alice@example.com");
+    expect(primaryEmailValue([email])).toEqual(Option.some("alice@example.com"));
   });
 });
 

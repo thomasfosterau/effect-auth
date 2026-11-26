@@ -293,7 +293,7 @@ export const aes256GcmSeal = (
   });
 
 /**
- * Open what {@link aes256GcmSeal} sealed, or `null` when it is malformed or
+ * Open what {@link aes256GcmSeal} sealed, or `None` when it is malformed or
  * fails authentication.
  *
  * @internal
@@ -301,12 +301,12 @@ export const aes256GcmSeal = (
 export const aes256GcmOpen = (
   key: Uint8Array,
   sealed: string,
-): Effect.Effect<string | null, never, Aead.Aead> =>
+): Effect.Effect<Option.Option<string>, never, Aead.Aead> =>
   Effect.gen(function* () {
     const open = openWith(yield* Aead.Aead);
     const aes = yield* Effect.option(aesKey(key));
-    if (Option.isNone(aes)) return null;
-    return (yield* open(aes.value, sealed)) ?? null;
+    if (Option.isNone(aes)) return Option.none();
+    return Option.fromUndefinedOr(yield* open(aes.value, sealed));
   });
 
 // ---------------------------------------------------------------------------
