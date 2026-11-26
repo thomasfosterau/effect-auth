@@ -45,6 +45,7 @@ import type { CredentialClass } from "./Authorizer.ts";
 import * as Observability from "./Observability.ts";
 import * as SessionCookies from "./SessionCookies.ts";
 import type * as Types from "./Types.ts";
+import { sessionCredentialClass } from "./Types.ts";
 
 /**
  * The four outcomes of a resolution attempt. Re-exported from `Observability`,
@@ -347,12 +348,14 @@ export const detectCredential = (
 };
 
 /**
- * Which credential class the caller presented, for `CurrentCredential`.
+ * The credential class of a resolved caller, for `CurrentCredential`.
  *
- * A bearer token or an API key is a `"machine"` credential; a cookie is
- * `"interactive"`. Mirrors the middleware's own read, so an app edge that
- * provides the session context by hand classifies the caller the same way the
- * HTTP stack would.
+ * An API key is a `"machine"` credential. A session has the class it was
+ * issued with ({@link Types.sessionCredentialClass}), whichever header or
+ * cookie carried its token: a browser session sent as `Authorization:
+ * Bearer` stays `"interactive"`, and a machine-issued session (the device
+ * grant) is `"machine"` even in a cookie. Without the session, a bearer token
+ * reads as `"machine"`, the class that grants less.
  *
  * A credential class changes *who* the request is, never *what* it may do —
  * the policy kernel reads it to enforce rules like "an API key may act as this
@@ -361,8 +364,14 @@ export const detectCredential = (
  * @since 0.1.0
  * @category accessors
  */
-export const credentialClassOf = (presence: CredentialPresence): CredentialClass =>
-  presence.hasApiKey || presence.hasBearer ? "machine" : "interactive";
+export const credentialClassOf = (
+  presence: CredentialPresence,
+  session?: Types.Session,
+): CredentialClass => {
+  if (presence.hasApiKey) return "machine";
+  if (session !== undefined) return sessionCredentialClass(session);
+  return presence.hasBearer ? "machine" : "interactive";
+};
 
 /**
  * Whether the request carries any credential — the cookieless fast-path

@@ -106,6 +106,56 @@ export const isImpersonationSession = (session: Session): boolean =>
   P.isString(session.attributes["impersonatedBy"]);
 
 /**
+ * The session attribute recording how the session was issued: `"machine"`
+ * for a session a device or other non-interactive grant issued. Absent means
+ * `"interactive"`, which every sign-in issues. Written once by the issuing
+ * flow; `SessionService.setSessionAttributes` never changes it.
+ */
+export const CREDENTIAL_CLASS_ATTRIBUTE = "credentialClass";
+
+/** The session attribute a device grant's client and scopes are recorded under. */
+export const DEVICE_GRANT_ATTRIBUTE = "deviceGrant";
+
+/**
+ * The session attributes fixed when the session is issued, which
+ * `SessionService.setSessionAttributes` keeps whatever it is given.
+ */
+export const SESSION_ISSUANCE_ATTRIBUTES: ReadonlyArray<string> = [
+  CREDENTIAL_CLASS_ATTRIBUTE,
+  DEVICE_GRANT_ATTRIBUTE,
+];
+
+/**
+ * The credential class a session was issued with: `"machine"` when its
+ * issuing flow recorded it (the device grant), else `"interactive"`. It
+ * comes from the session, never from how a request carried the token: a
+ * browser session's token sent as `Authorization: Bearer` stays interactive,
+ * and a machine-issued session never becomes interactive.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { sessionCredentialClass } from "@thomasfosterau/effect-auth"
+ *
+ * const session = {
+ *   id: "digest",
+ *   userId: "u-1",
+ *   expiresAt: new Date(),
+ *   createdAt: new Date(),
+ *   lastActivityAt: new Date(),
+ *   attributes: {},
+ * }
+ * assert.equal(sessionCredentialClass(session), "interactive")
+ * assert.equal(
+ *   sessionCredentialClass({ ...session, attributes: { credentialClass: "machine" } }),
+ *   "machine",
+ * )
+ * ```
+ */
+export const sessionCredentialClass = (session: Session): "interactive" | "machine" =>
+  session.attributes[CREDENTIAL_CLASS_ATTRIBUTE] === "machine" ? "machine" : "interactive";
+
+/**
  * Represents a session with its associated user.
  */
 export const SessionWithUser = Schema.Struct({

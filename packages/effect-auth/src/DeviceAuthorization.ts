@@ -13,6 +13,7 @@ import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
+import { CREDENTIAL_CLASS_ATTRIBUTE, DEVICE_GRANT_ATTRIBUTE } from "./Types.ts";
 import { SessionService } from "./SessionService.ts";
 import type { HookError } from "./Hooks.ts";
 import { tokenHasher } from "./TokenHash.ts";
@@ -214,9 +215,6 @@ export interface DeviceGrant {
   readonly clientId: string;
   readonly scopes: readonly string[];
 }
-
-/** The session attribute a device grant is recorded under. */
-export const DEVICE_GRANT_ATTRIBUTE = "deviceGrant";
 
 const decodeDeviceGrant = Schema.decodeUnknownOption(
   Schema.Struct({ clientId: Schema.String, scopes: Schema.Array(Schema.String) }),
@@ -512,7 +510,10 @@ const make = (
         const grant: DeviceGrant = { clientId: claimed.clientId, scopes: claimed.scopes };
         // User is resolved through the session manager so this flow needs no
         // direct user-store dependency (it isn't part of `AuthServices`).
+        // A device session is machine-class for its whole life: the class is
+        // read from the session, never from how a request carries its token.
         const { session, token } = yield* sessionManager.createSession(claimed.userId, {
+          [CREDENTIAL_CLASS_ATTRIBUTE]: "machine",
           [DEVICE_GRANT_ATTRIBUTE]: { clientId: grant.clientId, scopes: [...grant.scopes] },
         });
         const { user } = yield* sessionManager.validateSession(token);

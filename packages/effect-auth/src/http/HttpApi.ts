@@ -1393,10 +1393,12 @@ export const CurrentApiKeyDocument = Document.DataDocument(R.ApiKey, {
  *   `Cache-Control: no-store`.
  * - `GET /api-keys`: every key the caller owns.
  * - `POST /api-keys`: mint one; `201` with the key and, in `meta.key`, the
- *   plaintext key, shown this once. Minting needs an interactive credential
- *   (the session cookie): over a bearer credential it answers `403`.
+ *   plaintext key, shown this once. Minting needs an interactive session
+ *   (the class the session was issued with, whichever header carries its
+ *   token): a machine-issued session, such as the device grant's, gets `403`.
  * - `PATCH /api-keys/:id`: change its `name`, `enabled`, `expiresAt`,
- *   `permissions`, `metadata`, `remaining` or `rateLimit`.
+ *   `permissions`, `metadata`, `remaining` or `rateLimit`; it needs an
+ *   interactive session too (`403`).
  * - `DELETE /api-keys/:id`: delete it; `204`.
  *
  * A key the caller does not own answers `400`, as an unknown one does.
@@ -1420,12 +1422,13 @@ export const apiKeysGroup = Group.make(
     meta: Schema.Struct({ key: Schema.String }),
     errors: resourceErrors,
   }),
+  // Widening a key takes the same interactive session minting does.
   Endpoint.update(R.ApiKey, {
     payload: boundedPayload(R.ApiKey.updatePayload, {
       name: S.NameInput,
       metadata: S.AttributesInput,
     }),
-    errors: apiKeyErrors,
+    errors: [...apiKeyErrors, E.Forbidden],
   }),
   Endpoint.delete(R.ApiKey, { errors: apiKeyErrors }),
 );

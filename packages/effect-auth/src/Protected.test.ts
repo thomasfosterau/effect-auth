@@ -4,7 +4,13 @@ import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
-import { CurrentPrincipal, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";
+import * as Condition from "./Condition.ts";
+import {
+  CurrentCredential,
+  CurrentPrincipal,
+  EntityResolver,
+  memoryEntityResolver,
+} from "./Authorizer.ts";
 import { protectedField } from "./Protected.ts";
 
 // ---------------------------------------------------------------------------
@@ -293,5 +299,44 @@ describe("protectedField – requirements channel", () => {
       ),
     );
     expect(encoded).toEqual({ id: "u-1", email: "a@b" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The request Authorizer builds
+// ---------------------------------------------------------------------------
+
+describe("protectedField – the credential class", () => {
+  // Admins read the email, but never over a machine credential.
+  const MachineGuarded = Schema.Struct({
+    id: Schema.String,
+    email: protectedField(Schema.String, {
+      policies: [
+        adminReadsEmail,
+        Policy.forbid({
+          id: "no-machine-email",
+          when: Condition.eq(
+            Condition.attr("context", "credentialClass"),
+            Condition.lit("machine"),
+          ),
+        }),
+      ],
+      action: "user:read-email",
+    }),
+  });
+
+  const encodeWith = (credential: "interactive" | "machine") =>
+    Effect.runPromise(
+      withPrincipal(
+        Schema.encodeEffect(MachineGuarded)({ id: "1", email: "a@example.com" }).pipe(
+          CurrentCredential.provide(credential),
+        ),
+        alice,
+      ),
+    );
+
+  it("binds a forbid on context.credentialClass, as Authorizer.check does", async () => {
+    expect(await encodeWith("interactive")).toEqual({ id: "1", email: "a@example.com" });
+    expect(await encodeWith("machine")).toEqual({ id: "1" });
   });
 });

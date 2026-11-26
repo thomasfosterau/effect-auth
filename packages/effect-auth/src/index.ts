@@ -268,7 +268,6 @@ export {
   type DeviceAuthorizationRequest,
   type DevicePollResult,
   type DeviceGrant,
-  DEVICE_GRANT_ATTRIBUTE,
   deviceGrantOf,
   DeviceAuthorizationService,
   normalizeUserCode,

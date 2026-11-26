@@ -113,7 +113,6 @@ import {
   type ApiKeyError,
   type ApiKeyUpdate,
 } from "../ApiKey.ts";
-import { type CredentialClass } from "../Authorizer.ts";
 import { extractApiKey, fromHeaders } from "../SessionResolution.ts";
 import { JwtService } from "../Jwt.ts";
 import {
@@ -451,26 +450,6 @@ export const sessionIdFromRequest = (
     if ((scheme === "Token" || scheme === "Bearer") && value) return value;
   }
   return request.cookies[cfg.name];
-};
-
-/**
- * The {@link CredentialClass} implied by *how* the request carried its
- * credential: the session cookie only a browser sends automatically is
- * "interactive"; an `Authorization: Bearer/Token` header — copy-pasted into
- * a script, a CLI, or a machine caller, the same delivery mechanism a
- * consuming app's own API-key middleware uses — is "machine". Mirrors the
- * branch `sessionIdFromRequest` takes so the two never disagree about which
- * credential a request presented.
- */
-export const credentialClassFromRequest = (
-  request: HttpServerRequest.HttpServerRequest,
-): CredentialClass => {
-  const auth = request.headers["authorization"];
-  if (auth) {
-    const [scheme, value] = auth.split(" ");
-    if ((scheme === "Token" || scheme === "Bearer") && value) return "machine";
-  }
-  return "interactive";
 };
 
 // -----------------------------------------------------------------------------
@@ -3795,7 +3774,7 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
     Effect.gen(function* () {
       const resolved = yield* requireSession(request, cfg);
       const apiKey = yield* resolveApiKey;
-      return { apiKey: apiKey.service, userId: resolved.user.id };
+      return { apiKey: apiKey.service, userId: resolved.user.id, session: resolved.session };
     });
 
   return HttpApiBuilder.group(AuthApi, "api-keys", (handlers) =>
@@ -3813,9 +3792,8 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          // A key is never minted from a machine credential (a bearer token,
-          // another key): only from the interactive session cookie.
-          yield* requireInteractiveCredential(request);
+          // A key is never minted from a machine-issued session.
+          yield* requireInteractiveCredential(resolved.session);
           const apiKey = yield* resolveApiKey;
           // The answer carries the raw key, shown this once.
           yield* noStore;
@@ -3828,7 +3806,10 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
       )
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const { apiKey, userId } = yield* owner(request);
+          // Widening a key's permissions, expiry or uses is minting more of
+          // it, so it takes the same interactive session as create.
+          const { apiKey, userId, session } = yield* owner(request);
+          yield* requireInteractiveCredential(session);
           const updated = yield* asApiKeyOwner(
             apiKey.update(userId, params.id, apiKeyUpdate(payload.data.attributes ?? {})),
           );
@@ -5081,17 +5062,14 @@ const requireSession = (
 > => resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /**
- * Fail with `Forbidden` unless the request's credential is
- * `"interactive"` — i.e. presented as the session cookie, not the
- * `Authorization: Bearer/Token` header. Gates operations that must not be
- * reachable by a machine credential (a bearer-delivered session token, or —
- * for an app that wires its own API-key middleware on top of this library —
- * an API key), such as minting a new API key from one already in hand.
+ * Fail with `Forbidden` unless the caller's session is `"interactive"`: the
+ * class recorded on the session when it was issued
+ * (`sessionCredentialClass`), never the header or cookie that carried its
+ * token. Gates operations a machine-issued session (the device grant) must
+ * not reach, such as minting or widening an API key.
  */
-const requireInteractiveCredential = (
-  request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<void, S.Forbidden> =>
-  credentialClassFromRequest(request) === "interactive"
+const requireInteractiveCredential = (session: Types.Session): Effect.Effect<void, S.Forbidden> =>
+  Types.sessionCredentialClass(session) === "interactive"
     ? Effect.void
     : Effect.fail(new S.Forbidden({ message: "This operation requires an interactive session" }));
 
