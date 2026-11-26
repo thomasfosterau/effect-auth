@@ -3,6 +3,7 @@ import { assert, describe, it, expect } from "vite-plus/test";
 import {
   Clock,
   DateTime,
+  Deferred,
   Effect,
   FileSystem,
   Layer,
@@ -670,13 +671,17 @@ describe("OidcProviderService token state", () => {
     consentPage: "http://idp.test/consent",
   };
 
-  const setup = () => {
+  const setup = (
+    wrapTokenStore: (store: typeof OidcTokenStore.Service) => typeof OidcTokenStore.Service = (
+      store,
+    ) => store,
+  ) => {
     const stores = makeOidcStores();
     const users = MutableHashMap.make(["u1", makeUser("u1")] as const);
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
       Layer.succeed(OidcCodeStore)(stores.codeStore),
-      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcTokenStore)(wrapTokenStore(stores.tokenStore)),
       Layer.succeed(OidcConsentStore)(stores.consentStore),
       Layer.succeed(UserStore)({
         get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
@@ -771,7 +776,26 @@ describe("OidcProviderService token state", () => {
   });
 
   it("revokes the family when two refreshes race with one token", async () => {
-    const { provider } = setup();
+    // Once armed, a read that finds a refresh token waits until two have, so
+    // both requests hold the record before either spends it, however the
+    // scheduler orders them.
+    let armed = false;
+    let arrived = 0;
+    const bothRead = Effect.runSync(Deferred.make<void>());
+    const { provider } = setup((store) => ({
+      ...store,
+      get: (hash) =>
+        Effect.tap(store.get(hash), (record) =>
+          armed && record?.kind === "refresh"
+            ? Effect.suspend(() => {
+                arrived += 1;
+                return arrived >= 2
+                  ? Deferred.succeed(bothRead, undefined)
+                  : Deferred.await(bothRead);
+              })
+            : Effect.void,
+        ),
+    }));
     const service = provider();
     const { credentials, tokens } = await Effect.runPromise(
       grant(service, "openid offline_access"),
@@ -779,7 +803,7 @@ describe("OidcProviderService token state", () => {
     assert(Result.isSuccess(tokens));
     const original = tokens.success;
 
-    // The store's reads yield, so both requests read the record before either spends it.
+    armed = true;
     const raced = await Effect.runPromise(
       Effect.all(
         [
@@ -789,17 +813,30 @@ describe("OidcProviderService token state", () => {
         { concurrency: "unbounded" },
       ),
     );
-    // The winner of the rotation finds the family revoked by the loser, so
-    // neither request keeps a token.
-    expect(raced.map((result) => Result.isFailure(result))).toEqual([true, true]);
-    expect(raced.map((result) => Result.isFailure(result) && result.failure)).toEqual([
-      expect.objectContaining({ error: "invalid_grant" }),
-      expect.objectContaining({ error: "invalid_grant" }),
-    ]);
+    armed = false;
 
-    // The original access token went with the family.
-    const info = await Effect.runPromise(Effect.result(service.userinfo(original.accessToken)));
-    assert(Result.isFailure(info));
+    // The loser is refused. The winner either finds the family revoked and is
+    // refused too, or answered first; either way none of its tokens survive.
+    const failures = raced.filter(Result.isFailure);
+    expect(failures.length).toBeGreaterThanOrEqual(1);
+    expect(failures.map((result) => result.failure)).toEqual(
+      failures.map(() => expect.objectContaining({ error: "invalid_grant" })),
+    );
+    const issued = raced.filter(Result.isSuccess).map((result) => result.success);
+    const refreshes = await Effect.runPromise(
+      Effect.forEach(issued, (winner) => refresh(service, credentials, winner.refreshToken ?? ""), {
+        concurrency: 1,
+      }),
+    );
+    expect(refreshes.map(Result.isFailure)).toEqual(issued.map(() => true));
+    const infos = await Effect.runPromise(
+      Effect.forEach(
+        [original.accessToken, ...issued.map((winner) => winner.accessToken)],
+        (accessToken) => Effect.result(service.userinfo(accessToken)),
+        { concurrency: 1 },
+      ),
+    );
+    expect(infos.map(Result.isFailure)).toEqual(infos.map(() => true));
   });
 
   // A refresh down-scoped to drop openid signs no id_token, and is refused all the same.
@@ -2257,8 +2294,8 @@ describe("HTTP OIDC provider endpoints", () => {
     assert(issued !== undefined);
     const { refresh_token: refreshToken } = await jsonBody(issued, RefreshTokenBody);
 
-    // Concurrent refreshes of one token are reuse: every one is refused and
-    // the family is revoked, never forked.
+    // Concurrent refreshes of one token are reuse: the family is revoked,
+    // never forked.
     const rotations = await Promise.all(
       Arr.makeBy(3, () =>
         fx.handler(
@@ -2271,7 +2308,26 @@ describe("HTTP OIDC provider endpoints", () => {
         ),
       ),
     );
-    expect(rotations.map((response) => response.status)).toEqual([400, 400, 400]);
+    // At most one answered first, and its refresh token is dead too.
+    const statuses = rotations.map((response) => response.status);
+    expect(statuses.filter((status) => status === 400).length).toBeGreaterThanOrEqual(2);
+    expect(statuses.every((status) => status === 200 || status === 400)).toBe(true);
+    const winners = rotations.filter((response) => response.status === 200);
+    const after = await Promise.all(
+      winners.map(async (winner) => {
+        const { refresh_token: rotated } = await jsonBody(winner, RefreshTokenBody);
+        const response = await fx.handler(
+          post("/oauth2/token", {
+            grant_type: "refresh_token",
+            refresh_token: rotated,
+            client_id: client.clientId,
+            client_secret: clientSecret,
+          }),
+        );
+        return response.status;
+      }),
+    );
+    expect(after).toEqual(winners.map(() => 400));
   });
 
   it("enforces absolute (non-sliding) refresh token lifetime", async () => {

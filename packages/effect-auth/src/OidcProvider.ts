@@ -971,11 +971,30 @@ export const make = (
      */
     const revokedFamilyKey = (familyId: string) => hashSecret(`revoked-family:${familyId}`);
 
+    /**
+     * Revoke a family whose refresh token was reused. The marker goes first:
+     * a rotation still in flight reads it after writing its tokens, so either
+     * that rotation finds the marker or this delete finds its tokens.
+     */
+    const revokeFamily = (familyId: string, from: OidcToken) =>
+      Effect.gen(function* () {
+        yield* tokenStore.create({
+          tokenHash: yield* revokedFamilyKey(familyId),
+          kind: "rotated",
+          clientId: from.clientId,
+          userId: from.userId,
+          scopes: [],
+          expiresAt: from.absoluteExpiresAt ?? from.expiresAt,
+          createdAt: yield* Clock.currentTimeMillis,
+        });
+        yield* tokenStore.deleteByFamily(familyId);
+      });
+
     const revokeIfRotated = (presentedHash: string) =>
       Effect.gen(function* () {
         const rotated = yield* tokenStore.get(yield* rotationRecordKey(presentedHash));
         if (rotated?.kind === "rotated" && rotated.familyId !== undefined) {
-          yield* tokenStore.deleteByFamily(rotated.familyId);
+          yield* revokeFamily(rotated.familyId, rotated);
         }
       });
 
@@ -1778,20 +1797,10 @@ export const make = (
             // later replay (timing must not decide whether a stolen token's
             // family survives), so the family goes. A client that
             // double-submits a refresh (a retry, two tabs) is signed out by
-            // this, by design. The revocation marker is written before the
-            // delete, and the winner reads it after writing its tokens, so
-            // either the winner finds the marker or the delete finds its tokens.
+            // this, by design. The winner's own tokens go too (`revokeFamily`),
+            // though the winner may already have answered with them.
             if ((yield* tokenStore.consume(record.tokenHash)) === null) {
-              yield* tokenStore.create({
-                tokenHash: yield* revokedFamilyKey(familyId),
-                kind: "rotated",
-                clientId: record.clientId,
-                userId: record.userId,
-                scopes: [],
-                expiresAt: absoluteExpiresAt,
-                createdAt: yield* Clock.currentTimeMillis,
-              });
-              yield* tokenStore.deleteByFamily(familyId);
+              yield* revokeFamily(familyId, record);
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
 
