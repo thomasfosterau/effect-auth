@@ -41,6 +41,8 @@ import { safeRedirect } from "@thomasfosterau/effect-auth";
 export interface ActionEvent {
   readonly request: Request;
   readonly url: URL;
+  /** The client's address as the SvelteKit adapter knows it. */
+  readonly getClientAddress: () => string;
   readonly cookies: {
     readonly set: (name: string, value: string, options: CookieOptions) => void;
   };
@@ -188,6 +190,24 @@ export interface CredentialRequestOptions<Input, Fields> {
   readonly fallback: string;
   /** Override the message per failure kind. */
   readonly messages?: Partial<Record<CredentialFailureKind, string>> | undefined;
+  /**
+   * The client's address, sent to the auth handler in
+   * {@link CredentialRequestOptions.clientAddressHeader}. Default
+   * `event.getClientAddress()`; no header is sent when it answers `undefined`
+   * or throws (an adapter that cannot tell). Configure the auth handler to
+   * trust that one header, for example
+   * `trustedProxy: ClientIP.trustedHeader("x-forwarded-for")`.
+   */
+  readonly clientAddress?: ((event: ActionEvent) => string | undefined) | undefined;
+  /** The header the client address is sent in. Default `x-forwarded-for`. */
+  readonly clientAddressHeader?: string | undefined;
+  /**
+   * Forward the browser's own `x-forwarded-for` and `cf-connecting-ip` too.
+   * Default `false`: off Cloudflare the browser chose their values. Turn it on
+   * only when an edge in front of the app sets them; the client address
+   * header still carries `clientAddress`'s answer.
+   */
+  readonly forwardClientIpHeaders?: boolean | undefined;
 }
 
 /**
@@ -339,13 +359,54 @@ const relayCookies = (event: ActionEvent, response: Response): void => {
   });
 };
 
+const browserHeaders: ReadonlyArray<string> = ["origin", "user-agent"];
+const withClientIpHeaders: ReadonlyArray<string> = [
+  ...browserHeaders,
+  "x-forwarded-for",
+  "cf-connecting-ip",
+];
+
+/** The client address to send, or `undefined` when the adapter cannot tell. */
+const clientAddressOf = (
+  event: ActionEvent,
+  clientAddress: ((event: ActionEvent) => string | undefined) | undefined,
+): string | undefined =>
+  Option.getOrUndefined(
+    Option.liftThrowable((): string | undefined =>
+      clientAddress === undefined ? event.getClientAddress() : clientAddress(event),
+    )(),
+  );
+
+/** The headers sent with a credential: the browser's, and the client address in one header. */
+const credentialHeaders = <Input, Fields>(
+  event: ActionEvent,
+  options: CredentialRequestOptions<Input, Fields>,
+): Headers => {
+  const forwarded = new Headers({
+    "content-type": options.contentType ?? "application/vnd.api+json",
+  });
+  const names = options.forwardClientIpHeaders === true ? withClientIpHeaders : browserHeaders;
+  Arr.forEach(names, (name) => {
+    const value = event.request.headers.get(name);
+    if (value !== null) forwarded.set(name, value);
+  });
+  const addressHeader = options.clientAddressHeader ?? "x-forwarded-for";
+  const address = clientAddressOf(event, options.clientAddress);
+  if (address === undefined) forwarded.delete(addressHeader);
+  else forwarded.set(addressHeader, address);
+  return forwarded;
+};
+
 /**
  * Submit a credential to the auth handler on behalf of one request: the core
  * the form-action and remote-function helpers share.
  *
  * It POSTs `options.body(input)` to `endpoint`, forwarding the browser's
- * `Origin`, `User-Agent` and `X-Forwarded-For` (and `CF-Connecting-IP`) so the
- * handler's CSRF check and rate limits see the real client. On a `202` (no
+ * `Origin` and `User-Agent` so the handler's CSRF check sees the real client,
+ * and the client address (`clientAddress`, by default
+ * `event.getClientAddress()`) in one header for its rate limits. The browser's
+ * own `X-Forwarded-For` and `CF-Connecting-IP` are dropped unless
+ * `forwardClientIpHeaders` is on. On a `202` (no
  * session issued: a second factor is pending, or the address must be verified
  * first) it answers {@link CredentialPending}; a `202` whose body is not the
  * handler's pending document counts as `unavailable`. On any other 2xx it
@@ -362,13 +423,7 @@ export const submitCredential = async <Input, Fields>(
   input: Input,
   options: CredentialRequestOptions<Input, Fields>,
 ): Promise<CredentialResult<Fields>> => {
-  const forwarded = new Headers({
-    "content-type": options.contentType ?? "application/vnd.api+json",
-  });
-  Arr.forEach(["origin", "user-agent", "x-forwarded-for", "cf-connecting-ip"], (name) => {
-    const value = event.request.headers.get(name);
-    if (value !== null) forwarded.set(name, value);
-  });
+  const forwarded = credentialHeaders(event, options);
   const response = await options
     .fetch(
       new Request(options.endpoint, {
@@ -465,6 +520,7 @@ export const submitCredential = async <Input, Fields>(
  * const result = await signIn({
  *   request: new Request("https://app.example/login", { method: "POST", body: form }),
  *   url: new URL("https://app.example/login?redirect=/dashboard"),
+ *   getClientAddress: () => "203.0.113.9",
  *   cookies: { set: () => undefined },
  * });
  * deepStrictEqual(result, {
@@ -539,6 +595,7 @@ export interface RemoteFormKit extends RemoteKit {
  *   getRequestEvent: () => ({
  *     request: new Request("https://app.example/_app/remote/sign-in", { method: "POST" }),
  *     url: new URL("https://app.example/_app/remote/sign-in"),
+ *     getClientAddress: () => "203.0.113.9",
  *     cookies: { set: (name: string) => void relayed.push(name) },
  *   }),
  *   redirect: (status: 303, location: string): never => {
@@ -617,6 +674,7 @@ export const credentialForm =
  *     getRequestEvent: () => ({
  *       request: new Request("https://app.example/_app/remote/sign-in", { method: "POST" }),
  *       url: new URL("https://app.example/_app/remote/sign-in"),
+ *       getClientAddress: () => "203.0.113.9",
  *       cookies: { set: () => undefined },
  *     }),
  *   },
