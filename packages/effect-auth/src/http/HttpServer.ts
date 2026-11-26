@@ -3606,9 +3606,8 @@ const asAdmin = <A, R>(
 /** The `catchTags` cases of {@link asAdmin}. */
 const adminFailures = {
   AdminError: (e: AdminError) => Effect.fail(new S.Forbidden({ message: e.message })),
-  UserNotFoundError: (e: UserNotFoundError) =>
-    Effect.fail(new S.BadRequest({ message: e.message })),
-  AuthError: (e: AuthError) => internalServerError(e),
+  UserNotFoundError: accountTokenRefusals.UserNotFoundError,
+  AuthError: accountTokenRefusals.AuthError,
 };
 
 /**
