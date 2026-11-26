@@ -18,6 +18,7 @@ import {
   memoryUserTable,
 } from "./testing/index.ts";
 import { UserStore } from "./UserStore.ts";
+import { SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
 import * as RateLimit from "./RateLimit.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -551,6 +552,117 @@ describe("ApiKeyService", () => {
 
     expect(result.every((outcome) => outcome.valid)).toBe(true);
     expect(MutableHashMap.size(rateLimitEntries)).toBe(0);
+  });
+
+  describe("check", () => {
+    it("answers as verify does without spending a use or moving lastUsedAt", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          const { key, apiKey } = yield* service.create("user-1", {
+            remaining: 1,
+            permissions: { posts: ["read"] },
+          });
+          const checks = yield* Effect.replicateEffect(service.check(key, { posts: ["read"] }), 3);
+          const stored = yield* service.get(apiKey.id);
+          const verified = yield* service.verify(key);
+          const afterSpent = yield* service.check(key);
+          return { apiKey, checks, stored, verified, afterSpent };
+        }),
+      );
+      expect(
+        result.checks.map((checked) => [
+          checked.valid,
+          checked.apiKey?.id,
+          checked.apiKey?.remaining,
+        ]),
+      ).toEqual(Arr.replicate([true, result.apiKey.id, 1], 3));
+      expect(result.stored.remaining).toBe(1);
+      expect(result.stored.lastUsedAt).toBeUndefined();
+      expect(result.stored.updatedAt).toBe(result.apiKey.updatedAt);
+      // The one use is still there for verify to spend.
+      expect(result.verified.valid).toBe(true);
+      expect(result.verified.apiKey?.remaining).toBe(0);
+      expect(result.afterSpent).toEqual({
+        valid: false,
+        error: "API key has no remaining uses",
+        reason: "exhausted",
+      });
+    });
+
+    it("takes no rate-limit token", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          const { key } = yield* service.create("user-1", {
+            rateLimit: { maxRequests: 1, windowMs: 60_000 },
+          });
+          yield* Effect.replicateEffect(service.check(key), 3);
+          return yield* service.verifyWithRateLimit(key);
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("refuses an unknown, disabled, expired, deleted or under-permitted key", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          const disabled = yield* service.create("user-1");
+          yield* service.update("user-1", disabled.apiKey.id, { enabled: false });
+          const expired = yield* service.create("user-1", { expiresIn: -1000 });
+          const deleted = yield* service.create("user-1");
+          const accepted = yield* service.check(deleted.key);
+          yield* service.delete("user-1", deleted.apiKey.id);
+          const narrow = yield* service.create("user-1", { permissions: { posts: ["read"] } });
+          return {
+            unknown: yield* service.check("ak_does-not-exist"),
+            disabled: yield* service.check(disabled.key),
+            expired: yield* service.check(expired.key),
+            accepted,
+            deleted: yield* service.check(deleted.key),
+            narrow: yield* service.check(narrow.key, { posts: ["write"] }),
+          };
+        }),
+      );
+      expect(result.unknown.reason).toBe("invalid");
+      expect(result.disabled.reason).toBe("disabled");
+      expect(result.expired.reason).toBe("expired");
+      expect(result.accepted.valid).toBe(true);
+      expect(result.deleted).toEqual({ valid: false, error: "Invalid API key", reason: "invalid" });
+      expect(result.narrow.reason).toBe("missing-permissions");
+    });
+
+    it("refuses a key whose owner is banned or SCIM-deactivated", async () => {
+      const result = await runService((service) =>
+        Effect.gen(function* () {
+          MutableHashMap.set(users.users, "user-banned", { ...fixtureUser(), id: "user-banned" });
+          MutableHashMap.set(users.users, "user-scim", { ...fixtureUser(), id: "user-scim" });
+          const banned = yield* service.create("user-banned");
+          const scim = yield* service.create("user-scim");
+          const before = {
+            banned: yield* service.check(banned.key),
+            scim: yield* service.check(scim.key),
+          };
+          MutableHashMap.set(users.users, "user-banned", {
+            ...fixtureUser(),
+            id: "user-banned",
+            attributes: { banned: true },
+          });
+          MutableHashMap.set(users.users, "user-scim", {
+            ...fixtureUser(),
+            id: "user-scim",
+            attributes: { [SCIM_DEACTIVATED_ATTRIBUTE]: true },
+          });
+          return {
+            before,
+            banned: yield* service.check(banned.key),
+            scim: yield* service.check(scim.key),
+          };
+        }),
+      );
+      expect(result.before.banned.valid).toBe(true);
+      expect(result.before.scim.valid).toBe(true);
+      expect(result.banned.reason).toBe("invalid");
+      expect(result.scim.reason).toBe("invalid");
+    });
   });
 
   describe("concurrent verifies", () => {

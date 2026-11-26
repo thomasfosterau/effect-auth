@@ -1069,6 +1069,8 @@ Each store is used when it is in the context the service's layer is built in, as
 
 `ApiKeyService.verify` (and `verifyWithRateLimit`) also refuses a key whose owner `UserStore` no longer finds, answering `Invalid API key` as for an unknown key, so a key that outlived its user (a user row deleted straight through `UserServiceStore.delete`) never authenticates; `ApiKeyService` therefore requires `UserStore`.
 
+`ApiKeyService.check` runs the same lookup and checks as `verify` (owner, enabled, expiry, remaining uses, permissions) and answers the same result, but spends nothing: `remaining`, `lastRefillAt` and `lastUsedAt` stay as they are, nothing is written and no rate-limit token is taken. Use it to re-validate, on every request of a long-lived connection, a key already accepted with `verify`: a key disabled, expired or deleted, or whose owner is banned or SCIM-deactivated, is refused at the next check, and the checks do not use up the key's quota. A key with no uses left is still refused.
+
 JWTs already issued (`Jwt`) cannot be revoked and expire on their own. Short-lived records that carry a user id but are redeemed through a check that loads the user (pending multi-factor and OTP-second-factor challenges, approved device codes, OIDC authorization codes, and one-time tokens: `redeemOneTimeTokenForSession` refuses a token whose subject `UserStore` no longer finds, as an unknown token, so it requires `UserStore`) are left to expire. Organization invitations sent by email are not purged either: they name an address, not the user, and stay until they expire or are accepted, rejected or canceled.
 
 ## Configuration
