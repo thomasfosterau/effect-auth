@@ -1910,7 +1910,7 @@ interface SignInOutcome {
 type SignedIn = typeof SignedInDocument.Type;
 
 /** The `202` answer for a sign-in or sign-up that issued no session. */
-type Pending = typeof PendingDocument.Type;
+type Pending = PendingDocument;
 
 /**
  * Attach a new session to the response a JSON:API handler is about to send:
