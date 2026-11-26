@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
+import { SecureRandom } from "effect/crypto";
 import { ARGON2ID } from "./Common.ts";
 import * as Argon2 from "./index.ts";
 import { Password } from "@thomasfosterau/effect-auth";
@@ -42,6 +43,13 @@ describe("Argon2.Argon2.argon2Hasher", () => {
     expect(first.hash).not.toBe(second.hash);
     expect(await run(hasher.verify("same-password", first.hash))).toBe(true);
     expect(await run(hasher.verify("same-password", second.hash))).toBe(true);
+  });
+
+  it("draws its salt from the configured SecureRandom", async () => {
+    const random = SecureRandom.make((size) => new Uint8Array(size).fill(7));
+    const hasher = Argon2.Argon2.argon2Hasher({ ...cheap, random });
+    const { hash } = await run(hasher.hash("same-password"));
+    expect(hash.split("$")[4]).toBe("BwcHBwcHBwcHBwcHBwcHBw");
   });
 
   it("honours custom cost parameters in the PHC header", async () => {

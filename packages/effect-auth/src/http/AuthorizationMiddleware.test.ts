@@ -22,6 +22,7 @@ import {
   CurrentPrincipal,
   EntityResolver,
   memoryEntityResolver,
+  type PolicyValidationError,
 } from "../Authorizer.ts";
 import {
   makeAuthorizationMiddleware,
@@ -120,7 +121,7 @@ const runGate = <Id extends string>(
   options: {
     readonly principal?: Entity.EntityRef;
     readonly request?: HttpServerRequest.HttpServerRequest;
-    readonly overrideAuthorizerLayer?: Layer.Layer<Authorizer, Errors.AuthError>;
+    readonly overrideAuthorizerLayer?: Layer.Layer<Authorizer, PolicyValidationError>;
   } = {},
 ): Effect.Effect<typeof ok, S.Forbidden | Errors.AuthError> => {
   const request = options.request ?? makeWebRequest();
@@ -148,7 +149,9 @@ const runGate = <Id extends string>(
       Effect.scoped,
     );
   }).pipe(
-    Effect.provide(Layer.mergeAll(Guard.layer, options.overrideAuthorizerLayer ?? authorizerLayer)),
+    Effect.provide(
+      Layer.mergeAll(Guard.layer, Layer.orDie(options.overrideAuthorizerLayer ?? authorizerLayer)),
+    ),
   );
 
   return program.pipe(CurrentPrincipal.provide(options.principal ?? unreadablePrincipal));

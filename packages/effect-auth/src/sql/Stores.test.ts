@@ -1972,7 +1972,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.invalidated._tag).toBe("SessionNotFoundError");
     });
 
-    it("store gets surface AuthError (not defect) on SQL failure", async () => {
+    it("store gets and RBAC reads surface AuthError (not defect) on SQL failure", async () => {
       const brokenConnection: SqlConnection.Connection = {
         execute: () => Effect.fail(simulatedFailure()),
         executeRaw: () => Effect.fail(simulatedFailure()),
@@ -2003,7 +2003,10 @@ const storeContract = (engine: StoreEngine): void => {
           const e3 = yield* Effect.flip(rateLimits.get("key"));
           const e4 = yield* Effect.flip(apiKeys.get("key-id"));
           const e5 = yield* Effect.flip(adminUsers.listUsers({}));
-          return { e1, e2, e3, e4, e5 };
+          const resolver = yield* Sql.makeRbacEntityResolver;
+          const e6 = yield* Effect.flip(resolver.resolve([Auth.Entity.ref("User", "user-1")]));
+          const e7 = yield* Effect.flip(Sql.readRbacPolicies);
+          return { e1, e2, e3, e4, e5, e6, e7 };
         }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(brokenClientLayer)))),
       );
 
@@ -2013,6 +2016,8 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.e3._tag).toBe("AuthError");
       expect(result.e4._tag).toBe("AuthError");
       expect(result.e5._tag).toBe("AuthError");
+      expect(result.e6._tag).toBe("AuthError");
+      expect(result.e7._tag).toBe("AuthError");
     });
 
     it("decodeAttributes surfaces malformed JSON attributes as AuthError not defect", async () => {

@@ -85,7 +85,7 @@ const layer = argon2HasherLayer({ maxMemoryKiB: 19456, maxIterations: 4, maxPara
 
 `verify` also refuses, the same way, a stored hash whose parameters repeat a name or add one other than `m`, `t` and `p` (so the ceiling always reads the costs the kernel would run), and one longer than 512 characters, before it is copied into wasm memory.
 
-`argon2Hasher` and `argon2HasherLayer` throw a `RangeError` when a cost or a limit is not a positive integer, or when the configured costs exceed the ceiling (for example `memoryCost: 262144` without raising `maxMemoryKiB`), since such a hasher would write hashes its own `verify` refuses. Lowering the ceiling below costs your stored hashes already carry locks those users out until they reset their password, so lower it only to what you have written.
+`argon2Hasher` and `argon2HasherLayer` throw an `Argon2ConfigError` (from `@thomasfosterau/effect-auth/Password`) when a cost or a limit is not a positive integer, or when the configured costs exceed the ceiling (for example `memoryCost: 262144` without raising `maxMemoryKiB`), since such a hasher would write hashes its own `verify` refuses. Lowering the ceiling below costs your stored hashes already carry locks those users out until they reset their password, so lower it only to what you have written.
 
 Hashes that cannot be recomputed (a malformed PHC string, an unsupported variant, Argon2 `v=0x10`, or a salt or digest outside the Argon2 crate's bounds: salt 8–48 bytes, digest 4–64 bytes) fail with a `HashingError` rather than silently returning `false`.
 

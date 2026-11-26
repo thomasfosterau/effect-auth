@@ -35,10 +35,11 @@ export type CBORValue =
   | CBORMap;
 
 /** Thrown for any input this decoder rejects. */
-export class CBORParseError extends Error {
+export class CBORParseError extends Data.TaggedError("CBORParseError")<{
+  readonly message: string;
+}> {
   constructor(message: string) {
-    super(`Failed to decode CBOR: ${message}`);
-    this.name = "CBORParseError";
+    super({ message: `Failed to decode CBOR: ${message}` });
   }
 }
 
@@ -402,10 +403,11 @@ export interface ClientData {
 }
 
 /** Thrown when `clientDataJSON` is missing required members or malformed. */
-export class ClientDataParseError extends Error {
+export class ClientDataParseError extends Data.TaggedError("ClientDataParseError")<{
+  readonly message: string;
+}> {
   constructor(message: string) {
-    super(`Failed to parse client data: ${message}`);
-    this.name = "ClientDataParseError";
+    super({ message: `Failed to parse client data: ${message}` });
   }
 }
 
@@ -540,10 +542,11 @@ export interface AttestedCredential {
 }
 
 /** Thrown when authenticator data is truncated or otherwise malformed. */
-export class AuthenticatorDataParseError extends Error {
+export class AuthenticatorDataParseError extends Data.TaggedError("AuthenticatorDataParseError")<{
+  readonly message: string;
+}> {
   constructor(message: string) {
-    super(`Failed to parse authenticator data: ${message}`);
-    this.name = "AuthenticatorDataParseError";
+    super({ message: `Failed to parse authenticator data: ${message}` });
   }
 }
 
@@ -669,10 +672,11 @@ export interface AttestationObject {
 }
 
 /** Thrown when an attestation object is malformed or uses an unknown format. */
-export class AttestationObjectParseError extends Error {
+export class AttestationObjectParseError extends Data.TaggedError("AttestationObjectParseError")<{
+  readonly message: string;
+}> {
   constructor(message: string) {
-    super(`Failed to parse attestation object: ${message}`);
-    this.name = "AttestationObjectParseError";
+    super({ message: `Failed to parse attestation object: ${message}` });
   }
 }
 

@@ -7,6 +7,7 @@ import * as P from "effect/Predicate";
 import { Kdf, Password as CryptoPassword } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
+  Argon2ConfigError,
   argon2DefaultProfile,
   argon2idHasher,
   argon2idHasherLayer,
@@ -190,10 +191,10 @@ describe("argon2idHasher refusals", () => {
   it("throws on a configuration whose hashes would not verify", () => {
     const { kdf } = nodeKdf();
     const make = (options: Argon2Options) => () => argon2idHasher(cryptoPasswords(kdf), options);
-    expect(make({ memoryCost: 262144 })).toThrow(RangeError);
-    expect(make({ timeCost: 0 })).toThrow(RangeError);
-    expect(make({ parallelism: Number.NaN })).toThrow(RangeError);
-    expect(make({ maxIterations: 1.5 })).toThrow(RangeError);
+    expect(make({ memoryCost: 262144 })).toThrow(Argon2ConfigError);
+    expect(make({ timeCost: 0 })).toThrow(Argon2ConfigError);
+    expect(make({ parallelism: Number.NaN })).toThrow(Argon2ConfigError);
+    expect(make({ maxIterations: 1.5 })).toThrow(Argon2ConfigError);
     expect(make(argon2ServerProfile)).not.toThrow();
     expect(make(argon2DefaultProfile)).not.toThrow();
   });

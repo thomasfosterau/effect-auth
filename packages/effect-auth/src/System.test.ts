@@ -12,6 +12,7 @@ import * as Condition from "./Condition.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
+import * as Errors from "./Errors.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
@@ -730,7 +731,7 @@ describe("protectedField decisions about a system principal are audited by name"
       Schema.encodeEffect(field([chargeInvoices]))({ secret: "s" }).pipe(
         Authorizer.CurrentPrincipal.provide(billing),
         Effect.provideService(Authorizer.EntityResolver, {
-          resolve: () => Effect.fail(new Authorizer.PolicyValidationError({ message: "down" })),
+          resolve: () => Effect.fail(new Errors.AuthError({ message: "down" })),
         }),
       ),
     );

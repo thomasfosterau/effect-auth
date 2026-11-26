@@ -18,6 +18,7 @@ import { SqlClient, SqlError, Statement } from "effect/sql";
 import * as Auth from "../index.ts";
 import { decodeBigintColumns } from "./Int8.ts";
 import { definedKeys } from "../DefinedKeys.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs
@@ -219,7 +220,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     Effect.gen(function* () {
       const now = yield* DateTime.nowAsDate;
       const user: Auth.Types.User = {
-        id: globalThis.crypto.randomUUID(),
+        id: yield* PlatformCrypto.instance.uuidV4(),
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},
@@ -458,7 +459,7 @@ export const makeRbacEntityResolver: Effect.Effect<
   const rolesFor = (userId: string) =>
     sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
       Effect.map((rows) => rows.map((row) => row.role)),
-      Effect.orDie,
+      Effect.mapError(toAuthError("rbacEntityResolver.resolve")),
     );
   return {
     resolve: Effect.fn("Sql.rbacEntityResolver.resolve")(function* (
@@ -488,11 +489,11 @@ export const makeRbacEntityResolver: Effect.Effect<
  */
 export const readRbacPolicies: Effect.Effect<
   ReadonlyArray<Auth.Policy.DeclarativePolicy>,
-  never,
+  Auth.Errors.AuthError,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.use((sql) =>
   sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
-    Effect.orDie,
+    Effect.mapError(toAuthError("readRbacPolicies")),
     Effect.map((rows) => {
       const rolePermissions = R.map(
         Arr.groupBy(rows, (row) => row.role),

@@ -43,9 +43,13 @@ import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
-import { Authorizer, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";
+import {
+  Authorizer,
+  EntityResolver,
+  memoryEntityResolver,
+  type PolicyValidationError,
+} from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
-import type * as Errors from "./Errors.ts";
 import { formatPermission, type PermissionRef } from "./Permission.ts";
 import * as Policy from "./Policy.ts";
 
@@ -314,7 +318,7 @@ export const model = (config: RbacConfig): AuthorizationModel.Model => {
  */
 export const layer = (
   config: RbacConfig,
-): Layer.Layer<Authorizer | EntityResolver, Errors.AuthError> =>
+): Layer.Layer<Authorizer | EntityResolver, PolicyValidationError> =>
   Layer.provideMerge(
     Authorizer.layer({ policies: policies(config), model: model(config), useStore: false }),
     entityResolverLayer(config),

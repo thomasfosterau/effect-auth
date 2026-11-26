@@ -10,6 +10,7 @@ import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vite-pl
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import { Password } from "@thomasfosterau/effect-auth";
+import { Argon2ConfigError } from "@thomasfosterau/effect-auth/Password";
 import { hashWasmFixtures } from "./HashWasm.fixtures.ts";
 import * as Argon2 from "./index.ts";
 import { verifyArgon2 } from "./Wasm.ts";
@@ -225,9 +226,10 @@ describe("a configured verify ceiling", () => {
 
   it("refuses, at construction, costs over the ceiling: their hashes would not verify", () => {
     expect(() => Argon2.Argon2.argon2Hasher({ memoryCost: 262144 })).toThrow(
-      new RangeError(
-        "Argon2 memoryCost=262144 is over maxMemoryKiB=131072: its hashes would not verify",
-      ),
+      new Argon2ConfigError({
+        message:
+          "Argon2 memoryCost=262144 is over maxMemoryKiB=131072: its hashes would not verify",
+      }),
     );
     expect(() => Argon2.Argon2.argon2Hasher({ timeCost: 3, maxIterations: 2 })).toThrow(
       /timeCost=3 is over maxIterations=2/,
@@ -259,7 +261,9 @@ describe("a configured verify ceiling", () => {
     ),
   )("refuses %s = %s at construction", (limit, value) => {
     expect(() => Argon2.Argon2.argon2Hasher({ [limit]: value })).toThrow(
-      new RangeError(`Argon2 ${limit} must be a positive integer, got ${value}`),
+      new Argon2ConfigError({
+        message: `Argon2 ${limit} must be a positive integer, got ${value}`,
+      }),
     );
   });
 });
