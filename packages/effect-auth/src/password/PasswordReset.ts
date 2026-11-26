@@ -137,6 +137,9 @@ const validatePasswordLength = (
     return yield* Effect.void;
   });
 
+/** The prefix of a marker's owner: no user id starts with it. */
+const UNKNOWN_ADDRESS_OWNER = "password-reset-unknown-address:";
+
 /**
  * Build a {@link PasswordResetService} from its config, for embedding in a custom layer inside the package. The `password` barrel doesn't re-export it, so it never reads as `Password.make`; use {@link PasswordResetService.layer} from the public API.
  */
@@ -199,24 +202,27 @@ export const make = (
           normalizedEmail,
         );
 
-        // Do not reveal whether the user exists to reduce email enumeration risk.
-        // The after-hook fires uniformly (existence is not signalled to plugins).
-        if (resolved === null) {
-          yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
-          return;
-        }
-        // The token is bound to the identifier's owner, so it goes only to the
-        // identifier's own address, never to the one the caller typed.
-        const { user, identifier } = resolved;
+        // An unknown address makes the same two store writes as a known one,
+        // of a marker whose token nobody holds, so neither the answer nor the
+        // store work tells them apart. The marker's owner is derived from the
+        // address and names no user, so a repeat replaces it; were its token
+        // ever guessed, redeeming it would find no account.
+        const owner =
+          resolved === null
+            ? {
+                userId: `${UNKNOWN_ADDRESS_OWNER}${yield* hashToken(normalizedEmail)}`,
+                email: normalizedEmail,
+              }
+            : { userId: resolved.user.id, email: resolved.identifier.value };
 
-        yield* resetStore.deleteByUserId(user.id);
+        yield* resetStore.deleteByUserId(owner.userId);
 
         const rawToken = yield* generateResetToken();
         const reset: PasswordResetToken = {
           // Store the hash — the raw token is delivered to the user via sendResetPassword.
           token: yield* hashToken(rawToken),
-          userId: user.id,
-          email: identifier.value,
+          userId: owner.userId,
+          email: owner.email,
           createdAt: yield* Clock.currentTimeMillis,
           expiresAt: (yield* Clock.currentTimeMillis) + expiresIn,
         };
@@ -225,9 +231,14 @@ export const make = (
 
         // Only a known address gets a link, so an inline send would answer it
         // later, and fail it when the vendor does, than an unknown one: the
-        // send goes off the response path.
-        yield* detached("password-reset", config.sendResetPassword(identifier.value, rawToken));
+        // send goes off the response path. The token is bound to the
+        // identifier's owner, so it goes only to the identifier's own address,
+        // never to the one the caller typed.
+        if (resolved !== null) {
+          yield* detached("password-reset", config.sendResetPassword(owner.email, rawToken));
+        }
 
+        // The after-hook fires uniformly (existence is not signalled to plugins).
         yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
       }),
 
@@ -251,7 +262,7 @@ export const make = (
 
         const tokenHash = yield* hashToken(token);
         const reset = yield* resetStore.get(tokenHash);
-        if (!reset) {
+        if (!reset || reset.userId.startsWith(UNKNOWN_ADDRESS_OWNER)) {
           return yield* new Errors.PasswordResetError({
             message: "Invalid or expired password reset token",
           });

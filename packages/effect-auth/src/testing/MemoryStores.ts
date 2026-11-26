@@ -629,8 +629,7 @@ export const memoryOidcCodeStore = (
 });
 
 /**
- * `OidcTokenStore` over a `MutableHashMap` keyed by the token's hash, with
- * `listByFamily` (refresh-token reuse detection on).
+ * `OidcTokenStore` over a `MutableHashMap` keyed by the token's hash.
  *
  * @since 0.1.0
  * @category constructors
@@ -646,12 +645,14 @@ export const memoryOidcTokenStore = (
     Effect.sync(() => {
       removeWhere(tokens, (token) => token.userId === userId);
     }),
-  listByFamily: (familyId) =>
-    Effect.sync(() =>
-      Arr.fromIterable(MutableHashMap.values(tokens)).filter(
-        (token) => token.familyId === familyId,
-      ),
-    ),
+  deleteByFamily: (familyId) =>
+    Effect.sync(() => {
+      removeWhere(tokens, (token) => token.familyId === familyId);
+    }),
+  deleteByClientId: (clientId) =>
+    Effect.sync(() => {
+      removeWhere(tokens, (token) => token.clientId === clientId);
+    }),
 });
 
 /**

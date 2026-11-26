@@ -157,7 +157,7 @@ grant_type=authorization_code
 }
 ```
 
-The `refresh_token` is present because the grant included `offline_access`; refresh tokens rotate on every use, and replaying a consumed one revokes the whole family. The `id_token` verifies against `/.well-known/jwks.json`, and the access token resolves claims at `/oauth2/userinfo`.
+The `refresh_token` is present because the grant included `offline_access`; refresh tokens rotate on every use, and replaying a consumed one revokes the whole family, its access tokens included. The rotation is recorded in the `OidcTokenStore`, so the replay is caught across restarts and instances. The `id_token` verifies against `/.well-known/jwks.json`, and the access token resolves claims at `/oauth2/userinfo`.
 
 Errors are RFC 6749 §5.2 error responses, `{ "error": "invalid_grant", "error_description": "…" }`, always `Cache-Control: no-store`: `invalid_client` is a `401` with `WWW-Authenticate`, everything else a `400`, including a request the endpoint cannot decode (`invalid_request`).
 

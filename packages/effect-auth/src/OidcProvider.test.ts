@@ -128,9 +128,17 @@ const makeOidcStores = () => {
           }
         }),
       ),
-    listByFamily: (familyId) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(tokens)).filter((t) => t.familyId === familyId),
+    deleteByFamily: (familyId) =>
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(tokens))
+          .filter((t) => t.familyId === familyId)
+          .forEach((t) => MutableHashMap.remove(tokens, t.tokenHash)),
+      ),
+    deleteByClientId: (clientId) =>
+      Effect.sync(() =>
+        Arr.fromIterable(MutableHashMap.values(tokens))
+          .filter((t) => t.clientId === clientId)
+          .forEach((t) => MutableHashMap.remove(tokens, t.tokenHash)),
       ),
   };
   const consentStore: typeof OidcConsentStore.Service = {
@@ -647,6 +655,235 @@ describe("OidcProviderService", () => {
       expect(err).toBeInstanceOf(OidcProviderError);
       expect(err.message).toBe("Trusted clients are configured statically and cannot be updated");
     });
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Token state: rotation records, families, user standing, client lifecycle
+// -----------------------------------------------------------------------------
+
+describe("OidcProviderService token state", () => {
+  const config = {
+    issuer: ISSUER,
+    loginPage: "http://idp.test/login",
+    consentPage: "http://idp.test/consent",
+  };
+
+  const setup = () => {
+    const stores = makeOidcStores();
+    const users = MutableHashMap.make(["u1", makeUser("u1")] as const);
+    const layer = Layer.mergeAll(
+      Layer.succeed(OidcClientStore)(stores.clientStore),
+      Layer.succeed(OidcCodeStore)(stores.codeStore),
+      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcConsentStore)(stores.consentStore),
+      Layer.succeed(UserStore)({
+        get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
+      }),
+      Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
+      JwtService.layer({ issuer: ISSUER }).pipe(
+        Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
+      ),
+      testCryptoLayer,
+    );
+    // Each call is a fresh provider instance over the same stores, as after a
+    // restart or on another instance.
+    const provider = () => Effect.runSync(OidcProvider.make(config).pipe(Effect.provide(layer)));
+    return { stores, users, provider };
+  };
+
+  /** Register a confidential client and run a code grant for `u1`. */
+  const grant = (service: typeof OidcProviderService.Service, scope: string) =>
+    Effect.gen(function* () {
+      const { client, clientSecret } = yield* service.registerClient({
+        name: "RP",
+        redirectUris: ["https://rp.test/cb"],
+        skipConsent: true,
+      });
+      const authorized = yield* service.authorize(makeUser("u1"), {
+        responseType: "code",
+        clientId: client.clientId,
+        redirectUri: "https://rp.test/cb",
+        scope,
+      });
+      const code = new URL(authorized.redirectTo).searchParams.get("code") ?? "";
+      const credentials = { clientId: client.clientId, clientSecret: clientSecret ?? "" };
+      const tokens = yield* Effect.result(
+        service.token({
+          grantType: "authorization_code",
+          code,
+          redirectUri: "https://rp.test/cb",
+          ...credentials,
+        }),
+      );
+      return { credentials, tokens };
+    });
+
+  const refresh = (
+    service: typeof OidcProviderService.Service,
+    credentials: { readonly clientId: string; readonly clientSecret: string },
+    refreshToken: string,
+    scope?: string,
+  ) =>
+    Effect.result(
+      service.token({
+        grantType: "refresh_token",
+        refreshToken,
+        ...credentials,
+        ...(scope !== undefined && { scope }),
+      }),
+    );
+
+  it("detects a replayed refresh token on another instance and revokes the family's access tokens", async () => {
+    const { provider } = setup();
+    const first = provider();
+    const { credentials, tokens } = await Effect.runPromise(grant(first, "openid offline_access"));
+    assert(Result.isSuccess(tokens));
+    const original = tokens.success;
+
+    const rotated = await Effect.runPromise(
+      refresh(first, credentials, original.refreshToken ?? ""),
+    );
+    assert(Result.isSuccess(rotated));
+
+    // A second instance knows nothing in memory of the rotation.
+    const second = provider();
+    const replay = await Effect.runPromise(
+      refresh(second, credentials, original.refreshToken ?? ""),
+    );
+    assert(Result.isFailure(replay));
+    expect(replay.failure).toMatchObject({ error: "invalid_grant" });
+
+    // The whole family is gone: the rotated refresh token and every access token.
+    const afterReplay = await Effect.runPromise(
+      refresh(second, credentials, rotated.success.refreshToken ?? ""),
+    );
+    assert(Result.isFailure(afterReplay));
+    const infos = await Effect.runPromise(
+      Effect.forEach(
+        [original.accessToken, rotated.success.accessToken],
+        (accessToken) => Effect.result(second.userinfo(accessToken)),
+        { concurrency: 1 },
+      ),
+    );
+    expect(infos.map(Result.isFailure)).toEqual([true, true]);
+  });
+
+  // A refresh down-scoped to drop openid signs no id_token, and is refused all the same.
+  it.each([
+    { attributes: { banned: true }, scope: undefined },
+    { attributes: { banned: true }, scope: "offline_access" },
+    { attributes: { scimDeactivated: true }, scope: undefined },
+    { attributes: { scimDeactivated: true }, scope: "offline_access" },
+  ])(
+    "refuses and revokes the tokens of a user with $attributes (refresh scope $scope)",
+    async ({ attributes, scope }) => {
+      const { provider, users, stores } = setup();
+      const service = provider();
+      const { credentials, tokens } = await Effect.runPromise(
+        grant(service, "openid offline_access"),
+      );
+      assert(Result.isSuccess(tokens));
+
+      MutableHashMap.set(users, "u1", { ...makeUser("u1"), attributes });
+      const info = await Effect.runPromise(
+        Effect.result(service.userinfo(tokens.success.accessToken)),
+      );
+      expect(Result.isFailure(info)).toBe(true);
+      const refreshed = await Effect.runPromise(
+        refresh(service, credentials, tokens.success.refreshToken ?? "", scope),
+      );
+      assert(Result.isFailure(refreshed));
+      expect(refreshed.failure).toMatchObject({ error: "invalid_grant" });
+      // Lifting the ban restores nothing: the tokens were deleted.
+      expect(MutableHashMap.size(stores.tokens)).toBe(0);
+    },
+  );
+
+  it("issues nothing for a user deleted after the code or refresh token was issued, with or without openid", async () => {
+    // The code grant: the user is gone by the time the code is redeemed.
+    {
+      const { provider, users } = setup();
+      const service = provider();
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const { client, clientSecret } = yield* service.registerClient({
+            name: "RP",
+            redirectUris: ["https://rp.test/cb"],
+            skipConsent: true,
+          });
+          const authorized = yield* service.authorize(makeUser("u1"), {
+            responseType: "code",
+            clientId: client.clientId,
+            redirectUri: "https://rp.test/cb",
+            scope: "openid",
+          });
+          const code = new URL(authorized.redirectTo).searchParams.get("code");
+          assert(code !== null);
+          MutableHashMap.remove(users, "u1");
+          return yield* Effect.result(
+            service.token({
+              grantType: "authorization_code",
+              code,
+              redirectUri: "https://rp.test/cb",
+              clientId: client.clientId,
+              clientSecret: clientSecret ?? "",
+            }),
+          );
+        }),
+      );
+      assert(Result.isFailure(result));
+      expect(result.failure).toMatchObject({ error: "invalid_grant", description: "Unknown user" });
+    }
+    // The refresh grant, down-scoped to drop openid, so no id_token is signed.
+    {
+      const { provider, users } = setup();
+      const service = provider();
+      const { credentials, tokens } = await Effect.runPromise(
+        grant(service, "openid offline_access"),
+      );
+      assert(Result.isSuccess(tokens));
+      MutableHashMap.remove(users, "u1");
+      const refreshed = await Effect.runPromise(
+        refresh(service, credentials, tokens.success.refreshToken ?? "", "offline_access"),
+      );
+      assert(Result.isFailure(refreshed));
+      expect(refreshed.failure).toMatchObject({ error: "invalid_grant" });
+    }
+  });
+
+  it("refuses a disabled client's access tokens and deletes a deleted client's", async () => {
+    const { provider, stores } = setup();
+    const service = provider();
+    const { credentials, tokens } = await Effect.runPromise(
+      grant(service, "openid offline_access"),
+    );
+    assert(Result.isSuccess(tokens));
+
+    await Effect.runPromise(service.updateClient(credentials.clientId, { disabled: true }));
+    const disabled = await Effect.runPromise(
+      Effect.result(service.userinfo(tokens.success.accessToken)),
+    );
+    expect(Result.isFailure(disabled)).toBe(true);
+
+    await Effect.runPromise(service.updateClient(credentials.clientId, { disabled: false }));
+    await Effect.runPromise(service.userinfo(tokens.success.accessToken));
+
+    await Effect.runPromise(service.deleteClient(credentials.clientId));
+    expect(MutableHashMap.size(stores.tokens)).toBe(0);
+  });
+
+  it("puts the family id on access tokens and advertises no logout endpoint", async () => {
+    const { provider, stores } = setup();
+    const service = provider();
+    const { tokens } = await Effect.runPromise(grant(service, "openid offline_access"));
+    assert(Result.isSuccess(tokens));
+    const records = Arr.fromIterable(MutableHashMap.values(stores.tokens));
+    const access = records.find((t) => t.kind === "access");
+    const refreshRecord = records.find((t) => t.kind === "refresh");
+    expect(access?.familyId).toBeDefined();
+    expect(access?.familyId).toBe(refreshRecord?.familyId);
+    expect(service.getMetadata()["end_session_endpoint"]).toBeUndefined();
   });
 });
 
@@ -1584,11 +1821,26 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(reuse.status).toBe(400);
     expect((await jsonBody(reuse, OAuthErrorBody)).error).toBe("invalid_grant");
 
-    // The rotated access token is live.
+    // Replaying it revoked the family, the rotated access token with it.
     const userinfo2 = await fx.handler(
       get("/oauth2/userinfo", {}, { bearer: rotated.access_token }),
     );
-    expect(userinfo2.status).toBe(200);
+    expect(userinfo2.status).toBe(401);
+
+    // Basic credentials with a malformed percent-escape are a bad client, not a 500.
+    const malformedBasic = await fx.handler(
+      new Request("http://idp.test/oauth2/token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Basic ${Buffer.from(`${client.clientId}:%E0%A4%A`).toString("base64")}`,
+        },
+        body: encodeJson({ grant_type: "refresh_token", refresh_token: rotated.refresh_token }),
+      }),
+    );
+    expect(malformedBasic.status).toBe(401);
+    expect((await jsonBody(malformedBasic, OAuthErrorBody)).error).toBe("invalid_client");
+    expect(malformedBasic.headers.get("www-authenticate")).toBe('Basic realm="oauth"');
   });
 
   it("walks unauthenticated users through the login page and consent through the consent page", async () => {
@@ -1820,7 +2072,8 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(doc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
     expect(doc["jwks_uri"]).toBe(`${ISSUER}/.well-known/jwks.json`);
     expect(doc["registration_endpoint"]).toBeUndefined();
-    expect(doc["end_session_endpoint"]).toBe(`${ISSUER}/oauth2/logout`);
+    // No RP-initiated logout endpoint is served, so none is advertised.
+    expect(doc["end_session_endpoint"]).toBeUndefined();
     expect(doc["code_challenge_methods_supported"]).toEqual(["S256"]);
   });
 

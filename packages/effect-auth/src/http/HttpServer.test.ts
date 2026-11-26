@@ -115,6 +115,7 @@ import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import {
   CaptchaError,
   ClientAddressConfigError,
+  EmailVerificationError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
 } from "../Errors.ts";
@@ -189,6 +190,10 @@ const makeFixture = (
       | undefined;
     /** The `EmailVerificationService` `resendCooldown`. Default the service's 60 s. */
     readonly verificationResendCooldown?: number | undefined;
+    /** Replaces the `EmailVerificationService` send, which records the token by default. */
+    readonly verificationSendEmail?:
+      | ((to: string, token: string) => Effect.Effect<void, EmailVerificationError>)
+      | undefined;
     /** The `EmailPasswordService` config. Default `{}`. */
     readonly emailPassword?: EmailPasswordConfig | undefined;
     /** The `AuthLifecycleService` config. Default `{}`. */
@@ -417,7 +422,9 @@ const makeFixture = (
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(storeLayer)),
     EmailVerificationService.layer({
-      sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
+      sendEmail:
+        options.verificationSendEmail ??
+        ((_to, token) => Effect.sync(() => void sentVerificationTokens.push(token))),
       ...(options.verificationResendCooldown !== undefined && {
         resendCooldown: options.verificationResendCooldown,
       }),
@@ -1862,6 +1869,22 @@ describe("email verification roundtrip", () => {
       authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
     );
     expect(verify.status).toBe(201);
+  });
+
+  // An unverified account's send is detached, so a vendor failure is the
+  // scheduler's to report and the answer is the one any other address gets.
+  it("answers an unverified account alike when its send fails", async () => {
+    const fixture = makeFixture({
+      verificationSendEmail: () =>
+        Effect.fail(new EmailVerificationError({ message: "mail provider down" })),
+    });
+    const handler = handlerFor(fixture);
+    await signUp(handler, "a@b.com");
+
+    const known = await handler(authRequest("send-verification", { email: "a@b.com" }));
+    const unknown = await handler(authRequest("send-verification", { email: "no@one.com" }));
+    expect([known.status, unknown.status]).toEqual([202, 202]);
+    expect(await known.text()).toBe(await unknown.text());
   });
 
   it("acknowledges uniformly for unknown emails (anti-enumeration)", async () => {
