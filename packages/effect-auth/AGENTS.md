@@ -66,12 +66,12 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 
 - **Never relax `@node-saml/node-saml` below `5.1.0`**: the fix for CVE-2025-54419 / CVE-2025-54369 (profile data read from bytes the signature did not cover). `xml-crypto` is a dev dependency for the fixtures only.
 - **Trust only pinned certificates** (`idpCertificates`), never a `KeyInfo` in the document; profile data is read only from signature-covered XML.
-- **Every check is a rejection, never a warning**: issuer, audience, `Conditions` window with `defaultClockSkewMs`, `Recipient` and `Destination` equal to the ACS URL, `SubjectConfirmationData` `NotOnOrAfter`, signed `InResponseTo` agreeing with every `InResponseTo` in the raw XML (never node-saml's `profile.inResponseTo`, which 5.2 fills from the signed value), at most one `Assertion`, no duplicated `ID`.
+- **Every check is a rejection, never a warning**: issuer, audience, `Conditions` window with `defaultClockSkewMs`, `Recipient` and `Destination` equal to the ACS URL, `SubjectConfirmationData` `NotOnOrAfter`, signed `InResponseTo` agreeing with every `InResponseTo` in the raw XML (never node-saml's `profile.inResponseTo`, which 5.2 fills from the signed value), and `InResponseTo` taken only from signed content (the assertion's `SubjectConfirmationData`, or the `Response` attribute only when `wantAuthnResponseSigned` makes the Response signature required; otherwise the response reads as unsolicited), at most one `Assertion`, no duplicated `ID`.
 - **Algorithms are allow-listed** (`defaultSignatureAlgorithms`: SHA-256 and SHA-512); HMAC signature methods are refused outright.
 - **Encrypted assertions are refused** with an actionable message; there is no half-built decryption path.
 - **Pre-flight scans are conservative**: they run over the whole decoded document before node-saml and reject if anything anywhere fails, decoys included. Don't narrow them to "the signed part".
 - **The request-only placeholder certificate** (`REQUEST_ONLY_IDP_CERT`) is used only to build an `AuthnRequest`; `verify` always builds its own instance from the pinned certificates.
-- **Replay is the `SsoService`'s job** (`SamlReplayStore`, spent once per `AuthnRequest` and per `Assertion`); `./saml` is stateless.
+- **Replay is the `SsoService`'s job** (`SamlReplayStore`, spent once per `AuthnRequest` and per `Assertion`, the assertion's record kept until `NotOnOrAfter` plus `samlClockSkewMs`, as long as the verifier accepts it); `./saml` is stateless.
 - Every failure is a `SamlError`. `saml/Verifier.test.ts` reproduces each attack shape against hand-built signed fixtures; a new check gets a fixture.
 
 ### Root

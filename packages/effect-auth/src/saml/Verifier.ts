@@ -432,18 +432,22 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     const confirmation = yield* checkSubjectConfirmation(assertion, input.acsUrl, clockSkewMs);
     yield* checkDestination(xml, input.acsUrl);
 
-    // Prefer the signed `InResponseTo` over the Response attribute, and reject
-    // a document whose `InResponseTo` values disagree, with the signed one or
-    // among themselves. The values come from the raw XML, never from
-    // node-saml's profile, whose `inResponseTo` changed meaning in 5.2.
+    // Take `InResponseTo` only from signed content, and reject a document
+    // whose `InResponseTo` values disagree, with the signed one or among
+    // themselves. The values come from the raw XML, never from node-saml's
+    // profile, whose `inResponseTo` changed meaning in 5.2. The Response
+    // attribute counts only when the Response signature is required (and so
+    // verified): otherwise anyone can wrap a signed assertion that names no
+    // request in a Response naming one they minted, and pass it off as an
+    // answer to that request. Such an assertion reads as unsolicited.
     const documentValues = documentInResponseTo(xml);
     const signedValues = confirmation.inResponseTo === undefined ? [] : [confirmation.inResponseTo];
     if (Arr.dedupe([...signedValues, ...documentValues]).length > 1) {
       return yield* fail("SAML response InResponseTo disagrees with the signed assertion");
     }
-    const responseInResponseTo = P.isString(profile["inResponseTo"])
-      ? profile["inResponseTo"]
-      : Arr.head(documentValues).pipe(Option.getOrUndefined);
+    const responseInResponseTo = wantAuthnResponseSigned
+      ? Arr.head(documentValues).pipe(Option.getOrUndefined)
+      : undefined;
     const inResponseTo = confirmation.inResponseTo ?? responseInResponseTo;
     if (input.expectedInResponseTo !== undefined && inResponseTo !== input.expectedInResponseTo) {
       return yield* fail("SAML response does not answer the expected AuthnRequest");
