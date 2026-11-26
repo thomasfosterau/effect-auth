@@ -286,6 +286,27 @@ describe("PasswordResetRequestForm", () => {
     const status = await screen.findByRole("status");
     expect(status.textContent).toBe("If that email has an account, a reset link is on its way.");
   });
+
+  it("sends the captcha token the getter returns at submit time", async () => {
+    const calls: unknown[] = [];
+    const client = stub({
+      passwordResetRequest: (payload: object) => {
+        calls.push(payload);
+        return Promise.resolve(ok);
+      },
+    });
+    const { container } = render(PasswordResetRequestForm, {
+      props: { captchaToken: () => "captcha-ok" },
+      context: withClient(client),
+    });
+
+    await type("Email", EMAIL);
+    await fireEvent.submit(formOf(container));
+
+    await waitFor(() =>
+      expect(calls).toStrictEqual([{ email: EMAIL, captchaToken: "captcha-ok" }]),
+    );
+  });
 });
 
 describe("PasswordResetConfirmForm", () => {

@@ -2383,7 +2383,9 @@ export const passwordResetsGroupLayer = () =>
       .handle("create", ({ payload }) =>
         Effect.gen(function* () {
           const passwordReset = yield* PasswordResetService;
-          yield* passwordReset.requestPasswordReset(payload.data.attributes.email).pipe(
+          const { email, captchaToken } = payload.data.attributes;
+          // The send gate (`beforeSendCode`, the captcha).
+          yield* passwordReset.requestPasswordReset(email, { captchaToken }).pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
               PasswordResetError: (e) => internalServerError(e),

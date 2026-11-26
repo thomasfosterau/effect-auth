@@ -1,7 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
+import { Effect, Layer, Redacted, Result } from "effect";
 import { Digest } from "effect/crypto";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { ClientIP } from "../ClientIP.ts";
 import { Hooks } from "../Hooks.ts";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -167,5 +168,135 @@ describe("CaptchaPlugin", () => {
     const params = new URLSearchParams(bodyText);
     expect(params.get("secret")).toBe("secret");
     expect(params.get("response")).toBe("tok");
+  });
+
+  describe("checks what the token was minted for", () => {
+    const passes = async (cfg: Parameters<typeof CaptchaPlugin>[0], answer: object) => {
+      const client = stubHttpClient(() => Response.json(answer));
+      const result = await drive(CaptchaPlugin(cfg), client, (hooks) =>
+        Effect.result(hooks.beforeSignUp(signUp("pw", "tok"))),
+      );
+      return Result.isSuccess(result);
+    };
+
+    it("refuses a score below minScore, and a missing score", async () => {
+      const cfg = { ...config, minScore: 0.5 };
+      expect(await passes(cfg, { success: true, score: 0.9 })).toBe(true);
+      expect(await passes(cfg, { success: true, score: 0.5 })).toBe(true);
+      expect(await passes(cfg, { success: true, score: 0.1 })).toBe(false);
+      expect(await passes(cfg, { success: true })).toBe(false);
+      expect(await passes(cfg, { success: false, score: 0.9 })).toBe(false);
+    });
+
+    it("refuses a scored token when no minScore judges it", async () => {
+      // A reCAPTCHA v3 token behind a configuration that never set a floor.
+      const cfg = { ...config, provider: "google-recaptcha" as const };
+      expect(await passes(cfg, { success: true, score: 0.1 })).toBe(false);
+      expect(await passes(cfg, { success: true })).toBe(true);
+    });
+
+    it("refuses a token solved on another hostname", async () => {
+      const one = { ...config, expectedHostname: "app.example.com" };
+      expect(await passes(one, { success: true, hostname: "app.example.com" })).toBe(true);
+      expect(await passes(one, { success: true, hostname: "evil.example.net" })).toBe(false);
+      expect(await passes(one, { success: true })).toBe(false);
+      const many = { ...config, expectedHostname: ["a.example.com", "b.example.com"] };
+      expect(await passes(many, { success: true, hostname: "b.example.com" })).toBe(true);
+    });
+
+    it("refuses a token minted for another action, per endpoint", async () => {
+      const cfg = { ...config, expectedAction: "signup" };
+      expect(await passes(cfg, { success: true, action: "signup" })).toBe(true);
+      expect(await passes(cfg, { success: true, action: "login" })).toBe(false);
+      expect(await passes(cfg, { success: true })).toBe(false);
+
+      const perEndpoint = { ...config, expectedAction: { signIn: "login" } };
+      // Sign-up has no expected action, so it is not checked.
+      expect(await passes(perEndpoint, { success: true, action: "anything" })).toBe(true);
+      const client = stubHttpClient(() => Response.json({ success: true, action: "signup" }));
+      const err = await drive(CaptchaPlugin(perEndpoint), client, (hooks) =>
+        Effect.flip(hooks.beforeAuthenticate(signIn("tok"))),
+      );
+      expect(err).toBeInstanceOf(CaptchaError);
+    });
+
+    it("refuses an answer that is not a siteverify object", async () => {
+      expect(await passes(config, { success: "true" })).toBe(false);
+      const client = stubHttpClient(() => new Response("not json"));
+      const err = await drive(CaptchaPlugin(config), client, (hooks) =>
+        Effect.flip(hooks.beforeSignUp(signUp("pw", "tok"))),
+      );
+      expect(err).toBeInstanceOf(CaptchaError);
+    });
+  });
+
+  it.each([{ recaptchaVersion: 3 as const }, { minScore: 1.5 }, { minScore: Number.NaN }])(
+    "refuses to build with $recaptchaVersion / $minScore",
+    async (extra) => {
+      const client = stubHttpClient(() => Response.json({ success: true }));
+      const exit = await Effect.runPromise(
+        Effect.exit(
+          Effect.scoped(
+            Layer.build(
+              CaptchaPlugin({ ...config, provider: "google-recaptcha", ...extra }).pipe(
+                Layer.provide(Hooks.Default),
+                Layer.provide(client),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(exit._tag).toBe("Failure");
+      expect(String(exit)).toContain("CaptchaConfigError");
+    },
+  );
+
+  it("builds reCAPTCHA v3 with a minScore", async () => {
+    const client = stubHttpClient(() => Response.json({ success: true, score: 0.7 }));
+    const result = await drive(
+      CaptchaPlugin({
+        ...config,
+        provider: "google-recaptcha",
+        recaptchaVersion: 3,
+        minScore: 0.5,
+      }),
+      client,
+      (hooks) => hooks.beforeSignUp(signUp("pw", "tok")),
+    );
+    expect(result.email).toBe("u@example.com");
+  });
+
+  it("sends the client address as remoteip when the request has one", async () => {
+    let captured: Request | undefined;
+    const client = capturingHttpClient(
+      (req) => {
+        captured = req;
+      },
+      () => Response.json({ success: true }),
+    );
+    await drive(CaptchaPlugin(config), client, (hooks) =>
+      hooks
+        .beforeSignUp(signUp("pw", "tok"))
+        .pipe(Effect.provideService(ClientIP, { ip: "203.0.113.9" })),
+    );
+    assert(captured !== undefined, "the plugin called the verifier");
+    expect(new URLSearchParams(await captured.text()).get("remoteip")).toBe("203.0.113.9");
+  });
+
+  it("guards a password-reset send through beforeSendCode", async () => {
+    const client = stubHttpClient(() => Response.json({ success: true }));
+    const attempt = {
+      method: "password-reset",
+      purpose: "password-reset",
+      address: "u@example.com",
+    } as const;
+    const err = await drive(CaptchaPlugin(config), client, (hooks) =>
+      Effect.flip(hooks.beforeSendCode(attempt)),
+    );
+    expect(err).toBeInstanceOf(CaptchaError);
+    const ok = await drive(CaptchaPlugin(config), client, (hooks) =>
+      hooks.beforeSendCode({ ...attempt, captchaToken: "tok" }),
+    );
+    expect(ok.method).toBe("password-reset");
   });
 });

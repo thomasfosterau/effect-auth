@@ -244,10 +244,10 @@ export const EmailVerificationRequestDocument = writeDocument(
 );
 export type EmailVerificationRequestDocument = typeof EmailVerificationRequestDocument.Type;
 
-/** The body of `POST /password-resets`: the address to send a reset link to. */
+/** The body of `POST /password-resets`: the address to send a reset link to, and an optional `captchaToken` for the captcha plugin. */
 export const PasswordResetRequestDocument = writeDocument(
   "password-resets",
-  Schema.Struct({ email: S.IdentifierInput }),
+  Schema.Struct({ email: S.IdentifierInput, captchaToken: Schema.optional(S.TokenInput) }),
 );
 export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.Type;
 
@@ -432,7 +432,8 @@ export const emailVerificationsGroup = Group.make(
  * `password-resets`: reset a forgotten password.
  *
  * - `POST /password-resets`: send a reset link; `202` whether or not the address
- *   has an account.
+ *   has an account; `400` when a `beforeSendCode` plugin refuses the send (a
+ *   captcha that does not verify).
  * - `POST /password-resets/redemptions`: set the new password with the link's
  *   token; `204`.
  */
