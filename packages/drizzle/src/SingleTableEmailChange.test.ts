@@ -187,6 +187,7 @@ const makeHarness = (
 
   const layer = Auth.AccountManagementService.layer({
     sendChangeEmailVerification: () => Effect.void,
+    sendEmailChangeNotice: () => Effect.void,
     sendDeleteAccountVerification: () => Effect.void,
   }).pipe(
     Layer.provideMerge(
@@ -223,6 +224,21 @@ const makeHarness = (
   };
 };
 
+/** The store has no password, so the request re-authenticates by a session signed in just now. */
+const signedIn = (userId: string) => {
+  const now = DateTime.nowUnsafe();
+  return {
+    session: {
+      id: `session-${userId}`,
+      userId,
+      createdAt: DateTime.toDateUtc(now),
+      lastActivityAt: DateTime.toDateUtc(now),
+      expiresAt: DateTime.toDateUtc(DateTime.add(now, { days: 1 })),
+      attributes: {},
+    },
+  };
+};
+
 describe("single-table IdentifierStore: email change", () => {
   describe("nullable email", () => {
     beforeEach(async () => {
@@ -236,7 +252,9 @@ describe("single-table IdentifierStore: email change", () => {
 
     it("changes the address in place: the row holds the new address, verified, and the token is consumed", async () => {
       const h = makeHarness(mapping, async () => {});
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
 
       const { user } = await h.run((svc) => svc.confirmEmailChange(token));
 
@@ -267,7 +285,9 @@ describe("single-table IdentifierStore: email change", () => {
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
       );
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -300,7 +320,9 @@ describe("single-table IdentifierStore: email change", () => {
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
       );
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
 
       const { user } = await h.run((svc) => svc.confirmEmailChange(token));
 
@@ -311,7 +333,9 @@ describe("single-table IdentifierStore: email change", () => {
 
     it("an address another user claims after the change is requested fails with AccountTokenError and the previous address stays", async () => {
       const h = makeHarness(mapping, async () => {});
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
       await drizzle({ client })
         .update(appUsers)
         .set({ email: NEW, emailVerified: true })
@@ -337,7 +361,9 @@ describe("single-table IdentifierStore: email change", () => {
 
     it("changes the address in place without ever writing NULL, and consumes the token", async () => {
       const h = makeHarness(strictMapping, deleteStrictRow);
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
 
       const { user } = await h.run((svc) => svc.confirmEmailChange(token));
 
@@ -362,7 +388,9 @@ describe("single-table IdentifierStore: email change", () => {
             }),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
@@ -390,7 +418,9 @@ describe("single-table IdentifierStore: email change", () => {
             }),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
-      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+      const { token } = await h.run((svc) =>
+        svc.requestEmailChange(USER.ada, NEW, signedIn(USER.ada)),
+      );
 
       const { user } = await h.run((svc) => svc.confirmEmailChange(token));
 

@@ -7,7 +7,7 @@ import { Hooks } from "../Hooks.ts";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { CaptchaPlugin } from "./Captcha.ts";
-import { PwnedPasswordError, CaptchaError } from "../Errors.ts";
+import { AuthError, PwnedPasswordError, CaptchaError } from "../Errors.ts";
 import type { AuthenticateAttempt } from "../Hooks.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 
@@ -102,6 +102,68 @@ describe("HaveIBeenPwnedPlugin", () => {
       Effect.flip(hooks.beforeResetPassword({ token: "t", newPassword: pwd })),
     );
     expect(err).toBeInstanceOf(PwnedPasswordError);
+  });
+
+  it("guards beforeChangePassword and beforeSetPassword", async () => {
+    const pwd = "hunter2hunter2";
+    const suffix = await sha1UpperSuffix(pwd);
+    const client = stubHttpClient(() => new Response(`${suffix}:9\r\n`));
+    const changed = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
+      Effect.flip(hooks.beforeChangePassword({ userId: "u-1", newPassword: pwd })),
+    );
+    const set = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
+      Effect.flip(hooks.beforeSetPassword({ userId: "u-1", newPassword: pwd })),
+    );
+    expect(changed).toBeInstanceOf(PwnedPasswordError);
+    expect(set).toBeInstanceOf(PwnedPasswordError);
+  });
+
+  it("asks for a padded response", async () => {
+    const seen: Array<Request> = [];
+    const client = capturingHttpClient(
+      (request) => seen.push(request),
+      () => new Response("0000000000000000000000000000000000A:0\r\n"),
+    );
+    await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
+      hooks.beforeSignUp(signUp("a-fresh-password")),
+    );
+    expect(seen.map((request) => request.headers.get("add-padding"))).toEqual(["true"]);
+  });
+
+  describe.each([429, 503])(
+    "an HTTP %i answer is unavailability, not a clean password",
+    (status) => {
+      // The body would read as a count of 0 if the status were ignored.
+      const client = stubHttpClient(() => new Response("Too many requests", { status }));
+
+      it("with failClosed, refuses", async () => {
+        const err = await drive(HaveIBeenPwnedPlugin({ failClosed: true }), client, (hooks) =>
+          Effect.flip(hooks.beforeSignUp(signUp("password123"))),
+        );
+        expect(err).toBeInstanceOf(AuthError);
+        expect(err.message).toBe("Password breach check is unavailable");
+      });
+
+      it("without failClosed, allows", async () => {
+        const result = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
+          hooks.beforeSignUp(signUp("password123")),
+        );
+        expect(result.password).toBe("password123");
+      });
+    },
+  );
+
+  it("treats an API that does not answer within timeout as unavailable", async () => {
+    const hanging = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make(() => Effect.never),
+    );
+    const err = await drive(
+      HaveIBeenPwnedPlugin({ failClosed: true, timeout: "20 millis" }),
+      hanging,
+      (hooks) => Effect.flip(hooks.beforeSignUp(signUp("password123"))),
+    );
+    expect(err).toBeInstanceOf(AuthError);
   });
 });
 

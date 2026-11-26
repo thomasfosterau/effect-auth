@@ -29,6 +29,7 @@ import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 import { looseCollationIdentifierStore } from "../testing/LooseCollation.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
+import { TrustedDeviceStore } from "../TrustedDevice.ts";
 
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
@@ -498,6 +499,14 @@ describe("PasswordResetService", () => {
       attributes: {},
     });
 
+    const revokedDevices: string[] = [];
+    const devices: typeof TrustedDeviceStore.Service = {
+      upsert: (record) => Effect.succeed(record),
+      getByTokenHash: () => Effect.succeed(null),
+      delete: () => Effect.void,
+      deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
+    };
+
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -508,9 +517,11 @@ describe("PasswordResetService", () => {
 
           return yield* service.resetPassword("token-456", "new-password-123");
         }),
-        testContext,
+        Context.add(testContext, TrustedDeviceStore, devices),
       ).pipe(Effect.provide(TestHooks)),
     );
+    // Trusted devices go whatever the session setting.
+    expect(revokedDevices).toEqual([user.id]);
 
     const updatedHash = Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id));
     expect(result.userId).toBe(user.id);

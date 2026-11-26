@@ -14,6 +14,7 @@
 
 import { Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { Hex } from "effect/encoding";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
@@ -24,6 +25,7 @@ import { EmailPasswordStore, SecondFactorGate } from "../email/EmailPassword.ts"
 import { Hooks, type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
+import { storedPasswordVerifier } from "../password/DecoyVerify.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as RootSecret from "../RootSecret.ts";
 import { constantTimeHashEqual, hashToken, tokenHasher } from "../TokenHash.ts";
@@ -32,6 +34,7 @@ import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
 import { SessionService } from "../SessionService.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
+import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 
 /**
  * Two-factor error
@@ -285,7 +288,8 @@ export class MultiFactorService extends Context.Service<
     ) => Effect.Effect<void, MultiFactorError | Errors.HashingError | Errors.AuthError>;
 
     /**
-     * Disable multi-factor after re-verifying the user's password.
+     * Disable multi-factor after re-verifying the user's password, and revoke
+     * every trusted device of the user (`TrustedDeviceStore`, when present).
      */
     readonly disable: (
       userId: string,
@@ -464,12 +468,15 @@ export const make = (
     const store = yield* MultiFactorStore;
     const pendingStore = hashedPendingStore(yield* PendingMultiFactorStore, digestToken);
     const emailPasswordStore = yield* EmailPasswordStore;
-    const passwordHasher = yield* PasswordHasher;
+    // Through `MultiAlgorithmVerifier` when present, so a hash written by a
+    // previous hasher still verifies after a switch.
+    const verifyStoredPassword = yield* storedPasswordVerifier(yield* PasswordHasher);
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
+    const trustedDevices = Option.getOrUndefined(yield* Effect.serviceOption(TrustedDeviceStore));
     const maxFailedAttempts = config.maxFailedAttempts ?? 5;
 
     /**
@@ -550,7 +557,7 @@ export const make = (
           });
         }
 
-        const isValid = yield* passwordHasher.verify(password, passwordHash);
+        const isValid = yield* verifyStoredPassword(password, passwordHash);
         if (!isValid) {
           return yield* new Errors.InvalidCredentialsError({
             message: "Invalid password",
@@ -709,6 +716,8 @@ export const make = (
       ) {
         yield* verifyPassword(userId, password);
         yield* store.delete(userId);
+        // A device trusted under this enrolment must not skip a later one.
+        if (trustedDevices !== undefined) yield* trustedDevices.deleteByUserId(userId);
       }),
 
       isEnabled: Effect.fn("MultiFactorService.isEnabled")(function* (userId: string) {

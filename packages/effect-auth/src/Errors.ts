@@ -37,6 +37,7 @@ export const ErrorCode = {
   // Account access
   ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
   USER_BANNED: "USER_BANNED",
+  REAUTHENTICATION_REQUIRED: "REAUTHENTICATION_REQUIRED",
 
   // Permissions / scopes
   NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
@@ -214,6 +215,21 @@ export class PasswordPolicyError extends Data.TaggedError("PasswordPolicyError")
   readonly message: string;
   readonly params: { readonly minLength?: number; readonly maxLength?: number };
 }> {}
+
+/**
+ * A sensitive change (starting an email change) needs fresh proof that the
+ * caller is the account holder: the current password, or for an account
+ * without one, a recent sign-in.
+ */
+export class ReauthenticationRequiredError extends Data.TaggedError(
+  "ReauthenticationRequiredError",
+)<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.REAUTHENTICATION_REQUIRED {
+    return ErrorCode.REAUTHENTICATION_REQUIRED;
+  }
+}
 
 /**
  * Attempting to set a password for a user that already has one. Callers should

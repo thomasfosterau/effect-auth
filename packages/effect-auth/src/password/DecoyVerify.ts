@@ -47,3 +47,19 @@ export const verifyPasswordOrDecoy = (
       : passwordHasher.verify(password, hashToVerify);
     return yield* verifyEffect.pipe(Effect.catchTag("HashingError", () => Effect.succeed(false)));
   });
+
+/**
+ * The check for a password against a user's stored hash, resolved once where
+ * the caller resolves its other services: `MultiAlgorithmVerifier` when it is
+ * in context, so a hash written by a previous hasher still verifies after a
+ * switch, else `passwordHasher`.
+ */
+export const storedPasswordVerifier = (
+  passwordHasher: typeof PasswordHasher.Service,
+): Effect.Effect<(password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>> =>
+  Effect.map(Effect.serviceOption(MultiAlgorithmVerifier), (multiVerifier) =>
+    Option.match(multiVerifier, {
+      onNone: () => passwordHasher.verify,
+      onSome: (verifier) => verifier.verify,
+    }),
+  );

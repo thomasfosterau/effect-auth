@@ -4,8 +4,10 @@
  * OFF by default — opt-in by including `TrustedDeviceService.layer(config)` in
  * your service graph. Tokens are HMAC-SHA256-signed so they cannot be forged;
  * only the SHA-256 hash of the raw token is stored at rest (via `hashToken`),
- * so a stolen database does not allow replay. Revocation is immediate: call
- * `revokeAll` on password change, 2FA disable, and sign-out-everywhere.
+ * so a stolen database does not allow replay. Revocation is immediate: a
+ * password change (by default), a password reset and disabling multi-factor
+ * revoke every device of the user through `TrustedDeviceStore`; call
+ * `revokeAll` on sign-out-everywhere.
  *
  * **NEVER** use a trusted-device token to satisfy step-up authentication for
  * sensitive operations — always require a fresh second factor there.
@@ -57,41 +59,9 @@ import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { MultiFactorService } from "./multifactor/MultiFactor.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
+import { type TrustedDeviceRecord, TrustedDeviceStore } from "./TrustedDeviceStore.ts";
 
-// ---------------------------------------------------------------------------
-// Record + Store
-// ---------------------------------------------------------------------------
-
-/**
- * Trusted-device record stored in the database. The raw token is never
- * persisted; only its SHA-256 digest is kept for constant-time revocation.
- */
-export interface TrustedDeviceRecord {
-  /** SHA-256 hex digest of the raw token (`(yield* hashToken(rawToken))`). */
-  readonly tokenHash: string;
-  readonly userId: string;
-  readonly createdAt: number;
-  readonly expiresAt: number;
-}
-
-/**
- * Persistence interface for trusted-device tokens. Keyed by `tokenHash`
- * (SHA-256 of the raw token half of the cookie).
- */
-export class TrustedDeviceStore extends Context.Service<
-  TrustedDeviceStore,
-  {
-    readonly upsert: (
-      record: TrustedDeviceRecord,
-    ) => Effect.Effect<TrustedDeviceRecord, Errors.AuthError>;
-    readonly getByTokenHash: (
-      tokenHash: string,
-    ) => Effect.Effect<TrustedDeviceRecord | null, Errors.AuthError>;
-    readonly delete: (tokenHash: string) => Effect.Effect<void, Errors.AuthError>;
-    /** Revoke every device token for a user (password change, 2FA disable, etc.). */
-    readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-  }
->()("@effect-auth/TrustedDeviceStore") {}
+export { type TrustedDeviceRecord, TrustedDeviceStore } from "./TrustedDeviceStore.ts";
 
 // ---------------------------------------------------------------------------
 // Per-request Context.Reference
@@ -187,8 +157,9 @@ export class TrustedDeviceService extends Context.Service<
     readonly revoke: (cookieValue: string) => Effect.Effect<void, Errors.AuthError>;
 
     /**
-     * Revoke all trusted-device tokens for a user.
-     * **Must** be called on: password change, 2FA disable, sign-out-everywhere.
+     * Revoke all trusted-device tokens for a user. Password change (by
+     * default), password reset and multi-factor disable already do; call it
+     * on sign-out-everywhere.
      */
     readonly revokeAll: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -419,8 +390,9 @@ export const gate = (
  * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```
  *
- * Remember to call `TrustedDeviceService.revokeAll` whenever the user changes
- * their password, disables 2FA, or signs out everywhere.
+ * Password change (by default), password reset and multi-factor disable
+ * revoke the user's devices themselves; call `TrustedDeviceService.revokeAll`
+ * when the user signs out everywhere.
  */
 export const TrustedDeviceWithMultiFactorGateLayer: Layer.Layer<
   SecondFactorGate,

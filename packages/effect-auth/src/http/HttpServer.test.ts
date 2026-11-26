@@ -111,6 +111,7 @@ import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import {
   CaptchaError,
+  PwnedPasswordError,
   ClientAddressConfigError,
   EmailVerificationError,
   RateLimiterConfigError,
@@ -151,6 +152,7 @@ interface Fixture {
   readonly sentMagicLinkTokens: string[];
   readonly sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }>;
   readonly sentChangeEmail: Array<{ newEmail: string; token: string }>;
+  readonly sentEmailChangeNotices: Array<{ oldEmail: string; newEmail: string }>;
   readonly sentDeleteTokens: string[];
   readonly beforeDeleteCalls: string[];
   readonly sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }>;
@@ -236,6 +238,7 @@ const makeFixture = (
   const sentMagicLinkTokens: string[] = [];
   const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
   const sentChangeEmail: Array<{ newEmail: string; token: string }> = [];
+  const sentEmailChangeNotices: Array<{ oldEmail: string; newEmail: string }> = [];
   const sentDeleteTokens: string[] = [];
   const beforeDeleteCalls: string[] = [];
   const sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }> = [];
@@ -679,6 +682,8 @@ const makeFixture = (
     AccountManagementService.layer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
+      sendEmailChangeNotice: ({ oldEmail, newEmail }) =>
+        Effect.sync(() => void sentEmailChangeNotices.push({ oldEmail, newEmail })),
       sendDeleteAccountVerification: ({ token }) =>
         Effect.sync(() => void sentDeleteTokens.push(token)),
       beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
@@ -710,6 +715,7 @@ const makeFixture = (
     sentMagicLinkTokens,
     sentOtps,
     sentChangeEmail,
+    sentEmailChangeNotices,
     sentDeleteTokens,
     beforeDeleteCalls,
     sentPhoneOtps,
@@ -1699,7 +1705,7 @@ describe("change-password and update-user", () => {
     ).toBe(201);
   });
 
-  it("keeps other sessions when revokeOtherSessions is not set", async () => {
+  it("revokes other sessions by default", async () => {
     const handler = handlerFor();
     const sid1 = await signUp(handler, "a@b.com");
     const sid2 = await signIn(handler, "a@b.com");
@@ -1708,7 +1714,43 @@ describe("change-password and update-user", () => {
       authRequest("change-password", { currentPassword: PW, newPassword: PW2 }, asCookie(sid1)),
     );
     expect(res.status).toBe(204);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(401);
+    expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid1)))).status).toBe(200);
+  });
+
+  it("keeps other sessions when revokeOtherSessions is false", async () => {
+    const handler = handlerFor();
+    const sid1 = await signUp(handler, "a@b.com");
+    const sid2 = await signIn(handler, "a@b.com");
+
+    const res = await handler(
+      authRequest(
+        "change-password",
+        { currentPassword: PW, newPassword: PW2, revokeOtherSessions: false },
+        asCookie(sid1),
+      ),
+    );
+    expect(res.status).toBe(204);
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(200);
+  });
+
+  it("answers 400 when a beforeChangePassword plugin refuses the new password", async () => {
+    const hooks = makePlugin({
+      beforeChangePassword: () =>
+        Effect.fail(new PwnedPasswordError({ message: "This password has appeared in a breach" })),
+    }).pipe(Layer.provide(Hooks.Default));
+    const handler = handlerFor(makeFixture({ hooks }));
+    const sid = await signUp(handler, "a@b.com");
+
+    const res = await handler(
+      authRequest("change-password", { currentPassword: PW, newPassword: PW2 }, asCookie(sid)),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("PWNED_PASSWORD");
+    // Password unchanged.
+    expect(
+      (await handler(authRequest("password", { email: "a@b.com", password: PW }))).status,
+    ).toBe(201);
   });
 
   it("rejects a wrong current password with 400", async () => {
@@ -3245,9 +3287,16 @@ describe("HTTP account management (change email / delete user)", () => {
     const sid = await signUp(handler, "alice@example.com");
 
     const reqRes = await handler(
-      authRequest("change-email", { newEmail: "alice2@example.com" }, asCookie(sid)),
+      authRequest(
+        "change-email",
+        { newEmail: "alice2@example.com", currentPassword: PW },
+        asCookie(sid),
+      ),
     );
     expect(reqRes.status).toBe(202);
+    expect(fixture.sentEmailChangeNotices).toEqual([
+      { oldEmail: "alice@example.com", newEmail: "alice2@example.com" },
+    ]);
     expect(fixture.sentChangeEmail).toHaveLength(1);
     const [sent] = fixture.sentChangeEmail;
     assert(sent !== undefined);
@@ -3272,10 +3321,38 @@ describe("HTTP account management (change email / delete user)", () => {
     const sid = await signUp(handler, "alice@example.com");
 
     const res = await handler(
-      authRequest("change-email", { newEmail: "bob@example.com" }, asCookie(sid)),
+      authRequest(
+        "change-email",
+        { newEmail: "bob@example.com", currentPassword: PW },
+        asCookie(sid),
+      ),
     );
     expect(res.status).toBe(202);
     expect(fixture.sentChangeEmail).toHaveLength(0);
+  });
+
+  it("refuses an email change without the current password (403) or with a wrong one (400)", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    const sid = await signUp(handler, "alice@example.com");
+
+    const missing = await handler(
+      authRequest("change-email", { newEmail: "alice2@example.com" }, asCookie(sid)),
+    );
+    expect(missing.status).toBe(403);
+    expect(await missing.text()).toContain("REAUTHENTICATION_REQUIRED");
+
+    const wrong = await handler(
+      authRequest(
+        "change-email",
+        { newEmail: "alice2@example.com", currentPassword: "not-the-password" },
+        asCookie(sid),
+      ),
+    );
+    expect(wrong.status).toBe(400);
+
+    expect(fixture.sentEmailChangeNotices).toEqual([]);
+    expect(fixture.sentChangeEmail).toEqual([]);
   });
 
   it("requires authentication for change-email/request", async () => {
@@ -4458,6 +4535,7 @@ const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, m
   ["PATCH", "/multi-factor-enrollments/current", 10],
   ["DELETE", "/multi-factor-enrollments/current", 10],
   ["POST", "/backup-code-sets", 10],
+  ["POST", "/email-changes", 10],
   ["POST", "/google-one-tap-nonces", 20],
   ["POST", "/device/code", 10],
   ["POST", "/device/token", 300],

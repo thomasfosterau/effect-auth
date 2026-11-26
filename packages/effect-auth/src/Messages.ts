@@ -135,6 +135,7 @@ const catalog: Record<string, string | Resolver> = {
 
   [ErrorCode.ACCOUNT_LOCKED]: "Account temporarily locked due to too many failed sign-in attempts",
   [ErrorCode.USER_BANNED]: "Your account has been suspended",
+  [ErrorCode.REAUTHENTICATION_REQUIRED]: "Confirm it's you to continue",
 
   [ErrorCode.PERMISSION_DENIED]: "You do not have permission to perform this action",
   [ErrorCode.INSUFFICIENT_SCOPE]: "Insufficient OAuth scope",
