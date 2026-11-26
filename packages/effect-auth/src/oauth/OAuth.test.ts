@@ -1,11 +1,12 @@
 import { assert, describe, it, expect } from "vite-plus/test";
+import { createHash } from "node:crypto";
+import { testCryptoLayer, type TestCryptoServices } from "../testing/TestCrypto.ts";
 import { Cause, DateTime, Effect, Exit, Layer, Logger, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { Digest, SecureRandom } from "effect/crypto";
 import { KeyValueStore } from "effect/persistence";
 import { oauthStateStoreKV } from "../KeyValueStores.ts";
 import { ApiKeyStore } from "../ApiKey.ts";
@@ -19,6 +20,7 @@ import {
   OAuthMissingEmailError,
 } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
+import { testJwsKeyPair, testVerifyJws } from "../testing/TestJws.ts";
 import {
   IdentifierStore,
   lookupIdentifier,
@@ -70,10 +72,14 @@ import {
   KickProvider,
   HuggingFaceProvider,
 } from "./OAuth.ts";
+import * as RootSecret from "../RootSecret.ts";
 import * as OAuth from "./OAuth.ts";
 import type { HttpClient } from "effect/http";
 import { runPromiseExitHttp, runPromiseHttp } from "../testing/HttpClient.ts";
 import * as RemoteJwks from "../RemoteJwks.ts";
+
+/** The key the service stores a state under: its SHA-256 digest. */
+const stateKey = (state: string): string => createHash("sha256").update(state).digest("hex");
 
 /** In-memory OAuth state store for authorization-URL tests. */
 const StateStoreLive = () => {
@@ -94,11 +100,9 @@ const StateStoreLive = () => {
 };
 
 const runWithState = <A, E>(
-  eff: Effect.Effect<A, E, OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest>,
+  eff: Effect.Effect<A, E, OAuthStateStore | TestCryptoServices>,
 ): Promise<A> =>
-  Effect.runPromise(
-    eff.pipe(Effect.provide(Layer.mergeAll(StateStoreLive(), PlatformCrypto.layer))),
-  );
+  Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(StateStoreLive(), testCryptoLayer))));
 
 /** A single captured fetch call. */
 /** A request body as `fetch` received it, as text (`null` without one). */
@@ -912,7 +916,7 @@ describe("discoverOAuthEndpoints", () => {
 
 describe("OAuth.appleClientSecret", () => {
   it("produces a verifiable ES256 JWT with Apple's claims", async () => {
-    const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
+    const { publicKeyJwk, privateKeyPem } = testJwsKeyPair("ES256");
     const now = 1_700_000_000_000;
     const secret = await Effect.runPromise(
       OAuth.appleClientSecret({
@@ -947,7 +951,7 @@ describe("OAuth.appleClientSecret", () => {
     });
     expect(payload.exp).toBeGreaterThan(payload.iat);
 
-    const valid = Cipher.verifyJws(
+    const valid = testVerifyJws(
       "ES256",
       Buffer.from(`${headerSeg}.${payloadSeg}`),
       Buffer.from(signatureSeg, "base64url"),
@@ -961,9 +965,13 @@ describe("OAuth.appleClientSecret", () => {
 
 const TEST_SECRET = "test-secret-for-aes-256-gcm-cipher";
 
+/** The default cipher over `secret`, its methods bound to the platform's WebCrypto. */
+const makeCipher = (secret: string) =>
+  Effect.runPromise(PlatformCrypto.provide(Cipher.aes256GcmCipher(secret)));
+
 describe("Cipher.aes256GcmCipher", () => {
   it("encrypts and decrypts round-trip", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const token = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
     const encrypted = await Effect.runPromise(cipher.encrypt(token));
     expect(encrypted).not.toBe(token);
@@ -971,14 +979,14 @@ describe("Cipher.aes256GcmCipher", () => {
   });
 
   it("produces a different ciphertext on each call (random IV)", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const e1 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
     const e2 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
     expect(e1).not.toBe(e2);
   });
 
   it("fails loudly on tampered ciphertext (GCM auth-tag)", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const encrypted = await Effect.runPromise(cipher.encrypt("hello"));
     const buf = Buffer.from(encrypted, "base64url");
     buf[buf.length - 1] ^= 0xff;
@@ -988,7 +996,7 @@ describe("Cipher.aes256GcmCipher", () => {
   });
 
   it("fails on ciphertext that is too short", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const err = await Effect.runPromise(Effect.flip(cipher.decrypt("dG9vc2hvcnQ")));
     expect(err._tag).toBe("AuthError");
   });
@@ -1007,7 +1015,7 @@ describe("OAuthService encryptTokens", () => {
     Layer.succeed(UserStore)(undefined as never),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Layer.succeed(SessionService)(undefined as never),
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   const makeAccountStore = () => {
@@ -1061,9 +1069,22 @@ describe("OAuthService encryptTokens", () => {
     false,
   );
 
-  it("stores encrypted tokens and refreshAccessToken returns plaintext", async () => {
+  /** Open a stored token as the service would, under `encryption`. */
+  const openStored = (
+    stored: string,
+    row: string,
+    encryption?: RootSecret.Encryption,
+  ): Promise<string> =>
+    Effect.runPromise(
+      Effect.flatMap(RootSecret.sealerFor("oauth-tokens", encryption), (sealer) =>
+        sealer.open(stored, row),
+      ).pipe(Effect.provide(testCryptoLayer)),
+    );
+  const accessRow = "github\u0000gh-1\u0000access";
+
+  it("reads tokens the override secret's legacy cipher wrote, and rewrites them sealed to their row", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
 
     const PLAIN_ACCESS = "plain-access-token";
     const PLAIN_REFRESH = "plain-refresh-token";
@@ -1111,15 +1132,20 @@ describe("OAuthService encryptTokens", () => {
     expect(capturedRefreshToken).toBe(PLAIN_REFRESH);
     // Returned access token must be plaintext.
     expect(newAccessToken).toBe(NEW_ACCESS);
-    // Stored access token must be encrypted (not the raw plaintext).
+    // The new token is sealed in the current format, which the legacy cipher cannot open.
     const updated = Option.getOrUndefined(MutableHashMap.get(stored, "github:gh-1"));
     assert(updated !== undefined, "the account is stored");
-    expect(updated.accessToken).not.toBe(NEW_ACCESS);
-    // And it must decrypt to the new plaintext access token.
-    expect(await Effect.runPromise(cipher.decrypt(updated.accessToken))).toBe(NEW_ACCESS);
+    expect(updated.accessToken.startsWith(Cipher.SEALED_PREFIX)).toBe(true);
+    expect(await Effect.runPromise(Effect.isFailure(cipher.decrypt(updated.accessToken)))).toBe(
+      true,
+    );
+    const encryption = { secret: Redacted.make(TEST_SECRET) };
+    expect(await openStored(updated.accessToken, accessRow, encryption)).toBe(NEW_ACCESS);
+    // The root secret's key is not the override's.
+    await expect(openStored(updated.accessToken, accessRow)).rejects.toThrow(/Decryption failed/);
   });
 
-  it("default (no encryptTokens) stores tokens as plaintext", async () => {
+  it("by default reads plaintext rows and seals new tokens under the root secret, bound to their row", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
 
     const PLAIN_ACCESS = "plain-access-token";
@@ -1153,15 +1179,22 @@ describe("OAuthService encryptTokens", () => {
     );
 
     expect(newAccessToken).toBe(NEW_ACCESS);
-    // Without encryption the stored token is the raw string.
-    expect(Option.getOrUndefined(MutableHashMap.get(stored, "github:gh-1"))?.accessToken).toBe(
-      NEW_ACCESS,
+    const updated = Option.getOrUndefined(MutableHashMap.get(stored, "github:gh-1"));
+    assert(updated !== undefined, "the account is stored");
+    expect(updated.accessToken.startsWith(Cipher.SEALED_PREFIX)).toBe(true);
+    expect(await openStored(updated.accessToken, accessRow)).toBe(NEW_ACCESS);
+    // A ciphertext moved to another account or field does not open.
+    await expect(openStored(updated.accessToken, "github\u0000gh-2\u0000access")).rejects.toThrow(
+      /Decryption failed/,
+    );
+    await expect(openStored(updated.accessToken, "github\u0000gh-1\u0000refresh")).rejects.toThrow(
+      /Decryption failed/,
     );
   });
 
   it("accepts a custom TokenCipher via { cipher }", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
-    const customCipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const customCipher = await makeCipher(TEST_SECRET);
 
     const PLAIN_REFRESH = "custom-cipher-refresh-token";
     const NEW_ACCESS = "new-access-from-custom-cipher";
@@ -1233,7 +1266,7 @@ describe("OAuthService unlinkAccount guard", () => {
     Layer.succeed(UserStore)(undefined as never),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Layer.succeed(SessionService)(undefined as never),
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   const baseAccount = (overrides?: Partial<OAuthAccount>): OAuthAccount => ({
@@ -1380,7 +1413,7 @@ describe("OAuthService linking controls", () => {
   const makeStateLayer = (state: OAuthState) =>
     Layer.succeed(OAuthStateStore, {
       create: (s) => Effect.succeed(s),
-      consume: (k) => Effect.succeed(k === state.state ? state : null),
+      consume: (k) => Effect.succeed(k === stateKey(state.state) ? state : null),
     });
 
   const makeAccountLayer = (
@@ -1554,7 +1587,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(user),
             noSession,
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -1581,7 +1614,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(user),
             noSession,
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -1607,7 +1640,7 @@ describe("OAuthService linking controls", () => {
       makeCoreUserLayer(user),
       makeSessionLayer(user.id, minted),
       noPasswordsLayer,
-      PlatformCrypto.layer,
+      testCryptoLayer,
     );
     const service = await runPromiseHttp(
       OAuth.make({ reddit: makeTestProvider("reddit") }).pipe(Effect.provide(layer)),
@@ -1647,7 +1680,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(user),
             noSession,
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -1694,7 +1727,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(existingUser),
             makeSessionLayer(existingUser.id, minted, journal),
             Layer.succeed(EmailPasswordStore)(passwords),
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -1895,7 +1928,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(newUser),
             makeSessionLayer(newUser.id),
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -1940,7 +1973,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(newUser),
             makeSessionLayer(newUser.id),
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -2011,7 +2044,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(owner),
             makeSessionLayer(owner.id),
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -2048,7 +2081,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(user),
             noSession,
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -2079,7 +2112,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(user),
             noSession,
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -2114,7 +2147,9 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
   );
 
   const makeStateStore = (...seed: ReadonlyArray<OAuthState>) => {
-    const states = MutableHashMap.fromIterable<string, OAuthState>(seed.map((s) => [s.state, s]));
+    const states = MutableHashMap.fromIterable<string, OAuthState>(
+      seed.map((s) => [stateKey(s.state), s]),
+    );
     const store: typeof OAuthStateStore.Service = {
       create: (s) =>
         Effect.sync(() => {
@@ -2184,7 +2219,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
             Layer.succeed(OAuthStateStore)(stateStore),
             Layer.succeed(OAuthAccountStore)(accountStore),
             unusedByCallbackLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
           ),
         ),
       ),
@@ -2222,7 +2257,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       const service = await makeService(store);
       const err = await Effect.runPromise(Effect.flip(service.handleCallback("st-1", "code")));
       expect(err._tag).toBe("OAuthStateExpiredError");
-      expect(MutableHashMap.has(states, "st-1")).toBe(false);
+      expect(MutableHashMap.has(states, stateKey("st-1"))).toBe(false);
     });
 
     it("fails with OAuthProviderError when the state names an unregistered provider", async () => {
@@ -2255,11 +2290,11 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       });
       expect(result.account.refreshToken).toBeUndefined();
       expect(result.account.expiresAt).toBeUndefined();
-      expect(Option.getOrUndefined(MutableHashMap.get(accounts.accounts, "github:gh-9"))).toEqual(
-        result.account,
-      );
+      // The store holds the same account with its tokens sealed.
+      const stored = Option.getOrUndefined(MutableHashMap.get(accounts.accounts, "github:gh-9"));
+      expect(stored).toEqual({ ...result.account, accessToken: expect.stringMatching(/^v2\./) });
       // The state is single-use.
-      expect(MutableHashMap.has(states, "st-1")).toBe(false);
+      expect(MutableHashMap.has(states, stateKey("st-1"))).toBe(false);
     });
 
     it("links a new account to linkToUserId and reports the user", async () => {
@@ -2310,16 +2345,20 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
         refreshToken: "rt-2",
       });
       expect(result.account.updatedAt).toBeGreaterThan(1);
-      expect(Option.getOrUndefined(MutableHashMap.get(accounts.accounts, "github:gh-9"))).toEqual(
-        result.account,
-      );
+      // The store holds the same account with its tokens sealed.
+      const stored = Option.getOrUndefined(MutableHashMap.get(accounts.accounts, "github:gh-9"));
+      expect(stored).toEqual({
+        ...result.account,
+        accessToken: expect.stringMatching(/^v2\./),
+        refreshToken: expect.stringMatching(/^v2\./),
+      });
     });
   });
 
   /** The real `KeyValueStore`-backed store, holding one live state. */
   const kvStateStore = (): typeof OAuthStateStore.Service => {
     const store = Effect.runSync(oauthStateStoreKV.pipe(Effect.provide(KeyValueStore.layerMemory)));
-    Effect.runSync(store.create(liveState()));
+    Effect.runSync(store.create({ ...liveState(), state: stateKey("st-1") }));
     return store;
   };
 
@@ -2398,7 +2437,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       );
       expect(new URL(result.url).searchParams.get("scope")).toBe("read write");
       expect(
-        Option.getOrUndefined(MutableHashMap.get(states, result.state))?.returnTo,
+        Option.getOrUndefined(MutableHashMap.get(states, stateKey(result.state)))?.returnTo,
       ).toBeUndefined();
     });
 
@@ -2408,10 +2447,49 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       const result = await Effect.runPromise(
         service.generateAuthorizationUrl("github", { returnTo: "/after" }),
       );
-      expect(Option.getOrUndefined(MutableHashMap.get(states, result.state))).toMatchObject({
+      expect(
+        Option.getOrUndefined(MutableHashMap.get(states, stateKey(result.state))),
+      ).toMatchObject({
         provider: "github",
         returnTo: "/after",
       });
+    });
+
+    it("derives the PKCE verifier from the state rather than storing it, and sends it on the callback", async () => {
+      const { states, store } = makeStateStore();
+      const pkceGithub = OAuth.provider("github", github.config, true);
+      const service = await runPromiseHttp(
+        OAuth.make({ github: pkceGithub }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.succeed(OAuthStateStore)(store),
+              Layer.succeed(OAuthAccountStore)(makeAccounts().store),
+              unusedByCallbackLayer,
+              testCryptoLayer,
+            ),
+          ),
+        ),
+      );
+      const { url, state } = await Effect.runPromise(service.generateAuthorizationUrl("github"));
+      const challenge = new URL(url).searchParams.get("code_challenge");
+      const stored = Option.getOrUndefined(MutableHashMap.get(states, stateKey(state)));
+      assert(stored !== undefined, "the state is stored under its digest");
+      expect(stored.codeVerifier).toBeUndefined();
+
+      const calls = await withFetch(
+        (fetchUrl) =>
+          fetchUrl.includes("/token")
+            ? json({ access_token: "at-1", token_type: "bearer" })
+            : json({ id: "gh-9" }),
+        async (captured) => {
+          await Effect.runPromise(service.handleCallback(state, "code"));
+          return captured;
+        },
+      );
+      const tokenCall = calls.find((call) => call.url.includes("/token"));
+      const sentVerifier = new URLSearchParams(tokenCall?.body ?? "").get("code_verifier");
+      assert(sentVerifier !== null, "the token request carries a code_verifier");
+      expect(createHash("sha256").update(sentVerifier).digest("base64url")).toBe(challenge);
     });
 
     it("fails with AuthError when the state vanishes before returnTo is recorded", async () => {
@@ -2450,7 +2528,7 @@ describe("OAuthService first proof over the real services", () => {
       }),
     ),
     Layer.provideMerge(Layer.mergeAll(memoryStores, PasswordHasher.layer(), Hooks.Default)),
-    Layer.provideMerge(PlatformCrypto.layer),
+    Layer.provideMerge(testCryptoLayer),
   );
 
   it("a squatter's password sign-up is taken over by the address's holder signing in with a provider that verified it", async () => {

@@ -17,6 +17,7 @@ export {
   viewerLayerAs,
 } from "./RunAs.ts";
 export { inlineDeliveryScheduler } from "./Delivery.ts";
+export { testRootSecret, testRootSecretLayer } from "./RootSecret.ts";
 export {
   type FixtureUserOptions,
   type FixtureUsers,

@@ -12,6 +12,8 @@ export * from "./Hooks.ts";
 export * from "./TokenHash.ts";
 export * from "./Identifier.ts";
 export * from "./Cipher.ts";
+export * as PlatformCrypto from "./PlatformCrypto.ts";
+export * as RootSecret from "./RootSecret.ts";
 export * from "./Delivery.ts";
 export * from "./DeliveryScheduler.ts";
 export * from "./Messages.ts";
@@ -108,6 +110,7 @@ export {
   JwtError,
   type JwtAlgorithm,
   type JwtKeyPair,
+  type GeneratedJwtKeyPair,
   JwtKeyStore,
   type JwtConfig,
   type JwtSignResult,

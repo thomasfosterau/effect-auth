@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import {
@@ -11,7 +12,6 @@ import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Order, Resu
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { SecureRandom } from "effect/crypto";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -30,7 +30,6 @@ import {
 import { make, SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
-import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
 import { observable } from "./testing/Passwordless.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
@@ -219,7 +218,7 @@ const makeTestContext = async (
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -242,7 +241,7 @@ const makeTestContext = async (
           Context.make(IdentifierStore, identifierStore),
           Context.make(UserStore, userStore),
         ),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ),
   );
@@ -285,7 +284,7 @@ describe("MagicLinkService", () => {
 
     // The store is keyed by hash; the sent token is the raw value.
     const stored = Option.getOrUndefined(
-      MutableHashMap.get(magicLinkTokens, hashToken(recorded(sentLinks).token)),
+      MutableHashMap.get(magicLinkTokens, sha256Hex(recorded(sentLinks).token)),
     );
     expect(stored).toBeDefined();
     expect(stored?.email).toBe("new@example.com");
@@ -329,8 +328,8 @@ describe("MagicLinkService", () => {
     expect(sentLinks.length).toBe(2);
     // Only the latest token remains usable. Compare by hash (store key).
     expect(MutableHashMap.size(magicLinkTokens)).toBe(1);
-    expect(MutableHashMap.has(magicLinkTokens, hashToken(recorded(sentLinks, 1).token))).toBe(true);
-    expect(MutableHashMap.has(magicLinkTokens, hashToken(recorded(sentLinks).token))).toBe(false);
+    expect(MutableHashMap.has(magicLinkTokens, sha256Hex(recorded(sentLinks, 1).token))).toBe(true);
+    expect(MutableHashMap.has(magicLinkTokens, sha256Hex(recorded(sentLinks).token))).toBe(false);
   });
 
   it("should not send to unknown emails when sign-up is disabled, storing a marker token", async () => {
@@ -652,8 +651,8 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     // Seed with the hash as key (the service looks up by hash).
-    MutableHashMap.set(magicLinkTokens, hashToken("expired-token"), {
-      token: hashToken("expired-token"),
+    MutableHashMap.set(magicLinkTokens, sha256Hex("expired-token"), {
+      token: sha256Hex("expired-token"),
       email: "late@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10 * 60 * 1000,
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 60 * 1000,
@@ -743,8 +742,8 @@ describe("MagicLinkService", () => {
   it("should not create users at verification when sign-up is disabled", async () => {
     const testContext = await makeTestContext();
 
-    MutableHashMap.set(magicLinkTokens, hashToken("orphan-token"), {
-      token: hashToken("orphan-token"),
+    MutableHashMap.set(magicLinkTokens, sha256Hex("orphan-token"), {
+      token: sha256Hex("orphan-token"),
       email: "orphan@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60 * 1000,
@@ -803,7 +802,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     // Seed a token whose createdAt is older than the 60 s cooldown.
-    const oldToken = hashToken("old-magic-token");
+    const oldToken = sha256Hex("old-magic-token");
     MutableHashMap.set(magicLinkTokens, oldToken, {
       token: oldToken,
       email: "user@example.com",

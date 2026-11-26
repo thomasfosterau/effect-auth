@@ -17,7 +17,7 @@ export interface KeySetTiming {
 }
 
 /** Five minutes fresh; a forced refetch at most every 30 seconds. */
-export const defaultTiming: KeySetTiming = { ttlMs: 5 * 60_000, minRefreshIntervalMs: 30_000 };
+const defaultTiming: KeySetTiming = { ttlMs: 5 * 60_000, minRefreshIntervalMs: 30_000 };
 
 /** The keys a key set holds, and when it last fetched and tried to. */
 interface State {

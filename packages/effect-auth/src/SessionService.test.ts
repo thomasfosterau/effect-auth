@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import {
   Cause,
@@ -14,7 +15,6 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
-import type { SecureRandom } from "effect/crypto";
 import { AuthError, SessionConfigError } from "./Errors.ts";
 import { composePlugins, Hooks, makePlugin, type PluginImpls, type SessionRef } from "./Hooks.ts";
 import { AuditPlugin } from "./plugins/Audit.ts";
@@ -23,7 +23,6 @@ import { make } from "./SessionService.ts";
 import { SessionStore, type SessionTouch } from "./SessionStore.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import { UserStore } from "./UserStore.ts";
-import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
 
 // Mock implementations for testing
@@ -121,7 +120,7 @@ describe("SessionService", () => {
     );
 
     // The record carries the stored id; the token travels beside it.
-    expect(session.id).toBe(hashToken(token));
+    expect(session.id).toBe(sha256Hex(token));
     expect(token).toMatch(/^[0-9a-f]{40}$/);
     expect(session.userId).toBe("user1");
     expect(session.expiresAt).toBeInstanceOf(Date);
@@ -227,9 +226,9 @@ describe("SessionService", () => {
 
     // The raw token is not a key in the store, only its hash is.
     expect(result.storedKeys).not.toContain(result.token);
-    expect(result.storedKeys).toEqual([hashToken(result.token)]);
+    expect(result.storedKeys).toEqual([sha256Hex(result.token)]);
     // Validation answers the session under its stored id, never the token.
-    expect(result.validated.session.id).toBe(hashToken(result.token));
+    expect(result.validated.session.id).toBe(sha256Hex(result.token));
     expect(result.validated.session.id).toBe(result.session.id);
     expect(result.validated.user.id).toBe("user1");
     expect(Result.isFailure(result.byStoredId)).toBe(true);
@@ -443,7 +442,7 @@ describe("SessionService", () => {
       expect(updateCallCount).toBe(0);
 
       // Manually age the session's lastActivityAt beyond the updateAge threshold.
-      const tokenHash = hashToken(rawToken);
+      const tokenHash = sha256Hex(rawToken);
       const stored = Option.getOrUndefined(MutableHashMap.get(sessions, tokenHash));
       assert(stored !== undefined, "the session is stored");
 
@@ -647,7 +646,7 @@ describe("SessionService", () => {
   });
 });
 const runWithHooks = <A, E>(
-  program: Effect.Effect<A, E, SessionStore | UserStore | Hooks | SecureRandom.SecureRandom>,
+  program: Effect.Effect<A, E, SessionStore | UserStore | Hooks | PlatformCrypto.Services>,
   hooks: Layer.Layer<Hooks>,
 ) =>
   Effect.runPromise(
@@ -684,9 +683,9 @@ describe("session input hooks", () => {
       hooks,
     );
 
-    expect(seen).toEqual([hashToken(token)]);
+    expect(seen).toEqual([sha256Hex(token)]);
     expect(seen).not.toContain(token);
-    expect(validated.session.id).toBe(hashToken(token));
+    expect(validated.session.id).toBe(sha256Hex(token));
   });
 
   it("beforeSignOut sees hashToken(token), never the token", async () => {
@@ -705,9 +704,9 @@ describe("session input hooks", () => {
       hooks,
     );
 
-    expect(seen).toEqual([hashToken(token)]);
+    expect(seen).toEqual([sha256Hex(token)]);
     expect(seen).not.toContain(token);
-    expect(MutableHashMap.has(mockSessionStore.sessions, hashToken(token))).toBe(false);
+    expect(MutableHashMap.has(mockSessionStore.sessions, sha256Hex(token))).toBe(false);
   });
 
   it("a denying beforeValidateSession refuses validation", async () => {
@@ -744,7 +743,7 @@ describe("session input hooks", () => {
 
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("AuthError");
-    expect(MutableHashMap.has(mockSessionStore.sessions, hashToken(token))).toBe(true);
+    expect(MutableHashMap.has(mockSessionStore.sessions, sha256Hex(token))).toBe(true);
   });
 
   it("a hook cannot redirect validation or sign-out to another session", async () => {
@@ -804,7 +803,7 @@ describe("session input hooks", () => {
     // before/afterCreateSession, before/afterValidateSession, before/afterSignOut.
     expect(observed.length).toBe(6);
     expect(observed.filter((value) => value.includes(token))).toEqual([]);
-    expect(observed.some((value) => value.includes(hashToken(token)))).toBe(true);
+    expect(observed.some((value) => value.includes(sha256Hex(token)))).toBe(true);
   });
 });
 

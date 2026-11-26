@@ -28,7 +28,7 @@
  */
 import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
 import * as P from "effect/Predicate";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import type { HttpClient } from "effect/http";
 import * as OutboundHttp from "./OutboundHttp.ts";
 import type { AuthError } from "./Errors.ts";
@@ -40,7 +40,7 @@ import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
@@ -159,12 +159,6 @@ export class GoogleOneTapService extends Context.Service<
 // Implementation
 // ---------------------------------------------------------------------------
 
-/**
- * Google embeds the SHA-256 hex digest of the nonce — not the raw nonce —
- * in the id_token `nonce` claim.
- */
-const hashNonce = hashToken;
-
 export const make = (
   config: GoogleOneTapConfig,
 ): Effect.Effect<
@@ -177,6 +171,7 @@ export const make = (
   | SessionService
   | EmailPasswordStore
   | SecureRandom.SecureRandom
+  | Digest.Digest
   | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
@@ -197,6 +192,9 @@ export const make = (
       sessions: sessionManager,
     });
     const crypto = yield* SecureRandom.SecureRandom;
+    // Google embeds the SHA-256 hex digest of the nonce, not the raw nonce,
+    // in the id_token `nonce` claim.
+    const hashNonce = yield* tokenHasher;
 
     return {
       createNonce: Effect.fn("GoogleOneTapService.createNonce")(function* () {
@@ -235,7 +233,7 @@ export const make = (
           provider: "google-one-tap",
           jwksEndpoint,
           audience: config.clientId,
-          nonce: hashNonce(nonce),
+          nonce: yield* hashNonce(nonce),
         }).pipe(
           OutboundHttp.provide(outbound),
           Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })),

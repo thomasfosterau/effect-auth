@@ -32,7 +32,7 @@ import { Clock, Context, Data, DateTime, Effect, Layer, Redacted } from "effect"
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
 import type { HttpClient } from "effect/http";
 import { idpUrlPolicy } from "./IdpUrlPolicy.ts";
 import * as OutboundHttp from "./OutboundHttp.ts";
@@ -43,6 +43,8 @@ import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as RootSecret from "./RootSecret.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
 import { OrganizationService, OrganizationStore, type Member } from "./Organization.ts";
 import {
@@ -426,7 +428,12 @@ export const make = (
 ): Effect.Effect<
   typeof SsoService.Service,
   never,
-  SsoProviderStore | SecureRandom.SecureRandom | HttpClient.HttpClient
+  | SsoProviderStore
+  | SecureRandom.SecureRandom
+  | Digest.Digest
+  | Mac.Mac
+  | RootSecret.RootSecret
+  | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
     const urlPolicy = idpUrlPolicy(config.allowPrivateIdpUrls ?? false);
@@ -438,6 +445,14 @@ export const make = (
     const allowIdpInitiated = config.allowIdpInitiated ?? false;
 
     const store = yield* SsoProviderStore;
+    const digestToken = yield* tokenHasher;
+    const deriveVerifier = yield* RootSecret.pkceVerifier;
+    const mac = yield* Mac.Mac;
+    const rootSecret = yield* RootSecret.RootSecret;
+    /** The caller's state store, keyed by each state's digest. */
+    const hashedStates = Effect.map(OAuthStateStore, (states) =>
+      OAuth.hashedStateStore(states, digestToken),
+    );
     const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
@@ -824,9 +839,12 @@ export const make = (
           toOAuthConfig(provider),
           provider.usePKCE,
         );
-        const result = yield* oauth
-          .generateAuthorizationUrl()
-          .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
+        const result = yield* oauth.generateAuthorizationUrl().pipe(
+          Effect.provideService(OAuthStateStore, yield* hashedStates),
+          Effect.provideService(Mac.Mac, mac),
+          Effect.provideService(RootSecret.RootSecret, rootSecret),
+          Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
+        );
         return { url: result.url, state: result.state };
       }),
 
@@ -834,7 +852,7 @@ export const make = (
         state: string,
         code: string,
       ) {
-        const stateStore = yield* OAuthStateStore;
+        const stateStore = yield* hashedStates;
 
         // Spend the state before anything else: `consume` is an atomic
         // get-and-delete, so a replayed or concurrent callback carrying the
@@ -873,7 +891,11 @@ export const make = (
           toOAuthConfig(provider),
           provider.usePKCE,
         );
-        const tokens = yield* oauth.exchangeCode(code, stateEntry.codeVerifier).pipe(
+        // A state stored by an earlier release carries its verifier; a new
+        // one is derived from the state.
+        const codeVerifier =
+          stateEntry.codeVerifier ?? (provider.usePKCE ? yield* deriveVerifier(state) : undefined);
+        const tokens = yield* oauth.exchangeCode(code, codeVerifier).pipe(
           OutboundHttp.provide(outbound),
           Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
         );

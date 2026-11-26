@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import {
   Clock,
@@ -13,7 +14,6 @@ import {
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
-import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   IdentifierStore,
@@ -41,7 +41,6 @@ import {
 import * as OrganizationModule from "./Organization.ts";
 import * as Testing from "./testing/index.ts";
 import type { AuthError } from "./Errors.ts";
-import { hashToken } from "./TokenHash.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { SessionService } from "./SessionService.ts";
 import { type ApiKey, ApiKeyStore } from "./ApiKey.ts";
@@ -300,7 +299,7 @@ const baseContext = Context.merge(
     Context.make(OrganizationStore, organizationStore),
     Context.make(IdentifierStore, memoryIdentifierStore(identifierRecords)),
   ),
-  Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+  PlatformCrypto.context(),
 );
 
 const testContext = Context.merge(
@@ -359,7 +358,7 @@ const proofLayer = () =>
 type ProofServices = EmailPasswordStore | ApiKeyStore | SessionService;
 
 /** The stores every run's context holds. */
-type BaseServices = OrganizationStore | IdentifierStore | SecureRandom.SecureRandom;
+type BaseServices = OrganizationStore | IdentifierStore | PlatformCrypto.Services;
 
 /**
  * Build the service from `config` (delivering invitations into
@@ -688,7 +687,7 @@ describe("OrganizationService", () => {
     expect(sentInvitations[0].invitation.id).toBe(result.invitation.id);
     expect(sentInvitations[0].organization.slug).toBe("acme");
     // Only the token's digest is stored.
-    expect(result.invitation.tokenHash).toBe(hashToken(sentInvitations[0].token));
+    expect(result.invitation.tokenHash).toBe(sha256Hex(sentInvitations[0].token));
     expect(R.values(result.invitation)).not.toContain(sentInvitations[0].token);
     expect(result.duplicate._tag).toBe("Failure");
     expect(result.userInvitations).toHaveLength(1);

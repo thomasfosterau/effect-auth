@@ -5,6 +5,7 @@
  * limit gets `429`; the key never reaches a log line or a body; and a key never
  * falls back to a session cookie the request also carries.
  */
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { Effect, Exit, Logger, MutableHashMap } from "effect";
 import * as Arr from "effect/Array";
@@ -14,7 +15,6 @@ import * as Struct from "effect/Struct";
 import { AuthError } from "../Errors.ts";
 import type * as Auth from "../index.ts";
 import { memoryRateLimitStore } from "../testing/MemoryStores.ts";
-import { hashApiKey } from "../ApiKey.ts";
 import { makeServerFixture, type ServerFixtureOptions } from "../client/testing/fixture.ts";
 import * as RemoteSession from "./RemoteSession.ts";
 
@@ -168,7 +168,7 @@ describe("GET /api-keys/current", () => {
     const text = await res.text();
     // Neither the plaintext nor its digest is anywhere in the body.
     expect(text).not.toContain(key);
-    expect(text).not.toContain(hashApiKey(key));
+    expect(text).not.toContain(sha256Hex(key));
     expect(text).not.toContain("keyHash");
     const body = Schema.decodeSync(Schema.fromJsonString(CurrentKey))(text);
     expect(body.data.id).toBe(id);

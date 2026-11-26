@@ -191,6 +191,17 @@ const refuseRedirects = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect
   );
 
 /**
+ * `client` with redirects refused before they are sent, for a library that
+ * sends through the `HttpClient` itself (`effect/jose`'s remote key set).
+ *
+ * @since 0.9.0
+ * @category requests
+ */
+export const withoutRedirects = <E, R>(
+  client: HttpClient.HttpClient.With<E, R>,
+): HttpClient.HttpClient.With<E, R> => HttpClient.transform(client, refuseRedirects);
+
+/**
  * Send `request` through `client` and read the response within `limits`.
  *
  * @since 0.9.0
