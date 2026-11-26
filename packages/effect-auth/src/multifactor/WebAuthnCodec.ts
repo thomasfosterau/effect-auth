@@ -450,7 +450,7 @@ const decodeBase64urlIgnorePadding = (encoded: string): Uint8Array => {
 const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 /** Decode a base64url string property, throwing `message` when it is not one. */
-const base64urlProperty = (value: object, key: string, message: string): Uint8Array => {
+const base64urlProperty = (value: unknown, key: string, message: string): Uint8Array => {
   const raw = P.hasProperty(value, key) ? value[key] : undefined;
   if (!P.isString(raw)) {
     throw new ClientDataParseError(message);
@@ -462,7 +462,7 @@ const base64urlProperty = (value: object, key: string, message: string): Uint8Ar
 };
 
 /** The ceremony `type` of the client data. */
-const clientDataType = (parsed: object): ClientDataType => {
+const clientDataType = (parsed: unknown): ClientDataType => {
   const rawType = P.hasProperty(parsed, "type") ? parsed.type : undefined;
   if (rawType === "webauthn.get") return ClientDataType.Get;
   if (rawType === "webauthn.create") return ClientDataType.Create;
@@ -470,7 +470,7 @@ const clientDataType = (parsed: object): ClientDataType => {
 };
 
 /** The optional `crossOrigin` flag, `false` when absent. */
-const clientDataCrossOrigin = (parsed: object): boolean => {
+const clientDataCrossOrigin = (parsed: unknown): boolean => {
   if (!P.hasProperty(parsed, "crossOrigin")) return false;
   if (!P.isBoolean(parsed.crossOrigin)) {
     throw new ClientDataParseError("Invalid property 'crossOrigin'");
@@ -479,7 +479,7 @@ const clientDataCrossOrigin = (parsed: object): boolean => {
 };
 
 /** The `tokenBinding.status` value. */
-const tokenBindingStatus = (raw: object): TokenBindingStatus => {
+const tokenBindingStatus = (raw: unknown): TokenBindingStatus => {
   const rawStatus = P.hasProperty(raw, "status") ? raw.status : undefined;
   if (rawStatus === "present") return TokenBindingStatus.Present;
   if (rawStatus === "supported") return TokenBindingStatus.Supported;
@@ -487,7 +487,7 @@ const tokenBindingStatus = (raw: object): TokenBindingStatus => {
 };
 
 /** The optional `tokenBinding` member, `null` when absent. */
-const clientDataTokenBinding = (parsed: object): TokenBinding | null => {
+const clientDataTokenBinding = (parsed: unknown): TokenBinding | null => {
   if (!P.hasProperty(parsed, "tokenBinding")) return null;
   const raw = parsed.tokenBinding;
   // Any non-null object, arrays included.

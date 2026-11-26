@@ -221,7 +221,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 
   const write = (
     key: string,
-    value: object | string,
+    value: unknown,
     label: string,
   ): Effect.Effect<void, Errors.AuthError> =>
     kv.set(key, encodeJsonText(value)).pipe(Effect.mapError(toAuthError(label)));
@@ -229,7 +229,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
   /** Write `value` in an envelope that expires after `expiresAt` (epoch ms). */
   const writeExpiring = (
     key: string,
-    value: object,
+    value: unknown,
     expiresAt: number,
     label: string,
   ): Effect.Effect<void, Errors.AuthError> => write(key, { [EXPIRES_AT]: expiresAt, value }, label);

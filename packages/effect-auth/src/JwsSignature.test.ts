@@ -35,7 +35,7 @@ const publicJwk = (algorithm: Algorithm) => keyPairs[algorithm].publicKeyJwk;
 const privatePem = (algorithm: Algorithm) => keyPairs[algorithm].privateKeyPem;
 
 /** A compact JWS Node signs. */
-const nodeSigned = (algorithm: Algorithm, claims: object): string => {
+const nodeSigned = (algorithm: Algorithm, claims: Schema.Json): string => {
   const input = `${b64(encodeJson({ alg: algorithm, typ: "JWT" }))}.${b64(encodeJson(claims))}`;
   return `${input}.${b64(testSignJws(algorithm, enc(input), privatePem(algorithm)))}`;
 };

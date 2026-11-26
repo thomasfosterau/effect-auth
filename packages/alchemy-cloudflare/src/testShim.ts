@@ -72,7 +72,7 @@ export type RawD1 = ReturnType<typeof makeRawD1>;
  * `exec`); the full type carries many more, which nothing here reaches.
  */
 // SAFETY: see above; only the faked members are ever called.
-const fakeBinding = (fake: object): D1Binding => fake as D1Binding;
+const fakeBinding = (fake: unknown): D1Binding => fake as D1Binding;
 
 /** Workerd's `D1Database`, as the provider's client types its binding. */
 type D1Binding = Effect.Success<QueryDatabaseClient["raw"]>;

@@ -172,7 +172,10 @@ const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 const failingIdp = <A>(thunk: () => Promise<A>): Promise<A> =>
   withFetch(() => new Response("bad code", { status: 400 }), thunk);
 
-const json = (value: object): Response =>
+/** What a stub provider answers: a token response, a key set or any JSON. */
+type ProviderBody = Schema.Json | OAuthTokenResponse | SigningKey["jwks"];
+
+const json = (value: ProviderBody): Response =>
   new Response(encodeJson(value), { headers: { "content-type": "application/json" } });
 
 const CLIENT = {
@@ -445,7 +448,7 @@ describe("OAuth provider bodies", () => {
 // --- Provider-specific profile mapping --------------------------------------
 
 describe("OAuth profile mapping", () => {
-  const getProfile = (provider: OAuthProvider, body: object, method = "GET") =>
+  const getProfile = (provider: OAuthProvider, body: Schema.Json, method = "GET") =>
     withFetch(
       () => json(body),
       async (calls) => {
@@ -689,7 +692,8 @@ const makeSigningKey = async (
   return { privateKey: keyPair.privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
 };
 
-const b64u = (obj: object): string => Buffer.from(encodeJson(obj), "utf8").toString("base64url");
+const b64u = (obj: Schema.Json): string =>
+  Buffer.from(encodeJson(obj), "utf8").toString("base64url");
 
 const signIdToken = async (
   alg: "RS256" | "ES256" | "EdDSA",

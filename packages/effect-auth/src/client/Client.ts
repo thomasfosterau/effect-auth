@@ -969,7 +969,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     organizationId: string,
     collection: string,
     type: string,
-    attributes: object,
+    attributes: unknown,
   ) =>
     jsonApi<DataDocument<A>>(
       "POST",

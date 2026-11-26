@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vite-plus/test";
 import { Atom, AtomRegistry } from "effect/reactivity";
+import type * as Schema from "effect/Schema";
 import { createAuthClient } from "@thomasfosterau/effect-auth/client";
 import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
 import { atomStore, listSessionsStore, sessionStore, type ListSessionsState } from "./index.ts";
@@ -7,7 +8,7 @@ import { atomStore, listSessionsStore, sessionStore, type ListSessionsState } fr
 const EMAIL = "alice@svelte.test";
 const PW = "password-123";
 
-const json = (body: object): Response =>
+const json = (body: Schema.Json): Response =>
   new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },
