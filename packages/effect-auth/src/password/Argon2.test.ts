@@ -57,7 +57,9 @@ const cryptoPasswords = (kdf: typeof Kdf.Kdf.Service, options?: Argon2Options) =
     }).pipe(
       Effect.provide(
         CryptoPassword.layer({ algorithm }).pipe(
-          Layer.provide([Layer.succeed(Kdf.Kdf, kdf), PlatformCrypto.layer]),
+          // The counting Kdf first, so the platform layer only fills the rest.
+          Layer.provide(Layer.succeed(Kdf.Kdf, kdf)),
+          Layer.provide(PlatformCrypto.layer),
         ),
       ),
     ),
