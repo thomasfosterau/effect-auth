@@ -112,10 +112,9 @@ const signUpAda = Effect.fn("signUpAda")(function* () {
 const signInByUsername = (secret: string, captchaToken?: string) =>
   Effect.gen(function* () {
     const usernames = yield* UsernameService;
-    return yield* usernames.signIn(definedKeys({ username, password: secret, captchaToken })).pipe(
-      Effect.as("ok"),
-      Effect.catch((error) => Effect.succeed(error._tag)),
-    );
+    return yield* usernames
+      .signIn(definedKeys({ username, password: secret, captchaToken }))
+      .pipe(Effect.match({ onSuccess: () => "ok", onFailure: (error) => error._tag }));
   });
 
 const lockout = (config: AccountLockoutConfig) =>
@@ -245,10 +244,9 @@ describe("lockout clears only when a session is issued", () => {
         const secret = yield* enrolAda();
         const multiFactor = yield* MultiFactorService;
         const wrong = (token: string) =>
-          multiFactor.verifyTotp(token, "not-a-code").pipe(
-            Effect.as("ok"),
-            Effect.catch((error) => Effect.succeed(error._tag)),
-          );
+          multiFactor
+            .verifyTotp(token, "not-a-code")
+            .pipe(Effect.match({ onSuccess: () => "ok", onFailure: (error) => error._tag }));
 
         // Each challenge would allow five wrong codes; the user's own count
         // runs across challenges and stops the third.
@@ -257,10 +255,9 @@ describe("lockout clears only when a session is issued", () => {
         const b = yield* wrong(first);
         const second = yield* challenge();
         const c = yield* wrong(second);
-        const locked = yield* multiFactor.verifyTotp(second, yield* generateTotp(secret)).pipe(
-          Effect.as("ok"),
-          Effect.catch((error) => Effect.succeed(error._tag)),
-        );
+        const locked = yield* multiFactor
+          .verifyTotp(second, yield* generateTotp(secret))
+          .pipe(Effect.match({ onSuccess: () => "ok", onFailure: (error) => error._tag }));
         return [a, b, c, locked];
       }).pipe(Effect.provide(services(lockout({ maxAttempts: 10, maxSecondFactorAttempts: 3 })))),
     );
@@ -359,10 +356,7 @@ const passwordless = (
 
 /** Run `effect` and answer with `"ok"` or the tag it failed with. */
 const outcome = <A, E extends { readonly _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(
-    Effect.as("ok"),
-    Effect.catch((error) => Effect.succeed(error._tag)),
-  );
+  effect.pipe(Effect.match({ onSuccess: () => "ok", onFailure: (error) => error._tag }));
 
 /** Lock Ada's account with wrong passwords, and check the lock holds. */
 const lockAda = Effect.fn("lockAda")(function* (maxAttempts: number) {

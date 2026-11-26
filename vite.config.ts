@@ -134,9 +134,6 @@ export default defineConfig({
       "effect/no-known-value-widening": "off",
       // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
       "effect/avoid-object-type": "off",
-      // The remaining blanket catches fail closed on purpose (CAPTCHA,
-      // policy evaluation, optional session resolution).
-      "effect/effect-catchall-default": "off",
       // The only `makeFilter` calls probe config keys; they are not reusable checks.
       "effect/require-filter-metadata": "off",
       "effect/casting-awareness": "error",
