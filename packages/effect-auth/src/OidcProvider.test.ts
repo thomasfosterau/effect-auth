@@ -1426,15 +1426,15 @@ const makeHttpFixture = (
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
-    Layer.succeed(AuthLifecycleService)(undefined as never),
+    Layer.mock(AuthLifecycleService, {}),
     Layer.succeed(IdentifierStore)(identifierStore),
-    Layer.succeed(PasswordHasher)(undefined as never),
-    Layer.succeed(EmailPasswordService)(undefined as never),
-    Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(EmailVerificationStore)(undefined as never),
-    Layer.succeed(PasswordResetService)(undefined as never),
-    Layer.succeed(PasswordResetStore)(undefined as never),
-    Layer.succeed(PasswordResetUserStore)(undefined as never),
+    Layer.mock(PasswordHasher, { algorithm: "unused" }),
+    Layer.mock(EmailPasswordService, {}),
+    Layer.mock(EmailVerificationService, {}),
+    Layer.mock(EmailVerificationStore, {}),
+    Layer.mock(PasswordResetService, {}),
+    Layer.mock(PasswordResetStore, {}),
+    Layer.mock(PasswordResetUserStore, {}),
   );
 
   const jwtKeyStoreLayer = Layer.succeed(JwtKeyStore)(oidc.jwtKeyStore);

@@ -103,8 +103,8 @@ describe("Effect floor compatibility", () => {
     // SAFETY: the stores are never touched while a layer is built, so empty
     // stand-ins are enough to prove the config wiring resolves.
     const stores = Layer.mergeAll(
-      Layer.succeed(JwtKeyStore, {} as never),
-      Layer.succeed(TrustedDeviceStore, {} as never),
+      Layer.mock(JwtKeyStore, {}),
+      Layer.mock(TrustedDeviceStore, {}),
       testRootSecretLayer,
     );
     const env = withEnv({
@@ -126,7 +126,7 @@ describe("Effect floor compatibility", () => {
       Effect.scoped(Layer.build(JwtService.layerFromEnv)).pipe(
         // SAFETY: the build fails on the missing variable before it reads the store.
         Effect.provide(
-          Layer.mergeAll(Layer.succeed(JwtKeyStore, {} as never), testRootSecretLayer, withEnv({})),
+          Layer.mergeAll(Layer.mock(JwtKeyStore, {}), testRootSecretLayer, withEnv({})),
         ),
       ),
     );

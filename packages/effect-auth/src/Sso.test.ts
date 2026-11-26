@@ -1394,7 +1394,7 @@ const makeHttpFixture = (
       ),
     getMemberById: (memberId: string) =>
       Effect.succeed(Arr.findFirst(members, (m) => m.id === memberId)),
-    getOrganizationById: () => Effect.succeed(null),
+    getOrganizationById: () => Effect.succeedNone,
   };
 
   const coreStoreLayer = Layer.mergeAll(
@@ -1415,11 +1415,11 @@ const makeHttpFixture = (
     Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Hooks.Default,
-    Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordService)(undefined as never),
-    Layer.succeed(PasswordHasher)(undefined as never),
-    Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(PasswordResetService)(undefined as never),
+    Layer.mock(AuthLifecycleService, {}),
+    Layer.mock(EmailPasswordService, {}),
+    Layer.mock(PasswordHasher, { algorithm: "unused" }),
+    Layer.mock(EmailVerificationService, {}),
+    Layer.mock(PasswordResetService, {}),
   );
 
   // `SsoService` resolves its stores, `SessionService` and the crypto services
@@ -1435,9 +1435,7 @@ const makeHttpFixture = (
     Layer.succeed(OAuthUserStore)(oauthUserStore),
     Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(UserStore)(userStore),
-    // SAFETY: SSO only ever calls the three `orgStore` methods; the HTTP flows
-    // these tests drive reach no other `OrganizationStore` method.
-    Layer.succeed(OrganizationStore)(orgStore as never),
+    Layer.mock(OrganizationStore, orgStore),
     Layer.succeed(SamlVerifier)(stubSamlVerifier(samlRequests)),
     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
     testCryptoLayer,

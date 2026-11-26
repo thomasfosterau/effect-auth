@@ -103,7 +103,6 @@ export default defineConfig({
       // line is deleted so the rule is back at `error`. Counts are all sites
       // (sources and tests) when the categories were turned on.
       "unicorn/consistent-function-scoping": "warn", // 148
-      "typescript/no-unsafe-type-assertion": "warn", // 124
       "eslint/no-shadow": "warn", // 120
 
       // Assertion helpers are named `expect<What>` (`expectAgreement`,
@@ -480,7 +479,10 @@ export default defineConfig({
         // the server encodes. `./ladder` imports nothing, so it cannot map its
         // axes with `Record.map`.
         files: ["packages/effect-auth/src/client/Client.ts", "packages/effect-auth/src/Ladder.ts"],
-        rules: { "effect/casting-awareness": "off" },
+        rules: {
+          "effect/casting-awareness": "off",
+          "typescript/no-unsafe-type-assertion": "off",
+        },
       },
       {
         // drizzle's dialect table brands keep its three handles from sharing a
@@ -503,7 +505,10 @@ export default defineConfig({
           "packages/alchemy-cloudflare/src/AuthSchema.test.ts",
           "packages/alchemy-postgres/src/AuthSchema.test.ts",
         ],
-        rules: { "effect/casting-awareness": "off" },
+        rules: {
+          "effect/casting-awareness": "off",
+          "typescript/no-unsafe-type-assertion": "off",
+        },
       },
       {
         // SvelteKit's `handle` is a Promise-facing entrypoint: it runs the

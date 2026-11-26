@@ -17,12 +17,8 @@ import { Hooks } from "../Hooks.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
 import { PasswordHasher } from "../password/Password.ts";
-import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.ts";
-import {
-  PasswordResetService,
-  PasswordResetStore,
-  PasswordResetUserStore,
-} from "../password/PasswordReset.ts";
+import { EmailVerificationService } from "../email/EmailVerification.ts";
+import { PasswordResetService, PasswordResetUserStore } from "../password/PasswordReset.ts";
 import {
   OrganizationStore,
   type Organization,
@@ -364,15 +360,13 @@ const makeFixture = (
     Layer.succeed(RateLimitStore)(rateLimitStore),
     Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
     Hooks.Default,
-    Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordService)(undefined as never),
-    Layer.succeed(EmailPasswordStore)(undefined as never),
-    Layer.succeed(PasswordHasher)(undefined as never),
-    Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(EmailVerificationStore)(undefined as never),
-    Layer.succeed(PasswordResetService)(undefined as never),
-    Layer.succeed(PasswordResetStore)(undefined as never),
-    Layer.succeed(PasswordResetUserStore)(undefined as never),
+    Layer.mock(AuthLifecycleService, {}),
+    Layer.mock(EmailPasswordService, {}),
+    Layer.mock(EmailPasswordStore, {}),
+    Layer.mock(PasswordHasher, { algorithm: "unused" }),
+    Layer.mock(EmailVerificationService, {}),
+    Layer.mock(PasswordResetService, {}),
+    Layer.mock(PasswordResetUserStore, {}),
   );
 
   // Stage 1: services whose construction-time deps are all raw stores.

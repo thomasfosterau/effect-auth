@@ -24,7 +24,7 @@ const Live = Layer.mergeAll(
   ),
   // SAFETY: this backend never reads `RateLimitStore`; only the interface's
   // legacy requirement asks for it.
-  Layer.succeed(RateLimitStore)(undefined as never),
+  Layer.mock(RateLimitStore, {}),
 );
 
 const run = <A, E>(eff: Effect.Effect<A, E, RateLimiter | RateLimitStore>) =>

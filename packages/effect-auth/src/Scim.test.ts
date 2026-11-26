@@ -1180,12 +1180,12 @@ const makeHttpFixture = async (
   // handlers never touch them. `SessionService` and `IdentifierStore` come from
   // `stores.layer` for real.
   const base = Layer.mergeAll(
-    Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordService)(undefined as never),
-    Layer.succeed(PasswordHasher)(undefined as never),
-    Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(PasswordResetService)(undefined as never),
-    Layer.succeed(UserService)(undefined as never),
+    Layer.mock(AuthLifecycleService, {}),
+    Layer.mock(EmailPasswordService, {}),
+    Layer.mock(PasswordHasher, { algorithm: "unused" }),
+    Layer.mock(EmailVerificationService, {}),
+    Layer.mock(PasswordResetService, {}),
+    Layer.mock(UserService, {}),
     Hooks.Default,
   );
 

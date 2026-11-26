@@ -1018,12 +1018,12 @@ describe("OAuthService encryptTokens", () => {
   // refreshAccessToken (which only touches OAuthAccountStore, via closure), so
   // the `undefined` others are never invoked.
   const unusedDepsLayer = Layer.mergeAll(
-    Layer.succeed(OAuthStateStore)(undefined as never),
-    Layer.succeed(OAuthUserStore)(undefined as never),
-    Layer.succeed(IdentifierStore)(undefined as never),
-    Layer.succeed(UserStore)(undefined as never),
+    Layer.mock(OAuthStateStore, {}),
+    Layer.mock(OAuthUserStore, {}),
+    Layer.mock(IdentifierStore, {}),
+    Layer.mock(UserStore, {}),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
-    Layer.succeed(SessionService)(undefined as never),
+    Layer.mock(SessionService, {}),
     testCryptoLayer,
   );
 
@@ -1269,12 +1269,12 @@ describe("OAuthService unlinkAccount guard", () => {
   // SAFETY: unlinkAccount only touches OAuthAccountStore (resolved in `make`'s
   // closure); the `undefined` construction-time deps are never invoked here.
   const unusedDeps = Layer.mergeAll(
-    Layer.succeed(OAuthStateStore)(undefined as never),
-    Layer.succeed(OAuthUserStore)(undefined as never),
-    Layer.succeed(IdentifierStore)(undefined as never),
-    Layer.succeed(UserStore)(undefined as never),
+    Layer.mock(OAuthStateStore, {}),
+    Layer.mock(OAuthUserStore, {}),
+    Layer.mock(IdentifierStore, {}),
+    Layer.mock(UserStore, {}),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
-    Layer.succeed(SessionService)(undefined as never),
+    Layer.mock(SessionService, {}),
     testCryptoLayer,
   );
 
@@ -1565,7 +1565,7 @@ describe("OAuthService linking controls", () => {
 
   // SAFETY: linkAccount never touches SessionService, so the `undefined` stub is
   // never invoked by the tests that use it.
-  const noSession = Layer.succeed(SessionService)(undefined as never);
+  const noSession = Layer.mock(SessionService, {});
 
   /** A password store holding no passwords, for the tests that never prove an address. */
   const noPasswordsLayer = Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore());
@@ -2279,14 +2279,14 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
   // account stores; the services below are resolved at construction only.
   const unusedByCallbackLayer = Layer.mergeAll(
     // SAFETY: never called by handleCallback or generateAuthorizationUrl.
-    Layer.succeed(OAuthUserStore)(undefined as never),
+    Layer.mock(OAuthUserStore, {}),
     // SAFETY: never called by handleCallback or generateAuthorizationUrl.
-    Layer.succeed(IdentifierStore)(undefined as never),
+    Layer.mock(IdentifierStore, {}),
     // SAFETY: never called by handleCallback or generateAuthorizationUrl.
-    Layer.succeed(UserStore)(undefined as never),
+    Layer.mock(UserStore, {}),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     // SAFETY: never called by handleCallback or generateAuthorizationUrl.
-    Layer.succeed(SessionService)(undefined as never),
+    Layer.mock(SessionService, {}),
   );
 
   const makeService = (

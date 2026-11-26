@@ -27,18 +27,18 @@ import { Hooks } from "../Hooks.ts";
  */
 const stubServices = (): Layer.Layer<AuthServices> =>
   Layer.mergeAll(
-    Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(SessionService)(undefined as never),
-    Layer.succeed(EmailPasswordService)(undefined as never),
-    Layer.succeed(IdentifierStore)(undefined as never),
-    Layer.succeed(PasswordHasher)(undefined as never),
-    Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(EmailVerificationStore)(undefined as never),
-    Layer.succeed(PasswordResetService)(undefined as never),
-    Layer.succeed(PasswordResetStore)(undefined as never),
-    Layer.succeed(PasswordResetUserStore)(undefined as never),
-    Layer.succeed(UserService)(undefined as never),
-    Layer.succeed(UserServiceStore)(undefined as never),
+    Layer.mock(AuthLifecycleService, {}),
+    Layer.mock(SessionService, {}),
+    Layer.mock(EmailPasswordService, {}),
+    Layer.mock(IdentifierStore, {}),
+    Layer.mock(PasswordHasher, { algorithm: "unused" }),
+    Layer.mock(EmailVerificationService, {}),
+    Layer.mock(EmailVerificationStore, {}),
+    Layer.mock(PasswordResetService, {}),
+    Layer.mock(PasswordResetStore, {}),
+    Layer.mock(PasswordResetUserStore, {}),
+    Layer.mock(UserService, {}),
+    Layer.mock(UserServiceStore, {}),
     Hooks.Default,
   );
 
