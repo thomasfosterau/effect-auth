@@ -5,6 +5,7 @@ import * as P from "effect/Predicate";
 import * as Str from "effect/String";
 import { SecureRandom } from "effect/crypto";
 import * as Cipher from "../Cipher.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as Errors from "../Errors.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
 
@@ -208,7 +209,10 @@ export const generateHotp = (
     new DataView(counterBuffer.buffer).setBigUint64(0, BigInt(counter));
 
     // Generate HMAC
-    const hash = Cipher.hmac(algorithm, secretBuffer, counterBuffer);
+    const hash = yield* Cipher.hmac(algorithm, secretBuffer, counterBuffer).pipe(
+      PlatformCrypto.provide,
+      Effect.mapError((cause) => new Errors.HashingError({ message: cause.message, cause })),
+    );
 
     // Dynamic truncation (RFC 4226 Section 5.3)
     const offset = hash[hash.length - 1] & 0x0f;

@@ -1,7 +1,8 @@
 import { describe, it, expect, assert } from "vite-plus/test";
 import { Context, Effect, Result } from "effect";
 import * as Arr from "effect/Array";
-import { PasswordHasher, scryptHasher } from "./Password.ts";
+import { PasswordHasher } from "./Password.ts";
+import { scryptHasher } from "./Scrypt.ts";
 import * as Password from "./Password.ts";
 
 describe("PasswordHasher", () => {
@@ -189,7 +190,7 @@ describe("PasswordHasher", () => {
 
 describe("ScryptHasher", () => {
   it("should hash and verify a password", async () => {
-    const { scryptHasher } = await import("./Password.ts");
+    const { scryptHasher } = await import("./Scrypt.ts");
     // A cheap explicit cost: this test is about the round trip, not the cost,
     // and the default N = 2^17 (128 MiB per derivation) times out on a loaded
     // machine. ScryptDefaults.test.ts pins the defaults structurally.
@@ -207,7 +208,7 @@ describe("ScryptHasher", () => {
   });
 
   it("should produce different hashes for the same password (random salt)", async () => {
-    const { scryptHasher } = await import("./Password.ts");
+    const { scryptHasher } = await import("./Scrypt.ts");
     const scrypt = scryptHasher({ cost: 1024 });
 
     const h1 = await Effect.runPromise(scrypt.hash("samePassword"));
@@ -216,7 +217,7 @@ describe("ScryptHasher", () => {
   });
 
   it("should verify hashes produced with non-default parameters", async () => {
-    const { scryptHasher } = await import("./Password.ts");
+    const { scryptHasher } = await import("./Scrypt.ts");
     const weak = scryptHasher({ cost: 1024, blockSize: 8, parallelization: 1 });
     const strong = scryptHasher();
 
@@ -227,7 +228,7 @@ describe("ScryptHasher", () => {
   });
 
   it("should hash and verify when p + 2 exceeds N (maxmem covers 128 * r * (N + p + 2))", async () => {
-    const { scryptHasher } = await import("./Password.ts");
+    const { scryptHasher } = await import("./Scrypt.ts");
     // N = 4, r = 8, p = 8 needs 14336 bytes of scrypt memory; the former
     // 256 * N * r formula allowed 8192, so both hashing and verifying failed.
     const scrypt = scryptHasher({ cost: 4, blockSize: 8, parallelization: 8 });
@@ -240,7 +241,7 @@ describe("ScryptHasher", () => {
   });
 
   it("should interop with the multi-algorithm verifier", async () => {
-    const { scryptHasher, pbkdf2Hasher, multiAlgorithmVerifier } = await import("./Password.ts");
+    const { pbkdf2Hasher, multiAlgorithmVerifier } = await import("./Password.ts");
     const verifier = multiAlgorithmVerifier([
       pbkdf2Hasher({ iterations: 1000 }),
       scryptHasher({ cost: 1024 }),
@@ -255,7 +256,7 @@ describe("ScryptHasher", () => {
   });
 
   it("should fail on malformed scrypt hash", async () => {
-    const { scryptHasher } = await import("./Password.ts");
+    const { scryptHasher } = await import("./Scrypt.ts");
     const scrypt = scryptHasher();
 
     const result = await Effect.runPromise(Effect.result(scrypt.verify("password", "scrypt$bad")));

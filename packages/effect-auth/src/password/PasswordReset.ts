@@ -1,9 +1,9 @@
 import { Clock, Context, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
 import { UserStore } from "../UserStore.ts";
-import { hashToken } from "../TokenHash.ts";
+import { tokenHasher } from "../TokenHash.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
@@ -154,6 +154,7 @@ export const make = (
   | Hooks
   | RateLimitStore
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
@@ -162,6 +163,7 @@ export const make = (
     const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? true;
 
     const resetStore = yield* PasswordResetStore;
+    const hashToken = yield* tokenHasher;
     const userStore = yield* PasswordResetUserStore;
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
@@ -212,7 +214,7 @@ export const make = (
         const rawToken = yield* generateResetToken();
         const reset: PasswordResetToken = {
           // Store the hash — the raw token is delivered to the user via sendResetPassword.
-          token: hashToken(rawToken),
+          token: yield* hashToken(rawToken),
           userId: user.id,
           email: identifier.value,
           createdAt: yield* Clock.currentTimeMillis,
@@ -247,7 +249,7 @@ export const make = (
 
         yield* validatePasswordLength(newPassword, minPasswordLength, maxPasswordLength);
 
-        const tokenHash = hashToken(token);
+        const tokenHash = yield* hashToken(token);
         const reset = yield* resetStore.get(tokenHash);
         if (!reset) {
           return yield* new Errors.PasswordResetError({

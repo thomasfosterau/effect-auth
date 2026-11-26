@@ -1,3 +1,4 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
@@ -11,12 +12,11 @@ import * as Password from "../password/Password.ts";
 import { SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
-import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
 
-const hasher = Password.scryptHasher({ cost: 1024 });
+const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 
 const makeFixture = () => {
   const usersById = MutableHashMap.empty<string, Types.User>();
@@ -110,7 +110,7 @@ describe("LastLoginMethodPlugin", () => {
     // ...and the plugin persisted it onto both stored sessions.
     assert(signedUp.session !== undefined && signedIn.session !== undefined, "both issue sessions");
     // The plugin addresses each session by its stored id, the token's digest.
-    expect(signedIn.session.id).toBe(hashToken(signedIn.token ?? ""));
+    expect(signedIn.session.id).toBe(sha256Hex(signedIn.token ?? ""));
     expect(
       Option.getOrUndefined(MutableHashMap.get(sessions, signedUp.session.id))?.attributes[
         "method"

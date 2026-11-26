@@ -12,7 +12,7 @@ import { OtpSecondFactorService } from "../multifactor/OtpSecondFactor.ts";
 import { GoogleProvider, OAuthService } from "../oauth/index.ts";
 import { mcpProviderPreset, OidcProviderService } from "../OidcProvider.ts";
 import { PasswordHasher } from "../password/Password.ts";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { testCryptoLayer } from "./TestCrypto.ts";
 import { SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { TrustedDeviceService } from "../TrustedDevice.ts";
@@ -104,12 +104,7 @@ const services = Layer.mergeAll(
   Layer.provideMerge(JwtService.layer({ issuer: "https://app.test" })),
   Layer.provideMerge(SessionService.layer(sessionConfig)),
   Layer.provideMerge(
-    Layer.mergeAll(
-      Testing.memoryStores,
-      PasswordHasher.layer(),
-      Hooks.Default,
-      PlatformCrypto.layer,
-    ),
+    Layer.mergeAll(Testing.memoryStores, PasswordHasher.layer(), Hooks.Default, testCryptoLayer),
   ),
 );
 
@@ -200,8 +195,8 @@ describe("memoryStores", () => {
     const key = (id: string) => ({
       id,
       algorithm: "ES256" as const,
-      publicKeyJwk: {},
-      privateKeyPem: "",
+      publicKey: { kty: "EC", crv: "P-256", x: "", y: "" } as const,
+      privateKey: "",
       createdAt: 0,
     });
     const result = await Effect.runPromise(

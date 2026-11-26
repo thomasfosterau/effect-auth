@@ -8,13 +8,13 @@
  * `*ServiceLayer`, module-local `Data.TaggedError`s, epoch-ms timestamps.
  */
 import { Clock, Context, Data, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
 import { SessionService } from "./SessionService.ts";
 import type { HookError } from "./Hooks.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 
 /** Lifecycle status of a device authorization request. */
@@ -213,7 +213,7 @@ const make = (
 ): Effect.Effect<
   typeof DeviceAuthorizationService.Service,
   never,
-  DeviceAuthorizationStore | SessionService | SecureRandom.SecureRandom
+  DeviceAuthorizationStore | SessionService | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 30 * 60 * 1000;
@@ -222,6 +222,7 @@ const make = (
     const alphabet = config.userCodeAlphabet ?? DEFAULT_ALPHABET;
 
     const store = yield* DeviceAuthorizationStore;
+    const hashToken = yield* tokenHasher;
     const sessionManager = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
 
@@ -235,7 +236,7 @@ const make = (
         | { readonly status: "denied" },
     ) =>
       Effect.gen(function* () {
-        const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
+        const record = yield* store.getByUserCode(yield* hashToken(normalizeUserCode(userCode)));
         if (record === null || (yield* Clock.currentTimeMillis) > record.expiresAt) {
           return yield* new DeviceCodeError({ message: "Invalid or expired code" });
         }
@@ -256,8 +257,8 @@ const make = (
         yield* store.create({
           // Both codes are stored as SHA-256 hashes; the raw values are
           // returned to the caller and never persisted.
-          deviceCode: hashToken(rawDeviceCode),
-          userCode: hashToken(normalizedUserCode),
+          deviceCode: yield* hashToken(rawDeviceCode),
+          userCode: yield* hashToken(normalizedUserCode),
           ...(options?.clientId !== undefined && { clientId: options.clientId }),
           ...(options?.scopes !== undefined && { scopes: options.scopes }),
           status: "pending",
@@ -277,7 +278,7 @@ const make = (
       }),
 
       poll: Effect.fn("DeviceAuthorizationService.poll")(function* (deviceCode: string) {
-        const record = yield* store.getByDeviceCode(hashToken(deviceCode));
+        const record = yield* store.getByDeviceCode(yield* hashToken(deviceCode));
         const now = yield* Clock.currentTimeMillis;
 
         // record.deviceCode is already the stored hash.

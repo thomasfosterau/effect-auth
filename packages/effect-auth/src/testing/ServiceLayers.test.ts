@@ -1,6 +1,7 @@
+import { sha256Hex } from "./Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { Effect } from "effect";
-import { ApiKeyService, hashApiKey } from "../ApiKey.ts";
+import { ApiKeyService } from "../ApiKey.ts";
 import { SessionService } from "../SessionService.ts";
 import * as Testing from "./index.ts";
 
@@ -100,7 +101,7 @@ describe("apiKeyServiceLayer", () => {
               {
                 id: "seed-1",
                 start: "seeded",
-                keyHash: hashApiKey(plaintext),
+                keyHash: sha256Hex(plaintext),
                 userId: "user-1",
                 enabled: true,
                 metadata: {},

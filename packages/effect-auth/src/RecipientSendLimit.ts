@@ -14,9 +14,10 @@
  * capped exactly as a known one.
  */
 import { Effect } from "effect";
+import type { Digest } from "effect/crypto";
 import { type AuthError, RateLimitError } from "./Errors.ts";
 import * as RateLimit from "./RateLimit.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import type { RecipientSendLimit } from "./Types.ts";
 
 /** The default cap: 5 sends per recipient per purpose per hour. */
@@ -29,8 +30,7 @@ export const defaultRecipientSendLimit: RecipientSendLimit = {
 const keyPrefix = "recipient-send";
 
 /** The `RateLimitStore` key of a (purpose, recipient) pair: the recipient only as its digest. */
-export const recipientSendKey = (purpose: string, recipient: string): string =>
-  `${keyPrefix}:${purpose}:${hashToken(recipient)}`;
+const keyFor = (purpose: string, digest: string): string => `${keyPrefix}:${purpose}:${digest}`;
 
 /**
  * Whether `error` is a cap's refusal, as opposed to a hook's or another
@@ -54,16 +54,19 @@ export type RecipientSendGate = (
  */
 export const makeRecipientSendGate = (
   limit: RecipientSendLimit | false | undefined,
-): Effect.Effect<RecipientSendGate, never, RateLimit.RateLimitStore> =>
+): Effect.Effect<RecipientSendGate, never, RateLimit.RateLimitStore | Digest.Digest> =>
   Effect.gen(function* () {
     if (limit === false) {
       return () => Effect.void;
     }
     const { max, windowMs } = limit ?? defaultRecipientSendLimit;
     const limiter = yield* RateLimit.make();
+    const hash = yield* tokenHasher;
     const config: RateLimit.RateLimitConfig = { maxRequests: max, windowMs };
     return (purpose: string, recipient: string) =>
-      limiter.consumeToken(recipientSendKey(purpose, recipient), config).pipe(
+      Effect.flatMap(hash(recipient), (digest) =>
+        limiter.consumeToken(keyFor(purpose, digest), config),
+      ).pipe(
         Effect.catchTag("RateLimitError", (error) =>
           Effect.fail(
             new RateLimitError({

@@ -6,11 +6,11 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import * as Cipher from "./Cipher.ts";
+import { testJwsKeyPair, testSignJws } from "./testing/TestJws.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { hashToken } from "./TokenHash.ts";
+import { sha256Hex } from "./testing/Sha256.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
@@ -39,7 +39,7 @@ const JWKS_ENDPOINT = "https://fake-google.test/certs";
 
 // --- A fake Google: an ES256 key + JWT signer + JWKS document -----------------
 
-const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
+const { publicKeyJwk, privateKeyPem } = testJwsKeyPair("ES256");
 const KID = "test-key-1";
 const JWKS = {
   keys: [{ ...publicKeyJwk, kid: KID, alg: "ES256" }],
@@ -63,12 +63,12 @@ const b64 = (value: Schema.Json): string =>
 const signCredential = (claims: Schema.JsonObject): string => {
   const header = { alg: "ES256", kid: KID, typ: "JWT" };
   const signingInput = `${b64(header)}.${b64(claims)}`;
-  const signature = Cipher.signJws("ES256", Buffer.from(signingInput, "utf8"), privateKeyPem);
+  const signature = testSignJws("ES256", Buffer.from(signingInput, "utf8"), privateKeyPem);
   return `${signingInput}.${Buffer.from(signature).toString("base64url")}`;
 };
 
 /** Hash a nonce the same way GoogleOneTap.ts does (SHA-256 hex). */
-const hashNonce = hashToken;
+const hashNonce = sha256Hex;
 
 const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject =>
   Object.assign(
