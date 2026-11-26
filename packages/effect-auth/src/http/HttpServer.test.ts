@@ -34,6 +34,7 @@ import { HttpApiBuilder } from "effect/http-api";
 import { Base64Url } from "effect/encoding";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
+import { MAX_IDENTIFIER_LENGTH, MAX_NAME_LENGTH } from "./HttpApiSchema.ts";
 import * as HttpClient from "./HttpClient.ts";
 import * as HttpSubpath from "./index.ts";
 import * as Root from "../index.ts";
@@ -1770,6 +1771,35 @@ describe("change-password and update-user", () => {
     expect(read.user.name).toBe("Ada Lovelace");
   });
 
+  it(`refuses a name over ${MAX_NAME_LENGTH} characters with 400 and keeps the profile`, async () => {
+    const handler = handlerFor();
+    const sid = await signUp(handler, "a@b.com");
+    const patch = (name: string) =>
+      handler(
+        jsonApiRequest(
+          "/users/me",
+          { data: { type: "users", id: "me", attributes: { name } } },
+          asCookie(sid),
+        ),
+      );
+
+    expect((await patch("n".repeat(MAX_NAME_LENGTH))).status).toBe(200);
+    expect((await patch("x".repeat(MAX_NAME_LENGTH + 1))).status).toBe(400);
+    const session = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
+    const read = await sessionBody(
+      session,
+      Schema.Struct({ user: Schema.Struct({ name: Schema.optional(Schema.String) }) }),
+    );
+    expect(read.user.name).toBe("n".repeat(MAX_NAME_LENGTH));
+  });
+
+  it(`refuses a sign-up whose email is over ${MAX_IDENTIFIER_LENGTH} characters`, async () => {
+    const handler = handlerFor();
+    const email = `${"a".repeat(MAX_IDENTIFIER_LENGTH)}@b.com`;
+    const res = await handler(authRequest("sign-up", { email, password: PW }));
+    expect(res.status).toBe(400);
+  });
+
   it("requires authentication for PATCH /users/me", async () => {
     const handler = handlerFor();
     const res = await handler(
@@ -2025,19 +2055,68 @@ describe("request body size limit", () => {
     expect(res.status).toBe(201);
   });
 
-  it("allows requests when Content-Length is absent even if body would exceed limit", async () => {
-    const handler = handlerFor(makeFixture(), { maxBodySize: 1 });
-    // No Content-Length header — the check is advisory and cannot reject without reading.
+  /** A body streamed in `chunkSize` pieces with no `Content-Length`, counting what was pulled. */
+  const streamedBody = (text: string, chunkSize: number) => {
+    const bytes = new TextEncoder().encode(text);
+    let offset = 0;
+    const pulled = { bytes: 0 };
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.length) return controller.close();
+        const chunk = bytes.slice(offset, offset + chunkSize);
+        offset += chunk.length;
+        pulled.bytes += chunk.length;
+        controller.enqueue(chunk);
+      },
+    });
+    return { stream, pulled };
+  };
+
+  const streamedSignUp = (stream: ReadableStream<Uint8Array>) =>
+    // SAFETY: `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
+    new Request("http://test/users", {
+      method: "POST",
+      headers: { "content-type": "application/vnd.api+json" },
+      body: stream,
+      duplex: "half",
+    } as RequestInit);
+
+  it("counts a body without Content-Length and refuses it with 413 at the limit, creating no user", async () => {
+    const handler = handlerFor(makeFixture(), { maxBodySize: 1024 });
+    const document = toJson(
+      signUpDocument({ email: "big@b.com", password: PW, name: "x".repeat(1_000_000) }),
+    );
+    const { stream, pulled } = streamedBody(document, 256);
+    const res = await handler(streamedSignUp(stream));
+    expect(res.status).toBe(413);
+    expect((await jsonBody(res, MessageBody)).message).toBe("Payload too large");
+    // The read stopped at the limit rather than buffering the whole body.
+    expect(pulled.bytes).toBeLessThanOrEqual(1024 + 256 * 2);
+    // No user was created: the address is still free.
+    const signUp = await handler(authRequest("sign-up", { email: "big@b.com", password: PW }));
+    expect(signUp.status).toBe(201);
+  });
+
+  it("refuses a body that streams past an understated Content-Length", async () => {
+    const handler = handlerFor(makeFixture(), { maxBodySize: 200 });
+    const { stream } = streamedBody("x".repeat(1000), 100);
     const res = await handler(
+      // SAFETY: `duplex` is required for a streamed body but missing from the DOM lib's `RequestInit`.
       new Request("http://test/users", {
         method: "POST",
-        headers: { "content-type": "application/vnd.api+json" },
-        body: toJson(signUpDocument({ email: "a@b.com", password: PW })),
-      }),
+        headers: { "content-type": "application/vnd.api+json", "content-length": "10" },
+        body: stream,
+        duplex: "half",
+      } as RequestInit),
     );
-    // Should pass the size gate (no Content-Length) and either succeed or fail
-    // for another reason (e.g. body actually read fine).
-    expect(res.status).not.toBe(413);
+    expect(res.status).toBe(413);
+  });
+
+  it("serves a streamed body within the limit", async () => {
+    const handler = handlerFor(makeFixture(), { maxBodySize: 65536 });
+    const { stream } = streamedBody(toJson(signUpDocument({ email: "a@b.com", password: PW })), 16);
+    const res = await handler(streamedSignUp(stream));
+    expect(res.status).toBe(201);
   });
 });
 
@@ -3331,6 +3410,32 @@ describe("HTTP multi-session", () => {
     const ids = multi.split(".").filter(Boolean);
     expect(ids).toHaveLength(2);
     expect(ids).toContain(last); // newest retained
+  });
+
+  it("reads at most maximumSessions ids from a forged device list", async () => {
+    const handler = handlerFor(makeFixture(), { multiSession: { maximumSessions: 2 } });
+    const sidA = requireSetCookie(
+      await handler(authRequest("sign-up", { email: "a@example.com", password: PW })),
+      "conduit_session",
+    );
+    const sidB = requireSetCookie(
+      await handler(authRequest("sign-up", { email: "b@example.com", password: PW })),
+      "conduit_session",
+    );
+    // A's id first, then a thousand junk ids, then B's: only the newest two
+    // (a junk id and B's) are read, so A is never validated.
+    const forged = [sidA, ...Arr.makeBy(1000, (i) => `junk${i}`), sidB].join(".");
+    const list = await handler(
+      getRequest("/device-sessions", {
+        cookie: `conduit_session=${sidB}; conduit_session_multi=${forged}`,
+      }),
+    );
+    expect(list.status).toBe(200);
+    const listed = await jsonBody(
+      list,
+      Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+    );
+    expect(listed.data.map((s) => s.id)).toEqual([hashToken(sidB)]);
   });
 
   it("returns 404 for multi-session endpoints when not enabled", async () => {
