@@ -66,6 +66,26 @@ describe("Base32 Encoding/Decoding", () => {
     expect(decoded1).toEqual(decoded2);
   });
 
+  it.each([
+    ["", ""],
+    ["f", "MY"],
+    ["fo", "MZXQ"],
+    ["foo", "MZXW6"],
+    ["foob", "MZXW6YQ"],
+    ["fooba", "MZXW6YTB"],
+    ["foobar", "MZXW6YTBOI"],
+  ])("matches the RFC 4648 test vector %j -> %j", async (text, encoded) => {
+    const bytes = new TextEncoder().encode(text);
+    expect(Otp.encodeBase32(bytes)).toBe(encoded);
+    expect(await Effect.runPromise(Otp.decodeBase32(encoded))).toEqual(bytes);
+  });
+
+  it("round-trips a large buffer", async () => {
+    const original = Uint8Array.from({ length: 100_000 }, (_, i) => (i * 131) & 0xff);
+    const decoded = await Effect.runPromise(Otp.decodeBase32(Otp.encodeBase32(original)));
+    expect(decoded).toEqual(original);
+  });
+
   it("should fail on invalid base32 characters", async () => {
     const result = await Effect.runPromise(Effect.result(Otp.decodeBase32("INVALID@CHARS")));
 

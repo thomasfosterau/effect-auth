@@ -14,6 +14,7 @@ import {
   Result,
   Scheduler,
   Scope,
+  Stream,
 } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -363,16 +364,23 @@ const lastMethodCookieOptions = (cfg: ResolvedCookieConfig, maxAge: number) =>
 /** Name of the device session-list cookie. */
 const multiCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_multi`;
 
-/** Parse the comma-separated device session-id list from the request. */
+/**
+ * Parse the device session-id list from the request: its distinct ids, at
+ * most `maximumSessions` of them (the newest, which the writer appends last),
+ * so a forged cookie cannot make one request validate more.
+ */
 const readDeviceSessionIds = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
 ): string[] => {
   const raw = request.cookies[multiCookieName(cfg)];
-  if (raw === undefined || raw === "") return [];
+  if (cfg.multiSession === undefined || raw === undefined || raw === "") return [];
   // "." separates ids: safe inside a cookie value (session ids are hex /
   // base64url) and, unlike ",", it doesn't confuse Set-Cookie parsing.
-  return raw.split(".").filter(Str.isNonEmpty);
+  return Arr.takeRight(
+    Arr.dedupe(raw.split(".").filter(Str.isNonEmpty)),
+    cfg.multiSession.maximumSessions,
+  );
 };
 
 /**
@@ -5489,13 +5497,12 @@ export interface AuthWebHandlerOptions {
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
   /**
-   * Maximum allowed request-body size in bytes. Requests whose
-   * `Content-Length` header exceeds this limit are rejected with `413 Payload
-   * Too Large` before the body is read or decoded. Default `65536` (64 KiB).
-   *
-   * Note: `Content-Length` is advisory — a client that omits it or sends a
-   * chunked body bypasses this check. Pair with a reverse-proxy body-size
-   * limit for a complete defence.
+   * Maximum allowed request-body size in bytes. Default `65536` (64 KiB).
+   * A request whose `Content-Length` exceeds it is refused with `413 Payload
+   * Too Large` before its body is read; any other body is counted as it
+   * streams in and refused with `413` as soon as it passes the limit, so an
+   * omitted or understated `Content-Length` (a chunked body) does not bypass
+   * it. The body is read into memory before it is decoded.
    */
   readonly maxBodySize?: number;
   /**
@@ -5916,9 +5923,8 @@ const serve = (
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
 
-    // Reject bodies that exceed the configured limit before parsing.
-    // Content-Length is advisory; complement with a proxy-level limit for full
-    // coverage of chunked / omitted-length bodies.
+    // A declared length over the limit is refused before anything is read;
+    // `readBodyWithin` below counts the bytes that actually arrive.
     const contentLength = request.headers.get("content-length");
     if (contentLength !== null) {
       const bytes = parseInt(contentLength, 10);
@@ -5932,17 +5938,59 @@ const serve = (
       if (inner === "/reference") return Promise.resolve(referenceResponse());
     }
 
-    // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`;
-    // the cookie writers above mark theirs, and this holds the rule
-    // for the whole handler.
-    if (inner !== null && prefix !== "") {
-      url.pathname = inner || "/";
-      return web.handler(new Request(url, request), context).then(noStoreWithSetCookie);
-    }
-    return web.handler(request, context).then(noStoreWithSetCookie);
+    return Effect.runPromise(Effect.result(readBodyWithin(request, maxBodySize))).then((read) => {
+      if (Result.isFailure(read)) {
+        return read.failure === "too-large"
+          ? Response.json({ message: "Payload too large" }, { status: 413 })
+          : Response.json({ message: "Bad Request" }, { status: 400 });
+      }
+      // Whatever wrote it, a response carrying Set-Cookie leaves `no-store`;
+      // the cookie writers above mark theirs, and this holds the rule
+      // for the whole handler.
+      if (inner !== null && prefix !== "") {
+        url.pathname = inner || "/";
+        return web.handler(new Request(url, read.success), context).then(noStoreWithSetCookie);
+      }
+      return web.handler(read.success, context).then(noStoreWithSetCookie);
+    });
   };
   const dispose = (): Promise<void> => web.dispose().then(() => Effect.runPromise(release));
   return { handler, dispose };
+};
+
+/** Why {@link readBodyWithin} refused a body: `413` or `400`. */
+type BodyRefusal = "too-large" | "unreadable";
+
+/**
+ * The request with its body read into memory, counting the bytes as they
+ * arrive: refused `"too-large"` as soon as they pass `maxBytes` (the stream
+ * is cancelled, the rest never read), `"unreadable"` when the stream fails.
+ */
+const readBodyWithin = (
+  request: Request,
+  maxBytes: number,
+): Effect.Effect<Request, BodyRefusal> => {
+  const body = request.body;
+  if (body === null) return Effect.succeed(request);
+  let received = 0;
+  return Stream.fromReadableStream({
+    evaluate: () => body,
+    onError: (): BodyRefusal => "unreadable",
+  }).pipe(
+    Stream.mapEffect((chunk) => {
+      received += chunk.byteLength;
+      return received > maxBytes ? Effect.fail<BodyRefusal>("too-large") : Effect.succeed(chunk);
+    }),
+    Stream.runCollect,
+    Effect.map((chunks) => {
+      const bytes = new Uint8Array(received);
+      Arr.reduce(chunks, 0, (offset, chunk) => {
+        bytes.set(chunk, offset);
+        return offset + chunk.byteLength;
+      });
+      return new Request(request, { method: request.method, body: bytes });
+    }),
+  );
 };
 
 /**

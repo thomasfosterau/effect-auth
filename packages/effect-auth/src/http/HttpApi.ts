@@ -1,4 +1,7 @@
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as SchemaParser from "effect/SchemaParser";
+import * as Struct from "effect/Struct";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
 import {
   Document,
@@ -41,6 +44,33 @@ export const SessionDocument = Document.DataDocument(R.Session, {
 const writeDocument = <const T extends string, A extends Schema.Top>(type: T, attributes: A) =>
   Schema.Struct({ data: Schema.Struct({ type: Schema.Literal(type), attributes }) });
 
+/**
+ * A resource's create or update payload with the named attributes checked
+ * against their request bounds (`HttpApiSchema`'s `*Input` schemas). The
+ * resource itself stays unbounded, so a stored value of any size is still
+ * answered; only a write is refused.
+ */
+const boundedPayload = <Payload extends Schema.Top>(
+  payload: Payload,
+  bounds: Readonly<Record<string, Schema.Codec<unknown, unknown>>>,
+): Payload["Rebuild"] => {
+  const checkBounds = SchemaParser.decodeUnknownResult(
+    Schema.Struct({
+      data: Schema.Struct({
+        attributes: Schema.optional(Schema.Struct(bounds).mapFields(Struct.map(Schema.optional))),
+      }),
+    }),
+  );
+  return payload.check(
+    Schema.makeFilter((document: Payload["Type"]) =>
+      Result.match(checkBounds(document), {
+        onSuccess: () => undefined,
+        onFailure: (issue) => issue,
+      }),
+    ),
+  );
+};
+
 /** A JSON:API body accepted as `application/vnd.api+json`. */
 const jsonApiPayload = <S extends Schema.Top>(schema: S) =>
   MediaType.asMediaType(schema, "application/vnd.api+json");
@@ -67,28 +97,32 @@ const SignInMeta = Schema.Struct({
 export const SignInCredential = Schema.Union([
   Schema.Struct({
     method: Schema.Literal("password"),
-    email: Schema.String,
+    email: S.IdentifierInput,
     password: Schema.String,
-    captchaToken: Schema.optional(Schema.String),
+    captchaToken: Schema.optional(S.TokenInput),
   }),
   Schema.Struct({
     method: Schema.Literal("username"),
-    username: Schema.String,
+    username: S.IdentifierInput,
     password: Schema.String,
-    captchaToken: Schema.optional(Schema.String),
+    captchaToken: Schema.optional(S.TokenInput),
   }),
-  Schema.Struct({ method: Schema.Literal("email-otp"), email: Schema.String, otp: Schema.String }),
+  Schema.Struct({
+    method: Schema.Literal("email-otp"),
+    email: S.IdentifierInput,
+    otp: S.TokenInput,
+  }),
   Schema.Struct({
     method: Schema.Literal("phone-otp"),
-    phoneNumber: Schema.String,
-    otp: Schema.String,
+    phoneNumber: S.IdentifierInput,
+    otp: S.TokenInput,
   }),
-  Schema.Struct({ method: Schema.Literal("magic-link"), token: Schema.String }),
+  Schema.Struct({ method: Schema.Literal("magic-link"), token: S.TokenInput }),
   Schema.Struct({ method: Schema.Literal("anonymous") }),
   Schema.Struct({
     method: Schema.Literal("google-one-tap"),
-    idToken: Schema.String,
-    nonce: Schema.String,
+    idToken: S.TokenInput,
+    nonce: S.TokenInput,
   }),
 ]);
 export type SignInCredential = typeof SignInCredential.Type;
@@ -159,7 +193,7 @@ export const SecondFactorVerificationDocument = Schema.Struct({
     type: Schema.Literal("second-factor-verifications"),
     attributes: Schema.Struct({
       method: Schema.Literals(["totp", "backup-code"]),
-      code: Schema.String,
+      code: S.TokenInput,
     }),
     relationships: Schema.Struct({
       /** The challenge to redeem: its id is the challenge token. */
@@ -184,20 +218,20 @@ export const OtpChallengeDocument = writeDocument(
   Schema.Union([
     Schema.Struct({
       channel: Schema.Literal("email"),
-      email: Schema.String,
+      email: S.IdentifierInput,
       purpose: S.EmailOtpPurpose,
-      captchaToken: Schema.optional(Schema.String),
+      captchaToken: Schema.optional(S.TokenInput),
     }),
     Schema.Struct({
       channel: Schema.Literal("phone"),
-      phoneNumber: Schema.String,
+      phoneNumber: S.IdentifierInput,
       purpose: S.PhoneOtpPurpose,
-      captchaToken: Schema.optional(Schema.String),
+      captchaToken: Schema.optional(S.TokenInput),
     }),
     Schema.Struct({
       channel: Schema.Literal("magic-link"),
-      email: Schema.String,
-      captchaToken: Schema.optional(Schema.String),
+      email: S.IdentifierInput,
+      captchaToken: Schema.optional(S.TokenInput),
     }),
   ]),
 );
@@ -206,14 +240,14 @@ export type OtpChallengeDocument = typeof OtpChallengeDocument.Type;
 /** The body of `POST /email-verifications`: the address to (re)send a link to. */
 export const EmailVerificationRequestDocument = writeDocument(
   "email-verifications",
-  Schema.Struct({ email: Schema.String }),
+  Schema.Struct({ email: S.IdentifierInput }),
 );
 export type EmailVerificationRequestDocument = typeof EmailVerificationRequestDocument.Type;
 
 /** The body of `POST /password-resets`: the address to send a reset link to. */
 export const PasswordResetRequestDocument = writeDocument(
   "password-resets",
-  Schema.Struct({ email: Schema.String }),
+  Schema.Struct({ email: S.IdentifierInput }),
 );
 export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.Type;
 
@@ -223,7 +257,7 @@ export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.T
  */
 export const EmailVerificationRedemptionDocument = writeDocument(
   "email-verification-redemptions",
-  Schema.Struct({ token: Schema.String }),
+  Schema.Struct({ token: S.TokenInput }),
 );
 export type EmailVerificationRedemptionDocument = typeof EmailVerificationRedemptionDocument.Type;
 
@@ -233,7 +267,7 @@ export type EmailVerificationRedemptionDocument = typeof EmailVerificationRedemp
  */
 export const PasswordResetRedemptionDocument = writeDocument(
   "password-reset-redemptions",
-  Schema.Struct({ token: Schema.String, newPassword: Schema.String }),
+  Schema.Struct({ token: S.TokenInput, newPassword: Schema.String }),
 );
 export type PasswordResetRedemptionDocument = typeof PasswordResetRedemptionDocument.Type;
 
@@ -455,6 +489,7 @@ export const identifiersGroup = Group.make(
 export const usersGroup = Group.make(
   R.User,
   Endpoint.update(R.User, {
+    payload: boundedPayload(R.User.updatePayload, { name: S.NameInput, image: S.UrlInput }),
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
   HttpApiEndpoint.patch("changePassword", "/users/me/password", {
@@ -854,7 +889,7 @@ export type ActiveOrganizationDocument = typeof ActiveOrganizationDocument.Type;
  */
 export const MemberCreateDocument = userLinkDocument(
   "organization-members",
-  Schema.Struct({ role: Schema.optional(Schema.String) }),
+  Schema.Struct({ role: Schema.optional(S.NameInput) }),
 );
 export type MemberCreateDocument = typeof MemberCreateDocument.Type;
 
@@ -901,6 +936,13 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
   meta: Schema.Struct({ membership: Schema.optionalKey(R.OrganizationMember) }),
 });
 
+const organizationBounds = {
+  name: S.NameInput,
+  slug: S.NameInput,
+  logo: S.UrlInput,
+  metadata: S.AttributesInput,
+};
+
 /**
  * `organizations`: the organizations the signed-in user belongs to.
  *
@@ -942,7 +984,10 @@ export const organizationsGroup = Group.make(
   Endpoint.list(R.Organization, {
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
-  Endpoint.create(R.Organization, { errors: resourceErrors }),
+  Endpoint.create(R.Organization, {
+    payload: boundedPayload(R.Organization.createPayload, organizationBounds),
+    errors: resourceErrors,
+  }),
   HttpApiEndpoint.patch("setActive", "/organizations/active", {
     payload: jsonApiPayload(ActiveOrganizationDocument),
     success: HttpApiSchema.NoContent,
@@ -953,7 +998,10 @@ export const organizationsGroup = Group.make(
   Endpoint.get(R.Organization, {
     errors: [E.Unauthorized, E.Forbidden, E.NotFound, E.InternalServerError],
   }),
-  Endpoint.update(R.Organization, { errors: resourceErrors }),
+  Endpoint.update(R.Organization, {
+    payload: boundedPayload(R.Organization.updatePayload, organizationBounds),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.Organization, { errors: resourceErrors }),
   childCollection("listMembers", "/organizations/:id/members", R.OrganizationMember),
   childCreate(
@@ -1015,7 +1063,10 @@ export const organizationsGroup = Group.make(
  */
 export const organizationMembersGroup = Group.make(
   R.OrganizationMember,
-  Endpoint.update(R.OrganizationMember, { errors: resourceErrors }),
+  Endpoint.update(R.OrganizationMember, {
+    payload: boundedPayload(R.OrganizationMember.updatePayload, { role: S.NameInput }),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.OrganizationMember, { errors: resourceErrors }),
   childCollection("listTeams", "/organization-members/:id/teams", R.Team),
 );
@@ -1048,6 +1099,7 @@ export const invitationsGroup = Group.make(
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
   Endpoint.update(R.Invitation, {
+    payload: boundedPayload(R.Invitation.updatePayload, { token: S.TokenInput }),
     success: InvitationTransitionDocument,
     errors: resourceErrors,
   }),
@@ -1062,7 +1114,7 @@ export const invitationsGroup = Group.make(
 export const DomainAttestationDocument = Schema.Struct({
   data: Schema.Struct({
     type: Schema.Literal("organization-domains"),
-    attributes: Schema.Struct({ domain: Schema.String }),
+    attributes: Schema.Struct({ domain: S.IdentifierInput }),
     relationships: Schema.Struct({
       organization: Schema.Struct({
         data: Schema.Struct({ type: Schema.Literal("organizations"), id: Schema.String }),
@@ -1166,7 +1218,10 @@ export const organizationRolesGroup = Group.make(
  */
 export const teamsGroup = Group.make(
   R.Team,
-  Endpoint.update(R.Team, { errors: resourceErrors }),
+  Endpoint.update(R.Team, {
+    payload: boundedPayload(R.Team.updatePayload, { name: S.NameInput }),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.Team, { errors: resourceErrors }),
   childCollection("listMembers", "/teams/:id/members", R.TeamMember),
   childCreate(
@@ -1202,7 +1257,7 @@ export const AdminUserUpdateDocument = Schema.Struct({
   data: Schema.Struct({
     type: Schema.Literal("users"),
     id: Schema.String,
-    attributes: Schema.Struct({ role: Schema.String }),
+    attributes: Schema.Struct({ role: S.NameInput }),
   }),
 });
 export type AdminUserUpdateDocument = typeof AdminUserUpdateDocument.Type;
@@ -1225,7 +1280,7 @@ export const adminUsersGroup = Group.make(
   Endpoint.list(R.User, {
     path: "/admin/users",
     page: Query.Page.Offset,
-    filter: { email: Schema.optionalKey(Schema.String) },
+    filter: { email: Schema.optionalKey(S.IdentifierInput) },
     meta: AdminUsersMeta,
     errors: resourceErrors,
   }),
@@ -1252,7 +1307,7 @@ export const adminUsersGroup = Group.make(
 export const UserBanCreateDocument = userLinkDocument(
   "user-bans",
   Schema.Struct({
-    reason: Schema.optional(Schema.String),
+    reason: Schema.optional(S.TokenInput),
     expiresIn: Schema.optional(Schema.Finite),
   }),
 );
@@ -1365,9 +1420,17 @@ export const apiKeysGroup = Group.make(
     meta: Schema.Struct({ key: Schema.String }),
     errors: resourceErrors,
   }),
-  Endpoint.update(R.ApiKey, { errors: apiKeyErrors }),
+  Endpoint.update(R.ApiKey, {
+    payload: boundedPayload(R.ApiKey.updatePayload, {
+      name: S.NameInput,
+      metadata: S.AttributesInput,
+    }),
+    errors: apiKeyErrors,
+  }),
   Endpoint.delete(R.ApiKey, { errors: apiKeyErrors }),
 );
+
+const oauthClientBounds = { name: S.NameInput, metadata: S.AttributesInput };
 
 /**
  * `oauth-clients`: the OIDC provider's registered clients. Every call needs
@@ -1388,10 +1451,14 @@ export const oauthClientsGroup = Group.make(
   R.OAuthClient,
   Endpoint.list(R.OAuthClient, { errors: resourceErrors }),
   Endpoint.create(R.OAuthClient, {
+    payload: boundedPayload(R.OAuthClient.createPayload, oauthClientBounds),
     meta: Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) }),
     errors: resourceErrors,
   }),
-  Endpoint.update(R.OAuthClient, { errors: resourceErrors }),
+  Endpoint.update(R.OAuthClient, {
+    payload: boundedPayload(R.OAuthClient.updatePayload, oauthClientBounds),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.OAuthClient, { errors: resourceErrors }),
 );
 
@@ -1480,7 +1547,7 @@ export const tokensGroup = Group.make(
 export const DeviceAuthorizationDecisionDocument = writeDocument(
   "device-authorization-decisions",
   Schema.Struct({
-    userCode: Schema.String,
+    userCode: S.TokenInput,
     decision: Schema.Literals(["approved", "denied"]),
   }),
 );

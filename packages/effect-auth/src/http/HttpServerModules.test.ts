@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { testVerifyJws } from "../testing/TestJws.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
+import { MAX_ATTRIBUTES_BYTES, MAX_NAME_LENGTH } from "./HttpApiSchema.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
@@ -678,6 +679,35 @@ const deliverInvitation: ByIdRequest = (id, sessionId) =>
   apiReq("POST", `/invitations/${id}/deliveries`, undefined, sessionId);
 
 describe("HTTP organization endpoints", () => {
+  it("refuses an oversized name or metadata bag with 400 and creates nothing", async () => {
+    const fx = makeFixture();
+    fx.seedUser("u1", "owner@test.com");
+    const sid = fx.makeSession("u1");
+    const create = (attributes: Types.Attributes) =>
+      fx.handler(
+        apiReq("POST", "/organizations", { data: { type: "organizations", attributes } }, sid),
+      );
+
+    expect((await create({ name: "x".repeat(MAX_NAME_LENGTH + 1), slug: "a" })).status).toBe(400);
+    const metadata = { notes: "m".repeat(MAX_ATTRIBUTES_BYTES) };
+    expect((await create({ name: "Acme", slug: "acme", metadata })).status).toBe(400);
+    const list = await fx.handler(apiReq("GET", "/organizations", undefined, sid));
+    expect((await jsonBody(list, collectionBody({}))).data).toEqual([]);
+
+    const created = await create({ name: "Acme", slug: "acme", metadata: { notes: "small" } });
+    expect(created.status).toBe(201);
+    const id = (await jsonBody(created, resourceBody({}))).data.id;
+    const patched = await fx.handler(
+      apiReq(
+        "PATCH",
+        `/organizations/${id}`,
+        { data: { type: "organizations", id, attributes: { metadata } } },
+        sid,
+      ),
+    );
+    expect(patched.status).toBe(400);
+  });
+
   it("runs a full organization lifecycle", async () => {
     const fx = makeFixture();
     fx.seedUser("u1", "owner@test.com");
