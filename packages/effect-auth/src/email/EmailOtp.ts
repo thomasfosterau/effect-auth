@@ -8,16 +8,11 @@
  *
  * @module email-otp
  */
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
-import {
-  createUserWithIdentifier,
-  type CreateUserResult,
-  type NewUserIdentifier,
-  UserStore,
-} from "../UserStore.ts";
+import { type CreateUserResult, type NewUserIdentifier, UserStore } from "../UserStore.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { deliverCode } from "../CodeDelivery.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
@@ -32,7 +27,7 @@ import {
   sessionOrChallenge,
   type SessionOrChallenge,
 } from "./EmailPassword.ts";
-import { firstProofServices, proveAddress } from "../FirstProof.ts";
+import { firstProofServices, userForProvenEmail } from "../FirstProof.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 
@@ -484,7 +479,7 @@ export const make = (
       ) {
         const email = normalizeEmail(rawEmail);
 
-        const { identifier, user: owner } = yield* findIdentifierOwner(
+        const found = yield* findIdentifierOwner(
           identifiers,
           users.get,
           "email",
@@ -494,36 +489,22 @@ export const make = (
         yield* hooks.beforeAuthenticate({
           method: "email-otp",
           identifier: { type: "email", value: email },
-          userId: owner?.id,
+          userId: found.user?.id,
         });
 
         yield* verifyOtp(email, otp, "sign-in");
 
-        let user = owner;
-        if (!user) {
-          if (disableSignUp) {
-            return yield* new EmailOtpError({
-              message: "Sign-up is disabled",
-            });
-          }
-
-          // A verified OTP proves ownership of the email.
-          const created = yield* createUserWithIdentifier(
-            identifiers,
-            { type: "email", value: email, verified: true, verifiedAt: yield* DateTime.nowAsDate },
-            (identifier) => userStore.createUser({ identifier }),
-          ).pipe(
-            Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new EmailOtpError({ message: "This email is already in use" })),
-            ),
-          );
-          user = created.user;
-        } else if (identifier !== null && !identifier.verified) {
-          // The OTP proves ownership — promote the identifier to verified,
-          // first clearing the password, credentials and sessions an earlier, unproven
-          // sign-up left on the account.
-          yield* proveAddress(firstProof, identifier);
+        if (found.user === null && disableSignUp) {
+          return yield* new EmailOtpError({ message: "Sign-up is disabled" });
         }
+        // A verified OTP proves ownership of the email.
+        const user = yield* userForProvenEmail(
+          firstProof,
+          found,
+          email,
+          (identifier) => userStore.createUser({ identifier }),
+          () => new EmailOtpError({ message: "This email is already in use" }),
+        );
 
         const issued = yield* sessionOrChallenge(
           sessionManager,

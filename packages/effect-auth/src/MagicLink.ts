@@ -8,16 +8,11 @@
  *
  * @module magic-link
  */
-import { Clock, Context, DateTime, Duration, Effect, Layer } from "effect";
+import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "./Identifier.ts";
-import {
-  createUserWithIdentifier,
-  type CreateUserResult,
-  type NewUserIdentifier,
-  UserStore,
-} from "./UserStore.ts";
+import { type CreateUserResult, type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -30,7 +25,7 @@ import {
   sessionOrChallenge,
   type SessionOrChallenge,
 } from "./email/EmailPassword.ts";
-import { firstProofServices, proveAddress } from "./FirstProof.ts";
+import { firstProofServices, userForProvenEmail } from "./FirstProof.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
@@ -379,7 +374,7 @@ export const make = (
           });
         }
 
-        const { identifier, user: owner } = yield* findIdentifierOwner(
+        const found = yield* findIdentifierOwner(
           identifiers,
           users.get,
           "email",
@@ -391,7 +386,7 @@ export const make = (
         yield* hooks.beforeAuthenticate({
           method: "magic-link",
           identifier: { type: "email", value: magicLink.email },
-          userId: owner?.id,
+          userId: found.user?.id,
         });
 
         // Spend the token atomically: of concurrent redemptions of one
@@ -402,36 +397,17 @@ export const make = (
           });
         }
 
-        let user = owner;
-        if (!user) {
-          if (disableSignUp) {
-            return yield* new Errors.MagicLinkError({
-              message: "Sign-up is disabled",
-            });
-          }
-
-          // A verified magic link proves ownership of the email.
-          const created = yield* createUserWithIdentifier(
-            identifiers,
-            {
-              type: "email",
-              value: magicLink.email,
-              verified: true,
-              verifiedAt: yield* DateTime.nowAsDate,
-            },
-            (identifier) => userStore.createUser({ identifier }),
-          ).pipe(
-            Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new Errors.MagicLinkError({ message: "This email is already in use" })),
-            ),
-          );
-          user = created.user;
-        } else if (identifier !== null && !identifier.verified) {
-          // The link proves ownership — promote the identifier to verified,
-          // first clearing the password, credentials and sessions an earlier, unproven
-          // sign-up left on the account.
-          yield* proveAddress(firstProof, identifier);
+        if (found.user === null && disableSignUp) {
+          return yield* new Errors.MagicLinkError({ message: "Sign-up is disabled" });
         }
+        // A verified magic link proves ownership of the email.
+        const user = yield* userForProvenEmail(
+          firstProof,
+          found,
+          magicLink.email,
+          (identifier) => userStore.createUser({ identifier }),
+          () => new Errors.MagicLinkError({ message: "This email is already in use" }),
+        );
 
         const issued = yield* sessionOrChallenge(
           sessionManager,

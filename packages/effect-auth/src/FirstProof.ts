@@ -23,6 +23,12 @@ import type * as Errors from "./Errors.ts";
 import type { Identifier, IdentifierStore } from "./Identifier.ts";
 import type { EmailPasswordStore } from "./email/EmailPassword.ts";
 import type { SessionService } from "./SessionService.ts";
+import type * as Types from "./Types.ts";
+import {
+  type CreateUserResult,
+  createUserWithIdentifier,
+  type NewUserIdentifier,
+} from "./UserStore.ts";
 import {
   deleteCredentials,
   type UserCredentialStores,
@@ -136,4 +142,34 @@ export const proveAddress = (
         : services.sessions.revokeOtherSessions(identifier.userId, proverSessionId);
     }
     return yield* services.identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
+  });
+
+/**
+ * The user a proof of `email` signs in, given what `findIdentifierOwner`
+ * found for it. An owner is returned, its address first promoted through
+ * {@link proveAddress} when it is unverified. With no owner, `create` makes a
+ * user holding the address already verified, and `taken` is the flow's error
+ * when another user claims the address meanwhile.
+ */
+export const userForProvenEmail = <E, R, E2>(
+  services: FirstProofServices,
+  found:
+    | { readonly identifier: Identifier; readonly user: Types.User }
+    | { readonly identifier: null; readonly user: null },
+  email: string,
+  create: (identifier: NewUserIdentifier) => Effect.Effect<CreateUserResult, E, R>,
+  taken: () => E2,
+): Effect.Effect<Types.User, E | E2 | Errors.AuthError, R> =>
+  Effect.gen(function* () {
+    if (found.user !== null) {
+      if (!found.identifier.verified) yield* proveAddress(services, found.identifier);
+      return found.user;
+    }
+    const verifiedAt = yield* DateTime.nowAsDate;
+    const created = yield* createUserWithIdentifier(
+      services.identifiers,
+      { type: "email", value: email, verified: true, verifiedAt },
+      create,
+    ).pipe(Effect.catchTag("IdentifierTakenError", () => Effect.fail(taken())));
+    return created.user;
   });
