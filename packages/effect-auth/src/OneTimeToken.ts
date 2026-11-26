@@ -7,6 +7,7 @@
  * @module one-time-token
  */
 import { Clock, Context, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { sessionOrChallenge, type SessionOrChallenge } from "./email/EmailPassword.ts";
@@ -50,16 +51,20 @@ export class OneTimeTokenStore extends Context.Service<
     readonly create: (
       record: OneTimeTokenRecord,
     ) => Effect.Effect<OneTimeTokenRecord, Errors.AuthError>;
-    readonly get: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
+    readonly get: (
+      token: string,
+    ) => Effect.Effect<Option.Option<OneTimeTokenRecord>, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none. Of two concurrent callers
+     * return `None` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
+    readonly consume: (
+      token: string,
+    ) => Effect.Effect<Option.Option<OneTimeTokenRecord>, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/OneTimeTokenStore") {}
@@ -183,10 +188,11 @@ export const make = (
         // Spend the token atomically before anything else, the expiry
         // check included, so "found but expired" and "not found" take the
         // same path, and of concurrent redemptions only one gets the record.
-        const record = yield* store.consume(yield* hashToken(rawToken));
-        if (!record) {
+        const foundRecord = yield* store.consume(yield* hashToken(rawToken));
+        if (Option.isNone(foundRecord)) {
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
+        const record = foundRecord.value;
 
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
@@ -214,7 +220,7 @@ export const make = (
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Layer, Result } from "effect"
+ * import { Effect, Layer, Option, Result } from "effect"
  * import {
  *   Hooks,
  *   OneTimeTokenService,
@@ -235,11 +241,11 @@ export const make = (
  * const stores = Layer.mergeAll(
  *   Layer.succeed(OneTimeTokenStore, {
  *     create: (record) => Effect.sync(() => (tokens.set(record.token, record), record)),
- *     get: (token) => Effect.sync(() => tokens.get(token) ?? null),
+ *     get: (token) => Effect.sync(() => Option.fromUndefinedOr(tokens.get(token))),
  *     // Atomic get-and-delete: one synchronous step here, `DELETE … RETURNING` in SQL.
  *     consume: (token) =>
  *       Effect.sync(() => {
- *         const record = tokens.get(token) ?? null
+ *         const record = Option.fromUndefinedOr(tokens.get(token))
  *         tokens.delete(token)
  *         return record
  *       }),
@@ -247,16 +253,16 @@ export const make = (
  *   }),
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
- *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
  *     update: (session) =>
  *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
- *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return Option.none()
  *         const touched = { ...session, ...touch }
  *         sessions.set(id, touched)
- *         return touched
+ *         return Option.some(touched)
  *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
@@ -266,7 +272,7 @@ export const make = (
  *     listByUserId: (userId) =>
  *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
  *   }),
- *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => Option.fromUndefinedOr(users.get(id))) }),
  * )
  * const services = Layer.mergeAll(
  *   OneTimeTokenService.layer(),
@@ -329,10 +335,11 @@ export const redeemOneTimeTokenForSession = (
     const userStore = yield* UserStore;
     const result = yield* service.verify(rawToken);
     // Fail closed: a token outliving its user (deleted, or never one) mints no session.
-    const user = yield* userStore.get(result.subject);
-    if (user === null) {
+    const foundUser = yield* userStore.get(result.subject);
+    if (Option.isNone(foundUser)) {
       return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
     }
+    const user = foundUser.value;
     const issued = yield* sessionOrChallenge(
       sessionService,
       user,

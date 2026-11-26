@@ -7,6 +7,7 @@
  * @module google-one-tap
  */
 import { Clock, Context, Data, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Digest, SecureRandom } from "effect/crypto";
 import type { HttpClient } from "effect/http";
@@ -59,8 +60,10 @@ export class GoogleOneTapNonceStore extends Context.Service<
   {
     /** Persist a nonce until `expiresAt` (epoch-ms). */
     readonly create: (nonce: string, expiresAt: number) => Effect.Effect<void, AuthError>;
-    /** Return the stored entry, or `null` if absent. */
-    readonly get: (nonce: string) => Effect.Effect<GoogleOneTapNonceEntry | null, AuthError>;
+    /** Return the stored entry, or `None` if absent. */
+    readonly get: (
+      nonce: string,
+    ) => Effect.Effect<Option.Option<GoogleOneTapNonceEntry>, AuthError>;
     /** Remove a nonce (called after a successful or failed consume). */
     readonly delete: (nonce: string) => Effect.Effect<void, AuthError>;
   }
@@ -197,10 +200,10 @@ export const make = (
         const entry = yield* nonceStore
           .get(nonce)
           .pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));
-        if (entry === null) {
+        if (Option.isNone(entry)) {
           return yield* new GoogleOneTapError({ message: "Unknown or already-used nonce" });
         }
-        if ((yield* Clock.currentTimeMillis) > entry.expiresAt) {
+        if ((yield* Clock.currentTimeMillis) > entry.value.expiresAt) {
           yield* Effect.ignore(nonceStore.delete(nonce));
           return yield* new GoogleOneTapError({ message: "Nonce has expired" });
         }
@@ -240,7 +243,7 @@ export const make = (
           normalized,
           () => new GoogleOneTapError({ message: "Account is unavailable" }),
         );
-        const isNewUser = found.user === null;
+        const isNewUser = Option.isNone(found);
         // Google attested the address as verified.
         const user = yield* userForProvenEmail(
           firstProof,

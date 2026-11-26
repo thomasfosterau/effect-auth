@@ -1,4 +1,5 @@
 import { Context, DateTime, Effect } from "effect";
+import * as Option from "effect/Option";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import {
@@ -20,9 +21,9 @@ export class UserStore extends Context.Service<
   UserStore,
   {
     /**
-     * Get a user by ID, or `null` when no such user exists.
+     * Get a user by ID, or `None` when no such user exists.
      */
-    readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly get: (userId: string) => Effect.Effect<Option.Option<Types.User>, Errors.AuthError>;
   }
 >()("@effect-auth/UserStore") {}
 
@@ -92,9 +93,9 @@ const takenOr = <E>(
 ): Effect.Effect<never, E | IdentifierTakenError> =>
   Effect.gen(function* () {
     const held = yield* lookupIdentifier(store, identifier.type, identifier.value).pipe(
-      Effect.orElseSucceed(() => null),
+      Effect.orElseSucceed(() => Option.none()),
     );
-    if (held === null) return yield* Effect.fail(error);
+    if (Option.isNone(held)) return yield* Effect.fail(error);
     return yield* takenError(identifier);
   });
 
@@ -156,14 +157,15 @@ export const createUserWithIdentifier = <E, R>(
       Effect.catchTags({
         IdentifierTakenError: (taken) =>
           Effect.gen(function* () {
-            const held = yield* lookupIdentifier(store, identifier.type, identifier.value);
-            if (held === null || held.userId !== user.id) return yield* taken;
+            const found = yield* lookupIdentifier(store, identifier.type, identifier.value);
+            if (Option.isNone(found) || found.value.userId !== user.id) return yield* taken;
+            const held = found.value;
             if (!identifier.verified || held.verified) return held;
             const verified = yield* store.setVerified(
               held.id,
               identifier.verifiedAt ?? (yield* DateTime.nowAsDate),
             );
-            return verified ?? held;
+            return Option.getOrElse(verified, () => held);
           }),
         // A store that cannot hold the first identifier cannot serve this
         // sign-up at all: a wiring fault, not a request the client can fix.

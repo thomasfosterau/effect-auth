@@ -81,8 +81,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -113,7 +112,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const emailPasswordStore = {
@@ -132,7 +131,7 @@ const emailPasswordStore = {
     }),
 
   getPasswordHash: (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
 
   clearPasswordHash: (userId: string) =>
     Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
@@ -149,14 +148,13 @@ const emailVerificationStore = {
       return verification;
     }),
 
-  get: (token: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+  get: (token: string) => Effect.sync(() => MutableHashMap.get(verifications, token)),
 
   consume: (token: string) =>
     Effect.sync(() => {
       const found = Option.getOrNull(MutableHashMap.get(verifications, token));
       MutableHashMap.remove(verifications, token);
-      return found;
+      return Option.fromNullishOr(found);
     }),
 
   delete: (token: string) =>
@@ -175,10 +173,10 @@ const emailVerificationStore = {
 
   getLatestByUserId: (userId: string) =>
     Effect.sync(() => {
-      let latest: EmailVerification | null = null;
+      let latest = Option.none<EmailVerification>();
       MutableHashMap.forEach(verifications, (v) => {
-        if (v.userId === userId && (latest === null || v.createdAt > latest.createdAt)) {
-          latest = v;
+        if (v.userId === userId && !Option.exists(latest, (l) => l.createdAt >= v.createdAt)) {
+          latest = Option.some(v);
         }
       });
       return latest;
@@ -186,7 +184,7 @@ const emailVerificationStore = {
 };
 
 const userServiceStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 
   update: (user: User) =>
     Effect.sync(() => {
@@ -1009,7 +1007,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
         yield* service.verifyEmail({ token });
         return {
           apiKeys: yield* apiKeys.listByUserId(user.id),
-          multiFactor: yield* multiFactor.get(user.id),
+          multiFactor: Option.getOrNull(yield* multiFactor.get(user.id)),
         };
       }).pipe(
         Effect.provideService(ApiKeyStore, apiKeys),

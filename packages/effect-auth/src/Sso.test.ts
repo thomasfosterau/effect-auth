@@ -162,11 +162,9 @@ const makeStores = (
 
   const ssoStore: typeof SsoProviderStore.Service = {
     create: (p) => Effect.sync(() => (MutableHashMap.set(providers, p.id, p), p)),
-    getById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(providers, id))),
+    getById: (id) => Effect.succeed(MutableHashMap.get(providers, id)),
     getByDomain: (domain) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ?? null,
-      ),
+      Effect.succeed(Arr.findFirst(MutableHashMap.values(providers), (p) => p.domain === domain)),
     list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(providers))),
   };
 
@@ -193,7 +191,7 @@ const makeStores = (
   };
 
   const coreUserStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
   };
 
   const stateStore = kvStateStore();
@@ -228,13 +226,13 @@ const makeStores = (
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
-        members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
       ),
     getMemberById: (memberId: string) =>
-      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
+      Effect.succeed(Arr.findFirst(members, (m) => m.id === memberId)),
     // Read for the organization's `defaultRole`, and by JIT provisioning:
     getOrganizationById: (organizationId: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
+      Effect.succeed(MutableHashMap.get(organizations, organizationId)),
     countMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     // Unused by SSO:
@@ -386,7 +384,7 @@ describe("SsoService", () => {
     );
 
     expect(result.provider.domain).toBe("acme.test");
-    expect(result.resolved?.id).toBe(result.provider.id);
+    expect(Option.getOrUndefined(result.resolved)?.id).toBe(result.provider.id);
     const url = new URL(result.start.url);
     expect(url.origin + url.pathname).toBe("https://idp.acme.test/authorize");
     expect(url.searchParams.get("client_id")).toBe("client-1");
@@ -424,8 +422,8 @@ describe("SsoService", () => {
     const emailIdentifier = await Effect.runPromise(
       identifiers.getByValue("email", "worker@acme.test"),
     );
-    expect(emailIdentifier?.userId).toBe(first.user.id);
-    expect(emailIdentifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(emailIdentifier)?.userId).toBe(first.user.id);
+    expect(Option.getOrUndefined(emailIdentifier)?.verified).toBe(true);
     // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "worker@acme.test", verified: true, verifiedAt: expect.any(Date) },
@@ -529,7 +527,7 @@ describe("SsoService", () => {
       fx.identifiers.getByValue("email", "worker@acme.test"),
     );
     expect(await Effect.runPromise(apiKeys.listByUserId("user-squat"))).toEqual([]);
-    expect(identifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
   });
 
   it("provisions JIT membership from a verified domain when the organization opts in", async () => {
@@ -892,9 +890,9 @@ describe("SsoService — SAML", () => {
     const requestId = fx.requests[0]?.requestId ?? "";
     expect(requestId).toMatch(/^_[0-9a-f]{32}$/);
     const banked = await Effect.runPromise(fx.replay.consume(requestId));
-    expect(banked?.kind).toBe("authn-request");
-    expect(banked?.relayState).toBe(start.state);
-    expect(await Effect.runPromise(fx.replay.consume(requestId))).toBeNull();
+    expect(Option.getOrUndefined(banked)?.kind).toBe("authn-request");
+    expect(Option.getOrUndefined(banked)?.relayState).toBe(start.state);
+    expect(Option.isNone(await Effect.runPromise(fx.replay.consume(requestId)))).toBe(true);
   });
 
   it("provisions through the same tail as OIDC, then reuses the user", async () => {
@@ -925,10 +923,10 @@ describe("SsoService — SAML", () => {
     const identifier = await Effect.runPromise(
       fx.identifiers.getByValue("email", "worker@acme.test"),
     );
-    expect(identifier?.userId).toBe(first.user.id);
+    expect(Option.getOrUndefined(identifier)?.userId).toBe(first.user.id);
     // The IdP attested the address inside a signed assertion, exactly as an
     // OIDC `email_verified` claim would.
-    expect(identifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
     expect(fx.members).toEqual([
       { ...fx.members[0], organizationId: "org-1", userId: first.user.id, role: "member" },
     ]);
@@ -1230,15 +1228,19 @@ describe("memorySamlReplayStore", () => {
   it("inserts if absent and reports a duplicate as null", async () => {
     const store = memorySamlReplayStore();
     expect(
-      await Effect.runPromise(
-        store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+      Option.isNone(
+        await Effect.runPromise(
+          store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+        ),
       ),
-    ).not.toBeNull();
+    ).toBe(false);
     expect(
-      await Effect.runPromise(
-        store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+      Option.isNone(
+        await Effect.runPromise(
+          store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+        ),
       ),
-    ).toBeNull();
+    ).toBe(true);
   });
 
   it("lets an expired id be re-used, since the window it guarded has passed", async () => {
@@ -1247,10 +1249,12 @@ describe("memorySamlReplayStore", () => {
       store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1)),
     );
     expect(
-      await Effect.runPromise(
-        store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+      Option.isNone(
+        await Effect.runPromise(
+          store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
+        ),
       ),
-    ).not.toBeNull();
+    ).toBe(false);
   });
 
   it("consumes exactly once, and treats an expired record as absent", async () => {
@@ -1258,14 +1262,14 @@ describe("memorySamlReplayStore", () => {
     await Effect.runPromise(
       store.create(record("a", DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000)),
     );
-    expect(await Effect.runPromise(store.consume("a"))).not.toBeNull();
-    expect(await Effect.runPromise(store.consume("a"))).toBeNull();
+    expect(Option.isNone(await Effect.runPromise(store.consume("a")))).toBe(false);
+    expect(Option.isNone(await Effect.runPromise(store.consume("a")))).toBe(true);
 
     await Effect.runPromise(
       store.create(record("b", DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1)),
     );
-    expect(await Effect.runPromise(store.consume("b"))).toBeNull();
-    expect(await Effect.runPromise(store.consume("missing"))).toBeNull();
+    expect(Option.isNone(await Effect.runPromise(store.consume("b")))).toBe(true);
+    expect(Option.isNone(await Effect.runPromise(store.consume("missing")))).toBe(true);
   });
 });
 
@@ -1325,8 +1329,7 @@ const makeHttpFixture = (
   };
 
   const userStore = {
-    get: (userId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId: string) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -1336,7 +1339,7 @@ const makeHttpFixture = (
   };
   const sessionStore: typeof SessionStore.Service = {
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
-    get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    get: (id: string) => Effect.sync(() => MutableHashMap.get(sessions, id)),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     touch: (sessionId: string, touch: SessionTouch) =>
       memorySessionStore(sessions).touch(sessionId, touch),
@@ -1375,11 +1378,9 @@ const makeHttpFixture = (
   };
   const ssoStore: typeof SsoProviderStore.Service = {
     create: (p) => Effect.sync(() => (MutableHashMap.set(providers, p.id, p), p)),
-    getById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(providers, id))),
+    getById: (id) => Effect.succeed(MutableHashMap.get(providers, id)),
     getByDomain: (domain) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ?? null,
-      ),
+      Effect.succeed(Arr.findFirst(MutableHashMap.values(providers), (p) => p.domain === domain)),
     list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(providers))),
   };
   const stateStore = kvStateStore();
@@ -1389,10 +1390,10 @@ const makeHttpFixture = (
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
-        members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
       ),
     getMemberById: (memberId: string) =>
-      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
+      Effect.succeed(Arr.findFirst(members, (m) => m.id === memberId)),
     getOrganizationById: () => Effect.succeed(null),
   };
 

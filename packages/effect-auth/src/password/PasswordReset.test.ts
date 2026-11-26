@@ -63,8 +63,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -95,7 +94,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const passwordResetUserStore = {
@@ -112,14 +111,13 @@ const passwordResetStore = {
       return reset;
     }),
 
-  get: (token: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(resetTokens, token))),
+  get: (token: string) => Effect.sync(() => MutableHashMap.get(resetTokens, token)),
 
   consume: (token: string) =>
     Effect.sync(() => {
       const found = Option.getOrNull(MutableHashMap.get(resetTokens, token));
       MutableHashMap.remove(resetTokens, token);
-      return found;
+      return Option.fromNullishOr(found);
     }),
 
   delete: (token: string) =>
@@ -501,7 +499,7 @@ describe("PasswordResetService", () => {
     const revokedDevices: string[] = [];
     const devices: typeof TrustedDeviceStore.Service = {
       upsert: (record) => Effect.succeed(record),
-      getByTokenHash: () => Effect.succeed(null),
+      getByTokenHash: () => Effect.succeedNone,
       delete: () => Effect.void,
       deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
     };

@@ -32,10 +32,10 @@ const hasher = Auth.Password.pbkdf2Hasher({ iterations: 1000 });
  * (the shape most tests assert against).
  */
 
-/** Remove `key` from `map` and return what it held, or `null`: a single-use `consume`. */
-const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
-  const found = Option.getOrNull(MutableHashMap.get(map, key));
-  if (found !== null) MutableHashMap.remove(map, key);
+/** Remove `key` from `map` and return what it held: a single-use `consume`. */
+const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): Option.Option<A> => {
+  const found = MutableHashMap.get(map, key);
+  if (Option.isSome(found)) MutableHashMap.remove(map, key);
   return found;
 };
 
@@ -112,8 +112,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     return user;
   };
 
-  const getUserById = (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId)));
+  const getUserById = (userId: string) => Effect.sync(() => MutableHashMap.get(usersById, userId));
 
   const identifierStore = Auth.memoryIdentifierStore(identifierRecords);
 
@@ -125,8 +124,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
-    getPasswordHash: (userId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    getPasswordHash: (userId) => Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
     clearPasswordHash: (userId: string) =>
       Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
     setPasswordHash: (userId, hash) =>
@@ -145,7 +143,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
     create: (v) => Effect.sync(() => (MutableHashMap.set(verifications, v.token, v), v)),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(verifications, token)),
     consume: (token) => Effect.sync(() => take(verifications, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(verifications, token)),
     deleteByUserId: (userId) =>
@@ -156,10 +154,10 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       }),
     getLatestByUserId: (userId) =>
       Effect.sync(() => {
-        let latest: Auth.Email.EmailVerification | null = null;
+        let latest = Option.none<Auth.Email.EmailVerification>();
         MutableHashMap.forEach(verifications, (v) => {
-          if (v.userId === userId && (latest === null || v.createdAt > latest.createdAt)) {
-            latest = v;
+          if (v.userId === userId && !Option.exists(latest, (l) => l.createdAt >= v.createdAt)) {
+            latest = Option.some(v);
           }
         });
         return latest;
@@ -168,7 +166,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const passwordResetStore: typeof Auth.Password.PasswordResetStore.Service = {
     create: (reset) => Effect.sync(() => (MutableHashMap.set(resets, reset.token, reset), reset)),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(resets, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(resets, token)),
     consume: (token) => Effect.sync(() => take(resets, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(resets, token)),
     deleteByUserId: (userId) =>
@@ -251,7 +249,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const accountStore: typeof Auth.AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => (MutableHashMap.set(accountTokens, token.token, token), token)),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(accountTokens, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(accountTokens, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(accountTokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -263,25 +261,30 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const multiFactorRecords = MutableHashMap.empty<string, Auth.MultiFactor.MultiFactorRecord>();
   const multiFactorStore: typeof Auth.MultiFactor.MultiFactorStore.Service = {
-    get: (userId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(multiFactorRecords, userId)),
     upsert: (record) =>
       Effect.sync(() => (MutableHashMap.set(multiFactorRecords, record.userId, record), record)),
     delete: (userId) => Effect.sync(() => void MutableHashMap.remove(multiFactorRecords, userId)),
     useTotpCounter: (userId, counter) =>
       Effect.sync(() => {
-        const record = Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId));
-        if (record === null || !record.verified) return false;
+        const found = MutableHashMap.get(multiFactorRecords, userId);
+        if (Option.isNone(found) || !found.value.verified) return false;
+        const record = found.value;
         if (record.lastUsedCounter !== undefined && record.lastUsedCounter >= counter) return false;
         MutableHashMap.set(multiFactorRecords, userId, { ...record, lastUsedCounter: counter });
         return true;
       }),
     useBackupCode: (userId, codeHash) =>
       Effect.sync(() => {
-        const record = Option.getOrNull(MutableHashMap.get(multiFactorRecords, userId));
-        if (record === null || !record.verified || !record.backupCodes.includes(codeHash)) {
+        const found = MutableHashMap.get(multiFactorRecords, userId);
+        if (
+          Option.isNone(found) ||
+          !found.value.verified ||
+          !found.value.backupCodes.includes(codeHash)
+        ) {
           return false;
         }
+        const record = found.value;
         MutableHashMap.set(multiFactorRecords, userId, {
           ...record,
           backupCodes: record.backupCodes.filter((code) => code !== codeHash),
@@ -295,8 +298,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const pendingMultiFactorStore: typeof Auth.MultiFactor.PendingMultiFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => (MutableHashMap.set(pendingMultiFactors, pending.token, pending), pending)),
-    get: (token) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingMultiFactors, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(pendingMultiFactors, token)),
     recordFailedAttempt: (token) =>
       Effect.sync(() => {
         const attempts =
@@ -380,11 +382,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const organizationStore: typeof Auth.OrganizationStore.Service = {
     createOrganization: (org) => Effect.sync(() => (MutableHashMap.set(orgs, org.id, org), org)),
-    getOrganizationById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(orgs, id))),
+    getOrganizationById: (id) => Effect.succeed(MutableHashMap.get(orgs, id)),
     getOrganizationBySlug: (slug) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(orgs)).find((o) => o.slug === slug) ?? null,
-      ),
+      Effect.succeed(Arr.findFirst(MutableHashMap.values(orgs), (o) => o.slug === slug)),
     updateOrganization: (org) => Effect.sync(() => (MutableHashMap.set(orgs, org.id, org), org)),
     deleteOrganization: (id) =>
       Effect.sync(() => {
@@ -401,9 +401,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     createMember: (member) => Effect.sync(() => (members.push(member), member)),
     getMember: (organizationId, userId) =>
       Effect.succeed(
-        members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
       ),
-    getMemberById: (memberId) => Effect.succeed(members.find((m) => m.id === memberId) ?? null),
+    getMemberById: (memberId) => Effect.succeed(Arr.findFirst(members, (m) => m.id === memberId)),
     updateMember: (member) =>
       Effect.sync(() => {
         const index = members.findIndex((m) => m.id === member.id);
@@ -422,7 +422,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     createInvitation: (invitation) =>
       Effect.sync(() => (MutableHashMap.set(invitations, invitation.id, invitation), invitation)),
-    getInvitation: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(invitations, id))),
+    getInvitation: (id) => Effect.succeed(MutableHashMap.get(invitations, id)),
     updateInvitation: (invitation) =>
       Effect.sync(() => (MutableHashMap.set(invitations, invitation.id, invitation), invitation)),
     listInvitationsByOrganization: (organizationId) =>
@@ -436,12 +436,12 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
         Arr.fromIterable(MutableHashMap.values(invitations)).filter((i) => i.email === email),
       ),
     createTeam: (team) => Effect.sync(() => (MutableHashMap.set(teams, team.id, team), team)),
-    getTeam: (teamId) => Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
+    getTeam: (teamId) => Effect.succeed(MutableHashMap.get(teams, teamId)),
     updateTeam: (team) =>
       Effect.sync(() => {
-        if (!MutableHashMap.has(teams, team.id)) return null;
+        if (!MutableHashMap.has(teams, team.id)) return Option.none();
         MutableHashMap.set(teams, team.id, team);
-        return team;
+        return Option.some(team);
       }),
     deleteTeam: (teamId) =>
       Effect.sync(() => {
@@ -456,7 +456,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       ),
     addTeamMember: (teamMember) => Effect.sync(() => (teamMembers.push(teamMember), teamMember)),
     getTeamMemberById: (teamMemberId) =>
-      Effect.succeed(teamMembers.find((m) => m.id === teamMemberId) ?? null),
+      Effect.succeed(Arr.findFirst(teamMembers, (m) => m.id === teamMemberId)),
     removeTeamMember: (teamId, userId) =>
       Effect.sync(() => {
         const index = teamMembers.findIndex((m) => m.teamId === teamId && m.userId === userId);
@@ -475,11 +475,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
         () => (MutableHashMap.set(orgRoles, `${role.organizationId} ${role.role}`, role), role),
       ),
     getOrgRole: (organizationId, role) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(orgRoles, `${organizationId} ${role}`))),
+      Effect.succeed(MutableHashMap.get(orgRoles, `${organizationId} ${role}`)),
     getOrgRoleById: (orgRoleId) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(orgRoles)).find((r) => r.id === orgRoleId) ?? null,
-      ),
+      Effect.succeed(Arr.findFirst(MutableHashMap.values(orgRoles), (r) => r.id === orgRoleId)),
     listOrgRoles: (organizationId) =>
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(orgRoles)).filter(

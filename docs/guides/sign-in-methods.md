@@ -97,26 +97,27 @@ console.log(await Effect.runPromise(example("JBSWY3DPEHPK3PXP")));
 ## Passkeys (WebAuthn)
 
 ```typescript
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { Base64 } from "effect/encoding";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Challenges are short-lived (an in-memory or Redis store is fine); credentials
-// are persistent. Lookups return `null` on a miss.
+// are persistent. Lookups return `Option.none()` on a miss.
 // Challenges are raw bytes; key them by their base64 form.
 const key = (challenge: Uint8Array) => Base64.encode(challenge);
 const challenges = new Map<string, Auth.MultiFactor.WebAuthnChallenge>();
 const challengeStore: typeof Auth.MultiFactor.ChallengeStore.Service = {
   create: (c) => Effect.sync(() => (challenges.set(key(c.challenge), c), c)),
-  get: (challenge) => Effect.sync(() => challenges.get(key(challenge)) ?? null),
+  get: (challenge) => Effect.sync(() => Option.fromUndefinedOr(challenges.get(key(challenge)))),
   delete: (challenge) => Effect.sync(() => void challenges.delete(key(challenge))),
 };
 const credentials = new Map<string, Auth.MultiFactor.WebAuthnCredential>();
 const credentialStore: typeof Auth.MultiFactor.CredentialStore.Service = {
   create: (c) => Effect.sync(() => (credentials.set(c.id, c), c)),
-  get: (id) => Effect.sync(() => credentials.get(id) ?? null),
+  get: (id) => Effect.sync(() => Option.fromUndefinedOr(credentials.get(id))),
   // Resolves by the raw credential id, for the discoverable (usernameless) login path.
-  getByCredentialId: (credentialId) => Effect.sync(() => credentials.get(credentialId) ?? null),
+  getByCredentialId: (credentialId) =>
+    Effect.sync(() => Option.fromUndefinedOr(credentials.get(credentialId))),
   update: (c) => Effect.sync(() => (credentials.set(c.id, c), c)),
   delete: (id) => Effect.sync(() => void credentials.delete(id)),
   listByUserId: (userId) =>
@@ -339,11 +340,11 @@ declare const sendMail: (message: { to: string; subject: string; html: string })
 
 const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
   create: (verification) => Effect.succeed(verification),
-  get: (_token) => Effect.succeed(null), // null when unknown
-  consume: (_token) => Effect.succeed(null), // atomic get-and-delete
+  get: (_token) => Effect.succeedNone, // None when unknown
+  consume: (_token) => Effect.succeedNone, // atomic get-and-delete
   delete: (_token) => Effect.void,
   deleteByUserId: (_userId) => Effect.void,
-  getLatestByUserId: (_userId) => Effect.succeed(null), // the newest by createdAt, for the resend cooldown
+  getLatestByUserId: (_userId) => Effect.succeedNone, // the newest by createdAt, for the resend cooldown
 };
 
 const EmailVerificationLive = Auth.Email.EmailVerificationService.layer({

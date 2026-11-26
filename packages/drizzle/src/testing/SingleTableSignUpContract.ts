@@ -109,8 +109,9 @@ export const makeAppWriter = (
       createdWith.push(input.identifier);
       if (mode === "findsOrCreates" && lookup !== undefined && input.identifier !== undefined) {
         const held = yield* lookup.getByValue(input.identifier.type, input.identifier.value);
-        const existing =
-          held === null ? undefined : Option.getOrUndefined(MutableHashMap.get(users, held.userId));
+        const existing = Option.getOrUndefined(
+          Option.flatMap(held, (found) => MutableHashMap.get(users, found.userId)),
+        );
         if (existing !== undefined) return { user: existing, created: false };
       }
       const id = globalThis.crypto.randomUUID();
@@ -128,8 +129,7 @@ export const makeAppWriter = (
 
   const emailPasswordStore: typeof Email.EmailPasswordStore.Service = {
     createUser,
-    getPasswordHash: (userId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(hashes, userId))),
+    getPasswordHash: (userId) => Effect.sync(() => MutableHashMap.get(hashes, userId)),
     clearPasswordHash: (userId: string) =>
       Effect.sync(() => void MutableHashMap.remove(hashes, userId)),
     setPasswordHash: (userId, hash) =>
@@ -137,7 +137,7 @@ export const makeAppWriter = (
   };
 
   const userStore: typeof Auth.UserStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
   };
 
   /**
@@ -244,7 +244,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
             getByValue: (type, value) => {
               if (missed) return store.getByValue(type, value);
               missed = true;
-              return Effect.succeed(null);
+              return Effect.succeedNone;
             },
           }),
         ),
@@ -272,7 +272,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
             getByValue: (type, value) => {
               if (missed) return store.getByValue(type, value);
               missed = true;
-              return Effect.succeed(null);
+              return Effect.succeedNone;
             },
           }),
         ),

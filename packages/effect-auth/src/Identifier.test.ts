@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { KeyValueStore } from "effect/persistence";
 import { readdir, readFile } from "node:fs/promises";
@@ -55,13 +56,13 @@ describe("IdentifierStoreKV", () => {
         return yield* store.getByValue("email", "alice@example.com");
       }),
     );
-    expect(result).not.toBeNull();
-    expect(result?.id).toBe("id-1");
-    expect(result?.userId).toBe("user-1");
-    expect(result?.type).toBe("email");
-    expect(result?.value).toBe("alice@example.com");
-    expect(result?.verified).toBe(false);
-    expect(result?.createdAt).toEqual(now);
+    expect(Option.isNone(result)).toBe(false);
+    expect(Option.getOrUndefined(result)?.id).toBe("id-1");
+    expect(Option.getOrUndefined(result)?.userId).toBe("user-1");
+    expect(Option.getOrUndefined(result)?.type).toBe("email");
+    expect(Option.getOrUndefined(result)?.value).toBe("alice@example.com");
+    expect(Option.getOrUndefined(result)?.verified).toBe(false);
+    expect(Option.getOrUndefined(result)?.createdAt).toEqual(now);
   });
 
   it("getByValue returns null for unknown (type, value)", async () => {
@@ -71,7 +72,7 @@ describe("IdentifierStoreKV", () => {
         return yield* store.getByValue("email", "unknown@example.com");
       }),
     );
-    expect(result).toBeNull();
+    expect(Option.isNone(result)).toBe(true);
   });
 
   it("listByUser returns empty array for unknown user", async () => {
@@ -148,9 +149,9 @@ describe("IdentifierStoreKV", () => {
         return yield* store.setVerified("id-1", verifiedAt);
       }),
     );
-    expect(result).not.toBeNull();
-    expect(result?.verified).toBe(true);
-    expect(result?.verifiedAt).toEqual(verifiedAt);
+    expect(Option.isNone(result)).toBe(false);
+    expect(Option.getOrUndefined(result)?.verified).toBe(true);
+    expect(Option.getOrUndefined(result)?.verifiedAt).toEqual(verifiedAt);
   });
 
   it("setVerified returns null for unknown id", async () => {
@@ -160,7 +161,7 @@ describe("IdentifierStoreKV", () => {
         return yield* store.setVerified("no-such-id", yield* DateTime.nowAsDate);
       }),
     );
-    expect(result).toBeNull();
+    expect(Option.isNone(result)).toBe(true);
   });
 
   it("setVerified preserves the updated record in getByValue", async () => {
@@ -174,8 +175,8 @@ describe("IdentifierStoreKV", () => {
         return yield* store.getByValue("email", "alice@example.com");
       }),
     );
-    expect(fetched?.verified).toBe(true);
-    expect(fetched?.verifiedAt).toEqual(verifiedAt);
+    expect(Option.getOrUndefined(fetched)?.verified).toBe(true);
+    expect(Option.getOrUndefined(fetched)?.verifiedAt).toEqual(verifiedAt);
   });
 
   // -------------------------------------------------------------------------
@@ -194,7 +195,7 @@ describe("IdentifierStoreKV", () => {
         return { byValue, byUser };
       }),
     );
-    expect(result.byValue).toBeNull();
+    expect(Option.isNone(result.byValue)).toBe(true);
     expect(result.byUser).toHaveLength(0);
   });
 
@@ -229,8 +230,8 @@ describe("IdentifierStoreKV", () => {
       }),
     );
     expect(result.byUser).toHaveLength(0);
-    expect(result.byEmail).toBeNull();
-    expect(result.byUsername).toBeNull();
+    expect(Option.isNone(result.byEmail)).toBe(true);
+    expect(Option.isNone(result.byUsername)).toBe(true);
   });
 
   it("deleteByUser does not affect other users", async () => {
@@ -299,11 +300,11 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
           };
         }),
       );
-      expect(result.replaced?.value).toBe("alice-new@example.com");
+      expect(Option.getOrUndefined(result.replaced)?.value).toBe("alice-new@example.com");
       expect(result.listed.map((i) => [i.value, i.verified])).toEqual([
         ["alice-new@example.com", true],
       ]);
-      expect(result.old).toBeNull();
+      expect(Option.isNone(result.old)).toBe(true);
     });
 
     it("refuses a value another user holds with AuthError (IdentifierTakenError through replaceIdentifier) and keeps the old one", async () => {
@@ -327,7 +328,7 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
       expect(result.listed.map((i) => [i.value, i.verified])).toEqual([
         ["alice@example.com", true],
       ]);
-      expect(result.bob?.userId).toBe("user-2");
+      expect(Option.getOrUndefined(result.bob)?.userId).toBe("user-2");
     });
 
     it("resolves to null for an identifier the user no longer holds (IdentifierNotFoundError through replaceIdentifier), writing nothing", async () => {
@@ -345,7 +346,7 @@ Arr.forEach(replaceStores, ([label, makeLayer]) => {
           };
         }),
       );
-      expect(result.replaced).toBeNull();
+      expect(Option.isNone(result.replaced)).toBe(true);
       expect(result.notFound._tag).toBe("IdentifierNotFoundError");
       expect(result.listed.map((i) => i.value)).toEqual(["alice@example.com"]);
     });
@@ -473,7 +474,7 @@ describe("primaryEmailValue", () => {
 
 /** A user lookup that finds every id. */
 const getUser = (id: string) =>
-  Effect.succeed({ id, createdAt: now, updatedAt: now, attributes: {} });
+  Effect.succeedSome({ id, createdAt: now, updatedAt: now, attributes: {} });
 
 /** Bob's address, in a store that compares like a `_ai_ci` column. */
 const seeded = () => {
@@ -487,14 +488,16 @@ describe("lookupIdentifier", () => {
   it("passes an exact match through", async () => {
     const { bob, store } = seeded();
     expect(await Effect.runPromise(lookupIdentifier(store, "email", "bob@example.com"))).toEqual(
-      bob,
+      Option.some(bob),
     );
   });
 
   it("treats a record the store matched by case, accent or width as a miss", async () => {
     const { bob, store } = seeded();
     // The store itself answers with Bob's record, as a `_ai_ci` column would.
-    expect(await Effect.runPromise(store.getByValue("email", "bob@exämple.com"))).toEqual(bob);
+    expect(await Effect.runPromise(store.getByValue("email", "bob@exämple.com"))).toEqual(
+      Option.some(bob),
+    );
     const lookups = await Effect.runPromise(
       Effect.forEach(
         ["bob@exämple.com", "BOB@example.com", "ｂｏｂ@example.com"],
@@ -502,23 +505,30 @@ describe("lookupIdentifier", () => {
         { concurrency: 1 },
       ),
     );
-    expect(lookups).toEqual([null, null, null]);
+    expect(lookups.map(Option.isNone)).toEqual([true, true, true]);
   });
 
   it("treats a record of another type as a miss", async () => {
     const store: typeof IdentifierStore.Service = {
       ...memoryIdentifierStore(),
-      getByValue: () => Effect.succeed(mkIdentifier({ type: "username", value: "bob" })),
+      getByValue: () =>
+        Effect.succeed(Option.fromNullishOr(mkIdentifier({ type: "username", value: "bob" }))),
     };
-    expect(await Effect.runPromise(lookupIdentifier(store, "email", "bob"))).toBeNull();
+    expect(Option.isNone(await Effect.runPromise(lookupIdentifier(store, "email", "bob")))).toBe(
+      true,
+    );
   });
 
   it("keeps resolveUserByIdentifier and claimIdentifier off the look-alike's owner", async () => {
     const { store } = seeded();
 
     expect(
-      await Effect.runPromise(resolveUserByIdentifier(store, getUser, "email", "bob@exämple.com")),
-    ).toBeNull();
+      Option.isNone(
+        await Effect.runPromise(
+          resolveUserByIdentifier(store, getUser, "email", "bob@exämple.com"),
+        ),
+      ),
+    ).toBe(true);
     // The look-alike is not reported as Bob's: it is a value of its own.
     const claimed = await Effect.runPromise(
       claimIdentifier(
@@ -560,30 +570,26 @@ describe("findIdentifierOwner", () => {
     const found = await Effect.runPromise(
       findIdentifierOwner(store, getUser, "email", "bob@example.com", dangling),
     );
-    expect(found.identifier).toEqual(bob);
-    expect(found.user?.id).toBe("user-bob");
+    expect(Option.getOrUndefined(found)?.identifier).toEqual(bob);
+    expect(Option.getOrUndefined(found)?.user?.id).toBe("user-bob");
   });
 
-  it("is null for an unclaimed value, look-alikes included", async () => {
+  it("is none for an unclaimed value, look-alikes included", async () => {
     const { store } = seeded();
     expect(
-      await Effect.runPromise(
-        findIdentifierOwner(store, getUser, "email", "bob@exämple.com", dangling),
+      Option.isNone(
+        await Effect.runPromise(
+          findIdentifierOwner(store, getUser, "email", "bob@exämple.com", dangling),
+        ),
       ),
-    ).toEqual({ identifier: null, user: null });
+    ).toBe(true);
   });
 
   it("fails with onDangling when the holder's owner is gone", async () => {
     const { store } = seeded();
     const failure = await Effect.runPromise(
       Effect.flip(
-        findIdentifierOwner(
-          store,
-          () => Effect.succeed(null),
-          "email",
-          "bob@example.com",
-          dangling,
-        ),
+        findIdentifierOwner(store, () => Effect.succeedNone, "email", "bob@example.com", dangling),
       ),
     );
     expect(failure).toBe("dangling");

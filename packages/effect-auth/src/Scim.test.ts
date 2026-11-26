@@ -126,13 +126,13 @@ const makeStores = (
     get: (userId) =>
       Effect.sync(() => {
         reads.users++;
-        return Option.getOrNull(MutableHashMap.get(usersById, userId));
+        return MutableHashMap.get(usersById, userId);
       }),
     update: (user) => Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
   };
 
   const coreUserStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
   };
 
   const userServiceStore: typeof UserServiceStore.Service = {
@@ -183,10 +183,10 @@ const makeStores = (
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
-        members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
       ),
     getMemberById: (memberId: string) =>
-      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
+      Effect.succeed(Arr.findFirst(members, (m) => m.id === memberId)),
     listMembersByOrganization: (organizationId: string) =>
       Effect.sync(() => {
         reads.fullMemberLists++;
@@ -206,13 +206,12 @@ const makeStores = (
     countMembersByOrganization: (organizationId: string) =>
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),
-    getTeam: (teamId: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
+    getTeam: (teamId: string) => Effect.succeed(MutableHashMap.get(teams, teamId)),
     updateTeam: (t: Team) =>
       Effect.sync(() => {
-        if (!MutableHashMap.has(teams, t.id)) return null;
+        if (!MutableHashMap.has(teams, t.id)) return Option.none();
         MutableHashMap.set(teams, t.id, t);
-        return t;
+        return Option.fromNullishOr(t);
       }),
     deleteTeam: (teamId: string) =>
       Effect.sync(() => {
@@ -238,7 +237,7 @@ const makeStores = (
     // Read when provisioning a member, to pick up the organization's own
     // `defaultRole`; tests that care seed `organizations`.
     getOrganizationById: (organizationId: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
+      Effect.succeed(MutableHashMap.get(organizations, organizationId)),
     // Never reached by SCIM.
     createOrganization: unused,
     getOrganizationBySlug: unused,
@@ -447,8 +446,8 @@ describe("ScimService — users", () => {
 
     // The IdP is the system of record for the address, so it lands verified.
     const identifier = await fx.run(fx.identifiers.getByValue("email", "ada@acme.test"));
-    expect(identifier?.userId).toBe(resource.id);
-    expect(identifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(identifier)?.userId).toBe(resource.id);
+    expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
 
     // ...and the user is a member of the connection's organization, no other.
     expect(fx.members.map((m) => ({ organizationId: m.organizationId, role: m.role }))).toEqual([
@@ -741,7 +740,9 @@ describe("ScimService — users", () => {
     // the old handle is free and the new one is the primary.
     expect(patched.userName).toBe("ada.lovelace@acme.test");
     expect(patched.emails.map((e) => e.value)).toEqual(["ada.lovelace@acme.test"]);
-    expect(await fx.run(fx.identifiers.getByValue("email", "ada@acme.test"))).toBeNull();
+    expect(Option.isNone(await fx.run(fx.identifiers.getByValue("email", "ada@acme.test")))).toBe(
+      true,
+    );
   });
 
   it("answers a userName change a one-email store refuses with 409 uniqueness, keeping the old name", async () => {
@@ -886,7 +887,9 @@ describe("ScimService — users", () => {
     );
     expect(authoritative.emails.map((e) => e.value)).toEqual(["ada@acme.test"]);
     expect(authoritative.active).toBe(false);
-    expect(await fx.run(fx.identifiers.getByValue("email", "ada.alt@acme.test"))).toBeNull();
+    expect(
+      Option.isNone(await fx.run(fx.identifiers.getByValue("email", "ada.alt@acme.test"))),
+    ).toBe(true);
   });
 
   it("treats DELETE as a soft disable, not a delete", async () => {
@@ -898,7 +901,9 @@ describe("ScimService — users", () => {
 
     // The user, its identifiers and its membership all survive.
     expect(MutableHashMap.has(fx.usersById, ada.id)).toBe(true);
-    expect(await fx.run(fx.identifiers.getByValue("email", "ada@acme.test"))).not.toBeNull();
+    expect(Option.isNone(await fx.run(fx.identifiers.getByValue("email", "ada@acme.test")))).toBe(
+      false,
+    );
     expect(fx.members).toHaveLength(1);
     expect(MutableHashMap.size(fx.sessions)).toBe(0);
 
@@ -1157,8 +1162,8 @@ describe("ScimService — deactivation revokes access", () => {
 
     expect(Arr.fromIterable(MutableHashMap.keys(keys))).toEqual([`key-${grace.id}`]);
     expect(Arr.fromIterable(MutableHashMap.keys(tokens))).toEqual([`token-${grace.id}`]);
-    expect(Effect.runSync(consentStore.get(ada.id, "client"))).toBeNull();
-    expect(Effect.runSync(consentStore.get(grace.id, "client"))).not.toBeNull();
+    expect(Option.isNone(Effect.runSync(consentStore.get(ada.id, "client")))).toBe(true);
+    expect(Option.isNone(Effect.runSync(consentStore.get(grace.id, "client")))).toBe(false);
   });
 });
 
@@ -1807,7 +1812,9 @@ describe("ScimService — managed users", () => {
       }),
     );
     expect(put.scimType).toBe("invalidValue");
-    expect(await fx.run(fx.identifiers.getByValue("email", "ada@evil.test"))).toBeNull();
+    expect(Option.isNone(await fx.run(fx.identifiers.getByValue("email", "ada@evil.test")))).toBe(
+      true,
+    );
 
     // An address the user holds off the domains (proved some other way) is
     // never SCIM's to unclaim, by name or by a remove-all.
@@ -1835,8 +1842,9 @@ describe("ScimService — managed users", () => {
     await fx.run(
       fx.service.replaceUser(fx.a.connection, ada.id, { userName: "ada@acme.test", emails: [] }),
     );
-    expect((await fx.run(fx.identifiers.getByValue("email", "ada@home.test")))?.userId).toBe(
-      ada.id,
-    );
+    expect(
+      Option.getOrUndefined(await fx.run(fx.identifiers.getByValue("email", "ada@home.test")))
+        ?.userId,
+    ).toBe(ada.id);
   });
 });

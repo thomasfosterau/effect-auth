@@ -157,17 +157,17 @@ describe("IdentifierStore over BetterAuth", () => {
       auth,
       Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "email", email)),
     );
-    expect(byEmail?.userId).toBe(user.id);
+    expect(Option.getOrUndefined(byEmail)?.userId).toBe(user.id);
     const byUsername = await run(
       auth,
       Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "username", "ada")),
     );
-    expect(byUsername?.userId).toBe(user.id);
+    expect(Option.getOrUndefined(byUsername)?.userId).toBe(user.id);
     const none = await run(
       auth,
       Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "phone", "+15550100")),
     );
-    expect(none).toBeNull();
+    expect(Option.isNone(none)).toBe(true);
   });
 
   it("derives and finds the phoneNumber() plugin's number, and verifies it", async () => {
@@ -179,18 +179,21 @@ describe("IdentifierStore over BetterAuth", () => {
       auth,
       Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "phone", "+15550100")),
     );
-    expect(found).toMatchObject({ id: identifierId(user.id, "phone"), verified: false });
+    expect(Option.getOrUndefined(found)).toMatchObject({
+      id: identifierId(user.id, "phone"),
+      verified: false,
+    });
     const verified = await run(
       auth,
       Effect.flatMap(identifiers, (s) => s.setVerified(identifierId(user.id, "phone"), fromNow(0))),
     );
-    expect(verified?.verified).toBe(true);
+    expect(Option.getOrUndefined(verified)?.verified).toBe(true);
     // Without the username() plugin there is no column to look a username up by.
     const none = await run(
       auth,
       Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "username", "ada")),
     );
-    expect(none).toBeNull();
+    expect(Option.isNone(none)).toBe(true);
   });
 
   it("marks the email verified", async () => {
@@ -200,13 +203,13 @@ describe("IdentifierStore over BetterAuth", () => {
       auth,
       Effect.flatMap(identifiers, (s) => s.setVerified(identifierId(user.id, "email"), fromNow(0))),
     );
-    expect(verified?.verified).toBe(true);
+    expect(Option.getOrUndefined(verified)?.verified).toBe(true);
     expect(db["user"]?.[0]?.["emailVerified"]).toBe(true);
     const unknown = await run(
       auth,
       Effect.flatMap(identifiers, (s) => s.setVerified("not-derived", fromNow(0))),
     );
-    expect(unknown).toBeNull();
+    expect(Option.isNone(unknown)).toBe(true);
   });
 
   it("refuses every write that would skip BetterAuth's verification", async () => {

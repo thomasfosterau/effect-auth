@@ -6,6 +6,7 @@
  */
 
 import { DateTime, Effect } from "effect";
+import * as Option from "effect/Option";
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -77,11 +78,11 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
 
       expect(result.created.userId).toBe(USER.ada);
       expect(result.created.verified).toBe(false);
-      expect(result.byValue?.id).toBe(result.created.id);
-      expect(result.byValue?.userId).toBe(USER.ada);
-      expect(result.byValue?.value).toBe("ada@example.com");
-      expect(result.missing).toBeNull();
-      expect(result.crossType).toBeNull();
+      expect(Option.getOrUndefined(result.byValue)?.id).toBe(result.created.id);
+      expect(Option.getOrUndefined(result.byValue)?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.byValue)?.value).toBe("ada@example.com");
+      expect(Option.isNone(result.missing)).toBe(true);
+      expect(Option.isNone(result.crossType)).toBe(true);
     });
 
     it("keeps values that differ only by case or accent distinct", async () => {
@@ -103,13 +104,13 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
         }),
       );
 
-      expect(result.accented).toBeNull();
-      expect(result.cased).toBeNull();
-      expect(result.fullWidth).toBeNull();
+      expect(Option.isNone(result.accented)).toBe(true);
+      expect(Option.isNone(result.cased)).toBe(true);
+      expect(Option.isNone(result.fullWidth)).toBe(true);
       expect(result.claimed.userId).toBe(USER.grace);
-      expect(result.ownerOfBob?.userId).toBe(USER.ada);
-      expect(result.ownerOfLookAlike?.userId).toBe(USER.grace);
-      expect(result.ownerOfLookAlike?.value).toBe("bob@exämple.com");
+      expect(Option.getOrUndefined(result.ownerOfBob)?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.ownerOfLookAlike)?.userId).toBe(USER.grace);
+      expect(Option.getOrUndefined(result.ownerOfLookAlike)?.value).toBe("bob@exämple.com");
     });
 
     it("refuses a claimed (type, value) with AuthError, which claimIdentifier reports as taken", async () => {
@@ -147,7 +148,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
 
       expect(result.free.userId).toBe(USER.grace);
       // The loser never took the address from its owner.
-      expect(result.owner?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.owner)?.userId).toBe(USER.ada);
     });
 
     it("lists a user's identifiers, and [] for a user with none", async () => {
@@ -188,9 +189,9 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
         }),
       );
 
-      expect(result.verified?.verified).toBe(true);
-      expect(result.reloaded?.verified).toBe(true);
-      expect(result.unknown).toBeNull();
+      expect(Option.getOrUndefined(result.verified)?.verified).toBe(true);
+      expect(Option.getOrUndefined(result.reloaded)?.verified).toBe(true);
+      expect(Option.isNone(result.unknown)).toBe(true);
     });
 
     it("delete removes one identifier, and is a no-op when it is absent", async () => {
@@ -211,9 +212,9 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
         }),
       );
 
-      expect(result.gone).toBeNull();
+      expect(Option.isNone(result.gone)).toBe(true);
       expect(result.adaListed).toEqual([]);
-      expect(result.kept?.userId).toBe(USER.grace);
+      expect(Option.getOrUndefined(result.kept)?.userId).toBe(USER.grace);
     });
 
     it("deleteByUser removes that user's identifiers, and is a no-op for a user with none", async () => {
@@ -259,14 +260,14 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
         }),
       );
 
-      expect(result.replaced?.userId).toBe(USER.ada);
-      expect(result.replaced?.value).toBe("ada-new@example.com");
-      expect(result.replaced?.verified).toBe(true);
+      expect(Option.getOrUndefined(result.replaced)?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.replaced)?.value).toBe("ada-new@example.com");
+      expect(Option.getOrUndefined(result.replaced)?.verified).toBe(true);
       expect(result.listed.map((identifier) => [identifier.value, identifier.verified])).toEqual([
         ["ada-new@example.com", true],
       ]);
-      expect(result.old).toBeNull();
-      expect(result.current?.userId).toBe(USER.ada);
+      expect(Option.isNone(result.old)).toBe(true);
+      expect(Option.getOrUndefined(result.current)?.userId).toBe(USER.ada);
       expect(result.moved.userId).toBe(USER.grace);
     });
 
@@ -300,7 +301,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
         [["ada@example.com", true]],
       );
-      expect(result.owner?.userId).toBe(USER.grace);
+      expect(Option.getOrUndefined(result.owner)?.userId).toBe(USER.grace);
     });
 
     it("replace of an identifier the user no longer holds resolves to null and writes nothing", async () => {
@@ -321,10 +322,10 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
         }),
       );
 
-      expect(result.replaced).toBeNull();
+      expect(Option.isNone(result.replaced)).toBe(true);
       expect(result.notFound._tag).toBe("IdentifierNotFoundError");
       expect(result.listed.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
-      expect(result.newAddress).toBeNull();
+      expect(Option.isNone(result.newAddress)).toBe(true);
     });
 
     it("replace refuses a replacement for another user, of another type, with the same id, or of the same value", async () => {
@@ -364,7 +365,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.otherType._tag).toBe("AuthError");
       expect(result.sameId._tag).toBe("AuthError");
       expect(result.sameValue._tag).toBe("AuthError");
-      expect(result.newAddress).toBeNull();
+      expect(Option.isNone(result.newAddress)).toBe(true);
       expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
         [["ada@example.com", false]],
       );
@@ -418,8 +419,8 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
 
       expect(result.created.verified).toBe(true);
       expect("verifiedAt" in result.created).toBe(false);
-      expect(result.reloaded?.verified).toBe(true);
-      expect(result.reloaded && "verifiedAt" in result.reloaded).toBe(false);
+      expect(Option.getOrUndefined(result.reloaded)?.verified).toBe(true);
+      expect(Option.exists(result.reloaded, (found) => "verifiedAt" in found)).toBe(false);
     });
 
     it("holds only email: other types never resolve and cannot be created", async () => {
@@ -461,8 +462,8 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
       expect(result.username._tag).toBe("IdentifierRefusedError");
       expect(result.username.message).toContain("email identifiers only");
       expect(result.phone._tag).toBe("IdentifierRefusedError");
-      expect(result.usernameLookup).toBeNull();
-      expect(result.phoneLookup).toBeNull();
+      expect(Option.isNone(result.usernameLookup)).toBe(true);
+      expect(Option.isNone(result.phoneLookup)).toBe(true);
       expect(result.listed.map((identifier) => identifier.type)).toEqual(["email"]);
       expect(result.graceListed).toEqual([]);
     });
@@ -493,7 +494,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
       expect(result.second.message).toContain("one email identifier per user");
       expect(result.claim._tag).toBe("IdentifierRefusedError");
       expect(result.listed.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
-      expect(result.secondLookup).toBeNull();
+      expect(Option.isNone(result.secondLookup)).toBe(true);
     });
 
     it("refuses an email for a user with no row, and writes nothing", async () => {
@@ -511,7 +512,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
 
       expect(result.error._tag).toBe("AuthError");
       expect(result.error.message).toContain("no user row");
-      expect(result.lookup).toBeNull();
+      expect(Option.isNone(result.lookup)).toBe(true);
       expect(result.ghostListed).toEqual([]);
     });
 
@@ -524,8 +525,8 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
         }),
       );
 
-      expect(result?.id).toBe(USER.ada);
-      expect(result?.createdAt).toEqual(USER_CREATED_AT);
+      expect(Option.getOrUndefined(result)?.id).toBe(USER.ada);
+      expect(Option.getOrUndefined(result)?.createdAt).toEqual(USER_CREATED_AT);
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada-new@example.com",
         emailVerified: true,
@@ -547,7 +548,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
       );
 
       expect(result.listed).toEqual([]);
-      expect(result.verified).toBeNull();
+      expect(Option.isNone(result.verified)).toBe(true);
     });
 
     it("delete clears the address and keeps the user row, so the address can be claimed again", async () => {
@@ -580,7 +581,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
 
       // The row survives the delete; only its email columns are cleared.
       expect(result.cleared).toEqual({ email: null, emailVerified: false });
-      expect(result.afterDelete).toBeNull();
+      expect(Option.isNone(result.afterDelete)).toBe(true);
       expect(result.adaListed).toEqual([]);
       expect(result.moved.userId).toBe(USER.grace);
       expect(result.moved.verified).toBe(true);
@@ -613,7 +614,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         }),
       );
 
-      expect(result.ada?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.ada)?.userId).toBe(USER.ada);
       expect(result.adaListed.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
     });
 
@@ -630,7 +631,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
 
       expect(result.refused._tag).toBe("AuthError");
       expect(result.refused.message).toContain("NOT NULL");
-      expect(result.still?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.still)?.userId).toBe(USER.ada);
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada@example.com",
         emailVerified: false,
@@ -654,17 +655,20 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
           const ada = yield* store.getByValue("email", "ada@example.com");
-          assert(ada !== null, "ada's email is seeded");
+          assert(Option.isSome(ada), "ada's email is seeded");
           return {
-            replaced: yield* store.replace(ada, emailFor(USER.ada, "ada-new@example.com", true)),
+            replaced: yield* store.replace(
+              ada.value,
+              emailFor(USER.ada, "ada-new@example.com", true),
+            ),
             old: yield* store.getByValue("email", "ada@example.com"),
             listed: yield* store.listByUser(USER.ada),
           };
         }),
       );
 
-      expect(result.replaced?.value).toBe("ada-new@example.com");
-      expect(result.old).toBeNull();
+      expect(Option.getOrUndefined(result.replaced)?.value).toBe("ada-new@example.com");
+      expect(Option.isNone(result.old)).toBe(true);
       expect(result.listed.map((identifier) => identifier.value)).toEqual(["ada-new@example.com"]);
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada-new@example.com",
@@ -677,9 +681,9 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
           const ada = yield* store.getByValue("email", "ada@example.com");
-          assert(ada !== null, "ada's email is seeded");
+          assert(Option.isSome(ada), "ada's email is seeded");
           return yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada, emailFor(USER.ada, "grace@example.com")),
+            Auth.replaceIdentifier(store, ada.value, emailFor(USER.ada, "grace@example.com")),
           );
         }),
       );
@@ -703,7 +707,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         }),
       );
 
-      expect(result.held?.userId).toBe(USER.ada);
+      expect(Option.getOrUndefined(result.held)?.userId).toBe(USER.ada);
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada@example.com",
         emailVerified: false,
@@ -723,7 +727,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
       );
 
       expect(await harness.readUserRow(USER.ada)).toBeNull();
-      expect(after.gone).toBeNull();
+      expect(Option.isNone(after.gone)).toBe(true);
       expect(after.listed).toEqual([]);
     });
 
@@ -753,7 +757,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         }),
       );
 
-      expect(result?.verified).toBe(true);
+      expect(Option.getOrUndefined(result)?.verified).toBe(true);
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada@example.com",
         emailVerified: true,
@@ -789,8 +793,8 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
         }),
       );
 
-      expect(result.verified?.verifiedAt).toEqual(verifiedAt);
-      expect(result.reloaded?.verifiedAt).toEqual(verifiedAt);
+      expect(Option.getOrUndefined(result.verified)?.verifiedAt).toEqual(verifiedAt);
+      expect(Option.getOrUndefined(result.reloaded)?.verifiedAt).toEqual(verifiedAt);
       expect(await harness.readVerifiedAt(USER.ada)).toEqual(verifiedAt);
     });
 
@@ -851,19 +855,18 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
               catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
             }),
           );
-          assert(verified !== null, "the verified replace succeeds");
+          assert(Option.isSome(verified), "the verified replace succeeds");
           const unverified = yield* store.replace(
-            verified,
-
+            verified.value,
             emailFor(USER.ada, "ada-other@example.com"),
           );
           return { verified, storedVerifiedAt, unverified };
         }),
       );
 
-      expect(result.verified?.verifiedAt).toEqual(verifiedAt);
+      expect(Option.getOrUndefined(result.verified)?.verifiedAt).toEqual(verifiedAt);
       expect(result.storedVerifiedAt).toEqual(verifiedAt);
-      expect(result.unverified && "verifiedAt" in result.unverified).toBe(false);
+      expect(Option.exists(result.unverified, (found) => "verifiedAt" in found)).toBe(false);
       expect(await harness.readVerifiedAt(USER.ada)).toBeNull();
     });
 

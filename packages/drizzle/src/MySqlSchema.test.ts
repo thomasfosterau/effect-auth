@@ -30,6 +30,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
 import { DateTime, Effect, Layer, Struct } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -181,14 +182,16 @@ describe("MySQL / statements", () => {
       "select `id`, `user_id`, `expires_at`, `created_at`, `last_activity_at`, `attributes` from `effect_auth_sessions` where `effect_auth_sessions`.`id` = ? limit ?",
     );
     expect(proxy.statements[0]?.params).toEqual(["session-1", 1]);
-    expect(session).toEqual({
-      id: "session-1",
-      userId: "user-1",
-      expiresAt: at(60_000),
-      createdAt: at(0),
-      lastActivityAt: at(0),
-      attributes: { device: "laptop" },
-    });
+    expect(session).toEqual(
+      Option.some({
+        id: "session-1",
+        userId: "user-1",
+        expiresAt: at(60_000),
+        createdAt: at(0),
+        lastActivityAt: at(0),
+        attributes: { device: "laptop" },
+      }),
+    );
   });
 
   it("verifies an identifier with UPDATE then SELECT, never RETURNING", async () => {
@@ -221,15 +224,17 @@ describe("MySQL / statements", () => {
     ]);
     expect(proxy.statements.every((statement) => !statement.sql.includes("returning"))).toBe(true);
     // `1` came back a real `boolean`, the datetime a real `Date`.
-    expect(verified).toEqual({
-      id: "identifier-1",
-      userId: "user-1",
-      type: "email",
-      value: "ada@example.com",
-      verified: true,
-      verifiedAt: at(9000),
-      createdAt: at(0),
-    });
+    expect(verified).toEqual(
+      Option.some({
+        id: "identifier-1",
+        userId: "user-1",
+        type: "email",
+        value: "ada@example.com",
+        verified: true,
+        verifiedAt: at(9000),
+        createdAt: at(0),
+      }),
+    );
   });
 
   it("replaces an identifier with a guarded read, then INSERT, then DELETE", async () => {
@@ -260,7 +265,7 @@ describe("MySQL / statements", () => {
       }),
     );
 
-    expect(replaced).toEqual(to);
+    expect(replaced).toEqual(Option.some(to));
     expect(proxy.statements.map((statement) => statement.sql)).toEqual([
       "select `id` from `effect_auth_identifiers` where ((`effect_auth_identifiers`.`id` = ?) and (`effect_auth_identifiers`.`user_id` = ?) and (`effect_auth_identifiers`.`type` = ?) and (`effect_auth_identifiers`.`value` = ?)) limit ?",
       "insert into `effect_auth_identifiers` (`id`, `user_id`, `type`, `value`, `verified`, `verified_at`, `created_at`) values (?, ?, ?, ?, ?, ?, ?)",
@@ -286,7 +291,7 @@ describe("MySQL / statements", () => {
         return yield* store.getByValue("email", "nobody@example.com");
       }),
     );
-    expect(missing).toBeNull();
+    expect(Option.isNone(missing)).toBe(true);
 
     const proxyWithRow = makeProxy();
     proxyWithRow.respondWith([
@@ -308,8 +313,8 @@ describe("MySQL / statements", () => {
       }),
     );
 
-    expect(unverified?.verified).toBe(false);
-    expect(unverified && "verifiedAt" in unverified).toBe(false);
+    expect(Option.getOrUndefined(unverified)?.verified).toBe(false);
+    expect(Option.exists(unverified, (found) => "verifiedAt" in found)).toBe(false);
     expect(proxyWithRow.statements[0]?.sql).toContain(
       "where ((`effect_auth_identifiers`.`type` = ?) and (`effect_auth_identifiers`.`value` = ?))",
     );
@@ -339,7 +344,7 @@ describe("MySQL / statements", () => {
       }),
     );
 
-    expect(resolved).toBeNull();
+    expect(Option.isNone(resolved)).toBe(true);
     expect(proxy.statements).toHaveLength(1);
     expect(proxy.statements[0]?.sql).toContain(
       "where ((`effect_auth_identifiers`.`type` = ?) and (`effect_auth_identifiers`.`value` = ?))",
@@ -356,7 +361,7 @@ describe("MySQL / statements", () => {
         return yield* Auth.lookupIdentifier(store, "email", "bob@example.com");
       }),
     );
-    expect(found?.userId).toBe("user-bob");
+    expect(Option.getOrUndefined(found)?.userId).toBe("user-bob");
   });
 
   it("batches the same way through the request resolvers", async () => {
@@ -382,8 +387,8 @@ describe("MySQL / statements", () => {
     // Two reads, two ids, one query.
     expect(proxy.statements).toHaveLength(1);
     expect(proxy.statements[0]?.sql).toContain("`id` in (?, ?)");
-    expect(user?.id).toBe("user-1");
-    expect(missing).toBeNull();
+    expect(Option.getOrUndefined(user)?.id).toBe("user-1");
+    expect(Option.isNone(missing)).toBe(true);
   });
 });
 

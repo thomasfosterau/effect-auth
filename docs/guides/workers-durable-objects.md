@@ -123,6 +123,7 @@ Implement this one when your own code, or a plugin, reads and writes `RateLimitS
 // auth-rate-limit-store.ts
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 /** When an entry can be dropped: its window is over and any block has lapsed. */
@@ -186,7 +187,12 @@ export const makeRateLimitStore = (
 ): typeof Auth.RateLimitStore.Service => {
   const counter = (key: string) => namespace.get(namespace.idFromName(key));
   return {
-    get: (key) => call("rateLimit.get", () => counter(key).read()),
+    // An object answers a miss with `null` over RPC; the store contract's is `None`.
+    get: (key) =>
+      Effect.map(
+        call("rateLimit.get", () => counter(key).read()),
+        Option.fromNullishOr,
+      ),
     set: (key, entry, ttl) => call("rateLimit.set", () => counter(key).write(entry, ttl)),
     increment: (key, ttl) => call("rateLimit.increment", () => counter(key).increment(key, ttl)),
     delete: (key) => call("rateLimit.delete", () => counter(key).remove()),
@@ -214,6 +220,7 @@ A session is written before its pointer and deleted before it. A pointer left be
 // auth-sessions.ts
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 const sessionKey = (sessionId: string) => `session:${sessionId}`;
@@ -327,11 +334,12 @@ export const makeSessionStore = (
         await pointer(session.id).write(session.userId, session.expiresAt);
         return session;
       }),
+    // An object answers a miss with `null` over RPC; the store contract's is `None`.
     get: (sessionId) =>
       call("session.get", async () => {
         const userId = await pointer(sessionId).read();
         return userId === null ? null : user(userId).read(sessionId);
-      }),
+      }).pipe(Effect.map(Option.fromNullishOr)),
     // Never creates: a session whose pointer is gone was signed out or revoked.
     update: (session) =>
       call("session.update", async () => {
@@ -347,7 +355,7 @@ export const makeSessionStore = (
         const touched = await user(userId).touch(sessionId, touch);
         if (touched !== null) await pointer(sessionId).write(userId, touched.expiresAt);
         return touched;
-      }),
+      }).pipe(Effect.map(Option.fromNullishOr)),
     // The session first, then its pointer: a pointer left behind by a failure
     // in between reads as a miss.
     delete: (sessionId) =>

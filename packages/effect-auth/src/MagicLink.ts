@@ -9,6 +9,7 @@
  * @module magic-link
  */
 import { Clock, Context, Duration, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "./Identifier.ts";
@@ -64,17 +65,21 @@ export class MagicLinkStore extends Context.Service<
   MagicLinkStore,
   {
     readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
-    readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
-    readonly getByEmail: (email: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<Option.Option<MagicLinkToken>, Errors.AuthError>;
+    readonly getByEmail: (
+      email: string,
+    ) => Effect.Effect<Option.Option<MagicLinkToken>, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none. Of two concurrent callers
+     * return `None` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+    readonly consume: (
+      token: string,
+    ) => Effect.Effect<Option.Option<MagicLinkToken>, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
     readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -287,7 +292,7 @@ export const make = (
         // succeed without sending anything. When sign-up is enabled the link
         // is always sent (the user is created at verify time).
         const deliver = disableSignUp
-          ? (yield* lookupIdentifier(identifiers, "email", email)) !== null
+          ? Option.isSome(yield* lookupIdentifier(identifiers, "email", email))
           : true;
 
         // Resend cooldown: reject if an outstanding token was created within
@@ -295,8 +300,9 @@ export const make = (
         // whose earlier request stored an undelivered token below, so a known
         // and an unknown address get the same answer inside the window.
         if (resendCooldown > 0) {
-          const existing = yield* store.getByEmail(email);
-          if (existing !== null) {
+          const foundExisting = yield* store.getByEmail(email);
+          if (Option.isSome(foundExisting)) {
+            const existing = foundExisting.value;
             const elapsed = (yield* Clock.currentTimeMillis) - existing.createdAt;
             if (elapsed < resendCooldown) {
               return yield* new Errors.ResendTooSoonError({
@@ -355,8 +361,8 @@ export const make = (
         options?: MagicLinkVerifyOptions,
       ) {
         const tokenHash = yield* hashToken(rawToken);
-        const magicLink = rawToken ? yield* store.get(tokenHash) : null;
-        if (!magicLink) {
+        const foundMagicLink = rawToken ? yield* store.get(tokenHash) : Option.none();
+        if (Option.isNone(foundMagicLink)) {
           // Unkeyed: the token names no address, but the per-IP limit still
           // counts the guess.
           yield* hooks.beforeAuthenticate({ method: "magic-link" });
@@ -364,6 +370,7 @@ export const make = (
             message: "Invalid or expired magic link token",
           });
         }
+        const magicLink = foundMagicLink.value;
 
         // Check expiration
         if ((yield* Clock.currentTimeMillis) > magicLink.expiresAt) {
@@ -386,18 +393,18 @@ export const make = (
         yield* hooks.beforeAuthenticate({
           method: "magic-link",
           identifier: { type: "email", value: magicLink.email },
-          userId: found.user?.id,
+          userId: Option.getOrUndefined(Option.map(found, (owner) => owner.user.id)),
         });
 
         // Spend the token atomically: of concurrent redemptions of one
         // link, only the caller whose `consume` took the record signs in.
-        if ((yield* store.consume(tokenHash)) === null) {
+        if (Option.isNone(yield* store.consume(tokenHash))) {
           return yield* new Errors.MagicLinkError({
             message: "Invalid or expired magic link token",
           });
         }
 
-        if (found.user === null && disableSignUp) {
+        if (Option.isNone(found) && disableSignUp) {
           return yield* new Errors.MagicLinkError({ message: "Sign-up is disabled" });
         }
         // A verified magic link proves ownership of the email.

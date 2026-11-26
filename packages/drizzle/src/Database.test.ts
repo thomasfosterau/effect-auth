@@ -21,6 +21,7 @@ import type { EffectPgDatabase } from "drizzle-orm/effect-postgres";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import * as EffectPglite from "drizzle-orm/effect-pglite";
 import { Context, DateTime, Effect, Latch, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -134,8 +135,8 @@ describe("databaseLayer doors", () => {
     );
 
     expect(result.created.id).toBe("effect-driver");
-    expect(result.read).toEqual(makeSession("effect-driver", "user-1"));
-    expect(result.afterDelete).toBeNull();
+    expect(result.read).toEqual(Option.some(makeSession("effect-driver", "user-1")));
+    expect(Option.isNone(result.afterDelete)).toBe(true);
   });
 });
 
@@ -199,7 +200,11 @@ describe("overlapping requests", () => {
           db: PgliteDatabase,
           arrived: Latch.Latch,
           other: Latch.Latch,
-        ): Effect.Effect<ReadonlyArray<Auth.Session | null>, Auth.AuthError, StoreServices> =>
+        ): Effect.Effect<
+          ReadonlyArray<Option.Option<Auth.Session>>,
+          Auth.AuthError,
+          StoreServices
+        > =>
           Effect.gen(function* () {
             const sessions = yield* Auth.SessionStore;
             const before = yield* sessions.get("shared");
@@ -219,11 +224,11 @@ describe("overlapping requests", () => {
       }).pipe(Effect.provide(stores)),
     );
 
-    expect(firstReads.map((session) => session?.userId)).toEqual([
+    expect(firstReads.map((session) => Option.getOrUndefined(session)?.userId)).toEqual([
       "first-request",
       "first-request",
     ]);
-    expect(secondReads.map((session) => session?.userId)).toEqual([
+    expect(secondReads.map((session) => Option.getOrUndefined(session)?.userId)).toEqual([
       "second-request",
       "second-request",
     ]);

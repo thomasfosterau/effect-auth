@@ -27,6 +27,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import * as EffectPglite from "drizzle-orm/effect-pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as ApiKeyStore from "./ApiKeyStore.ts";
@@ -119,7 +120,10 @@ const run = (): Promise<Observed> => {
               [Requests.getSession("committed"), Requests.getSession("committed")],
               { concurrency: "unbounded" },
             );
-            return { direct: direct?.id ?? null, batched: batched.map((s) => s?.id ?? null) };
+            return {
+              direct: Option.getOrUndefined(direct)?.id ?? null,
+              batched: batched.map((s) => Option.getOrUndefined(s)?.id ?? null),
+            };
           }),
         );
 
@@ -139,8 +143,8 @@ const run = (): Promise<Observed> => {
         const committed = yield* sessions.get("committed");
         return {
           ...inside,
-          afterRollback: afterRollback?.id ?? null,
-          committed: committed?.id ?? null,
+          afterRollback: Option.getOrUndefined(afterRollback)?.id ?? null,
+          committed: Option.getOrUndefined(committed)?.id ?? null,
           fibers,
         };
       }).pipe(Effect.provide(stores), Effect.timeout("10 seconds"));
@@ -237,7 +241,7 @@ const purge = (outcome: "fail" | "commit"): Promise<Held> =>
           .pipe(Effect.ignore);
 
         return {
-          user: (yield* (yield* Auth.UserStore).get(user.id)) !== null,
+          user: Option.isSome(yield* (yield* Auth.UserStore).get(user.id)),
           identifiers: (yield* identifiers.listByUser(user.id)).length,
           apiKeys: (yield* apiKeys.listByUserId(user.id)).length,
           sessions: (yield* sessions.listSessions(user.id)).length,

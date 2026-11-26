@@ -88,14 +88,14 @@ const organizationStore = {
     }),
 
   getOrganizationById: (organizationId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(organizations, organizationId))),
+    Effect.sync(() => MutableHashMap.get(organizations, organizationId)),
 
   getOrganizationBySlug: (slug: string) =>
-    Effect.sync(
-      () =>
-        Array.from(MutableHashMap.values(organizations)).find(
-          (organization) => organization.slug === slug,
-        ) ?? null,
+    Effect.sync(() =>
+      Arr.findFirst(
+        MutableHashMap.values(organizations),
+        (organization) => organization.slug === slug,
+      ),
     ),
 
   updateOrganization: (organization: Organization) =>
@@ -137,15 +137,14 @@ const organizationStore = {
     }),
 
   getMember: (organizationId: string, userId: string) =>
-    Effect.sync(
-      () =>
-        Array.from(MutableHashMap.values(members)).find(
-          (member) => member.organizationId === organizationId && member.userId === userId,
-        ) ?? null,
+    Effect.sync(() =>
+      Arr.findFirst(
+        MutableHashMap.values(members),
+        (member) => member.organizationId === organizationId && member.userId === userId,
+      ),
     ),
 
-  getMemberById: (memberId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(members, memberId))),
+  getMemberById: (memberId: string) => Effect.sync(() => MutableHashMap.get(members, memberId)),
 
   updateMember: (member: Member) =>
     Effect.sync(() => {
@@ -185,7 +184,7 @@ const organizationStore = {
     }),
 
   getInvitation: (invitationId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(invitations, invitationId))),
+    Effect.sync(() => MutableHashMap.get(invitations, invitationId)),
 
   updateInvitation: (invitation: Invitation) =>
     Effect.sync(() => {
@@ -213,14 +212,13 @@ const organizationStore = {
       return team;
     }),
 
-  getTeam: (teamId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(teams, teamId))),
+  getTeam: (teamId: string) => Effect.sync(() => MutableHashMap.get(teams, teamId)),
 
   updateTeam: (team: Team) =>
     Effect.sync(() => {
-      if (!MutableHashMap.has(teams, team.id)) return null;
+      if (!MutableHashMap.has(teams, team.id)) return Option.none();
       MutableHashMap.set(teams, team.id, team);
-      return team;
+      return Option.some(team);
     }),
 
   deleteTeam: (teamId: string) =>
@@ -243,7 +241,7 @@ const organizationStore = {
     }),
 
   getTeamMemberById: (teamMemberId: string) =>
-    Effect.sync(() => teamMembers.find((teamMember) => teamMember.id === teamMemberId) ?? null),
+    Effect.sync(() => Arr.findFirst(teamMembers, (teamMember) => teamMember.id === teamMemberId)),
 
   removeTeamMember: (teamId: string, userId: string) =>
     Effect.sync(() => {
@@ -272,15 +270,11 @@ const organizationStore = {
     }),
 
   getOrgRole: (organizationId: string, role: string) =>
-    Effect.sync(() =>
-      Option.getOrNull(MutableHashMap.get(orgRoles, orgRoleKey(organizationId, role))),
-    ),
+    Effect.sync(() => MutableHashMap.get(orgRoles, orgRoleKey(organizationId, role))),
 
   getOrgRoleById: (orgRoleId: string) =>
-    Effect.sync(
-      () =>
-        Array.from(MutableHashMap.values(orgRoles)).find((orgRole) => orgRole.id === orgRoleId) ??
-        null,
+    Effect.sync(() =>
+      Arr.findFirst(MutableHashMap.values(orgRoles), (orgRole) => orgRole.id === orgRoleId),
     ),
 
   listOrgRoles: (organizationId: string) =>
@@ -370,16 +364,18 @@ const unknownUsers = MutableHashSet.empty<string>();
 const userStore: typeof UserStore.Service = {
   get: (userId) =>
     Effect.sync(() =>
-      MutableHashSet.has(unknownUsers, userId)
-        ? null
-        : Testing.fixtureUser({
-            id: userId,
-            attributes: Option.match(MutableHashMap.get(managedBy, userId), {
-              onNone: () => ({}),
-              onSome: (organizationId) =>
-                provisionedByAttributes({ kind: "scim", connectionId: "scim-1", organizationId }),
+      Option.fromNullishOr(
+        MutableHashSet.has(unknownUsers, userId)
+          ? null
+          : Testing.fixtureUser({
+              id: userId,
+              attributes: Option.match(MutableHashMap.get(managedBy, userId), {
+                onNone: () => ({}),
+                onSome: (organizationId) =>
+                  provisionedByAttributes({ kind: "scim", connectionId: "scim-1", organizationId }),
+              }),
             }),
-          }),
+      ),
     ),
 };
 
@@ -1263,7 +1259,7 @@ describe("OrganizationService", () => {
     expect(result.teamMembership[0].userId).toBe("member-1");
     // The service mints the team membership's id; the store reads it back.
     expect(result.teamMembership[0].id).toBe(result.added.id);
-    expect(result.byId).toEqual(result.added);
+    expect(result.byId).toEqual(Option.some(result.added));
     expect(result.forMember.map((team) => team.id)).toEqual([result.engineering.id]);
     expect(result.renamed.name).toBe("Design Ops");
     expect(result.renamed.updatedAt).toBeGreaterThanOrEqual(result.design.createdAt);
@@ -2957,7 +2953,7 @@ describe("OrganizationService - domains", () => {
     expect(result.verify.failure.message).toBe(
       "DNS domain verification is not available: provide a DomainVerifier layer",
     );
-    expect(result.stored?.verificationState).toBe("pending");
+    expect(Option.getOrUndefined(result.stored)?.verificationState).toBe("pending");
     expect(result.jit).toBeNull();
   });
 
@@ -2989,7 +2985,7 @@ describe("OrganizationService - domains", () => {
 
     assert(Result.isFailure(result.verify));
     expect(result.verify.failure._tag).toBe("OrganizationError");
-    expect(result.stored?.verificationState).toBe("pending");
+    expect(Option.getOrUndefined(result.stored)?.verificationState).toBe("pending");
   });
 
   it("lets the operator attest a domain server-side, creating or attesting the claim", async () => {
@@ -3071,7 +3067,7 @@ describe("OrganizationService - domains", () => {
     expect(result.pending.attestedBy).toBeUndefined();
     expect(result.attested).toMatchObject({ id: result.pending.id, attestedBy: "ops-1" });
     expect(result.attested.verifiedAt).toBeTypeOf("number");
-    expect(result.stored?.attestedBy).toBe("ops-1");
+    expect(Option.getOrUndefined(result.stored)?.attestedBy).toBe("ops-1");
     // A claim already verified is answered unchanged: the record of who
     // attested it is not overwritten.
     expect(result.again).toStrictEqual(result.attested);

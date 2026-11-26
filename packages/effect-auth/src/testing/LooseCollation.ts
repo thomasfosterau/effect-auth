@@ -9,7 +9,6 @@
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
-import * as Option from "effect/Option";
 import { memoryIdentifierStore, type Identifier, type IdentifierStore } from "../Identifier.ts";
 
 /** Fold a value the way an `_ai_ci` collation compares it. */
@@ -27,11 +26,9 @@ export const looseCollationIdentifierStore = (
   ...memoryIdentifierStore(records),
   getByValue: (type, value) =>
     Effect.sync(() =>
-      Option.getOrNull(
-        Arr.findFirst(
-          MutableHashMap.values(records),
-          (record) => record.type === type && fold(record.value) === fold(value),
-        ),
+      Arr.findFirst(
+        MutableHashMap.values(records),
+        (record) => record.type === type && fold(record.value) === fold(value),
       ),
     ),
 });

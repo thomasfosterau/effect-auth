@@ -92,7 +92,13 @@ const allRows = <A extends object>(
 const firstRow = <A extends object>(
   label: string,
   statement: Effect.Effect<ReadonlyArray<A>, unknown>,
-) => allRows(label, statement).pipe(Effect.map((rows) => rows[0] ?? null));
+) => allRows(label, statement).pipe(Effect.map(Arr.head));
+
+/** Decode a row read with {@link firstRow}, keeping a miss a miss. */
+const decodeRow =
+  <A, B, E>(decode: (row: A) => Effect.Effect<B, E>) =>
+  (row: Option.Option<A>): Effect.Effect<Option.Option<B>, E> =>
+    Effect.transposeOption(Option.map(row, decode));
 
 /**
  * Wraps an effect in a SQL transaction, mapping any transaction-level SQL
@@ -155,16 +161,16 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     firstRow(label, sql<UserRow>`SELECT * FROM auth_users WHERE id = ${userId}`);
 
   const findById = (userId: string, label: string) =>
-    getById(userId, label).pipe(
-      Effect.flatMap((row) => (row ? rowToUser(row, label) : Effect.succeed(null))),
-    );
+    getById(userId, label).pipe(Effect.flatMap(decodeRow((r) => rowToUser(r, label))));
 
   const requireById = (userId: string, label: string) =>
     getById(userId, label).pipe(
-      Effect.flatMap((row): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
-        row
-          ? rowToUser(row, label)
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+      Effect.flatMap(
+        Option.match({
+          onNone: (): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
+            Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+          onSome: (row) => rowToUser(row, label),
+        }),
       ),
     );
 
@@ -205,7 +211,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     asVoid(label, sql`UPDATE auth_users SET password_hash = NULL WHERE id = ${userId}`);
 
   const hasPassword = (userId: string, label: string) =>
-    getById(userId, label).pipe(Effect.map((row) => row?.password_hash != null));
+    getById(userId, label).pipe(Effect.map(Option.exists((row) => row.password_hash != null)));
 
   return {
     getById,
@@ -271,9 +277,7 @@ export const makeSessionStore: Effect.Effect<
       firstRow(
         "session.get",
         sql<SessionRow>`SELECT * FROM auth_sessions WHERE id = ${sessionId}`,
-      ).pipe(
-        Effect.flatMap((row) => (row ? rowToSession(row, "session.get") : Effect.succeed(null))),
-      ),
+      ).pipe(Effect.flatMap(decodeRow((r) => rowToSession(r, "session.get")))),
     update: (session) =>
       asVoid(
         "session.update",
@@ -285,9 +289,7 @@ export const makeSessionStore: Effect.Effect<
         sql<SessionRow>`UPDATE auth_sessions SET expires_at = ${dateToMs(touch.expiresAt)}, last_activity_at = ${dateToMs(touch.lastActivityAt)}
             WHERE id = ${sessionId} AND expires_at >= ${dateToMs(touch.lastActivityAt)}
             RETURNING *`,
-      ).pipe(
-        Effect.flatMap((row) => (row ? rowToSession(row, "session.touch") : Effect.succeed(null))),
-      ),
+      ).pipe(Effect.flatMap(decodeRow((r) => rowToSession(r, "session.touch")))),
     delete: (sessionId) =>
       asVoid("session.delete", sql`DELETE FROM auth_sessions WHERE id = ${sessionId}`),
     deleteByUserId: (userId) =>
@@ -369,7 +371,7 @@ export const makeEmailPasswordStore: Effect.Effect<
     getPasswordHash: (userId) =>
       users
         .getById(userId, "emailPassword.getPasswordHash")
-        .pipe(Effect.map((row) => row?.password_hash ?? null)),
+        .pipe(Effect.map(Option.flatMap((row) => Option.fromNullishOr(row.password_hash)))),
     setPasswordHash: (userId, hash) =>
       users.setPasswordHash(userId, hash, "emailPassword.setPasswordHash"),
     clearPasswordHash: (userId) =>
@@ -499,7 +501,7 @@ export const makeRateLimitStore: Effect.Effect<
 > = SqlClient.SqlClient.useSync((sql) => {
   const readEntry = (key: string, label: string) =>
     firstRow(label, sql<RateLimitRow>`SELECT * FROM auth_rate_limits WHERE key = ${key}`).pipe(
-      Effect.map((row) => (row ? rowToRateLimit(row) : null)),
+      Effect.map(Option.map(rowToRateLimit)),
     );
 
   return {
@@ -579,14 +581,14 @@ export const makeEmailVerificationStore: Effect.Effect<
       firstRow(
         "emailVerification.get",
         sql<EmailVerificationRow>`SELECT * FROM auth_email_verifications WHERE token = ${token}`,
-      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToEmailVerification))),
     // One `DELETE ... RETURNING`: of concurrent consumers of one
     // token, only the one whose delete removed the row gets it back.
     consume: (token) =>
       firstRow(
         "emailVerification.consume",
         sql<EmailVerificationRow>`DELETE FROM auth_email_verifications WHERE token = ${token} RETURNING *`,
-      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToEmailVerification))),
     delete: (token) =>
       asVoid(
         "emailVerification.delete",
@@ -602,7 +604,7 @@ export const makeEmailVerificationStore: Effect.Effect<
         "emailVerification.getLatestByUserId",
         sql<EmailVerificationRow>`SELECT * FROM auth_email_verifications WHERE user_id = ${userId}
             ORDER BY created_at DESC LIMIT 1`,
-      ).pipe(Effect.map((row) => (row ? rowToEmailVerification(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToEmailVerification))),
   } satisfies typeof Auth.Email.EmailVerificationStore.Service;
 });
 
@@ -620,15 +622,17 @@ interface ChallengeRow {
 /** A row whose ceremony is not one the core knows reads as missing. */
 const rowToChallenge = (
   row: ChallengeRow,
-): Effect.Effect<Auth.MultiFactor.WebAuthnChallenge | null, Auth.AuthError> => {
+): Effect.Effect<Option.Option<Auth.MultiFactor.WebAuthnChallenge>, Auth.AuthError> => {
   const { ceremony } = row;
-  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return Effect.succeed(null);
+  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return Effect.succeedNone;
   return Effect.try({
     try: () => {
       const challenge = fromBase64(row.challenge);
-      return row.user_id == null
-        ? { challenge, ceremony, expiresAt: row.expires_at }
-        : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+      return Option.some(
+        row.user_id == null
+          ? { challenge, ceremony, expiresAt: row.expires_at }
+          : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id },
+      );
     },
     catch: (cause) => new Auth.AuthError({ message: "challenge decode failed", cause }),
   });
@@ -683,7 +687,9 @@ export const makeChallengeStore: Effect.Effect<
           FROM auth_webauthn_challenges c
           JOIN auth_webauthn_challenge_ceremonies k ON k.challenge = c.challenge
           WHERE c.challenge = ${toBase64(challenge)}`,
-      ).pipe(Effect.flatMap((row) => (row ? rowToChallenge(row) : Effect.succeed(null)))),
+      ).pipe(
+        Effect.flatMap(Option.match({ onNone: () => Effect.succeedNone, onSome: rowToChallenge })),
+      ),
     delete: (challenge) =>
       withTx("challenge.delete", remove("challenge.delete", toBase64(challenge))),
   } satisfies typeof Auth.MultiFactor.ChallengeStore.Service;
@@ -744,7 +750,7 @@ export const makeCredentialStore: Effect.Effect<
         FROM auth_webauthn_credentials c
         LEFT JOIN auth_webauthn_credential_flags f ON f.credential_id = c.id
         WHERE c.id = ${credentialId}`,
-    ).pipe(Effect.flatMap((row) => (row ? rowToCredential(row) : Effect.succeed(null))));
+    ).pipe(Effect.flatMap(decodeRow(rowToCredential)));
   // An upsert: a flags row left by a delete interrupted between its
   // statements is overwritten, never a conflict.
   const writeFlags = (label: string, credential: Auth.MultiFactor.WebAuthnCredential) =>
@@ -903,7 +909,7 @@ export const makeOAuthStateStore: Effect.Effect<
       firstRow(
         "oauthState.consume",
         sql<OAuthStateRow>`DELETE FROM auth_oauth_states WHERE state = ${state} RETURNING *`,
-      ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToOAuthState))),
   } satisfies typeof Auth.OAuth.OAuthStateStore.Service;
 });
 
@@ -962,7 +968,7 @@ export const makeOAuthAccountStore: Effect.Effect<
       ).pipe(Effect.as(account)),
     get: (provider, providerId) =>
       read(provider, providerId, "oauthAccount.get").pipe(
-        Effect.map((row) => (row ? rowToOAuthAccount(row) : null)),
+        Effect.map(Option.map(rowToOAuthAccount)),
       ),
     getByUserId: (userId) =>
       allRows(
@@ -982,7 +988,7 @@ export const makeOAuthAccountStore: Effect.Effect<
             updated_at = ${account.updatedAt}
           WHERE id = ${account.id}
           RETURNING *`,
-      ).pipe(Effect.map((row) => (row ? rowToOAuthAccount(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToOAuthAccount))),
     // Only an unlinked link (empty user_id) or one `userId` already holds
     // moves; a link another user holds is refused, never reassigned.
     linkToUser: (userId, account) =>
@@ -996,11 +1002,11 @@ export const makeOAuthAccountStore: Effect.Effect<
             RETURNING id`,
       ).pipe(
         Effect.flatMap((moved) =>
-          moved
+          Option.isSome(moved)
             ? Effect.void
             : read(account.provider, account.providerId, "oauthAccount.linkToUser").pipe(
                 Effect.flatMap((held) =>
-                  held
+                  Option.isSome(held)
                     ? Effect.fail(
                         new Auth.AuthError({
                           message: "oauthAccount.linkToUser: the link belongs to another user",
@@ -1101,13 +1107,13 @@ export const makePasswordResetStore: Effect.Effect<
       firstRow(
         "passwordReset.get",
         sql<PasswordResetRow>`SELECT * FROM auth_password_resets WHERE token = ${token}`,
-      ).pipe(Effect.map((row) => (row ? rowToPasswordReset(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToPasswordReset))),
     // One `DELETE ... RETURNING`.
     consume: (token) =>
       firstRow(
         "passwordReset.consume",
         sql<PasswordResetRow>`DELETE FROM auth_password_resets WHERE token = ${token} RETURNING *`,
-      ).pipe(Effect.map((row) => (row ? rowToPasswordReset(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToPasswordReset))),
     delete: (token) =>
       asVoid("passwordReset.delete", sql`DELETE FROM auth_password_resets WHERE token = ${token}`),
     deleteByUserId: (userId) =>
@@ -1153,18 +1159,18 @@ export const makeMagicLinkStore: Effect.Effect<
       firstRow(
         "magicLink.get",
         sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE token = ${token}`,
-      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToMagicLink))),
     getByEmail: (email) =>
       firstRow(
         "magicLink.getByEmail",
         sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE email = ${email}`,
-      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToMagicLink))),
     // One `DELETE ... RETURNING`.
     consume: (token) =>
       firstRow(
         "magicLink.consume",
         sql<MagicLinkRow>`DELETE FROM auth_magic_links WHERE token = ${token} RETURNING *`,
-      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToMagicLink))),
     delete: (token) =>
       asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
     deleteByEmail: (email) =>
@@ -1254,9 +1260,7 @@ export const makeEmailOtpStore: Effect.Effect<
         }),
       ),
     get: (email, purpose) =>
-      read(email, purpose, "emailOtp.get").pipe(
-        Effect.map((row) => (row ? rowToEmailOtp(row) : null)),
-      ),
+      read(email, purpose, "emailOtp.get").pipe(Effect.map(Option.map(rowToEmailOtp))),
     delete: (email, purpose) =>
       asVoid(
         "emailOtp.delete",
@@ -1274,14 +1278,14 @@ export const makeEmailOtpStore: Effect.Effect<
             RETURNING attempts`,
         );
         // No row: another request consumed or exhausted the code.
-        return rows[0]?.attempts ?? null;
+        return Option.map(Arr.head(rows), (row) => row.attempts);
       }),
     getFailures: (email, purpose) =>
       firstRow(
         "emailOtp.getFailures",
         sql<EmailOtpFailuresRow>`SELECT failures, last_failure_at FROM auth_email_otp_failures
           WHERE email = ${email} AND purpose = ${purpose}`,
-      ).pipe(Effect.map((row) => (row ? rowToOtpFailures(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToOtpFailures))),
     recordFailure: (email, purpose, at) =>
       Effect.gen(function* () {
         // One upsert + RETURNING: concurrent wrong codes are all counted.
@@ -1295,10 +1299,10 @@ export const makeEmailOtpStore: Effect.Effect<
                   last_failure_at = excluded.last_failure_at
             RETURNING failures, last_failure_at`,
         );
-        if (row === null) {
+        if (Option.isNone(row)) {
           return yield* new Auth.AuthError({ message: "OTP failure count not returned" });
         }
-        return rowToOtpFailures(row);
+        return rowToOtpFailures(row.value);
       }),
     clearFailures: (email, purpose) =>
       asVoid(
@@ -1703,9 +1707,7 @@ export const makeMultiFactorStore: Effect.Effect<
 
   return {
     get: (userId) =>
-      read(userId, "multiFactor.get").pipe(
-        Effect.flatMap((row) => (row ? rowToMultiFactor(row) : Effect.succeed(null))),
-      ),
+      read(userId, "multiFactor.get").pipe(Effect.flatMap(decodeRow(rowToMultiFactor))),
     // Atomic single-statement upsert keyed by the user_id primary key.
     upsert: (record) =>
       asVoid(
@@ -1730,7 +1732,7 @@ export const makeMultiFactorStore: Effect.Effect<
             WHERE user_id = ${userId} AND verified = 1
               AND (last_used_counter IS NULL OR last_used_counter < ${counter})
             RETURNING user_id`,
-      ).pipe(Effect.map((row) => row !== null)),
+      ).pipe(Effect.map(Option.isSome)),
     // A compare-and-set on the stored list: the write lands only if
     // the list is still the one read. A concurrent change (another code
     // spent) moves it, and the read is retried while the code is still there.
@@ -1741,21 +1743,23 @@ export const makeMultiFactorStore: Effect.Effect<
           sql<{ backup_codes: string }>`SELECT backup_codes FROM auth_multi_factor
               WHERE user_id = ${userId} AND verified = 1`,
         ).pipe(
-          Effect.flatMap((row) =>
-            row === null
-              ? Effect.succeed(null)
-              : Effect.try({
-                  try: () => ({
-                    stored: row.backup_codes,
-                    codes: decodeStringList(row.backup_codes),
-                  }),
-                  catch: (cause) =>
-                    new Auth.AuthError({ message: "multiFactor decode failed", cause }),
+          Effect.flatMap(
+            decodeRow((row) =>
+              Effect.try({
+                try: () => ({
+                  stored: row.backup_codes,
+                  codes: decodeStringList(row.backup_codes),
                 }),
+                catch: (cause) =>
+                  new Auth.AuthError({ message: "multiFactor decode failed", cause }),
+              }),
+            ),
           ),
           Effect.flatMap((read) => {
-            if (read === null || !read.codes.includes(codeHash)) return Effect.succeed(false);
-            const { stored, codes } = read;
+            if (Option.isNone(read) || !read.value.codes.includes(codeHash)) {
+              return Effect.succeed(false);
+            }
+            const { stored, codes } = read.value;
             const next = encodeStringList(codes.filter((code) => code !== codeHash));
             return firstRow(
               "multiFactor.useBackupCode",
@@ -1764,7 +1768,7 @@ export const makeMultiFactorStore: Effect.Effect<
                   RETURNING user_id`,
             ).pipe(
               Effect.flatMap((updated) =>
-                updated !== null
+                Option.isSome(updated)
                   ? Effect.succeed(true)
                   : left > 0
                     ? attempt(left - 1)
@@ -1814,7 +1818,7 @@ export const makePendingMultiFactorStore: Effect.Effect<
       firstRow(
         "pendingMultiFactor.get",
         sql<PendingMultiFactorRow>`SELECT * FROM auth_pending_multi_factor WHERE token = ${token}`,
-      ).pipe(Effect.map((row) => (row ? rowToPendingMultiFactor(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToPendingMultiFactor))),
     // One atomic statement: count the attempt only for a challenge that
     // exists, starting at 1 and incrementing in place after that.
     recordFailedAttempt: (token) =>
@@ -1825,12 +1829,14 @@ export const makePendingMultiFactorStore: Effect.Effect<
             ON CONFLICT(token) DO UPDATE SET attempts = auth_pending_multi_factor_attempts.attempts + 1
             RETURNING attempts`,
       ).pipe(
-        Effect.flatMap((row) =>
-          row
-            ? Effect.succeed(row.attempts)
-            : Effect.fail(
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
                 new Auth.AuthError({ message: "Pending multi-factor challenge not found" }),
               ),
+            onSome: (row) => Effect.succeed(row.attempts),
+          }),
         ),
       ),
     // The challenge goes in one `DELETE ... RETURNING`, so of
@@ -1843,7 +1849,7 @@ export const makePendingMultiFactorStore: Effect.Effect<
           firstRow(
             "pendingMultiFactor.consume",
             sql<PendingMultiFactorRow>`DELETE FROM auth_pending_multi_factor WHERE token = ${token} RETURNING *`,
-          ).pipe(Effect.map((row) => (row ? rowToPendingMultiFactor(row) : null))),
+          ).pipe(Effect.map(Option.map(rowToPendingMultiFactor))),
           () =>
             asVoid(
               "pendingMultiFactor.consume",
@@ -1932,11 +1938,7 @@ export const makeIdentifierStore: Effect.Effect<
       firstRow(
         "identifier.getByValue",
         sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE type = ${type} AND value = ${value}`,
-      ).pipe(
-        Effect.flatMap((row) =>
-          row ? rowToIdentifier(row, "identifier.getByValue") : Effect.succeed(null),
-        ),
-      ),
+      ).pipe(Effect.flatMap(decodeRow((row) => rowToIdentifier(row, "identifier.getByValue")))),
 
     listByUser: (userId) =>
       allRows(
@@ -1957,7 +1959,7 @@ export const makeIdentifierStore: Effect.Effect<
     // stays. The release is a compare-and-swap: the DELETE matches `from` by id,
     // user, type and value, so a `from` that is gone (another replace released
     // it first) deletes nothing, the claim is removed again and the call
-    // resolves to null. On PostgreSQL a concurrent second DELETE waits for the
+    // resolves to `None`. On PostgreSQL a concurrent second DELETE waits for the
     // first to commit and then matches nothing (at PostgreSQL's default READ
     // COMMITTED isolation; stricter levels fail with a serialization error,
     // surfaced as `AuthError`), so of two replaces of one `from` one succeeds.
@@ -1966,7 +1968,7 @@ export const makeIdentifierStore: Effect.Effect<
     // of a stale claim is a statement of its own.
     replace: (from, to) => {
       const invalid = Auth.replaceInputError(from, to);
-      if (invalid !== null) return Effect.fail(invalid);
+      if (Option.isSome(invalid)) return Effect.fail(invalid.value);
       return withTx(
         "identifier.replace",
         Effect.gen(function* () {
@@ -1977,14 +1979,14 @@ export const makeIdentifierStore: Effect.Effect<
               readonly id: string;
             }>`DELETE FROM auth_identifiers WHERE id = ${from.id} AND user_id = ${from.userId} AND type = ${from.type} AND value = ${from.value} RETURNING id`,
           );
-          if (Arr.isReadonlyArrayNonEmpty(released)) return to;
+          if (Arr.isReadonlyArrayNonEmpty(released)) return Option.some(to);
           // `from` was not held: take the claim back. A DELETE rather than a
           // ROLLBACK, so D1, where a ROLLBACK does nothing, ends unchanged too.
           yield* asVoid(
             "identifier.replace.undo",
             sql`DELETE FROM auth_identifiers WHERE id = ${to.id}`,
           );
-          return null;
+          return Option.none();
         }),
       );
     },
@@ -1998,11 +2000,7 @@ export const makeIdentifierStore: Effect.Effect<
         return yield* firstRow(
           "identifier.setVerified",
           sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE id = ${id}`,
-        ).pipe(
-          Effect.flatMap((row) =>
-            row ? rowToIdentifier(row, "identifier.setVerified") : Effect.succeed(null),
-          ),
-        );
+        ).pipe(Effect.flatMap(decodeRow((row) => rowToIdentifier(row, "identifier.setVerified"))));
       }),
 
     delete: (id) => asVoid("identifier.delete", sql`DELETE FROM auth_identifiers WHERE id = ${id}`),
@@ -2041,7 +2039,7 @@ export const makeAccountLockoutStore: Effect.Effect<
       firstRow(
         "accountLockout.get",
         sql<AccountLockoutRow>`SELECT * FROM auth_account_lockouts WHERE key = ${key}`,
-      ).pipe(Effect.map((row) => (row ? rowToLockout(row) : null))),
+      ).pipe(Effect.map(Option.map(rowToLockout))),
     // The whole transition is one statement, so concurrent attempts can't
     // lose increments: an active lock is returned unchanged; an expired lock
     // (or missing row) resets to 1; otherwise increment; crossing the
@@ -2160,7 +2158,7 @@ export const makeApiKeyStore: Effect.Effect<
 > = SqlClient.SqlClient.useSync((sql) => {
   const getById = (id: string, label: string) =>
     firstRow(label, sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE id = ${id}`).pipe(
-      Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))),
+      Effect.flatMap(decodeRow(rowToApiKey)),
     );
 
   return {
@@ -2175,7 +2173,7 @@ export const makeApiKeyStore: Effect.Effect<
       firstRow(
         "apiKey.getByHash",
         sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE key_hash = ${keyHash}`,
-      ).pipe(Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null)))),
+      ).pipe(Effect.flatMap(decodeRow(rowToApiKey))),
     update: (apiKey) =>
       asVoid(
         "apiKey.update",
@@ -2224,7 +2222,7 @@ export const makeApiKeyStore: Effect.Effect<
               AND (remaining IS NULL OR ${topped} > 0)
               ${refill === undefined ? sql`` : sql`AND last_refill_at = ${refill.from}`}
             RETURNING *`,
-      ).pipe(Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))));
+      ).pipe(Effect.flatMap(decodeRow(rowToApiKey)));
     },
     delete: (id) => asVoid("apiKey.delete", sql`DELETE FROM auth_api_keys WHERE id = ${id}`),
     listByUserId: (userId) =>
@@ -2298,7 +2296,7 @@ export const makeAdminUserStore: Effect.Effect<
           users: yield* Effect.forEach(rows, (row) => rowToUser(row, "adminUser.listUsers"), {
             concurrency: 1,
           }),
-          total: counted?.total ?? 0,
+          total: Option.match(counted, { onNone: () => 0, onSome: (row) => row.total }),
         } satisfies Auth.ListUsersResult;
       }),
     createUser: (input) => users.create(input, "adminUser.createUser"),

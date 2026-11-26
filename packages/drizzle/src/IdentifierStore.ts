@@ -81,12 +81,7 @@ export const make = (
             .where(and(eq(column.type, type), eq(column.value, value)))
             .limit(1)
             .execute(),
-        ).pipe(
-          Effect.map((rows) => {
-            const row = rows[0];
-            return row === undefined ? null : toIdentifier(row);
-          }),
-        ),
+        ).pipe(Effect.map((rows) => Option.map(Arr.head(rows), toIdentifier))),
 
       listByUser: (userId) =>
         query("identifier.listByUser", (db) =>
@@ -108,7 +103,7 @@ export const make = (
       // taken value while `from` is still in place.
       replace: (from, to) => {
         const invalid = Auth.replaceInputError(from, to);
-        if (invalid !== null) return Effect.fail(invalid);
+        if (Option.isSome(invalid)) return Effect.fail(invalid.value);
         return Effect.gen(function* () {
           const held = yield* query("identifier.replace.read", (db) =>
             db
@@ -125,12 +120,12 @@ export const make = (
               .limit(1)
               .execute(),
           );
-          if (Arr.isReadonlyArrayEmpty(held)) return null;
+          if (Arr.isReadonlyArrayEmpty(held)) return Option.none();
           yield* insert(to, "identifier.replace");
           yield* query("identifier.replace.release", (db) =>
             db.delete(table).where(eq(column.id, from.id)).execute(),
           );
-          return to;
+          return Option.some(to);
         });
       },
 
@@ -151,8 +146,7 @@ export const make = (
             db.select(column).from(table).where(eq(column.id, id)).limit(1).execute(),
           );
 
-          const row = rows[0];
-          return row === undefined ? null : toIdentifier(row);
+          return Option.map(Arr.head(rows), toIdentifier);
         }),
 
       delete: (id) =>
@@ -179,12 +173,12 @@ export const layer = (
 
 /**
  * Resolve one identifier by its `(type, value)` pair — the natural unique key.
- * Resolves to `null` on a miss, exactly like `IdentifierStore.getByValue`.
+ * Resolves to `None` on a miss, exactly like `IdentifierStore.getByValue`.
  * Issue it with `Requests.getIdentifierByValue(type, value)`.
  */
 export class GetIdentifierByValue extends Request.TaggedClass("GetIdentifierByValue")<
   { readonly type: Auth.IdentifierType; readonly value: string },
-  Auth.Identifier | null,
+  Option.Option<Auth.Identifier>,
   Auth.AuthError
 > {}
 
@@ -255,11 +249,7 @@ export const makeByValueResolver = (
         );
         Arr.forEach(entries, (entry) =>
           entry.completeUnsafe(
-            Exit.succeed(
-              Option.getOrNull(
-                HashMap.get(byPair, pairKey(entry.request.type, entry.request.value)),
-              ),
-            ),
+            Exit.succeed(HashMap.get(byPair, pairKey(entry.request.type, entry.request.value))),
           ),
         );
       }),

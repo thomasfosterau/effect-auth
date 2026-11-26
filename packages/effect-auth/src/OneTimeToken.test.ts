@@ -30,14 +30,13 @@ const oneTimeTokenStore = {
       return record;
     }),
 
-  get: (token: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(oneTimeTokens, token))),
+  get: (token: string) => Effect.sync(() => MutableHashMap.get(oneTimeTokens, token)),
 
   consume: (token: string) =>
     Effect.sync(() => {
       const found = Option.getOrNull(MutableHashMap.get(oneTimeTokens, token));
       MutableHashMap.remove(oneTimeTokens, token);
-      return found;
+      return Option.fromNullishOr(found);
     }),
 
   delete: (token: string) =>
@@ -246,7 +245,7 @@ describe("redeemOneTimeTokenForSession", () => {
         Layer.succeed(SessionStore)({
           create: (session) =>
             Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
-          get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+          get: (id) => Effect.sync(() => MutableHashMap.get(sessions, id)),
           update: (session) =>
             Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
           touch: (sessionId: string, touch: SessionTouch) =>
@@ -256,7 +255,7 @@ describe("redeemOneTimeTokenForSession", () => {
           listByUserId: () => Effect.succeed([]),
         }),
         Layer.succeed(UserStore)({
-          get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
+          get: (id) => Effect.sync(() => MutableHashMap.get(users, id)),
         }),
         Hooks.Default,
       ),

@@ -101,7 +101,7 @@ const StateStoreLive = () => {
       Effect.sync(() => {
         const v = Option.getOrNull(MutableHashMap.get(map, state));
         MutableHashMap.remove(map, state);
-        return v;
+        return Option.fromNullishOr(v);
       }),
   });
 };
@@ -1033,7 +1033,7 @@ describe("OAuthService encryptTokens", () => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(stored, `${p}:${id}`))),
+      get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
       getByUserId: (uid) =>
         Effect.succeed(
           Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
@@ -1041,7 +1041,7 @@ describe("OAuthService encryptTokens", () => {
       update: (a) =>
         Effect.sync(() => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return a;
+          return Option.fromNullishOr(a);
         }),
       linkToUser: (uid, a) =>
         Effect.sync(() => {
@@ -1297,7 +1297,7 @@ describe("OAuthService unlinkAccount guard", () => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(stored, `${p}:${id}`))),
+      get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
       getByUserId: (uid) =>
         Effect.succeed(
           Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
@@ -1305,7 +1305,7 @@ describe("OAuthService unlinkAccount guard", () => {
       update: (a) =>
         Effect.sync(() => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return a;
+          return Option.fromNullishOr(a);
         }),
       linkToUser: (uid, a) =>
         Effect.sync(() => {
@@ -1420,7 +1420,8 @@ describe("OAuthService linking controls", () => {
   const makeStateLayer = (state: OAuthState) =>
     Layer.succeed(OAuthStateStore, {
       create: (s) => Effect.succeed(s),
-      consume: (k) => Effect.succeed(k === stateKey(state.state) ? state : null),
+      consume: (k) =>
+        Effect.succeed(Option.fromNullishOr(k === stateKey(state.state) ? state : null)),
     });
 
   const makeAccountLayer = (
@@ -1435,7 +1436,7 @@ describe("OAuthService linking controls", () => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(stored, `${p}:${id}`))),
+      get: (p, id) => Effect.succeed(MutableHashMap.get(stored, `${p}:${id}`)),
       getByUserId: (uid) =>
         Effect.succeed(
           Arr.fromIterable(MutableHashMap.values(stored)).filter((a) => a.userId === uid),
@@ -1443,7 +1444,7 @@ describe("OAuthService linking controls", () => {
       update: (a) =>
         Effect.sync(() => {
           MutableHashMap.set(stored, `${a.provider}:${a.providerId}`, a);
-          return a;
+          return Option.fromNullishOr(a);
         }),
       linkToUser: (uid, a) =>
         Effect.sync(() => {
@@ -1514,7 +1515,7 @@ describe("OAuthService linking controls", () => {
   /** Core user-by-id store used by signInWithCallback's auto-link resolution. */
   const makeCoreUserLayer = (...users: ReadonlyArray<Types.User>) =>
     Layer.succeed(UserStore, {
-      get: (id) => Effect.succeed(users.find((u) => u.id === id) ?? null),
+      get: (id) => Effect.succeed(Arr.findFirst(users, (u) => u.id === id)),
     });
 
   /**
@@ -1783,8 +1784,10 @@ describe("OAuthService linking controls", () => {
     accounts,
     minted,
     journal,
-    password,
-    address: address === null ? null : { userId: address.userId, verified: address.verified },
+    password: Option.getOrNull(password),
+    address: Option.getOrNull(
+      Option.map(address, ({ userId, verified }) => ({ userId, verified })),
+    ),
   });
 
   /** A first-proof takeover: the squatter's password and sessions cleared, then the link and the prover's session. */
@@ -1954,8 +1957,8 @@ describe("OAuthService linking controls", () => {
     const claimed = await Effect.runPromise(
       identifiers.store.getByValue("email", "user@example.com"),
     );
-    expect(claimed?.userId).toBe(newUser.id);
-    expect(claimed?.verified).toBe(false);
+    expect(Option.getOrUndefined(claimed)?.userId).toBe(newUser.id);
+    expect(Option.getOrUndefined(claimed)?.verified).toBe(false);
     // The store was handed the address to create the user with.
     expect(createdWith).toEqual([{ type: "email", value: "user@example.com", verified: false }]);
   });
@@ -2055,9 +2058,9 @@ describe("OAuthService linking controls", () => {
     const claimed = await Effect.runPromise(
       identifiers.store.getByValue("email", "user@example.com"),
     );
-    expect(claimed?.userId).toBe(newUser.id);
-    expect(claimed?.verified).toBe(true);
-    expect(claimed?.verifiedAt).toBeInstanceOf(Date);
+    expect(Option.getOrUndefined(claimed)?.userId).toBe(newUser.id);
+    expect(Option.getOrUndefined(claimed)?.verified).toBe(true);
+    expect(Option.getOrUndefined(claimed)?.verifiedAt).toBeInstanceOf(Date);
     expect(createdWith).toEqual([
       { type: "email", value: "user@example.com", verified: true, verifiedAt: expect.any(Date) },
     ]);
@@ -2069,12 +2072,13 @@ describe("OAuthService linking controls", () => {
     const accounts = MutableHashMap.empty<string, OAuthAccount>();
     const accountLayer = Layer.succeed(OAuthAccountStore, {
       create: (a) => Effect.sync(() => (MutableHashMap.set(accounts, a.id, a), a)),
-      get: () => Effect.succeed(null),
+      get: () => Effect.succeedNone,
       getByUserId: (uid) =>
         Effect.succeed(
           Arr.fromIterable(MutableHashMap.values(accounts)).filter((a) => a.userId === uid),
         ),
-      update: (a) => Effect.sync(() => (MutableHashMap.set(accounts, a.id, a), a)),
+      update: (a) =>
+        Effect.sync(() => Option.fromNullishOr((MutableHashMap.set(accounts, a.id, a), a))),
       linkToUser: (uid, a) =>
         Effect.sync(() => void MutableHashMap.set(accounts, a.id, { ...a, userId: uid })),
       deleteByUserId: () => Effect.void,
@@ -2129,7 +2133,7 @@ describe("OAuthService linking controls", () => {
     const held = await Effect.runPromise(
       identifiers.store.getByValue("email", "owner@example.com"),
     );
-    expect(held).toMatchObject({ userId: owner.id, verified: false });
+    expect(Option.getOrUndefined(held)).toMatchObject({ userId: owner.id, verified: false });
   });
 
   it("updateUserInfoOnLink: false (default) does not update the user profile", async () => {
@@ -2227,7 +2231,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
         Effect.sync(() => {
           const entry = Option.getOrNull(MutableHashMap.get(states, k));
           MutableHashMap.remove(states, k);
-          return entry;
+          return Option.fromNullishOr(entry);
         }),
     };
     return { states, store };
@@ -2243,7 +2247,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
           MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
           return a;
         }),
-      get: (p, id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(accounts, `${p}:${id}`))),
+      get: (p, id) => Effect.succeed(MutableHashMap.get(accounts, `${p}:${id}`)),
       getByUserId: (uid) =>
         Effect.succeed(
           Arr.fromIterable(MutableHashMap.values(accounts)).filter((a) => a.userId === uid),
@@ -2251,7 +2255,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       update: (a) =>
         Effect.sync(() => {
           MutableHashMap.set(accounts, `${a.provider}:${a.providerId}`, a);
-          return a;
+          return Option.fromNullishOr(a);
         }),
       linkToUser: () => Effect.void,
       deleteByUserId: () => Effect.void,
@@ -2382,7 +2386,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       const racing: typeof OAuthAccountStore.Service = {
         ...accounts,
         get: (provider, providerId) =>
-          lookups++ === 0 ? Effect.succeed(null) : accounts.get(provider, providerId),
+          lookups++ === 0 ? Effect.succeedNone : accounts.get(provider, providerId),
       };
       const service = await makeService(store, racing);
 
@@ -2396,7 +2400,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       );
 
       expect(err._tag).toBe("OAuthAccountConflictError");
-      expect(await Effect.runPromise(accounts.get("github", "gh-9"))).toEqual(rival);
+      expect(await Effect.runPromise(accounts.get("github", "gh-9"))).toEqual(Option.some(rival));
     });
 
     it("links a new account to linkToUserId and reports the user", async () => {
@@ -2596,7 +2600,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
 
     it("fails with AuthError when the state vanishes before returnTo is recorded", async () => {
       const { store } = makeStateStore();
-      const service = await makeService({ ...store, consume: () => Effect.succeed(null) });
+      const service = await makeService({ ...store, consume: () => Effect.succeedNone });
       const err = await Effect.runPromise(
         Effect.flip(service.generateAuthorizationUrl("github", { returnTo: "/after" })),
       );
@@ -2678,7 +2682,10 @@ describe("OAuthService first proof over the real services", () => {
     // The victim lands in the account the address names, now verified.
     expect(outcome.victim.isNewUser).toBe(false);
     expect(outcome.victim.user.id).toBe(outcome.squatter.user.id);
-    expect(outcome.address).toMatchObject({ userId: outcome.squatter.user.id, verified: true });
+    expect(Option.getOrUndefined(outcome.address)).toMatchObject({
+      userId: outcome.squatter.user.id,
+      verified: true,
+    });
     assert(Result.isSuccess(outcome.victimSession));
     expect(outcome.victimSession.success.user.id).toBe(outcome.squatter.user.id);
     // The squatter's session and password are gone.
@@ -2763,8 +2770,8 @@ describe("OAuthService first proof over the real services", () => {
     // Only the link the victim made now is left.
     expect(outcome.links).toEqual(["gh-victim"]);
     expect(outcome.apiKeys).toEqual([]);
-    expect(outcome.multiFactor).toBeNull();
-    expect(outcome.trustedDevice).toBeNull();
+    expect(Option.isNone(outcome.multiFactor)).toBe(true);
+    expect(Option.isNone(outcome.trustedDevice)).toBe(true);
   });
 });
 

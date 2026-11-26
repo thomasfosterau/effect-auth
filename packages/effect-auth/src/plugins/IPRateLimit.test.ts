@@ -19,7 +19,7 @@ const makeMemStore = (
   store: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
 ): typeof RateLimitStore.Service => {
   return {
-    get: (key) => Effect.succeed(Option.getOrNull(MutableHashMap.get(store, key))),
+    get: (key) => Effect.succeed(MutableHashMap.get(store, key)),
     set: (key, entry) =>
       Effect.sync(() => {
         MutableHashMap.set(store, key, entry);

@@ -5,14 +5,14 @@ Rate limits, client addresses behind a proxy, the per-endpoint IP limit, account
 ## Rate limiting
 
 ```typescript
-import { Clock, Effect, Layer, Result } from "effect";
+import { Clock, Effect, Layer, Option, Result } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // An in-process store: one instance only. Use a shared store (`/sql`, Redis)
 // when you run more than one, where `increment` must be one atomic statement.
 const counts = new Map<string, Auth.RateLimitEntry>();
 const rateLimitStore: typeof Auth.RateLimitStore.Service = {
-  get: (key) => Effect.sync(() => counts.get(key) ?? null),
+  get: (key) => Effect.sync(() => Option.fromUndefinedOr(counts.get(key))),
   set: (key, entry, _ttl) => Effect.sync(() => void counts.set(key, entry)),
   // Count one request, opening a new window when there is none or it has ended.
   increment: (key, ttlSeconds) =>

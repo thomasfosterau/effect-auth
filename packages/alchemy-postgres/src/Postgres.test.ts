@@ -63,7 +63,7 @@ describe.skipIf(skipWithoutServer)("effect-auth on Postgres over @effect/sql-pg"
       }).pipe(Effect.provide(Postgres.layer(hyperdrive, { maxConnections: 1 }))),
     );
     expect(result.user.attributes).toEqual({ plan: "pro" });
-    expect(result.loaded?.userId).toBe(result.user.id);
+    expect(Option.getOrUndefined(result.loaded)?.userId).toBe(result.user.id);
   });
 
   it("purges expired rows", async () => {

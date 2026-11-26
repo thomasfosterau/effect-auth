@@ -77,7 +77,7 @@ export type Query = ReturnType<typeof makeQuery>;
 
 /**
  * The first row of `table` matching `where`, projected onto `fields`, or
- * `null` on a miss.
+ * `None` on a miss.
  *
  * @internal
  */
@@ -87,26 +87,26 @@ export const selectOne = <TFields extends DrizzleSelectFields>(
   fields: TFields,
   table: Table,
   where: SQL,
-): Effect.Effect<DrizzleSelected<TFields> | null, Auth.AuthError> =>
+): Effect.Effect<Option.Option<DrizzleSelected<TFields>>, Auth.AuthError> =>
   query(label, (db) => db.select(fields).from(table).where(where).limit(1).execute()).pipe(
-    Effect.map((rows) => rows[0] ?? null),
+    Effect.map(Arr.head),
   );
 
 /**
  * One entry of a batch of by-id lookups: the request carries the id, and the
- * entry is completed with the found value or `null`.
+ * entry is completed with the found value or `None`.
  *
  * @internal
  */
 export interface ByIdEntry<A> {
   readonly request: { readonly id: string };
-  completeUnsafe(exit: Exit.Exit<A | null>): void;
+  completeUnsafe(exit: Exit.Exit<Option.Option<A>>): void;
 }
 
 /**
  * Answer a batch of by-id lookups with one query: dedupe the requested ids,
  * fetch their rows with `fetchRows`, and complete each entry with its row's
- * value, or `null` on a miss.
+ * value, or `None` on a miss.
  *
  * @internal
  */
@@ -118,7 +118,7 @@ export const completeById = <Row extends { readonly id: string }, A, E>(
   Effect.map(fetchRows(Arr.dedupe(entries.map((entry) => entry.request.id))), (rows) => {
     const byId = HashMap.fromIterable(rows.map((row) => [row.id, toValue(row)] as const));
     Arr.forEach(entries, (entry) =>
-      entry.completeUnsafe(Exit.succeed(Option.getOrNull(HashMap.get(byId, entry.request.id)))),
+      entry.completeUnsafe(Exit.succeed(HashMap.get(byId, entry.request.id))),
     );
   });
 

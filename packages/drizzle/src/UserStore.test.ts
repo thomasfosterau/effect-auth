@@ -7,6 +7,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -100,23 +101,27 @@ describe("UserStore", () => {
       }),
     );
 
-    expect(result.full).toEqual({
-      id: "full",
-      name: "Ada",
-      image: "https://example.com/a.png",
-      createdAt: at(0),
-      updatedAt: at(5000),
-      attributes: { plan: "pro", flags: { beta: true } },
-    });
-    expect(result.bare).toEqual({
-      id: "bare",
-      createdAt: at(0),
-      updatedAt: at(0),
-      attributes: {},
-    });
-    expect(result.bare && "name" in result.bare).toBe(false);
-    expect(result.bare && "image" in result.bare).toBe(false);
-    expect(result.missing).toBeNull();
+    expect(result.full).toEqual(
+      Option.some({
+        id: "full",
+        name: "Ada",
+        image: "https://example.com/a.png",
+        createdAt: at(0),
+        updatedAt: at(5000),
+        attributes: { plan: "pro", flags: { beta: true } },
+      }),
+    );
+    expect(result.bare).toEqual(
+      Option.some({
+        id: "bare",
+        createdAt: at(0),
+        updatedAt: at(0),
+        attributes: {},
+      }),
+    );
+    expect(Option.exists(result.bare, (found) => "name" in found)).toBe(false);
+    expect(Option.exists(result.bare, (found) => "image" in found)).toBe(false);
+    expect(Option.isNone(result.missing)).toBe(true);
   });
 });
 

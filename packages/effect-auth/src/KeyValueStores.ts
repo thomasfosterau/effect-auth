@@ -100,9 +100,9 @@ const isEnvelope = Schema.is(Schema.Struct({ [EXPIRES_AT]: Schema.Number, value:
 const decodeEntry = <A>(
   value: string | undefined,
   label: string,
-): Effect.Effect<StoredEntry<A> | null, Errors.AuthError> =>
+): Effect.Effect<Option.Option<StoredEntry<A>>, Errors.AuthError> =>
   value === undefined
-    ? Effect.succeed(null)
+    ? Effect.succeedNone
     : decodeJsonText(value).pipe(
         // SAFETY: every key is namespaced to one record shape and written
         // only by `write` / `writeExpiring` with a value of that shape, so the
@@ -112,6 +112,7 @@ const decodeEntry = <A>(
             ? { value: parsed.value as A, expiresAt: parsed[EXPIRES_AT] }
             : { value: parsed as A, expiresAt: undefined },
         ),
+        Effect.map(Option.some),
         Effect.mapError(toAuthError(label)),
       );
 
@@ -120,19 +121,19 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
   const readEntry = <A>(
     key: string,
     label: string,
-  ): Effect.Effect<StoredEntry<A> | null, Errors.AuthError> =>
+  ): Effect.Effect<Option.Option<StoredEntry<A>>, Errors.AuthError> =>
     kv.get(key).pipe(
       Effect.mapError(toAuthError(label)),
       Effect.flatMap((value) => decodeEntry<A>(value, label)),
     );
 
   /**
-   * The record under `key`, or `null`. An entry past its envelope's expiry is
+   * The record under `key`, if any. An entry past its envelope's expiry is
    * still returned: stores are dumb persistence, and the services judge expiry
    * from the record itself, as they do over every other store.
    */
-  const read = <A>(key: string, label: string): Effect.Effect<A | null, Errors.AuthError> =>
-    readEntry<A>(key, label).pipe(Effect.map((entry) => (entry === null ? null : entry.value)));
+  const read = <A>(key: string, label: string): Effect.Effect<Option.Option<A>, Errors.AuthError> =>
+    readEntry<A>(key, label).pipe(Effect.map(Option.map((entry) => entry.value)));
 
   const write = (
     key: string,
@@ -156,7 +157,7 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
     key: string,
     label: string,
   ): Effect.Effect<readonly string[], Errors.AuthError> =>
-    read<readonly string[]>(key, label).pipe(Effect.map((tokens) => tokens ?? []));
+    read<readonly string[]>(key, label).pipe(Effect.map(Option.getOrElse(() => [])));
 
   /** Append an entry to a secondary index key (deduplicated). */
   const indexAdd = (
@@ -274,18 +275,20 @@ const makeTakeRecord = (
 ) => {
   const kv = jsonKv(store);
   const lock = Semaphore.makeUnsafe(1);
-  return <A>(key: string, label: string): Effect.Effect<A | null, Errors.AuthError> =>
+  return <A>(key: string, label: string): Effect.Effect<Option.Option<A>, Errors.AuthError> =>
     Option.match(take, {
       onSome: (service) =>
         service.take(key).pipe(
           Effect.flatMap((value) => decodeEntry<A>(value, label)),
-          Effect.map((entry) => (entry === null ? null : entry.value)),
+          Effect.map(Option.map((entry) => entry.value)),
         ),
       onNone: () =>
         lock.withPermit(
           kv
             .read<A>(key, label)
-            .pipe(Effect.tap((found) => (found === null ? Effect.void : kv.remove(key, label)))),
+            .pipe(
+              Effect.tap((found) => (Option.isNone(found) ? Effect.void : kv.remove(key, label))),
+            ),
         ),
     });
 };
@@ -348,15 +351,15 @@ interface StoredChallenge {
 const challengeKey = (challenge: Uint8Array) => `webauthn-challenge:${toBase64(challenge)}`;
 
 /** A stored challenge without a known ceremony reads as missing, so no ceremony redeems it. */
-const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge | null =>
+const decodeChallenge = (stored: StoredChallenge): Option.Option<WebAuthnChallenge> =>
   isWebAuthnCeremony(stored.ceremony)
-    ? {
+    ? Option.some({
         challenge: fromBase64(stored.challenge),
         ceremony: stored.ceremony,
         expiresAt: stored.expiresAt,
         ...(stored.userId !== undefined ? { userId: stored.userId } : {}),
-      }
-    : null;
+      })
+    : Option.none();
 
 /**
  * Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
@@ -385,7 +388,7 @@ export const challengeStoreKV: Effect.Effect<
     get: (challenge) =>
       kv
         .read<StoredChallenge>(challengeKey(challenge), "challenge.get")
-        .pipe(Effect.map((stored) => (stored ? decodeChallenge(stored) : null))),
+        .pipe(Effect.map(Option.flatMap(decodeChallenge))),
     delete: (challenge) => kv.remove(challengeKey(challenge), "challenge.delete"),
   } satisfies typeof ChallengeStore.Service;
 });
@@ -441,13 +444,13 @@ export const rateLimitStoreKV: Effect.Effect<
     increment: (key, ttlSeconds) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        const existing = yield* readEntry(key);
-        if (existing == null || now >= existing.resetAt) {
+        const found = yield* readEntry(key);
+        if (Option.isNone(found) || now >= found.value.resetAt) {
           const entry: RateLimitEntry = { key, count: 1, resetAt: now + ttlSeconds * 1000 };
           yield* kv.writeExpiring(rateLimitKey(key), entry, entry.resetAt, "rateLimit.increment");
           return 1;
         }
-        const updated: RateLimitEntry = { ...existing, count: existing.count + 1 };
+        const updated: RateLimitEntry = { ...found.value, count: found.value.count + 1 };
         yield* kv.writeExpiring(
           rateLimitKey(key),
           updated,
@@ -515,10 +518,10 @@ export const emailVerificationStoreKV: Effect.Effect<
           emailVerificationTokenKey(token),
           "emailVerification.delete",
         );
-        if (existing == null) return;
+        if (Option.isNone(existing)) return;
         yield* kv.remove(emailVerificationTokenKey(token), "emailVerification.delete");
         yield* kv.indexRemove(
-          emailVerificationUserKey(existing.userId),
+          emailVerificationUserKey(existing.value.userId),
           token,
           "emailVerification.delete",
         );
@@ -553,8 +556,10 @@ export const emailVerificationStoreKV: Effect.Effect<
           { concurrency: 1 },
         );
         // A stale index entry reads as a miss and is skipped.
-        const live = Arr.filter(records, P.isNotNullish);
-        return Arr.isReadonlyArrayNonEmpty(live) ? Arr.max(live, verificationByCreatedAt) : null;
+        const live = Arr.getSomes(records);
+        return Arr.isReadonlyArrayNonEmpty(live)
+          ? Option.some(Arr.max(live, verificationByCreatedAt))
+          : Option.none();
       }),
   } satisfies Omit<typeof EmailVerificationStore.Service, "consume">;
   return {
@@ -565,10 +570,10 @@ export const emailVerificationStoreKV: Effect.Effect<
         "emailVerification.consume",
       ).pipe(
         Effect.tap((taken) =>
-          taken === null
+          Option.isNone(taken)
             ? Effect.void
             : kv.indexRemove(
-                emailVerificationUserKey(taken.userId),
+                emailVerificationUserKey(taken.value.userId),
                 token,
                 "emailVerification.consume",
               ),
@@ -624,9 +629,13 @@ export const passwordResetStoreKV: Effect.Effect<
           passwordResetTokenKey(token),
           "passwordReset.delete",
         );
-        if (existing == null) return;
+        if (Option.isNone(existing)) return;
         yield* kv.remove(passwordResetTokenKey(token), "passwordReset.delete");
-        yield* kv.indexRemove(passwordResetUserKey(existing.userId), token, "passwordReset.delete");
+        yield* kv.indexRemove(
+          passwordResetUserKey(existing.value.userId),
+          token,
+          "passwordReset.delete",
+        );
       }),
     deleteByUserId: (userId) =>
       Effect.gen(function* () {
@@ -647,9 +656,13 @@ export const passwordResetStoreKV: Effect.Effect<
     consume: (token) =>
       takeRecord<PasswordResetToken>(passwordResetTokenKey(token), "passwordReset.consume").pipe(
         Effect.tap((taken) =>
-          taken === null
+          Option.isNone(taken)
             ? Effect.void
-            : kv.indexRemove(passwordResetUserKey(taken.userId), token, "passwordReset.consume"),
+            : kv.indexRemove(
+                passwordResetUserKey(taken.value.userId),
+                token,
+                "passwordReset.consume",
+              ),
         ),
       ),
   } satisfies typeof PasswordResetStore.Service;
@@ -700,7 +713,7 @@ export const magicLinkStoreKV: Effect.Effect<
       Effect.gen(function* () {
         const tokens = yield* kv.readIndex(magicLinkEmailKey(email), "magicLink.getByEmail");
         const latest = Arr.last(tokens);
-        if (Option.isNone(latest)) return null;
+        if (Option.isNone(latest)) return Option.none();
         return yield* kv.read<MagicLinkToken>(
           magicLinkTokenKey(latest.value),
           "magicLink.getByEmail",
@@ -712,9 +725,9 @@ export const magicLinkStoreKV: Effect.Effect<
           magicLinkTokenKey(token),
           "magicLink.delete",
         );
-        if (existing == null) return;
+        if (Option.isNone(existing)) return;
         yield* kv.remove(magicLinkTokenKey(token), "magicLink.delete");
-        yield* kv.indexRemove(magicLinkEmailKey(existing.email), token, "magicLink.delete");
+        yield* kv.indexRemove(magicLinkEmailKey(existing.value.email), token, "magicLink.delete");
       }),
     deleteByEmail: (email) =>
       Effect.gen(function* () {
@@ -732,9 +745,9 @@ export const magicLinkStoreKV: Effect.Effect<
     consume: (token) =>
       takeRecord<MagicLinkToken>(magicLinkTokenKey(token), "magicLink.consume").pipe(
         Effect.tap((taken) =>
-          taken === null
+          Option.isNone(taken)
             ? Effect.void
-            : kv.indexRemove(magicLinkEmailKey(taken.email), token, "magicLink.consume"),
+            : kv.indexRemove(magicLinkEmailKey(taken.value.email), token, "magicLink.consume"),
         ),
       ),
   } satisfies typeof MagicLinkStore.Service;
@@ -794,15 +807,15 @@ export const emailOtpStoreKV: Effect.Effect<
             emailOtpKey(email, purpose),
             "emailOtp.incrementAttempts",
           );
-          if (record == null) return null;
-          const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
+          if (Option.isNone(record)) return Option.none();
+          const updated: EmailOtpRecord = { ...record.value, attempts: record.value.attempts + 1 };
           yield* kv.writeExpiring(
             emailOtpKey(email, purpose),
             updated,
             updated.expiresAt,
             "emailOtp.incrementAttempts",
           );
-          return updated.attempts;
+          return Option.some(updated.attempts);
         }),
       ),
     getFailures: (email, purpose) =>
@@ -811,7 +824,10 @@ export const emailOtpStoreKV: Effect.Effect<
       Effect.gen(function* () {
         const key = emailOtpFailuresKey(email, purpose);
         const stored = yield* kv.read<OtpFailures>(key, "emailOtp.recordFailure");
-        const failures: OtpFailures = { count: (stored?.count ?? 0) + 1, lastFailureAt: at };
+        const failures: OtpFailures = {
+          count: Option.match(stored, { onNone: () => 0, onSome: (s) => s.count }) + 1,
+          lastFailureAt: at,
+        };
         yield* kv.write(key, failures, "emailOtp.recordFailure");
         return failures;
       }),
@@ -1008,9 +1024,9 @@ const purgeExpiredRecords = <A>(options: {
         (removed, key) =>
           Effect.gen(function* () {
             const entry = yield* options.kv.readEntry<A>(key, options.label);
-            if (entry == null || !options.isPurgeable(entry)) return removed;
+            if (Option.isNone(entry) || !options.isPurgeable(entry.value)) return removed;
             yield* options.kv.remove(key, options.label);
-            if (options.onRemoved !== undefined) yield* options.onRemoved(entry.value);
+            if (options.onRemoved !== undefined) yield* options.onRemoved(entry.value.value);
             return removed + 1;
           }),
       ),
@@ -1051,7 +1067,7 @@ const purgeExpiredRecords = <A>(options: {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Layer } from "effect"
+ * import { Effect, Layer, Option } from "effect"
  * import { TestClock } from "effect/testing"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
@@ -1074,8 +1090,8 @@ const purgeExpiredRecords = <A>(options: {
  *
  *   const purged = yield* Auth.purgeExpiredKV
  *   assert.equal(purged.emailOtps, 1)
- *   assert.equal(yield* otps.get("a@example.com", "sign-in"), null)
- *   assert.notEqual(yield* otps.get("a@example.com", "forget-password"), null)
+ *   assert.ok(Option.isNone(yield* otps.get("a@example.com", "sign-in")))
+ *   assert.ok(Option.isSome(yield* otps.get("a@example.com", "forget-password")))
  * })
  *
  * await Effect.runPromise(
@@ -1239,18 +1255,17 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
         )
         .pipe(Effect.as(pending)),
     get: (token) =>
-      read(token, "pendingMultiFactor.get").pipe(
-        Effect.map((stored) => (stored === null ? null : withoutAttempts(stored))),
-      ),
+      read(token, "pendingMultiFactor.get").pipe(Effect.map(Option.map(withoutAttempts))),
     recordFailedAttempt: (token) =>
       attemptsLock.withPermit(
         Effect.gen(function* () {
-          const stored = yield* read(token, "pendingMultiFactor.recordFailedAttempt");
-          if (stored === null) {
+          const found = yield* read(token, "pendingMultiFactor.recordFailedAttempt");
+          if (Option.isNone(found)) {
             return yield* new Errors.AuthError({
               message: "Pending multi-factor challenge not found",
             });
           }
+          const stored = found.value;
           const failedAttempts = (stored.failedAttempts ?? 0) + 1;
           yield* kv.writeExpiring(
             pendingMultiFactorKey(token),
@@ -1269,7 +1284,7 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
       takeRecord<StoredPendingMultiFactor>(
         pendingMultiFactorKey(token),
         "pendingMultiFactor.consume",
-      ).pipe(Effect.map((taken) => (taken === null ? null : withoutAttempts(taken)))),
+      ).pipe(Effect.map(Option.map(withoutAttempts))),
   } satisfies typeof PendingMultiFactorStore.Service;
 });
 
@@ -1355,9 +1370,9 @@ export const identifierStoreKV: Effect.Effect<
   const getByValue = (type: IdentifierType, value: string, label: string) =>
     Effect.gen(function* () {
       const id = yield* kv.read<string>(identifierTypeValueKey(type, value), label);
-      if (id == null) return null;
-      const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), label);
-      return stored == null ? null : decodeIdentifier(stored);
+      if (Option.isNone(id)) return Option.none<Identifier>();
+      const stored = yield* kv.read<StoredIdentifier>(identifierKey(id.value), label);
+      return Option.map(stored, decodeIdentifier);
     });
 
   const create = (identifier: Identifier, label: string) =>
@@ -1375,8 +1390,9 @@ export const identifierStoreKV: Effect.Effect<
 
   const remove = (id: string, label: string) =>
     Effect.gen(function* () {
-      const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), label);
-      if (stored == null) return;
+      const found = yield* kv.read<StoredIdentifier>(identifierKey(id), label);
+      if (Option.isNone(found)) return;
+      const stored = found.value;
       yield* kv.remove(identifierKey(id), label);
       yield* kv.remove(identifierTypeValueKey(stored.type, stored.value), label);
       yield* kv.indexRemove(identifierUserKey(stored.userId), id, label);
@@ -1393,10 +1409,7 @@ export const identifierStoreKV: Effect.Effect<
           (id) => kv.read<StoredIdentifier>(identifierKey(id), "identifier.listByUser"),
           { concurrency: "unbounded" },
         );
-        return Arr.sort(
-          records.filter((r): r is StoredIdentifier => r != null).map(decodeIdentifier),
-          identifierByCreatedAt,
-        );
+        return Arr.sort(Arr.map(Arr.getSomes(records), decodeIdentifier), identifierByCreatedAt);
       }),
 
     // `(type, value)` is unique: a claimed pair is refused with `AuthError`, as
@@ -1404,7 +1417,9 @@ export const identifierStoreKV: Effect.Effect<
     // A read before the write, so two concurrent creates can still both land.
     create: (identifier) =>
       Effect.gen(function* () {
-        if ((yield* getByValue(identifier.type, identifier.value, "identifier.create")) !== null) {
+        if (
+          Option.isSome(yield* getByValue(identifier.type, identifier.value, "identifier.create"))
+        ) {
           return yield* new Errors.AuthError({
             message: `Identifier (${identifier.type}) already exists`,
           });
@@ -1419,24 +1434,24 @@ export const identifierStoreKV: Effect.Effect<
     replace: (from, to) =>
       Effect.gen(function* () {
         const invalid = replaceInputError(from, to);
-        if (invalid !== null) return yield* invalid;
+        if (Option.isSome(invalid)) return yield* invalid.value;
         const held = yield* kv.read<StoredIdentifier>(identifierKey(from.id), "identifier.replace");
         if (
-          held == null ||
-          held.userId !== from.userId ||
-          held.type !== from.type ||
-          held.value !== from.value
+          Option.isNone(held) ||
+          held.value.userId !== from.userId ||
+          held.value.type !== from.type ||
+          held.value.value !== from.value
         ) {
-          return null;
+          return Option.none();
         }
-        if ((yield* getByValue(to.type, to.value, "identifier.replace")) !== null) {
+        if (Option.isSome(yield* getByValue(to.type, to.value, "identifier.replace"))) {
           return yield* new Errors.AuthError({
             message: `Identifier (${to.type}) already exists`,
           });
         }
         yield* create(to, "identifier.replace");
         yield* remove(from.id, "identifier.replace");
-        return to;
+        return Option.some(to);
       }),
 
     setVerified: (id, verifiedAt) =>
@@ -1445,14 +1460,14 @@ export const identifierStoreKV: Effect.Effect<
           identifierKey(id),
           "identifier.setVerified",
         );
-        if (stored == null) return null;
+        if (Option.isNone(stored)) return Option.none();
         const updated: StoredIdentifier = {
-          ...stored,
+          ...stored.value,
           verified: true,
           verifiedAt: verifiedAt.getTime(),
         };
         yield* kv.write(identifierKey(id), updated, "identifier.setVerified");
-        return decodeIdentifier(updated);
+        return Option.some(decodeIdentifier(updated));
       }),
 
     delete: (id) => remove(id, "identifier.delete"),
@@ -1468,10 +1483,10 @@ export const identifierStoreKV: Effect.Effect<
                 identifierKey(id),
                 "identifier.deleteByUser",
               );
-              if (stored == null) return;
+              if (Option.isNone(stored)) return;
               yield* kv.remove(identifierKey(id), "identifier.deleteByUser");
               yield* kv.remove(
-                identifierTypeValueKey(stored.type, stored.value),
+                identifierTypeValueKey(stored.value.type, stored.value.value),
                 "identifier.deleteByUser",
               );
             }),

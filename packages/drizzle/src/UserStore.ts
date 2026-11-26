@@ -1,11 +1,13 @@
 /**
  * Drizzle `UserStore` and the batched user reads, over a dialect's {@link
- * Tables} or a `defineSchema` mapping. `get` is `null` on a miss and never
+ * Tables} or a `defineSchema` mapping. `get` is `None` on a miss and never
  * reads `password_hash`.
  */
 
 import { eq, inArray } from "drizzle-orm";
 import { Effect, Layer, Request, RequestResolver } from "effect";
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
@@ -104,14 +106,16 @@ export const make = (
     const projection = selection(users);
     const toUser = makeToUser(users);
 
-    const byId = (userId: string, label: string): Effect.Effect<UserRow | null, Auth.AuthError> =>
+    const byId = (
+      userId: string,
+      label: string,
+    ): Effect.Effect<Option.Option<UserRow>, Auth.AuthError> =>
       query(label, (db) =>
         db.select(projection).from(table).where(eq(column.id, userId)).limit(1).execute(),
-      ).pipe(Effect.map((rows) => rows[0] ?? null));
+      ).pipe(Effect.map(Arr.head));
 
     return {
-      get: (userId) =>
-        byId(userId, "user.get").pipe(Effect.map((row) => (row === null ? null : toUser(row)))),
+      get: (userId) => byId(userId, "user.get").pipe(Effect.map(Option.map(toUser))),
     } satisfies typeof Auth.UserStore.Service;
   });
 
@@ -126,12 +130,12 @@ export const layer = (
 // ---------------------------------------------------------------------------
 
 /**
- * Read one user by id. Resolves to `null` on a miss, exactly like
+ * Read one user by id. Resolves to `None` on a miss, exactly like
  * `UserStore.get`. Issue it with `Requests.getUser(id)`.
  */
 export class GetUser extends Request.TaggedClass("GetUser")<
   { readonly id: string },
-  Auth.User | null,
+  Option.Option<Auth.User>,
   Auth.AuthError
 > {}
 

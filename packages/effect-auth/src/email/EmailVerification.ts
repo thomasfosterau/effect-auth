@@ -3,6 +3,7 @@
  */
 
 import { Clock, Context, Duration, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
 import {
   AuthError,
@@ -92,26 +93,26 @@ export class EmailVerificationStore extends Context.Service<
     readonly create: (
       verification: EmailVerification,
     ) => Effect.Effect<EmailVerification, AuthError>;
-    readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
+    readonly get: (token: string) => Effect.Effect<Option.Option<EmailVerification>, AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none. Of two concurrent callers
+     * return `None` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
+    readonly consume: (token: string) => Effect.Effect<Option.Option<EmailVerification>, AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, AuthError>;
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
     /**
      * The user's most recently created verification (greatest `createdAt`),
-     * expired or not, or `null` when the user has none. The resend cooldown
+     * expired or not, or `None` when the user has none. The resend cooldown
      * reads it.
      */
     readonly getLatestByUserId: (
       userId: string,
-    ) => Effect.Effect<EmailVerification | null, AuthError>;
+    ) => Effect.Effect<Option.Option<EmailVerification>, AuthError>;
   }
 >()("@effect-auth/EmailVerificationStore") {}
 
@@ -279,13 +280,14 @@ export const make = (
 
         const tokenHash = yield* hashToken(token);
 
-        const verification = yield* store.get(tokenHash);
+        const foundVerification = yield* store.get(tokenHash);
 
-        if (!verification) {
+        if (Option.isNone(foundVerification)) {
           return yield* new EmailVerificationError({
             message: "Invalid or expired verification token",
           });
         }
+        const verification = foundVerification.value;
 
         // Check expiration
         if ((yield* Clock.currentTimeMillis) > verification.expiresAt) {
@@ -297,7 +299,7 @@ export const make = (
 
         // Spend the token atomically: of concurrent verifications of
         // one token, only one succeeds.
-        if ((yield* store.consume(tokenHash)) === null) {
+        if (Option.isNone(yield* store.consume(tokenHash))) {
           return yield* new EmailVerificationError({
             message: "Invalid or expired verification token",
           });
@@ -315,12 +317,13 @@ export const make = (
       peekToken: Effect.fn("EmailVerificationService.peekToken")(function* (rawToken: string) {
         const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
         const tokenHash = yield* hashToken(token);
-        const verification = yield* store.get(tokenHash);
-        if (!verification) {
+        const foundVerification = yield* store.get(tokenHash);
+        if (Option.isNone(foundVerification)) {
           return yield* new EmailVerificationError({
             message: "Invalid or expired verification token",
           });
         }
+        const verification = foundVerification.value;
         if ((yield* Clock.currentTimeMillis) > verification.expiresAt) {
           yield* store.delete(tokenHash);
           return yield* new EmailVerificationError({
@@ -334,7 +337,7 @@ export const make = (
         token: string,
         result: EmailVerificationResult,
       ) {
-        if ((yield* store.consume(token)) === null) {
+        if (Option.isNone(yield* store.consume(token))) {
           return yield* new EmailVerificationError({
             message: "Invalid or expired verification token",
           });
@@ -349,8 +352,10 @@ export const make = (
       ) {
         // Resend cooldown: inside the window the outstanding token
         // stays usable and nothing is sent.
-        const latest = resendCooldown > 0 ? yield* store.getLatestByUserId(userId) : null;
-        if (latest !== null) {
+        const foundLatest =
+          resendCooldown > 0 ? yield* store.getLatestByUserId(userId) : Option.none();
+        if (Option.isSome(foundLatest)) {
+          const latest = foundLatest.value;
           const elapsed = (yield* Clock.currentTimeMillis) - latest.createdAt;
           if (elapsed < resendCooldown) {
             return yield* new ResendTooSoonError({

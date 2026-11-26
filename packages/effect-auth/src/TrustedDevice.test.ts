@@ -1,7 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
-import * as Option from "effect/Option";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
 import { Hooks } from "./Hooks.ts";
@@ -28,7 +27,7 @@ const deviceStore = {
     }),
 
   getByTokenHash: (tokenHash: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(deviceRecords, tokenHash))),
+    Effect.sync(() => MutableHashMap.get(deviceRecords, tokenHash)),
 
   delete: (tokenHash: string) =>
     Effect.sync(() => {

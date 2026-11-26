@@ -30,6 +30,7 @@
  * @module trusted-device
  */
 import { Clock, Config, Context, Effect, Layer, Redacted } from "effect";
+import * as Option from "effect/Option";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import { Hex } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
@@ -248,8 +249,9 @@ export const make = (
         if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
 
         const tokenHash = yield* hashToken(parsed.rawToken);
-        const record = yield* store.getByTokenHash(tokenHash);
-        if (!record) return null;
+        const found = yield* store.getByTokenHash(tokenHash);
+        if (Option.isNone(found)) return null;
+        const record = found.value;
 
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(tokenHash);

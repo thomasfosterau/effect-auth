@@ -8,6 +8,7 @@
 
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -91,7 +92,7 @@ export const make = (
     const get = (key: string, label: string) =>
       query(label, (db) =>
         db.select(column).from(table).where(eq(column.key, key)).limit(1).execute(),
-      ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toEntry(rows[0]))));
+      ).pipe(Effect.map((rows) => Option.map(Arr.head(rows), toEntry)));
 
     const reopenExpired = (key: string, now: Date, resetAt: Date) =>
       query("rateLimit.increment.reopen", (db) =>
@@ -139,7 +140,7 @@ export const make = (
           const returned = returnedCount(yield* countOne(key, resetAt));
           if (Option.isSome(returned)) return returned.value[0].count;
           const entry = yield* get(key, "rateLimit.increment.read");
-          return entry?.count ?? 1;
+          return Option.match(entry, { onNone: () => 1, onSome: (found) => found.count });
         }),
 
       delete: (key) =>

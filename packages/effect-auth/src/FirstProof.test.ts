@@ -99,8 +99,8 @@ const memoryPasskeyStore = (
 ): typeof CredentialStore.Service => ({
   create: (credential) =>
     Effect.sync(() => (MutableHashMap.set(passkeys, credential.id, credential), credential)),
-  get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(passkeys, id))),
-  getByCredentialId: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(passkeys, id))),
+  get: (id) => Effect.sync(() => MutableHashMap.get(passkeys, id)),
+  getByCredentialId: (id) => Effect.sync(() => MutableHashMap.get(passkeys, id)),
   update: (credential) =>
     Effect.sync(() => (MutableHashMap.set(passkeys, credential.id, credential), credential)),
   delete: (id) => Effect.sync(() => void MutableHashMap.remove(passkeys, id)),
@@ -210,9 +210,10 @@ const fixture = (verified: boolean) => {
             .toSorted(),
           passkeys: (yield* credentials.passkeys.listByUserId(userId)).map((p) => p.id),
           apiKeys: (yield* credentials.apiKeys.listByUserId(userId)).map((key) => key.id),
-          multiFactor: (yield* credentials.multiFactor.get(userId)) !== null,
-          trustedDevice:
-            (yield* credentials.trustedDevices.getByTokenHash(`device-${userId}`)) !== null,
+          multiFactor: Option.isSome(yield* credentials.multiFactor.get(userId)),
+          trustedDevice: Option.isSome(
+            yield* credentials.trustedDevices.getByTokenHash(`device-${userId}`),
+          ),
         };
       }),
     );
@@ -230,7 +231,7 @@ const fixture = (verified: boolean) => {
       .toSorted();
   /** Whether `userId` still holds a consent to the client `rp`. */
   const oidcConsent = (userId: string) =>
-    Effect.runSync(credentials.oidcConsents.get(userId, "rp")) !== null;
+    Option.isSome(Effect.runSync(credentials.oidcConsents.get(userId, "rp")));
   return {
     table,
     identifier,
@@ -306,7 +307,7 @@ describe("proveAddress: the first proof removes the earlier holder's credentials
     expect(f.oidcTokens(BYSTANDER)).toEqual(["access", "refresh"]);
     expect(MutableHashMap.has(f.table.passwordHashes, SQUATTER)).toBe(false);
     expect(f.revoked).toEqual([`${SQUATTER} except prover-session`]);
-    expect(proved?.verified).toBe(true);
+    expect(Option.getOrUndefined(proved)?.verified).toBe(true);
   });
 
   it("still clears the password and sessions when the app provides no credential store", () => {
@@ -325,7 +326,7 @@ describe("proveAddress: the first proof removes the earlier holder's credentials
     expect(f.oidcTokens(SQUATTER)).toEqual(["access", "refresh"]);
     expect(MutableHashMap.has(f.table.passwordHashes, SQUATTER)).toBe(true);
     expect(f.revoked).toEqual([]);
-    expect(proved?.verified).toBe(true);
+    expect(Option.getOrUndefined(proved)?.verified).toBe(true);
   });
 });
 

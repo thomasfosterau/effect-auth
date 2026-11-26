@@ -116,7 +116,7 @@ export const make = (
         projection,
         users.table,
         eq(column.id, userId),
-      ).pipe(Effect.map((row) => (row === null ? null : toUser(row))));
+      ).pipe(Effect.map(Option.map(toUser)));
 
     const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] = (input) =>
       Effect.gen(function* () {
@@ -145,12 +145,12 @@ export const make = (
             .execute(),
         );
         const user = yield* readUser(id);
-        if (user === null) {
+        if (Option.isNone(user)) {
           return yield* new Auth.AuthError({
             message: "drizzle emailPassword.createUser failed: the inserted user was not found",
           });
         }
-        return { user, created: true };
+        return { user: user.value, created: true };
       });
 
     return {
@@ -162,7 +162,7 @@ export const make = (
           { hash: password },
           users.table,
           eq(column.id, userId),
-        ).pipe(Effect.map((row) => row?.hash ?? null)),
+        ).pipe(Effect.map(Option.flatMap((row) => Option.fromNullishOr(row.hash)))),
       setPasswordHash: (userId, hash) =>
         writePassword(query, users, "emailPassword.setPasswordHash", userId, hash),
       clearPasswordHash: (userId) =>

@@ -9,6 +9,7 @@
  * @module email-otp
  */
 import { Context, Data, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
@@ -88,14 +89,14 @@ export class EmailOtpStore extends Context.Service<
     readonly get: (
       email: string,
       purpose: EmailOtpPurpose,
-    ) => Effect.Effect<EmailOtpRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<EmailOtpRecord>, Errors.AuthError>;
     readonly delete: (
       email: string,
       purpose: EmailOtpPurpose,
     ) => Effect.Effect<void, Errors.AuthError>;
     /**
      * Count one attempt against the pair's code, atomically, and return the
-     * new count, or `null` when the pair has no code. The service
+     * new count, or `None` when the pair has no code. The service
      * counts before it compares, so of concurrent guesses each gets its own
      * count and at most `maxAttempts` are ever compared: two calls must never
      * return the same number. On SQL this is one `UPDATE … RETURNING`.
@@ -103,16 +104,16 @@ export class EmailOtpStore extends Context.Service<
     readonly incrementAttempts: (
       email: string,
       purpose: EmailOtpPurpose,
-    ) => Effect.Effect<number | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<number>, Errors.AuthError>;
     /**
-     * The pair's failure budget, or `null` when it has none. It is
+     * The pair's failure budget, or `None` when it has none. It is
      * kept apart from the OTP record: `upsert` and `delete` leave it as it
      * was.
      */
     readonly getFailures: (
       email: string,
       purpose: EmailOtpPurpose,
-    ) => Effect.Effect<Types.OtpFailures | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Types.OtpFailures>, Errors.AuthError>;
     /**
      * Count one wrong code against the pair, at `at` (epoch ms), and return
      * the budget after it: `count` from 1, `lastFailureAt` set to `at`. One
@@ -433,7 +434,7 @@ export const make = (
         // Sign-in with sign-up enabled always sends (the user is created at
         // verification time).
         const deliver = hidesAccount(purpose)
-          ? (yield* lookupIdentifier(identifiers, "email", email)) !== null
+          ? Option.isSome(yield* lookupIdentifier(identifiers, "email", email))
           : true;
 
         // Resend cooldown and failure backoff. Both run for an
@@ -489,12 +490,12 @@ export const make = (
         yield* hooks.beforeAuthenticate({
           method: "email-otp",
           identifier: { type: "email", value: email },
-          userId: found.user?.id,
+          userId: Option.getOrUndefined(Option.map(found, (owner) => owner.user.id)),
         });
 
         yield* verifyOtp(email, otp, "sign-in");
 
-        if (found.user === null && disableSignUp) {
+        if (Option.isNone(found) && disableSignUp) {
           return yield* new EmailOtpError({ message: "Sign-up is disabled" });
         }
         // A verified OTP proves ownership of the email.
@@ -528,7 +529,7 @@ export const make = (
         yield* hooks.beforeAuthenticate({
           method: "email-otp",
           identifier: { type: "email", value: email },
-          userId: identifier?.userId,
+          userId: Option.getOrUndefined(Option.map(identifier, (found) => found.userId)),
         });
 
         yield* verifyOtp(email, otp, purpose);

@@ -10,6 +10,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -86,16 +87,16 @@ describe("SessionStore", () => {
     );
 
     expect(result.created).toEqual(makeSession({ attributes: { device: "laptop" } }));
-    expect(result.loaded?.id).toBe("session-1");
-    expect(result.loaded?.userId).toBe("user-1");
-    expect(result.loaded?.createdAt).toEqual(at(0));
-    expect(result.loaded?.expiresAt).toEqual(at(60_000));
-    expect(result.loaded?.attributes).toEqual({ device: "laptop" });
+    expect(Option.getOrUndefined(result.loaded)?.id).toBe("session-1");
+    expect(Option.getOrUndefined(result.loaded)?.userId).toBe("user-1");
+    expect(Option.getOrUndefined(result.loaded)?.createdAt).toEqual(at(0));
+    expect(Option.getOrUndefined(result.loaded)?.expiresAt).toEqual(at(60_000));
+    expect(Option.getOrUndefined(result.loaded)?.attributes).toEqual({ device: "laptop" });
     expect(result.updated.attributes).toEqual({ device: "phone" });
-    expect(result.reloaded?.expiresAt).toEqual(at(120_000));
-    expect(result.reloaded?.lastActivityAt).toEqual(at(30_000));
-    expect(result.reloaded?.attributes).toEqual({ device: "phone" });
-    expect(result.afterDelete).toBeNull();
+    expect(Option.getOrUndefined(result.reloaded)?.expiresAt).toEqual(at(120_000));
+    expect(Option.getOrUndefined(result.reloaded)?.lastActivityAt).toEqual(at(30_000));
+    expect(Option.getOrUndefined(result.reloaded)?.attributes).toEqual({ device: "phone" });
+    expect(Option.isNone(result.afterDelete)).toBe(true);
   });
 
   it("returns null on a miss and no-ops on deletes of absent rows", async () => {
@@ -110,7 +111,7 @@ describe("SessionStore", () => {
       }),
     );
 
-    expect(result.missing).toBeNull();
+    expect(Option.isNone(result.missing)).toBe(true);
     expect(result.listed).toEqual([]);
   });
 
@@ -131,11 +132,13 @@ describe("SessionStore", () => {
       }),
     );
 
-    expect(result.expired?.expiresAt).toEqual(at(-60_000));
-    assert(result.future !== null, "the future session is stored");
-    expect(result.expired?.expiresAt.getTime()).toBeLessThan(result.future.expiresAt.getTime());
+    expect(Option.getOrUndefined(result.expired)?.expiresAt).toEqual(at(-60_000));
+    assert(Option.isSome(result.future), "the future session is stored");
+    expect(Option.getOrUndefined(result.expired)?.expiresAt.getTime()).toBeLessThan(
+      result.future.value.expiresAt.getTime(),
+    );
 
-    expect(result.future?.expiresAt).toEqual(at(86_400_000));
+    expect(Option.getOrUndefined(result.future)?.expiresAt).toEqual(at(86_400_000));
   });
 
   it("round-trips nested attribute bags through jsonb", async () => {
@@ -162,8 +165,8 @@ describe("SessionStore", () => {
       }),
     );
 
-    expect(result.rich?.attributes).toEqual(attributes);
-    expect(result.empty?.attributes).toEqual({});
+    expect(Option.getOrUndefined(result.rich)?.attributes).toEqual(attributes);
+    expect(Option.getOrUndefined(result.empty)?.attributes).toEqual({});
   });
 
   it("lists a user's sessions by createdAt and scopes deleteByUserId", async () => {

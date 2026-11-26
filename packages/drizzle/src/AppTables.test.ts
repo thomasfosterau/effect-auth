@@ -24,6 +24,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as ApiKeyStore from "./ApiKeyStore.ts";
@@ -266,9 +267,13 @@ describe("an application's own API key and token tables", () => {
         const keys = yield* Auth.ApiKeyStore;
         return {
           keys: yield* keys.listByUserId(userId),
-          kept: yield* keys.get(kept.id),
-          verification: yield* (yield* Auth.Email.EmailVerificationStore).get(verification.token),
-          reset: yield* (yield* Auth.Password.PasswordResetStore).get(reset.token),
+          kept: Option.getOrNull(yield* keys.get(kept.id)),
+          verification: Option.getOrNull(
+            yield* (yield* Auth.Email.EmailVerificationStore).get(verification.token),
+          ),
+          reset: Option.getOrNull(
+            yield* (yield* Auth.Password.PasswordResetStore).get(reset.token),
+          ),
         };
       }),
     );

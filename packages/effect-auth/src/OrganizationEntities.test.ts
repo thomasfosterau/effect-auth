@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
 import { OrganizationStore, type Member, type Organization, type Team } from "./Organization.ts";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
@@ -43,9 +44,9 @@ const teamMemberships: ReadonlyArray<{ teamId: string; userId: string }> = [
 /** The read-only slice of `OrganizationStore` the resolver actually calls. */
 const store = {
   getOrganizationById: (organizationId: string) =>
-    Effect.succeed(organizations.find((o) => o.id === organizationId) ?? null),
+    Effect.succeed(Arr.findFirst(organizations, (o) => o.id === organizationId)),
   listMembersByUser: (userId: string) => Effect.succeed(members.filter((m) => m.userId === userId)),
-  getTeam: (teamId: string) => Effect.succeed(teams.find((t) => t.id === teamId) ?? null),
+  getTeam: (teamId: string) => Effect.succeed(Arr.findFirst(teams, (t) => t.id === teamId)),
   listTeamsForMember: (organizationId: string, userId: string) =>
     Effect.succeed(
       teamMemberships

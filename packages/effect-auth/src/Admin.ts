@@ -442,10 +442,11 @@ export const make = (
         yield* requireAdmin(actor);
         yield* requireRole(role);
 
-        const user = yield* userStore.get(userId);
-        if (user === null) {
+        const foundUser = yield* userStore.get(userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const user = foundUser.value;
 
         return yield* userStore.update({
           ...user,
@@ -465,10 +466,11 @@ export const make = (
           return yield* new AdminError({ message: "You cannot ban yourself" });
         }
 
-        const user = yield* userStore.get(userId);
-        if (user === null) {
+        const foundUser = yield* userStore.get(userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const user = foundUser.value;
 
         if (isAdmin(user, config)) {
           return yield* new AdminError({ message: "Administrators cannot be banned" });
@@ -502,10 +504,11 @@ export const make = (
       unbanUser: Effect.fn("AdminService.unbanUser")(function* (actor: Types.User, userId: string) {
         yield* requireAdmin(actor);
 
-        const user = yield* userStore.get(userId);
-        if (user === null) {
+        const foundUser = yield* userStore.get(userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const user = foundUser.value;
 
         const attributes: Types.Attributes = {
           ...withoutBanAttributes(user.attributes),
@@ -546,10 +549,11 @@ export const make = (
       ) {
         yield* requireAdmin(actor);
 
-        const target = yield* userStore.get(userId);
-        if (target === null) {
+        const foundTarget = yield* userStore.get(userId);
+        if (Option.isNone(foundTarget)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const target = foundTarget.value;
 
         return yield* sessionManager.createSession(target.id, {
           impersonatedBy: actor.id,
@@ -652,8 +656,7 @@ export const make = (
       ) {
         yield* requireAdmin(actor);
 
-        const user = yield* userStore.get(userId);
-        if (user === null) {
+        if (Option.isNone(yield* userStore.get(userId))) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
 

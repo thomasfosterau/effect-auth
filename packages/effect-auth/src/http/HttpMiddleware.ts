@@ -8,7 +8,7 @@
  * @example Attaching required auth to a group
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import { Effect, FileSystem, Layer, Option, Path } from "effect"
  * import * as Schema from "effect/Schema"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
@@ -30,16 +30,16 @@
  * const storeLayers = Layer.mergeAll(
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
- *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
  *     update: (session) =>
  *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
- *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return Option.none()
  *         const touched = { ...session, ...touch }
  *         sessions.set(id, touched)
- *         return touched
+ *         return Option.some(touched)
  *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
@@ -49,7 +49,7 @@
  *     listByUserId: (userId) =>
  *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
  *   }),
- *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => Option.fromUndefinedOr(users.get(id))) }),
  * )
  *
  * // Stands in for the services the app provides (SessionService, Hooks, ...).
@@ -422,7 +422,7 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import { Effect, FileSystem, Layer, Option, Path } from "effect"
  * import * as Schema from "effect/Schema"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
@@ -442,16 +442,16 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  * const storeLayers = Layer.mergeAll(
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
- *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
  *     update: (session) =>
  *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
- *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return Option.none()
  *         const touched = { ...session, ...touch }
  *         sessions.set(id, touched)
- *         return touched
+ *         return Option.some(touched)
  *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
@@ -461,7 +461,7 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  *     listByUserId: (userId) =>
  *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
  *   }),
- *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => Option.fromUndefinedOr(users.get(id))) }),
  * )
  *
  * // The app's services: SessionService and Hooks.
@@ -607,8 +607,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Path } from "effect"
- * import * as Option from "effect/Option"
+ * import { Effect, FileSystem, Layer, Option, Path } from "effect"
  * import * as Schema from "effect/Schema"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
@@ -629,16 +628,16 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * const storeLayers = Layer.mergeAll(
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
- *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
  *     update: (session) =>
  *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
- *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return Option.none()
  *         const touched = { ...session, ...touch }
  *         sessions.set(id, touched)
- *         return touched
+ *         return Option.some(touched)
  *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
@@ -648,7 +647,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *     listByUserId: (userId) =>
  *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
  *   }),
- *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => Option.fromUndefinedOr(users.get(id))) }),
  * )
  *
  * // Stand-ins for the feed group handlers and the app's services.

@@ -28,7 +28,7 @@ const app = Effect.gen(function* () {
   `Layer.succeed(Auth.XStore)(impl)` or a first-party layer from
   `effect-auth/sql`, `effect-auth-alchemy-cloudflare`, or the KV layers in core.
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
-  for flow outcomes; lookups that can legitimately miss return `X | null` from
+  for flow outcomes; lookups that can legitimately miss return `Option<X>` from
   stores and surface typed errors from services.
 - **HTTP:** the `AuthApi` contract on the `./http` subpath, one flat `auth` group,
   404-until-configured for optional features, trusted-origin CSRF gate.
@@ -168,12 +168,15 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
 
 **Decision.** One store contract style:
 
-1. **Stores are dumb persistence.** Lookup methods return `X | null` when the row
-   may legitimately be absent; the _service_ converts `null` into the typed
+1. **Stores are dumb persistence.** Lookup methods return `Option<X>` when the
+   row may legitimately be absent; the _service_ converts `None` into the typed
    domain error. Store error channel is `AuthError` only (infrastructure
    failure), `never` where the store cannot fail meaningfully.
-   `Option<X>` is rejected: implementors write these against raw drivers and
-   `null` keeps implementations dependency-light and obvious.
+   _Amended:_ this first read `X | null`, rejecting `Option` to keep
+   implementations dependency-light. The library's public surface has since
+   moved to `Option` throughout, and the store contracts with it: an
+   implementor already depends on `effect`, and `Option.fromNullishOr` or
+   `Arr.head` turns a driver's row into the answer in one call.
 2. **Vocabulary:** `create`, `get` (by natural/primary key), `getBy<Key>` for
    secondary keys, `list()`/`listBy<Key>` (always array-returning), `update`,
    `upsert`, `delete`, `deleteBy<Key>`. Array-returning lookups are `list*`,
@@ -185,8 +188,8 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
    `CredentialStore.getByUserId` → `listByUserId`; `ApiKeyStore.getById` → `get`.
    `effect-auth/sql` and `effect-auth-alchemy-cloudflare` update in lockstep.
 
-**Rationale.** The nullable convention is the de-facto majority (30+ of 38), is
-the easiest contract to implement correctly against any driver, and keeps typed
+**Rationale.** One miss convention across every store is the easiest contract
+to implement correctly against any driver, and keeps typed
 errors where they carry meaning — the service boundary that decides _why_ a
 miss matters (expired vs invalid vs enumeration-safe silence).
 

@@ -61,8 +61,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -92,8 +91,7 @@ const sessionStore = {
     ),
 };
 
-const getUser = (userId: string) =>
-  Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId)));
+const getUser = (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId));
 
 // Session's UserStore (used by SessionService.validateSession)
 const sessionUserStore = {
@@ -610,8 +608,8 @@ describe("AdminService", () => {
 
     expect(Arr.fromIterable(MutableHashMap.keys(keys))).toEqual(["key-user-2"]);
     expect(Arr.fromIterable(MutableHashMap.keys(tokens))).toEqual(["token-user-2"]);
-    expect(Effect.runSync(consentStore.get("user-1", "client"))).toBeNull();
-    expect(Effect.runSync(consentStore.get("user-2", "client"))).not.toBeNull();
+    expect(Option.isNone(Effect.runSync(consentStore.get("user-1", "client")))).toBe(true);
+    expect(Option.isNone(Effect.runSync(consentStore.get("user-2", "client")))).toBe(false);
   });
 
   it("removes a user along with their sessions, but never the actor", async () => {
@@ -864,12 +862,11 @@ describe("AdminService", () => {
         Effect.gen(function* () {
           const held =
             input.identifier === undefined
-              ? null
+              ? Option.none()
               : yield* identifierStore.getByValue(input.identifier.type, input.identifier.value);
-          const owner =
-            held === null
-              ? undefined
-              : Option.getOrUndefined(MutableHashMap.get(users, held.userId));
+          const owner = Option.getOrUndefined(
+            Option.flatMap(held, (identifier) => MutableHashMap.get(users, identifier.userId)),
+          );
           if (owner !== undefined) return { user: owner, created: false };
           return yield* adminUserStore.createUser(input);
         }),

@@ -6,6 +6,7 @@
  * @internal
  */
 import { Context, type Effect } from "effect";
+import * as Option from "effect/Option";
 import type * as Errors from "./Errors.ts";
 
 /**
@@ -32,7 +33,7 @@ export class TrustedDeviceStore extends Context.Service<
     ) => Effect.Effect<TrustedDeviceRecord, Errors.AuthError>;
     readonly getByTokenHash: (
       tokenHash: string,
-    ) => Effect.Effect<TrustedDeviceRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<TrustedDeviceRecord>, Errors.AuthError>;
     readonly delete: (tokenHash: string) => Effect.Effect<void, Errors.AuthError>;
     /** Revoke every device token for a user (password change, 2FA disable, etc.). */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;

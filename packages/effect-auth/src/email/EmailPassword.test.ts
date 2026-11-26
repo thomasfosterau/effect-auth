@@ -55,8 +55,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -87,7 +86,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const emailPasswordStore = {
@@ -108,7 +107,7 @@ const emailPasswordStore = {
     }),
 
   getPasswordHash: (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
 
   clearPasswordHash: (userId: string) =>
     Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
@@ -399,7 +398,7 @@ describe("EmailPasswordService.changePassword revokes sessions and trusted devic
     const revokedDevices: string[] = [];
     const devices: typeof TrustedDeviceStore.Service = {
       upsert: (record) => Effect.succeed(record),
-      getByTokenHash: () => Effect.succeed(null),
+      getByTokenHash: () => Effect.succeedNone,
       delete: () => Effect.void,
       deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
     };
@@ -997,8 +996,7 @@ describe("EmailPasswordService - dangling session protection", () => {
         MutableHashMap.set(localSessions, session.id, session);
         return session;
       }),
-    get: (sessionId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(localSessions, sessionId))),
+    get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(localSessions, sessionId)),
     update: (session: Session) =>
       Effect.sync(() => {
         MutableHashMap.set(localSessions, session.id, session);
@@ -1023,8 +1021,7 @@ describe("EmailPasswordService - dangling session protection", () => {
   };
 
   const localUserStore = {
-    get: (userId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(localUsers, userId))),
+    get: (userId: string) => Effect.sync(() => MutableHashMap.get(localUsers, userId)),
   };
 
   const localEmailPasswordStore = {
@@ -1042,7 +1039,7 @@ describe("EmailPasswordService - dangling session protection", () => {
         return { user, created: true };
       }),
     getPasswordHash: (userId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(localPasswordHashes, userId))),
+      Effect.sync(() => MutableHashMap.get(localPasswordHashes, userId)),
     clearPasswordHash: (userId: string) =>
       Effect.sync(() => void MutableHashMap.remove(localPasswordHashes, userId)),
     setPasswordHash: (userId: string, hash: string) =>
@@ -1457,7 +1454,7 @@ const userServiceLayer = (serverOnly: ReadonlyArray<string>) =>
   UserService.layer({ serverOnlyAttributes: serverOnly }).pipe(
     Layer.provide(
       Layer.succeed(UserServiceStore)({
-        get: () => Effect.succeed(null),
+        get: () => Effect.succeedNone,
         update: (user) => Effect.succeed(user),
         delete: () => Effect.void,
       }),

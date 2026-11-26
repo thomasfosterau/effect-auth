@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap, Redacted } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { TestClock } from "effect/testing";
@@ -134,7 +135,7 @@ describe("memoryStores", () => {
     expect(result.signedIn.user.id).toBe(result.signedUp.user.id);
     expect(result.signedIn.session?.userId).toBe(result.signedUp.user.id);
     expect(result.claims["sub"]).toBe(result.signedUp.user.id);
-    expect(result.stored?.id).toBe(result.signedUp.user.id);
+    expect(Option.getOrUndefined(result.stored)?.id).toBe(result.signedUp.user.id);
   });
 
   it("starts empty on every build", async () => {
@@ -187,9 +188,9 @@ describe("memoryStores", () => {
     expect(result.before).toBe(false);
     expect(result.after).toBe(true);
     expect(result.viaOAuth).toEqual(result.user);
-    expect(result.viaUserStore).toEqual(result.user);
+    expect(result.viaUserStore).toEqual(Option.some(result.user));
     expect(result.renamed.name).toBe("Ada L.");
-    expect(result.cleared).toBeNull();
+    expect(Option.isNone(result.cleared)).toBe(true);
   });
 
   it("the JWT key store makes the newest key active and lists them all", async () => {
@@ -209,8 +210,8 @@ describe("memoryStores", () => {
         return { empty, active: yield* store.getActive, listed: yield* store.list };
       }),
     );
-    expect(result.empty).toBeNull();
-    expect(result.active?.id).toBe("new");
+    expect(Option.isNone(result.empty)).toBe(true);
+    expect(Option.getOrUndefined(result.active)?.id).toBe("new");
     expect(result.listed.map((pair) => pair.id)).toEqual(["old", "new"]);
   });
 
@@ -239,7 +240,7 @@ describe("memoryStores", () => {
     );
     expect(result.purged.magicLinks).toBe(1);
     expect(Arr.reduce(R.values(result.purged), 0, (sum, n) => sum + n)).toBe(1);
-    expect(result.link).toBeNull();
-    expect(result.otp?.expiresAt).toBe(20_000);
+    expect(Option.isNone(result.link)).toBe(true);
+    expect(Option.getOrUndefined(result.otp)?.expiresAt).toBe(20_000);
   });
 });

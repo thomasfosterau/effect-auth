@@ -7,7 +7,8 @@
  * @module api-key
  */
 
-import { Clock, Context, Data, type Duration, Effect, Layer } from "effect";
+import { Clock, Context, Data, Effect, Layer, type Duration } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { Base64Url } from "effect/encoding";
@@ -106,30 +107,30 @@ export interface ApiKeyUse {
 }
 
 /**
- * The record `recordUse` stores for `use` of `key`, or `null` when the key
+ * The record `recordUse` stores for `use` of `key`, or `None` when the key
  * may not be spent: {@link ApiKeyStore}'s `recordUse` contract as a pure
  * function, for a store that can run it inside one atomic step of its own
  * (a lock, a compare-and-set loop, a single-threaded actor).
  *
  * @since 0.6.0
  */
-export const applyApiKeyUse = (key: ApiKey, use: ApiKeyUse): ApiKey | null => {
-  if (!key.enabled) return null;
-  if (key.expiresAt !== undefined && use.usedAt > key.expiresAt) return null;
+export const applyApiKeyUse = (key: ApiKey, use: ApiKeyUse): Option.Option<ApiKey> => {
+  if (!key.enabled) return Option.none();
+  if (key.expiresAt !== undefined && use.usedAt > key.expiresAt) return Option.none();
   const refill = use.refill;
-  if (refill !== undefined && key.lastRefillAt !== refill.from) return null;
+  if (refill !== undefined && key.lastRefillAt !== refill.from) return Option.none();
   const topped =
     refill === undefined || key.remaining === undefined
       ? key.remaining
       : Math.min(key.remaining + refill.amount, refill.max ?? Number.POSITIVE_INFINITY);
-  if (topped !== undefined && topped <= 0) return null;
-  return {
+  if (topped !== undefined && topped <= 0) return Option.none();
+  return Option.some({
     ...key,
     ...(topped !== undefined && { remaining: topped - 1 }),
     ...(refill !== undefined && { lastRefillAt: refill.to }),
     lastUsedAt: use.usedAt,
     updatedAt: use.usedAt,
-  };
+  });
 };
 
 /**
@@ -139,8 +140,8 @@ export class ApiKeyStore extends Context.Service<
   ApiKeyStore,
   {
     readonly create: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
-    readonly get: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
-    readonly getByHash: (keyHash: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+    readonly get: (id: string) => Effect.Effect<Option.Option<ApiKey>, Errors.AuthError>;
+    readonly getByHash: (keyHash: string) => Effect.Effect<Option.Option<ApiKey>, Errors.AuthError>;
     /**
      * Replace the stored record whole. The owner's edits go through it;
      * a verify never does, since a write from a stale read would undo a
@@ -149,7 +150,7 @@ export class ApiKeyStore extends Context.Service<
     readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
     /**
      * Spend one use of key `id`, atomically, and return the record
-     * as stored after it, or `null` when the key may not be spent. In one
+     * as stored after it, or `None` when the key may not be spent. In one
      * step: the key must exist, be enabled and not have expired at
      * `use.usedAt` (`expiresAt >= usedAt`); a `use.refill` applies only while
      * `lastRefillAt === refill.from`, setting `remaining` to
@@ -164,7 +165,7 @@ export class ApiKeyStore extends Context.Service<
     readonly recordUse: (
       id: string,
       use: ApiKeyUse,
-    ) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<ApiKey>, Errors.AuthError>;
     readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
     readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
     /**
@@ -549,12 +550,13 @@ export const make = (
      */
     const getOwned = (userId: string, keyId: string) =>
       Effect.gen(function* () {
-        const apiKey = yield* store.get(keyId);
-        if (!apiKey || apiKey.userId !== userId) {
+        const foundApiKey = yield* store.get(keyId);
+        if (Option.isNone(foundApiKey) || foundApiKey.value.userId !== userId) {
           return yield* new ApiKeyError({
             message: "API key not found",
           });
         }
+        const apiKey = foundApiKey.value;
         return apiKey;
       });
 
@@ -575,34 +577,39 @@ export const make = (
           usedAt: checked.now,
           ...(checked.refill !== undefined && { refill: checked.refill }),
         });
-        if (spent !== null) return { valid: true, apiKey: spent } satisfies ApiKeyVerifyResult;
+        if (Option.isSome(spent)) {
+          return { valid: true, apiKey: spent.value } satisfies ApiKeyVerifyResult;
+        }
         if (attempt >= useAttempts) {
           return yield* new Errors.AuthError({ message: "apiKey.recordUse contended" });
         }
-        const fresh = yield* store.get(checked.key.id);
-        if (fresh === null) return refused("Invalid API key", "invalid");
+        const foundFresh = yield* store.get(checked.key.id);
+        if (Option.isNone(foundFresh)) return refused("Invalid API key", "invalid");
+        const fresh = foundFresh.value;
         const again = yield* checkRecord(fresh, requiredPermissions);
         if (again.refused !== undefined) return again.refused;
         return yield* spend(again, requiredPermissions, attempt + 1);
       });
 
     /**
-     * Hash lookup for a plaintext key, `null` when no key matches or its owner
+     * Hash lookup for a plaintext key, `None` when no key matches or its owner
      * no longer exists or is banned or SCIM-deactivated: a key outlives its user only when something
      * deleted the user row without the purge, and it must not authenticate.
      * Lookup is by exact sha256 digest, so the comparison carries no
      * secret-dependent timing.
      */
-    const lookup = (plaintextKey: string) =>
-      Effect.flatMap(Effect.flatMap(hashKey(plaintextKey), store.getByHash), (apiKey) =>
-        apiKey === null
-          ? Effect.succeed(null)
-          : Effect.flatMap(users.get(apiKey.userId), (owner) =>
-              owner === null
-                ? Effect.succeed(null)
+    const lookup = (plaintextKey: string): Effect.Effect<Option.Option<ApiKey>, Errors.AuthError> =>
+      Effect.flatMap(Effect.flatMap(hashKey(plaintextKey), store.getByHash), (found) =>
+        Option.isNone(found)
+          ? Effect.succeedNone
+          : Effect.flatMap(users.get(found.value.userId), (owner) =>
+              Option.isNone(owner)
+                ? Effect.succeedNone
                 : // A banned or SCIM-deactivated owner's key is refused as
                   // unknown, before the per-key limit and the spend.
-                  Effect.map(isInGoodStanding(owner), (good) => (good ? apiKey : null)),
+                  Effect.map(isInGoodStanding(owner.value), (good) =>
+                    good ? found : Option.none(),
+                  ),
             ),
       );
 
@@ -615,9 +622,9 @@ export const make = (
       requiredPermissions: Record<string, readonly string[]> | undefined,
     ) =>
       Effect.flatMap(lookup(plaintextKey), (apiKey) =>
-        apiKey === null
+        Option.isNone(apiKey)
           ? Effect.succeed({ refused: refused("Invalid API key", "invalid") })
-          : checkRecord(apiKey, requiredPermissions),
+          : checkRecord(apiKey.value, requiredPermissions),
       );
 
     return {
@@ -721,12 +728,13 @@ export const make = (
       }),
 
       get: Effect.fn("ApiKeyService.get")(function* (keyId: string) {
-        const apiKey = yield* store.get(keyId);
-        if (!apiKey) {
+        const foundApiKey = yield* store.get(keyId);
+        if (Option.isNone(foundApiKey)) {
           return yield* new ApiKeyError({
             message: "API key not found",
           });
         }
+        const apiKey = foundApiKey.value;
         return apiKey;
       }),
 

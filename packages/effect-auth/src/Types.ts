@@ -7,6 +7,7 @@
  * HTTP protocol layer. Configuration shapes remain plain interfaces.
  */
 import type { Effect } from "effect";
+import type * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type * as Errors from "./Errors.ts";
@@ -287,7 +288,7 @@ export interface OtpFailures {
 /**
  * The failure-budget methods of `EmailOtpStore` and `PhoneOtpStore`,
  * over the store's purposes `P`: `getFailures` reads a pair's
- * {@link OtpFailures} (`null` when it has none), `recordFailure` counts one
+ * {@link OtpFailures} (`Option.none()` when it has none), `recordFailure` counts one
  * wrong code at `at` (epoch ms) and returns the budget after it, and
  * `clearFailures` forgets it.
  */
@@ -295,7 +296,7 @@ export interface OtpFailureBudget<P> {
   readonly getFailures: (
     address: string,
     purpose: P,
-  ) => Effect.Effect<OtpFailures | null, Errors.AuthError>;
+  ) => Effect.Effect<Option.Option<OtpFailures>, Errors.AuthError>;
   readonly recordFailure: (
     address: string,
     purpose: P,

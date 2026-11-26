@@ -110,22 +110,26 @@ export const organizationEntityResolver = (
   const resolveOrganization = (
     organizationId: string,
   ): Effect.Effect<Entity.Entity | null, Errors.AuthError> =>
-    Effect.map(store.getOrganizationById(organizationId), (organization) =>
-      organization === null
-        ? null
-        : Entity.entity(organizationRef(organization.id), {
+    Effect.map(store.getOrganizationById(organizationId), (found) =>
+      Option.getOrNull(
+        Option.map(found, (organization) =>
+          Entity.entity(organizationRef(organization.id), {
             attributes: { name: organization.name, slug: organization.slug },
           }),
+        ),
+      ),
     );
 
   const resolveTeam = (teamId: string): Effect.Effect<Entity.Entity | null, Errors.AuthError> =>
-    Effect.map(store.getTeam(teamId), (team) =>
-      team === null
-        ? null
-        : Entity.entity(teamRef(team.id), {
+    Effect.map(store.getTeam(teamId), (found) =>
+      Option.getOrNull(
+        Option.map(found, (team) =>
+          Entity.entity(teamRef(team.id), {
             attributes: { name: team.name, organizationId: team.organizationId },
             parents: [organizationRef(team.organizationId)],
           }),
+        ),
+      ),
     );
 
   /**

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Cause, DateTime, Effect, Exit, MutableHashMap } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import * as Condition from "./Condition.ts";
@@ -52,25 +53,25 @@ describe("PolicyStore CRUD", () => {
     const store = PolicyStore.memoryPolicyStore();
     const policy = Policy.permit({ id: "p1", action: Policy.eq(readDoc) });
 
-    expect(await run(store.getPolicy("p1"))).toBeNull();
+    expect(Option.isNone(await run(store.getPolicy("p1")))).toBe(true);
     expect(await run(store.createPolicy(policy))).toEqual(policy);
-    expect(await run(store.getPolicy("p1"))).toEqual(policy);
+    expect(await run(store.getPolicy("p1"))).toEqual(Option.some(policy));
     expect(await run(store.listPolicies)).toEqual([policy]);
 
     const updated = Policy.forbid({ id: "p1", action: Policy.eq(readDoc) });
-    expect(await run(store.updatePolicy(updated))).toEqual(updated);
-    expect(await run(store.getPolicy("p1"))).toEqual(updated);
+    expect(await run(store.updatePolicy(updated))).toEqual(Option.some(updated));
+    expect(await run(store.getPolicy("p1"))).toEqual(Option.some(updated));
 
     await run(store.deletePolicy("p1"));
-    expect(await run(store.getPolicy("p1"))).toBeNull();
+    expect(Option.isNone(await run(store.getPolicy("p1")))).toBe(true);
     // Deleting an absent policy is a no-op, not a failure.
     await run(store.deletePolicy("p1"));
   });
 
   it("updatePolicy/updateTemplate return null when the row is absent", async () => {
     const store = PolicyStore.memoryPolicyStore();
-    expect(await run(store.updatePolicy(Policy.permit({ id: "ghost" })))).toBeNull();
-    expect(await run(store.updateTemplate(shareTemplate))).toBeNull();
+    expect(Option.isNone(await run(store.updatePolicy(Policy.permit({ id: "ghost" }))))).toBe(true);
+    expect(Option.isNone(await run(store.updateTemplate(shareTemplate)))).toBe(true);
   });
 
   it("creating a policy or template with an existing id fails like a unique index", async () => {
@@ -107,8 +108,8 @@ describe("PolicyStore CRUD", () => {
     await run(store.createLink(shared));
     await run(store.createLink(elsewhere));
 
-    expect(await run(store.getLink("l1"))).toEqual(shared);
-    expect(await run(store.getLink("nope"))).toBeNull();
+    expect(await run(store.getLink("l1"))).toEqual(Option.some(shared));
+    expect(Option.isNone(await run(store.getLink("nope")))).toBe(true);
     expect(await run(store.listLinks())).toHaveLength(2);
     expect(await run(store.listLinks("share-doc"))).toEqual([shared]);
 
@@ -138,7 +139,7 @@ describe("PolicyStore CRUD", () => {
     );
 
     await run(store.deleteTemplate("share-doc"));
-    expect(await run(store.getTemplate("share-doc"))).toBeNull();
+    expect(Option.isNone(await run(store.getTemplate("share-doc")))).toBe(true);
     expect(Arr.fromIterable(MutableHashMap.keys(links))).toEqual(["l3"]);
     // No-op for an unknown template.
     await run(store.deleteTemplate("share-doc"));
@@ -148,7 +149,7 @@ describe("PolicyStore CRUD", () => {
     const policy = Policy.permit({ id: "seeded" });
     const policies = MutableHashMap.fromIterable([[policy.id, policy]]);
     const store = PolicyStore.memoryPolicyStore({ policies });
-    expect(await run(store.getPolicy("seeded"))).toEqual(policy);
+    expect(await run(store.getPolicy("seeded"))).toEqual(Option.some(policy));
     await run(store.createPolicy(Policy.permit({ id: "added" })));
     expect(Arr.fromIterable(MutableHashMap.keys(policies))).toEqual(["seeded", "added"]);
   });
@@ -423,9 +424,9 @@ describe("condition bounds", () => {
       await run(Effect.flip(store.updateTemplate({ ...shareTemplate, when: deep }))),
     ];
     expect(Arr.map(failures, (failure) => failure._tag)).toEqual(Arr.replicate("AuthError", 4));
-    expect(await run(store.getPolicy("q"))).toBeNull();
-    expect((await run(store.getPolicy("p")))?.when).toBeUndefined();
-    expect((await run(store.getTemplate("share-doc")))?.when).toBeUndefined();
+    expect(Option.isNone(await run(store.getPolicy("q")))).toBe(true);
+    expect(Option.getOrUndefined(await run(store.getPolicy("p")))?.when).toBeUndefined();
+    expect(Option.getOrUndefined(await run(store.getTemplate("share-doc")))?.when).toBeUndefined();
   });
 });
 

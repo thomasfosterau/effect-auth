@@ -28,16 +28,16 @@ The core never relies on the Node globals `nodejs_compat` sets only from 2024-09
 Implement the store interfaces (or take them from an adapter), provide the service layer, and use the service:
 
 ```typescript
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// Stores are "dumb persistence": lookups return `null` on a miss, and the
+// Stores are "dumb persistence": lookups return `Option.none()` on a miss, and the
 // service turns that into a typed `SessionNotFoundError` / `UserNotFoundError`.
 // `session.id` arrives already hashed (SHA-256); the raw token never reaches the store.
 const sessions = new Map<string, Auth.Session>();
 const sessionStore: typeof Auth.SessionStore.Service = {
   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-  get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+  get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
   // Never creates: a session signed out or revoked since the caller read it stays gone.
   update: (session) =>
     Effect.sync(() => {
@@ -48,10 +48,10 @@ const sessionStore: typeof Auth.SessionStore.Service = {
   touch: (id, touch) =>
     Effect.sync(() => {
       const session = sessions.get(id);
-      if (session === undefined || session.expiresAt < touch.lastActivityAt) return null;
+      if (session === undefined || session.expiresAt < touch.lastActivityAt) return Option.none();
       const touched = { ...session, ...touch };
       sessions.set(id, touched);
-      return touched;
+      return Option.some(touched);
     }),
   delete: (id) => Effect.sync(() => void sessions.delete(id)),
   deleteByUserId: (userId) =>
@@ -65,7 +65,8 @@ const sessionStore: typeof Auth.SessionStore.Service = {
 // Users carry first-class fields (name, image, createdAt, updatedAt) plus an
 // `attributes` bag for app-specific data; email, username and phone are identifiers.
 const userStore: typeof Auth.UserStore.Service = {
-  get: (id) => Effect.succeed({ id, createdAt: new Date(), updatedAt: new Date(), attributes: {} }),
+  get: (id) =>
+    Effect.succeedSome({ id, createdAt: new Date(), updatedAt: new Date(), attributes: {} }),
 };
 
 const sessionConfig: Auth.SessionConfig = {

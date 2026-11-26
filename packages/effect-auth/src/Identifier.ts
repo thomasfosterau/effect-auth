@@ -84,7 +84,7 @@ export const refusalAuthError = (error: IdentifierRefusedError): Errors.AuthErro
   new Errors.AuthError({ message: error.message, cause: error });
 
 // ---------------------------------------------------------------------------
-// Store contract (D3 conventions: null on miss, AuthError for infra failures)
+// Store contract (D3 conventions: `Option.none()` on a miss, AuthError for infra failures)
 // ---------------------------------------------------------------------------
 
 /** Tag for the `IdentifierStore` service. */
@@ -93,7 +93,7 @@ export class IdentifierStore extends Context.Service<
   {
     /**
      * Look up an identifier by its `(type, value)` pair (the natural unique key).
-     * Returns `null` when no matching record exists.
+     * Returns `Option.none()` when no matching record exists.
      *
      * The match is exact: the store compares `value` code unit for code unit,
      * never under a case- or accent-insensitive collation, since the services
@@ -104,7 +104,7 @@ export class IdentifierStore extends Context.Service<
     readonly getByValue: (
       type: IdentifierType,
       value: string,
-    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Identifier>, Errors.AuthError>;
 
     /**
      * List all identifiers for a user, ordered by `createdAt` ascending.
@@ -135,7 +135,7 @@ export class IdentifierStore extends Context.Service<
      * `to` before it releases `from`, so a failure between the two leaves the
      * user holding both, never neither.
      *
-     * Resolves to the replacement as the store now reports it, or `null` when
+     * Resolves to the replacement as the store now reports it, or `None` when
      * `from` is no longer held by its user (no record matches its `id`,
      * `userId`, `type` and `value`), in which case nothing is written. A store
      * that keeps the identifier on the user's own record (effect-auth-drizzle's
@@ -151,7 +151,7 @@ export class IdentifierStore extends Context.Service<
      * in-memory store (one synchronous step), effect-auth/sql (a compare-and-swap
      * on the release) and effect-auth-drizzle's single-table store (an `UPDATE`
      * guarded on `from`'s value) let one succeed, and the other resolves to
-     * `null`, writing nothing. For effect-auth/sql on PostgreSQL that holds at
+     * `None`, writing nothing. For effect-auth/sql on PostgreSQL that holds at
      * the default READ COMMITTED isolation; at stricter levels the losing call
      * fails with a serialization error, surfaced as `AuthError`. On D1
      * (effect-auth-alchemy-cloudflare), which has no transactions, the losing call removes
@@ -164,16 +164,16 @@ export class IdentifierStore extends Context.Service<
     readonly replace: (
       from: Identifier,
       to: Identifier,
-    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Identifier>, Errors.AuthError>;
 
     /**
      * Mark an identifier as verified, recording the timestamp.
-     * Returns `null` when no identifier with the given `id` exists.
+     * Returns `Option.none()` when no identifier with the given `id` exists.
      */
     readonly setVerified: (
       id: string,
       verifiedAt: Date,
-    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Identifier>, Errors.AuthError>;
 
     /**
      * Delete a single identifier by `id`.
@@ -213,16 +213,16 @@ export const lookupIdentifier = (
   store: typeof IdentifierStore.Service,
   type: IdentifierType,
   value: string,
-): Effect.Effect<Identifier | null, Errors.AuthError> =>
+): Effect.Effect<Option.Option<Identifier>, Errors.AuthError> =>
   Effect.filterOrElse(
     store.getByValue(type, value),
-    (identifier) => identifier === null || (identifier.type === type && identifier.value === value),
+    (found) => !Option.exists(found, (i) => i.type !== type || i.value !== value),
     () =>
       Effect.as(
         Effect.logWarning(
           `IdentifierStore.getByValue returned a different ${type} than the one asked for; treated as a miss. The store's comparison is not exact (check the column's collation).`,
         ),
-        null,
+        Option.none(),
       ),
   );
 
@@ -318,18 +318,23 @@ const takenError = (type: IdentifierType): IdentifierTakenError =>
 /**
  * The `AuthError` an {@link IdentifierStore} `replace` fails with when `to` is
  * not a new record for `from`'s user and type, with its own `id` and a
- * different `value`, or `null` when the pair is valid.
+ * different `value`, or `None` when the pair is valid.
  *
  * Exported for store implementations, so every store refuses the same inputs
  * with the same message.
  */
-export const replaceInputError = (from: Identifier, to: Identifier): Errors.AuthError | null =>
+export const replaceInputError = (
+  from: Identifier,
+  to: Identifier,
+): Option.Option<Errors.AuthError> =>
   to.userId === from.userId && to.type === from.type && to.id !== from.id && to.value !== from.value
-    ? null
-    : new Errors.AuthError({
-        message:
-          "IdentifierStore.replace takes a new record, with its own id and a new value, for the same user and type as the identifier it replaces",
-      });
+    ? Option.none()
+    : Option.some(
+        new Errors.AuthError({
+          message:
+            "IdentifierStore.replace takes a new record, with its own id and a new value, for the same user and type as the identifier it replaces",
+        }),
+      );
 
 /**
  * Claim a `(type, value)` identifier for a user.
@@ -347,7 +352,7 @@ export const claimIdentifier = (
 ): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError | IdentifierRefusedError> =>
   Effect.gen(function* () {
     const existing = yield* lookupIdentifier(store, identifier.type, identifier.value);
-    if (existing !== null) {
+    if (Option.isSome(existing)) {
       return yield* new IdentifierTakenError({
         message: `This ${identifier.type} is already in use`,
         identifierType: identifier.type,
@@ -366,7 +371,7 @@ export const claimIdentifier = (
             // The unique index may have rejected a concurrent claim — re-check
             // so the caller sees a conflict, not an infrastructure error.
             const raced = yield* lookupIdentifier(store, identifier.type, identifier.value);
-            if (raced !== null) {
+            if (Option.isSome(raced)) {
               return yield* new IdentifierTakenError({
                 message: `This ${identifier.type} is already in use`,
                 identifierType: identifier.type,
@@ -403,40 +408,42 @@ export const replaceIdentifier = (
 ): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError | IdentifierNotFoundError> =>
   Effect.gen(function* () {
     const existing = yield* lookupIdentifier(store, to.type, to.value);
-    if (existing !== null && existing.userId !== to.userId) {
+    if (Option.isSome(existing) && existing.value.userId !== to.userId) {
       return yield* takenError(to.type);
     }
     const replaced = yield* store.replace(from, to).pipe(
       Effect.catchTag(
         "AuthError",
-        (error): Effect.Effect<Identifier | null, Errors.AuthError | IdentifierTakenError> =>
+        (
+          error,
+        ): Effect.Effect<Option.Option<Identifier>, Errors.AuthError | IdentifierTakenError> =>
           Effect.gen(function* () {
             // The unique index may have rejected `to` because another user
             // claimed it concurrently: re-check so the caller sees a conflict.
             const raced = yield* lookupIdentifier(store, to.type, to.value);
-            if (raced !== null && raced.userId !== to.userId) {
+            if (Option.isSome(raced) && raced.value.userId !== to.userId) {
               return yield* takenError(to.type);
             }
             // Or a concurrent replace of the same `from` (a double submit)
             // already gave this user `to`'s value and released `from`: report
             // that `from` is gone, as a store that checks `from` first does.
-            if (raced !== null) {
+            if (Option.isSome(raced)) {
               const held = yield* lookupIdentifier(store, from.type, from.value);
-              if (held === null || held.id !== from.id || held.userId !== from.userId) {
-                return null;
+              if (!Option.exists(held, (h) => h.id === from.id && h.userId === from.userId)) {
+                return Option.none();
               }
             }
             return yield* error;
           }),
       ),
     );
-    if (replaced === null) {
+    if (Option.isNone(replaced)) {
       return yield* new IdentifierNotFoundError({
         message: `The ${from.type} to replace is no longer held by this user`,
         id: from.id,
       });
     }
-    return replaced;
+    return replaced.value;
   });
 
 /**
@@ -451,12 +458,10 @@ export const replaceIdentifier = (
 export const memoryIdentifierStore = (
   records: MutableHashMap.MutableHashMap<string, Identifier> = MutableHashMap.empty(),
 ): typeof IdentifierStore.Service => {
-  const byValue = (type: IdentifierType, value: string): Identifier | null =>
-    Option.getOrNull(
-      Arr.findFirst(
-        MutableHashMap.values(records),
-        (identifier) => identifier.type === type && identifier.value === value,
-      ),
+  const byValue = (type: IdentifierType, value: string): Option.Option<Identifier> =>
+    Arr.findFirst(
+      MutableHashMap.values(records),
+      (identifier) => identifier.type === type && identifier.value === value,
     );
   return {
     getByValue: (type, value) => Effect.sync(() => byValue(type, value)),
@@ -469,7 +474,7 @@ export const memoryIdentifierStore = (
       ),
     create: (identifier) =>
       Effect.suspend(() => {
-        if (byValue(identifier.type, identifier.value) !== null) {
+        if (Option.isSome(byValue(identifier.type, identifier.value))) {
           return Effect.fail(
             new Errors.AuthError({
               message: `Identifier (${identifier.type}) already exists`,
@@ -483,17 +488,17 @@ export const memoryIdentifierStore = (
     replace: (from, to) =>
       Effect.suspend(() => {
         const invalid = replaceInputError(from, to);
-        if (invalid !== null) return Effect.fail(invalid);
-        const held = Option.getOrUndefined(MutableHashMap.get(records, from.id));
+        if (Option.isSome(invalid)) return Effect.fail(invalid.value);
+        const held = MutableHashMap.get(records, from.id);
         if (
-          held === undefined ||
-          held.userId !== from.userId ||
-          held.type !== from.type ||
-          held.value !== from.value
+          !Option.exists(
+            held,
+            (h) => h.userId === from.userId && h.type === from.type && h.value === from.value,
+          )
         ) {
-          return Effect.succeed(null);
+          return Effect.succeedNone;
         }
-        if (byValue(to.type, to.value) !== null) {
+        if (Option.isSome(byValue(to.type, to.value))) {
           return Effect.fail(
             new Errors.AuthError({
               message: `Identifier (${to.type}) already exists`,
@@ -502,16 +507,16 @@ export const memoryIdentifierStore = (
         }
         MutableHashMap.remove(records, from.id);
         MutableHashMap.set(records, to.id, to);
-        return Effect.succeed(to);
+        return Effect.succeedSome(to);
       }),
     setVerified: (id, verifiedAt) =>
-      Effect.sync(() => {
-        const existing = Option.getOrUndefined(MutableHashMap.get(records, id));
-        if (existing === undefined) return null;
-        const updated: Identifier = { ...existing, verified: true, verifiedAt };
-        MutableHashMap.set(records, id, updated);
-        return updated;
-      }),
+      Effect.sync(() =>
+        Option.map(MutableHashMap.get(records, id), (existing) => {
+          const updated: Identifier = { ...existing, verified: true, verifiedAt };
+          MutableHashMap.set(records, id, updated);
+          return updated;
+        }),
+      ),
     delete: (id) => Effect.sync(() => void MutableHashMap.remove(records, id)),
     deleteByUser: (userId) =>
       Effect.sync(() => {
@@ -523,46 +528,50 @@ export const memoryIdentifierStore = (
 };
 
 /**
- * Resolve the user that owns a `(type, value)` identifier, or `null` when the
+ * Resolve the user that owns a `(type, value)` identifier, or `None` when the
  * identifier is unclaimed (or its owner no longer exists). `getUser` is any
  * user-by-id lookup (e.g. `UserStore.get`).
  */
 export const resolveUserByIdentifier = <E>(
   store: typeof IdentifierStore.Service,
-  getUser: (userId: string) => Effect.Effect<Types.User | null, E>,
+  getUser: (userId: string) => Effect.Effect<Option.Option<Types.User>, E>,
   type: IdentifierType,
   value: string,
-): Effect.Effect<{ user: Types.User; identifier: Identifier } | null, Errors.AuthError | E> =>
+): Effect.Effect<
+  Option.Option<{ readonly user: Types.User; readonly identifier: Identifier }>,
+  Errors.AuthError | E
+> =>
   Effect.gen(function* () {
-    const identifier = yield* lookupIdentifier(store, type, value);
-    if (identifier === null) return null;
+    const found = yield* lookupIdentifier(store, type, value);
+    if (Option.isNone(found)) return Option.none();
+    const identifier = found.value;
     const user = yield* getUser(identifier.userId);
-    return user === null ? null : { user, identifier };
+    return Option.map(user, (user) => ({ user, identifier }));
   });
 
 /**
  * The identifier holding exactly `(type, value)` and its owner, for a sign-in
  * that creates the user when nobody holds the value (magic link, email and
- * phone OTP, SSO, Google One Tap). Both are `null` when the value is
+ * phone OTP, SSO, Google One Tap), or `None` when the value is
  * unclaimed. A claimed identifier whose owner no longer exists fails with
  * `onDangling()`, so the flow never creates a second claimant for it. The
  * identifier is read through {@link lookupIdentifier}.
  */
 export const findIdentifierOwner = <E, E2>(
   store: typeof IdentifierStore.Service,
-  getUser: (userId: string) => Effect.Effect<Types.User | null, E>,
+  getUser: (userId: string) => Effect.Effect<Option.Option<Types.User>, E>,
   type: IdentifierType,
   value: string,
   onDangling: () => E2,
 ): Effect.Effect<
-  | { readonly identifier: Identifier; readonly user: Types.User }
-  | { readonly identifier: null; readonly user: null },
+  Option.Option<{ readonly identifier: Identifier; readonly user: Types.User }>,
   Errors.AuthError | E | E2
 > =>
   Effect.gen(function* () {
-    const identifier = yield* lookupIdentifier(store, type, value);
-    if (identifier === null) return { identifier, user: null };
+    const found = yield* lookupIdentifier(store, type, value);
+    if (Option.isNone(found)) return Option.none();
+    const identifier = found.value;
     const user = yield* getUser(identifier.userId);
-    if (user === null) return yield* Effect.fail(onDangling());
-    return { identifier, user };
+    if (Option.isNone(user)) return yield* Effect.fail(onDangling());
+    return Option.some({ identifier, user: user.value });
   });

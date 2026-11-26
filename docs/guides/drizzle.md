@@ -159,9 +159,9 @@ export const users = program.pipe(Effect.provide(requests));
 
 | Constructor                                  | Request                 | Resolves to                 |
 | -------------------------------------------- | ----------------------- | --------------------------- |
-| `Requests.getSession(id)`                    | `GetSession`            | `Session \| null`           |
-| `Requests.getUser(id)`                       | `GetUser`               | `User \| null`              |
-| `Requests.getIdentifierByValue(type, value)` | `GetIdentifierByValue`  | `Identifier \| null`        |
+| `Requests.getSession(id)`                    | `GetSession`            | `Option<Session>`           |
+| `Requests.getUser(id)`                       | `GetUser`               | `Option<User>`              |
+| `Requests.getIdentifierByValue(type, value)` | `GetIdentifierByValue`  | `Option<Identifier>`        |
 | `Requests.listIdentifiersByUser(userId)`     | `ListIdentifiersByUser` | `ReadonlyArray<Identifier>` |
 
 Each returns an `Effect<…, AuthError, AuthRequests>`; provide
@@ -176,7 +176,7 @@ What the resolvers do inside a batch:
 - **Group composite keys.** `(type, value)` pairs are grouped by type and
   `OR`-ed together — still one round trip when a batch mixes emails, usernames
   and phone numbers.
-- **Keep the store semantics.** A miss is `null`, a user with no identifiers is
+- **Keep the store semantics.** A miss is `None`, a user with no identifiers is
   `[]`, `listIdentifiersByUser` stays ordered by `createdAt` ascending, and
   driver failures are the same `AuthError`.
 
@@ -720,7 +720,7 @@ A user whose `email` is `NULL` holds no identifier.
 
 ### Method behaviour
 
-- `getByValue` looks up `email`. Any other type returns `null`.
+- `getByValue` looks up `email`. Any other type returns `None`.
 - `create` refuses a type other than `email`, and a user that already holds an
   address, with `IdentifierRefusedError`; a user with no row is an `AuthError`. A duplicate address owned by another user
   fails through the unique index as `AuthError`, which `claimIdentifier` reports
@@ -728,7 +728,7 @@ A user whose `email` is `NULL` holds no identifier.
 - `replace` rewrites the row's address in one statement,
   `UPDATE … SET email = <new>, email_verified = <new flag>[, email_verified_at = <new time>] WHERE id = <user> AND email = <old>`,
   then reads the row back. The guard on the old address means a stale call
-  writes nothing and resolves to `null`. An address another user holds fails
+  writes nothing and resolves to `None`. An address another user holds fails
   through the unique index as `AuthError`, which `replaceIdentifier` reports as
   `IdentifierTakenError`, and the row keeps its address. The identifier keeps
   the user's id and the row's creation time. It works on nullable and `NOT NULL`
@@ -799,7 +799,7 @@ store each).
 - **`UserServiceStore`** works on the users table too, and takes a
   `defineSchema` mapping like `EmailPasswordStore` (`passwordHash` need not be
   mapped; it never touches it). `get` reads through `UserStore`'s projection
-  (`null` on a miss). `update` is one `UPDATE` that writes the user whole —
+  (`None` on a miss). `update` is one `UPDATE` that writes the user whole —
   `name` and `image` (`NULL` when absent), `updatedAt` and the attributes — and
   returns the user it was given; an update of a missing user writes nothing.
   Promoted attributes go to their columns (`NULL` when the user no longer has
@@ -885,9 +885,10 @@ account deletion still deletes a user's keys and tokens through
 
 The stores implement effect-auth's contracts exactly:
 
-- **`null` on a miss.** `get`, `getByValue` and `setVerified` return `null`
-  rather than failing when there is no matching row, and `replace` returns
-  `null` when the identifier it replaces is no longer the user's.
+- **`None` on a miss.** `get`, `getByValue` and `setVerified` return
+  `Option.none()` rather than failing when there is no matching row, and
+  `replace` returns `None` when the identifier it replaces is no longer the
+  user's.
 - **`getByValue` matches exactly.** Values that differ only by case, accent or
   width are different identifiers on every dialect (on MySQL through the binary
   collation above).

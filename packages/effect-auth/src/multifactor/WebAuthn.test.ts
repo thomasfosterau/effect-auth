@@ -50,7 +50,7 @@ const mockChallengeStore = {
   get: (challenge: Uint8Array) =>
     Effect.sync(() => {
       const key = Buffer.from(challenge).toString("hex");
-      return Option.getOrNull(MutableHashMap.get(mockChallengeStore.challenges, key));
+      return MutableHashMap.get(mockChallengeStore.challenges, key);
     }),
 
   delete: (challenge: Uint8Array) =>
@@ -70,14 +70,10 @@ const mockCredentialStore = {
     }),
 
   get: (credentialId: string) =>
-    Effect.sync(() =>
-      Option.getOrNull(MutableHashMap.get(mockCredentialStore.credentials, credentialId)),
-    ),
+    Effect.sync(() => MutableHashMap.get(mockCredentialStore.credentials, credentialId)),
 
   getByCredentialId: (credentialId: string) =>
-    Effect.sync(() =>
-      Option.getOrNull(MutableHashMap.get(mockCredentialStore.credentials, credentialId)),
-    ),
+    Effect.sync(() => MutableHashMap.get(mockCredentialStore.credentials, credentialId)),
 
   update: (credential: WebAuthnCredential) =>
     Effect.sync(() => {
@@ -346,7 +342,7 @@ describe("WebAuthn Service", () => {
           yield* mockCredentialStore.create(mockCredential);
 
           const stored = yield* mockCredentialStore.get("test-credential-id");
-          expect(stored?.userId).toBe(testUser.id);
+          expect(Option.getOrUndefined(stored)?.userId).toBe(testUser.id);
         }),
         dependencies,
       ),
@@ -408,7 +404,7 @@ describe("WebAuthn Service", () => {
           yield* mockCredentialStore.update(updated);
 
           const retrieved = yield* mockCredentialStore.get("test-cred");
-          expect(retrieved?.counter).toBe(6);
+          expect(Option.getOrUndefined(retrieved)?.counter).toBe(6);
         }),
         dependencies,
       ),
@@ -527,7 +523,7 @@ describe("WebAuthn Service", () => {
           yield* service.deleteCredential(testUser.id, cred.id);
 
           const after = yield* mockCredentialStore.get(cred.id);
-          expect(after).toBeNull();
+          expect(Option.isNone(after)).toBe(true);
         }),
         dependencies,
       ),
@@ -589,7 +585,7 @@ describe("WebAuthn Service", () => {
           expect(updated.name).toBe("My YubiKey");
 
           const stored = yield* mockCredentialStore.get(cred.id);
-          expect(stored?.name).toBe("My YubiKey");
+          expect(Option.getOrUndefined(stored)?.name).toBe("My YubiKey");
         }),
         dependencies,
       ),

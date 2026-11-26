@@ -128,9 +128,9 @@ describe("KeyValueStores", () => {
           return { consumed, replayed, unknown };
         }),
       );
-      expect(result.consumed).toEqual(state);
-      expect(result.replayed).toBeNull();
-      expect(result.unknown).toBeNull();
+      expect(result.consumed).toEqual(Option.some(state));
+      expect(Option.isNone(result.replayed)).toBe(true);
+      expect(Option.isNone(result.unknown)).toBe(true);
     });
 
     it("gives a state to only one of two concurrent consumers", async () => {
@@ -165,7 +165,7 @@ describe("KeyValueStores", () => {
           ),
         ),
       );
-      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
+      expect(Arr.getSomes(results)).toEqual([state]);
     });
   });
 
@@ -231,13 +231,13 @@ describe("KeyValueStores", () => {
     it("without it, two instances over one backend can both consume a state", async () => {
       const { store } = sharedBackend();
       const results = await raceTwoInstances(store);
-      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state, state]);
+      expect(Arr.getSomes(results)).toEqual([state, state]);
     });
 
     it("with it, only one of two instances over one backend consumes a state", async () => {
       const backend = sharedBackend();
       const results = await raceTwoInstances(Layer.merge(backend.store, backend.take));
-      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
+      expect(Arr.getSomes(results)).toEqual([state]);
       expect(backend.takes()).toBe(2);
     });
 
@@ -290,16 +290,18 @@ describe("KeyValueStores", () => {
           ),
         ),
       );
-      expect(result.link?.token).toBe("ml");
-      expect(result.reset?.token).toBe("pr");
-      expect(result.verification?.token).toBe("ev");
-      expect(result.pending).toEqual({
-        token: "mf",
-        userId: "u1",
-        createdAt: now,
-        expiresAt: now + 60_000,
-      });
-      expect(result.again).toBeNull();
+      expect(Option.getOrUndefined(result.link)?.token).toBe("ml");
+      expect(Option.getOrUndefined(result.reset)?.token).toBe("pr");
+      expect(Option.getOrUndefined(result.verification)?.token).toBe("ev");
+      expect(result.pending).toEqual(
+        Option.some({
+          token: "mf",
+          userId: "u1",
+          createdAt: now,
+          expiresAt: now + 60_000,
+        }),
+      );
+      expect(Option.isNone(result.again)).toBe(true);
       expect(backend.takes()).toBe(5);
       expect(MutableHashMap.size(backend.entries)).toBe(0);
     });
@@ -343,10 +345,12 @@ describe("KeyValueStores", () => {
           return { loaded, missing };
         }),
       );
-      expect(Array.from(result.loaded?.challenge ?? [])).toEqual([1, 2, 3, 255, 0, 42]);
-      expect(result.loaded?.userId).toBe("user-1");
-      expect(result.loaded?.expiresAt).toBe(challenge.expiresAt);
-      expect(result.missing).toBeNull();
+      expect(Array.from(Option.getOrUndefined(result.loaded)?.challenge ?? [])).toEqual([
+        1, 2, 3, 255, 0, 42,
+      ]);
+      expect(Option.getOrUndefined(result.loaded)?.userId).toBe("user-1");
+      expect(Option.getOrUndefined(result.loaded)?.expiresAt).toBe(challenge.expiresAt);
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("stores anonymous challenges (no userId)", async () => {
@@ -362,9 +366,9 @@ describe("KeyValueStores", () => {
           return yield* store.get(challenge.challenge);
         }),
       );
-      expect(loaded).not.toBeNull();
-      expect(loaded?.userId).toBeUndefined();
-      expect(loaded?.ceremony).toBe("authentication");
+      expect(Option.isNone(loaded)).toBe(false);
+      expect(Option.getOrUndefined(loaded)?.userId).toBeUndefined();
+      expect(Option.getOrUndefined(loaded)?.ceremony).toBe("authentication");
     });
 
     it("reads an entry with no known ceremony as missing", async () => {
@@ -391,7 +395,7 @@ describe("KeyValueStores", () => {
           Effect.provide(Layer.provideMerge(layerKVSingleProcess, KeyValueStore.layerMemory)),
         ),
       );
-      expect(loaded).toEqual([null, null]);
+      expect(loaded.map(Option.isNone)).toEqual([true, true]);
     });
   });
 
@@ -414,9 +418,9 @@ describe("KeyValueStores", () => {
           return { before, after, deleted };
         }),
       );
-      expect(result.before).toBeNull();
-      expect(result.after).toEqual(entry);
-      expect(result.deleted).toBeNull();
+      expect(Option.isNone(result.before)).toBe(true);
+      expect(result.after).toEqual(Option.some(entry));
+      expect(Option.isNone(result.deleted)).toBe(true);
     });
 
     it("increments within a window and restarts an expired window", async () => {
@@ -464,8 +468,8 @@ describe("KeyValueStores", () => {
           return { loaded, deleted };
         }),
       );
-      expect(result.loaded).toEqual(record);
-      expect(result.deleted).toBeNull();
+      expect(result.loaded).toEqual(Option.some(record));
+      expect(Option.isNone(result.deleted)).toBe(true);
     });
 
     it("deleteByUserId removes only that user's tokens", async () => {
@@ -482,9 +486,9 @@ describe("KeyValueStores", () => {
           return { a, b, c };
         }),
       );
-      expect(result.a).toBeNull();
-      expect(result.b).toBeNull();
-      expect(result.c?.userId).toBe("user-2");
+      expect(Option.isNone(result.a)).toBe(true);
+      expect(Option.isNone(result.b)).toBe(true);
+      expect(Option.getOrUndefined(result.c)?.userId).toBe("user-2");
     });
   });
 
@@ -513,10 +517,10 @@ describe("KeyValueStores", () => {
           return { loaded, afterDelete, two, three };
         }),
       );
-      expect(result.loaded?.token).toBe("pr-1");
-      expect(result.afterDelete).toBeNull();
-      expect(result.two).toBeNull();
-      expect(result.three?.userId).toBe("user-2");
+      expect(Option.getOrUndefined(result.loaded)?.token).toBe("pr-1");
+      expect(Option.isNone(result.afterDelete)).toBe(true);
+      expect(Option.isNone(result.two)).toBe(true);
+      expect(Option.getOrUndefined(result.three)?.userId).toBe("user-2");
     });
   });
 
@@ -544,10 +548,10 @@ describe("KeyValueStores", () => {
           return { loaded, afterDelete, two, three };
         }),
       );
-      expect(result.loaded?.email).toBe("a@example.com");
-      expect(result.afterDelete).toBeNull();
-      expect(result.two).toBeNull();
-      expect(result.three?.email).toBe("b@example.com");
+      expect(Option.getOrUndefined(result.loaded)?.email).toBe("a@example.com");
+      expect(Option.isNone(result.afterDelete)).toBe(true);
+      expect(Option.isNone(result.two)).toBe(true);
+      expect(Option.getOrUndefined(result.three)?.email).toBe("b@example.com");
     });
 
     it("getByEmail returns the newest token for the address", async () => {
@@ -559,7 +563,7 @@ describe("KeyValueStores", () => {
           return yield* store.getByEmail("a@example.com");
         }),
       );
-      expect(latest?.token).toBe("ml-new");
+      expect(Option.getOrUndefined(latest)?.token).toBe("ml-new");
     });
   });
 
@@ -593,15 +597,15 @@ describe("KeyValueStores", () => {
           return { loaded, attempts1, attempts2, replaced, other, deleted, missingIncrement };
         }),
       );
-      expect(result.loaded?.otpHash).toBe("hash");
-      expect(result.attempts1).toBe(1);
-      expect(result.attempts2).toBe(2);
-      expect(result.replaced?.otpHash).toBe("new-hash");
-      expect(result.replaced?.attempts).toBe(0);
-      expect(result.other?.otpHash).toBe("other");
-      expect(result.deleted).toBeNull();
+      expect(Option.getOrUndefined(result.loaded)?.otpHash).toBe("hash");
+      expect(result.attempts1).toEqual(Option.some(1));
+      expect(result.attempts2).toEqual(Option.some(2));
+      expect(Option.getOrUndefined(result.replaced)?.otpHash).toBe("new-hash");
+      expect(Option.getOrUndefined(result.replaced)?.attempts).toBe(0);
+      expect(Option.getOrUndefined(result.other)?.otpHash).toBe("other");
+      expect(Option.isNone(result.deleted)).toBe(true);
       // A pair with no code counts nothing.
-      expect(result.missingIncrement).toBeNull();
+      expect(Option.isNone(result.missingIncrement)).toBe(true);
     });
   });
 
@@ -623,8 +627,8 @@ describe("KeyValueStores", () => {
           return { loaded, deleted };
         }),
       );
-      expect(result.loaded).toEqual(pending);
-      expect(result.deleted).toBeNull();
+      expect(result.loaded).toEqual(Option.some(pending));
+      expect(Option.isNone(result.deleted)).toBe(true);
     });
   });
 
@@ -704,11 +708,11 @@ describe("KeyValueStores", () => {
         }).pipe(Effect.provide(layer), Effect.orDie),
       );
 
-      expect(outcome.latest?.createdAt).toBe(1_000_000);
+      expect(Option.getOrUndefined(outcome.latest)?.createdAt).toBe(1_000_000);
       expect(outcome.early._tag).toBe("ResendTooSoonError");
       expect(outcome.stillValid.userId).toBe("user-1");
       expect(sent).toEqual([expect.any(String), outcome.later.token]);
-      expect(outcome.none).toBeNull();
+      expect(Option.isNone(outcome.none)).toBe(true);
     });
   });
 
@@ -804,15 +808,15 @@ describe("KeyValueStores", () => {
         }),
       );
       expect(result.purged).toEqual({ ...nothingPurged, magicLinks: 2, emailOtps: 2 });
-      expect(result.old).toBeNull();
-      expect(result.gone).toBeNull();
-      expect(result.fresh?.token).toBe("new");
+      expect(Option.isNone(result.old)).toBe(true);
+      expect(Option.isNone(result.gone)).toBe(true);
+      expect(Option.getOrUndefined(result.fresh)?.token).toBe("new");
       // The purged token left its address's index; the empty index went.
-      expect(result.byEmailA?.token).toBe("new");
-      expect(result.byEmailB).toBeNull();
-      expect(result.signIn).toBeNull();
-      expect(result.verify).toBeNull();
-      expect(result.reset?.expiresAt).toBe(now + 60_000);
+      expect(Option.getOrUndefined(result.byEmailA)?.token).toBe("new");
+      expect(Option.isNone(result.byEmailB)).toBe(true);
+      expect(Option.isNone(result.signIn)).toBe(true);
+      expect(Option.isNone(result.verify)).toBe(true);
+      expect(Option.getOrUndefined(result.reset)?.expiresAt).toBe(now + 60_000);
       expect(Arr.sort(result.remaining, Order.String)).toEqual([
         "email-otp:forget-password:a@example.com",
         "magic-link:email:a@example.com",
@@ -847,8 +851,10 @@ describe("KeyValueStores", () => {
       );
       expect(result.purged).toEqual({ ...nothingPurged, rateLimits: 3 });
       expect(result.again).toEqual({ ...nothingPurged });
-      expect(result.inWindow).toEqual(limit("in-window", now + 1));
-      expect(result.stillBlocked).toEqual(limit("still-blocked", now - 60_000, now + 1));
+      expect(result.inWindow).toEqual(Option.some(limit("in-window", now + 1)));
+      expect(result.stillBlocked).toEqual(
+        Option.some(limit("still-blocked", now - 60_000, now + 1)),
+      );
       expect(Arr.sort(result.remaining, Order.String)).toEqual([
         "rate-limit:in-window",
         "rate-limit:still-blocked",
@@ -1015,7 +1021,7 @@ describe("KeyValueStores", () => {
       expect(result.byDefault).toEqual({ ...nothingPurged, emailOtpFailures: 1 });
       expect(result.shorter).toEqual({ ...nothingPurged, emailOtpFailures: 1 });
       expect(result.refused).toBe("AuthError");
-      expect(result.recent).toBeNull();
+      expect(Option.isNone(result.recent)).toBe(true);
     });
 
     it("skips a listed key that is gone by the time it is read", async () => {
@@ -1080,8 +1086,8 @@ describe("KeyValueStores", () => {
         ),
       );
       expect(result.purged).toEqual({ ...nothingPurged, magicLinks: 1, emailOtps: 1 });
-      expect(result.old).toBeNull();
-      expect(result.fresh?.token).toBe("new");
+      expect(Option.isNone(result.old)).toBe(true);
+      expect(Option.getOrUndefined(result.fresh)?.token).toBe("new");
       expect(Arr.sort(result.remaining, Order.String)).toEqual([
         "magic-link:email:a@example.com",
         "magic-link:token:new",

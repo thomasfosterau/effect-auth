@@ -4,6 +4,7 @@
  */
 
 import { Clock, Context, Data, Effect, Layer, Result } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { Base64, Base64Url, Hex } from "effect/encoding";
@@ -293,11 +294,13 @@ export class ChallengeStore extends Context.Service<
     /** Store a challenge with its ceremony, replacing one with the same bytes. */
     create: (challenge: WebAuthnChallenge) => Effect.Effect<WebAuthnChallenge, Errors.AuthError>;
     /**
-     * Get a challenge by its value, or `null` when no such challenge exists.
+     * Get a challenge by its value, or `None` when no such challenge exists.
      * A stored challenge whose ceremony is missing or unknown (one written
-     * before ceremonies were recorded) reads as `null`.
+     * before ceremonies were recorded) reads as `None`.
      */
-    get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge | null, Errors.AuthError>;
+    get: (
+      challenge: Uint8Array,
+    ) => Effect.Effect<Option.Option<WebAuthnChallenge>, Errors.AuthError>;
     /** Delete a challenge */
     delete: (challenge: Uint8Array) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -320,11 +323,13 @@ export class CredentialStore extends Context.Service<
      */
     create: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
     /** Get a credential by ID, or `null` when no such credential exists. */
-    get: (credentialId: string) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
+    get: (
+      credentialId: string,
+    ) => Effect.Effect<Option.Option<WebAuthnCredential>, Errors.AuthError>;
     /** Resolve a credential by its raw credential ID (base64url-encoded); used on the discoverable/usernameless login path. */
     getByCredentialId: (
       credentialId: string,
-    ) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<WebAuthnCredential>, Errors.AuthError>;
     /** Update a credential (e.g., counter) */
     update: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
     /** Delete a credential */
@@ -418,10 +423,11 @@ export const make = (
       challenge: Uint8Array,
       ceremony: WebAuthnCeremony,
     ) {
-      const stored = yield* challengeStore.get(challenge);
-      if (stored === null) {
+      const foundStored = yield* challengeStore.get(challenge);
+      if (Option.isNone(foundStored)) {
         return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
       }
+      const stored = foundStored.value;
       if (stored.ceremony !== ceremony) {
         return yield* verificationError(
           `Challenge was issued for ${stored.ceremony}, not ${ceremony}`,
@@ -456,12 +462,13 @@ export const make = (
       // On the usernameless path the credentialId is the lookup key; on the
       // bound path we use the same route for consistency.
       const credentialId = base64UrlEncode(response.credentialId);
-      const credential = yield* credentialStore.get(credentialId);
-      if (credential === null) {
+      const foundCredential = yield* credentialStore.get(credentialId);
+      if (Option.isNone(foundCredential)) {
         return yield* refuseUnkeyed(
           new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
         );
       }
+      const credential = foundCredential.value;
 
       // Bound challenge: the credential must belong to the expected user.
       if (storedChallenge.userId !== undefined && credential.userId !== storedChallenge.userId) {
@@ -654,7 +661,7 @@ export const make = (
 
             // §7.1 step 26: an id that is already registered, to this user or
             // another, is refused rather than overwritten.
-            if ((yield* credentialStore.get(attested.id)) !== null) {
+            if (Option.isSome(yield* credentialStore.get(attested.id))) {
               return yield* verificationError("Credential is already registered");
             }
 
@@ -784,13 +791,14 @@ export const make = (
         userId: string,
         credentialId: string,
       ) {
-        const credential = yield* credentialStore.get(credentialId);
-        if (credential === null) {
+        const foundCredential = yield* credentialStore.get(credentialId);
+        if (Option.isNone(foundCredential)) {
           return yield* new Errors.CredentialNotFoundError({
             message: "Credential not found",
             credentialId,
           });
         }
+        const credential = foundCredential.value;
         if (credential.userId !== userId) {
           return yield* new Errors.AuthError({
             message: "Not authorized to delete this credential",
@@ -804,13 +812,14 @@ export const make = (
         credentialId: string,
         name: string,
       ) {
-        const credential = yield* credentialStore.get(credentialId);
-        if (credential === null) {
+        const foundCredential = yield* credentialStore.get(credentialId);
+        if (Option.isNone(foundCredential)) {
           return yield* new Errors.CredentialNotFoundError({
             message: "Credential not found",
             credentialId,
           });
         }
+        const credential = foundCredential.value;
         if (credential.userId !== userId) {
           return yield* new Errors.AuthError({
             message: "Not authorized to rename this credential",

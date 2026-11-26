@@ -36,11 +36,11 @@ export const makeDecoyHash = (
 export const verifyPasswordOrDecoy = (
   passwordHasher: typeof PasswordHasher.Service,
   password: string,
-  passwordHash: string | null,
+  passwordHash: Option.Option<string>,
   decoyHash: () => Effect.Effect<string, Errors.HashingError>,
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
-    const hashToVerify = passwordHash ?? (yield* decoyHash());
+    const hashToVerify = Option.isSome(passwordHash) ? passwordHash.value : yield* decoyHash();
     const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
     const verifyEffect = Option.isSome(multiVerifier)
       ? multiVerifier.value.verify(password, hashToVerify)

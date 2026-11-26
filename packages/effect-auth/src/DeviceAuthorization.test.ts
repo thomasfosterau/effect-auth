@@ -33,7 +33,7 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
   update: (session) =>
     Effect.sync(() => {
       MutableHashMap.set(sessions, session.id, session);
@@ -55,7 +55,7 @@ const sessionStore: typeof SessionStore.Service = {
 };
 
 const userStore: typeof UserStore.Service = {
-  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const sessionConfig: Types.SessionConfig = {

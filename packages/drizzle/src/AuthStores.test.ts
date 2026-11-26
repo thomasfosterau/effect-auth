@@ -18,6 +18,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import * as EffectPglite from "drizzle-orm/effect-pglite";
 import { Cause, Effect, Exit, Layer } from "effect";
+import * as Option from "effect/Option";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { defineSchema } from "./Columns.ts";
@@ -168,8 +169,8 @@ describe("EmailPasswordStore on an application's own users table", () => {
       }),
     );
     expect(result.member.attributes).toEqual({ role: "member" });
-    expect(result.admin?.attributes).toEqual({ role: "admin" });
-    expect(result.hash).toBe("hash");
+    expect(Option.getOrUndefined(result.admin)?.attributes).toEqual({ role: "admin" });
+    expect(result.hash).toEqual(Option.some("hash"));
   });
 
   it("refuses attributes a table with no bag cannot hold", async () => {
@@ -220,12 +221,15 @@ describe("UserServiceStore on an application's own users table", () => {
       }),
     );
     const row = await client.query("SELECT role, plan FROM app_users WHERE id = $1", [result.id]);
-    expect(result.promoted?.name).toBe("Grace");
-    expect(result.promoted?.image).toBe("g.png");
-    expect(result.promoted?.attributes).toEqual({ role: "admin", plan: "pro" });
-    expect(result.cleared?.name).toBe("Ada");
-    expect(result.cleared?.image).toBeUndefined();
-    expect(result.cleared?.attributes).toEqual({ role: "member" });
+    expect(Option.getOrUndefined(result.promoted)?.name).toBe("Grace");
+    expect(Option.getOrUndefined(result.promoted)?.image).toBe("g.png");
+    expect(Option.getOrUndefined(result.promoted)?.attributes).toEqual({
+      role: "admin",
+      plan: "pro",
+    });
+    expect(Option.getOrUndefined(result.cleared)?.name).toBe("Ada");
+    expect(Option.getOrUndefined(result.cleared)?.image).toBeUndefined();
+    expect(Option.getOrUndefined(result.cleared)?.attributes).toEqual({ role: "member" });
     expect(row.rows).toEqual([{ role: "member", plan: null }]);
   });
 
@@ -245,8 +249,8 @@ describe("UserServiceStore on an application's own users table", () => {
     expect(result.error).toBeInstanceOf(Auth.AuthError);
     expect(result.error.message).toContain("drizzle userService.update failed");
     expect(result.error.message).toContain("no attribute bag for team");
-    expect(result.read?.name).toBe("Ada");
-    expect(result.read?.attributes).toEqual({ role: "member" });
+    expect(Option.getOrUndefined(result.read)?.name).toBe("Ada");
+    expect(Option.getOrUndefined(result.read)?.attributes).toEqual({ role: "member" });
   });
 
   it("deletes the row, which then reads null", async () => {
@@ -258,6 +262,6 @@ describe("UserServiceStore on an application's own users table", () => {
         return yield* store.get(user.id);
       }),
     );
-    expect(result).toBeNull();
+    expect(Option.isNone(result)).toBe(true);
   });
 });

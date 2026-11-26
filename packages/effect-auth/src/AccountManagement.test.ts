@@ -91,7 +91,7 @@ const passwordLayer = (options: HarnessOptions): Layer.Layer<never> => {
   if (hashes === undefined) return Layer.empty;
   const store: typeof EmailPasswordStore.Service = {
     createUser: () => Effect.die("unused"),
-    getPasswordHash: (userId) => Effect.succeed(hashes[userId] ?? null),
+    getPasswordHash: (userId) => Effect.succeed(Option.fromNullishOr(hashes[userId] ?? null)),
     setPasswordHash: () => Effect.die("unused"),
     clearPasswordHash: () => Effect.die("unused"),
   };
@@ -142,7 +142,7 @@ const makeHarness = (wrap?: WrapIdentifiers, options: HarnessOptions = {}): Harn
   addUser(makeUser("user-2"), "bob@example.com");
 
   const userStore: typeof UserServiceStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
     update: (user) =>
       Effect.sync(() => {
         MutableHashMap.set(users, user.id, user);
@@ -157,7 +157,7 @@ const makeHarness = (wrap?: WrapIdentifiers, options: HarnessOptions = {}): Harn
         MutableHashMap.set(tokens, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(tokens, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -622,7 +622,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
           );
           // A store that claims `to` before it looks at `from` (effect-auth/sql's
           // INSERT first) refuses the now-held value instead of resolving to null.
-          if (rejectTakenFirst && (yield* store.getByValue(to.type, to.value)) !== null) {
+          if (rejectTakenFirst && Option.isSome(yield* store.getByValue(to.type, to.value))) {
             return yield* new AuthError({ message: "unique index violation" });
           }
           return yield* store.replace(from, to);

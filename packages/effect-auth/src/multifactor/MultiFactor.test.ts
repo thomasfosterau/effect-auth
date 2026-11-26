@@ -48,8 +48,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -80,7 +79,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const emailPasswordStore = {
@@ -98,7 +97,7 @@ const emailPasswordStore = {
     }),
 
   getPasswordHash: (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
 
   clearPasswordHash: (userId: string) =>
     Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
@@ -124,7 +123,7 @@ const pendingMultiFactorStore = {
     }),
 
   get: (token: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingChallenges, token))).pipe(
+    Effect.sync(() => MutableHashMap.get(pendingChallenges, token)).pipe(
       Effect.tap(() => Effect.yieldNow),
     ),
 
@@ -133,7 +132,7 @@ const pendingMultiFactorStore = {
       MutableHashMap.remove(pendingAttempts, token);
       const found = Option.getOrNull(MutableHashMap.get(pendingChallenges, token));
       MutableHashMap.remove(pendingChallenges, token);
-      return found;
+      return Option.fromNullishOr(found);
     }),
 
   recordFailedAttempt: (token: string) =>
@@ -394,7 +393,7 @@ describe("MultiFactorService", () => {
     const revokedDevices: string[] = [];
     const devices: typeof TrustedDeviceStore.Service = {
       upsert: (record) => Effect.succeed(record),
-      getByTokenHash: () => Effect.succeed(null),
+      getByTokenHash: () => Effect.succeedNone,
       delete: () => Effect.void,
       deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
     };

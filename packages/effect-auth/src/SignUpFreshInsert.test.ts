@@ -127,7 +127,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
   const base = Layer.mergeAll(
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)({
-      get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+      get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
     }),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
@@ -161,16 +161,16 @@ const memoryOtpStore = <R extends { readonly purpose: string; readonly attempts:
         () => (MutableHashMap.set(records, key(keyOf(record), record.purpose), record), record),
       ),
     get: (address: string, purpose: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, key(address, purpose)))),
+      Effect.sync(() => MutableHashMap.get(records, key(address, purpose))),
     delete: (address: string, purpose: string) =>
       Effect.sync(() => void MutableHashMap.remove(records, key(address, purpose))),
     incrementAttempts: (address: string, purpose: string) =>
       Effect.sync(() => {
         const record = Option.getOrUndefined(MutableHashMap.get(records, key(address, purpose)));
-        if (record === undefined) return 0;
+        if (record === undefined) return Option.none();
         const attempts = record.attempts + 1;
         MutableHashMap.set(records, key(address, purpose), { ...record, attempts });
-        return attempts;
+        return Option.some(attempts);
       }),
     ...memoryOtpFailures<string>(),
   };
@@ -283,14 +283,14 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(MagicLink.MagicLinkStore)({
           create: (token) =>
             Effect.sync(() => (MutableHashMap.set(tokens, token.token, token), token)),
-          get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+          get: (token) => Effect.sync(() => MutableHashMap.get(tokens, token)),
           consume: (token) =>
             Effect.sync(() => {
               const found = Option.getOrNull(MutableHashMap.get(tokens, token));
               MutableHashMap.remove(tokens, token);
-              return found;
+              return Option.fromNullishOr(found);
             }),
-          getByEmail: () => Effect.succeed(null),
+          getByEmail: () => Effect.succeedNone,
           delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
           deleteByEmail: () => Effect.void,
         }),
@@ -372,7 +372,7 @@ const cases: ReadonlyArray<Case> = [
           get: (nonce) =>
             Effect.sync(() => {
               const expiresAt = Option.getOrUndefined(MutableHashMap.get(nonces, nonce));
-              return expiresAt === undefined ? null : { expiresAt };
+              return Option.fromNullishOr(expiresAt === undefined ? null : { expiresAt });
             }),
           delete: (nonce) => Effect.sync(() => void MutableHashMap.remove(nonces, nonce)),
         }),
@@ -406,11 +406,10 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(Sso.SsoProviderStore)({
           create: (provider) =>
             Effect.sync(() => (MutableHashMap.set(providers, provider.id, provider), provider)),
-          getById: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(providers, id))),
+          getById: (id) => Effect.succeed(MutableHashMap.get(providers, id)),
           getByDomain: (domain) =>
             Effect.succeed(
-              Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ??
-                null,
+              Arr.findFirst(MutableHashMap.values(providers), (p) => p.domain === domain),
             ),
           list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(providers))),
         }),
@@ -421,7 +420,7 @@ const cases: ReadonlyArray<Case> = [
             Effect.sync(() => {
               const entry = Option.getOrNull(MutableHashMap.get(states, state));
               MutableHashMap.remove(states, state);
-              return entry;
+              return Option.fromNullishOr(entry);
             }),
         }),
         Layer.succeed(OAuthUserStore)(oauthUserStore(world)),
@@ -460,8 +459,8 @@ const cases: ReadonlyArray<Case> = [
       // organization call dies.
       const unused = (name: string) => () => Effect.die(`unused: ${name}`);
       const orgs: typeof OrganizationStore.Service = {
-        getMember: () => Effect.succeed(null),
-        getMemberById: () => Effect.succeed(null),
+        getMember: () => Effect.succeedNone,
+        getMemberById: () => Effect.succeedNone,
         createMember: (member: Member) => Effect.sync(() => (world.members.push(member), member)),
         createOrganization: unused("createOrganization"),
         getOrganizationById: unused("getOrganizationById"),
@@ -499,7 +498,8 @@ const cases: ReadonlyArray<Case> = [
         Layer.succeed(Scim.ScimConnectionStore)(Scim.memoryScimConnectionStore()),
         Layer.succeed(Scim.ScimUserStore)({
           create: world.createUser,
-          get: (userId) => Effect.succeed(userId === world.owner.id ? world.owner : null),
+          get: (userId) =>
+            Effect.succeed(Option.fromNullishOr(userId === world.owner.id ? world.owner : null)),
           update: (user) => Effect.die(`unexpected update of ${user.id}`),
         }),
         Layer.succeed(OrganizationStore)(orgs),

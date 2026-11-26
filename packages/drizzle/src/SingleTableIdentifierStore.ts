@@ -32,6 +32,8 @@
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import type { Table } from "drizzle-orm";
 import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   type ColumnKey,
@@ -120,15 +122,15 @@ const verifiedAtOf = (row: UserRow): Date | null => {
 };
 
 /**
- * The identifier a user row holds, or `null` when the row holds no email.
+ * The identifier a user row holds, or `None` when the row holds no email.
  *
  * `verifiedAt` is reported only when the `emailVerifiedAt` column is mapped (the
  * projection then includes it) and holds a value.
  */
-const toIdentifier = (row: UserRow): Auth.Identifier | null => {
-  if (row.email === null) return null;
+const toIdentifier = (row: UserRow): Option.Option<Auth.Identifier> => {
+  if (row.email === null) return Option.none();
   const verifiedAt = verifiedAtOf(row);
-  return {
+  return Option.some({
     id: row.id,
     userId: row.id,
     type: "email",
@@ -136,7 +138,7 @@ const toIdentifier = (row: UserRow): Auth.Identifier | null => {
     verified: row.emailVerified,
     createdAt: row.createdAt,
     ...(verifiedAt === null ? {} : { verifiedAt }),
-  };
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -198,7 +200,7 @@ export const make = (
     const refuseClear = (userId: string) =>
       readUser(userId, "identifier.delete.read").pipe(
         Effect.flatMap((row) =>
-          row === null
+          Option.isNone(row)
             ? Effect.void
             : Effect.fail(
                 new Auth.AuthError({
@@ -212,15 +214,10 @@ export const make = (
     return {
       getByValue: (type, value) => {
         // The table holds only email identifiers; another type has no record here.
-        if (type !== "email") return Effect.succeed(null);
+        if (type !== "email") return Effect.succeedNone;
         return query("identifier.getByValue", (db) =>
           db.select(selection).from(table).where(eq(column.email, value)).limit(1).execute(),
-        ).pipe(
-          Effect.map((rows) => {
-            const row = rows[0];
-            return row === undefined ? null : toIdentifier(row);
-          }),
-        );
+        ).pipe(Effect.map((rows) => Option.flatMap(Arr.head(rows), toIdentifier)));
       },
 
       listByUser: (userId) =>
@@ -230,14 +227,7 @@ export const make = (
             .from(table)
             .where(and(eq(column.id, userId), holdsEmail()))
             .execute(),
-        ).pipe(
-          Effect.map((rows) =>
-            rows.flatMap((row) => {
-              const identifier = toIdentifier(row);
-              return identifier === null ? [] : [identifier];
-            }),
-          ),
-        ),
+        ).pipe(Effect.map((rows) => Arr.getSomes(rows.map(toIdentifier)))),
 
       create: (identifier) => {
         if (identifier.type !== "email") {
@@ -250,12 +240,12 @@ export const make = (
         }
         return Effect.gen(function* () {
           const current = yield* readUser(identifier.userId, "identifier.create.read");
-          if (current === null) {
+          if (Option.isNone(current)) {
             return yield* new Auth.AuthError({
               message: "the single-table IdentifierStore has no user row to hold the email",
             });
           }
-          if (current.email !== null) {
+          if (current.value.email !== null) {
             return yield* new Auth.IdentifierRefusedError({
               message:
                 "the single-table IdentifierStore allows one email identifier per user, and this user already has one",
@@ -280,13 +270,13 @@ export const make = (
           );
 
           const stored = yield* readUser(identifier.userId, "identifier.create.read");
-          const claimed = stored === null ? null : toIdentifier(stored);
-          if (claimed === null || claimed.value !== identifier.value) {
+          const claimed = Option.flatMap(stored, toIdentifier);
+          if (Option.isNone(claimed) || claimed.value.value !== identifier.value) {
             return yield* new Auth.AuthError({
               message: "the user's email changed while it was being claimed",
             });
           }
-          return claimed;
+          return claimed.value;
         });
       },
 
@@ -294,7 +284,7 @@ export const make = (
       // stays as it is. Never NULL, so a NOT NULL column takes it too.
       replace: (from, to) => {
         const invalid = Auth.replaceInputError(from, to);
-        if (invalid !== null) return Effect.fail(invalid);
+        if (Option.isSome(invalid)) return Effect.fail(invalid.value);
         if (from.type !== "email") {
           return Effect.fail(
             new Auth.AuthError({
@@ -304,7 +294,7 @@ export const make = (
         }
         // An email identifier's id is its user's id; any other id is not one this
         // store holds.
-        if (from.id !== from.userId) return Effect.succeed(null);
+        if (from.id !== from.userId) return Effect.succeedNone;
         return Effect.gen(function* () {
           yield* query("identifier.replace", (db) =>
             db
@@ -321,8 +311,10 @@ export const make = (
           );
 
           const stored = yield* readUser(from.userId, "identifier.replace.read");
-          const replaced = stored === null ? null : toIdentifier(stored);
-          return replaced !== null && replaced.value === to.value ? replaced : null;
+          return Option.filter(
+            Option.flatMap(stored, toIdentifier),
+            (replaced) => replaced.value === to.value,
+          );
         });
       },
 
@@ -346,8 +338,7 @@ export const make = (
               .execute(),
           );
 
-          const row = rows[0];
-          return row === undefined ? null : toIdentifier(row);
+          return Option.flatMap(Arr.head(rows), toIdentifier);
         }),
 
       // An email identifier's id is its user's id, so deleting one and deleting

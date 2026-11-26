@@ -7,6 +7,7 @@
 
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { resolveSchema, type SchemaInput, type UserSchema, writeValues } from "./Columns.ts";
@@ -60,7 +61,7 @@ export const make = (
     return {
       get: (userId) =>
         selectOne(query, "userService.get", projection, users.table, eq(column.id, userId)).pipe(
-          Effect.map((row) => (row === null ? null : toUser(row))),
+          Effect.map(Option.map(toUser)),
         ),
       update,
       delete: (userId) =>

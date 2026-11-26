@@ -55,7 +55,9 @@ export const userStoreLayer: Layer.Layer<Auth.UserStore, never, BetterAuthInstan
   Auth.UserStore,
   Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
     get: (userId: string) =>
-      Effect.map(findUser(context, userId), (user) => (user === null ? null : toUser(user))),
+      Effect.map(findUser(context, userId), (user) =>
+        Option.map(Option.fromNullishOr(user), toUser),
+      ),
   })),
 );
 
@@ -105,7 +107,9 @@ export const userServiceStoreLayer: Layer.Layer<Auth.UserServiceStore, never, Be
     Auth.UserServiceStore,
     Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
       get: (userId: string) =>
-        Effect.map(findUser(context, userId), (user) => (user === null ? null : toUser(user))),
+        Effect.map(findUser(context, userId), (user) =>
+          Option.map(Option.fromNullishOr(user), toUser),
+        ),
       update: Effect.fn("UserServiceStore.update")(function* (user: Auth.User) {
         const row = yield* findUser(context, user.id);
         if (row === null) {
@@ -190,8 +194,8 @@ export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, Bett
     Effect.map(Effect.service(BetterAuthInstance), ({ context }) => {
       const identifierOf = (user: BetterAuthUser | null, type: Auth.IdentifierType) =>
         user === null
-          ? null
-          : Option.getOrNull(Arr.findFirst(identifiersOf(user), (id) => id.type === type));
+          ? Option.none()
+          : Arr.findFirst(identifiersOf(user), (id) => id.type === type);
 
       const byValue = (type: Auth.IdentifierType, value: string) => {
         if (type === "email") {
@@ -226,13 +230,16 @@ export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, Bett
 
         setVerified: Effect.fn("IdentifierStore.setVerified")(function* (id: string) {
           const parsed = parseIdentifierId(id);
-          if (parsed === undefined) return null;
+          if (parsed === undefined) return Option.none();
           const user = yield* findUser(context, parsed.userId);
           const current = identifierOf(user, parsed.type);
-          if (current === null || current.id !== identifierId(parsed.userId, parsed.type)) {
-            return null;
+          if (
+            Option.isNone(current) ||
+            current.value.id !== identifierId(parsed.userId, parsed.type)
+          ) {
+            return Option.none();
           }
-          if (current.verified || parsed.type === "username") return current;
+          if (current.value.verified || parsed.type === "username") return current;
           const column = parsed.type === "email" ? "emailVerified" : "phoneNumberVerified";
           const updated = yield* adapterCall("updateUser", () =>
             context.internalAdapter.updateUser(parsed.userId, { [column]: true }),

@@ -65,8 +65,7 @@ const emailPasswordStore: typeof EmailPasswordStore.Service = {
       MutableHashMap.set(usersById, user.id, user);
       return { user, created: true };
     }),
-  getPasswordHash: (userId) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+  getPasswordHash: (userId) => Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
   clearPasswordHash: (userId: string) =>
     Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
   setPasswordHash: (userId, hash) =>
@@ -79,7 +78,7 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
   update: (session) =>
     Effect.sync(() => {
       MutableHashMap.set(sessions, session.id, session);
@@ -101,7 +100,7 @@ const sessionStore: typeof SessionStore.Service = {
 };
 
 const userStore: typeof UserStore.Service = {
-  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+  get: (userId) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
 };
 
 const hasherLayer = Layer.succeed(PasswordHasher)(hasher);
@@ -605,7 +604,7 @@ describe("UsernameService under anti-enumeration", () => {
     const lagging: typeof IdentifierStore.Service = {
       ...identifierStore,
       getByValue: (type, value) =>
-        type === "email" ? Effect.succeed(null) : identifierStore.getByValue(type, value),
+        type === "email" ? Effect.succeedNone : identifierStore.getByValue(type, value),
     };
     const fresh = await runAntiEnumeration(
       (svc) =>

@@ -301,7 +301,7 @@ const seed = (user: Types.User, email: string, outbox: Outbox) =>
 
 type Seeded = Effect.Success<ReturnType<typeof seed>>;
 
-const count = (found: object | null) => (found === null ? 0 : 1);
+const count = (found: Option.Option<unknown>) => (Option.isSome(found) ? 1 : 0);
 
 /** How many of each credential kind `seeded.user` still holds. */
 const inventory = (seeded: Seeded) =>
@@ -450,7 +450,7 @@ describe("every path that deletes a user deletes everything the account holds", 
         expect(yield* inventory(doomed)).toEqual(nothing);
         expect(yield* inventory(bystander)).toEqual(held);
         // The token was spent with the rest.
-        expect(yield* (yield* AccountManagementStore).get(token)).toBeNull();
+        expect(Option.isNone(yield* (yield* AccountManagementStore).get(token))).toBe(true);
       }),
     );
   });
@@ -556,7 +556,7 @@ describe("a deleted user's address can be claimed again, and nothing sent before
         });
         expect(signedUp.user.id).not.toBe(doomed.user.id);
         const holder = yield* lookupIdentifier(yield* IdentifierStore, "email", doomed.email);
-        expect(holder?.userId).toBe(signedUp.user.id);
+        expect(Option.getOrUndefined(holder)?.userId).toBe(signedUp.user.id);
 
         // Nothing sent to the old account works, for it or for the new one.
         const reset = yield* Effect.flip(

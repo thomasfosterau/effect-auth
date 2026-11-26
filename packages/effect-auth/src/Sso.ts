@@ -165,8 +165,8 @@ export class SsoProviderStore extends Context.Service<
   SsoProviderStore,
   {
     readonly create: (provider: SsoProvider) => Effect.Effect<SsoProvider, AuthError>;
-    readonly getById: (id: string) => Effect.Effect<SsoProvider | null, AuthError>;
-    readonly getByDomain: (domain: string) => Effect.Effect<SsoProvider | null, AuthError>;
+    readonly getById: (id: string) => Effect.Effect<Option.Option<SsoProvider>, AuthError>;
+    readonly getByDomain: (domain: string) => Effect.Effect<Option.Option<SsoProvider>, AuthError>;
     readonly list: Effect.Effect<ReadonlyArray<SsoProvider>, AuthError>;
   }
 >()("@effect-auth/SsoProviderStore") {}
@@ -267,11 +267,11 @@ export class SsoService extends Context.Service<
 
     /**
      * Resolve the connection an email address routes to, by domain. Returns
-     * `null` when no connection matches.
+     * `None` when no connection matches.
      */
     readonly resolveProviderForEmail: (
       email: string,
-    ) => Effect.Effect<SsoProvider | null, AuthError>;
+    ) => Effect.Effect<Option.Option<SsoProvider>, AuthError>;
 
     /**
      * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`,
@@ -535,12 +535,13 @@ export const make = (
       options: SamlCallbackOptions | undefined,
     ) =>
       Effect.gen(function* () {
-        const pending = yield* replay.consume(inResponseTo);
-        if (pending === null || pending.kind !== "authn-request") {
+        const foundPending = yield* replay.consume(inResponseTo);
+        if (Option.isNone(foundPending) || foundPending.value.kind !== "authn-request") {
           return yield* new SsoError({
             message: "SAML response answers an unknown, expired, or already-used request",
           });
         }
+        const pending = foundPending.value;
         if (pending.providerId !== providerId) {
           return yield* new SsoError({
             message: "SAML response answers a request issued for a different connection",
@@ -563,10 +564,11 @@ export const make = (
     /** Resolve a connection by id, insisting it speaks SAML. */
     const requireSamlProvider = (providerId: string) =>
       Effect.gen(function* () {
-        const provider = yield* store.getById(providerId);
-        if (provider === null) {
+        const foundProvider = yield* store.getById(providerId);
+        if (Option.isNone(foundProvider)) {
           return yield* new SsoError({ message: "SSO provider not found" });
         }
+        const provider = foundProvider.value;
         if (provider.protocol !== "saml") {
           return yield* new SsoError({
             message: `SSO provider "${providerId}" is an OIDC connection, not a SAML one`,
@@ -615,16 +617,21 @@ export const make = (
         const orgStore = yield* Effect.serviceOption(OrganizationStore);
         if (Option.isNone(orgStore)) return;
         const existing = yield* orgStore.value.getMember(provider.organizationId, userId);
-        if (existing !== null) return;
+        if (Option.isSome(existing)) return;
         const organization =
           config.defaultRole !== undefined
-            ? null
+            ? Option.none()
             : yield* orgStore.value.getOrganizationById(provider.organizationId);
         const member: Member = {
           id: yield* randomId(),
           organizationId: provider.organizationId,
           userId,
-          role: config.defaultRole ?? organization?.defaultRole ?? "member",
+          role:
+            config.defaultRole ??
+            Option.getOrElse(
+              Option.flatMap(organization, (o) => Option.fromUndefinedOr(o.defaultRole)),
+              () => "member",
+            ),
           status: "active",
           createdAt: yield* Clock.currentTimeMillis,
         };
@@ -640,9 +647,9 @@ export const make = (
     const managesAddress = Effect.fn("SsoService.managesAddress")(function* (
       provider: SsoProvider,
       email: string,
-      owner: Types.User | null,
+      owner: Option.Option<Types.User>,
     ) {
-      const stamp = owner === null ? null : provisionedBy(owner);
+      const stamp = Option.isNone(owner) ? null : provisionedBy(owner.value);
       if (provider.organizationId === undefined) {
         if (stamp?.kind === "sso" && stamp.connectionId === provider.id) return true;
         return isOnDomains(email, [provider.domain]);
@@ -672,22 +679,28 @@ export const make = (
     ) {
       const email = normalizeEmail(profile.email);
 
-      const { identifier, user: owner } = yield* findIdentifierOwner(
+      const owned = yield* findIdentifierOwner(
         identifiers,
         users.get,
         "email",
         email,
         () => new SsoError({ message: "Account is unavailable" }),
       );
-      if (!(yield* managesAddress(provider, email, owner))) {
+      if (
+        !(yield* managesAddress(
+          provider,
+          email,
+          Option.map(owned, (o) => o.user),
+        ))
+      ) {
         return yield* new SsoError({
           message: "This SSO connection does not manage that email address",
         });
       }
 
-      let user = owner;
-      const isNewUser = user === null;
-      if (user === null) {
+      let user: Types.User;
+      const isNewUser = Option.isNone(owned);
+      if (Option.isNone(owned)) {
         // The IdP attested the address as verified.
         const created = yield* createUserWithIdentifier(
           identifiers,
@@ -711,10 +724,13 @@ export const make = (
           ),
         );
         user = created.user;
-      } else if (identifier !== null && !identifier.verified) {
-        // The IdP verified the address: clear what an earlier, unproven
-        // sign-up left on the account before promoting it.
-        yield* proveAddress(firstProof, identifier);
+      } else {
+        user = owned.value.user;
+        if (!owned.value.identifier.verified) {
+          // The IdP verified the address: clear what an earlier, unproven
+          // sign-up left on the account before promoting it.
+          yield* proveAddress(firstProof, owned.value.identifier);
+        }
       }
 
       // Provision organization membership on first login when configured.
@@ -754,10 +770,11 @@ export const make = (
     const resolveProvider = (selector: SsoSignInSelector) =>
       Effect.gen(function* () {
         if (selector.providerId !== undefined) {
-          const p = yield* store.getById(selector.providerId);
-          if (p === null) {
+          const foundP = yield* store.getById(selector.providerId);
+          if (Option.isNone(foundP)) {
             return yield* new SsoError({ message: "SSO provider not found" });
           }
+          const p = foundP.value;
           return p;
         }
         const domain =
@@ -769,10 +786,11 @@ export const make = (
         if (domain === "") {
           return yield* new SsoError({ message: "An email, domain, or providerId is required" });
         }
-        const p = yield* store.getByDomain(domain);
-        if (p === null) {
+        const foundP = yield* store.getByDomain(domain);
+        if (Option.isNone(foundP)) {
           return yield* new SsoError({ message: `No SSO provider for domain "${domain}"` });
         }
+        const p = foundP.value;
         return p;
       });
 
@@ -931,7 +949,7 @@ export const make = (
             createdAt: now,
             expiresAt: now + samlRequestTtl,
           });
-          if (created === null) {
+          if (Option.isNone(created)) {
             return yield* new SsoError({ message: "Failed to record the SAML request id" });
           }
           return { url: request.url, state: relayState };
@@ -962,17 +980,18 @@ export const make = (
         // Spend the state before anything else: `consume` is an atomic
         // get-and-delete, so a replayed or concurrent callback carrying the
         // same state is refused, and a failed exchange leaves nothing to retry.
-        const stateEntry = yield* stateStore.consume(state).pipe(
+        const foundStateEntry = yield* stateStore.consume(state).pipe(
           Effect.tapError((cause) =>
             Effect.logError("SSO state store failed while spending a callback state", cause),
           ),
           Effect.mapError(() => new SsoError({ message: "SSO state not found or expired" })),
         );
-        if (stateEntry === null) {
+        if (Option.isNone(foundStateEntry)) {
           return yield* new SsoError({
             message: "SSO state not found, expired or already used",
           });
         }
+        const stateEntry = foundStateEntry.value;
         if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
           return yield* new SsoError({ message: "SSO state expired" });
         }
@@ -981,10 +1000,11 @@ export const make = (
         if (providerId === null) {
           return yield* new SsoError({ message: "State does not belong to an SSO sign-in" });
         }
-        const provider = yield* store.getById(providerId);
-        if (provider === null) {
+        const foundProvider = yield* store.getById(providerId);
+        if (Option.isNone(foundProvider)) {
           return yield* new SsoError({ message: "SSO provider no longer exists" });
         }
+        const provider = foundProvider.value;
         if (provider.protocol !== "oidc") {
           return yield* new SsoError({
             message: "SSO state belongs to a SAML connection; use handleSamlCallback",
@@ -1108,7 +1128,7 @@ export const make = (
               ? now + samlAssertionReplayTtl
               : assertion.notOnOrAfter + samlClockSkewMs,
         });
-        if (seen === null) {
+        if (Option.isNone(seen)) {
           return yield* new SsoError({ message: "SAML assertion has already been used" });
         }
 

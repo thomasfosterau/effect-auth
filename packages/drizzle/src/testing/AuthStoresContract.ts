@@ -7,6 +7,7 @@
 
 import { createHash } from "node:crypto";
 import { Context, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";
@@ -126,8 +127,8 @@ const emailPasswordCases = (label: string, run: Run): void => {
       expect(result.created.created).toBe(true);
       expect(result.created.user.name).toBe("Ada");
       expect(result.created.user.attributes).toEqual({ team: "core" });
-      expect(result.read).toEqual(result.created.user);
-      expect(result.hash).toBeNull();
+      expect(result.read).toEqual(Option.some(result.created.user));
+      expect(Option.isNone(result.hash)).toBe(true);
     });
 
     it("sets, reads and clears the password hash; a missing user reads null", async () => {
@@ -151,7 +152,12 @@ const emailPasswordCases = (label: string, run: Run): void => {
           };
         }),
       );
-      expect(result).toEqual({ first: "hash-1", second: "hash-2", cleared: null, missing: null });
+      expect(result).toEqual({
+        first: Option.some("hash-1"),
+        second: Option.some("hash-2"),
+        cleared: Option.none(),
+        missing: Option.none(),
+      });
     });
 
     it("signs up and signs in through EmailPasswordService", async () => {
@@ -183,7 +189,7 @@ const emailPasswordCases = (label: string, run: Run): void => {
             validated: validated.user.id,
             digest: hashToken(token),
             sessionId: signedIn.session?.id,
-            storedId: stored?.id,
+            storedId: Option.getOrUndefined(stored)?.id,
             wrong: wrong._tag,
           };
         }).pipe(Effect.provide(service)),
@@ -213,9 +219,9 @@ const userServiceCases = (label: string, run: Run): void => {
           };
         }),
       );
-      expect(result.read).toEqual(result.user);
+      expect(result.read).toEqual(Option.some(result.user));
       expect(result.read).toEqual(result.viaUserStore);
-      expect(result.missing).toBeNull();
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("update writes name, image, updatedAt and the attributes, and returns the user", async () => {
@@ -240,14 +246,17 @@ const userServiceCases = (label: string, run: Run): void => {
           return { renamed, first, cleared: yield* store.get(user.id) };
         }),
       );
-      expect(result.first).toEqual(result.renamed);
-      expect(result.first?.name).toBe("Grace");
-      expect(result.first?.image).toBe("g.png");
-      expect(result.first?.updatedAt).toEqual(updatedAt);
-      expect(result.first?.attributes).toEqual({ plan: "pro", nested: { seats: 3 } });
-      expect(result.cleared?.name).toBeUndefined();
-      expect(result.cleared?.image).toBeUndefined();
-      expect(result.cleared?.attributes).toEqual({});
+      expect(result.first).toEqual(Option.some(result.renamed));
+      expect(Option.getOrUndefined(result.first)?.name).toBe("Grace");
+      expect(Option.getOrUndefined(result.first)?.image).toBe("g.png");
+      expect(Option.getOrUndefined(result.first)?.updatedAt).toEqual(updatedAt);
+      expect(Option.getOrUndefined(result.first)?.attributes).toEqual({
+        plan: "pro",
+        nested: { seats: 3 },
+      });
+      expect(Option.getOrUndefined(result.cleared)?.name).toBeUndefined();
+      expect(Option.getOrUndefined(result.cleared)?.image).toBeUndefined();
+      expect(Option.getOrUndefined(result.cleared)?.attributes).toEqual({});
     });
 
     it("update of a missing user writes nothing and returns the user given", async () => {
@@ -264,7 +273,7 @@ const userServiceCases = (label: string, run: Run): void => {
           return { returned: yield* store.update(ghost), read: yield* store.get(ghost.id) };
         }),
       );
-      expect(result).toEqual({ returned: ghost, read: null });
+      expect(result).toEqual({ returned: ghost, read: Option.none() });
     });
 
     it("delete removes the user; a delete of a missing user is a no-op", async () => {
@@ -282,8 +291,8 @@ const userServiceCases = (label: string, run: Run): void => {
           return { deleted: yield* store.get(user.id), other: yield* store.get(other.id) };
         }),
       );
-      expect(result.deleted).toBeNull();
-      expect(result.other).not.toBeNull();
+      expect(Option.isNone(result.deleted)).toBe(true);
+      expect(Option.isNone(result.other)).toBe(false);
     });
 
     it("UserService round-trips over the store", async () => {
@@ -335,11 +344,11 @@ const rateLimitCases = (label: string, run: Run): void => {
           return { missing, counts, entry: yield* store.get(key) };
         }),
       );
-      expect(result.missing).toBeNull();
+      expect(Option.isNone(result.missing)).toBe(true);
       expect(result.counts).toEqual([1, 2, 3]);
-      expect(result.entry?.count).toBe(3);
-      expect(result.entry?.resetAt).toBeGreaterThan(millis(0));
-      expect(result.entry && "blockedUntil" in result.entry).toBe(false);
+      expect(Option.getOrUndefined(result.entry)?.count).toBe(3);
+      expect(Option.getOrUndefined(result.entry)?.resetAt).toBeGreaterThan(millis(0));
+      expect(Option.exists(result.entry, (found) => "blockedUntil" in found)).toBe(false);
     });
 
     it("gives concurrent increments distinct counts", async () => {
@@ -386,9 +395,9 @@ const rateLimitCases = (label: string, run: Run): void => {
         }),
       );
       expect(result.reopened).toBe(1);
-      expect(result.after?.count).toBe(1);
-      expect(result.after && "blockedUntil" in result.after).toBe(false);
-      expect(result.open).toEqual(result.blocked);
+      expect(Option.getOrUndefined(result.after)?.count).toBe(1);
+      expect(Option.exists(result.after, (found) => "blockedUntil" in found)).toBe(false);
+      expect(result.open).toEqual(Option.some(result.blocked));
     });
 
     it("delete removes the entry and is a no-op for an unknown key", async () => {
@@ -402,7 +411,7 @@ const rateLimitCases = (label: string, run: Run): void => {
           return { gone: yield* store.get(key), restarted: yield* store.increment(key, 60) };
         }),
       );
-      expect(result).toEqual({ gone: null, restarted: 1 });
+      expect(result).toEqual({ gone: Option.none(), restarted: 1 });
     });
 
     it("purgeExpired deletes rows whose window and block have both passed, keeps open or blocked ones, and is idempotent", async () => {
@@ -437,7 +446,13 @@ const rateLimitCases = (label: string, run: Run): void => {
           return { first, second: yield* read };
         }).pipe(Effect.provide(TestClock.layer())),
       );
-      expect(result.first).toEqual([null, null, null, entries[3], entries[4]]);
+      expect(result.first).toEqual([
+        Option.none(),
+        Option.none(),
+        Option.none(),
+        Option.fromUndefinedOr(entries[3]),
+        Option.fromUndefinedOr(entries[4]),
+      ]);
       expect(result.second).toEqual(result.first);
     });
 
@@ -467,7 +482,7 @@ const rateLimitCases = (label: string, run: Run): void => {
           });
           const spentLeft = Effect.map(
             Effect.forEach(spent, (entry) => store.get(entry.key), { concurrency: 1 }),
-            (rows) => rows.filter((row) => row !== null).length,
+            (rows) => rows.filter((row) => Option.isSome(row)).length,
           );
           const ticks = yield* Effect.forEach(
             [1, 2, 3, 4],
@@ -481,14 +496,14 @@ const rateLimitCases = (label: string, run: Run): void => {
         }).pipe(Effect.provide(TestClock.layer())),
       );
       expect(result.ticks).toEqual([3, 1, 0, 0]);
-      expect(result.left).toEqual([...spent.map(() => null), ...kept]);
+      expect(result.left).toEqual([...spent.map(() => Option.none()), ...kept.map(Option.some)]);
     });
   });
 };
 
 const tokenCases = (label: string, run: Run): void => {
   describe(`${label}: EmailVerificationStore and PasswordResetStore`, () => {
-    it("round-trip a record by its digest, and a miss is null", async () => {
+    it("round-trip a record by its digest, and a miss is None", async () => {
       const verification = tokenRecord(uuid());
       const reset = tokenRecord(uuid());
       const result = await run(
@@ -504,9 +519,9 @@ const tokenCases = (label: string, run: Run): void => {
         }),
       );
       expect(result.created).toEqual(verification);
-      expect(result.verification).toEqual(verification);
-      expect(result.reset).toEqual(reset);
-      expect(result.missing).toBeNull();
+      expect(result.verification).toEqual(Option.some(verification));
+      expect(result.reset).toEqual(Option.some(reset));
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("keep the two purposes apart in one table", async () => {
@@ -534,10 +549,10 @@ const tokenCases = (label: string, run: Run): void => {
         }),
       );
       expect(result).toEqual({
-        verificationAsReset: null,
-        resetAsVerification: null,
-        verification,
-        reset: null,
+        verificationAsReset: Option.none(),
+        resetAsVerification: Option.none(),
+        verification: Option.some(verification),
+        reset: Option.none(),
       });
     });
 
@@ -566,10 +581,15 @@ const tokenCases = (label: string, run: Run): void => {
           };
         }),
       );
-      expect(result).toEqual({ afterDelete: second, first: null, second: null, other });
+      expect(result).toEqual({
+        afterDelete: Option.some(second),
+        first: Option.none(),
+        second: Option.none(),
+        other: Option.some(other),
+      });
     });
 
-    it("getLatestByUserId reads the user's newest record of its own purpose, and null for none", async () => {
+    it("getLatestByUserId reads the user's newest record of its own purpose, and None when there is none", async () => {
       const userId = uuid();
       const older = tokenRecord(userId);
       const newer = { ...tokenRecord(userId), createdAt: millis(2_000) };
@@ -591,7 +611,7 @@ const tokenCases = (label: string, run: Run): void => {
           };
         }),
       );
-      expect(result).toEqual({ latest: newer, none: null });
+      expect(result).toEqual({ latest: Option.some(newer), none: Option.none() });
     });
   });
 };

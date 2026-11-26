@@ -14,6 +14,7 @@
 import { boolean, datetime, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -156,14 +157,16 @@ describe("single-table MySQL / statements", () => {
     expect(proxy.statements[0]?.sql).toContain("`app_users`.`email` = ?");
     expect(proxy.statements[0]?.params).toContain("ada@example.com");
     // tinyint 1 read back as a real boolean; the id doubles as the identifier id.
-    expect(found).toEqual({
-      id: USER_ID,
-      userId: USER_ID,
-      type: "email",
-      value: "ada@example.com",
-      verified: true,
-      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
-    });
+    expect(found).toEqual(
+      Option.some({
+        id: USER_ID,
+        userId: USER_ID,
+        type: "email",
+        value: "ada@example.com",
+        verified: true,
+        createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
+      }),
+    );
   });
 
   it("holds no identifier for a row whose email is NULL", async () => {
@@ -195,7 +198,7 @@ describe("single-table MySQL / statements", () => {
       }),
     );
 
-    expect(found).toBeNull();
+    expect(Option.isNone(found)).toBe(true);
     expect(proxy.statements).toEqual([]);
   });
 
@@ -287,8 +290,8 @@ describe("single-table MySQL / replace", () => {
     );
     expect(update?.params).toEqual(["ada-new@example.com", true, USER_ID, "ada@example.com"]);
     expect(read?.sql).toMatch(/^select /);
-    expect(replaced?.id).toBe(USER_ID);
-    expect(replaced?.value).toBe("ada-new@example.com");
+    expect(Option.getOrUndefined(replaced)?.id).toBe(USER_ID);
+    expect(Option.getOrUndefined(replaced)?.value).toBe("ada-new@example.com");
   });
 
   it("sends the same UPDATE on a NOT NULL column: no NULL is ever written", async () => {
@@ -435,7 +438,7 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
       "update `app_users_verified` set `email_verified` = ?, `email_verified_at` = ? where ((`app_users_verified`.`id` = ?) and ((`app_users_verified`.`email` is not null)))",
     );
     expect(update?.params).toEqual([true, "2026-01-02 09:30:00.000", USER_ID]);
-    expect(verified?.verifiedAt).toEqual(verifiedAt);
+    expect(Option.getOrUndefined(verified)?.verifiedAt).toEqual(verifiedAt);
   });
 
   it("clears the verification time with the address on delete", async () => {
@@ -480,6 +483,6 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
     );
 
     expect(proxy.statements[0]?.sql).not.toContain("email_verified_at");
-    expect(verified && "verifiedAt" in verified).toBe(false);
+    expect(Option.exists(verified, (found) => "verifiedAt" in found)).toBe(false);
   });
 });

@@ -81,7 +81,9 @@ export interface MultiFactorRecord {
 export class MultiFactorStore extends Context.Service<
   MultiFactorStore,
   {
-    readonly get: (userId: string) => Effect.Effect<MultiFactorRecord | null, Errors.AuthError>;
+    readonly get: (
+      userId: string,
+    ) => Effect.Effect<Option.Option<MultiFactorRecord>, Errors.AuthError>;
     readonly upsert: (
       record: MultiFactorRecord,
     ) => Effect.Effect<MultiFactorRecord, Errors.AuthError>;
@@ -151,17 +153,21 @@ export class PendingMultiFactorStore extends Context.Service<
     readonly create: (
       pending: PendingMultiFactor,
     ) => Effect.Effect<PendingMultiFactor, Errors.AuthError>;
-    readonly get: (token: string) => Effect.Effect<PendingMultiFactor | null, Errors.AuthError>;
+    readonly get: (
+      token: string,
+    ) => Effect.Effect<Option.Option<PendingMultiFactor>, Errors.AuthError>;
     readonly recordFailedAttempt: (token: string) => Effect.Effect<number, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it (dropping its failed-attempt count too), or
-     * return `null` when there is none. Of two concurrent callers
+     * return `None` when there is none. Of two concurrent callers
      * passing the same challenge token, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (token: string) => Effect.Effect<PendingMultiFactor | null, Errors.AuthError>;
+    readonly consume: (
+      token: string,
+    ) => Effect.Effect<Option.Option<PendingMultiFactor>, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/PendingMultiFactorStore") {}
@@ -491,7 +497,7 @@ export const make = (
         // the read and the count, and `delete` drops the count with it, so a
         // count taken after that starts again from 1. The challenge must
         // still be there; if not, drop the stray count and refuse.
-        if ((yield* pendingStore.get(pendingToken)) === null) {
+        if (Option.isNone(yield* pendingStore.get(pendingToken))) {
           yield* pendingStore.delete(pendingToken);
           return yield* new MultiFactorError({ message });
         }
@@ -544,12 +550,13 @@ export const make = (
      */
     const verifyPassword = (userId: string, password: string) =>
       Effect.gen(function* () {
-        const passwordHash = yield* emailPasswordStore.getPasswordHash(userId);
-        if (!passwordHash) {
+        const foundPasswordHash = yield* emailPasswordStore.getPasswordHash(userId);
+        if (Option.isNone(foundPasswordHash)) {
           return yield* new Errors.InvalidCredentialsError({
             message: "Invalid password",
           });
         }
+        const passwordHash = foundPasswordHash.value;
 
         const isValid = yield* verifyStoredPassword(password, passwordHash);
         if (!isValid) {
@@ -572,11 +579,12 @@ export const make = (
      */
     const resolvePending = (pendingToken: string, invalidCode: string) =>
       Effect.gen(function* () {
-        const pending = yield* pendingStore.get(pendingToken);
-        if (!pending) {
+        const foundPending = yield* pendingStore.get(pendingToken);
+        if (Option.isNone(foundPending)) {
           yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* new MultiFactorError({ message: invalidCode });
         }
+        const pending = foundPending.value;
 
         if ((yield* Clock.currentTimeMillis) > pending.expiresAt) {
           yield* pendingStore.delete(pendingToken);
@@ -597,8 +605,9 @@ export const make = (
      */
     const consumePending = (pendingToken: string, invalidCode: string) =>
       Effect.gen(function* () {
-        const spent = yield* pendingStore.consume(pendingToken);
-        if (spent === null) return yield* new MultiFactorError({ message: invalidCode });
+        const foundSpent = yield* pendingStore.consume(pendingToken);
+        if (Option.isNone(foundSpent)) return yield* new MultiFactorError({ message: invalidCode });
+        const spent = foundSpent.value;
         return spent;
       });
 
@@ -634,13 +643,13 @@ export const make = (
      */
     const getVerifiedRecord = (userId: string) =>
       Effect.gen(function* () {
-        const record = yield* store.get(userId);
-        if (!record || !record.verified) {
+        const foundRecord = yield* store.get(userId);
+        if (Option.isNone(foundRecord) || !foundRecord.value.verified) {
           return yield* new MultiFactorError({
             message: "Two-factor authentication is not enabled for this user",
           });
         }
-        return record;
+        return foundRecord.value;
       });
 
     return {
@@ -648,17 +657,18 @@ export const make = (
         yield* verifyPassword(userId, password);
 
         const existing = yield* store.get(userId);
-        if (existing !== null && existing.verified) {
+        if (Option.exists(existing, (record) => record.verified)) {
           return yield* new MultiFactorAlreadyEnabledError({
             message: "Two-factor authentication is already enabled; disable it first",
           });
         }
 
         // The otpauth:// label is the user's email
-        const user = yield* userStore.get(userId);
-        if (user === null) {
+        const foundUser = yield* userStore.get(userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const user = foundUser.value;
 
         const secret = yield* generateBase32Secret(crypto);
         const storedSecret = yield* sealer.seal(secret, userId);
@@ -712,12 +722,13 @@ export const make = (
         userId: string,
         code: string,
       ) {
-        const record = yield* store.get(userId);
-        if (!record) {
+        const foundRecord = yield* store.get(userId);
+        if (Option.isNone(foundRecord)) {
           return yield* new MultiFactorError({
             message: "Two-factor authentication has not been set up for this user",
           });
         }
+        const record = foundRecord.value;
 
         const plainSecret = yield* sealer.open(record.secret, userId);
         const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
@@ -742,7 +753,7 @@ export const make = (
 
       isEnabled: Effect.fn("MultiFactorService.isEnabled")(function* (userId: string) {
         const record = yield* store.get(userId);
-        return record !== null && record.verified;
+        return Option.exists(record, (found) => found.verified);
       }),
 
       beginChallenge: Effect.fn("MultiFactorService.beginChallenge")((userId: string) =>
@@ -846,12 +857,13 @@ export const make = (
       ) {
         yield* verifyPassword(userId, password);
 
-        const record = yield* store.get(userId);
-        if (!record) {
+        const foundRecord = yield* store.get(userId);
+        if (Option.isNone(foundRecord)) {
           return yield* new MultiFactorError({
             message: "Two-factor authentication is not enabled for this user",
           });
         }
+        const record = foundRecord.value;
 
         const backupCodes = yield* Effect.all(
           Array.from({ length: backupCodeCount }, () => generateBackupCode()),

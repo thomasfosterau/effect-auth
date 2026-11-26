@@ -278,21 +278,21 @@ export class OAuthStateStore extends Context.Service<
     /** Record a pending state entry, replacing any entry with the same `state`. */
     readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
     /**
-     * Atomically fetch **and delete** a pending state entry, or `null`
+     * Atomically fetch **and delete** a pending state entry, or `None`
      * when it is unknown or already consumed.
      *
      * This is the replay guard for every OAuth and OIDC SSO callback: the
      * services spend the state before they exchange the code, so a captured
      * callback works at most once, whether that first use succeeded or failed.
      * Two concurrent callers passing the same `state` must not both receive
-     * the entry; the loser gets `null`. Implement it as a conditional
+     * the entry; the loser gets `None`. Implement it as a conditional
      * `DELETE ... RETURNING` (or a compare-and-swap, or Redis `GETDEL`), never
      * as a read followed by a delete.
      *
-     * An expired entry may be returned or reported as `null`: the services
+     * An expired entry may be returned or reported as `None`: the services
      * check `expiresAt` themselves and refuse an expired entry either way.
      */
-    readonly consume: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
+    readonly consume: (state: string) => Effect.Effect<Option.Option<OAuthState>, AuthError>;
   }
 >()("@effect-auth/OAuthStateStore") {}
 
@@ -1250,13 +1250,14 @@ export const make = (
      */
     const consumeState = (state: string) =>
       Effect.gen(function* () {
-        const stateEntry = yield* stateStore.consume(state);
-        if (stateEntry === null) {
+        const foundStateEntry = yield* stateStore.consume(state);
+        if (Option.isNone(foundStateEntry)) {
           return yield* new OAuthStateNotFoundError({
             message: "OAuth state not found, expired or already used",
             state,
           });
         }
+        const stateEntry = foundStateEntry.value;
         if ((yield* Clock.currentTimeMillis) > stateEntry.expiresAt) {
           return yield* new OAuthStateExpiredError({
             message: "OAuth state expired",
@@ -1327,7 +1328,7 @@ export const make = (
         Effect.catchTag("AuthError", (error) =>
           Effect.gen(function* () {
             const raced = yield* accountStore.get(account.provider, account.providerId);
-            if (raced === null) return yield* error;
+            if (Option.isNone(raced)) return yield* error;
             return yield* new OAuthAccountConflictError({
               message: `This ${account.provider} account is already linked`,
               provider: account.provider,
@@ -1417,12 +1418,14 @@ export const make = (
      */
     const autoLinkTarget = (providerName: string, email: string, emailVerified: boolean) =>
       Effect.gen(function* () {
-        const existing = yield* lookupIdentifier(identifiers, "email", email);
-        if (existing === null) return null;
+        const foundExisting = yield* lookupIdentifier(identifiers, "email", email);
+        if (Option.isNone(foundExisting)) return null;
+        const existing = foundExisting.value;
         const mayLink =
           emailVerified && (autoLinkByVerifiedEmail || trustedProviders.includes(providerName));
-        const user = mayLink ? yield* coreUsers.get(existing.userId) : null;
-        if (user === null) return yield* emailInUse(email);
+        const foundUser = mayLink ? yield* coreUsers.get(existing.userId) : Option.none();
+        if (Option.isNone(foundUser)) return yield* emailInUse(email);
+        const user = foundUser.value;
         if (!existing.verified) {
           yield* proveAddress({ ...firstProof, oauthAccounts: accountStore }, existing);
         }
@@ -1474,10 +1477,11 @@ export const make = (
 
             // Update state with returnTo if provided
             if (options?.returnTo) {
-              const stateEntry = yield* stateStore.consume(result.state);
-              if (stateEntry === null) {
+              const foundStateEntry = yield* stateStore.consume(result.state);
+              if (Option.isNone(foundStateEntry)) {
                 return yield* new AuthError({ message: "OAuth state missing after creation" });
               }
+              const stateEntry = foundStateEntry.value;
               // Record the state again, now carrying returnTo.
               yield* stateStore.create({
                 ...stateEntry,
@@ -1500,8 +1504,8 @@ export const make = (
         const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
 
         const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
-        if (existingAccount) {
-          return yield* refreshCallbackAccount(existingAccount, tokens);
+        if (Option.isSome(existingAccount)) {
+          return yield* refreshCallbackAccount(existingAccount.value, tokens);
         }
         return yield* createCallbackAccount(stateEntry.provider, tokens, userInfo, options);
       }),
@@ -1520,15 +1524,15 @@ export const make = (
 
             const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
 
-            if (existingAccount) {
-              if (existingAccount.userId === "") {
+            if (Option.isSome(existingAccount)) {
+              if (existingAccount.value.userId === "") {
                 return yield* new OAuthAccountNotLinkedError({
                   message: `This ${stateEntry.provider} account is not linked to a user`,
                   provider: stateEntry.provider,
                 });
               }
 
-              const plainExisting = yield* decryptAccount(existingAccount);
+              const plainExisting = yield* decryptAccount(existingAccount.value);
               const updatedAccount: OAuthAccount = {
                 ...plainExisting,
                 ...tokenFields,
@@ -1649,7 +1653,7 @@ export const make = (
         // Check if this OAuth account is already linked to another user
         const existingAccount = yield* accountStore.get(provider, userInfo.id);
 
-        if (existingAccount && existingAccount.userId !== userId) {
+        if (Option.exists(existingAccount, (account) => account.userId !== userId)) {
           return yield* new OAuthAccountConflictError({
             message: `This ${provider} account is already linked to another user`,
             provider,
@@ -1657,20 +1661,24 @@ export const make = (
         }
 
         // Create or update the account linked to this user
-        const accountId = existingAccount?.id ?? (yield* randomAccountId());
+        const accountId = Option.isSome(existingAccount)
+          ? existingAccount.value.id
+          : yield* randomAccountId();
         const account = profileAccount(
           {
             id: accountId,
             userId,
             provider,
-            createdAt: existingAccount?.createdAt ?? (yield* Clock.currentTimeMillis),
+            createdAt: Option.isSome(existingAccount)
+              ? existingAccount.value.createdAt
+              : yield* Clock.currentTimeMillis,
           },
           tokens,
           userInfo,
           yield* Clock.currentTimeMillis,
         );
 
-        if (existingAccount) {
+        if (Option.isSome(existingAccount)) {
           yield* accountStore.update(yield* encryptAccount(account));
         } else {
           yield* createAccount(yield* encryptAccount(account));

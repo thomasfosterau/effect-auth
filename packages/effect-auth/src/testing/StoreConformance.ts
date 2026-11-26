@@ -117,9 +117,11 @@ class Mismatch extends Data.TaggedError("Mismatch")<{ readonly message: string }
 
 /**
  * A value with `Date`s as their instants, undefined properties dropped and
- * keys sorted, so two records compare by content alone.
+ * keys sorted, so two records compare by content alone. An `Option` reads as
+ * its value, `None` as `null`, so a case states a miss as `null`.
  */
 const canonical = (value: unknown): unknown => {
+  if (Option.isOption(value)) return Option.match(value, { onNone: () => null, onSome: canonical });
   if (value instanceof Date) return { $date: value.getTime() };
   if (Array.isArray(value)) return value.map(canonical);
   if (P.isObject(value)) {
@@ -252,7 +254,7 @@ const sessionIds = (sessions: ReadonlyArray<Types.Session>): ReadonlyArray<strin
 
 /**
  * The `SessionStore` contract: sessions round-trip with their `Date`s and
- * attributes, a miss is `null`, deletes of unknown ids are no-ops, and the
+ * attributes, a miss is `None`, deletes of unknown ids are no-ops, and the
  * per-user operations touch that user's sessions only.
  *
  * @since 0.1.0
@@ -448,7 +450,7 @@ export interface UserStoreConformanceOptions<E = never, R = never> {
 
 /**
  * The `UserStore` contract: a seeded user reads back with its fields,
- * `Date`s and attributes, and a miss is `null`.
+ * `Date`s and attributes, and a miss is `None`.
  *
  * @since 0.1.0
  * @category suites
@@ -513,15 +515,16 @@ const email = (userId: string, verified = false): Identifier.Identifier =>
  * row reports the user's id, so every case works from the record as the store
  * reports it (what `create` returns), never from the one it handed in.
  */
-const identity = (identifier: Identifier.Identifier | null | undefined) =>
-  identifier === null || identifier === undefined
-    ? null
-    : {
-        userId: identifier.userId,
-        type: identifier.type,
-        value: identifier.value,
-        verified: identifier.verified,
-      };
+const identity = (found: Option.Option<Identifier.Identifier> | Identifier.Identifier) =>
+  Option.match(Option.isOption(found) ? found : Option.some(found), {
+    onNone: () => null,
+    onSome: (identifier) => ({
+      userId: identifier.userId,
+      type: identifier.type,
+      value: identifier.value,
+      verified: identifier.verified,
+    }),
+  });
 
 const values = (identifiers: ReadonlyArray<Identifier.Identifier>) =>
   identifiers.map((identifier) => [identifier.value, identifier.verified]);
@@ -550,7 +553,11 @@ export const identifierStoreConformance = <E = never, R = never>(
           yield* expectEqual("create", identity(created), identity(claim));
           const found = yield* store.getByValue("email", claim.value);
           yield* expectEqual("getByValue", identity(found), identity(claim));
-          yield* expectEqual("getByValue's id", found?.id, created.id);
+          yield* expectEqual(
+            "getByValue's id",
+            Option.map(found, (i) => i.id),
+            created.id,
+          );
           yield* expectEqual(
             "getByValue of an unclaimed value",
             yield* store.getByValue("email", `${uuid()}@example.test`),
@@ -581,7 +588,7 @@ export const identifierStoreConformance = <E = never, R = never>(
           );
           yield* expectEqual(
             "the claimed value's holder",
-            (yield* store.getByValue("email", claim.value))?.userId,
+            Option.map(yield* store.getByValue("email", claim.value), (found) => found.userId),
             owner,
           );
         }),
@@ -609,12 +616,12 @@ export const identifierStoreConformance = <E = never, R = never>(
           yield* store.create({ ...email(rival), value: lookAlike });
           yield* expectEqual(
             "the look-alike's holder",
-            (yield* store.getByValue("email", lookAlike))?.userId,
+            Option.map(yield* store.getByValue("email", lookAlike), (found) => found.userId),
             rival,
           );
           yield* expectEqual(
             "the original's holder",
-            (yield* store.getByValue("email", claim.value))?.userId,
+            Option.map(yield* store.getByValue("email", claim.value), (found) => found.userId),
             owner,
           );
         }),
@@ -646,10 +653,14 @@ export const identifierStoreConformance = <E = never, R = never>(
           const claim = email(yield* newUser());
           const created = yield* store.create(claim);
           const verified = yield* store.setVerified(created.id, at(1000));
-          yield* expectEqual("setVerified", verified?.verified, true);
+          yield* expectEqual(
+            "setVerified",
+            Option.map(verified, (i) => i.verified),
+            true,
+          );
           yield* expectEqual(
             "getByValue after setVerified",
-            (yield* store.getByValue("email", claim.value))?.verified,
+            Option.map(yield* store.getByValue("email", claim.value), (found) => found.verified),
             true,
           );
           yield* expectEqual(
@@ -717,7 +728,7 @@ export const identifierStoreConformance = <E = never, R = never>(
           const replaced = yield* store.replace(from, to);
           yield* expectEqual(
             "replace",
-            [replaced?.userId, replaced?.value, replaced?.verified],
+            Option.map(replaced, (i) => [i.userId, i.value, i.verified]),
             [userId, to.value, true],
           );
           yield* expectEqual("listByUser after replace", values(yield* store.listByUser(userId)), [
@@ -730,7 +741,7 @@ export const identifierStoreConformance = <E = never, R = never>(
           );
           yield* expectEqual(
             "getByValue of the new value",
-            (yield* store.getByValue("email", to.value))?.userId,
+            Option.map(yield* store.getByValue("email", to.value), (found) => found.userId),
             userId,
           );
           const reclaimed = yield* Identifier.claimIdentifier(store, {
@@ -773,7 +784,7 @@ export const identifierStoreConformance = <E = never, R = never>(
           );
           yield* expectEqual(
             "the held value's holder",
-            (yield* store.getByValue("email", held.value))?.userId,
+            Option.map(yield* store.getByValue("email", held.value), (found) => found.userId),
             otherId,
           );
         }),
@@ -897,7 +908,7 @@ const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
 
 /**
  * The `ApiKeyStore` contract: keys round-trip with every optional field, read
- * by id and by hash, misses are `null`, `update` writes, `recordUse` spends
+ * by id and by hash, misses are `None`, `update` writes, `recordUse` spends
  * atomically and moves only the usage fields, and the per-user list
  * and the per-user delete touch that user's keys only.
  *
@@ -1136,12 +1147,12 @@ export const apiKeyStoreConformance = <E = never, R = never>(
             Arr.makeBy(apiKeyRacers, () => store.recordUse(key.id, { usedAt })),
             { concurrency: "unbounded" },
           );
+          yield* expectEqual("successful concurrent spends", Arr.getSomes(spends).length, 3);
           yield* expectEqual(
-            "successful concurrent spends",
-            spends.filter((spent) => spent !== null).length,
-            3,
+            "remaining after them",
+            Option.map(yield* store.get(key.id), (found) => found.remaining),
+            0,
           );
-          yield* expectEqual("remaining after them", (yield* store.get(key.id))?.remaining, 0);
         }),
     },
     perUserDeleteCase(ApiKey.ApiKeyStore, {
@@ -1166,7 +1177,7 @@ const makePending = (userId: string): PendingMultiFactor => ({
 
 /**
  * The `PendingMultiFactorStore` contract: challenges round-trip, a miss is
- * `null`, `recordFailedAttempt` counts each challenge's wrong codes from 1
+ * `None`, `recordFailedAttempt` counts each challenge's wrong codes from 1
  * without touching the challenge or another challenge's count, `delete`
  * removes the challenge with its count (a no-op for an unknown token), and
  * `consume` hands a challenge out once, with its count dropped, to
@@ -1289,13 +1300,16 @@ export const pendingMultiFactorStoreConformance = <E = never, R = never>(
 const challengeBytes = (): Uint8Array => new TextEncoder().encode(uuid());
 
 /** A challenge with its bytes as a plain array, so two compare by content. */
-const challengeView = (challenge: WebAuthnChallenge | null) =>
-  challenge === null ? null : { ...challenge, challenge: Arr.fromIterable(challenge.challenge) };
+const challengeView = (found: Option.Option<WebAuthnChallenge> | WebAuthnChallenge) =>
+  Option.match(Option.isOption(found) ? found : Option.some(found), {
+    onNone: () => null,
+    onSome: (challenge) => ({ ...challenge, challenge: Arr.fromIterable(challenge.challenge) }),
+  });
 
 /**
  * The WebAuthn `ChallengeStore` contract: a challenge round-trips with its
  * bytes, its ceremony, its expiry and its user (absent for a discoverable
- * authentication challenge), a miss is `null`, `create` under bytes already
+ * authentication challenge), a miss is `None`, `create` under bytes already
  * stored replaces that challenge (ceremony and user included), and `delete`
  * removes it (a no-op for unknown bytes). The ceremony is what keeps an
  * authentication challenge from being redeemed as a registration, so a
@@ -1462,12 +1476,12 @@ const makeTeamMember = (teamId: string, userId: string): TeamMember => ({
  * The parts of the `OrganizationStore` contract the HTTP tier addresses by
  * id. A membership reads back by `(organizationId, userId)` and by its own id
  * (`getMemberById`, behind `/organization-members/:id`), an update is what
- * both lookups then answer, and a deleted or unknown membership is `null`. A
+ * both lookups then answer, and a deleted or unknown membership is `None`. A
  * team membership keeps the id it was added with (`getTeamMemberById`, behind
  * `/team-members/:id`) until it is removed or its team deleted. A custom role
  * definition reads back by its id (`getOrgRoleById`, behind
  * `/organization-roles/:id`), a replacement under the same id is what both
- * lookups answer, and a deleted definition is `null`.
+ * lookups answer, and a deleted definition is `None`.
  *
  * @since 0.3.0
  * @category suites
@@ -1759,10 +1773,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
           );
           yield* expectEqual(
             "the counts, sorted",
-            Arr.sort(
-              counts.map((count) => count ?? 0),
-              Order.Number,
-            ),
+            Arr.sort(counts.map(Option.getOrElse(() => 0)), Order.Number),
             Arr.makeBy(attemptRacers, (i) => i + 1),
           );
         }),
@@ -1851,7 +1862,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
             yield* store.getFailures(address, other),
             failuresAt(1, 3),
           );
-          yield* expectThat("the record stays", (yield* store.get(address, purpose)) !== null);
+          yield* expectThat("the record stays", Option.isSome(yield* store.get(address, purpose)));
           yield* expectEqual(
             "the first count after a clear",
             yield* store.recordFailure(address, purpose, at(4).getTime()),
@@ -1865,7 +1876,7 @@ const codeStoreSuite = <P, A extends CodeRecord, S, E, R>(
 /**
  * The `EmailOtpStore` contract: one record per email and purpose (`upsert`
  * replaces it, `incrementAttempts` counts from 1, `delete` removes it, a miss
- * is `null`), and a failure budget per pair that counts wrong codes
+ * is `None`), and a failure budget per pair that counts wrong codes
  * from 1 at the time given, outlives every write to the pair's record, and is
  * forgotten only by `clearFailures`.
  *
@@ -1908,11 +1919,11 @@ interface SingleUse<S, A> {
   readonly record: string;
   readonly make: (userId: string) => A;
   readonly write: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
-  /** Read `record` back: the record while it is stored, `null` once it is gone. */
+  /** Read `record` back: the record while it is stored, `None` once it is gone. */
   readonly read: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
   /** The key `consume` takes for `record`. */
   readonly key: (record: A) => string;
-  readonly consume: (store: S, key: string) => Effect.Effect<A | null, Errors.AuthError>;
+  readonly consume: (store: S, key: string) => Effect.Effect<Option.Option<A>, Errors.AuthError>;
 }
 
 /** Concurrent callers the race case starts against one record. */
@@ -1920,7 +1931,7 @@ const consumeRacers = 8;
 
 /**
  * The cases every single-use store's `consume` shares: it hands the
- * record back once and removes it, answers `null` for a spent or unknown key,
+ * record back once and removes it, answers `None` for a spent or unknown key,
  * and of concurrent callers passing one key exactly one receives the record.
  */
 const consumeCases = <I, S, A, E, R>(store: Context.Key<I, S>, spec: SingleUse<S, A>) => [
@@ -1960,7 +1971,7 @@ const consumeCases = <I, S, A, E, R>(store: Context.Key<I, S>, spec: SingleUse<S
           Arr.makeBy(consumeRacers, () => spec.consume(service, spec.key(record))),
           { concurrency: "unbounded" },
         );
-        const winners = results.filter(P.isNotNull);
+        const winners = Arr.getSomes(results);
         yield* expectEqual(`callers that received the ${spec.record}`, winners.length, 1);
         yield* expectEqual(`the ${spec.record} the winner received`, winners[0], record);
       }),
@@ -1979,7 +1990,7 @@ interface PerUserDelete<S, A> {
   readonly method?: string | undefined;
   readonly make: (userId: string) => A;
   readonly write: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
-  /** Read `record` back: the record while it is stored, `null` once it is gone. */
+  /** Read `record` back: the record while it is stored, `None` once it is gone. */
   readonly read: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
   readonly purge: (store: S, userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
@@ -2125,7 +2136,10 @@ export const oauthAccountStoreConformance = <E = never, R = never>(
           yield* store.linkToUser(owner, unlinked);
           yield* expectEqual(
             "the unlinked account after linkToUser",
-            (yield* store.get(unlinked.provider, unlinked.providerId))?.userId,
+            Option.map(
+              yield* store.get(unlinked.provider, unlinked.providerId),
+              (found) => found.userId,
+            ),
             owner,
           );
           yield* store.linkToUser(owner, unlinked);
@@ -2359,7 +2373,7 @@ export const multiFactorStoreConformance = <E = never, R = never>(
           yield* expectEqual("a later step", yield* store.useTotpCounter(record.userId, 11), true);
           yield* expectEqual(
             "the stored counter",
-            (yield* store.get(record.userId))?.lastUsedCounter,
+            Option.map(yield* store.get(record.userId), (found) => found.lastUsedCounter),
             11,
           );
           const unverified = { ...makeEnrolment(yield* newUser()), verified: false };
@@ -2411,9 +2425,11 @@ export const multiFactorStoreConformance = <E = never, R = never>(
             yield* store.useBackupCode(record.userId, digest()),
             false,
           );
-          yield* expectEqual("the codes left", (yield* store.get(record.userId))?.backupCodes, [
-            second,
-          ]);
+          yield* expectEqual(
+            "the codes left",
+            Option.map(yield* store.get(record.userId), (found) => found.backupCodes),
+            [second],
+          );
           const absent = yield* newUser();
           yield* expectEqual("no record", yield* store.useBackupCode(absent, first ?? ""), false);
           yield* expectEqual("no record recreated", yield* store.get(absent), null);
@@ -2439,7 +2455,11 @@ export const multiFactorStoreConformance = <E = never, R = never>(
             { concurrency: "unbounded" },
           );
           yield* expectEqual("accepted uses", results.filter((used) => used).length, 2);
-          yield* expectEqual("the codes left", (yield* store.get(record.userId))?.backupCodes, []);
+          yield* expectEqual(
+            "the codes left",
+            Option.map(yield* store.get(record.userId), (found) => found.backupCodes),
+            [],
+          );
         }),
     },
   ]);
@@ -2712,7 +2732,7 @@ export const accountManagementStoreConformance = <E = never, R = never>(
 
 /**
  * The `MagicLinkStore` single-use `consume`: a link's token is handed
- * out once and removed, a spent or unknown token is `null`, and of concurrent
+ * out once and removed, a spent or unknown token is `None`, and of concurrent
  * callers passing one token exactly one receives it.
  *
  * @since 0.6.0
@@ -2744,7 +2764,7 @@ export const magicLinkStoreConformance = <E = never, R = never>(
 
 /**
  * The `OneTimeTokenStore` single-use `consume`: a token is handed out
- * once and removed, a spent or unknown token is `null`, and of concurrent
+ * once and removed, a spent or unknown token is `None`, and of concurrent
  * callers passing one token exactly one receives it.
  *
  * @since 0.6.0
@@ -2778,7 +2798,7 @@ export const oneTimeTokenStoreConformance = <E = never, R = never>(
 /**
  * The `OidcCodeStore` single-use `consume`: an authorization code (or
  * a pending consent request) is handed out once and removed, a spent or
- * unknown code is `null`, and of concurrent redemptions of one code exactly
+ * unknown code is `None`, and of concurrent redemptions of one code exactly
  * one receives it (RFC 6749 §4.1.2).
  *
  * @since 0.6.0

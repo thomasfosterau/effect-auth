@@ -263,8 +263,7 @@ const makeFixture = (
     return user;
   };
 
-  const getUserById = (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId)));
+  const getUserById = (userId: string) => Effect.sync(() => MutableHashMap.get(usersById, userId));
 
   // --- core stores -----------------------------------------------------------
   const sessionStore: typeof SessionStore.Service = {
@@ -276,7 +275,7 @@ const makeFixture = (
     get: (sessionId) =>
       Effect.sync(() => {
         sessionStoreReads++;
-        return Option.getOrNull(MutableHashMap.get(sessions, sessionId));
+        return MutableHashMap.get(sessions, sessionId);
       }),
     update: (session) =>
       Effect.sync(() => {
@@ -306,8 +305,7 @@ const makeFixture = (
 
   const baseEmailPasswordStore: typeof EmailPasswordStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
-    getPasswordHash: (userId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    getPasswordHash: (userId) => Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
     clearPasswordHash: (userId: string) =>
       Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
     setPasswordHash: (userId, hash) =>
@@ -345,12 +343,12 @@ const makeFixture = (
         MutableHashMap.set(verifications, verification.token, verification);
         return verification;
       }),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(verifications, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(verifications, token)),
     consume: (token) =>
       Effect.sync(() => {
         const found = Option.getOrNull(MutableHashMap.get(verifications, token));
         MutableHashMap.remove(verifications, token);
-        return found;
+        return Option.fromNullishOr(found);
       }),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(verifications, token)),
     deleteByUserId: (userId) =>
@@ -367,7 +365,7 @@ const makeFixture = (
             latest = v;
           }
         });
-        return latest;
+        return Option.fromNullishOr(latest);
       }),
   };
 
@@ -377,12 +375,12 @@ const makeFixture = (
         MutableHashMap.set(resets, reset.token, reset);
         return reset;
       }),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(resets, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(resets, token)),
     consume: (token) =>
       Effect.sync(() => {
         const found = Option.getOrNull(MutableHashMap.get(resets, token));
         MutableHashMap.remove(resets, token);
-        return found;
+        return Option.fromNullishOr(found);
       }),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(resets, token)),
     deleteByUserId: (userId) =>
@@ -462,18 +460,16 @@ const makeFixture = (
         MutableHashMap.set(magicLinks, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(magicLinks, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(magicLinks, token)),
     consume: (token) =>
       Effect.sync(() => {
         const found = Option.getOrNull(MutableHashMap.get(magicLinks, token));
         MutableHashMap.remove(magicLinks, token);
-        return found;
+        return Option.fromNullishOr(found);
       }),
     getByEmail: (email) =>
       Effect.sync(() => {
-        return Option.getOrNull(
-          Arr.findFirst(MutableHashMap.values(magicLinks), (link) => link.email === email),
-        );
+        return Arr.findFirst(MutableHashMap.values(magicLinks), (link) => link.email === email);
       }),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(magicLinks, token)),
     deleteByEmail: (email) =>
@@ -496,16 +492,16 @@ const makeFixture = (
         return record;
       }),
     get: (email, purpose) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(emailOtps, otpKey(email, purpose)))),
+      Effect.sync(() => MutableHashMap.get(emailOtps, otpKey(email, purpose))),
     delete: (email, purpose) =>
       Effect.sync(() => void MutableHashMap.remove(emailOtps, otpKey(email, purpose))),
     incrementAttempts: (email, purpose) =>
       Effect.sync(() => {
         const record = Option.getOrUndefined(MutableHashMap.get(emailOtps, otpKey(email, purpose)));
-        if (record === undefined) return 0;
+        if (record === undefined) return Option.fromNullishOr(0);
         const updated = { ...record, attempts: record.attempts + 1 };
         MutableHashMap.set(emailOtps, otpKey(email, purpose), updated);
-        return updated.attempts;
+        return Option.fromNullishOr(updated.attempts);
       }),
     ...memoryOtpFailures<EmailOtpPurpose>(),
   };
@@ -525,13 +521,12 @@ const makeFixture = (
         MutableHashMap.set(pendingMultiFactors, pending.token, pending);
         return pending;
       }),
-    get: (token) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(pendingMultiFactors, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(pendingMultiFactors, token)),
     consume: (token) =>
       Effect.sync(() => {
         const found = Option.getOrNull(MutableHashMap.get(pendingMultiFactors, token));
         MutableHashMap.remove(pendingMultiFactors, token);
-        return found;
+        return Option.fromNullishOr(found);
       }),
     recordFailedAttempt: (token) =>
       Effect.sync(() => {
@@ -554,7 +549,7 @@ const makeFixture = (
         MutableHashMap.set(accountTokens, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(accountTokens, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(accountTokens, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(accountTokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
@@ -573,9 +568,7 @@ const makeFixture = (
         return record;
       }),
     get: (phone, purpose) =>
-      Effect.sync(() =>
-        Option.getOrNull(MutableHashMap.get(phoneRecords, phoneKey(phone, purpose))),
-      ),
+      Effect.sync(() => MutableHashMap.get(phoneRecords, phoneKey(phone, purpose))),
     delete: (phone, purpose) =>
       Effect.sync(() => void MutableHashMap.remove(phoneRecords, phoneKey(phone, purpose))),
     incrementAttempts: (phone, purpose) =>
@@ -583,10 +576,10 @@ const makeFixture = (
         const record = Option.getOrUndefined(
           MutableHashMap.get(phoneRecords, phoneKey(phone, purpose)),
         );
-        if (!record) return 0;
+        if (!record) return Option.fromNullishOr(0);
         const updated = { ...record, attempts: record.attempts + 1 };
         MutableHashMap.set(phoneRecords, phoneKey(phone, purpose), updated);
-        return updated.attempts;
+        return Option.fromNullishOr(updated.attempts);
       }),
     ...memoryOtpFailures<PhoneOtpPurpose>(),
   };
@@ -736,7 +729,7 @@ const memoryRateLimiterLayer = (): Layer.Layer<RateLimiter> =>
 const memoryRateLimitStoreLayer = (): Layer.Layer<RateLimitStore> => {
   const entries = MutableHashMap.empty<string, RateLimitEntry>();
   const store = {
-    get: (key: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(entries, key))),
+    get: (key: string) => Effect.sync(() => MutableHashMap.get(entries, key)),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
       Effect.sync(() => void MutableHashMap.set(entries, key, entry)),
     increment: (key: string, ttl: number) =>
@@ -4246,7 +4239,7 @@ describe("client IP at the HTTP boundary", () => {
       get: (key: string) =>
         Effect.sync(() => {
           MutableHashSet.add(keys, key);
-          return Option.getOrNull(MutableHashMap.get(entries, key));
+          return MutableHashMap.get(entries, key);
         }),
       set: (key: string, entry: RateLimitEntry, _ttl: number) =>
         Effect.sync(() => {

@@ -27,7 +27,7 @@ const sessionStore = (): typeof SessionStore.Service => {
   return {
     create: (session) =>
       Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
-    get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    get: (id) => Effect.sync(() => MutableHashMap.get(sessions, id)),
     update: (session) => memorySessionStore(sessions).update(session),
     touch: (sessionId: string, touch: SessionTouch) =>
       memorySessionStore(sessions).touch(sessionId, touch),
@@ -49,7 +49,7 @@ const sessionStore = (): typeof SessionStore.Service => {
 
 const users = MutableHashMap.empty<string, Types.User>();
 const userStore: typeof UserStore.Service = {
-  get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
+  get: (id) => Effect.sync(() => MutableHashMap.get(users, id)),
 };
 const seedUser = (user: Types.User) =>
   Effect.sync(() => void MutableHashMap.set(users, user.id, user));
@@ -80,8 +80,7 @@ register(Testing.identifierStoreConformance(), () =>
  */
 const oneTimeTokenStore = (yieldBetween = false): typeof OneTimeTokenStore.Service => {
   const tokens = MutableHashMap.empty<string, OneTimeTokenRecord>();
-  const get = (token: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token)));
+  const get = (token: string) => Effect.sync(() => MutableHashMap.get(tokens, token));
   const remove = (token: string) => Effect.sync(() => void MutableHashMap.remove(tokens, token));
   return {
     create: (record) =>
@@ -91,7 +90,7 @@ const oneTimeTokenStore = (yieldBetween = false): typeof OneTimeTokenStore.Servi
       Effect.gen(function* () {
         const found = yield* get(token);
         if (yieldBetween) yield* Effect.yieldNow;
-        if (found !== null) yield* remove(token);
+        if (Option.isSome(found)) yield* remove(token);
         return found;
       }),
     delete: remove,
@@ -198,7 +197,7 @@ describe("a broken store fails its suite", () => {
   it("an ApiKeyStore whose getByHash misses fails", async () => {
     const failed = await failures(Testing.apiKeyStoreConformance(), () => {
       const inner = Testing.memoryApiKeyStore();
-      return Layer.succeed(ApiKey.ApiKeyStore, { ...inner, getByHash: () => Effect.succeed(null) });
+      return Layer.succeed(ApiKey.ApiKeyStore, { ...inner, getByHash: () => Effect.succeedNone });
     });
     expect(failed.map((failure) => failure.name)).toEqual([
       "create returns the key, and get and getByHash read it back with every field",
@@ -246,7 +245,7 @@ describe("a broken store fails its suite", () => {
       return Layer.succeed(OAuthAccountStore, {
         ...Testing.memoryOAuthAccountStore(undefined, accounts),
         create: upsert,
-        update: upsert,
+        update: (account) => Effect.map(upsert(account), Option.some),
       });
     });
     expect(failed.map((failure) => failure.name)).toEqual([

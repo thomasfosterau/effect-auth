@@ -59,14 +59,14 @@ export class DeviceAuthorizationStore extends Context.Service<
     ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
     readonly getByDeviceCode: (
       deviceCode: string,
-    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<DeviceAuthorizationRecord>, Errors.AuthError>;
     readonly getByUserCode: (
       userCode: string,
-    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<DeviceAuthorizationRecord>, Errors.AuthError>;
     /**
      * Atomically record a decision: if the record the user-code digest names
      * is `"pending"` and `expiresAt >= now`, set its `status` and `userId` and
-     * return the updated record; otherwise return `null` and change nothing.
+     * return the updated record; otherwise return `None` and change nothing.
      * One conditional write (`UPDATE … WHERE status = 'pending' AND expires_at
      * >= ? RETURNING`), so a decision is never overwritten: of two concurrent
      * decisions only one lands, and a denial can never become an approval.
@@ -75,28 +75,28 @@ export class DeviceAuthorizationStore extends Context.Service<
       userCode: string,
       decision: DeviceDecision,
       now: number,
-    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<DeviceAuthorizationRecord>, Errors.AuthError>;
     /**
      * Write only the given poll field of an existing record and return the
-     * record as it now stands (its current `status` included), or `null` when
+     * record as it now stands (its current `status` included), or `None` when
      * it is gone. Never writes `status` or `userId`, so a poll racing a
      * decision cannot undo it.
      */
     readonly touch: (
       deviceCode: string,
       touch: DevicePollTouch,
-    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<DeviceAuthorizationRecord>, Errors.AuthError>;
     readonly delete: (deviceCode: string) => Effect.Effect<void, Errors.AuthError>;
     /**
      * Atomically consume an approved record: if the record exists and its status
-     * is `"approved"`, delete it and return it; otherwise return `null`.
+     * is `"approved"`, delete it and return it; otherwise return `None`.
      * Implementations must make the read-then-delete atomic (e.g. a conditional
      * delete or compare-and-swap) so that two concurrent polls on the same
      * approved code each see at most one win.
      */
     readonly claimApproval: (
       deviceCode: string,
-    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<DeviceAuthorizationRecord>, Errors.AuthError>;
   }
 >()("@effect-auth/DeviceAuthorizationStore") {}
 
@@ -410,7 +410,10 @@ const make = (
         );
         // A request whose client was removed since is refused here, and its
         // poll answers `expired_token` whatever was recorded.
-        return yield* settled === null ? Effect.fail(invalidCode()) : described(settled);
+        return yield* Option.match(settled, {
+          onNone: () => Effect.fail(invalidCode()),
+          onSome: described,
+        });
       });
 
     return {
@@ -467,26 +470,31 @@ const make = (
         clientId?: string,
       ) {
         const digest = yield* hashToken(deviceCode);
-        const read = yield* store.getByDeviceCode(digest);
+        const found = yield* store.getByDeviceCode(digest);
         const now = yield* Clock.currentTimeMillis;
 
         // RFC 8628 §3.4 / RFC 6749 §5.2: a code issued to another client is
         // `invalid_grant`. Checked before anything is written, so another
         // client's polls neither slow nor spend the request.
-        if (read !== null && clientId !== undefined && read.clientId !== clientId) {
+        if (Option.exists(found, (read) => clientId !== undefined && read.clientId !== clientId)) {
           return yield* new DevicePollError({
             error: "invalid_grant",
             message: "The device code was issued to another client",
           });
         }
 
-        if (read === null || now > read.expiresAt || Option.isNone(findClient(read.clientId))) {
-          if (read !== null) yield* store.delete(read.deviceCode);
+        if (
+          Option.isNone(found) ||
+          now > found.value.expiresAt ||
+          Option.isNone(findClient(found.value.clientId))
+        ) {
+          if (Option.isSome(found)) yield* store.delete(found.value.deviceCode);
           return yield* new DevicePollError({
             error: "expired_token",
             message: "The device code has expired",
           });
         }
+        const read = found.value;
 
         // Enforce the minimum polling interval (RFC 8628 slow_down).
         // Don't update lastPolledAt on rejection: a slightly-too-fast client
@@ -502,13 +510,14 @@ const make = (
         }
         // The touch writes only `lastPolledAt` and answers the record as it
         // now stands, so the status read below is never older than the poll.
-        const record = yield* store.touch(digest, { lastPolledAt: now });
-        if (record === null) {
+        const foundRecord = yield* store.touch(digest, { lastPolledAt: now });
+        if (Option.isNone(foundRecord)) {
           return yield* new DevicePollError({
             error: "expired_token",
             message: "The device code has expired",
           });
         }
+        const record = foundRecord.value;
 
         if (record.status === "denied") {
           yield* store.delete(record.deviceCode);
@@ -527,10 +536,10 @@ const make = (
 
         // Atomically consume the approved record before minting a session.
         // claimApproval does a conditional delete so that only one concurrent
-        // poll wins; a second poll racing the same approval sees null here and
+        // poll wins; a second poll racing the same approval sees `None` here and
         // gets expired_token instead of minting a duplicate session.
-        const claimed = yield* store.claimApproval(record.deviceCode);
-        if (claimed === null || claimed.userId === undefined) {
+        const claimed = Option.getOrUndefined(yield* store.claimApproval(record.deviceCode));
+        if (claimed?.userId === undefined) {
           return yield* new DevicePollError({
             error: "expired_token",
             message: "The device code has already been consumed",
@@ -554,10 +563,14 @@ const make = (
       lookup: Effect.fn("DeviceAuthorizationService.lookup")(function* (userCode: string) {
         const record = yield* store.getByUserCode(yield* hashToken(normalizeUserCode(userCode)));
         const now = yield* Clock.currentTimeMillis;
-        if (record === null || record.status !== "pending" || now > record.expiresAt) {
+        if (
+          Option.isNone(record) ||
+          record.value.status !== "pending" ||
+          now > record.value.expiresAt
+        ) {
           return yield* invalidCode();
         }
-        return yield* described(record);
+        return yield* described(record.value);
       }),
 
       approve: Effect.fn("DeviceAuthorizationService.approve")((userCode: string, userId: string) =>

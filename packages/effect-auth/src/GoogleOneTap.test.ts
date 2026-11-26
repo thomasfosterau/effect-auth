@@ -113,7 +113,7 @@ const makeMemoryNonceStore = (): typeof GoogleOneTapNonceStore.Service => {
       Effect.sync(() => {
         MutableHashMap.set(store, nonce, { expiresAt });
       }),
-    get: (nonce) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(store, nonce))),
+    get: (nonce) => Effect.sync(() => MutableHashMap.get(store, nonce)),
     delete: (nonce) =>
       Effect.sync(() => {
         MutableHashMap.remove(store, nonce);
@@ -153,7 +153,7 @@ const makeStores = () => {
       }),
   };
   const coreUserStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
   };
   const sessionsCleared: Array<string> = [];
   const sessionManager: typeof SessionService.Service = {
@@ -237,8 +237,8 @@ describe("GoogleOneTapService", () => {
     const emailIdentifier = await Effect.runPromise(
       identifiers.getByValue("email", "alice@gmail.test"),
     );
-    expect(emailIdentifier?.userId).toBe(first.user.id);
-    expect(emailIdentifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(emailIdentifier)?.userId).toBe(first.user.id);
+    expect(Option.getOrUndefined(emailIdentifier)?.verified).toBe(true);
     // The store was handed the address to create the user with.
     expect(createdWith).toEqual([
       { type: "email", value: "alice@gmail.test", verified: true, verifiedAt: expect.any(Date) },
@@ -303,7 +303,7 @@ describe("GoogleOneTapService", () => {
     const emailIdentifier = await Effect.runPromise(
       identifiers.getByValue("email", "alice@gmail.test"),
     );
-    expect(emailIdentifier?.userId).toBe(result.user.id);
+    expect(Option.getOrUndefined(emailIdentifier)?.userId).toBe(result.user.id);
   });
 
   it("rejects wrong audience, wrong issuer, expiry, unverified email, and bad signatures", async () => {
@@ -422,7 +422,7 @@ describe("GoogleOneTapService", () => {
     expect(sessionsCleared).toEqual(["user-squat"]);
     const identifier = await Effect.runPromise(identifiers.getByValue("email", "alice@gmail.test"));
     expect(await Effect.runPromise(apiKeys.listByUserId("user-squat"))).toEqual([]);
-    expect(identifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
   });
 
   it("rejects a replayed id_token (nonce already consumed)", async () => {
@@ -526,8 +526,7 @@ const makeHttpFixture = () => {
       }),
   };
   const userStore = {
-    get: (userId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId: string) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -537,7 +536,7 @@ const makeHttpFixture = () => {
   };
   const sessionStore: typeof SessionStore.Service = {
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
-    get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    get: (id: string) => Effect.sync(() => MutableHashMap.get(sessions, id)),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     touch: (sessionId: string, touch: SessionTouch) =>
       memorySessionStore(sessions).touch(sessionId, touch),

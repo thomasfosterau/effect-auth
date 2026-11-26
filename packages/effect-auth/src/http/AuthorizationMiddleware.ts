@@ -7,7 +7,7 @@
  * @example Gate one endpoint on a per-request resource
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import { Effect, FileSystem, Layer, Option, Path } from "effect"
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { AuthMiddleware, layer as authLayer, makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
@@ -81,16 +81,16 @@
  * const storeLayers = Layer.mergeAll(
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
- *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
  *     update: (session) =>
  *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
- *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
+ *         if (session === undefined || session.expiresAt < touch.lastActivityAt) return Option.none()
  *         const touched = { ...session, ...touch }
  *         sessions.set(id, touched)
- *         return touched
+ *         return Option.some(touched)
  *       }),
  *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
  *     deleteByUserId: (userId) =>
@@ -100,7 +100,7 @@
  *     listByUserId: (userId) =>
  *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
  *   }),
- *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => Option.fromUndefinedOr(users.get(id))) }),
  * )
  * const myServiceLayer = SessionService.layer({
  *   sessionExpiresIn: { activePeriod: 7 * 86_400_000, idlePeriod: 86_400_000 },

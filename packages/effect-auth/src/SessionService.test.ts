@@ -37,7 +37,7 @@ const mockSessionStore = {
     }),
 
   get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(mockSessionStore.sessions, sessionId))),
+    Effect.sync(() => MutableHashMap.get(mockSessionStore.sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -94,8 +94,7 @@ const mockUserStore = {
     ],
   ]),
 
-  get: (userId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(mockUserStore.users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(mockUserStore.users, userId)),
 };
 
 const SessionStoreTest = Context.make(SessionStore, mockSessionStore);
@@ -425,8 +424,7 @@ describe("SessionService", () => {
             MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
-        get: (sessionId: string) =>
-          Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+        get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
         update: (session: Session) =>
           Effect.sync(() => {
             MutableHashMap.set(sessions, session.id, session);
@@ -513,15 +511,16 @@ describe("SessionService", () => {
       const racingStore: typeof SessionStore.Service = {
         ...store,
         get: (sessionId) =>
-          store
-            .get(sessionId)
-            .pipe(
-              Effect.tap((session) =>
-                session === null
-                  ? Effect.void
-                  : store.update({ ...session, attributes: { activeOrganizationId: "org-1" } }),
-              ),
+          store.get(sessionId).pipe(
+            Effect.tap((session) =>
+              Option.isNone(session)
+                ? Effect.void
+                : store.update({
+                    ...session.value,
+                    attributes: { activeOrganizationId: "org-1" },
+                  }),
             ),
+          ),
       };
 
       const { validated, stored } = await Effect.runPromise(
@@ -541,7 +540,7 @@ describe("SessionService", () => {
         ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
       );
 
-      expect(stored?.attributes).toEqual({ activeOrganizationId: "org-1" });
+      expect(Option.getOrUndefined(stored)?.attributes).toEqual({ activeOrganizationId: "org-1" });
       expect(validated.session.attributes).toEqual({ activeOrganizationId: "org-1" });
     });
 
@@ -573,7 +572,7 @@ describe("SessionService", () => {
 
       assert(Result.isFailure(result));
       expect(result.failure._tag).toBe("SessionNotFoundError");
-      expect(stored).toBeNull();
+      expect(Option.isNone(stored)).toBe(true);
     });
 
     it("still enforces expiry even when write is throttled", async () => {
@@ -584,8 +583,7 @@ describe("SessionService", () => {
             MutableHashMap.set(sessions, session.id, session);
             return session;
           }),
-        get: (sessionId: string) =>
-          Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+        get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
         update: (session: Session) =>
           Effect.sync(() => {
             MutableHashMap.set(sessions, session.id, session);
