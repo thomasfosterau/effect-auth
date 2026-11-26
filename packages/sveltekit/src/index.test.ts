@@ -73,7 +73,7 @@ describe("handle", () => {
 
   it("resolves before rendering and forces private caching for a signed-in viewer", async () => {
     const hook = handle({
-      lookup: () => Effect.succeed(Option.some(signedIn)),
+      lookup: () => Effect.succeedSome(signedIn),
       failure: { mode: "closed" },
     });
     const input = event(sessionCookie);
@@ -93,7 +93,7 @@ describe("handle", () => {
 
   it("forces private caching even when the rendered response's headers are immutable", async () => {
     const hook = handle({
-      lookup: () => Effect.succeed(Option.some(signedIn)),
+      lookup: () => Effect.succeedSome(signedIn),
       failure: { mode: "closed" },
     });
     const immutable = Response.redirect("https://app.example/elsewhere", 302);
