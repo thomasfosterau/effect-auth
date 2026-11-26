@@ -37,7 +37,13 @@ import {
  */
 export type FirstProofCredentials = Pick<
   UserCredentialStores,
-  "oauthAccounts" | "passkeys" | "apiKeys" | "multiFactor" | "trustedDevices" | "oidcTokens"
+  | "oauthAccounts"
+  | "passkeys"
+  | "apiKeys"
+  | "multiFactor"
+  | "trustedDevices"
+  | "oidcTokens"
+  | "oidcConsents"
 >;
 
 /** The services {@link proveAddress} writes through, resolved by the caller. */
@@ -67,6 +73,7 @@ export const firstProofServices = (
     multiFactor: stores.multiFactor,
     trustedDevices: stores.trustedDevices,
     oidcTokens: stores.oidcTokens,
+    oidcConsents: stores.oidcConsents,
   }));
 
 /**
@@ -95,6 +102,7 @@ const removeCredentials = (credentials: FirstProofCredentials, userId: string) =
       multiFactor: credentials.multiFactor,
       trustedDevices: credentials.trustedDevices,
       oidcTokens: credentials.oidcTokens,
+      oidcConsents: credentials.oidcConsents,
     },
     userId,
   );
@@ -103,7 +111,7 @@ const removeCredentials = (credentials: FirstProofCredentials, userId: string) =
  * Promote `identifier` to verified. When it is not verified yet, first clear
  * its account's password, remove its unverified phone identifiers and its
  * other credentials (the {@link FirstProofCredentials} the caller passes,
- * OIDC-provider tokens included) and revoke its sessions,
+ * OIDC-provider tokens and consents included) and revoke its sessions,
  * last, so a session minted with a credential before its removal goes too;
  * the caller mints the prover's session (and, for OAuth, creates the link
  * being made now) afterwards. A prover who presented the proof over one of
