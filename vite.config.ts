@@ -119,8 +119,6 @@ export default defineConfig({
       // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
       "effect/prefer-namespace-imports": "error",
-      // The only `makeFilter` calls probe config keys; they are not reusable checks.
-      "effect/require-filter-metadata": "off",
       "effect/casting-awareness": "error",
     },
     overrides: [
@@ -472,6 +470,13 @@ export default defineConfig({
           "packages/argon2/src/Workerd.test.ts",
         ],
         rules: { "effect/avoid-native-fetch": "off" },
+      },
+      {
+        // Published wire contract: the bounds filter sits on each write
+        // payload, and an `identifier` on it makes every one a named
+        // component of the OpenAPI document instead of an inline body.
+        files: ["packages/effect-auth/src/http/HttpApi.ts"],
+        rules: { "effect/require-filter-metadata": "off" },
       },
       {
         // The Promise-facing web handler is an entrypoint: it runs effects.
