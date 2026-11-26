@@ -52,6 +52,9 @@ examples/
 # Output of 'npm pack'
 *.tgz
 
+# `vp run release:pack`
+/release/
+
 # Yarn Integrity file
 .yarn-integrity
 

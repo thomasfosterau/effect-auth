@@ -75,7 +75,7 @@ const services = (
 ) => {
   const stores = Layer.mergeAll(
     Testing.layer,
-    Layer.succeed(PasswordHasher)(Password.scryptHasher({ cost: 1024 })),
+    Layer.succeed(PasswordHasher)(Password.pbkdf2Hasher({ iterations: 1000 })),
     Layer.succeed(AccountLockoutStore)(memoryAccountLockoutStore()),
     captchaClient(options.captcha ?? true),
   );

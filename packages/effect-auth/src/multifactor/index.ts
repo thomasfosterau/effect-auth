@@ -11,6 +11,7 @@ export {
   TrustedDeviceWithOtpSecondFactorGateLayer,
 } from "./OtpSecondFactor.ts";
 export {
+  MultiFactorAlreadyEnabledError,
   MultiFactorError,
   type MultiFactorRecord,
   MultiFactorStore,
@@ -34,6 +35,8 @@ export {
   type WebAuthnChallenge,
   type WebAuthnCredential,
   type WebAuthnConfig,
+  type AttestationConveyancePreference,
+  WebAuthnConfigError,
   type PublicKeyCredentialParameter,
   type PublicKeyCredentialDescriptor,
   type AuthenticatorSelectionCriteria,

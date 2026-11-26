@@ -1,37 +1,27 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
-import * as crypto from "node:crypto";
 import { Effect, Result } from "effect";
 import * as Arr from "effect/Array";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { PasswordHasher, pbkdf2Hasher } from "./Password.ts";
 
 // Pins PBKDF2's production default (600,000 iterations) and the `iterations`
-// option without running a 600,000-iteration derivation: `crypto.pbkdf2` is
-// replaced by a stub that records the arguments it was asked for and returns a
-// zero key at once. The round trips at a cheap explicit count are in
-// `Password.test.ts`, which runs the real KDF.
-vi.mock("node:crypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:crypto")>();
-  return {
-    ...actual,
-    pbkdf2: vi.fn<
-      (
-        password: crypto.BinaryLike,
-        salt: crypto.BinaryLike,
-        iterations: number,
-        keylen: number,
-        digest: string,
-        callback: (error: Error | null, derivedKey: Buffer) => void,
-      ) => void
-    >((_password, _salt, _iterations, keylen, _digest, callback) =>
-      callback(null, Buffer.alloc(keylen)),
-    ),
-  };
-});
+// option without running a 600,000-iteration derivation: the platform `Kdf`'s
+// `derive` is replaced by a stub that records the algorithm it was asked for
+// and returns a zero key at once. The round trips at a cheap explicit count are
+// in `Password.test.ts`, which runs the real KDF.
+const derive = vi.spyOn(PlatformCrypto.kdf(), "derive");
 
-const pbkdf2 = vi.mocked(crypto.pbkdf2);
+/** The iteration count of every derivation the stub saw, in order. */
+const counts = (): Array<number | undefined> =>
+  derive.mock.calls.map(([algorithm]) =>
+    "iterations" in algorithm ? algorithm.iterations : undefined,
+  );
 
 beforeEach(() => {
-  pbkdf2.mockClear();
+  derive.mockReset();
+  derive.mockImplementation((_algorithm, _secret, { length }) =>
+    Effect.succeed(new Uint8Array(length)),
+  );
 });
 
 const SALT = "00".repeat(16);
@@ -41,8 +31,8 @@ describe("pbkdf2 defaults", () => {
   it("pbkdf2Hasher() derives and encodes 600,000 iterations", async () => {
     const { hash } = await Effect.runPromise(pbkdf2Hasher().hash("default-params"));
     expect(hash).toMatch(/^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
-    expect(pbkdf2).toHaveBeenCalledOnce();
-    expect(pbkdf2.mock.calls[0]?.[2]).toBe(600000);
+    expect(derive).toHaveBeenCalledOnce();
+    expect(counts()[0]).toBe(600000);
   });
 
   it("an undefined iterations option is the default", async () => {
@@ -63,7 +53,7 @@ describe("pbkdf2 defaults", () => {
       ),
     );
     expect(hash.startsWith("pbkdf2-sha256$600000$")).toBe(true);
-    expect(pbkdf2.mock.calls[0]?.[2]).toBe(600000);
+    expect(counts()[0]).toBe(600000);
   });
 
   it("needsRehash flags any hash below the default count", () => {
@@ -82,7 +72,7 @@ describe("pbkdf2 iterations option", () => {
   it("encodes the configured count and passes it to the KDF", async () => {
     const { hash } = await Effect.runPromise(pbkdf2Hasher({ iterations: 1000 }).hash("pw"));
     expect(hash.startsWith("pbkdf2-sha256$1000$")).toBe(true);
-    expect(pbkdf2.mock.calls[0]?.[2]).toBe(1000);
+    expect(counts()[0]).toBe(1000);
   });
 
   it("PasswordHasher.layer({ iterations }) forwards the option", async () => {
@@ -96,16 +86,16 @@ describe("pbkdf2 iterations option", () => {
       ),
     );
     expect(hash.startsWith("pbkdf2-sha256$1000$")).toBe(true);
-    expect(pbkdf2.mock.calls[0]?.[2]).toBe(1000);
+    expect(counts()[0]).toBe(1000);
   });
 
   it("accepts 1 and Node's largest count, 2^31 - 1", async () => {
     await Arr.reduce([1, 2 ** 31 - 1], Promise.resolve(), async (previous, iterations) => {
       await previous;
-      pbkdf2.mockClear();
+      derive.mockClear();
       const { hash } = await Effect.runPromise(pbkdf2Hasher({ iterations }).hash("pw"));
       expect(hash.startsWith(`pbkdf2-sha256$${iterations}$`)).toBe(true);
-      expect(pbkdf2.mock.calls[0]?.[2]).toBe(iterations);
+      expect(counts()[0]).toBe(iterations);
     });
   });
 
@@ -121,7 +111,7 @@ describe("pbkdf2 iterations option", () => {
     const stored = `pbkdf2-sha256$5000$${SALT}$${KEY}`;
     const hasher = pbkdf2Hasher({ iterations: 1000 });
     expect(await Effect.runPromise(hasher.verify("pw", stored))).toBe(true);
-    expect(pbkdf2.mock.calls[0]?.[2]).toBe(5000);
+    expect(counts()[0]).toBe(5000);
   });
 
   it.each([
@@ -143,7 +133,7 @@ describe("pbkdf2 iterations option", () => {
       expect(result._tag).toBe("Failure");
       assert(Result.isFailure(result));
       expect(result.failure._tag).toBe("HashingError");
-      expect(pbkdf2).not.toHaveBeenCalled();
+      expect(derive).not.toHaveBeenCalled();
     },
   );
 });
@@ -168,14 +158,14 @@ describe("pbkdf2 stored iteration limit", () => {
       expect(result.failure._tag).toBe("HashingError");
       // Refused before any derivation: an unguarded verify would run PBKDF2 at
       // this count, minutes of CPU at the top of the range.
-      expect(pbkdf2).not.toHaveBeenCalled();
+      expect(derive).not.toHaveBeenCalled();
       expect(pbkdf2Hasher().needsRehash?.(hash)).toBe(true);
     },
   );
 
   it("verifies a stored count at the 5,000,000 cap", async () => {
     expect(await Effect.runPromise(pbkdf2Hasher().verify("pw", stored("5000000")))).toBe(true);
-    expect(pbkdf2.mock.calls[0]?.[2]).toBe(5000000);
+    expect(counts()[0]).toBe(5000000);
   });
 
   it("a configured count above the cap still verifies its own hashes", async () => {
@@ -185,13 +175,13 @@ describe("pbkdf2 stored iteration limit", () => {
     const hashed = await Effect.runPromise(hasher.hash("pw"));
     expect(hashed.hash.startsWith("pbkdf2-sha256$6000000$")).toBe(true);
     expect(await Effect.runPromise(hasher.verify("pw", hashed.hash))).toBe(true);
-    expect(pbkdf2.mock.calls[1]?.[2]).toBe(6000000);
+    expect(counts()[1]).toBe(6000000);
     // A hasher with the default cap still refuses that stored count.
     const defaultCap = await Effect.runPromise(
       Effect.result(pbkdf2Hasher().verify("pw", hashed.hash)),
     );
     expect(defaultCap._tag).toBe("Failure");
-    expect(pbkdf2).toHaveBeenCalledTimes(2);
+    expect(derive).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -217,7 +207,7 @@ describe("pbkdf2 stored iteration limit", () => {
           expect(result.failure._tag).toBe("HashingError");
         },
       );
-      expect(pbkdf2).not.toHaveBeenCalled();
+      expect(derive).not.toHaveBeenCalled();
     },
   );
 });

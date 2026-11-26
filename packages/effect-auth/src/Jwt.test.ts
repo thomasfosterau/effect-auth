@@ -1,15 +1,21 @@
-import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
-import { createServer } from "node:http";
-import type { Server } from "node:http";
-import { Clock, Context, DateTime, Effect, Redacted, Result } from "effect";
+import { assert, describe, it, expect, beforeEach, beforeAll } from "vite-plus/test";
+import { testCryptoContext, type TestCryptoServices } from "./testing/TestCrypto.ts";
+import { Clock, Context, DateTime, Effect, Layer, Redacted, Result, type Scope } from "effect";
 import * as Arr from "effect/Array";
-import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { SecureRandom } from "effect/crypto";
-import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import { Jwk } from "effect/jose";
+import {
+  generateKeyPair,
+  JwtKeyStore,
+  type GeneratedJwtKeyPair,
+  type JwtConfig,
+  type JwtKeyPair,
+} from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as RootSecret from "./RootSecret.ts";
+import { testJwsKeyPair, testSignJws } from "./testing/TestJws.ts";
 import type { User } from "./Types.ts";
 
 /** JSON text to and from a JSON object (a JOSE header or claims set). */
@@ -21,8 +27,14 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const jwsSegments = Schema.decodeUnknownSync(
   Schema.Tuple([Schema.String, Schema.String, Schema.String]),
 );
+/** The protected header of a compact JWS or JWE. */
+const jweHeader = (token: string) =>
+  decodeJsonObject(Buffer.from(token.split(".")[0] ?? "", "base64url").toString("utf8"));
 
 const keyPairs: JwtKeyPair[] = [];
+
+/** A generated pair as a store row for verification only: its private key is never read. */
+const verifyOnly = (pair: GeneratedJwtKeyPair): JwtKeyPair => ({ ...pair, privateKey: "" });
 
 const jwtKeyStore = {
   getActive: () => Effect.sync(() => keyPairs[keyPairs.length - 1] ?? null),
@@ -36,10 +48,7 @@ const jwtKeyStore = {
   list: () => Effect.sync(() => [...keyPairs]),
 };
 
-const storeContext = Context.merge(
-  Context.make(JwtKeyStore, jwtKeyStore),
-  Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-);
+const storeContext = Context.merge(Context.make(JwtKeyStore, jwtKeyStore), testCryptoContext());
 
 const user: User = {
   id: "user-1",
@@ -55,7 +64,7 @@ const baseConfig: JwtConfig = {
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | SecureRandom.SecureRandom>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | TestCryptoServices>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
 describe("JwtService", () => {
@@ -236,7 +245,7 @@ describe("JwtService", () => {
       Effect.gen(function* () {
         const es256 = yield* Jwt.make({ ...baseConfig, algorithm: "ES256" });
         yield* es256.sign(user);
-        const ed25519 = yield* generateKeyPair("EdDSA", PlatformCrypto.instance);
+        const ed25519 = yield* generateKeyPair("EdDSA").pipe(Effect.map(verifyOnly));
         const store = yield* JwtKeyStore;
         yield* store.create(ed25519);
 
@@ -256,13 +265,11 @@ describe("JwtService", () => {
       expect(encodeJson(key)).not.toContain("PRIVATE KEY");
     });
 
-    const es256Key = jwks.keys.find((key) => key["alg"] === "ES256");
-    expect(es256Key?.["kty"]).toBe("EC");
-    expect(es256Key?.["crv"]).toBe("P-256");
-
-    const edKey = jwks.keys.find((key) => key["alg"] === "EdDSA");
-    expect(edKey?.["kty"]).toBe("OKP");
-    expect(edKey?.["crv"]).toBe("Ed25519");
+    expect(jwks.keys.find((key) => key.alg === "ES256")).toMatchObject({ kty: "EC", crv: "P-256" });
+    expect(jwks.keys.find((key) => key.alg === "EdDSA")).toMatchObject({
+      kty: "OKP",
+      crv: "Ed25519",
+    });
   });
 
   it("should verify tokens signed by an older key via kid lookup", async () => {
@@ -272,7 +279,7 @@ describe("JwtService", () => {
         const { token } = yield* service.sign(user);
 
         // Rotate: a new key becomes active, the old one stays in the store
-        const rotated = yield* generateKeyPair("ES256", PlatformCrypto.instance);
+        const rotated = yield* generateKeyPair("ES256").pipe(Effect.map(verifyOnly));
         const store = yield* JwtKeyStore;
         yield* store.create(rotated);
 
@@ -424,9 +431,15 @@ describe("JwtService with private key encryption", () => {
     expect(result.payload["sub"]).toBe("user-1");
     expect(result.payload["iss"]).toBe("https://auth.example.com");
 
-    // The stored private key PEM should be ciphertext, not a PEM block
-    expect(keyPairs[0]?.privateKeyPem).toBeDefined();
-    expect(keyPairs[0]?.privateKeyPem).not.toContain("PRIVATE KEY");
+    // The stored private key is a compact JWE bound to the key id
+    const stored = keyPairs[0];
+    assert(stored !== undefined, "a key pair is stored");
+    expect(stored.privateKey.split(".")).toHaveLength(5);
+    expect(jweHeader(stored.privateKey)).toMatchObject({
+      alg: "dir",
+      enc: "A256GCM",
+      kid: stored.id,
+    });
   });
 
   it("should sign and verify with encrypted private key (EdDSA, { secret })", async () => {
@@ -445,14 +458,13 @@ describe("JwtService with private key encryption", () => {
 
     expect(result.payload["sub"]).toBe("user-1");
     expect(keyPairs[0]?.algorithm).toBe("EdDSA");
-    expect(keyPairs[0]?.privateKeyPem).not.toContain("PRIVATE KEY");
+    expect(keyPairs[0]?.privateKey).not.toContain("PRIVATE KEY");
   });
 
   it("should sign and verify with a custom { cipher }", async () => {
-    const cipher = Cipher.aes256GcmCipher("custom-cipher-secret");
-
     const result = await run(
       Effect.gen(function* () {
+        const cipher = yield* Cipher.aes256GcmCipher("custom-cipher-secret");
         const service = yield* Jwt.make({
           ...baseConfig,
           encryptPrivateKey: { cipher },
@@ -464,7 +476,7 @@ describe("JwtService with private key encryption", () => {
     );
 
     expect(result.payload["sub"]).toBe("user-1");
-    expect(keyPairs[0]?.privateKeyPem).not.toContain("PRIVATE KEY");
+    expect(keyPairs[0]?.privateKey).not.toContain("PRIVATE KEY");
   });
 
   it("should reuse the encrypted key across multiple sign calls", async () => {
@@ -485,7 +497,7 @@ describe("JwtService with private key encryption", () => {
   });
 
   it("should verify tokens signed with an encrypted key after key rotation", async () => {
-    // Verification uses publicKeyJwk (plaintext), not privateKeyPem, so the
+    // Verification uses the public key (plaintext), not the private key, so the
     // encrypted private key in the store does not need to be decrypted here.
     const result = await run(
       Effect.gen(function* () {
@@ -497,7 +509,7 @@ describe("JwtService with private key encryption", () => {
         const { token } = yield* service.sign(user);
 
         // Rotate: new unencrypted key becomes active in the store
-        const rotated = yield* generateKeyPair("ES256", PlatformCrypto.instance);
+        const rotated = yield* generateKeyPair("ES256").pipe(Effect.map(verifyOnly));
         const store = yield* JwtKeyStore;
         yield* store.create(rotated);
 
@@ -514,6 +526,97 @@ describe("JwtService with private key encryption", () => {
 // Remote JWKS verification
 // ---------------------------------------------------------------------------
 
+describe("JwtService — stored private keys", () => {
+  beforeEach(() => {
+    keyPairs.splice(0, keyPairs.length);
+  });
+
+  const decodePublicJwk = Schema.decodeUnknownSync(Jwk.PublicJwk);
+
+  /** A row as written before the JWE format: a plaintext PKCS#8 PEM. */
+  const pemRow = (id: string): JwtKeyPair => {
+    const { publicKeyJwk, privateKeyPem } = testJwsKeyPair("ES256");
+    return {
+      id,
+      algorithm: "ES256",
+      publicKey: decodePublicJwk(publicKeyJwk),
+      privateKey: privateKeyPem,
+      createdAt: 0,
+    };
+  };
+
+  it("signs with a key stored as plaintext PEM before the JWE format", async () => {
+    keyPairs.push(pemRow("legacy-pem"));
+    const payload = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make(baseConfig);
+        const { token } = yield* service.sign(user);
+        expect(jweHeader(token)["kid"]).toBe("legacy-pem");
+        return yield* service.verify(token);
+      }),
+    );
+    expect(payload["sub"]).toBe("user-1");
+  });
+
+  it("signs with a key sealed as v2 under the root secret", async () => {
+    const row = pemRow("legacy-v2");
+    const sealed = await run(
+      Effect.gen(function* () {
+        const sealer = yield* RootSecret.sealerFor("jwt-private-key", undefined);
+        return yield* sealer.seal(row.privateKey, row.id);
+      }),
+    );
+    expect(sealed.startsWith(Cipher.SEALED_PREFIX)).toBe(true);
+    keyPairs.push({ ...row, privateKey: sealed });
+    const payload = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make(baseConfig);
+        return yield* service.verify((yield* service.sign(user)).token);
+      }),
+    );
+    expect(payload["sub"]).toBe("user-1");
+  });
+
+  it("refuses a JWE moved to another key id", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* (yield* Jwt.make(baseConfig)).sign(user);
+      }),
+    );
+    const original = keyPairs[0];
+    assert(original !== undefined, "a key pair is stored");
+    keyPairs.splice(0, 1, { ...original, id: "moved" });
+
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make(baseConfig);
+        return yield* Effect.result(service.sign(user));
+      }),
+    );
+    assert(Result.isFailure(result));
+    expect(result.failure.message).toBe("Failed to decrypt the private key");
+  });
+
+  it("refuses a JWE under another root secret", async () => {
+    await run(
+      Effect.gen(function* () {
+        yield* (yield* Jwt.make(baseConfig)).sign(user);
+      }),
+    );
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make({
+          ...baseConfig,
+          encryptPrivateKey: { secret: Redacted.make("another-secret-of-at-least-32-bytes") },
+        });
+        return yield* Effect.result(service.sign(user));
+      }),
+    );
+    assert(Result.isFailure(result));
+    expect(result.failure.message).toBe("Failed to decrypt the private key");
+  });
+});
+
 describe("RemoteJwksVerifier", () => {
   // Isolated key store so beforeEach on the shared store doesn't interfere.
   const remotePairs: JwtKeyPair[] = [];
@@ -526,16 +629,57 @@ describe("RemoteJwksVerifier", () => {
       }),
     list: () => Effect.sync(() => [...remotePairs]),
   };
-  const remoteContext = Context.merge(
-    Context.make(JwtKeyStore, remoteStore),
-    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-  );
-  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | SecureRandom.SecureRandom>) =>
+  const remoteContext = Context.merge(Context.make(JwtKeyStore, remoteStore), testCryptoContext());
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | TestCryptoServices>) =>
     Effect.runPromise(Effect.provide(program, remoteContext));
 
-  let server: Server;
-  let jwksUrl: string;
+  // A third-party issuer signing with RS256, which JwtService never does.
+  const rsa = testJwsKeyPair("RS256");
+  const rsaJwks = { keys: [{ ...rsa.publicKeyJwk, kid: "rsa-1", alg: "RS256", use: "sig" }] };
+  const b64 = (value: Schema.Json) => Buffer.from(encodeJson(value)).toString("base64url");
+  const rsaSigned = (claims: Schema.JsonObject): string => {
+    const input = `${b64({ alg: "RS256", kid: "rsa-1", typ: "JWT" })}.${b64(claims)}`;
+    const signature = testSignJws("RS256", Buffer.from(input), rsa.privateKeyPem);
+    return `${input}.${Buffer.from(signature).toString("base64url")}`;
+  };
+  const rsaClaims = () => ({
+    iss: baseConfig.issuer,
+    sub: "rsa-user",
+    exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
+  });
+
+  const jwksUrl = "https://issuer.test/.well-known/jwks.json";
+  const rsaJwksUrl = "https://issuer.test/rsa/jwks.json";
+  let jwks: Jwt.Jwks = { keys: [] };
   let signedToken: string;
+  const requested: string[] = [];
+
+  /** An issuer answering the two JWKS URLs, recording each request. */
+  const issuerClient = HttpClient.make((request) =>
+    Effect.sync(() => {
+      requested.push(request.url);
+      const body = request.url === rsaJwksUrl ? rsaJwks : request.url === jwksUrl ? jwks : null;
+      return HttpClientResponse.fromWeb(
+        request,
+        new Response(encodeJson(body), {
+          status: body === null ? 404 : 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }),
+  );
+
+  /** Run a program that builds a verifier over {@link issuerClient}. */
+  const runVerifier = <A, E>(
+    program: Effect.Effect<A, E, HttpClient.HttpClient | Scope.Scope | TestCryptoServices>,
+  ) =>
+    Effect.runPromise(
+      program.pipe(
+        Effect.scoped,
+        Effect.provideService(HttpClient.HttpClient, issuerClient),
+        Effect.provide(testCryptoContext()),
+      ),
+    );
 
   beforeAll(async () => {
     // Sign a token to trigger lazy key-pair creation in the remote store.
@@ -547,32 +691,17 @@ describe("RemoteJwksVerifier", () => {
       }),
     );
 
-    // Get the JWKS to serve from the test HTTP server.
-    const jwks = await runRemote(
+    // The JWKS the issuer serves.
+    jwks = await runRemote(
       Effect.gen(function* () {
         const service = yield* Jwt.make(baseConfig);
         return yield* service.getJwks();
       }),
     );
-
-    server = createServer((_req, res) => {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(encodeJson(jwks));
-    });
-
-    await new Promise<void>((resolve) => server.listen(0, () => resolve()));
-    const addr = server.address();
-    // A server listening on a TCP port reports an `AddressInfo`.
-    assert(P.isNotNull(addr) && !P.isString(addr), "the JWKS server listens on a port");
-    jwksUrl = `http://127.0.0.1:${addr.port}/.well-known/jwks.json`;
-  });
-
-  afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
   it("should verify a valid JWT against the remote JWKS", async () => {
-    const payload = await Effect.runPromise(
+    const payload = await runVerifier(
       Effect.gen(function* () {
         const verifier = yield* Jwt.remoteJwksVerifier({
           jwksUri: jwksUrl,
@@ -597,7 +726,7 @@ describe("RemoteJwksVerifier", () => {
       }),
     ).toString("base64url");
 
-    const result = await Effect.runPromise(
+    const result = await runVerifier(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -623,7 +752,7 @@ describe("RemoteJwksVerifier", () => {
       "base64url",
     );
 
-    const result = await Effect.runPromise(
+    const result = await runVerifier(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -652,7 +781,7 @@ describe("RemoteJwksVerifier", () => {
       }),
     );
 
-    const result = await Effect.runPromise(
+    const result = await runVerifier(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -671,9 +800,10 @@ describe("RemoteJwksVerifier", () => {
   });
 
   it("should reuse the cache across multiple verify calls", async () => {
+    requested.splice(0, requested.length);
     // Two verify calls on the same verifier instance should both succeed;
     // internal caching means only one network request was made.
-    const results = await Effect.runPromise(
+    const results = await runVerifier(
       Effect.gen(function* () {
         const verifier = yield* Jwt.remoteJwksVerifier({
           jwksUri: jwksUrl,
@@ -689,10 +819,11 @@ describe("RemoteJwksVerifier", () => {
 
     expect(results[0]["sub"]).toBe("user-1");
     expect(results[1]["sub"]).toBe("user-1");
+    expect(requested).toEqual([jwksUrl]);
   });
 
   it("should reject an issuer mismatch via the remote verifier", async () => {
-    const result = await Effect.runPromise(
+    const result = await runVerifier(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -708,5 +839,83 @@ describe("RemoteJwksVerifier", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("JwtError");
     expect(result.failure.message).toContain("issuer");
+  });
+
+  it("verifies an RS256 token from a third-party issuer", async () => {
+    const payload = await runVerifier(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.remoteJwksVerifier({
+          jwksUri: rsaJwksUrl,
+          issuer: baseConfig.issuer,
+        });
+        return yield* verifier.verify(rsaSigned(rsaClaims()));
+      }),
+    );
+    expect(payload["sub"]).toBe("rsa-user");
+  });
+
+  it("refuses an algorithm left out of `algorithms`", async () => {
+    const result = await runVerifier(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.remoteJwksVerifier({
+          jwksUri: rsaJwksUrl,
+          issuer: baseConfig.issuer,
+          algorithms: ["ES256", "EdDSA"],
+        });
+        return yield* Effect.result(verifier.verify(rsaSigned(rsaClaims())));
+      }),
+    );
+    assert(Result.isFailure(result));
+    expect(result.failure.message).toBe("Token algorithm does not match the signing key");
+  });
+
+  it("refuses a token without `exp`", async () => {
+    const { exp: _, ...claims } = rsaClaims();
+    const result = await runVerifier(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.remoteJwksVerifier({
+          jwksUri: rsaJwksUrl,
+          issuer: baseConfig.issuer,
+        });
+        return yield* Effect.result(verifier.verify(rsaSigned(claims)));
+      }),
+    );
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+  });
+
+  it("RemoteJwksVerifier.layer refuses a JWKS URL that is not HTTPS", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        return yield* Jwt.RemoteJwksVerifier;
+      }).pipe(
+        Effect.provide(
+          Jwt.RemoteJwksVerifier.layer({
+            jwksUri: "http://issuer.test/.well-known/jwks.json",
+            issuer: baseConfig.issuer,
+          }),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+
+  it("RemoteJwksVerifier.layerHttpClient fetches through the HttpClient it is given", async () => {
+    requested.splice(0, requested.length);
+    const payload = await Effect.runPromise(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.RemoteJwksVerifier;
+        return yield* verifier.verify(rsaSigned(rsaClaims()));
+      }).pipe(
+        Effect.provide(
+          Jwt.RemoteJwksVerifier.layerHttpClient({
+            jwksUri: rsaJwksUrl,
+            issuer: baseConfig.issuer,
+          }).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, issuerClient))),
+        ),
+      ),
+    );
+    expect(payload["sub"]).toBe("rsa-user");
+    expect(requested).toEqual([rsaJwksUrl]);
   });
 });

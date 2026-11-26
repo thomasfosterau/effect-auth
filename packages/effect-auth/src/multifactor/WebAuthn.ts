@@ -7,7 +7,7 @@ import { Clock, Context, Data, Effect, Layer, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { Base64, Base64Url, Hex } from "effect/encoding";
-import { Digest, SecureRandom } from "effect/crypto";
+import { type CryptoError, Digest, type KeyFormat, SecureRandom, Signature } from "effect/crypto";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -84,7 +84,46 @@ export interface WebAuthnCredential {
   name?: string;
   /** Transports this credential supports */
   transports?: readonly string[];
+  /**
+   * BE: whether the credential may be backed up (a multi-device passkey), as
+   * the authenticator reported at registration. It never changes for a
+   * credential (WebAuthn Level 3 §6.1.3), so an assertion reporting another
+   * value is refused. Absent on a credential stored before it was recorded;
+   * the next sign-in records it.
+   */
+  backupEligible?: boolean | undefined;
+  /**
+   * BS: whether the credential was backed up at its latest ceremony. It may
+   * change, and each sign-in records it.
+   */
+  backupState?: boolean | undefined;
+  /**
+   * The authenticator's AAGUID from registration, as a lowercase hyphenated
+   * UUID (all zeros when the authenticator reports none), for an app's own
+   * allow- or deny-list of authenticator models. Under `none` attestation it is
+   * the authenticator's claim, not a verified fact. Absent on a credential
+   * registered before it was recorded.
+   */
+  aaguid?: string | undefined;
 }
+
+/**
+ * The attestation conveyance preference a relying party can ask for
+ * (WebAuthn Level 3 §5.4.7). Only `"none"` is supported: see
+ * {@link WebAuthnConfig.attestation}.
+ */
+export type AttestationConveyancePreference = "none" | "indirect" | "direct" | "enterprise";
+
+/**
+ * `WebAuthnService.layer` (or `make`) was configured with an attestation
+ * conveyance other than `"none"`. The service never verifies an attestation
+ * statement, so it refuses to ask for one rather than imply a guarantee it
+ * does not give; the layer build dies with this error, so the app fails to
+ * start.
+ */
+export class WebAuthnConfigError extends Data.TaggedError("WebAuthnConfigError")<{
+  readonly message: string;
+}> {}
 
 /**
  * Configuration for WebAuthn service
@@ -112,6 +151,16 @@ export interface WebAuthnConfig {
    * the results) for the host to act on.
    */
   userVerification?: "required" | "preferred" | "discouraged";
+  /**
+   * Attestation conveyance advertised during registration. Only `"none"` (the
+   * default) is supported: the service parses the attestation object for the
+   * credential but never verifies its attestation statement (`packed`, `tpm`,
+   * `fido-u2f`, …), so every registration carries `none`-style trust and
+   * says nothing about the authenticator's make or model. `"indirect"`,
+   * `"direct"` and `"enterprise"` are refused: the layer build dies with
+   * {@link WebAuthnConfigError}.
+   */
+  attestation?: AttestationConveyancePreference | undefined;
 }
 
 /** A `PublicKeyCredentialParameters` entry advertised to the authenticator. */
@@ -147,6 +196,8 @@ export interface RegistrationChallenge {
   /** The user's existing credentials, to prevent duplicate registration. */
   readonly excludeCredentials: readonly PublicKeyCredentialDescriptor[];
   readonly authenticatorSelection: AuthenticatorSelectionCriteria;
+  /** Attestation conveyance to pass to `navigator.credentials.create()`; always `"none"`. */
+  readonly attestation: "none";
 }
 
 /**
@@ -314,14 +365,32 @@ export const make = (
 ): Effect.Effect<
   typeof WebAuthnService.Service,
   never,
-  ChallengeStore | CredentialStore | Hooks | SecureRandom.SecureRandom | Digest.Digest
+  | ChallengeStore
+  | CredentialStore
+  | Hooks
+  | SecureRandom.SecureRandom
+  | Signature.Signature
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
+    const attestation = config.attestation ?? "none";
+    if (attestation !== "none") {
+      return yield* Effect.die(
+        new WebAuthnConfigError({
+          message: `WebAuthn attestation "${attestation}" is not supported: attestation statements are not verified, so only "none" is offered`,
+        }),
+      );
+    }
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
+    const signature = yield* Signature.Signature;
+    const relyingPartyIdHash = yield* digest.digest(
+      Digest.sha256,
+      new TextEncoder().encode(config.relyingPartyId),
+    );
 
     /**
      * Fail a passkey sign-in that names no user (an unknown or expired
@@ -445,7 +514,7 @@ export const make = (
     const verifyAuthenticatorData = Effect.fnUntraced(function* (
       authenticatorData: AuthenticatorData,
     ) {
-      if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
+      if (!authenticatorData.verifyRelyingPartyIdHash(relyingPartyIdHash)) {
         return yield* verificationError("Invalid relying party ID hash");
       }
       if (!authenticatorData.userPresent) {
@@ -499,15 +568,19 @@ export const make = (
           `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
         );
       }
+      // Reading the COSE key throws on a malformed one.
+      const invalidKey = (cause: unknown) =>
+        new Errors.WebAuthnVerificationError({ message: "Invalid credential public key", cause });
       const publicKey = yield* Effect.try({
         try: () => serializePublicKey(attested.publicKey, algorithm),
-        catch: (error) =>
-          new Errors.WebAuthnVerificationError({
-            message: "Invalid credential public key",
-            cause: error,
-          }),
-      });
-      return { id: base64UrlEncode(attested.id), algorithm, publicKey };
+        catch: invalidKey,
+      }).pipe(Effect.flatMap(Effect.mapError(invalidKey)));
+      return {
+        id: base64UrlEncode(attested.id),
+        algorithm,
+        publicKey,
+        aaguid: formatAaguid(attested.authenticatorAAGUID),
+      };
     });
 
     return {
@@ -549,6 +622,7 @@ export const make = (
             ),
             excludeCredentials,
             authenticatorSelection,
+            attestation,
           };
         },
       ),
@@ -591,6 +665,9 @@ export const make = (
               algorithm: attested.algorithm,
               counter: authenticatorData.signatureCounter,
               createdAt: yield* Clock.currentTimeMillis,
+              backupEligible: flags.backupEligible,
+              backupState: flags.backupState,
+              aaguid: attested.aaguid,
             };
 
             // Spend the challenge, then store the credential.
@@ -639,6 +716,15 @@ export const make = (
 
             const flags = yield* verifyAuthenticatorData(authenticatorData);
 
+            // §6.1.3: backup eligibility is fixed when the credential is
+            // created, so a change means this is not the registered credential.
+            if (
+              credential.backupEligible !== undefined &&
+              credential.backupEligible !== flags.backupEligible
+            ) {
+              return yield* verificationError("Backup eligibility changed for this credential");
+            }
+
             // Verify counter (anti-replay protection)
             // If both counters are 0, the authenticator does not support counter-based replay protection
             // and the counter check must be skipped per WebAuthn specification.
@@ -653,6 +739,7 @@ export const make = (
             // Verify signature
             const verified = yield* verifySignature(
               digest,
+              signature,
               credential.publicKey,
               credential.algorithm,
               response.authenticatorData,
@@ -664,10 +751,13 @@ export const make = (
               return yield* verificationError("Invalid signature");
             }
 
-            // Update credential counter
-            const updatedCredential = {
+            // Record the counter and the backup state (and the eligibility of a
+            // credential stored before it was recorded).
+            const updatedCredential: WebAuthnCredential = {
               ...credential,
               counter: authenticatorData.signatureCounter,
+              backupEligible: flags.backupEligible,
+              backupState: flags.backupState,
             };
             yield* credentialStore.update(updatedCredential);
 
@@ -829,21 +919,40 @@ class UnsupportedAlgorithmError extends Data.TaggedError("UnsupportedAlgorithmEr
 
 const b64url = (bytes: Uint8Array): string => Base64Url.encode(bytes);
 
+/** A 16-byte AAGUID as a lowercase hyphenated UUID (8-4-4-4-12). */
+const formatAaguid = (aaguid: Uint8Array): string => {
+  const hex = Hex.encode(aaguid);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join("-");
+};
+
 /**
  * Serialize a COSE public key to SPKI DER for storage. Using a single
  * key-independent encoding (rather than a raw EC point) lets ES256, RS256, and
  * EdDSA credentials share one storage format and one verification path.
  */
-function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8Array {
-  let jwk: Parameters<typeof Cipher.jwkToSpkiDer>[0];
+function serializePublicKey(
+  publicKey: COSEPublicKey,
+  algorithm: number,
+): Effect.Effect<Uint8Array, UnsupportedAlgorithmError | CryptoError.CryptoError> {
+  let jwk: KeyFormat.JsonWebKey;
+  let spkiAlgorithm: Cipher.SpkiAlgorithm;
   if (algorithm === coseAlgorithmES256) {
     const ec2 = publicKey.ec2();
     // ES256 is ECDSA over P-256 only (RFC 9053 §2.1).
     if (ec2.curve !== coseEllipticCurveP256) {
-      throw new UnsupportedAlgorithmError({
-        message: `ES256 key on curve ${ec2.curve}, not P-256`,
-      });
+      return Effect.fail(
+        new UnsupportedAlgorithmError({
+          message: `ES256 key on curve ${ec2.curve}, not P-256`,
+        }),
+      );
     }
+    spkiAlgorithm = "ES256";
     jwk = {
       kty: "EC",
       crv: "P-256",
@@ -852,6 +961,7 @@ function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8A
     };
   } else if (algorithm === coseAlgorithmRS256) {
     const rsa = publicKey.rsa();
+    spkiAlgorithm = "RS256";
     jwk = {
       kty: "RSA",
       n: b64url(bigintToBytes(rsa.n, 256)),
@@ -860,10 +970,13 @@ function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8A
   } else if (algorithm === coseAlgorithmEdDSA) {
     const okp = publicKey.okp();
     jwk = { kty: "OKP", crv: "Ed25519", x: b64url(okp.x) };
+    spkiAlgorithm = "EdDSA";
   } else {
-    throw new UnsupportedAlgorithmError({ message: `Unsupported algorithm: ${algorithm}` });
+    return Effect.fail(
+      new UnsupportedAlgorithmError({ message: `Unsupported algorithm: ${algorithm}` }),
+    );
   }
-  return Cipher.jwkToSpkiDer(jwk);
+  return Cipher.jwkToSpkiDer(spkiAlgorithm, jwk);
 }
 
 /**
@@ -878,16 +991,15 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
 }
 
 /**
- * Verify an assertion signature over `authenticatorData || SHA-256(clientDataJSON)`.
- *
- * Delegates to the raw asymmetric primitives in `Cipher.ts` (not WebCrypto),
- * so the algorithm-native signature encodings authenticators produce verify
- * directly: ES256 (DER-encoded ECDSA), RS256 (RSASSA-PKCS1-v1_5), and EdDSA
- * (Ed25519). The stored public key is the SPKI DER produced by
- * {@link serializePublicKey}.
+ * Verify an assertion signature over `authenticatorData || SHA-256(clientDataJSON)`
+ * through `Cipher.verifySpkiSignature`, which takes the algorithm-native
+ * encodings authenticators produce: ES256 (DER-encoded ECDSA), RS256
+ * (RSASSA-PKCS1-v1_5), and EdDSA (Ed25519). The stored public key is the SPKI
+ * DER produced by {@link serializePublicKey}.
  */
 function verifySignature(
   digest: typeof Digest.Digest.Service,
+  signer: typeof Signature.Signature.Service,
   publicKeyDer: Uint8Array,
   algorithm: number,
   authenticatorData: Uint8Array,
@@ -897,27 +1009,34 @@ function verifySignature(
   return Effect.gen(function* () {
     const clientDataHash = yield* digest.digest(Digest.sha256, clientDataJSON);
 
-    return yield* Effect.try({
-      try: () => {
-        const message = new Uint8Array(authenticatorData.length + clientDataHash.length);
-        message.set(authenticatorData, 0);
-        message.set(clientDataHash, authenticatorData.length);
+    const message = new Uint8Array(authenticatorData.length + clientDataHash.length);
+    message.set(authenticatorData, 0);
+    message.set(clientDataHash, authenticatorData.length);
 
-        if (algorithm === coseAlgorithmES256 || algorithm === coseAlgorithmRS256) {
-          return Cipher.verifyDerSignature("sha256", publicKeyDer, message, signature);
-        }
-        if (algorithm === coseAlgorithmEdDSA) {
-          // Ed25519 hashes internally; the digest algorithm must be null.
-          return Cipher.verifyDerSignature(null, publicKeyDer, message, signature);
-        }
-        throw new UnsupportedAlgorithmError({ message: `Unsupported algorithm: ${algorithm}` });
-      },
-      catch: (error) =>
-        new Errors.WebAuthnVerificationError({
-          message: "Failed to verify signature",
-          cause: error,
-        }),
-    });
+    const spkiAlgorithm: Cipher.SpkiAlgorithm | undefined =
+      algorithm === coseAlgorithmES256
+        ? "ES256"
+        : algorithm === coseAlgorithmRS256
+          ? "RS256"
+          : algorithm === coseAlgorithmEdDSA
+            ? "EdDSA"
+            : undefined;
+    if (spkiAlgorithm === undefined) {
+      return yield* new Errors.WebAuthnVerificationError({
+        message: "Failed to verify signature",
+        cause: new UnsupportedAlgorithmError({ message: `Unsupported algorithm: ${algorithm}` }),
+      });
+    }
+    return yield* Cipher.verifySpkiSignature(spkiAlgorithm, publicKeyDer, message, signature).pipe(
+      Effect.provideService(Signature.Signature, signer),
+      Effect.mapError(
+        (cause) =>
+          new Errors.WebAuthnVerificationError({
+            message: "Failed to verify signature",
+            cause,
+          }),
+      ),
+    );
   });
 }
 

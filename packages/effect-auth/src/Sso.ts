@@ -31,7 +31,8 @@
 import { Clock, Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
+import { HttpClient } from "effect/http";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -39,6 +40,8 @@ import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as RootSecret from "./RootSecret.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
 import { OrganizationService, OrganizationStore, type Member } from "./Organization.ts";
 import {
@@ -369,8 +372,9 @@ export interface SsoConfig {
   readonly samlClockSkewMs?: number;
   /**
    * Fallback replay window for an assertion that carries no `NotOnOrAfter`.
-   * Default 10 minutes. When the assertion does declare an expiry, that is used
-   * instead — the id only needs to be remembered for as long as it is valid.
+   * Default 10 minutes. When the assertion does declare an expiry, the id is
+   * remembered until that expiry plus `samlClockSkewMs`, as long as the
+   * verifier would still accept it.
    */
   readonly samlAssertionReplayTtl?: number;
   /**
@@ -409,8 +413,18 @@ const toOAuthConfig = (provider: OidcSsoProvider): OAuthProviderConfig => ({
 
 export const make = (
   config: SsoConfig = {},
-): Effect.Effect<typeof SsoService.Service, never, SsoProviderStore | SecureRandom.SecureRandom> =>
+): Effect.Effect<
+  typeof SsoService.Service,
+  never,
+  | SsoProviderStore
+  | SecureRandom.SecureRandom
+  | Digest.Digest
+  | Mac.Mac
+  | RootSecret.RootSecret
+  | HttpClient.HttpClient
+> =>
   Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
     const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
     const samlRequestTtl = config.samlRequestTtl ?? 10 * 60 * 1000;
     const samlClockSkewMs = config.samlClockSkewMs ?? defaultClockSkewMs;
@@ -418,6 +432,14 @@ export const make = (
     const allowIdpInitiated = config.allowIdpInitiated ?? false;
 
     const store = yield* SsoProviderStore;
+    const digestToken = yield* tokenHasher;
+    const deriveVerifier = yield* RootSecret.pkceVerifier;
+    const mac = yield* Mac.Mac;
+    const rootSecret = yield* RootSecret.RootSecret;
+    /** The caller's state store, keyed by each state's digest. */
+    const hashedStates = Effect.map(OAuthStateStore, (states) =>
+      OAuth.hashedStateStore(states, digestToken),
+    );
     const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
@@ -646,6 +668,7 @@ export const make = (
       ) {
         const discovered = input.discover
           ? yield* discoverOAuthEndpoints(input.issuer).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
               Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
             )
           : undefined;
@@ -794,9 +817,12 @@ export const make = (
           toOAuthConfig(provider),
           provider.usePKCE,
         );
-        const result = yield* oauth
-          .generateAuthorizationUrl()
-          .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
+        const result = yield* oauth.generateAuthorizationUrl().pipe(
+          Effect.provideService(OAuthStateStore, yield* hashedStates),
+          Effect.provideService(Mac.Mac, mac),
+          Effect.provideService(RootSecret.RootSecret, rootSecret),
+          Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
+        );
         return { url: result.url, state: result.state };
       }),
 
@@ -804,7 +830,7 @@ export const make = (
         state: string,
         code: string,
       ) {
-        const stateStore = yield* OAuthStateStore;
+        const stateStore = yield* hashedStates;
 
         // Spend the state before anything else: `consume` is an atomic
         // get-and-delete, so a replayed or concurrent callback carrying the
@@ -840,14 +866,22 @@ export const make = (
           toOAuthConfig(provider),
           provider.usePKCE,
         );
-        const tokens = yield* oauth
-          .exchangeCode(code, stateEntry.codeVerifier)
-          .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
+        // A state stored by an earlier release carries its verifier; a new
+        // one is derived from the state.
+        const codeVerifier =
+          stateEntry.codeVerifier ?? (provider.usePKCE ? yield* deriveVerifier(state) : undefined);
+        const tokens = yield* oauth.exchangeCode(code, codeVerifier).pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
+        );
         const profile = yield* oauth
           .getProfile(tokens, {
             ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
           })
-          .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
+          .pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
+          );
 
         if (profile.email === undefined || profile.email_verified === false) {
           return yield* new SsoError({
@@ -931,14 +965,19 @@ export const make = (
 
         // Spend the assertion id itself, so a captured response cannot be
         // replayed inside its own validity window (or at all, for an
-        // IdP-initiated one, where there is no request to spend).
+        // IdP-initiated one, where there is no request to spend). The verifier
+        // accepts an assertion until `NotOnOrAfter` plus the clock skew, so
+        // the record outlives it by the skew too.
         const now = yield* Clock.currentTimeMillis;
         const seen = yield* replay.create({
           id: assertion.id,
           kind: "assertion",
           providerId: provider.id,
           createdAt: now,
-          expiresAt: assertion.notOnOrAfter ?? now + samlAssertionReplayTtl,
+          expiresAt:
+            assertion.notOnOrAfter === undefined
+              ? now + samlAssertionReplayTtl
+              : assertion.notOnOrAfter + samlClockSkewMs,
         });
         if (seen === null) {
           return yield* new SsoError({ message: "SAML assertion has already been used" });

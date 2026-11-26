@@ -19,7 +19,6 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { sha256 } from "../Cipher.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
 
 // ---------------------------------------------------------------------------
@@ -564,14 +563,12 @@ export class AuthenticatorData {
   ) {}
 
   /**
-   * Constant-time check that this response was produced for `relyingPartyId`
-   * (the authenticator reports SHA-256 of the RP ID, never the ID itself).
+   * Constant-time check that this response was produced for the relying party
+   * whose ID hashes to `expected` (the authenticator reports SHA-256 of the RP
+   * ID, never the ID itself).
    */
-  verifyRelyingPartyIdHash(relyingPartyId: string): boolean {
-    return timingSafeEqualBytes(
-      this.relyingPartyIdHash,
-      sha256(new TextEncoder().encode(relyingPartyId)),
-    );
+  verifyRelyingPartyIdHash(expected: Uint8Array): boolean {
+    return timingSafeEqualBytes(this.relyingPartyIdHash, expected);
   }
 }
 

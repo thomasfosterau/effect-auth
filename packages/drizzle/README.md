@@ -97,18 +97,19 @@ yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
 
 ### The export map
 
-| Export                                                        | What it is                                                                            |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `layer(schema?)`                                              | All three stores at once, over a dialect's `tables` or an `AuthSchema`                |
-| `databaseLayer(db)`, `effectDatabaseLayer(db)`                | The database seam for Promise and Effect drivers (`DrizzleDatabase`)                  |
-| `SessionStore`, `UserStore`, `IdentifierStore`                | One namespace per store: `make`, `layer`, requests, resolvers                         |
-| `SingleTableIdentifierStore`                                  | The opt-in one-email-per-user store over your own `users` table                       |
-| `Requests`                                                    | The batched read interface                                                            |
-| `Pg`, `Sqlite`, `MySql`                                       | One namespace per dialect: tables, `defineTables`, DDL (`MySql` also `binaryVarchar`) |
-| `defineSchema`, `fromTables`, `AuthSchema` and column types   | The stores pointed at tables you already have                                         |
-| `TableNames`, `defaultTableNames`, `Tables`, row types        | What the three dialects agree on                                                      |
-| `ladderCheck(column, ladder)`                                 | A role column's `CHECK` derived from an `Auth.Ladder`                                 |
-| `ownedListFilter(columns)`, `isFollowerLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`                          |
+| Export                                                                         | What it is                                                                            |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `layer(schema?)`                                                               | All three stores at once, over a dialect's `tables` or an `AuthSchema`                |
+| `databaseLayer(db)`, `effectDatabaseLayer(db)`                                 | The database seam for Promise and Effect drivers (`DrizzleDatabase`)                  |
+| `SessionStore`, `UserStore`, `IdentifierStore`                                 | One namespace per store: `make`, `layer`, requests, resolvers                         |
+| `SingleTableIdentifierStore`                                                   | The opt-in one-email-per-user store over your own `users` table                       |
+| `Requests`                                                                     | The batched read interface                                                            |
+| `Pg`, `Sqlite`, `MySql`                                                        | One namespace per dialect: tables, `defineTables`, DDL (`MySql` also `binaryVarchar`) |
+| `defineSchema`, `fromTables`, `AuthSchema` and column types                    | The stores pointed at tables you already have                                         |
+| `defineApiKeyTable`, `defineTokenTable`, `defineRateLimitTable`                | `ApiKeyStore`, `TokenStore`, `RateLimitStore` pointed at tables you already have      |
+| `TableNames`, `defaultTableNames`, `Tables`, row types                         | What the three dialects agree on                                                      |
+| `ladderCheck(column, ladder)`                                                  | A role column's `CHECK` derived from an `Auth.Ladder`                                 |
+| `ownedListFilter(columns)`, `isFollowerLayer`, `isMemberLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`                          |
 
 ## Dialects
 
@@ -533,7 +534,7 @@ export const users = pgTable(
 );
 ```
 
-`ownedListFilter(columns)(scope)` renders an `Auth.OwnedAccess` read scope (`yield* owned.readScope`) as a `WHERE` over an owned table's `owner`, `visibility` and optional `draft` columns: `undefined` for the `all` scope, published public rows for `public`, and for a signed-in member their own rows (drafts included) plus public rows plus followers-only rows of owners they follow. `isFollowerLayer({ isFollower, followingQuery })` provides `Auth.OwnedAccess.IsFollower` over your follow table; the follow set reaches the `WHERE` as an `owner IN (SELECT …)` subquery, never a materialised list. The test suite runs the filter and the kernel's per-row `canView` over one corpus in Postgres and requires them to agree on every row.
+`ownedListFilter(columns)(scope)` renders an `Auth.OwnedAccess` read scope (`yield* owned.readScope`) as a `WHERE` over an owned table's `owner` and `visibility` columns and its optional `draft`, `unapproved` and `group` columns. It is `undefined` for the `all` scope and published public rows for `public`. For a signed-in member, it is their own rows (drafts and unapproved rows included), plus public rows, plus published followers-only rows of owners they follow, plus published `group` rows of groups they belong to. A published row is neither a draft nor unapproved. Map a moderation state to `unapproved` as an expression (anything but the approved state). Without a `group` column, a `group` row lists only for its owner. `isFollowerLayer({ isFollower, followingQuery })` and `isMemberLayer({ isMember, groupsQuery })` provide `Auth.OwnedAccess.IsFollower` and `IsMember` over your follow and membership tables. The follow and group sets reach the `WHERE` as `IN (SELECT …)` subqueries, never materialised lists. The test suite runs the filter, the kernel's per-row `canView` and `ReadScope.compile` over the owned policies across one corpus in Postgres, and requires all three to agree on every row.
 
 ## Single-table identifiers (opt-in)
 
@@ -899,6 +900,50 @@ store each).
   services compute; every read and delete is scoped to the store's purpose, so
   a password-reset request never clears a pending verification. Expiry is the
   services' check: an expired row is returned as found.
+
+### Your own API key, token and rate-limit tables
+
+The package's `api_keys` and `tokens` tables keep `user_id` as `text` with no
+foreign key. An application whose `users.id` is a `uuid`, or that wants
+deleting a user to cascade to its keys and pending tokens in the database,
+keeps those tables itself and maps the stores onto them, as `defineSchema` does
+for the sign-in stores. `defineApiKeyTable`, `defineTokenTable` and
+`defineRateLimitTable` each take one table and the column that holds every
+field the store writes; each store's `make` / `layer` (and
+`RateLimitStore.purgeExpired`) takes the result in place of `tables`:
+
+```ts
+const appApiKeys = pgTable("api_keys", {
+  id: text("id").primaryKey(),
+  owner: uuid("owner_id")
+    .notNull()
+    .references(() => appUsers.userId, { onDelete: "cascade" }),
+  digest: text("digest").notNull().unique(),
+  // ... a column for every other ApiKeyColumnNames field
+});
+
+const stores = Layer.mergeAll(
+  Drizzle.ApiKeyStore.layer(
+    Drizzle.defineApiKeyTable({
+      table: appApiKeys,
+      columns: { id: "id", userId: "owner", keyHash: "digest" /* , ... */ },
+    }),
+  ),
+  Drizzle.TokenStore.layer(Drizzle.defineTokenTable({ table: appTokens, columns: { ... } })),
+  Drizzle.RateLimitStore.layer(
+    Drizzle.defineRateLimitTable({ table: appThrottle, columns: { ... } }),
+  ),
+).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+```
+
+The mapping is checked at the type level, as in `defineSchema`: each field
+names a column that reads back as the value the store needs (a `uuid` owner
+reads back as a `string`). What the table still has to carry: a unique index
+on the API key's `keyHash`; `token` as the tokens table's primary key, with one
+`purpose` column serving both token stores; and the rate-limit `key` as a
+primary key or unique index, since `increment` and `set` upsert on it. Core's
+account deletion still deletes a user's keys and tokens through
+`deleteByUserId` first, so the cascade is a second guarantee, not the only one.
 
 ## Store semantics
 

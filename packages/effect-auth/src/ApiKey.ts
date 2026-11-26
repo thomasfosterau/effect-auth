@@ -20,11 +20,11 @@ import { Clock, Context, Data, type Duration, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { Base64Url } from "effect/encoding";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
-import { hashToken } from "./TokenHash.ts";
+import { hashToken, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
 import { isInGoodStanding } from "./UserStanding.ts";
@@ -517,7 +517,7 @@ export const make = (
 ): Effect.Effect<
   typeof ApiKeyService.Service,
   never,
-  ApiKeyStore | RateLimiter | UserStore | SecureRandom.SecureRandom
+  ApiKeyStore | RateLimiter | UserStore | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const defaultPrefix = config?.defaultPrefix ?? "ak_";
@@ -529,6 +529,7 @@ export const make = (
     const rateLimiter = yield* RateLimiter;
     const users = yield* UserStore;
     const crypto = yield* SecureRandom.SecureRandom;
+    const hashKey = yield* tokenHasher;
 
     const randomToken = (): Effect.Effect<string> =>
       crypto.randomBytes(keyLength).pipe(Effect.map(Base64Url.encode));
@@ -596,7 +597,7 @@ export const make = (
      * secret-dependent timing.
      */
     const lookup = (plaintextKey: string) =>
-      Effect.flatMap(store.getByHash(hashApiKey(plaintextKey)), (apiKey) =>
+      Effect.flatMap(Effect.flatMap(hashKey(plaintextKey), store.getByHash), (apiKey) =>
         apiKey === null
           ? Effect.succeed(null)
           : Effect.flatMap(users.get(apiKey.userId), (owner) =>
@@ -635,7 +636,7 @@ export const make = (
           ...(options?.name !== undefined && { name: options.name }),
           prefix,
           start: secret.slice(0, 6),
-          keyHash: hashApiKey(key),
+          keyHash: yield* hashKey(key),
           userId,
           enabled: true,
           ...(expiresIn !== undefined && { expiresAt: now + expiresIn }),

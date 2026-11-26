@@ -2,7 +2,6 @@ import { assert, describe, it, expect } from "vite-plus/test";
 import { Clock, Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Errors from "./Errors.ts";
@@ -424,7 +423,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -441,7 +440,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, memoryIdentifierStore(identifierRecords)),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ),
     );

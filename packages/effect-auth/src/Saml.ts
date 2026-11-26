@@ -124,9 +124,17 @@ export interface SamlAssertion {
   readonly attributes: Readonly<Record<string, string | ReadonlyArray<string>>>;
   /** `AuthnStatement/@SessionIndex`, needed later for single logout. */
   readonly sessionIndex?: string;
-  /** `Response/@InResponseTo`, when the flow was SP-initiated. */
+  /**
+   * The request this response answers, when the flow was SP-initiated, read
+   * only from signed content: the assertion's `SubjectConfirmationData`, or
+   * the `Response` attribute when the Response signature is required. Absent,
+   * the response is unsolicited (IdP-initiated).
+   */
   readonly inResponseTo?: string;
-  /** Assertion expiry (epoch ms), for sizing the replay window. */
+  /**
+   * Assertion expiry (epoch ms), for sizing the replay window. The verifier
+   * accepts the assertion until this plus the clock skew.
+   */
   readonly notOnOrAfter?: number;
   /** `RelayState` as received. */
   readonly relayState?: string;

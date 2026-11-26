@@ -1,9 +1,10 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect } from "effect";
+import { Data, DateTime, Effect } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { hashToken, type SessionWithUser } from "@thomasfosterau/effect-auth";
+import { createHash } from "node:crypto";
+import type { SessionWithUser } from "@thomasfosterau/effect-auth";
 import { makeServerFixture } from "@thomasfosterau/effect-auth/client/testing";
 import * as Http from "@thomasfosterau/effect-auth/http";
 import {
@@ -36,6 +37,7 @@ const event = (cookies: Record<string, string> = {}) => {
   const locals: { auth?: LocalsAuth } = {};
   return {
     request: new Request("https://app.example/page"),
+    getClientAddress: () => "203.0.113.9",
     cookies: { get: (name: string) => cookies[name] },
     locals,
   };
@@ -118,6 +120,134 @@ describe("handle", () => {
   });
 });
 
+describe("handle replays the lookup's Set-Cookie", () => {
+  const refreshed = "__Host-conduit_session_data=fresh; Path=/; HttpOnly; Secure";
+  const lookupWithCookie = () =>
+    Effect.succeed({ session: Option.some(signedIn), setCookie: [refreshed] });
+
+  it("appends a refreshed cache cookie, and keeps the response out of shared caches", async () => {
+    const hook = handle({ lookup: lookupWithCookie, failure: { mode: "closed" } });
+    const input = event(sessionCookie);
+    const response = await hook({ event: input, resolve: () => new Response("page") });
+    expect(response.headers.getSetCookie()).toEqual([refreshed]);
+    expect(response.headers.get("cache-control")).toBe(PRIVATE_CACHE_CONTROL);
+    expect(input.locals.auth?.session?.user.id).toBe("u-1");
+  });
+
+  it("clears a stale cookie for a viewer the lookup found signed out", async () => {
+    const clear = "__Host-conduit_session=; Path=/; Max-Age=0";
+    const hook = handle({
+      lookup: () => Effect.succeed({ session: Option.none(), setCookie: [clear] }),
+      failure: { mode: "closed" },
+    });
+    const response = await hook({
+      event: event(sessionCookie),
+      resolve: () => new Response("page", { headers: { "cache-control": "public, max-age=60" } }),
+    });
+    expect(response.headers.getSetCookie()).toEqual([clear]);
+    expect(response.headers.get("cache-control")).toBe(PRIVATE_CACHE_CONTROL);
+  });
+
+  it("never hands a cookie to a bearer or API-key caller", async () => {
+    const hook = handle({ lookup: lookupWithCookie, failure: { mode: "closed" } });
+    const responses = await Promise.all(
+      [{ authorization: "Bearer tok" }, { "x-api-key": "k" }].map((headers) =>
+        hook({
+          event: {
+            request: new Request("https://app.example/page", { headers }),
+            getClientAddress: () => "203.0.113.9",
+            cookies: { get: () => undefined },
+            locals: {},
+          },
+          resolve: () => new Response("page"),
+        }),
+      ),
+    );
+    expect(responses.map((response) => response.headers.getSetCookie())).toEqual([[], []]);
+  });
+
+  it("hands the lookup the event, for the client address", async () => {
+    const seen: Array<string> = [];
+    const hook = handle({
+      lookup: (_request, event) =>
+        Effect.sync(() => {
+          seen.push(event.getClientAddress());
+          return Option.none();
+        }),
+      failure: { mode: "closed" },
+    });
+    await hook({ event: event(sessionCookie), resolve: () => new Response("page") });
+    expect(seen).toEqual(["203.0.113.9"]);
+  });
+});
+
+/** What an adapter's `getClientAddress` throws when it cannot tell. */
+class NoClientAddress extends Data.TaggedError("NoClientAddress") {}
+
+describe("submitCredential's client address", () => {
+  const options = (extra: object = {}) => ({
+    fetch: async () => new Response(null, { status: 401 }),
+    endpoint: "https://auth.internal/api/auth/sessions",
+    body: () => ({}),
+    fields: () => ({}),
+    fallback: "/",
+    ...extra,
+  });
+  const spoofing = (getClientAddress: () => string = () => "203.0.113.9"): ActionEvent => ({
+    request: new Request("https://app.example/login", {
+      method: "POST",
+      headers: { "x-forwarded-for": "198.51.100.66", "cf-connecting-ip": "198.51.100.67" },
+    }),
+    url: new URL("https://app.example/login"),
+    getClientAddress,
+    cookies: { set: () => undefined },
+  });
+  const sent = async (event: ActionEvent, extra?: object): Promise<Headers> => {
+    const seen: Array<Request> = [];
+    await submitCredential(event, undefined, {
+      ...options(extra),
+      fetch: async (request: Request) => {
+        seen.push(request);
+        return new Response(null, { status: 401 });
+      },
+    });
+    const [request] = seen;
+    assert(request !== undefined);
+    return request.headers;
+  };
+
+  it("sends getClientAddress() in one header, never the browser's address headers", async () => {
+    const headers = await sent(spoofing());
+    expect(headers.get("x-forwarded-for")).toBe("203.0.113.9");
+    expect(headers.get("cf-connecting-ip")).toBeNull();
+  });
+
+  it("takes a clientAddress function and a custom header", async () => {
+    const headers = await sent(spoofing(), {
+      clientAddress: () => "2001:db8::1",
+      clientAddressHeader: "x-client-ip",
+    });
+    expect(headers.get("x-client-ip")).toBe("2001:db8::1");
+    expect(headers.get("x-forwarded-for")).toBeNull();
+  });
+
+  it("forwards the browser's headers only on opt-in, the address header still the app's", async () => {
+    const headers = await sent(spoofing(), { forwardClientIpHeaders: true });
+    expect(headers.get("cf-connecting-ip")).toBe("198.51.100.67");
+    expect(headers.get("x-forwarded-for")).toBe("203.0.113.9");
+  });
+
+  it("sends no address when the adapter cannot tell", async () => {
+    const headers = await sent(
+      spoofing(() => {
+        throw new NoClientAddress();
+      }),
+      { forwardClientIpHeaders: true },
+    );
+    expect(headers.get("x-forwarded-for")).toBeNull();
+  });
+});
+
 describe("parseSetCookie", () => {
   it("reads the name, value and attributes", () => {
     const parsed = parseSetCookie(
@@ -184,6 +314,7 @@ const submit = (
         headers: { origin: "https://app.example" },
       }),
       url: new URL(url),
+      getClientAddress: () => "203.0.113.9",
       cookies: { set: (name, value, options) => void cookies.push([name, value, options]) },
     },
   };
@@ -358,6 +489,7 @@ const remote = () => {
       headers: { origin: "https://app.example" },
     }),
     url: new URL("https://app.example/_app/remote/abc/signIn?redirect=/elsewhere"),
+    getClientAddress: () => "203.0.113.9",
     cookies: { set: (name, value, options) => void cookies.push([name, value, options]) },
   };
   return { cookies, getRequestEvent: () => remoteEvent };
@@ -569,7 +701,8 @@ describe("against the real auth handler", () => {
     });
     const hook = handle({
       cookies: { secure: false },
-      lookup: (request) => Effect.map(remoteSession.read(request), (result) => result.session),
+      lookup: (request, event) =>
+        remoteSession.read(request, { clientAddress: event.getClientAddress() }),
       failure: { mode: "closed" },
     });
     const locals: { auth?: LocalsAuth } = {};
@@ -578,6 +711,7 @@ describe("against the real auth handler", () => {
         request: new Request("https://app.example/page", {
           headers: { cookie: `conduit_session=${token}` },
         }),
+        getClientAddress: () => "203.0.113.9",
         cookies: { get: (name: string) => (name === "conduit_session" ? token : undefined) },
         locals,
       },
@@ -585,7 +719,7 @@ describe("against the real auth handler", () => {
     });
     const resolved = locals.auth?.session;
     assert(resolved !== null && resolved !== undefined, "the viewer is signed in");
-    expect(resolved.session.id).toBe(hashToken(token));
+    expect(resolved.session.id).toBe(createHash("sha256").update(token).digest("hex"));
     // A `load` that returns `locals.auth` serializes no credential into the page.
     expect(encodeUnknown(locals.auth)).not.toContain(token);
   });
@@ -597,6 +731,7 @@ const actionEvent = () => {
   const actionInput: ActionEvent = {
     request: new Request("https://app.example/login", { method: "POST" }),
     url: new URL("https://app.example/login?redirect=/dashboard"),
+    getClientAddress: () => "203.0.113.9",
     cookies: { set: (name, value, options) => void cookies.push([name, value, options]) },
   };
   return { cookies, actionInput };

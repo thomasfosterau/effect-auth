@@ -17,7 +17,7 @@
  *
  * @module oidc-provider
  */
-import { Clock, Context, Data, Effect, HashMap, Layer, MutableHashMap, Redacted } from "effect";
+import { Clock, Context, Data, Effect, HashMap, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -33,7 +33,8 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { RateLimitConfig } from "./RateLimit.ts";
 import { UserStore } from "./UserStore.ts";
 import { anyEmail, IdentifierStore } from "./Identifier.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
+import { constantTimeHashEqual, hashToken, tokenHasher } from "./TokenHash.ts";
+import { isInGoodStanding } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register a client or process an authorization request. */
@@ -167,18 +168,30 @@ export class OidcCodeStore extends Context.Service<
   }
 >()("@effect-auth/OidcCodeStore") {}
 
-/** An issued opaque token, keyed by the sha256 hex digest of its value. */
+/**
+ * An issued opaque token, keyed by the sha256 hex digest of its value.
+ *
+ * `kind: "rotated"` is the record a refresh token leaves behind when it is
+ * rotated, under a key derived from the token's digest: it grants nothing,
+ * and presenting its token again is a replay that revokes the whole family
+ * (RFC 6819 §5.2.2.3). It expires with the family.
+ */
 export interface OidcToken {
   /** sha256 hex digest of the token — never the plaintext. */
   readonly tokenHash: string;
-  readonly kind: "access" | "refresh";
+  readonly kind: "access" | "refresh" | "rotated";
   readonly clientId: string;
   readonly userId: string;
   readonly scopes: readonly string[];
   /** Epoch milliseconds. */
   readonly expiresAt: number;
   readonly createdAt: number;
-  /** Refresh-token rotation family (all tokens issued from the same authorization_code grant). */
+  /**
+   * The grant family: every access and refresh token issued from one
+   * authorization code and its refreshes. Revoking the family revokes all of
+   * them. Optional only for records written before families covered access
+   * tokens.
+   */
   readonly familyId?: string;
   /** Absolute (non-sliding) expiry for the whole refresh family. Epoch milliseconds. */
   readonly absoluteExpiresAt?: number;
@@ -208,10 +221,17 @@ export class OidcTokenStore extends Context.Service<
      * No-ops silently when the user holds none.
      */
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
-    /** Optional: list all tokens belonging to a rotation family. Used for reuse-detection revocation. */
-    readonly listByFamily?: (
-      familyId: string,
-    ) => Effect.Effect<ReadonlyArray<OidcToken>, AuthError>;
+    /**
+     * Delete every record of the grant family `familyId`: its access and
+     * refresh tokens and the records rotated refresh tokens left. A replayed
+     * refresh token calls it. No-ops silently when there are none.
+     */
+    readonly deleteByFamily: (familyId: string) => Effect.Effect<void, AuthError>;
+    /**
+     * Delete every record issued to `clientId`, for every user. Deleting the
+     * client calls it. No-ops silently when there are none.
+     */
+    readonly deleteByClientId: (clientId: string) => Effect.Effect<void, AuthError>;
   }
 >()("@effect-auth/OidcTokenStore") {}
 
@@ -684,10 +704,6 @@ export class OidcProviderService extends Context.Service<
 /** SHA-256 hex digest used for every OIDC secret at rest (tokens, codes, secrets). */
 export const hashOidcSecret = hashToken;
 
-/** Constant-time equality of two strings via their SHA-256 digests. */
-const secretEquals = (a: string, b: string): boolean =>
-  constantTimeHashEqual(hashToken(a), hashToken(b));
-
 /** Append query parameters to a URL that may already carry a query string. */
 const buildRedirect = (base: string, params: Record<string, string | undefined>): string => {
   const url = new URL(base);
@@ -830,6 +846,15 @@ export const make = (
   | Digest.Digest
 > =>
   Effect.gen(function* () {
+    const hashSecret = yield* tokenHasher;
+    /**
+     * The key of the record a rotated refresh token leaves: a digest of its own
+     * digest, so it never collides with a live token and `consume` never takes it.
+     */
+    const rotationRecordKey = (tokenHash: string) => hashSecret(`rotated:${tokenHash}`);
+    /** Constant-time equality of two strings via their SHA-256 digests. */
+    const secretEquals = (a: string, b: string): Effect.Effect<boolean> =>
+      Effect.zipWith(hashSecret(a), hashSecret(b), constantTimeHashEqual);
     const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
     const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
     const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
@@ -841,41 +866,34 @@ export const make = (
       rateLimit: dcr?.rateLimit ?? DEFAULT_OIDC_REGISTRATION_RATE_LIMIT,
     };
 
-    /**
-     * In-process registry of consumed refresh-token hashes → their family.
-     * Lets us detect a reuse attack (RFC 6819 §6.1): if a hash appears here it
-     * was already rotated; presenting it again means a stolen token is in play.
-     * Entries are pruned once their absolute expiry passes.
-     */
-    const consumedRefreshTokens = MutableHashMap.empty<
-      string,
-      { familyId: string; absoluteExpiresAt: number }
-    >();
-    const pruneConsumed = Effect.map(Clock.currentTimeMillis, (now) => {
-      Arr.fromIterable(consumedRefreshTokens)
-        .filter(([, entry]) => now > entry.absoluteExpiresAt)
-        .forEach(([hash]) => MutableHashMap.remove(consumedRefreshTokens, hash));
-    });
-
     /** Trusted config clients, normalized to the stored shape (secret hashed). */
     const trustedClients = HashMap.fromIterable<string, OidcClient>(
-      (config.trustedClients ?? []).map((c) => [
-        c.clientId,
-        {
-          clientId: c.clientId,
-          ...(c.clientSecret !== undefined && {
-            clientSecretHash: hashOidcSecret(Redacted.value(c.clientSecret)),
+      yield* Effect.forEach(
+        config.trustedClients ?? [],
+        (c) =>
+          Effect.gen(function* () {
+            const clientSecretHash =
+              c.clientSecret === undefined
+                ? undefined
+                : yield* hashSecret(Redacted.value(c.clientSecret));
+            return [
+              c.clientId,
+              {
+                clientId: c.clientId,
+                ...(clientSecretHash !== undefined && { clientSecretHash }),
+                name: c.name,
+                redirectUris: c.redirectUris,
+                type: c.type ?? "web",
+                skipConsent: c.skipConsent ?? true,
+                disabled: false,
+                metadata: {},
+                createdAt: 0,
+                updatedAt: 0,
+              } satisfies OidcClient,
+            ] as const;
           }),
-          name: c.name,
-          redirectUris: c.redirectUris,
-          type: c.type ?? "web",
-          skipConsent: c.skipConsent ?? true,
-          disabled: false,
-          metadata: {},
-          createdAt: 0,
-          updatedAt: 0,
-        } satisfies OidcClient,
-      ]),
+        { concurrency: "unbounded" },
+      ),
     );
 
     const clientStore = yield* OidcClientStore;
@@ -916,7 +934,7 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
         yield* codeStore.create({
           ...base,
-          codeHash: hashOidcSecret(value),
+          codeHash: yield* hashSecret(value),
           kind,
           expiresAt: now + codeExpiresIn,
           createdAt: now,
@@ -928,6 +946,38 @@ export const make = (
      * Build the standard claims for a user, filtered by granted scopes. Email
      * claims resolve the user's email identifier; omitted when none exists.
      */
+    /**
+     * The user a token is for, or `null` when they are gone or no longer in
+     * good standing (banned, SCIM-deactivated). A user refused for their
+     * standing has every OIDC token revoked, so a lapsed ban restores none.
+     */
+    const activeUser = (userId: string) =>
+      Effect.gen(function* () {
+        const user = yield* userStore.get(userId);
+        if (user === null) return null;
+        if (yield* isInGoodStanding(user)) return user;
+        yield* tokenStore.deleteByUserId(userId);
+        return null;
+      });
+
+    /**
+     * A rotated refresh token presented again is a replay: one of its holders
+     * stole it, so the whole family goes (RFC 6819 §5.2.2.3), every access
+     * token with it. The record lives in the store, so this holds across
+     * restarts and instances.
+     */
+    const revokeIfRotated = (presentedHash: string) =>
+      Effect.gen(function* () {
+        const rotated = yield* tokenStore.get(yield* rotationRecordKey(presentedHash));
+        if (rotated?.kind === "rotated" && rotated.familyId !== undefined) {
+          yield* tokenStore.deleteByFamily(rotated.familyId);
+        }
+      });
+
+    /** Whether `clientId` names a client that may still use its tokens. */
+    const clientActive = (clientId: string) =>
+      Effect.map(getClient(clientId), (client) => client !== null && !client.disabled);
+
     const claimsFor = (
       user: Types.User,
       scopes: readonly string[],
@@ -964,23 +1014,26 @@ export const make = (
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
 
+        // Every grant loads the user, whatever its scopes: a user deleted,
+        // banned or SCIM-deactivated since the code or refresh token was
+        // issued gets no tokens, and a refused user's tokens are revoked.
+        const user = yield* activeUser(grant.userId).pipe(
+          Effect.mapError(
+            (e) => new OidcTokenError({ error: "invalid_grant", description: e.message }),
+          ),
+        );
+        if (user === null) {
+          return yield* new OidcTokenError({
+            error: "invalid_grant",
+            description: "Unknown user",
+          });
+        }
+        const familyId = grant.familyId ?? (yield* randomToken());
+
         // Mint the id_token FIRST — a signing failure here must not leave
         // orphaned access/refresh tokens that can never be revoked.
         let idToken: string | undefined;
         if (grant.scopes.includes("openid")) {
-          const user = yield* userStore
-            .get(grant.userId)
-            .pipe(
-              Effect.mapError(
-                (e) => new OidcTokenError({ error: "invalid_grant", description: e.message }),
-              ),
-            );
-          if (user === null) {
-            return yield* new OidcTokenError({
-              error: "invalid_grant",
-              description: "Unknown user",
-            });
-          }
           const signed = yield* jwt
             .sign(user, {
               iss: config.issuer,
@@ -998,22 +1051,22 @@ export const make = (
 
         const accessToken = yield* randomToken();
         yield* tokenStore.create({
-          tokenHash: hashOidcSecret(accessToken),
+          tokenHash: yield* hashSecret(accessToken),
           kind: "access",
           clientId: grant.clientId,
           userId: grant.userId,
           scopes: grant.scopes,
           expiresAt: now + accessTokenExpiresIn,
           createdAt: now,
+          familyId,
         });
 
         let refreshToken: string | undefined;
         if (grant.scopes.includes("offline_access")) {
           refreshToken = yield* randomToken();
-          const familyId = grant.familyId ?? (yield* randomToken());
           const absoluteExpiresAt = grant.absoluteExpiresAt ?? now + refreshTokenExpiresIn;
           yield* tokenStore.create({
-            tokenHash: hashOidcSecret(refreshToken),
+            tokenHash: yield* hashSecret(refreshToken),
             kind: "refresh",
             clientId: grant.clientId,
             userId: grant.userId,
@@ -1059,7 +1112,7 @@ export const make = (
         if (client.clientSecretHash !== undefined) {
           if (
             request.clientSecret === undefined ||
-            !secretEquals(hashOidcSecret(request.clientSecret), client.clientSecretHash)
+            !(yield* secretEquals(yield* hashSecret(request.clientSecret), client.clientSecretHash))
           ) {
             return yield* new OidcTokenError({
               error: "invalid_client",
@@ -1096,7 +1149,7 @@ export const make = (
         if (token === undefined) return yield* invalid;
         const ok = P.isFunction(required)
           ? yield* required(token)
-          : secretEquals(token, Redacted.value(required));
+          : yield* secretEquals(token, Redacted.value(required));
         if (!ok) return yield* invalid;
         return yield* Effect.void;
       });
@@ -1218,7 +1271,7 @@ export const make = (
         if (
           client === null ||
           client.registrationAccessTokenHash === undefined ||
-          !secretEquals(hashOidcSecret(token), client.registrationAccessTokenHash)
+          !(yield* secretEquals(yield* hashSecret(token), client.registrationAccessTokenHash))
         ) {
           return yield* new OidcRegistrationError({
             error: "invalid_token",
@@ -1272,7 +1325,7 @@ export const make = (
             const client = yield* clientStore.create({
               clientId,
               ...(clientSecret !== undefined && {
-                clientSecretHash: hashOidcSecret(clientSecret),
+                clientSecretHash: yield* hashSecret(clientSecret),
               }),
               name: normalized.clientName,
               redirectUris: normalized.redirectUris,
@@ -1284,7 +1337,7 @@ export const make = (
               metadata: {},
               createdAt: now,
               updatedAt: now,
-              registrationAccessTokenHash: hashOidcSecret(registrationAccessToken),
+              registrationAccessTokenHash: yield* hashSecret(registrationAccessToken),
               tokenEndpointAuthMethod: normalized.tokenEndpointAuthMethod,
               grantTypes: normalized.grantTypes,
               responseTypes: normalized.responseTypes,
@@ -1370,7 +1423,7 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
         const client = yield* clientStore.create({
           clientId,
-          ...(clientSecret !== undefined && { clientSecretHash: hashOidcSecret(clientSecret) }),
+          ...(clientSecret !== undefined && { clientSecretHash: yield* hashSecret(clientSecret) }),
           name: input.name,
           redirectUris: input.redirectUris,
           type,
@@ -1422,7 +1475,9 @@ export const make = (
         if (existing === null) {
           return yield* new OidcProviderError({ message: "Client not found" });
         }
-        return yield* clientStore.delete(clientId);
+        yield* clientStore.delete(clientId);
+        // A deleted client's tokens grant nothing; delete them with it.
+        return yield* tokenStore.deleteByClientId(clientId);
       }),
 
       authorize: Effect.fn("OidcProviderService.authorize")(
@@ -1540,7 +1595,7 @@ export const make = (
       consent: Effect.fn("OidcProviderService.consent")(
         (userId: string, consentCode: string, accept: boolean) =>
           Effect.gen(function* () {
-            const pending = yield* codeStore.get(hashOidcSecret(consentCode));
+            const pending = yield* codeStore.get(yield* hashSecret(consentCode));
             if (
               pending === null ||
               pending.kind !== "pending_consent" ||
@@ -1617,7 +1672,7 @@ export const make = (
                 description: "Missing code",
               });
             }
-            const record = yield* codeStore.get(hashOidcSecret(request.code));
+            const record = yield* codeStore.get(yield* hashSecret(request.code));
             if (
               record === null ||
               record.kind !== "authorization_code" ||
@@ -1651,7 +1706,7 @@ export const make = (
                   : undefined;
               if (
                 computedChallenge === undefined ||
-                !secretEquals(computedChallenge, record.codeChallenge)
+                !(yield* secretEquals(computedChallenge, record.codeChallenge))
               ) {
                 return yield* new OidcTokenError({
                   error: "invalid_grant",
@@ -1681,30 +1736,14 @@ export const make = (
               });
             }
 
-            yield* pruneConsumed;
-            const presentedHash = hashOidcSecret(request.refreshToken);
+            const presentedHash = yield* hashSecret(request.refreshToken);
             const record = yield* tokenStore.get(presentedHash);
 
-            if (
-              record === null ||
-              record.kind !== "refresh" ||
-              record.clientId !== client.clientId
-            ) {
-              // Check if this hash was already consumed — if so, it's a reuse attack.
-              const consumed = Option.getOrUndefined(
-                MutableHashMap.get(consumedRefreshTokens, presentedHash),
-              );
-              if (consumed !== undefined) {
-                // Revoke the entire family to protect the user (RFC 6819 §6.1).
-                yield* Effect.gen(function* () {
-                  const listByFamily = tokenStore.listByFamily;
-                  if (listByFamily === undefined) return;
-                  const family = yield* listByFamily(consumed.familyId);
-                  yield* Effect.forEach(family, (t) => tokenStore.delete(t.tokenHash), {
-                    concurrency: "unbounded",
-                  });
-                });
-              }
+            if (record === null) {
+              yield* revokeIfRotated(presentedHash);
+              return yield* new OidcTokenError({ error: "invalid_grant" });
+            }
+            if (record.kind !== "refresh" || record.clientId !== client.clientId) {
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
 
@@ -1719,8 +1758,16 @@ export const make = (
             const familyId = record.familyId ?? (yield* randomToken());
             const absoluteExpiresAt = record.absoluteExpiresAt ?? record.expiresAt;
 
-            // Record as consumed for reuse detection.
-            MutableHashMap.set(consumedRefreshTokens, presentedHash, {
+            // Leave a record of the rotation for reuse detection. It grants
+            // nothing and expires with the family.
+            yield* tokenStore.create({
+              tokenHash: yield* rotationRecordKey(record.tokenHash),
+              kind: "rotated",
+              clientId: record.clientId,
+              userId: record.userId,
+              scopes: [],
+              expiresAt: absoluteExpiresAt,
+              createdAt: yield* Clock.currentTimeMillis,
               familyId,
               absoluteExpiresAt,
             });
@@ -1765,7 +1812,7 @@ export const make = (
 
       userinfo: Effect.fn("OidcProviderService.userinfo")((accessToken: string) =>
         Effect.gen(function* () {
-          const record = yield* tokenStore.get(hashOidcSecret(accessToken));
+          const record = yield* tokenStore.get(yield* hashSecret(accessToken));
           if (
             record === null ||
             record.kind !== "access" ||
@@ -1773,13 +1820,11 @@ export const make = (
           ) {
             return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
-          const user = yield* userStore
-            .get(record.userId)
-            .pipe(
-              Effect.mapError(
-                () => new OidcProviderError({ message: "Invalid or expired access token" }),
-              ),
-            );
+          // A disabled or deleted client's tokens, and a user's who is gone,
+          // banned or deactivated, answer as an invalid token.
+          const user = (yield* clientActive(record.clientId))
+            ? yield* activeUser(record.userId)
+            : null;
           if (user === null) {
             return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
@@ -1790,7 +1835,6 @@ export const make = (
       getMetadata: () => ({
         ...authorizationServerMetadata(),
         userinfo_endpoint: `${config.issuer}/oauth2/userinfo`,
-        end_session_endpoint: `${config.issuer}/oauth2/logout`,
         subject_types_supported: ["public"],
         id_token_signing_alg_values_supported: ["ES256", "EdDSA"],
         claims_supported: ["sub", "email", "email_verified", "name", "picture", "updated_at"],

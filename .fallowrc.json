@@ -15,6 +15,7 @@
     "packages/effect-auth/src/client/testing/fixture.ts",
     "packages/effect-auth/src/sql/index.ts",
     "packages/effect-auth/src/saml/index.ts",
+    "packages/effect-auth/src/password/Scrypt.ts",
     "packages/{alchemy-cloudflare,alchemy-postgres,argon2,drizzle,resend,svelte,sveltekit,twilio}/src/index.ts",
     "packages/*/src/**/PgliteTemplate.setup.ts",
     "packages/*/src/**/*.test.ts",
@@ -27,7 +28,11 @@
     {
       "name": "repo-scripts",
       "detection": { "type": "fileExists", "pattern": "scripts/check-dist.ts" },
-      "entryPoints": ["scripts/check-dist.ts", "scripts/generate-argon2-wasm.ts"],
+      "entryPoints": [
+        "scripts/check-dist.ts",
+        "scripts/generate-argon2-wasm.ts",
+        "scripts/release.ts"
+      ],
       "entryPointRole": "support"
     }
   ],

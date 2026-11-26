@@ -21,7 +21,7 @@ The settled API conventions — naming, export shapes, store contracts, error ta
    HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration
    responses.
 6. **Minimal dependencies**: the core library depends on `effect` only (plus
-   `node:crypto` for the three primitives it doesn't cover — see Dependencies
+   `node:crypto` for scrypt, which it doesn't cover — see Dependencies
    below). A subpath that needs a third-party library takes it as an optional
    peer (`./saml`'s `@node-saml/node-saml`, `./http`'s effect-jsonapi); any
    other dependency lives in a companion package ([ADR-0022](adr/0022-package-boundaries.md)).
@@ -123,7 +123,7 @@ directories, each with its own `index.ts` barrel and matching
   `Session` record.
 - **`email/` cluster**: `EmailAddress.ts`, `EmailOtp.ts`, `EmailPassword.ts`,
   `EmailVerification.ts`.
-- **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
+- **`password/` cluster**: `Password.ts` (the PBKDF2 hasher over `effect/crypto`'s `Kdf`,
   multi-algorithm verifier), `PasswordReset.ts`, `HaveIBeenPwned.ts`. Argon2id
   is `Argon2.ts`, over `effect/crypto`'s `Kdf`; the separate `effect-auth-argon2`
   package covers runtimes whose `Kdf` has no Argon2id, Workers among them.
@@ -209,7 +209,7 @@ directories, each with its own `index.ts` barrel and matching
   `AccountDeletion.ts` (the tag `UserService.deleteUser` delegates to; its
   layer is `AccountManagement.ts`'s `accountDeletionLayer`).
 - **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
-  `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
+  `Jwt.ts` (ES256/EdDSA + JWKS over `effect/jose`), `OidcProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
   `OneTimeToken.ts`, `Scim.ts` (SCIM 2.0, see
   [guides/scim.md](guides/scim.md)), `Saml.ts` (the `SamlVerifier` seam that
@@ -269,7 +269,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### Password Security
 
-- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt also in core; Argon2id in core over `effect/crypto`'s `Kdf` (`NodeCrypto.layerKdf`: Node.js 24.7+, Bun 1.4+), and on Workers via `@thomasfosterau/effect-auth-argon2` (WASM: the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2`, compiled at module scope so it runs on Workers); a multi-algorithm verifier supports migration between algorithms.
+- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt as an opt-in Node-only verifier (`./scrypt`, `password/Scrypt.ts`); Argon2id in core over `effect/crypto`'s `Kdf` (`NodeCrypto.layerKdf`: Node.js 24.7+, Bun 1.4+), and on Workers via `@thomasfosterau/effect-auth-argon2` (WASM: the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2`, compiled at module scope so it runs on Workers); a multi-algorithm verifier supports migration between algorithms.
 - Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security
@@ -298,7 +298,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 If you mount the included HTTP API, cookie flags (`HttpOnly`, `Secure`, `SameSite`), trusted-origin CSRF checks and per-address rate limits on every sensitive endpoint (`ipRateLimit`, `defaultEndpointRules`) are on by default. The rate limits need a `RateLimiter` in `services` and a client address source (`trustedProxy`; `allowMissingClientIp: true` is none), and `Http.make` refuses to start without them unless it is given `ipRateLimit: false`. A deployment overrides one endpoint's default by putting its own rule ahead of `defaultEndpointRules`. The rules match the endpoint the router matched, so no spelling of a path escapes them. The send cooldowns (`resendCooldown`) on the email and phone OTPs, the magic link and the email-verification resend are on by default at 60 s. Account lockout (`AccountLockoutPlugin`), the per-address plugin limits (`IPRateLimitPlugin`) and captcha are opt-in: compose them when you want them. If you use only the headless core, all of it is yours to implement. Either way the application provides secure store implementations (parameterised queries, encrypted connections) and serves over HTTPS.
 
-Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` or `TWO_FACTOR_ENCRYPT_SECRET` unset to keep it off. A variable that is set but empty fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError`, rather than silently storing the data unencrypted. A whitespace-only value counts as empty. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) reads as unset.
+One root secret (`AUTH_SECRET`, at least 32 bytes, `RootSecret.ts`) keys everything that needs a server-side key: HKDF-SHA256 derives one key per purpose (the OTP and backup-code pepper, the PKCE verifier, and the encryption keys for TOTP secrets, OAuth provider tokens and JWT private keys). OTPs and backup codes are stored as HMAC-SHA256 under the pepper; the three secrets are always sealed with AES-256-GCM, with the purpose and row as associated data. `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` and `TWO_FACTOR_ENCRYPT_SECRET` override one purpose's key. A variable that is set but empty fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError`. A whitespace-only value counts as empty. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) reads as unset. Rows written before the root secret stay readable (plaintext, or the override's earlier ciphertext) until they are rewritten.
 
 ### Fail-open vs fail-closed session resolution
 
@@ -359,7 +359,7 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Dependencies
 
-- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (PBKDF2, scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256, JWS key generation, signing and verification, the WebAuthn signature checks), which take `Buffer` from `node:buffer`, never the global. That keeps the core running on Cloudflare Workers with `nodejs_compat` from compatibility date 2023-01-01, before the flag set Node globals; `Workerd.test.ts` runs the three modules inside a real workerd. Native dependencies never enter core: its Argon2id hasher (`password/Argon2.ts`) derives through the `Kdf` service the application provides, and the WebAssembly Argon2id for Workers lives in `@thomasfosterau/effect-auth-argon2`.
+- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Randomness and digests go through `effect/crypto`'s `SecureRandom.SecureRandom` and `Digest.Digest` services (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); JWS and JWE go through `effect/jose`; direct `node:crypto` usage is corralled into `password/Scrypt.ts` (the opt-in scrypt verifier), which takes `Buffer` from `node:buffer`, never the global. That keeps the core running on Cloudflare Workers with `nodejs_compat` from compatibility date 2023-01-01, before the flag set Node globals; `Workerd.test.ts` runs the core's crypto inside a real workerd. Native dependencies never enter core: its Argon2id hasher (`password/Argon2.ts`) derives through the `Kdf` service the application provides, and the WebAssembly Argon2id for Workers lives in `@thomasfosterau/effect-auth-argon2`.
 - **Optional peers of the core**, each reached from one subpath only: `@thomasfosterau/effect-jsonapi` (`./http`, and `./client/testing` through it) and `@node-saml/node-saml` (`./saml`, Node-only). `effect/sql`, behind `./sql`, ships in `effect`.
 - **Packages** hold the code that brings a dependency the core lacks (ADR-0022): `-drizzle` (`drizzle-orm`), `-alchemy-cloudflare` (`alchemy`, `@alchemy.run/cloudflare`), `-alchemy-postgres` (`alchemy`, `@effect/sql-pg`), `-argon2` (the Argon2 wasm of `@thomasfosterau/argon2`) and the Svelte binding (`svelte`). `-resend` and `-twilio` (plain `fetch`) stay packages because the owner decides vendor-adapter merges case by case, and `-sveltekit` is the server side of a framework. The browser client, the SQL stores and the SAML verifier, once packages of their own, are core subpaths.
 

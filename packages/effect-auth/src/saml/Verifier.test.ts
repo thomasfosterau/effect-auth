@@ -306,6 +306,30 @@ describe("SamlVerifier.verify — addressing and validity", () => {
     expect(err.message).toMatch(/InResponseTo disagrees/);
   });
 
+  it("takes no InResponseTo from an unsigned Response around an assertion that names none", async () => {
+    // The assertion is signed and answers no request; the attacker wraps it in
+    // a Response naming a request they minted. That attribute is outside every
+    // signature, so the assertion still reads as unsolicited.
+    const unsolicited = assertionXml().replace(` InResponseTo="${REQUEST_ID}"`, "");
+    const wrapped = sign(responseXml(unsolicited), ASSERTION_XPATH);
+    const assertion = await run(verifier.verify(input(wrapped)));
+    expect(assertion.inResponseTo).toBeUndefined();
+    const err = await flip(wrapped, { expectedInResponseTo: REQUEST_ID });
+    expect(err.message).toMatch(/does not answer the expected AuthnRequest/);
+  });
+
+  it("takes InResponseTo from the Response when its signature is required", async () => {
+    const unsolicited = assertionXml().replace(` InResponseTo="${REQUEST_ID}"`, "");
+    const signedResponse = sign(
+      sign(responseXml(unsolicited), ASSERTION_XPATH),
+      "/*[local-name(.)='Response']",
+    );
+    const assertion = await run(
+      verifier.verify(input(signedResponse, { wantAuthnResponseSigned: true })),
+    );
+    expect(assertion.inResponseTo).toBe(REQUEST_ID);
+  });
+
   it("reads InResponseTo from the document, not node-saml's profile, so decoys count too", async () => {
     // node-saml 5.2 reports the signed value as `profile.inResponseTo`,
     // so the comparison must read the raw XML: here a second, unsigned

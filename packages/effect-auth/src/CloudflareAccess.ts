@@ -40,18 +40,19 @@
  * any session cookie (a trusted-origin check, a `SameSite` cookie).
  *
  * This module runs on Workers (`nodejs_compat`), in Node and anywhere else the
- * core does: signature verification goes through `Cipher.verifyJws`.
+ * core does: signature verification goes through `effect/jose`.
  *
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Option } from "effect"
+ * import { Effect, Layer, Option } from "effect"
+ * import { FetchHttpClient } from "effect/http"
  * import { CloudflareAccess, SessionResolution } from "@thomasfosterau/effect-auth"
  *
  * const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
  *   teamDomain: "example-team.cloudflareaccess.com",
  *   audience: "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2",
- * })
+ * }).pipe(Layer.provide(FetchHttpClient.layer))
  *
  * // A request with no Access token is anonymous, and nothing is fetched.
  * const request = new Request("https://example.com/notes/1")
@@ -73,10 +74,12 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import { HttpClient } from "effect/http";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "./Authorizer.ts";
-import * as Cipher from "./Cipher.ts";
+import { verifiesWithJwk } from "./JwsSignature.ts";
 import type { AuthError } from "./Errors.ts";
 import { IdentifierStore, lookupIdentifier } from "./Identifier.ts";
+import * as OutboundHttp from "./OutboundHttp.ts";
 import type { CredentialSource } from "./SessionResolution.ts";
 import { type CurrentUser, userLayer } from "./SessionContext.ts";
 import type * as Types from "./Types.ts";
@@ -249,7 +252,8 @@ export class CloudflareAccessVerifier extends Context.Service<
 >()("@effect-auth/CloudflareAccessVerifier") {
   /**
    * A layer over {@link make}. Fails with a `"config"` {@link CloudflareAccessError}
-   * when the team domain or audience is unusable.
+   * when the team domain or audience is unusable. The key set is fetched
+   * through the `HttpClient` the application provides (`FetchHttpClient.layer`).
    */
   static readonly layer = (config: CloudflareAccessConfig) =>
     Layer.effect(CloudflareAccessVerifier, make(config));
@@ -369,7 +373,11 @@ const claimFailure = (
  */
 export const make = (
   config: CloudflareAccessConfig,
-): Effect.Effect<typeof CloudflareAccessVerifier.Service, CloudflareAccessError> =>
+): Effect.Effect<
+  typeof CloudflareAccessVerifier.Service,
+  CloudflareAccessError,
+  HttpClient.HttpClient
+> =>
   Effect.gen(function* () {
     const issuer = issuerOf(config.teamDomain);
     if (issuer === undefined) {
@@ -400,16 +408,14 @@ export const make = (
       attemptedAt: Number.NEGATIVE_INFINITY,
     });
 
-    const fetchKeys = Effect.tryPromise({
-      try: (signal) => fetch(certsUrl, { headers: { Accept: "application/json" }, signal }),
-      catch: (cause) => fail("jwks", "Failed to fetch the Cloudflare Access keys", cause),
-    }).pipe(
+    const client = yield* HttpClient.HttpClient;
+    const fetchKeys = OutboundHttp.send(client, OutboundHttp.getJson(certsUrl)).pipe(
+      Effect.mapError((cause) => fail("jwks", "Failed to fetch the Cloudflare Access keys", cause)),
       Effect.flatMap((response) =>
-        response.ok
-          ? Effect.tryPromise({
-              try: () => response.json(),
-              catch: (cause) => fail("jwks", "Invalid Cloudflare Access key set", cause),
-            })
+        OutboundHttp.isOk(response)
+          ? response.json.pipe(
+              Effect.mapError((cause) => fail("jwks", "Invalid Cloudflare Access key set", cause)),
+            )
           : Effect.fail(
               fail(
                 "jwks",
@@ -476,12 +482,12 @@ export const make = (
       ) {
         return yield* fail("malformed", "Malformed Access token");
       }
-      const { header, payload, signature } = yield* Effect.try({
-        try: () => ({
-          header: decodeSegment(headerSeg),
-          payload: decodeSegment(payloadSeg),
-          signature: decodeBase64UrlBytes(signatureSeg),
-        }),
+      const { header, payload } = yield* Effect.try({
+        try: () => {
+          // A signature segment that is not base64url is malformed, not a bad signature.
+          decodeBase64UrlBytes(signatureSeg);
+          return { header: decodeSegment(headerSeg), payload: decodeSegment(payloadSeg) };
+        },
         catch: (cause) => fail("malformed", "Malformed Access token", cause),
       });
       if (header["alg"] !== "RS256") {
@@ -495,16 +501,11 @@ export const make = (
         return yield* fail("key", "Access token has no kid");
       }
       const jwk = yield* keyFor(kid);
-      const verified = yield* Effect.try({
-        try: () =>
-          Cipher.verifyJws(
-            "RS256",
-            new TextEncoder().encode(`${headerSeg}.${payloadSeg}`),
-            signature,
-            jwk,
-          ),
-        catch: (cause) => fail("signature", "Access token signature verification failed", cause),
-      });
+      const verified = yield* verifiesWithJwk(token, jwk, "RS256").pipe(
+        Effect.mapError((cause) =>
+          fail("signature", "Access token signature verification failed", cause),
+        ),
+      );
       if (!verified) return yield* fail("signature", "Invalid Access token signature");
 
       const failure = claimFailure(

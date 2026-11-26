@@ -21,13 +21,16 @@
  *
  * ```ts
  * import { Layer } from "effect";
+ * import { FetchHttpClient } from "effect/http";
  * import * as Saml from "@thomasfosterau/effect-auth/saml";
  * import { SamlReplayStore, memorySamlReplayStore, SsoService } from "@thomasfosterau/effect-auth";
  *
  * const ssoLayer = SsoService.layer().pipe(
- *   Layer.provide(
- *     Layer.mergeAll(Saml.layer, Layer.succeed(SamlReplayStore)(memorySamlReplayStore())),
- *   ),
+ *   Layer.provide([
+ *     Saml.layer,
+ *     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
+ *     FetchHttpClient.layer,
+ *   ]),
  * );
  * ```
  *

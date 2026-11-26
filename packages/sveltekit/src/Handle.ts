@@ -21,6 +21,7 @@
  * @module handle
  */
 import { type Cause, Effect } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import {
   SessionResolution,
@@ -38,8 +39,24 @@ import {
  */
 export interface HandleEvent {
   readonly request: Request;
+  /** The client's address as the SvelteKit adapter knows it, for the lookup. */
+  readonly getClientAddress: () => string;
   readonly cookies: { readonly get: (name: string) => string | undefined };
   readonly locals: object;
+}
+
+/**
+ * A lookup's answer when it carries `Set-Cookie` lines as well as the
+ * session: what `Http.RemoteSession`'s `read` answers. The hook replays the
+ * lines on the response, so a refreshed cache cookie or the clearing of a
+ * stale one reaches the browser.
+ *
+ * @since 0.4.0
+ * @category models
+ */
+export interface SessionLookup {
+  readonly session: Option.Option<SessionWithUser>;
+  readonly setCookie: ReadonlyArray<string>;
 }
 
 /**
@@ -105,9 +122,15 @@ export interface HandleOptions {
   readonly cookies?: SessionCookies.SessionCookieNaming | undefined;
   /**
    * Look the session up for this request: `Option.none()` when nobody is
-   * signed in. Runs only when the request carries a credential.
+   * signed in, or a {@link SessionLookup} carrying `Set-Cookie` lines to
+   * replay. Runs only when the request carries a credential. Over
+   * `Http.RemoteSession`, pass the client address on:
+   * `(request, event) => auth.read(request, { clientAddress: event.getClientAddress() })`.
    */
-  readonly lookup: (request: Request) => Effect.Effect<Option.Option<SessionWithUser>, unknown>;
+  readonly lookup: (
+    request: Request,
+    event: HandleEvent,
+  ) => Effect.Effect<Option.Option<SessionWithUser> | SessionLookup, unknown>;
   /** What a lookup fault does. Required: neither direction is a safe default. */
   readonly failure: FailurePolicy;
 }
@@ -122,19 +145,50 @@ const withPrivateCache = (response: Response): Response => {
   return copy;
 };
 
+const noCookies: SessionLookup = { session: Option.none(), setCookie: [] };
+
+const asLookup = (value: Option.Option<SessionWithUser> | SessionLookup): SessionLookup =>
+  Option.isOption(value) ? { session: value, setCookie: [] } : value;
+
 const resolveSession = (
   event: HandleEvent,
   options: HandleOptions,
-): Effect.Effect<SessionResolution.SessionResolutionResult, unknown> => {
+): Effect.Effect<SessionResolution.ResolveWithResult<SessionLookup>, unknown> => {
   const credential = SessionResolution.detectCredential(
     SessionResolution.fromCookies(event.cookies, event.request.headers),
     options.cookies,
   );
-  const resolve = options.lookup(event.request);
+  const resolve = Effect.map(options.lookup(event.request, event), asLookup);
   const failure = options.failure;
-  return failure.mode === "open"
-    ? SessionResolution.resolveFailOpen({ credential, resolve, onDegraded: failure.onDegraded })
-    : SessionResolution.resolve({ credential, resolve });
+  return Effect.map(
+    failure.mode === "open"
+      ? SessionResolution.resolveWithFailOpen({
+          credential,
+          resolve,
+          session: (lookup) => lookup.session,
+          empty: noCookies,
+          onDegraded: failure.onDegraded,
+        })
+      : SessionResolution.resolveWith({
+          credential,
+          resolve,
+          session: (lookup) => lookup.session,
+          empty: noCookies,
+        }),
+    // A machine caller is never handed a cookie (the core's relay rule).
+    (result) =>
+      credential.hasApiKey || credential.hasBearer
+        ? { ...result, value: { ...result.value, setCookie: [] } }
+        : result,
+  );
+};
+
+/** The response with the lookup's `Set-Cookie` lines appended, kept out of shared caches. */
+const withLookupCookies = (response: Response, setCookie: ReadonlyArray<string>): Response => {
+  const copy = new Response(response.body, response);
+  setCookie.forEach((line) => copy.headers.append("set-cookie", line));
+  copy.headers.set("cache-control", PRIVATE_CACHE_CONTROL);
+  return copy;
 };
 
 /**
@@ -142,7 +196,8 @@ const resolveSession = (
  *
  * It resolves the session, sets `event.locals.auth` ({@link LocalsAuth}),
  * renders the route, and forces `Cache-Control: private, no-store` on the
- * response when a viewer is signed in. Compose it first in `sequence(...)`,
+ * response when a viewer is signed in or the lookup sent `Set-Cookie` lines,
+ * which it appends to the response (never for an API-key or bearer caller). Compose it first in `sequence(...)`,
  * so every later hook and every `load` sees the resolved viewer.
  *
  * @example
@@ -159,6 +214,7 @@ const resolveSession = (
  *
  * const event = {
  *   request: new Request("https://app.example/"),
+ *   getClientAddress: () => "203.0.113.9",
  *   cookies: { get: () => undefined },
  *   locals: {},
  * };
@@ -172,9 +228,11 @@ const resolveSession = (
 export const handle =
   (options: HandleOptions) =>
   async <Event extends HandleEvent>(input: HandleInput<Event>): Promise<Response> => {
-    const { session, outcome } = await Effect.runPromise(resolveSession(input.event, options));
-    const auth: LocalsAuth = { session: Option.getOrNull(session), outcome };
+    const { value, outcome } = await Effect.runPromise(resolveSession(input.event, options));
+    const auth: LocalsAuth = { session: Option.getOrNull(value.session), outcome };
     Object.assign(input.event.locals, { auth });
     const response = await input.resolve(input.event);
+    if (Arr.isReadonlyArrayNonEmpty(value.setCookie))
+      return withLookupCookies(response, value.setCookie);
     return auth.session === null ? response : withPrivateCache(response);
   };

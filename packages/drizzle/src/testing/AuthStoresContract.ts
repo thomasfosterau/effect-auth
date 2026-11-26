@@ -14,6 +14,7 @@
  * Never published (`tsconfig.json` excludes `src/testing/`).
  */
 
+import { createHash } from "node:crypto";
 import { Context, DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import { TestClock } from "effect/testing";
@@ -21,6 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 import * as ApiKeyStore from "../ApiKeyStore.ts";
+import type { ApiKeySchema, RateLimitSchema, TokenSchema } from "../Columns.ts";
 import type { DrizzleDatabase } from "../Database.ts";
 import * as EmailPasswordStore from "../EmailPasswordStore.ts";
 import * as IdentifierStore from "../IdentifierStore.ts";
@@ -31,6 +33,9 @@ import * as TokenStore from "../TokenStore.ts";
 import * as UserServiceStore from "../UserServiceStore.ts";
 import * as UserStore from "../UserStore.ts";
 import { conformance } from "./Conformance.ts";
+
+/** The store key a service computes for `token`: its SHA-256 hex digest. */
+const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 /**
  * `RateLimitStore.purgeExpired` over the same database and tables as the
@@ -55,14 +60,27 @@ export type AuthStores =
   | Auth.UserServiceStore
   | Auth.IdentifierStore;
 
-/** The stores over one dialect's tables, still needing the database. */
-export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, DrizzleDatabase> =>
+/** Application tables standing in for the dialect's API key, token and rate-limit tables. */
+export interface MappedTables {
+  readonly apiKeys?: ApiKeySchema | undefined;
+  readonly tokens?: TokenSchema | undefined;
+  readonly rateLimits?: RateLimitSchema | undefined;
+}
+
+/**
+ * The stores over one dialect's tables, still needing the database; `mapped`
+ * swaps in an application's own tables for the stores that take one.
+ */
+export const authStoresLayer = (
+  tables: Tables,
+  mapped: MappedTables = {},
+): Layer.Layer<AuthStores, never, DrizzleDatabase> =>
   Layer.mergeAll(
-    ApiKeyStore.layer(tables),
+    ApiKeyStore.layer(mapped.apiKeys ?? tables),
     EmailPasswordStore.layer(tables),
     EmailPasswordStore.passwordResetUserLayer(tables),
-    RateLimitStore.layer(tables),
-    TokenStore.layer(tables),
+    RateLimitStore.layer(mapped.rateLimits ?? tables),
+    TokenStore.layer(mapped.tokens ?? tables),
     SessionStore.layer(tables),
     UserStore.layer(tables),
     UserServiceStore.layer(tables),
@@ -72,7 +90,9 @@ export const authStoresLayer = (tables: Tables): Layer.Layer<AuthStores, never, 
       Effect.map(
         Effect.context<DrizzleDatabase>(),
         (context) => (options?: RateLimitStore.PurgeExpiredOptions) =>
-          RateLimitStore.purgeExpired(tables, options).pipe(Effect.provide(context)),
+          RateLimitStore.purgeExpired(mapped.rateLimits ?? tables, options).pipe(
+            Effect.provide(context),
+          ),
       ),
     ),
   );
@@ -90,7 +110,7 @@ const dateAt = (offset: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(
 const uuid = (): string => globalThis.crypto.randomUUID();
 
 const tokenRecord = (userId: string) => ({
-  token: Auth.hashToken(uuid()),
+  token: hashToken(uuid()),
   userId,
   email: `${userId}@example.com`,
   createdAt: millis(0),
@@ -170,7 +190,7 @@ const emailPasswordCases = (label: string, run: Run): void => {
           return {
             signedUp: signedUp.user.id,
             validated: validated.user.id,
-            digest: Auth.hashToken(token),
+            digest: hashToken(token),
             sessionId: signedIn.session?.id,
             storedId: stored?.id,
             wrong: wrong._tag,
@@ -488,7 +508,7 @@ const tokenCases = (label: string, run: Run): void => {
             created: yield* verifications.create(verification),
             verification: yield* verifications.get(verification.token),
             reset: yield* Effect.andThen(resets.create(reset), resets.get(reset.token)),
-            missing: yield* verifications.get(Auth.hashToken(uuid())),
+            missing: yield* verifications.get(hashToken(uuid())),
           };
         }),
       );
@@ -543,7 +563,7 @@ const tokenCases = (label: string, run: Run): void => {
             discard: true,
           });
           yield* store.delete(first.token);
-          yield* store.delete(Auth.hashToken(uuid()));
+          yield* store.delete(hashToken(uuid()));
           const afterDelete = yield* store.get(second.token);
           yield* store.deleteByUserId(userId);
           yield* store.deleteByUserId(uuid());

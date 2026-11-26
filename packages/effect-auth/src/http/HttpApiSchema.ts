@@ -1,7 +1,7 @@
-import * as Effect from "effect/Effect";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
-import { HttpApiSchema } from "effect/http-api";
+import { HttpApiMiddleware, HttpApiSchema } from "effect/http-api";
 import { Forbidden, Unauthorized } from "../Guard.ts";
 import * as Identifier from "../Identifier.ts";
 import * as Types from "../Types.ts";
@@ -1370,6 +1370,19 @@ export class OAuthError extends Schema.TaggedError<OAuthError>()("OAuthError", {
 }) {}
 
 /**
+ * 401 — an RFC 6749 §5.2 `invalid_client` error response
+ * (`{ error, error_description }`) from the token endpoint, which also sends
+ * `WWW-Authenticate`.
+ */
+export class OAuthInvalidClient extends Schema.TaggedError<OAuthInvalidClient>()(
+  "OAuthInvalidClient",
+  {
+    error: Schema.Literal("invalid_client"),
+    error_description: Schema.optional(Schema.String),
+  },
+) {}
+
+/**
  * SCIM error bodies (RFC 7644 §3.12).
  *
  * SCIM specifies the failure body exactly — `schemas`, a **string** `status`,
@@ -1437,8 +1450,31 @@ export const NotFoundError = NotFound.pipe(HttpApiSchema.status(404));
 export const TooManyRequestsError = TooManyRequests.pipe(HttpApiSchema.status(429));
 /** `InternalServerError` with HTTP status 500. */
 export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500));
-/** 400 with an RFC 7591 §3.2.2 `{ error, error_description }` body. */
+/** 400 with an RFC 7591 §3.2.2 or RFC 6749 §5.2 `{ error, error_description }` body. */
 export const OAuthBadRequestError = OAuthError.pipe(HttpApiSchema.status(400));
+/** 401 with an RFC 6749 §5.2 `invalid_client` body. */
+export const OAuthInvalidClientError = OAuthInvalidClient.pipe(HttpApiSchema.status(401));
+
+/**
+ * Answers a request the token endpoint cannot decode (a missing `grant_type`,
+ * a non-string member, an unreadable body) with the RFC 6749 §5.2
+ * `invalid_request` error response rather than the HTTP API's own body.
+ */
+export class OAuthTokenSchemaErrors extends HttpApiMiddleware.Service<OAuthTokenSchemaErrors>()(
+  "@effect-auth/OAuthTokenSchemaErrors",
+  { error: OAuthBadRequestError },
+) {
+  static readonly layer = HttpApiMiddleware.layerSchemaErrorTransform(
+    OAuthTokenSchemaErrors,
+    (error) =>
+      Effect.fail(
+        new OAuthError({
+          error: "invalid_request",
+          error_description: `Malformed token request ${error.kind.toLowerCase()}`,
+        }),
+      ),
+  );
+}
 
 /** The SCIM error bodies, each carrying its status and the SCIM media type. */
 export const ScimBadRequestError = ScimBadRequest.pipe(HttpApiSchema.status(400), asScimJson);
