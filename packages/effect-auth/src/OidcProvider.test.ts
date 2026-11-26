@@ -553,7 +553,7 @@ describe("OidcProviderService", () => {
         const jwt = yield* JwtService;
         return {
           claims: yield* Effect.orDie(
-            Schema.decodeUnknownEffect(
+            Schema.decodeEffect(
               Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
             )(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8")),
           ),

@@ -577,7 +577,7 @@ describe("a system principal is denied under every library policy set with no gr
       who: Entity.EntityRef,
     ) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
     expect(await as(Schema.encodeEffect(View)(value), billing)).toEqual({ id: "a-1" });
-    const refused = await as(Effect.result(Schema.decodeUnknownEffect(View)(value)), billing);
+    const refused = await as(Effect.result(Schema.decodeEffect(View)(value)), billing);
     expect(Result.isFailure(refused)).toBe(true);
     expect(await as(Schema.encodeEffect(View)(value), alice)).toEqual(value);
   });
@@ -684,7 +684,7 @@ describe("with an explicit grant, a system principal gets exactly that", () => {
       who: Entity.EntityRef,
     ) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
     expect(await as(Schema.encodeEffect(View)(value), billing)).toEqual(value);
-    expect(await as(Schema.decodeUnknownEffect(View)(value), billing)).toEqual(value);
+    expect(await as(Schema.decodeEffect(View)(value), billing)).toEqual(value);
     expect(await as(Schema.encodeEffect(View)(value), retry)).toEqual({ id: "a-1" });
   });
 });

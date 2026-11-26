@@ -56,7 +56,7 @@ describe("fixtureUsers", () => {
     const users = Testing.fixtureUsers();
     Arr.forEach([users.admin, users.member, users.otherMember], (user) => {
       const row = Schema.encodeSync(Types.User)(user);
-      expect(Schema.decodeUnknownSync(Types.User)(row)).toEqual(user);
+      expect(Schema.decodeSync(Types.User)(row)).toEqual(user);
     });
   });
 

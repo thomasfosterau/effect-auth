@@ -47,9 +47,7 @@ const encodeAs = (principal: Entity.EntityRef, value: typeof UserView.Type) =>
   Effect.runPromise(withPrincipal(Schema.encodeEffect(UserView)(value), principal));
 
 const decodeAs = (principal: Entity.EntityRef, input: typeof UserView.Encoded) =>
-  Effect.runPromise(
-    Effect.result(withPrincipal(Schema.decodeUnknownEffect(UserView)(input), principal)),
-  );
+  Effect.runPromise(Effect.result(withPrincipal(Schema.decodeEffect(UserView)(input), principal)));
 
 // ---------------------------------------------------------------------------
 // Viewer projection (encode)
@@ -88,10 +86,7 @@ describe("protectedField – write-side guard on decode", () => {
 
   it("the failure names the principal, action and resource", async () => {
     const exit = await Effect.runPromiseExit(
-      withPrincipal(
-        Schema.decodeUnknownEffect(UserView)({ id: "u-1", email: "bob@example.com" }),
-        bob,
-      ),
+      withPrincipal(Schema.decodeEffect(UserView)({ id: "u-1", email: "bob@example.com" }), bob),
     );
     const rendered = encodeJson(exit);
     expect(rendered).toContain("Authorization denied");
@@ -131,7 +126,7 @@ describe("protectedField – redact-on-decode", () => {
 
   it("ignores a value the principal may not set instead of failing", async () => {
     const decoded = await Effect.runPromise(
-      withPrincipal(Schema.decodeUnknownEffect(Patch)({ id: "u-1", banned: true }), bob),
+      withPrincipal(Schema.decodeEffect(Patch)({ id: "u-1", banned: true }), bob),
     );
     expect(decoded).toEqual({ id: "u-1" });
     expect("banned" in decoded).toBe(false);
@@ -139,7 +134,7 @@ describe("protectedField – redact-on-decode", () => {
 
   it("still passes the value through for a privileged principal", async () => {
     const decoded = await Effect.runPromise(
-      withPrincipal(Schema.decodeUnknownEffect(Patch)({ id: "u-1", banned: true }), alice),
+      withPrincipal(Schema.decodeEffect(Patch)({ id: "u-1", banned: true }), alice),
     );
     expect(decoded).toEqual({ id: "u-1", banned: true });
   });

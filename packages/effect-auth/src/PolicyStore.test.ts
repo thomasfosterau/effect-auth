@@ -442,7 +442,7 @@ describe("document format", () => {
     const document = PolicyStore.policyDocument(policy);
 
     const encoded = await run(PolicyStore.encodePolicyDocument(document));
-    const json = Schema.decodeUnknownSync(Json)(Schema.encodeSync(Json)(encoded));
+    const json = Schema.decodeSync(Json)(Schema.encodeSync(Json)(encoded));
     const decoded = await run(PolicyStore.decodePolicyDocument(json));
 
     expect(decoded).toEqual(document);
@@ -452,7 +452,7 @@ describe("document format", () => {
   it("roundtrips a template document through JSON, slots and all", async () => {
     const document = PolicyStore.templateDocument(shareTemplate);
     const encoded = await run(PolicyStore.encodeTemplateDocument(document));
-    const json = Schema.decodeUnknownSync(Json)(Schema.encodeSync(Json)(encoded));
+    const json = Schema.decodeSync(Json)(Schema.encodeSync(Json)(encoded));
     const decoded = await run(PolicyStore.decodeTemplateDocument(json));
     expect(decoded).toEqual(document);
     expect(decoded.template.principal).toEqual(PolicyStore.eqSlot);

@@ -27,9 +27,7 @@ describe("LadderSchema.rung", () => {
   });
 
   it("types a decoded role as the ladder's rung union", () => {
-    const role: Ladder.RungOf<typeof Roles> = Schema.decodeUnknownSync(LadderSchema.rung(Roles))(
-      "editor",
-    );
+    const role: Ladder.RungOf<typeof Roles> = Schema.decodeSync(LadderSchema.rung(Roles))("editor");
     expect(Roles.hasAtLeast({ role }, "commenter")).toBe(true);
   });
 });
