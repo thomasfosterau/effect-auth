@@ -75,8 +75,8 @@ const sortedTableNames = Arr.sort(authTableNames, Order.String);
 const DeployOutput = Schema.UndefinedOr(
   Schema.Struct({
     tables: Schema.Array(Schema.String),
-    statements: Schema.Number,
-    appliedAt: Schema.Number,
+    statements: Schema.Finite,
+    appliedAt: Schema.Finite,
   }),
 );
 const STAGE = "test";

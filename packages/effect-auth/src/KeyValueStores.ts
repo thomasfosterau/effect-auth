@@ -86,7 +86,7 @@ interface StoredEntry<A> {
 }
 
 /** An entry's JSON as `writeExpiring` writes it. */
-const isEnvelope = Schema.is(Schema.Struct({ [EXPIRES_AT]: Schema.Number, value: Schema.Unknown }));
+const isEnvelope = Schema.is(Schema.Struct({ [EXPIRES_AT]: Schema.Finite, value: Schema.Unknown }));
 
 /**
  * Small JSON codec over a raw {@link KeyValueStore.KeyValueStore}, mapping

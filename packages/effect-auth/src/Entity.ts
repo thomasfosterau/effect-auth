@@ -114,7 +114,7 @@ export type AttributeValue =
 
 export const AttributeValue: Schema.Codec<AttributeValue> = Schema.Union([
   Schema.String,
-  Schema.Number,
+  Schema.Finite,
   Schema.Boolean,
   Schema.Null,
   EntityValue,

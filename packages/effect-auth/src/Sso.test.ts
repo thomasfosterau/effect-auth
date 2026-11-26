@@ -814,7 +814,7 @@ const decodeAssertionOverrides = Schema.decodeUnknownSync(
       ),
       sessionIndex: Schema.optionalKey(Schema.String),
       inResponseTo: Schema.optionalKey(Schema.String),
-      notOnOrAfter: Schema.optionalKey(Schema.Number),
+      notOnOrAfter: Schema.optionalKey(Schema.Finite),
       relayState: Schema.optionalKey(Schema.String),
     }),
   ),

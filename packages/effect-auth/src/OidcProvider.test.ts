@@ -1775,7 +1775,7 @@ describe("HTTP OIDC provider endpoints", () => {
       Schema.Struct({
         access_token: Schema.String,
         token_type: Schema.String,
-        expires_in: Schema.Number,
+        expires_in: Schema.Finite,
         refresh_token: Schema.String,
         id_token: Schema.String,
         scope: Schema.String,
@@ -2535,9 +2535,9 @@ describe("HTTP OIDC provider endpoints", () => {
 
 const RegistrationResponse = Schema.Struct({
   client_id: Schema.String,
-  client_id_issued_at: Schema.Number,
+  client_id_issued_at: Schema.Finite,
   client_secret: Schema.optional(Schema.String),
-  client_secret_expires_at: Schema.optional(Schema.Number),
+  client_secret_expires_at: Schema.optional(Schema.Finite),
   client_name: Schema.String,
   redirect_uris: Schema.Array(Schema.String),
   grant_types: Schema.Array(Schema.String),

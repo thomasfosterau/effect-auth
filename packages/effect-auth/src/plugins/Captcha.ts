@@ -121,7 +121,7 @@ const SiteverifyAnswer = Schema.Struct({
   success: Schema.Boolean,
   hostname: Schema.optional(Schema.String),
   action: Schema.optional(Schema.String),
-  score: Schema.optional(Schema.Number),
+  score: Schema.optional(Schema.Finite),
 });
 
 const decodeAnswer = Schema.decodeUnknownEffect(SiteverifyAnswer);

@@ -54,6 +54,7 @@ export default defineConfig({
       "effecttsgo/strict-effect-provide": "off",
       "effecttsgo/any-unknown-in-error-context": "warn",
       "effecttsgo/unsafe-effect-type-assertion": "error",
+      "effecttsgo/schema-number": "error",
 
       // ---- oxlint plugins (`correctness` / `suspicious` / `perf`) ----------
       // `_tag` is the discriminant of every Effect tagged union and error
