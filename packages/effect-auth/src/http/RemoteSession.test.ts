@@ -829,7 +829,9 @@ describe("the machine-caller rule covers session reads and every key spelling", 
       RemoteSession.resolveAtEdge({ client, request: inbound({ authorization: "Bearer tok" }) }),
     );
     expect(edge.outcome).toBe("resolved");
-    expect(edge.credentialClass).toBe("machine");
+    // The class is the session's own (a browser session here), whatever
+    // carries its token; the cookie rule still reads the carrier.
+    expect(edge.credentialClass).toBe("interactive");
     expect(edge.setCookie).toStrictEqual([]);
   });
 

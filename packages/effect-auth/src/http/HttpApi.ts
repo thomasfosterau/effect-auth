@@ -1398,10 +1398,12 @@ export const CurrentApiKeyDocument = Document.DataDocument(R.ApiKey, {
  *   `Cache-Control: no-store`.
  * - `GET /api-keys`: every key the caller owns.
  * - `POST /api-keys`: mint one; `201` with the key and, in `meta.key`, the
- *   plaintext key, shown this once. Minting needs an interactive credential
- *   (the session cookie): over a bearer credential it answers `403`.
+ *   plaintext key, shown this once. Minting needs an interactive session
+ *   (the class the session was issued with, whichever header carries its
+ *   token): a machine-issued session, such as the device grant's, gets `403`.
  * - `PATCH /api-keys/:id`: change its `name`, `enabled`, `expiresAt`,
- *   `permissions`, `metadata`, `remaining` or `rateLimit`.
+ *   `permissions`, `metadata`, `remaining` or `rateLimit`; it needs an
+ *   interactive session too (`403`).
  * - `DELETE /api-keys/:id`: delete it; `204`.
  *
  * A key the caller does not own answers `400`, as an unknown one does.
@@ -1425,12 +1427,13 @@ export const apiKeysGroup = Group.make(
     meta: Schema.Struct({ key: Schema.String }),
     errors: resourceErrors,
   }),
+  // Widening a key takes the same interactive session minting does.
   Endpoint.update(R.ApiKey, {
     payload: boundedPayload(R.ApiKey.updatePayload, {
       name: S.NameInput,
       metadata: S.AttributesInput,
     }),
-    errors: apiKeyErrors,
+    errors: [...apiKeyErrors, E.Forbidden],
   }),
   Endpoint.delete(R.ApiKey, { errors: apiKeyErrors }),
 );
@@ -1545,6 +1548,17 @@ export const tokensGroup = Group.make(
 );
 
 /**
+ * The body of `POST /device-authorizations/lookups`: the user code the device
+ * showed. The code travels in the body, never in the URL, so no access log or
+ * `Referer` carries it.
+ */
+export const DeviceAuthorizationLookupDocument = writeDocument(
+  "device-authorization-lookups",
+  Schema.Struct({ userCode: Schema.String }),
+);
+export type DeviceAuthorizationLookupDocument = typeof DeviceAuthorizationLookupDocument.Type;
+
+/**
  * The body of `POST /device-authorizations/decisions`: the user code the
  * device showed, and the decision. The code travels in the body, never in the
  * URL, so no access log or `Referer` carries it.
@@ -1558,30 +1572,44 @@ export const DeviceAuthorizationDecisionDocument = writeDocument(
 );
 export type DeviceAuthorizationDecisionDocument = typeof DeviceAuthorizationDecisionDocument.Type;
 
+const deviceAuthorizationErrors = [
+  E.BadRequest.wire,
+  E.Unauthorized.wire,
+  E.NotFound.wire,
+  E.TooManyRequests.wire,
+  E.InternalServerError.wire,
+];
+
 /**
  * `device-authorizations`: the verification page's side of the device grant
- * (RFC 8628 §3.3, which leaves its shape to the server).
+ * (RFC 8628 §3.3, which leaves its shape to the server). Both need a session.
  *
- * - `POST /device-authorizations/decisions`: approve (signed in: the device
- *   is granted the caller's session) or deny (no session needed) the pending
- *   authorization a user code names; `204`. An unknown or settled code
- *   answers `400`; each code allows 5 attempts per 15 minutes (`429`).
+ * - `POST /device-authorizations/lookups`: the pending request a user code
+ *   names, with the client and scopes it asks for, for the page to show
+ *   before the user decides; `200` with the `device-authorizations` resource.
+ * - `POST /device-authorizations/decisions`: approve (the device is granted a
+ *   session for the caller, recording the client and scopes) or deny the
+ *   pending request; `200` with the decided resource.
+ *
+ * An unknown, expired or already decided code answers `400`; each caller
+ * allows 10 lookups and decisions per 15 minutes together (`429`).
  *
  * The device's own endpoints (`/device/code`, `/device/token`) keep RFC
  * 8628's wire format. `404` when device authorization is not enabled.
  */
 export const deviceAuthorizationsGroup = Group.make(
   "device-authorizations",
+  HttpApiEndpoint.post("lookup", "/device-authorizations/lookups", {
+    payload: jsonApiPayload(DeviceAuthorizationLookupDocument),
+    success: MediaType.asJsonApi(Document.DataDocument(R.DeviceAuthorization), 200),
+    error: deviceAuthorizationErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
   HttpApiEndpoint.post("decide", "/device-authorizations/decisions", {
     payload: jsonApiPayload(DeviceAuthorizationDecisionDocument),
-    success: HttpApiSchema.NoContent,
-    error: [
-      E.BadRequest.wire,
-      E.Unauthorized.wire,
-      E.NotFound.wire,
-      E.TooManyRequests.wire,
-      E.InternalServerError.wire,
-    ],
+    success: MediaType.asJsonApi(Document.DataDocument(R.DeviceAuthorization), 200),
+    error: deviceAuthorizationErrors,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -1594,24 +1622,24 @@ export const deviceAuthorizationsGroup = Group.make(
  * formats are fixed by those specifications, so they are not JSON:API.
  */
 export const authGroup = HttpApiGroup.make("auth").add(
-  // Device authorization grant (RFC 8628). 404 when unconfigured.
+  // Device authorization grant (RFC 8628). 404 when unconfigured. Requests
+  // are form-encoded (or JSON); every refusal, a request that does not
+  // decode included, is an RFC 6749 §5.2 error object with status 400: `invalid_request`, `invalid_client`,
+  // `invalid_scope`, `unsupported_grant_type`, `invalid_grant`, and the
+  // poll's `authorization_pending`, `slow_down`, `access_denied` and
+  // `expired_token`.
   HttpApiEndpoint.post("deviceCode", "/device/code", {
-    payload: S.DeviceCodePayload,
+    payload: [S.DeviceCodePayload, S.DeviceCodePayload.pipe(HttpApiSchema.asFormUrlEncoded())],
     success: S.DeviceCodeView,
-    error: [S.NotFoundError, S.InternalError],
-  }),
-  // Poll: RFC error codes (authorization_pending/slow_down/...) -> 400.
+    error: [S.OAuthBadRequestError, S.NotFoundError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
+  // A successful poll answers a token response whose `access_token` is the
+  // session token, used as a bearer; no cookie is set.
   HttpApiEndpoint.post("deviceToken", "/device/token", {
-    payload: S.DeviceTokenPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
+    payload: [S.DeviceTokenPayload, S.DeviceTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
+    success: S.DeviceTokenView,
+    error: [S.OAuthBadRequestError, S.NotFoundError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
   // --- Enterprise SSO callbacks (relying party). 404 when the module is
   // --- absent. The IdP sends the browser back here, so they keep their
   // --- binding's wire format.

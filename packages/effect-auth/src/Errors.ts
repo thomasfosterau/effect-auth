@@ -616,7 +616,7 @@ export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
  * run. The limits are `Http.make`'s `ipRateLimit` (on unless it is
  * `false`), the dynamic client
  * registration limit (`POST /register`) and the device user-code limit on
- * approve/deny, which counts as configured whenever a
+ * lookups and decisions, which counts as configured whenever a
  * `DeviceAuthorizationService` is in `services` unless it was built with
  * `allowMissingRateLimiter: true`.
  *

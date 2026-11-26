@@ -101,7 +101,7 @@ const makeFixture = (admin?: AdminConfig, clientHiddenAttributes?: ReadonlyArray
     return user;
   };
 
-  const makeSession = (userId: string): string => {
+  const makeSession = (userId: string, attributes: Types.Attributes = {}): string => {
     const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(16))).toString(
       "hex",
     );
@@ -113,7 +113,7 @@ const makeFixture = (admin?: AdminConfig, clientHiddenAttributes?: ReadonlyArray
       expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: HOUR })),
       createdAt: now,
       lastActivityAt: now,
-      attributes: {},
+      attributes,
     });
     return rawToken;
   };
@@ -443,7 +443,7 @@ const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 ): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
 // Same raw session token, delivered as `Authorization: Bearer` instead of
-// the cookie — the "machine" credential path (`credentialClassFromRequest`).
+// the cookie. The carrier never decides the credential class: the session does.
 const apiReqBearer = (path: string, body: Schema.Json, sessionId: string): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
@@ -2057,22 +2057,48 @@ const ApiKeyResource = Schema.Struct({
 describe("HTTP api-key endpoints", () => {
   const createKey = { data: { type: "api-keys", attributes: { name: "CI" } } };
 
-  it("rejects minting a key over a machine (bearer) credential, and allows it over the session cookie", async () => {
+  it("reads the credential class from the session, never from the header that carried it", async () => {
     const fx = makeFixture();
     fx.seedUser("u", "u@test.com");
     const sid = fx.makeSession("u");
 
-    // Same valid, unexpired session token — but presented as a bearer
-    // credential rather than the cookie. Minting requires an interactive
-    // session, so this is a 403, not a 401: the caller is authenticated, just
-    // not with a credential class allowed to mint.
-    const deniedOverBearer = await fx.handler(apiReqBearer("/api-keys", createKey, sid));
-    expect(deniedOverBearer.status).toBe(403);
-
-    const allowedOverCookie = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
-    expect(allowedOverCookie.status).toBe(201);
+    // An interactive session's token stays interactive as a bearer token.
+    const overBearer = await fx.handler(apiReqBearer("/api-keys", createKey, sid));
+    expect(overBearer.status).toBe(201);
+    const overCookie = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
+    expect(overCookie.status).toBe(201);
     // The answer carries the raw key: never stored by a cache.
-    expect(allowedOverCookie.headers.get("cache-control")).toBe("no-store");
+    expect(overCookie.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("refuses minting or widening a key from a machine-issued session, over either carrier", async () => {
+    const fx = makeFixture();
+    fx.seedUser("u", "u@test.com");
+    const sid = fx.makeSession("u");
+    const machine = fx.makeSession("u", { credentialClass: "machine" });
+
+    const created = await fx.handler(apiReq("POST", "/api-keys", createKey, sid));
+    const keyId = (await jsonBody(created, Schema.Struct({ data: ApiKeyResource }))).data.id;
+
+    // Authenticated, but not with a class allowed to mint: 403, not 401.
+    expect((await fx.handler(apiReq("POST", "/api-keys", createKey, machine))).status).toBe(403);
+    expect((await fx.handler(apiReqBearer("/api-keys", createKey, machine))).status).toBe(403);
+
+    const widen = {
+      data: { type: "api-keys", id: keyId, attributes: { permissions: { admin: ["*"] } } },
+    };
+    const update = await fx.handler(apiReq("PATCH", `/api-keys/${keyId}`, widen, machine));
+    expect(update.status).toBe(403);
+    // The interactive session may still edit its own key.
+    const allowed = await fx.handler(
+      apiReq(
+        "PATCH",
+        `/api-keys/${keyId}`,
+        { data: { type: "api-keys", id: keyId, attributes: { name: "CI 2" } } },
+        sid,
+      ),
+    );
+    expect(allowed.status).toBe(200);
   });
 
   it("creates, lists, updates, and deletes keys, the plaintext only at creation", async () => {

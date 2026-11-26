@@ -199,6 +199,36 @@ const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
   P.isString(action) ? Entity.ref("Action", action) : action;
 
 /**
+ * The {@link Policy.PolicyRequest} every kernel entry point that decides for
+ * the {@link CurrentPrincipal} asks: `Authorizer.authorize` / `check` and the
+ * `protectedField` schema guard (`Protected.ts`) build it here, so both see
+ * the same principal, action, resource and context. The resource defaults to
+ * the principal itself. `CurrentCredential`, when present, is authoritative
+ * over a caller's own `context.credentialClass`: it is spread last, so a call
+ * site cannot spoof its credential class.
+ *
+ * @internal
+ */
+export const requestForCurrent = (input: {
+  readonly action: Entity.EntityRef | string;
+  readonly resource?: Entity.EntityRef | undefined;
+  readonly context?: Readonly<Record<string, Entity.AttributeValue>> | undefined;
+}): Effect.Effect<Policy.PolicyRequest, never, CurrentPrincipal> =>
+  Effect.gen(function* () {
+    const principal = yield* CurrentPrincipal;
+    const credentialClass = yield* Effect.serviceOption(CurrentCredential);
+    return Policy.request({
+      principal,
+      action: toActionRef(input.action),
+      resource: input.resource ?? principal,
+      context: {
+        ...input.context,
+        ...(Option.isSome(credentialClass) ? { credentialClass: credentialClass.value } : {}),
+      },
+    });
+  });
+
+/**
  * The audit record of a system principal's decision. A background job has no
  * request or session to log against, so its decisions are logged here, always,
  * with the principal's name and the policies that determined the outcome:
@@ -357,32 +387,11 @@ const make = <E = unknown>(
       return decision;
     });
 
-    const requestFrom = (
-      input: AuthorizeInput,
-    ): Effect.Effect<Policy.PolicyRequest, never, CurrentPrincipal> =>
-      Effect.gen(function* () {
-        const principal = yield* CurrentPrincipal;
-        // `CurrentCredential`, when present, is authoritative over anything
-        // a caller passed in `input.context.credentialClass`: it is spread
-        // last so a call site cannot spoof its own credential class.
-        const credentialClass = yield* Effect.serviceOption(CurrentCredential);
-        const context = {
-          ...input.context,
-          ...(Option.isSome(credentialClass) ? { credentialClass: credentialClass.value } : {}),
-        };
-        return Policy.request({
-          principal,
-          action: toActionRef(input.action),
-          resource: input.resource,
-          context,
-        });
-      });
-
     return {
       decideRequest,
 
       authorize: Effect.fn("Authorizer.authorize")(function* (input: AuthorizeInput) {
-        const request = yield* requestFrom(input);
+        const request = yield* requestForCurrent(input);
         const decision = yield* decideRequest(request);
         if (!decision.allowed) {
           return yield* new Policy.AuthorizationDeniedError({
@@ -395,7 +404,7 @@ const make = <E = unknown>(
       }),
 
       check: Effect.fn("Authorizer.check")(function* (input: AuthorizeInput) {
-        const request = yield* requestFrom(input);
+        const request = yield* requestForCurrent(input);
         const decision = yield* decideRequest(request);
         return decision.allowed;
       }),

@@ -75,12 +75,12 @@
 import { Effect, SchemaGetter, SchemaIssue } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import {
   auditSystemDecision,
   CurrentPrincipal,
   EntityResolver,
+  requestForCurrent,
   requestRefs,
 } from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
@@ -135,29 +135,9 @@ export interface ProtectedFieldOptions<E = unknown> {
 // Decision
 // ---------------------------------------------------------------------------
 
-const toActionRef = (action: string | Entity.EntityRef): Entity.EntityRef =>
-  P.isString(action) ? Entity.ref("Action", action) : action;
-
 const toPolicies = <E>(
   policies: Policy.Policy<E> | ReadonlyArray<Policy.Policy<E>>,
 ): ReadonlyArray<Policy.Policy<E>> => Arr.ensure(policies);
-
-/**
- * Build the {@link Policy.PolicyRequest} a protected field asks. The principal
- * comes from context; the resource defaults to that same principal.
- */
-const requestFor = <E>(
-  options: ProtectedFieldOptions<E>,
-): Effect.Effect<Policy.PolicyRequest, never, CurrentPrincipal> =>
-  Effect.gen(function* () {
-    const principal = yield* CurrentPrincipal;
-    return Policy.request({
-      principal,
-      action: toActionRef(options.action),
-      resource: options.resource ?? principal,
-      ...(options.context !== undefined ? { context: options.context } : {}),
-    });
-  });
 
 /**
  * Resolve the slice and run the pure kernel. `EntityResolver` is optional (an
@@ -224,7 +204,8 @@ const guard = <A, E>(
   const policies = toPolicies(options.policies);
   return someEffect<A, CurrentPrincipal>((value) =>
     Effect.gen(function* () {
-      const request = yield* requestFor(options);
+      // The same request `Authorizer` builds, `CurrentCredential` included.
+      const request = yield* requestForCurrent(options);
       const allowed = yield* decide(policies, request);
       if (allowed) return Option.some(value);
       if (behavior === "redact") return Option.none<A>();

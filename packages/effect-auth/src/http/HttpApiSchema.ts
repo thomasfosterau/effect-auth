@@ -382,34 +382,77 @@ export const MultiSessionActionPayload = Schema.Struct({
 });
 export type MultiSessionActionPayload = typeof MultiSessionActionPayload.Type;
 
-/** Request body for starting a device authorization request. */
+/**
+ * The device authorization request (RFC 8628 §3.1), as JSON or
+ * `application/x-www-form-urlencoded`. Every member is optional here so a
+ * missing one is answered with the RFC's `invalid_request`, not a schema error.
+ */
 export const DeviceCodePayload = Schema.Struct({
-  clientId: Schema.optional(TokenInput),
-  scopes: Schema.optional(Schema.Array(Schema.String)),
+  client_id: Schema.optional(TokenInput),
+  /** Space-delimited scopes (RFC 6749 §3.3). */
+  scope: Schema.optional(TokenInput),
 });
 export type DeviceCodePayload = typeof DeviceCodePayload.Type;
 
-/** Response for a started device authorization request. */
+/** The device authorization response (RFC 8628 §3.2). */
 export const DeviceCodeView = Schema.Struct({
-  deviceCode: Schema.String,
-  userCode: Schema.String,
-  verificationUri: Schema.String,
-  expiresIn: Schema.Number,
+  device_code: Schema.String,
+  user_code: Schema.String,
+  verification_uri: Schema.String,
+  verification_uri_complete: Schema.String,
+  /** Seconds. */
+  expires_in: Schema.Number,
+  /** Seconds between polls. */
   interval: Schema.Number,
 });
 export type DeviceCodeView = typeof DeviceCodeView.Type;
 
-/** Request body for polling the device token endpoint. */
+/**
+ * The device access token request (RFC 8628 §3.4), as JSON or
+ * `application/x-www-form-urlencoded`: `grant_type` is
+ * `urn:ietf:params:oauth:grant-type:device_code`. Every member is optional
+ * here so a missing one is answered with `invalid_request`.
+ */
 export const DeviceTokenPayload = Schema.Struct({
-  deviceCode: TokenInput,
+  grant_type: Schema.optional(TokenInput),
+  device_code: Schema.optional(TokenInput),
+  client_id: Schema.optional(TokenInput),
 });
 export type DeviceTokenPayload = typeof DeviceTokenPayload.Type;
 
-/** Request body for approving/denying a device user code. */
+/**
+ * The device grant's token response (RFC 6749 §5.1). `access_token` is the
+ * session token, presented as `Authorization: Bearer`; `expires_in` is the
+ * session's remaining lifetime in seconds, and `scope` the granted scopes.
+ */
+export const DeviceTokenView = Schema.Struct({
+  access_token: Schema.String,
+  token_type: Schema.Literal("Bearer"),
+  expires_in: Schema.Number,
+  scope: Schema.String,
+});
+export type DeviceTokenView = typeof DeviceTokenView.Type;
+
+/** Request body for looking up, approving or denying a device user code. */
 export const DeviceUserCodePayload = Schema.Struct({
   userCode: TokenInput,
 });
 export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
+
+/**
+ * A device authorization request as the verification page shows it: the
+ * registered client, its display name, the scopes it asks for and the status.
+ * `id` is the device code's digest; `expiresAt` is epoch-ms.
+ */
+export const DeviceAuthorizationView = Schema.Struct({
+  id: Schema.String,
+  clientId: Schema.String,
+  clientName: Schema.String,
+  scopes: Schema.Array(Schema.String),
+  status: Schema.Literals(["pending", "approved", "denied"]),
+  expiresAt: Schema.Number,
+});
+export type DeviceAuthorizationView = typeof DeviceAuthorizationView.Type;
 
 /** Request body for signing in with a username + password. */
 export const UsernameSignInPayload = Schema.Struct({
@@ -1363,11 +1406,12 @@ export class InternalServerError extends Schema.TaggedError<InternalServerError>
 /**
  * 400 — an OAuth error response body (`{ error, error_description }`) rather
  * than this API's `{ message }` shape. RFC 7591 §3.2.2 specifies it verbatim
- * for the dynamic client registration endpoint, and generic OAuth clients
+ * for the dynamic client registration endpoint and RFC 8628 §3.5 / RFC 6749
+ * §5.2 for the device grant's endpoints, and generic OAuth clients
  * (MCP clients included) read `error` to decide what to do next.
  */
 export class OAuthError extends Schema.TaggedError<OAuthError>()("OAuthError", {
-  /** RFC 7591 §3.2.2 code, e.g. `invalid_redirect_uri`, `invalid_client_metadata`. */
+  /** The RFC's code, e.g. `invalid_client_metadata` or `authorization_pending`. */
   error: Schema.String,
   error_description: Schema.optional(Schema.String),
 }) {}

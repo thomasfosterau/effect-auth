@@ -117,6 +117,29 @@ describe("SessionResolution.credentialClassOf", () => {
       SessionResolution.credentialClassOf(SessionResolution.detectCredential(request(headers))),
     ).toBe(expected);
   });
+  const session = (attributes: Types.Attributes): Types.Session => ({
+    id: "digest",
+    userId: "u",
+    expiresAt: now,
+    createdAt: now,
+    lastActivityAt: now,
+    attributes,
+  });
+
+  it("reads a session's class from the session, not from its carrier", () => {
+    const bearer = SessionResolution.detectCredential(request({ authorization: "Bearer tok" }));
+    const cookie = SessionResolution.detectCredential(request(withSessionCookie));
+    // A browser session sent as a bearer token stays interactive.
+    expect(SessionResolution.credentialClassOf(bearer, session({}))).toBe("interactive");
+    // A machine-issued session is machine even in a cookie.
+    const machine = session({ credentialClass: "machine" });
+    expect(SessionResolution.credentialClassOf(cookie, machine)).toBe("machine");
+    // An API key is machine whatever session sits beside it.
+    const keyed = SessionResolution.detectCredential(
+      request({ ...withSessionCookie, "x-api-key": "k" }),
+    );
+    expect(SessionResolution.credentialClassOf(keyed, session({}))).toBe("machine");
+  });
 });
 
 describe("SessionResolution credential sources", () => {
