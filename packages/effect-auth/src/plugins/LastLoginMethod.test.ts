@@ -90,7 +90,7 @@ const makeFixture = () => {
 describe("LastLoginMethodPlugin", () => {
   it("records the method into session.attributes on sign-up and sign-in", async () => {
     const { layer, sessions } = makeFixture();
-    const { signedUp, signedIn } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const service = yield* EmailPassword.make();
         const signedUp = yield* service.signUp({
@@ -101,27 +101,29 @@ describe("LastLoginMethodPlugin", () => {
           email: "alice@test.dev",
           password: "password-123",
         });
-        return { signedUp, signedIn };
+
+        // The hooks see the discriminator...
+        expect(signedUp.method).toBe("email-password");
+        expect(signedIn.method).toBe("email-password");
+        // ...and the plugin persisted it onto both stored sessions.
+        assert(
+          signedUp.session !== undefined && signedIn.session !== undefined,
+          "both issue sessions",
+        );
+        // The plugin addresses each session by its stored id, the token's digest.
+        expect(signedIn.session.id).toBe(sha256Hex(signedIn.token ?? ""));
+        expect(
+          Option.getOrUndefined(MutableHashMap.get(sessions, signedUp.session.id))?.attributes[
+            "method"
+          ],
+        ).toBe("email-password");
+        expect(
+          Option.getOrUndefined(MutableHashMap.get(sessions, signedIn.session.id))?.attributes[
+            "method"
+          ],
+        ).toBe("email-password");
       }).pipe(Effect.provide(layer)),
     );
-
-    // The hooks see the discriminator...
-    expect(signedUp.method).toBe("email-password");
-    expect(signedIn.method).toBe("email-password");
-    // ...and the plugin persisted it onto both stored sessions.
-    assert(signedUp.session !== undefined && signedIn.session !== undefined, "both issue sessions");
-    // The plugin addresses each session by its stored id, the token's digest.
-    expect(signedIn.session.id).toBe(sha256Hex(signedIn.token ?? ""));
-    expect(
-      Option.getOrUndefined(MutableHashMap.get(sessions, signedUp.session.id))?.attributes[
-        "method"
-      ],
-    ).toBe("email-password");
-    expect(
-      Option.getOrUndefined(MutableHashMap.get(sessions, signedIn.session.id))?.attributes[
-        "method"
-      ],
-    ).toBe("email-password");
   });
 
   it("does nothing when no session was issued", async () => {

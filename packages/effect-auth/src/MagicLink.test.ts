@@ -386,9 +386,9 @@ describe("MagicLinkService", () => {
             sendMagicLink: recordingSend,
           });
           yield* service.send("member@example.com");
-          const knownOps = storeOps.splice(0);
+          const knownAddressOps = storeOps.splice(0);
           yield* service.send("missing@example.com");
-          return { knownOps, unknownOps: storeOps.splice(0) };
+          return { knownOps: knownAddressOps, unknownOps: storeOps.splice(0) };
         }),
         testContext,
       ).pipe(Effect.provide(TestHooks)),

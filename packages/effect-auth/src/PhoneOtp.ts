@@ -485,7 +485,7 @@ export const make = (
               verified: true,
               verifiedAt: yield* DateTime.nowAsDate,
             },
-            (identifier) => userStore.createUser({ identifier }),
+            (claimed) => userStore.createUser({ identifier: claimed }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
               Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),

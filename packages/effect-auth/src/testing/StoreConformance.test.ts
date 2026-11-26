@@ -301,14 +301,14 @@ describe("a broken store fails its suite", () => {
 
   it("a PhoneOtpStore whose upsert resets the failure budget fails the failure-budget case", async () => {
     const failed = await failures(Testing.phoneOtpStoreConformance(), () => {
-      const failures = MutableHashMap.empty<string, Types.OtpFailures>();
-      const inner = Testing.memoryPhoneOtpStore(MutableHashMap.empty(), failures);
+      const failureBudgets = MutableHashMap.empty<string, Types.OtpFailures>();
+      const inner = Testing.memoryPhoneOtpStore(MutableHashMap.empty(), failureBudgets);
       // The naive shape: the count lives with the code, so a resend clears it.
       return Layer.succeed(PhoneOtpStore, {
         ...inner,
         upsert: (record) =>
           Effect.andThen(
-            Effect.sync(() => MutableHashMap.clear(failures)),
+            Effect.sync(() => MutableHashMap.clear(failureBudgets)),
             inner.upsert(record),
           ),
       });

@@ -410,24 +410,23 @@ describe("WebAuthn Service", () => {
   });
 
   it("advertises ES256, RS256, and EdDSA in the registration challenge", async () => {
-    const result = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* WebAuthn.make({ ...config, residentKey: "required" });
           const result = yield* service.generateRegistrationChallenge(testUser);
-          return result;
+          expect(result.pubKeyCredParams.map((p) => p.alg)).toEqual([-7, -257, -8]);
+          expect(result.authenticatorSelection).toEqual({
+            residentKey: "required",
+            requireResidentKey: true,
+            userVerification: "preferred",
+          });
+          expect(result.excludeCredentials).toEqual([]);
+          expect(result.attestation).toBe("none");
         }),
         dependencies,
       ),
     );
-    expect(result.pubKeyCredParams.map((p) => p.alg)).toEqual([-7, -257, -8]);
-    expect(result.authenticatorSelection).toEqual({
-      residentKey: "required",
-      requireResidentKey: true,
-      userVerification: "preferred",
-    });
-    expect(result.excludeCredentials).toEqual([]);
-    expect(result.attestation).toBe("none");
   });
 
   // Attestation statements are never verified, so asking for one is refused

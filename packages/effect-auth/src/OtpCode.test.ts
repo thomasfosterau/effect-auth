@@ -27,7 +27,7 @@ const verify = (store: typeof PhoneOtpStore.Service, guess: string) =>
     code: guess,
     purpose,
     maxAttempts: 3,
-    hash: (code) => Effect.succeed(sha256Hex(code)),
+    hash: (plain) => Effect.succeed(sha256Hex(plain)),
     reject: (_purpose, reason): Effect.Effect<never, VerifyFailure> => Effect.fail(reason),
   }).pipe(Effect.result);
 

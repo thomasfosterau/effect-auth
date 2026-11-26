@@ -1382,18 +1382,18 @@ export const make = (
      * database.
      */
     const createCallbackAccount = (
-      provider: string,
+      providerName: string,
       tokens: OAuthTokenResponse,
       userInfo: OAuthUserInfo,
-      options: { linkToUserId?: string } | undefined,
+      linkOptions: { linkToUserId?: string } | undefined,
     ) =>
       Effect.gen(function* () {
         const newAccountId = yield* randomAccountId();
         const newAccount = profileAccount(
           {
             id: newAccountId,
-            userId: options?.linkToUserId ?? "",
-            provider,
+            userId: linkOptions?.linkToUserId ?? "",
+            provider: providerName,
             createdAt: yield* Clock.currentTimeMillis,
           },
           tokens,
@@ -1407,7 +1407,7 @@ export const make = (
           account: newAccount,
           isNewUser: true,
           ...definedKeys({
-            user: options?.linkToUserId
+            user: linkOptions?.linkToUserId
               ? {
                   id: newAccount.userId,
                   ...(userInfo.email && { email: userInfo.email }),
@@ -1470,18 +1470,18 @@ export const make = (
 
     return {
       generateAuthorizationUrl: Effect.fn("OAuthService.generateAuthorizationUrl")(
-        (provider: string, options?: { scopes?: readonly string[]; returnTo?: string }) =>
+        (providerName: string, urlOptions?: { scopes?: readonly string[]; returnTo?: string }) =>
           Effect.gen(function* () {
-            const providerInstance = providers[provider];
+            const providerInstance = providers[providerName];
             if (!providerInstance) {
               return yield* new OAuthProviderError({
-                message: `Provider ${provider} not found`,
-                provider,
+                message: `Provider ${providerName} not found`,
+                provider: providerName,
               });
             }
 
             const result = yield* providerInstance
-              .generateAuthorizationUrl(options?.scopes)
+              .generateAuthorizationUrl(urlOptions?.scopes)
               .pipe(
                 Effect.provideService(OAuthStateStore, stateStore),
                 Effect.provideService(SecureRandom.SecureRandom, crypto),
@@ -1491,7 +1491,7 @@ export const make = (
               );
 
             // Update state with returnTo if provided
-            if (options?.returnTo) {
+            if (urlOptions?.returnTo) {
               const foundStateEntry = yield* stateStore.consume(result.state);
               if (Option.isNone(foundStateEntry)) {
                 return yield* new AuthError({ message: "OAuth state missing after creation" });
@@ -1501,18 +1501,22 @@ export const make = (
               yield* stateStore.create({
                 ...stateEntry,
                 state: result.state,
-                returnTo: options.returnTo,
+                returnTo: urlOptions.returnTo,
               });
             }
 
             return result;
-          }).pipe(Effect.withSpan(Obs.spanNames.oauthAuthorize, { attributes: { provider } })),
+          }).pipe(
+            Effect.withSpan(Obs.spanNames.oauthAuthorize, {
+              attributes: { provider: providerName },
+            }),
+          ),
       ),
 
       handleCallback: Effect.fn("OAuthService.handleCallback")(function* (
         state: string,
         code: string,
-        options?: { linkToUserId?: string },
+        callbackOptions?: { linkToUserId?: string },
       ) {
         // Verify and consume the state, exchange the code and fetch the
         // profile (userinfo endpoint or verified OIDC id_token).
@@ -1522,7 +1526,7 @@ export const make = (
         if (Option.isSome(existingAccount)) {
           return yield* refreshCallbackAccount(existingAccount.value, tokens);
         }
-        return yield* createCallbackAccount(stateEntry.provider, tokens, userInfo, options);
+        return yield* createCallbackAccount(stateEntry.provider, tokens, userInfo, callbackOptions);
       }),
 
       signInWithCallback: Effect.fn("OAuthService.signInWithCallback")(
@@ -1615,7 +1619,7 @@ export const make = (
 
       linkAccount: Effect.fn("OAuthService.linkAccount")(function* (
         userId: string,
-        provider: string,
+        providerName: string,
         code: string,
         state: string,
       ) {
@@ -1626,18 +1630,18 @@ export const make = (
         // the same state is refused, and so is a retry after a failure.
         const stateEntry = yield* consumeState(state);
 
-        if (stateEntry.provider !== provider) {
+        if (stateEntry.provider !== providerName) {
           return yield* new OAuthProviderError({
-            message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
-            provider,
+            message: `State provider mismatch: expected ${providerName}, got ${stateEntry.provider}`,
+            provider: providerName,
           });
         }
 
-        const providerInstance = providers[provider];
+        const providerInstance = providers[providerName];
         if (!providerInstance) {
           return yield* new OAuthProviderError({
-            message: `Provider ${provider} not found`,
-            provider,
+            message: `Provider ${providerName} not found`,
+            provider: providerName,
           });
         }
 
@@ -1659,19 +1663,19 @@ export const make = (
           );
           if (!ownsEmail) {
             return yield* new OAuthEmailMismatchError({
-              message: `Cannot link ${provider} account: provider email (${providerEmail}) does not belong to this account`,
-              provider,
+              message: `Cannot link ${providerName} account: provider email (${providerEmail}) does not belong to this account`,
+              provider: providerName,
             });
           }
         }
 
         // Check if this OAuth account is already linked to another user
-        const existingAccount = yield* accountStore.get(provider, userInfo.id);
+        const existingAccount = yield* accountStore.get(providerName, userInfo.id);
 
         if (Option.exists(existingAccount, (account) => account.userId !== userId)) {
           return yield* new OAuthAccountConflictError({
-            message: `This ${provider} account is already linked to another user`,
-            provider,
+            message: `This ${providerName} account is already linked to another user`,
+            provider: providerName,
           });
         }
 
@@ -1683,7 +1687,7 @@ export const make = (
           {
             id: accountId,
             userId,
-            provider,
+            provider: providerName,
             createdAt: Option.isSome(existingAccount)
               ? existingAccount.value.createdAt
               : yield* Clock.currentTimeMillis,
@@ -1715,16 +1719,16 @@ export const make = (
 
       unlinkAccount: Effect.fn("OAuthService.unlinkAccount")(function* (
         userId: string,
-        provider: string,
+        providerName: string,
         opts?: { readonly allowUnlinkingAll?: boolean },
       ) {
         const accounts = yield* accountStore.getByUserId(userId);
-        const account = accounts.find((a) => a.provider === provider);
+        const account = accounts.find((a) => a.provider === providerName);
 
         if (!account) {
           return yield* new OAuthAccountNotFoundError({
-            message: `No ${provider} account linked to this user`,
-            provider,
+            message: `No ${providerName} account linked to this user`,
+            provider: providerName,
           });
         }
 
@@ -1734,7 +1738,7 @@ export const make = (
         // implement `hasPassword`, the guard fails open — it assumes another
         // credential exists and permits the unlink.
         if (!(opts?.allowUnlinkingAll ?? false)) {
-          const remainingOAuth = accounts.filter((a) => a.provider !== provider).length;
+          const remainingOAuth = accounts.filter((a) => a.provider !== providerName).length;
           const hasPass = accountStore.hasPassword ? yield* accountStore.hasPassword(userId) : true;
           if (remainingOAuth === 0 && !hasPass) {
             return yield* new OAuthLastCredentialError({
@@ -1744,25 +1748,25 @@ export const make = (
           }
         }
 
-        return yield* accountStore.delete(provider, account.providerId);
+        return yield* accountStore.delete(providerName, account.providerId);
       }),
 
       refreshAccessToken: Effect.fn("OAuthService.refreshAccessToken")(
-        (userId: string, provider: string) =>
+        (userId: string, providerName: string) =>
           Effect.gen(function* () {
             const accounts = yield* accountStore.getByUserId(userId);
-            const account = accounts.find((a) => a.provider === provider);
+            const account = accounts.find((a) => a.provider === providerName);
 
             if (!account) {
               return yield* new OAuthAccountNotFoundError({
-                message: `No ${provider} account linked to this user`,
-                provider,
+                message: `No ${providerName} account linked to this user`,
+                provider: providerName,
               });
             }
             if (!account.refreshToken) {
               return yield* new OAuthNoRefreshTokenError({
-                message: `No refresh token available for ${provider}`,
-                provider,
+                message: `No refresh token available for ${providerName}`,
+                provider: providerName,
               });
             }
 
@@ -1771,16 +1775,16 @@ export const make = (
             const refreshToken = plainAccount.refreshToken;
             if (refreshToken === undefined) {
               return yield* new OAuthNoRefreshTokenError({
-                message: `No refresh token available for ${provider}`,
-                provider,
+                message: `No refresh token available for ${providerName}`,
+                provider: providerName,
               });
             }
 
-            const providerInstance = providers[provider];
+            const providerInstance = providers[providerName];
             if (!providerInstance) {
               return yield* new OAuthProviderError({
-                message: `Provider ${provider} not found`,
-                provider,
+                message: `Provider ${providerName} not found`,
+                provider: providerName,
               });
             }
 
@@ -1796,12 +1800,12 @@ export const make = (
               params.set("client_secret", Redacted.value(rConfig.clientSecret));
             }
 
-            const response = yield* fetchProviderOk(provider, tokenRequest(rConfig, params), {
-              fetchFailure: `Failed to refresh token for ${provider}`,
+            const response = yield* fetchProviderOk(providerName, tokenRequest(rConfig, params), {
+              fetchFailure: `Failed to refresh token for ${providerName}`,
               statusFailure: "Token refresh failed",
             }).pipe(OutboundHttp.provide(outbound));
 
-            const data = yield* readTokenResponse(provider, response);
+            const data = yield* readTokenResponse(providerName, response);
 
             // Update account with new tokens
             const updatedAccount: OAuthAccount = {
@@ -1818,9 +1822,9 @@ export const make = (
 
             return data.access_token;
           }).pipe(
-            Effect.withSpan(Obs.spanNames.oauthRefresh, { attributes: { provider } }),
-            Effect.tap(() => Obs.recordOAuthRefresh(provider, "success")),
-            Effect.tapError(() => Obs.recordOAuthRefresh(provider, "failure")),
+            Effect.withSpan(Obs.spanNames.oauthRefresh, { attributes: { provider: providerName } }),
+            Effect.tap(() => Obs.recordOAuthRefresh(providerName, "success")),
+            Effect.tapError(() => Obs.recordOAuthRefresh(providerName, "failure")),
           ),
       ),
     };

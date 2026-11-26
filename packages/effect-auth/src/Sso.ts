@@ -734,7 +734,7 @@ export const make = (
         const created = yield* createUserWithIdentifier(
           identifiers,
           { type: "email", value: email, verified: true, verifiedAt: yield* DateTime.nowAsDate },
-          (identifier) =>
+          (claimed) =>
             userStore.createUser({
               ...(profile.name !== undefined && { name: profile.name }),
               ...(profile.image !== undefined && { image: profile.image }),
@@ -745,7 +745,7 @@ export const make = (
                   organizationId: provider.organizationId,
                 }),
               }),
-              identifier,
+              identifier: claimed,
             }),
         ).pipe(
           Effect.catchTag("IdentifierTakenError", () =>

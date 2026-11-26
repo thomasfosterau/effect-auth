@@ -86,19 +86,18 @@ describe("Hooks - defaults", () => {
       beforeSignIn: (input) => Effect.succeed({ ...input, email: `${input.email}!` }),
     });
 
-    const { transformed, observed } = await runWithPlugins(
+    await runWithPlugins(
       [onlyBeforeSignIn],
       Effect.gen(function* () {
         const hooks = yield* Hooks;
         const transformed = yield* hooks.beforeSignIn(signIn("x"));
         // afterSignIn was never provided -> identity, returns its input unchanged
         const observed = yield* hooks.afterSignIn(authResult);
-        return { transformed, observed };
+
+        expect(transformed.email).toBe("x!");
+        expect(observed).toBe(authResult);
       }),
     );
-
-    expect(transformed.email).toBe("x!");
-    expect(observed).toBe(authResult);
   });
 
   it("an empty plugin stack behaves exactly like Hooks.Default", async () => {

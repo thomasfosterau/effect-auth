@@ -2182,8 +2182,10 @@ describe("request body size limit", () => {
     // The read stopped at the limit rather than buffering the whole body.
     expect(pulled.bytes).toBeLessThanOrEqual(1024 + 256 * 2);
     // No user was created: the address is still free.
-    const signUp = await handler(authRequest("sign-up", { email: "big@b.com", password: PW }));
-    expect(signUp.status).toBe(201);
+    const signUpResponse = await handler(
+      authRequest("sign-up", { email: "big@b.com", password: PW }),
+    );
+    expect(signUpResponse.status).toBe(201);
   });
 
   it("refuses a body that streams past an understated Content-Length", async () => {
@@ -2907,9 +2909,11 @@ describe("HTTP phone OTP", () => {
     assert(sent !== undefined);
     const otp = sent.otp;
 
-    const signIn = await handler(authRequest("phone-otp", { phoneNumber: "+15551234567", otp }));
-    expect(signIn.status).toBe(201);
-    const sid = sessionIdFromSetCookie(signIn.headers.get("set-cookie"));
+    const signInResponse = await handler(
+      authRequest("phone-otp", { phoneNumber: "+15551234567", otp }),
+    );
+    expect(signInResponse.status).toBe(201);
+    const sid = sessionIdFromSetCookie(signInResponse.headers.get("set-cookie"));
 
     const sess = await handler(getRequest(CURRENT_SESSION, asCookie(sid)));
     expect(sess.status).toBe(200);
@@ -4407,12 +4411,14 @@ describe("client IP at the HTTP boundary", () => {
     });
     const from = { "cf-connecting-ip": "203.0.113.30" };
 
-    const signIn = await handler(
+    const signInResponse = await handler(
       authRequest("password", { email: "nobody@example.com", password: PW }, from),
     );
-    expect(signIn.status).not.toBe(429);
-    const signUp = await handler(authRequest("sign-up", { email: "a@b.com", password: PW }, from));
-    expect(signUp.status).toBe(429);
+    expect(signInResponse.status).not.toBe(429);
+    const signUpResponse = await handler(
+      authRequest("sign-up", { email: "a@b.com", password: PW }, from),
+    );
+    expect(signUpResponse.status).toBe(429);
     expect(Arr.fromIterable(keys).filter((key) => key.includes("203.0.113.30"))).toHaveLength(1);
   });
 
@@ -4791,9 +4797,9 @@ describe("Http.make refuses to start without the IP limit's dependencies", () =>
     expect(token.slice(0, 100).includes(429)).toBe(false);
     expect(token[100]).toBe(429);
     // Every other endpoint keeps its default: sign-in still allows 10.
-    const signIn = await statuses("POST", "/sessions", "203.0.113.50", 11);
-    expect(signIn.slice(0, 10).includes(429)).toBe(false);
-    expect(signIn[10]).toBe(429);
+    const signInStatuses = await statuses("POST", "/sessions", "203.0.113.50", 11);
+    expect(signInStatuses.slice(0, 10).includes(429)).toBe(false);
+    expect(signInStatuses[10]).toBe(429);
   });
 
   // RFC 6749 §5.2: every token endpoint answer is no-store, the IP limit's
@@ -5057,7 +5063,7 @@ describe("IPRateLimitPlugin needs a client-address source under make", () => {
       cookie: { secure: false },
       trustedProxy: ClientIP.cloudflare,
     });
-    const signIn = (ip: string) =>
+    const signInFrom = (ip: string) =>
       handler(
         authRequest(
           "password",
@@ -5066,9 +5072,9 @@ describe("IPRateLimitPlugin needs a client-address source under make", () => {
         ),
       );
 
-    expect((await signIn("203.0.113.20")).status).toBe(401);
-    expect((await signIn("203.0.113.20")).status).toBe(429);
-    expect((await signIn("203.0.113.21")).status).toBe(401);
+    expect((await signInFrom("203.0.113.20")).status).toBe(401);
+    expect((await signInFrom("203.0.113.20")).status).toBe(429);
+    expect((await signInFrom("203.0.113.21")).status).toBe(401);
   });
 
   it("refuses an address-less sign-in with 429 under a trustedProxy", async () => {
@@ -5689,9 +5695,9 @@ describe("makeAsync builds services fully before it resolves", () => {
       cookie: { secure: false },
     }).then(
       () => expect.unreachable("expected a rejection"),
-      (error) => {
+      (cause) => {
         finishedAtRejection = released;
-        return thrownError(error);
+        return thrownError(cause);
       },
     );
     expect(error).toBe(failure);
@@ -5729,9 +5735,9 @@ describe("makeAsync builds services fully before it resolves", () => {
 
     const error = await HttpServer.makeAsync({ services, ...limitWithoutLimiter }).then(
       () => expect.unreachable("expected a rejection"),
-      (error) => {
+      (cause) => {
         finishedAtRejection = released;
-        return thrownError(error);
+        return thrownError(cause);
       },
     );
     expect(error).toBeInstanceOf(RateLimiterConfigError);

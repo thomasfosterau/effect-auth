@@ -162,9 +162,9 @@ const substitute = (
         ? { ok: false, message: `no value supplied for ?${slot}` }
         : { ok: true, scope: Policy.inScope(value) },
     ),
-    Match.orElse((scope): Substitution =>
+    Match.orElse((fixed): Substitution =>
       value === undefined
-        ? { ok: true, scope }
+        ? { ok: true, scope: fixed }
         : {
             ok: false,
             message: `a ?${slot} value was supplied but the template has no ?${slot} slot`,
@@ -186,31 +186,34 @@ const substitute = (
  * template would otherwise instantiate to a *broader* policy than its author
  * intended.
  */
-export const instantiate = (template: PolicyTemplate, link: TemplateLink): InstantiateResult => {
-  const context = `template "${template.id}" link "${link.id}"`;
+export const instantiate = (
+  policyTemplate: PolicyTemplate,
+  link: TemplateLink,
+): InstantiateResult => {
+  const context = `template "${policyTemplate.id}" link "${link.id}"`;
   const fail = (message: string): InstantiateResult => ({
     ok: false,
     error: { message: `${context}: ${message}` },
   });
 
-  if (link.templateId !== template.id) {
+  if (link.templateId !== policyTemplate.id) {
     return fail(`link targets template "${link.templateId}"`);
   }
-  const principal = substitute("principal", template.principal, link.principal);
+  const principal = substitute("principal", policyTemplate.principal, link.principal);
   if (!principal.ok) return fail(principal.message);
-  const resource = substitute("resource", template.resource, link.resource);
+  const resource = substitute("resource", policyTemplate.resource, link.resource);
   if (!resource.ok) return fail(resource.message);
 
   return {
     ok: true,
     value: {
       _tag: "DeclarativePolicy",
-      id: `${template.id}#${link.id}`,
-      effect: template.effect,
+      id: `${policyTemplate.id}#${link.id}`,
+      effect: policyTemplate.effect,
       principal: principal.scope,
-      action: template.action,
+      action: policyTemplate.action,
       resource: resource.scope,
-      ...definedKeys({ when: template.when, description: template.description }),
+      ...definedKeys({ when: policyTemplate.when, description: policyTemplate.description }),
     },
   };
 };
@@ -245,9 +248,9 @@ export const TemplateDocument = Schema.Struct({
 export type TemplateDocument = typeof TemplateDocument.Type;
 
 /** Wrap a template in the current document envelope. */
-export const templateDocument = (template: PolicyTemplate): TemplateDocument => ({
+export const templateDocument = (policyTemplate: PolicyTemplate): TemplateDocument => ({
   version: 1,
-  template,
+  template: policyTemplate,
 });
 
 /** Encode a policy document to its JSON-safe representation. */
@@ -518,7 +521,7 @@ export const memoryPolicyStore = (
 const scope = (s: TemplateScope): Policy.Scope =>
   Match.value(s).pipe(
     Match.tag("eqSlot", "inSlot", (): Policy.Scope => Policy.any),
-    Match.orElse((scope) => scope),
+    Match.orElse((fixed) => fixed),
   );
 
 // ---------------------------------------------------------------------------

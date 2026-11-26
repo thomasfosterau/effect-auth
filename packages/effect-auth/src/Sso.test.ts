@@ -310,7 +310,7 @@ const makeStores = (
   /** Register an organization row, with whatever JIT settings a test needs. */
   const seedOrganization = (
     organizationId: string,
-    overrides: Partial<Organization> = {},
+    organizationOverrides: Partial<Organization> = {},
   ): Organization => {
     const organization: Organization = {
       id: organizationId,
@@ -318,7 +318,7 @@ const makeStores = (
       slug: organizationId,
       metadata: {},
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-      ...overrides,
+      ...organizationOverrides,
     };
     MutableHashMap.set(organizations, organization.id, organization);
     return organization;
@@ -879,9 +879,9 @@ describe("SsoService — SAML", () => {
 
     const { provider, start } = await Effect.runPromise(
       Effect.gen(function* () {
-        const provider = yield* sso.registerSamlProvider("admin", ACME_SAML);
-        const start = yield* sso.signIn({ email: "worker@ACME.test" });
-        return { provider, start };
+        const registered = yield* sso.registerSamlProvider("admin", ACME_SAML);
+        const started = yield* sso.signIn({ email: "worker@ACME.test" });
+        return { provider: registered, start: started };
       }).pipe(Effect.provide(fx.layer)),
     );
 

@@ -95,15 +95,6 @@ export default defineConfig({
       // `.catch` here takes two arguments.
       "promise/valid-params": "off",
 
-      // ---- oxlint plugins: adoption allowances ----------------------------
-      // Sites that predate the `suspicious` / `perf` categories and the
-      // type-aware rules. Same contract as the ported-code
-      // allowances below: each rule sits at `warn` so its sites stay
-      // reported, a new site is a defect, and once a count reaches zero the
-      // line is deleted so the rule is back at `error`. Counts are all sites
-      // (sources and tests) when the categories were turned on.
-      "eslint/no-shadow": "warn", // 120
-
       // Assertion helpers are named `expect<What>` (`expectAgreement`,
       // `expectProviderError`, …) and assert inside.
       "vitest/expect-expect": ["error", { assertFunctionNames: ["expect", "expect*"] }],
@@ -150,9 +141,9 @@ export default defineConfig({
         rules: { "effect/prefer-option-over-null": "off" },
       },
       {
-        // Adoption allowance for `prefer-option-over-null`, the same contract
-        // as the rule allowances above: these files still answer "nothing"
-        // with `null` or `undefined` and report it as a warning, a new site is
+        // Adoption allowance for `prefer-option-over-null`: these files still
+        // answer "nothing" with `null` or `undefined` and report it as a
+        // warning, a new site is
         // a defect, and a file leaves the list once its count reaches zero.
         // The client, ladder and Svelte follow as whole surfaces.
         files: [

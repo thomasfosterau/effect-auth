@@ -651,7 +651,7 @@ describe("PhoneOtpService", () => {
     const otpLength = 6;
     const guess = "0".repeat(otpLength);
 
-    const { marker, error } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({
           otpLength,
@@ -665,17 +665,16 @@ describe("PhoneOtpService", () => {
           MutableHashMap.get(records, key("+15559990021", "sign-in")),
         );
         const error = yield* Effect.flip(service.signIn("+15559990021", guess));
-        return { marker, error };
+
+        // The stub draws only the all-zero code, as the account holder's shows.
+        expect(sentOtps).toEqual([{ phoneNumber: "+15559990020", otp: guess, purpose: "sign-in" }]);
+        expect(marker).toBeDefined();
+        expect(marker?.otpHash).not.toBe(testPepper(guess));
+        expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
+        expect(MutableHashMap.size(users)).toBe(1);
+        expect(createdWith).toEqual([]);
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
-
-    // The stub draws only the all-zero code, as the account holder's shows.
-    expect(sentOtps).toEqual([{ phoneNumber: "+15559990020", otp: guess, purpose: "sign-in" }]);
-    expect(marker).toBeDefined();
-    expect(marker?.otpHash).not.toBe(testPepper(guess));
-    expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
-    expect(MutableHashMap.size(users)).toBe(1);
-    expect(createdWith).toEqual([]);
   });
 });
 
@@ -815,9 +814,9 @@ describe("PhoneOtpService verification where send hides the account", () => {
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ disableSignUp: true, sendOtp: recordingSend });
         yield* service.send(member, "sign-in");
-        const knownOps = storeOps.splice(0);
+        const knownAddressOps = storeOps.splice(0);
         yield* service.send("+15559990101", "sign-in");
-        return { knownOps, unknownOps: storeOps.splice(0) };
+        return { knownOps: knownAddressOps, unknownOps: storeOps.splice(0) };
       }),
     );
 
@@ -865,7 +864,7 @@ describe("PhoneOtpService verification where send hides the account", () => {
         : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
     };
 
-    const run = (sequence: (typeof verifySequences)[number]) =>
+    const runSequence = (sequence: (typeof verifySequences)[number]) =>
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({
           maxAttempts,
@@ -884,7 +883,10 @@ describe("PhoneOtpService verification where send hides the account", () => {
 
     const { wrong, expired } = await runPromise(
       Effect.gen(function* () {
-        return { wrong: yield* run("wrong codes"), expired: yield* run("expired code") };
+        return {
+          wrong: yield* runSequence("wrong codes"),
+          expired: yield* runSequence("expired code"),
+        };
       }),
     );
     expect(wrong.slice(1).map((step) => step.answer)).toEqual([

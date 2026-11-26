@@ -1789,11 +1789,11 @@ export const makeMultiFactorStore: Effect.Effect<
               }),
             ),
           ),
-          Effect.flatMap((read) => {
-            if (Option.isNone(read) || !read.value.codes.includes(codeHash)) {
+          Effect.flatMap((current) => {
+            if (Option.isNone(current) || !current.value.codes.includes(codeHash)) {
               return Effect.succeed(false);
             }
-            const { stored, codes } = read.value;
+            const { stored, codes } = current.value;
             const next = encodeStringList(codes.filter((code) => code !== codeHash));
             return firstRow(
               "multiFactor.useBackupCode",

@@ -398,28 +398,30 @@ describe("requireSystem", () => {
   const authorizer = Authorizer.Authorizer.layer({ policies });
   const gate = (action: string) => Guard.requireSystem({ action, resource: page });
 
-  const run = <A, E>(effect: Effect.Effect<A, E, Authorizer.Authorizer>) =>
+  const runAuthorized = <A, E>(effect: Effect.Effect<A, E, Authorizer.Authorizer>) =>
     Effect.runPromiseExit(effect.pipe(Effect.provide(authorizer)));
 
   it("admits a granted system principal and yields its ref", async () => {
-    const exit = await run(gate("page:write").pipe(System.provide("translation-pipeline")));
+    const exit = await runAuthorized(
+      gate("page:write").pipe(System.provide("translation-pipeline")),
+    );
     expect(exit).toEqual(Exit.succeed(System.ref("translation-pipeline")));
   });
 
   it("refuses a system principal no policy grants the action with Forbidden", async () => {
-    expect(tagOf(await run(gate("page:write").pipe(System.provide("billing-cron"))))).toBe(
-      "Forbidden",
-    );
-    expect(tagOf(await run(gate("page:read").pipe(System.provide("translation-pipeline"))))).toBe(
-      "Forbidden",
-    );
+    expect(
+      tagOf(await runAuthorized(gate("page:write").pipe(System.provide("billing-cron")))),
+    ).toBe("Forbidden");
+    expect(
+      tagOf(await runAuthorized(gate("page:read").pipe(System.provide("translation-pipeline")))),
+    ).toBe("Forbidden");
   });
 
   it("refuses a missing principal, and a user principal, with Unauthorized", async () => {
-    expect(tagOf(await run(gate("page:write")))).toBe("Unauthorized");
+    expect(tagOf(await runAuthorized(gate("page:write")))).toBe("Unauthorized");
     expect(
       tagOf(
-        await run(
+        await runAuthorized(
           gate("page:read").pipe(Authorizer.CurrentPrincipal.provide(Entity.ref("User", "u-1"))),
         ),
       ),

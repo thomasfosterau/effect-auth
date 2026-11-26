@@ -57,10 +57,10 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
     const [before, after] = await run(
       Effect.gen(function* () {
         const rl = yield* RateLimiter;
-        const before = yield* rl.checkLimit("k2", config);
+        const checkBefore = yield* rl.checkLimit("k2", config);
         yield* rl.consumeToken("k2", config);
-        const after = yield* rl.checkLimit("k2", config);
-        return [before, after] as const;
+        const checkAfter = yield* rl.checkLimit("k2", config);
+        return [checkBefore, checkAfter] as const;
       }),
     );
     expect(before).toBe(true);
@@ -72,12 +72,12 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
     const [start, mid, end] = await run(
       Effect.gen(function* () {
         const rl = yield* RateLimiter;
-        const start = yield* rl.getRemainingTokens("k3", config);
+        const atStart = yield* rl.getRemainingTokens("k3", config);
         yield* rl.consumeToken("k3", config);
-        const mid = yield* rl.getRemainingTokens("k3", config);
+        const atMid = yield* rl.getRemainingTokens("k3", config);
         yield* rl.consumeToken("k3", config);
-        const end = yield* rl.getRemainingTokens("k3", config);
-        return [start, mid, end] as const;
+        const atEnd = yield* rl.getRemainingTokens("k3", config);
+        return [atStart, atMid, atEnd] as const;
       }),
     );
     expect(start).toBe(2);

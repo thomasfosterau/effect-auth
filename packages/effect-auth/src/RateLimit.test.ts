@@ -134,8 +134,8 @@ describe("RateLimiter.checkLimit", () => {
   });
 });
 
-const consume = (layer: Layer.Layer<RateLimitStore>, key: string, config: RateLimitConfig) =>
-  Effect.flatMap(make, (limiter) => limiter.consumeToken(key, config)).pipe(Effect.provide(layer));
+const consume = (layer: Layer.Layer<RateLimitStore>, key: string, limit: RateLimitConfig) =>
+  Effect.flatMap(make, (limiter) => limiter.consumeToken(key, limit)).pipe(Effect.provide(layer));
 
 describe("RateLimiter.consumeToken", () => {
   it("allows up to the limit in a window, then refuses", async () => {

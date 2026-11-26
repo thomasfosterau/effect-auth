@@ -175,7 +175,7 @@ describe("EmailPasswordService", () => {
   it("should sign up and create a session by default", async () => {
     const testContext = await makeTestContext();
 
-    const result = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* EmailPassword.make();
@@ -189,22 +189,22 @@ describe("EmailPasswordService", () => {
           expect(result.identifier).toEqual({ type: "email", value: "test@example.com" });
           expect(result.session).toBeDefined();
 
-          return result;
+          expect(result.session?.userId).toBe(result.user.id);
+
+          // The claimed email identifier belongs to the new user and starts unverified.
+          const stored = Array.from(MutableHashMap.values(identifierRecords)).find(
+            (identifier) => identifier.type === "email" && identifier.value === "test@example.com",
+          );
+          expect(stored?.userId).toBe(result.user.id);
+          expect(stored?.verified).toBe(false);
+          // The store was handed the address to create the user with.
+          expect(createdWith).toEqual([
+            { type: "email", value: "test@example.com", verified: false },
+          ]);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(result.session?.userId).toBe(result.user.id);
-
-    // The claimed email identifier belongs to the new user and starts unverified.
-    const stored = Array.from(MutableHashMap.values(identifierRecords)).find(
-      (identifier) => identifier.type === "email" && identifier.value === "test@example.com",
-    );
-    expect(stored?.userId).toBe(result.user.id);
-    expect(stored?.verified).toBe(false);
-    // The store was handed the address to create the user with.
-    expect(createdWith).toEqual([{ type: "email", value: "test@example.com", verified: false }]);
   });
 
   it("stores an internationalised address in normalised form, so its other spellings sign in", async () => {
@@ -1214,7 +1214,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
   it("antiEnumeration mode: fresh and duplicate sign-ups are indistinguishable", async () => {
     const testContext = await makeTestContext();
 
-    const { fresh, duplicate } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* EmailPassword.make({ antiEnumeration: true });
@@ -1228,37 +1228,36 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
             password: "different-strong-pw",
             name: "Attacker Supplied Name",
           });
-          return { fresh, duplicate };
+
+          // Neither branch creates a session — no Set-Cookie on either at the
+          // HTTP layer, so "a session came back" can't itself be the oracle.
+          expect(fresh.session).toBeUndefined();
+          expect(duplicate.session).toBeUndefined();
+
+          // Same body shape: same set of top-level fields on both branches.
+          expect(Arr.sort(Struct.keys(duplicate), Order.String)).toEqual(
+            Arr.sort(Struct.keys(fresh), Order.String),
+          );
+          expect(fresh.method).toBe("email-password");
+          expect(duplicate.method).toBe("email-password");
+          expect(duplicate.identifier).toEqual({ type: "email", value: "shape@example.com" });
+
+          // The duplicate branch never touches the real account: different user
+          // id, and its fields reflect only what THIS request submitted.
+          expect(duplicate.user.id).not.toBe(fresh.user.id);
+          expect(duplicate.user.name).toBe("Attacker Supplied Name");
+
+          // The real, pre-existing account is untouched (no second identifier or
+          // password write landed against it).
+          const identifiersForEmail = Array.from(MutableHashMap.values(identifierRecords)).filter(
+            (identifier) => identifier.type === "email" && identifier.value === "shape@example.com",
+          );
+          expect(identifiersForEmail).toHaveLength(1);
+          expect(identifiersForEmail[0]?.userId).toBe(fresh.user.id);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    // Neither branch creates a session — no Set-Cookie on either at the
-    // HTTP layer, so "a session came back" can't itself be the oracle.
-    expect(fresh.session).toBeUndefined();
-    expect(duplicate.session).toBeUndefined();
-
-    // Same body shape: same set of top-level fields on both branches.
-    expect(Arr.sort(Struct.keys(duplicate), Order.String)).toEqual(
-      Arr.sort(Struct.keys(fresh), Order.String),
-    );
-    expect(fresh.method).toBe("email-password");
-    expect(duplicate.method).toBe("email-password");
-    expect(duplicate.identifier).toEqual({ type: "email", value: "shape@example.com" });
-
-    // The duplicate branch never touches the real account: different user
-    // id, and its fields reflect only what THIS request submitted.
-    expect(duplicate.user.id).not.toBe(fresh.user.id);
-    expect(duplicate.user.name).toBe("Attacker Supplied Name");
-
-    // The real, pre-existing account is untouched (no second identifier or
-    // password write landed against it).
-    const identifiersForEmail = Array.from(MutableHashMap.values(identifierRecords)).filter(
-      (identifier) => identifier.type === "email" && identifier.value === "shape@example.com",
-    );
-    expect(identifiersForEmail).toHaveLength(1);
-    expect(identifiersForEmail[0]?.userId).toBe(fresh.user.id);
   });
 
   it("antiEnumeration mode: the duplicate branch still hashes the submitted password", async () => {

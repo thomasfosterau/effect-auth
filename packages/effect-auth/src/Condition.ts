@@ -295,7 +295,7 @@ const err = <A>(message: string): EvalResult<A> => ({ ok: false, error: { messag
 const describeOperand = (operand: Operand): string =>
   Match.valueTags(operand, {
     Lit: () => "literal",
-    Attr: (attr) => `${attr.of}.${attr.path.join(".")}`,
+    Attr: (ref) => `${ref.of}.${ref.path.join(".")}`,
     SlotRef: (slot) => slot.of,
   });
 
@@ -352,10 +352,9 @@ export const evaluateOperand = (
   operand: Operand,
 ): EvalResult<Entity.AttributeValue> =>
   Match.valueTags(operand, {
-    Lit: (lit) => ok(lit.value),
+    Lit: (literal) => ok(literal.value),
     SlotRef: (slot) => ok<Entity.AttributeValue>(Entity.entityValue(request[slot.of])),
-    Attr: (attr) =>
-      resolvePath(slotRoot(slice, request, attr.of), attr.path, describeOperand(attr)),
+    Attr: (ref) => resolvePath(slotRoot(slice, request, ref.of), ref.path, describeOperand(ref)),
   });
 
 /**
@@ -378,14 +377,14 @@ export const evaluate = (
       Arr.reduce(conditions, ok(false), (acc, inner) =>
         acc.ok && !acc.value ? evaluate(slice, request, inner) : acc,
       ),
-    Not: (not): EvalResult<boolean> => {
-      const result = evaluate(slice, request, not.condition);
+    Not: (negation): EvalResult<boolean> => {
+      const result = evaluate(slice, request, negation.condition);
       return result.ok ? ok(!result.value) : result;
     },
-    Eq: (eq): EvalResult<boolean> => {
-      const left = evaluateOperand(slice, request, eq.left);
+    Eq: (equality): EvalResult<boolean> => {
+      const left = evaluateOperand(slice, request, equality.left);
       if (!left.ok) return left;
-      const right = evaluateOperand(slice, request, eq.right);
+      const right = evaluateOperand(slice, request, equality.right);
       if (!right.ok) return right;
       return ok(Entity.attributeValueEquals(left.value, right.value));
     },
@@ -411,10 +410,10 @@ export const evaluate = (
         ),
       );
     },
-    Contains: (contains): EvalResult<boolean> => {
-      const collection = evaluateOperand(slice, request, contains.collection);
+    Contains: (containment): EvalResult<boolean> => {
+      const collection = evaluateOperand(slice, request, containment.collection);
       if (!collection.ok) return collection;
-      const value = evaluateOperand(slice, request, contains.value);
+      const value = evaluateOperand(slice, request, containment.value);
       if (!value.ok) return value;
       if (!Array.isArray(collection.value)) {
         return err(`contains requires an array collection (got ${typeName(collection.value)})`);
@@ -431,8 +430,12 @@ export const evaluate = (
       }
       return ok(Entity.entityIn(slice, left.value.__entity, right.value.__entity));
     },
-    Has: (has): EvalResult<boolean> => {
-      const result = resolvePath(slotRoot(slice, request, has.of), has.path, has.path.join("."));
+    Has: (presence): EvalResult<boolean> => {
+      const result = resolvePath(
+        slotRoot(slice, request, presence.of),
+        presence.path,
+        presence.path.join("."),
+      );
       return ok(result.ok);
     },
   });
