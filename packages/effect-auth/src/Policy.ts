@@ -494,20 +494,22 @@ const decideWellFormed = <E, R>(
           result: "not-matched",
         });
       }
+      // An erroring predicate is an outcome of its own, which
+      // `combineOutcomes` reads as fail-closed.
       return policy.predicate(req, slice).pipe(
-        Effect.map((matched): PolicyOutcome => ({
-          policyId: policy.id,
-          effect: policy.effect,
-          result: matched ? "matched" : "not-matched",
-        })),
-        Effect.catch((error) =>
-          Effect.succeed<PolicyOutcome>({
+        Effect.match({
+          onSuccess: (matched): PolicyOutcome => ({
+            policyId: policy.id,
+            effect: policy.effect,
+            result: matched ? "matched" : "not-matched",
+          }),
+          onFailure: (error): PolicyOutcome => ({
             policyId: policy.id,
             effect: policy.effect,
             result: "error",
             error: String(error),
           }),
-        ),
+        }),
       );
     },
     { concurrency: 1 },
