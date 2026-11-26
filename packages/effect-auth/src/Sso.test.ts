@@ -1421,11 +1421,8 @@ const makeHttpFixture = (
     Layer.succeed(PasswordResetService)(undefined as never),
   );
 
-  // `SsoService` only needs `SsoProviderStore` to construct; `OAuthStateStore`/
-  // `OAuthUserStore`/`IdentifierStore`/`UserStore`/`SessionService`/
-  // `SecureRandom.SecureRandom` are required dynamically by its `signIn`/`handleCallback`
-  // methods, and `OrganizationStore` is resolved optionally at call time — all
-  // are provided here as ambient context.
+  // `SsoService` resolves its stores, `SessionService` and the crypto services
+  // when it is built; `OrganizationStore` is resolved optionally at call time.
   // SAML is resolved optionally by `SsoService`, so the HTTP fixture installs
   // the same stub verifier the service-level tests use plus an in-memory
   // replay store — that is exactly what an app installing
@@ -1446,7 +1443,9 @@ const makeHttpFixture = (
     options.gate ?? Layer.empty,
   );
 
-  const ssoServiceLayer = SsoService.layer().pipe(Layer.provide([ssoDeps, globalFetchHttpClient]));
+  const ssoServiceLayer = SsoService.layer().pipe(
+    Layer.provide([ssoDeps, base, globalFetchHttpClient]),
+  );
 
   const ssoLayer = Layer.mergeAll(ssoDeps, ssoServiceLayer);
 
