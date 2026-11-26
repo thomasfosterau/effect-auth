@@ -1,34 +1,9 @@
 /**
- * Composable `HttpApiMiddleware` for effect-auth.
- *
- * Provides drop-in auth guards for any consumer `HttpApi` application:
- *
- * - `CurrentSession` / `CurrentUser` — context services injected by the
- *   required-auth middleware so downstream handlers can `yield* CurrentUser`
- *   without knowing how the session was resolved.
- * - `CurrentPrincipal` / `CurrentCredential` — the resolved principal
- *   (`Authorizer.ts`) and how it was authenticated: `"interactive"` for the
- *   session cookie, `"machine"` for the `Authorization` header. Read by
- *   `Authorizer.authorize`/`check` so a policy can gate an operation on
- *   credential class, not just identity.
- * - `MaybeCurrentSession` — analogous service for optional-auth handlers;
- *   holds `Option<SessionWithUser>` (some when authenticated, none otherwise).
- * - `AuthMiddleware` — required-auth `HttpApiMiddleware.Service` tag.
- * - `OptionalAuthMiddleware` — optional-auth variant; fails only on a store
- *   fault (a logged 500), unless the app opts to degrade.
- * - `layer(config?)` — returns the `Layer` that implements
- *   `AuthMiddleware`. Reads the session cookie (honoring the cache) or an
- *   `Authorization: Bearer/Token` header; fails with `Unauthorized` (401) when
- *   neither is present or the session is expired/invalid, and with a logged
- *   `InternalServerError` (500) when the session or user store faults.
- * - `optionalLayer(config?, options?)` — returns the `Layer` that
- *   implements `OptionalAuthMiddleware`. Provides `MaybeCurrentSession` with
- *   `Option.none()` when unauthenticated; a store fault is a logged 500 unless
- *   `options.onDegraded` is given.
- *
- * The `AuthMiddleware` class carries `HttpApiSecurity` definitions for the
- * session cookie and Bearer token schemes so the derived OpenAPI spec
- * advertises both supported auth methods.
+ * `HttpApiMiddleware` for any `HttpApi`: {@link layer} implements
+ * `AuthMiddleware` (the session cookie or an `Authorization` bearer; `401` when
+ * absent or invalid, a logged `500` on a store fault) and {@link optionalLayer}
+ * implements `OptionalAuthMiddleware`. Handlers read the re-exported
+ * `SessionContext` services.
  *
  * @example Attaching required auth to a group
  * ```ts

@@ -1,11 +1,6 @@
 /**
- * The props and label sets of the six bundled form components, plus their
- * default copy.
- *
- * They live in a `.ts` module rather than beside each component because a
- * Svelte instance script cannot export types: keeping them here is what lets
- * `SignInFormProps`, `SignInLabels` and friends be part of the package's public
- * type surface.
+ * The props, label sets and default copy of the bundled form components, in a
+ * `.ts` module because a Svelte instance script cannot export types.
  *
  * @module forms/props
  */

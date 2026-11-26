@@ -1,15 +1,8 @@
 /**
- * WebAuthn wire-format decoding: CBOR, `clientDataJSON`, authenticator data,
- * attestation objects, and COSE public keys.
- *
- * This module exists so the core package keeps `effect` as its only runtime
- * dependency — it replaces the parsing subset effect-auth previously took from
- * a third-party WebAuthn package, matching that library's validation rules and
- * error messages so the surrounding service contract is unchanged.
- *
- * Nothing here performs signature verification: assertion signatures are
- * verified in `Cipher.ts` against the SPKI DER public key stored at
- * registration.
+ * WebAuthn wire-format decoding (CBOR, `clientDataJSON`, authenticator data,
+ * attestation objects, COSE keys), so the core needs only `effect`. It keeps
+ * the validation rules and messages of the library it replaced. Signatures are
+ * verified elsewhere, against the stored SPKI key.
  *
  * @module webauthn-codec
  */

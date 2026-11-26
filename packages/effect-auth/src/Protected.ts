@@ -1,33 +1,8 @@
 /**
- * Schema-embedded authorization: policy enforcement at the data boundary.
- *
- * Effect Schema transformations carry a **Requirements** channel, so a schema
- * can demand the authorization context and decide, per field, whether the
- * current principal may see or set a value (`docs/better-auth-parity.md` §2.5,
- * decision 6 — "the Barake insight, generalized"). Wrapping a field with
- * {@link protectedField} turns a policy into two guards on the same field:
- *
- * - **Encoding** is the *viewer projection*: a principal who may not read the
- *   field simply does not receive the key (`onEncodeDeny: "redact"`, the
- *   default). Hiding beats erroring when rendering a response.
- * - **Decoding** is the *write-side guard*: a client that supplies a field it
- *   may not set is a schema error (`onDecodeDeny: "fail"`, the default), not a
- *   silent drop. Flip it to `"redact"` when ignoring the value is the friendlier
- *   contract (e.g. a permissive public API that tolerates extra input).
- *
- * A protected field is **optional-keyed**: redaction removes the key entirely
- * rather than yielding `undefined`, and an absent value is always allowed —
- * authorization asks about a *value*, and there is nothing to authorize when the
- * field is not there.
- *
- * The mechanism is one projection of the same policy kernel, not a parallel
- * one: {@link protectedField} accepts any {@link Policy.Policy} — a declarative,
- * storable, tenant-editable policy or a `Policy.custom` escape hatch — and the
- * decision is made exactly as `Authorizer` makes it (`CurrentPrincipal` +
- * an {@link EntityResolver}-resolved slice + the pure kernel). For a system
- * principal (`System::"<name>"`) that includes the kernel's default deny and
- * `Authorizer`'s decision log: every field decision about it is logged with its
- * name and the determining policies.
+ * Schema-embedded authorization: {@link protectedField} guards a field with a
+ * policy, leaving it out when encoding for a principal who may not read it and
+ * failing the decode for one who may not set it. The field is optional-keyed,
+ * and each decision is made exactly as `Authorizer` makes it.
  *
  * @example Viewer projection + write guard on one field
  * ```ts
@@ -243,8 +218,9 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
 /**
  * Protect a struct field with a policy.
  *
- * Decoding is the write-side guard and encoding is the viewer projection; see
- * the module docs for the defaults and why they differ. The returned schema is
+ * Decoding is the write-side guard (`onDecodeDeny: "fail"` by default) and
+ * encoding is the viewer projection (`onEncodeDeny: "redact"`): hiding suits a
+ * response, while a client setting a field it may not is an error. The returned schema is
  * optional-keyed: an absent value is always allowed, and a redacted value is
  * removed rather than set to `undefined`.
  *

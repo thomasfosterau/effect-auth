@@ -1,16 +1,8 @@
 /**
- * Identifier domain: a surrogate-keyed model for user identity credentials.
- *
- * An `Identifier` is a verified or unverified claim that a user owns a
- * particular value for a given type — an email address, a username, or a phone
- * number. This separates identity claims from the `User` record itself, enabling
- * a user to have multiple emails, rename their username, or add phone as a
- * second factor without changing the user's primary key.
- *
- * Since the surrogate-key migration, identifiers are the **only** place
- * login handles live: `User` carries no `email`/`emailVerified` fields, and
- * every flow that resolves "who owns this email/username/phone" goes through
- * the {@link IdentifierStore}.
+ * Identifiers: a user's verified or unverified claims to an email address,
+ * username or phone number, kept apart from the `User` record, which carries no
+ * login handle. Every flow that asks who owns a value goes through the {@link
+ * IdentifierStore}.
  */
 import { Context, Data, Effect, MutableHashMap, Order } from "effect";
 import * as Arr from "effect/Array";

@@ -1,18 +1,9 @@
 /**
- * The authorization model: Schema-declared entity types and actions.
- *
- * Declaring the entity vocabulary once gives Cedar-style **policy
- * validation** for free: a stored or authored declarative policy can be
- * checked against the model — do the entity types it names exist, are the
- * actions declared, does the policy's action actually apply to the
- * principal/resource types it is scoped to? Validation catches typos and
- * drift *before* a policy reaches the decision path, where an invalid
- * policy would otherwise just silently never match (or, worse for a forbid,
- * silently always deny).
- *
- * The attribute schemas double as the app's own entity codecs: the same
- * `Schema.Struct` that validates `Document.attributes` in the model is the
- * one the app uses to build slice entities from its rows.
+ * The authorization model: entity types and actions declared with `Schema`.
+ * Declarative policies are validated against it before they reach a decision,
+ * which catches unknown types, undeclared actions and actions scoped to types
+ * they do not apply to. The attribute schemas double as the app's entity
+ * codecs.
  *
  * @module authorization-model
  */

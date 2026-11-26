@@ -1,49 +1,8 @@
 /**
- * A `SqlClient` over Alchemy's Effect-native D1 client.
- *
- * This is the only D1-specific code in the package: it turns the
- * `QueryDatabaseClient` that `Cloudflare.D1.QueryDatabase(database)` binds
- * into an `effect/sql` {@link SqlClient.SqlClient} and stops there. Every auth
- * query lives in `@thomasfosterau/effect-auth/sql`, which is written against
- * `SqlClient` and shared with every other SQL deployment, so nothing here
- * knows what a session or a credential is. Statements go through the client's
- * `prepare` / `bind` / `all` / `raw` / `batch`, so the database is bound,
- * named and typed the way the rest of an Alchemy Worker binds it.
- *
- * The client's statements need Alchemy's `RuntimeContext` (they run inside a
- * Worker or Durable Object event, or a deploy-time Action); {@link make}
- * captures it once, so the `SqlClient` it returns needs nothing. The client
- * reports a failed statement as a defect (its effects have no error channel);
- * this client turns that defect into a `SqlError`.
- *
- * ### Transactions are batches
- *
- * D1 has no interactive transactions: `BEGIN` / `COMMIT` / `SAVEPOINT` are
- * rejected, and `batch()` — statements run in order and rolled back together
- * on failure — is its only atomic primitive. `@thomasfosterau/effect-auth/sql`
- * calls `sql.withTransaction` around its multi-step writes (the
- * `DELETE`-then-`INSERT` upserts of `ChallengeStore.create`,
- * `OAuthStateStore.create` and `EmailOtpStore.upsert`,
- * `PendingMultiFactorStore.delete`'s two deletes and `IdentifierStore.replace`'s
- * claim-then-release), so a transaction here is mapped onto `batch()`:
- *
- * - `BEGIN` opens a buffer instead of being sent.
- * - A write that returns no rows (`INSERT` / `UPDATE` / `DELETE` / `REPLACE`
- *   without `RETURNING`) is buffered and answers no rows.
- * - A statement that returns rows (a `SELECT`, or a write with `RETURNING`)
- *   is sent in one batch together with every buffered write before it, so it
- *   sees them and they commit or fail together.
- * - `COMMIT` sends what is still buffered as one batch; `ROLLBACK` discards it;
- *   `ROLLBACK TO SAVEPOINT` discards what was buffered after the savepoint.
- *
- * So every write between two reads commits atomically, and so does the read
- * that ends the group. What `batch()` cannot give is atomicity across a read:
- * a group already sent stays committed when a later one fails or the effect
- * rolls back. Of the stores above only `IdentifierStore.replace` reads in the
- * middle (its `DELETE … RETURNING`), and its claim and release are sent in one
- * batch; the undo of a stale claim that follows is its own batch. D1 has no
- * isolation between batches either: another request's statements can run
- * between two of them.
+ * A `SqlClient` over Alchemy's D1 client, the package's only D1-specific code.
+ * D1 has no interactive transactions, so `sql.withTransaction` buffers writes
+ * and sends them as `batch()`es: the writes between two reads commit together,
+ * but nothing is atomic across a read.
  */
 
 import type {
@@ -248,7 +207,7 @@ export const make = (options: {
     return yield* SqlClient.make({
       acquirer: Effect.succeed(makeConnection(options.db, run, undefined)),
       // A transaction leases a connection of its own, whose buffer becomes one
-      // `batch()` (see the module docs).
+      // `batch()`.
       transactionAcquirer: Effect.sync(() =>
         makeConnection(options.db, run, { open: false, pending: [], savepoints: [] }),
       ),

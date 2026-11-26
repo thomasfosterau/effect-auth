@@ -1,52 +1,9 @@
 /**
- * Organizations (multi-tenant teams) for effect-auth.
- *
- * Mirrors better-auth's organization plugin: users create organizations,
- * invite members by email, and manage member roles. Every mutating operation
- * is permission-checked against a configurable role → permission map using
- * `"resource:action"` permission strings.
- *
- * **Teams:** organizations can be subdivided into teams (see {@link Team}).
- * Team management is governed by the *organization*-scoped `team:*`
- * permissions; team membership itself carries no roles - it is a plain
- * `(teamId, userId)` association, and any organization member may read the
- * team structure. A user must already be a member of the team's organization
- * before they can be added to one of its teams.
- *
- * **Dynamic access control:** on top of the static `roles` config map, each
- * organization may define its own roles at runtime ({@link OrgRole}, managed
- * with {@link OrganizationService.upsertOrgRole} and friends). A custom role
- * *replaces* the static entry of the same name for that organization - the
- * two are never merged, so what a tenant sees is exactly what it defined.
- *
- * **Member status:** a membership can be deactivated ({@link Member.status})
- * instead of deleted. The row - and the member's team memberships and role -
- * survive, but every authorization question in the organization answers as if
- * the user were not a member. Application sessions are deliberately left
- * alone; see {@link OrganizationConfig.onMemberDeactivated}.
- *
- * **Domains:** an organization may claim email domains
- * ({@link OrganizationDomain}). A tenant proves its claim only through DNS
- * (via an app-provided {@link DomainVerifier}); manual attestation is the
- * application operator's alone ({@link OrganizationService.attestDomain}, a
- * server-side call made after checking ownership out of band), never a
- * member's. A *verified* domain is what lets an SSO sign-in provision
- * membership just in time, per organization and off by default
- * ({@link Organization.jitProvisioning}).
- *
- * **Active organization:** this module deliberately does not manage a
- * per-session "active organization" (better-auth's `setActiveOrganization`).
- * The conventional integration is to store the selected organization id on
- * the session's attribute bag - e.g.
- * `sessionManager.createSession(userId, { activeOrganizationId: org.id })`
- * or by updating `session.attributes.activeOrganizationId` through your
- * session store - and read it back from `session.attributes` when handling
- * requests. The HTTP tier's `PATCH /organizations/active` records only an
- * organization the caller is an active member of
- * ({@link OrganizationService.requireMembership}); a host that writes
- * the attribute itself checks the same. Membership can end after it is set,
- * so it names the organization the user picked, never proof they belong to
- * it: authorize every request against the membership, not the attribute.
+ * Organizations: members with role-checked `"resource:action"` permissions,
+ * invitations, teams, per-organization roles that replace the static ones,
+ * deactivatable memberships and DNS-verified domains. The active organization
+ * is a session attribute; authorize every request against the membership, never
+ * the attribute.
  *
  * @module organization
  */

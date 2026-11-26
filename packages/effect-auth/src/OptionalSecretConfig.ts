@@ -1,53 +1,8 @@
 /**
- * An optional secret `Config` that distinguishes UNSET from PRESENT-BUT-EMPTY.
- *
- * On Effect rc.118 the stock providers (`ConfigProvider.fromEnv`,
- * `fromUnknown`, ...) read `NAME=""` as absent, so `Config.option(...)` cannot
- * tell an operator who deliberately left an encryption secret unset (opt out)
- * from one whose templating or secrets manager rendered it as `""` (a mistake
- * that would otherwise silently disable encryption at rest).
- *
- * The raw distinction is still visible through the provider interface: a
- * provider reports a missing leaf as `undefined`, but its parent `Record`
- * node still lists the key. The probe is built from `Config.flatMap` and
- * `Config.schema`, so it is evaluated by the Config evaluator with the same
- * provider and path prefix as the rest of the config: it honours
- * `Config.nested(...)`, `.parse(provider)` and `ConfigProvider.layer`, and
- * never touches `process.env`.
- *
- * The probe relies on the documented `ConfigProvider.load` contract and the
- * `Node` shapes (`Record.keys`), observed through the key schema of
- * `Config.schema(Schema.Record(...))`. A name is "present but empty" when its
- * parent `Record` lists the final segment AND the node at the full path has no
- * children (a `Record` there, or an `Array` when the siblings are all numeric
- * suffixes such as `NAME_0` / `NAME_1`, means other variables merely share the
- * prefix, e.g. `NAME_FILE=...`, so the secret is unset).
- *
- * A value that is present but whitespace-only (`"   "`, a lone newline) counts
- * as empty; a secret with surrounding spaces but
- * non-space content is accepted unchanged and is not trimmed. No error message
- * ever contains a secret value.
- *
- * The root `[[], name]` candidate only matters for map-style providers
- * (`fromUnknown({ NAME: "" })`); `fromEnv` is covered by the `_`-segmented one.
- *
- * Residual blind spot: `NAME=""` set together with `NAME_FILE=...` (or any
- * other `NAME_*` variable) reads as unset, because the provider then reports a
- * `Record` or `Array` node at `NAME`. This is accepted;
- * `ConfigEmptyEnv.test.ts` pins it so a future fix flips it deliberately.
- *
- * Further blind spots and misclassifications (documented, not fixed):
- *
- * - A composite `ConfigProvider.orElse` whose primary provider has a
- *   `NAME`-prefix sibling can hide an empty value in the fallback provider,
- *   because the probe sees the primary's `Record` / `Array` node first.
- * - Non-env `fromUnknown` shapes can be misclassified, because the
- *   `_`-segmented candidate is also probed there: a nested object at the
- *   segmented path (`{ A: { B: "" } }` for `A_B`) or an object at `NAME` itself
- *   is read as "prefix shared", i.e. unset.
- * - `fromUnknown({ NAME: ["a"] })` (an array value) is not a string: the
- *   `Array` node counts as "prefix shared", so it reads as unset (encryption
- *   off), not as "set but empty". Only string-valued secrets are supported.
+ * An optional secret `Config` that tells an unset name from one set to an empty
+ * or whitespace-only value, which the stock providers both read as absent. It
+ * probes the provider's `Record` node for the key; the known blind spots are
+ * pinned in `ConfigEmptyEnv.test.ts`.
  *
  * @module optional-secret-config
  * @internal

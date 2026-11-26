@@ -1,9 +1,8 @@
 /**
- * Svelte context plumbing for the auth client, so the bundled form components
- * (and app code) reach it without threading it through every prop.
+ * Svelte context for the auth client, so the bundled forms and app code reach
+ * it without props. Set it once, high up.
  *
- * Set it once, high up:
- *
+ * @example
  * ```svelte
  * <script lang="ts">
  *   import { createAuthClient } from "@thomasfosterau/effect-auth/client";

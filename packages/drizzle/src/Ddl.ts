@@ -1,16 +1,8 @@
 /**
  * The DDL behind every dialect's `migrationStatements`, generated from one
- * column spec per table and a per-dialect type map, so the three dialects
- * cannot drift apart in which columns, keys and indexes they create.
- *
- * Each column names a semantic {@link ColumnType}; a {@link DdlDialect} says
- * what that type is called on its engine, how a primary key and a default are
- * spelled, and whether indexes are separate statements (PostgreSQL, SQLite:
- * `CREATE INDEX IF NOT EXISTS`) or declared inside the `CREATE TABLE` (MySQL,
- * which has no `IF NOT EXISTS` for an index).
- *
- * The drizzle tables themselves stay per dialect, because each dialect's
- * builders are their own types; `*Schema.test.ts` checks that both agree.
+ * column spec per table and a per-dialect type map ({@link DdlDialect}), so the
+ * dialects cannot drift in their columns, keys and indexes. `*Schema.test.ts`
+ * checks that the drizzle tables agree.
  *
  * @internal
  */

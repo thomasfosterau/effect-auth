@@ -1,16 +1,8 @@
 /**
- * Vanilla auth client for the effect-auth HTTP protocol.
- *
- * A small, dependency-free client (plain `fetch`, no Effect runtime in the
- * bundle) with methods mirroring the contract's endpoint names. The client
- * holds no session state: it announces each session-changing call to its
- * observers (`onSessionChange`), and the session itself is an
- * `effect/reactivity` Atom graph over the client in the `./client/atoms`
- * subpath (`SessionAtoms.ts`), which the Svelte binding
- * (`@thomasfosterau/effect-auth-svelte`) adapts.
- *
- * Only the wire *types* are imported from the `http/` tier — they erase at
- * compile time, so the browser bundle contains just this file.
+ * Vanilla auth client over the HTTP API: plain `fetch`, no Effect runtime, one
+ * method per endpoint. It holds no session state and announces session changes
+ * to `onSessionChange`; the session Atoms are in `./client/atoms`. It imports
+ * only wire types from `http/`, which erase.
  *
  * @module client
  */

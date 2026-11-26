@@ -1,20 +1,9 @@
 /**
- * The JSON:API resources of the included HTTP API: each entity the
- * contract exposes is declared once, here, as an effect-jsonapi
- * `Resource.make`, and every endpoint, document and client type over it is
- * derived from that declaration.
- *
- * The attributes are the wire projection of the store-facing records in
- * `Types.ts` and `Identifier.ts`: the same field names, with each `Date`
- * carried as epoch milliseconds (`Schema.DateFromMillis`, as the contract's
- * views always have), and each foreign key (`userId`) expressed as a
- * relationship instead of an attribute. `Resources.test.ts` holds the two
- * declarations together, so a field added to one and not the other fails a
- * test rather than drifting.
- *
- * Server-maintained fields are read-only (`Resource.readOnlyAttribute`): no
- * write payload accepts them. In particular the untyped `attributes` bag is
- * never writable over HTTP: a `PATCH` cannot set a `role`.
+ * The JSON:API resources of the HTTP API, each declared once with
+ * effect-jsonapi's `Resource.make`; every endpoint, document and client type
+ * derives from them. Attributes mirror the store records (`Date`s as epoch
+ * milliseconds, foreign keys as relationships), and server-maintained fields,
+ * the `attributes` bag included, are read-only.
  *
  * @module http/Resources
  */

@@ -1,47 +1,8 @@
 /**
- * The read scope: what a policy set compiles to when it is evaluated as a set
- * of rows rather than at one row.
- *
- * A single-row check asks "may this principal read this resource". A LIST asks
- * "which rows may this principal read", and the answer has to reach the
- * database: filtering a page after the fact returns short pages, breaks
- * totals, and reads rows the viewer was never entitled to. {@link ReadScope} is
- * that answer, in a form this library owns and every adapter projects from
- * (ADR-0020):
- *
- * - {@link AllowAll}: every row. A privileged role short-circuits to this
- *   branch, so the renderer emits no filter at all rather than a disjunction
- *   over every axis.
- * - {@link Deny}: no row. The renderer emits no query.
- * - {@link Filter}: the rows a {@link Predicate} admits.
- *
- * ### The predicate is bound-scalar
- *
- * A {@link Predicate} compares a resource attribute (a column, once an adapter
- * binds it) with a {@link Scalar}: text, integer, double, boolean or instant.
- * That is the value domain a database binds as a parameter, and nothing else:
- * no entity hierarchy, no arrays, no nested records. It is not effect-jsonapi's
- * `Filter.Ast` (a wire grammar, typed per resource over decoded attribute
- * values) and not legation's subset predicate (an engine grammar). Both are
- * projection targets, written where they are needed.
- *
- * ### Two-valued by construction
- *
- * Every atom is decided: {@link Eq} and {@link Compare} hold only for a present
- * attribute, and absence is its own atom, {@link IsNull}. A projection to SQL
- * therefore never meets SQL's third truth value: `NOT (x = 'a')` over a NULL
- * `x` can't silently admit or exclude a row, because the predicate states what
- * a NULL does. (The kernel treats an absent attribute as an evaluation error,
- * and its error handling is what the compiler encodes into those atoms.)
- *
- * ### Relationships are named sets
- *
- * "The owner is someone the viewer follows" is an {@link InSet} atom: the
- * attribute, and the *name* of a set the application resolves (a subquery, a
- * semi-join). The predicate never carries the set's members, so its authored
- * form is stable across requests and nothing is resolved per row. A set the
- * runtime can't resolve narrows the scope ({@link withoutSets}); it never
- * widens it.
+ * The read scope (ADR-0020): a policy set compiled for a LIST rather than one
+ * row, as `AllowAll`, `Deny` or a `Filter` over a bound-scalar, two-valued
+ * {@link Predicate}. Relationships are named sets the application resolves; a
+ * set it cannot resolve narrows the scope, never widens it.
  *
  * @module read-scope
  */

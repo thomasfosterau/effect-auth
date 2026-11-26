@@ -1,17 +1,9 @@
 /**
- * The JSON:API error documents of the included HTTP API.
- *
- * Each class is an effect-jsonapi `ApiError.make` declaration: a tagged error
- * on the Effect side whose wire encoding is a JSON:API error document with the
- * declared status. They carry the same information as the `{ message, code }`
- * bodies of `HttpApiSchema.ts`: `detail` is the message, and `meta` carries
- * `message` and, when the failure has one, the stable domain `code`
- * (`EMAIL_NOT_VERIFIED`, `RESEND_TOO_SOON`, …) a client branches on.
- *
- * The externally specified endpoints (OAuth / OIDC, SCIM, the device flow)
- * keep their own error bodies; these classes serve only the JSON:API
- * endpoints. {@link fromHttpError} maps the `HttpApiSchema.ts` errors the
- * shared handler helpers fail with onto them.
+ * The JSON:API error documents of the HTTP API, as effect-jsonapi
+ * `ApiError.make` classes: `detail` is the message, and `meta` carries it and
+ * the stable domain `code`. The specified endpoints (OAuth, OIDC, SCIM, the
+ * device flow) keep their own bodies. {@link fromHttpError} maps
+ * `HttpApiSchema.ts`'s errors.
  *
  * @module http/JsonApiErrors
  */

@@ -377,7 +377,7 @@ const withSql = <A, E>(
   effect: Effect.Effect<A, E, SqlClient.SqlClient>,
 ): Promise<A> => runPromise(effect.pipe(Effect.provide(D1Client.layer({ db: database }))));
 
-// The transaction mapping itself (see `D1Client`'s module docs): a transaction's
+// The transaction mapping itself: a transaction's
 // writes go to D1 as `batch()`es, so they commit or fail together.
 describe("D1Client transactions", () => {
   const setUp = Effect.fn("setUp")(function* () {

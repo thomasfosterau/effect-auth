@@ -1,22 +1,8 @@
 /**
- * The `IdentifierStore` contract, written once and run against every drizzle
- * store that claims it.
- *
- * The suites:
- *
- * - {@link identifierStoreContract} — the semantics the core contract states for
- *   any store, restricted to email identifiers so the multi-identifier store and
- *   the single-table store both qualify. It runs against each of them.
- * - {@link singleTableContract} — what only the single-table store does: one
- *   email per user, the user row as the identifier, refusals for other types.
- * - {@link notNullContract} — a `NOT NULL` email column: a targeted delete is
- *   refused, `deleteByUser` leaves the row for account deletion to remove, and
- *   `replace` rewrites the address without ever writing `NULL`.
- * - {@link verifiedAtContract} — a mapped `emailVerifiedAt` column stores and
- *   reports the verification time.
- *
- * A harness supplies the database and the user rows; everything else is the
- * assertion. Never published (`tsconfig.json` excludes `src/testing/`).
+ * The `IdentifierStore` contract suites, run against every drizzle store that
+ * claims it: the shared contract (email identifiers only), the single-table
+ * store's own rules, a `NOT NULL` email column and a mapped `emailVerifiedAt`.
+ * A harness supplies the database and the user rows. Never published.
  */
 
 import { DateTime, Effect } from "effect";

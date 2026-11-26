@@ -1,14 +1,8 @@
 /**
- * The host scheduler seam for sends that must not sit on the response path
- * ({@link DeliveryScheduler}), and the detached send the flows build on it
- * ({@link makeDetachedSend}).
- *
- * A flow awaits its send inline unless the configuration hides whether an
- * account exists: there only a known address gets a message, so an inline send
- * would answer that address later than an unknown one, and fail it when the
- * vendor fails. Those sends are handed to the scheduler instead, and their
- * failures go to the `afterDeliveryFailure` hook and the
- * `effect_auth_delivery_sends_total` metric.
+ * The host scheduler for sends that must not sit on the response path ({@link
+ * DeliveryScheduler}), and the detached send built on it ({@link
+ * makeDetachedSend}). The flows that hide whether an account exists use it;
+ * failures go to the `afterDeliveryFailure` hook and the delivery metric.
  *
  * @module deliveryScheduler
  */

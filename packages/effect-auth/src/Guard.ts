@@ -1,121 +1,9 @@
 /**
- * Zero-IO guards over an already-resolved viewer: the gates (`requireUser`,
- * `requireRoleAtLeast`, `requireOwnerOrRole`), their never-failing predicate
- * counterparts, and the per-viewer capability hooks that restate a write gate
- * as `meta.canEdit` / `canDelete`.
- *
- * ### The kernel's fast path, not a second engine
- *
- * Every rung and ownership decision here is made by `Policy.decidePure` over a
- * slice built from facts the caller already holds — the viewer's id and rung,
- * and (for ownership) the owner id the caller loaded with the row. No
- * `EntityResolver`, no `Authorizer`, no IO. The policies decided are the ones
- * {@link Guards.policies} returns, which are ordinary `DeclarativePolicy`
- * values: a gate and a stored declarative policy built from the same axis
- * cannot disagree, because they are the same value (ADR-0018: there is one
- * authorization model).
- *
- * ### Gates and predicates
- *
- * - **Gates** fail: anonymous → {@link Unauthorized}, signed in but not
- *   entitled → {@link Forbidden}. They yield the viewer on success, so a gate
- *   is the first line of an operation: `const user = yield* guards.requireUser`.
- * - **Predicates** never fail and treat anonymous as an ordinary answer
- *   (`false`). Most of a read path, and all per-viewer response shaping, is
- *   predicates.
- *
- * Gates are Effect **values** where they take no argument (`requireUser`), so
- * call sites yield them bare; the axis-taking ones are functions, and an app
- * binds its named gates once: `const requireModerator =
- * guards.requireRoleAtLeast(Axes.moderate)`.
- *
- * ### 401, 403 — and 404
- *
- * | Outcome                                   | Status | Error                   |
- * | ----------------------------------------- | ------ | ----------------------- |
- * | no viewer, on a gated **write**           | 401    | {@link Unauthorized}    |
- * | a viewer below the gate, on a **write**   | 403    | {@link Forbidden}       |
- * | a **read** predicate answers `false`      | **404**| the app's `NotFound`    |
- *
- * The last row is the one to get right. A read the viewer may not see must be
- * indistinguishable from a read of a row that does not exist: answering 403
- * confirms the row exists, which is an enumeration oracle. So read paths ask a
- * predicate (`canViewOwned`, `hasRoleAtLeast`) and turn `false` into the same
- * not-found they return for a missing id — never into `Forbidden`.
- *
- * ### Users and system principals
- *
- * The kit's gates admit a viewer and nothing else: a background job has no
- * viewer, so it cannot pass them. {@link requireSystem} is the gate for a job:
- * it admits the {@link Authorizer.CurrentPrincipal} when that is a system
- * principal (`System::"<name>"`) a policy grants the action, decides it through
- * the `Authorizer` (so the decision is logged with the job's name), and yields
- * its `EntityRef`. An operation either may perform asks which it has: the user
- * gate when a viewer is signed in, the system gate otherwise. Report the write
- * with `recordWrite`, naming whichever principal passed, and `AuditPlugin`
- * logs it.
- *
- * ```ts
- * import assert from "node:assert/strict"
- * import { Context, Effect, Layer, Result } from "effect"
- * import * as Option from "effect/Option"
- * import * as Auth from "@thomasfosterau/effect-auth"
- *
- * interface AppUser { readonly id: string; readonly role: string }
- * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
- *   "@app/CurrentViewer",
- * ) {}
- *
- * const Roles = Auth.Ladder.make(["user", "contributor"])
- * const guards = Auth.Guard.make({ ladder: Roles, viewer: CurrentViewer })
- * const requireContributor = guards.requireRoleAtLeast("contributor")
- *
- * // The translation pipeline may write pages, and nothing else.
- * const AuthorizerLive = Auth.Authorizer.layer({
- *   policies: [
- *     Auth.System.grant("translation-pipeline", {
- *       id: "translation-pipeline:write-pages",
- *       action: "page:write",
- *       resource: Auth.Policy.isType("Page"),
- *     }),
- *   ],
- * })
- *
- * const writePage = (id: string) =>
- *   Effect.gen(function* () {
- *     const resource = Auth.Entity.ref("Page", id)
- *     const actor = (yield* guards.isSignedIn)
- *       ? guards.principal(yield* requireContributor).ref
- *       : yield* Auth.Guard.requireSystem({ action: "page:write", resource })
- *     // ...the write itself...
- *     yield* Auth.recordWrite({ principal: actor, action: "page:write", resource })
- *     return Auth.Entity.formatRef(actor)
- *   })
- *
- * const anonymous = Layer.succeed(CurrentViewer, Option.none())
- * const ada = Layer.succeed(CurrentViewer, Option.some({ id: "u-1", role: "contributor" }))
- *
- * const program = Effect.gen(function* () {
- *   assert.equal(yield* writePage("p-1").pipe(Effect.provide(ada)), 'User::"u-1"')
- *   assert.equal(
- *     yield* writePage("p-1").pipe(Auth.System.provide("translation-pipeline"), Effect.provide(anonymous)),
- *     'System::"translation-pipeline"',
- *   )
- *   // A job no policy grants is refused.
- *   const refused = yield* Effect.result(
- *     writePage("p-1").pipe(Auth.System.provide("billing-cron"), Effect.provide(anonymous)),
- *   )
- *   assert.ok(Result.isFailure(refused))
- * }).pipe(Effect.provide(Layer.merge(AuthorizerLive, Auth.Hooks.Default)))
- *
- * await Effect.runPromise(program)
- * ```
- *
- * ### "Signed in" is not a rung
- *
- * `requireUser` asks whether a viewer exists and compares no rung. It is
- * deliberately not `requireRoleAtLeast(lowestRung)`: the two diverge the
- * instant the ladder gains a rung below the lowest one.
+ * Zero-IO guards over a resolved viewer: gates that fail with `Unauthorized` or
+ * `Forbidden`, predicates that never fail, {@link requireSystem} for jobs, and
+ * capability hooks for `meta.canEdit` / `canDelete`. Each decision is
+ * `Policy.decidePure` over {@link Guards.policies}. Answer a `false` read
+ * predicate as not found, never `Forbidden`.
  *
  * @example
  * ```ts
@@ -195,7 +83,8 @@ export class Unauthorized extends Schema.TaggedError<
 
 /**
  * 403 — there is a viewer, and the gate refuses them. Never the answer to a
- * **read** the viewer may not see (that is a 404; see the module docs).
+ * **read** the viewer may not see: that is a 404, since a 403 confirms the row
+ * exists.
  *
  * @since 0.1.0
  * @category errors
@@ -528,7 +417,64 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
  * {@link Forbidden} when no policy grants the system principal the action. The
  * decision is the `Authorizer`'s, so it runs every policy, stored ones
  * included, and is logged as `authorization.decision` with the principal's
- * name. The module docs show it composed with a user gate.
+ * name. The example composes it with a user gate.
+ *
+ * @example A user gate or the system gate
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Context, Effect, Layer, Result } from "effect"
+ * import * as Option from "effect/Option"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * interface AppUser { readonly id: string; readonly role: string }
+ * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
+ *   "@app/CurrentViewer",
+ * ) {}
+ *
+ * const Roles = Auth.Ladder.make(["user", "contributor"])
+ * const guards = Auth.Guard.make({ ladder: Roles, viewer: CurrentViewer })
+ * const requireContributor = guards.requireRoleAtLeast("contributor")
+ *
+ * // The translation pipeline may write pages, and nothing else.
+ * const AuthorizerLive = Auth.Authorizer.layer({
+ *   policies: [
+ *     Auth.System.grant("translation-pipeline", {
+ *       id: "translation-pipeline:write-pages",
+ *       action: "page:write",
+ *       resource: Auth.Policy.isType("Page"),
+ *     }),
+ *   ],
+ * })
+ *
+ * const writePage = (id: string) =>
+ *   Effect.gen(function* () {
+ *     const resource = Auth.Entity.ref("Page", id)
+ *     const actor = (yield* guards.isSignedIn)
+ *       ? guards.principal(yield* requireContributor).ref
+ *       : yield* Auth.Guard.requireSystem({ action: "page:write", resource })
+ *     // ...the write itself...
+ *     yield* Auth.recordWrite({ principal: actor, action: "page:write", resource })
+ *     return Auth.Entity.formatRef(actor)
+ *   })
+ *
+ * const anonymous = Layer.succeed(CurrentViewer, Option.none())
+ * const ada = Layer.succeed(CurrentViewer, Option.some({ id: "u-1", role: "contributor" }))
+ *
+ * const program = Effect.gen(function* () {
+ *   assert.equal(yield* writePage("p-1").pipe(Effect.provide(ada)), 'User::"u-1"')
+ *   assert.equal(
+ *     yield* writePage("p-1").pipe(Auth.System.provide("translation-pipeline"), Effect.provide(anonymous)),
+ *     'System::"translation-pipeline"',
+ *   )
+ *   // A job no policy grants is refused.
+ *   const refused = yield* Effect.result(
+ *     writePage("p-1").pipe(Auth.System.provide("billing-cron"), Effect.provide(anonymous)),
+ *   )
+ *   assert.ok(Result.isFailure(refused))
+ * }).pipe(Effect.provide(Layer.merge(AuthorizerLive, Auth.Hooks.Default)))
+ *
+ * await Effect.runPromise(program)
+ * ```
  *
  * @since 0.1.0
  * @category gates

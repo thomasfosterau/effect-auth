@@ -1,93 +1,10 @@
 /**
- * `KeyValueStore`-backed implementations of effect-auth's ephemeral stores.
- *
- * These stores hold short-lived token and state data (OAuth states, WebAuthn
- * challenges, verification, reset and magic-link tokens, One Tap nonces) and
- * the attempt counters (rate limits, email OTPs, pending multi-factor
- * challenges), plus one long-lived store, {@link IdentifierStoreKV}.
- *
- * Each layer requires the `KeyValueStore` service from
- * `effect/persistence`; provide any of its backends (e.g.
- * `KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`,
- * `KeyValueStore.layerSql`) underneath.
- *
- * ## What is supported where
- *
- * A `KeyValueStore` offers get, set and remove, and nothing atomic across
- * them, so every write that depends on a read can interleave with another.
- *
- * - **Token and state stores** (`OAuthStateStoreKV`, `ChallengeStoreKV`,
- *   `EmailVerificationStoreKV`, `PasswordResetStoreKV`, `MagicLinkStoreKV`,
- *   `GoogleOneTapNonceStoreKV`) tolerate it, apart from spending a single-use
- *   record: `consume` is atomic across processes only with a
- *   {@link KeyValueStoreTake} (below).
- *   {@link layerKV} bundles the first five, for a deployment.
- * - **Counter stores** (`RateLimitStoreKV`, `EmailOtpStoreKV`,
- *   `PendingMultiFactorStoreKV`) and **`IdentifierStoreKV`** are for
- *   development, tests and a single process only. Their counts are
- *   read-modify-write, so parallel guesses across processes share a count and
- *   the attempt caps scale with concurrency, and `IdentifierStoreKV` checks a
- *   value is free with a read before it writes, so two processes can both
- *   claim one address. {@link layerKVSingleProcess} adds them to
- *   {@link layerKV}. In production use `./sql` (or another store with atomic
- *   counters and a unique index) for these.
- *
- * Never put a single-use record on an eventually consistent backend such as
- * Cloudflare KV: a read after a remove may still see the record, so a spent
- * token or state can be spent again. Use Durable Objects, D1 through
- * `./sql`, or Redis.
- *
- * Records are serialized as JSON strings. All of these record shapes use
- * epoch-millisecond numbers for timestamps (no `Date` fields), so plain
- * `JSON.stringify`/`JSON.parse` roundtrips them; WebAuthn challenge bytes are
- * base64-encoded.
- *
- * ## Key layout
- *
- * Every store namespaces its keys, e.g. `oauth-state:${state}` or
- * `magic-link:token:${token}`.
- *
- * ## Secondary indexes
- *
- * A key-value store cannot scan by user id or email, so stores with
- * `deleteByUserId`/`deleteByEmail` maintain a secondary index key (e.g.
- * `email-verification:user:${userId}` holding a JSON array of live tokens).
- * The index is updated on create/delete, and {@link purgeExpiredKV} removes
- * an expired token from its index as it deletes the token, so an index holds
- * at most its key's unexpired tokens and the ones the next purge will take.
- *
- * ## Expiry
- *
- * `KeyValueStore` has no per-entry TTL, so every record that expires is
- * written in an envelope carrying its expiry (`{ "~expiresAt": ms, value }`),
- * and {@link purgeExpiredKV}, scheduled by the host, deletes the spent ones.
- * Reads open the envelope and return the record whether or not it has
- * expired; the services judge expiry, as over every other store.
- *
- * ## Atomicity caveat
- *
- * `RateLimitStore.increment` (and `EmailOtpStore.recordFailure` and the
- * secondary index updates) are implemented as read-modify-write, which is not
- * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
- * the same count and only bump it once, which is why the counter stores are
- * single-process only.
- *
- * The per-code attempt counters (`EmailOtpStore.incrementAttempts`,
- * `PendingMultiFactorStore.recordFailedAttempt`) are the guess limit itself:
- * the services count before they compare, and two attempts sharing a count
- * would both be compared. Each runs under a semaphore its store owns,
- * so one process never hands out a count twice; as with `consume` below,
- * that does not span processes sharing a backend.
- *
- * The single-use stores' `consume` (`OAuthStateStore`,
- * `EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`,
- * `PendingMultiFactorStore`) is a security guarantee, not a counter. A
- * `KeyValueStore` offers no get-and-delete, so by default each runs its read
- * and remove under a semaphore the store owns: one process never hands a
- * record out twice, but two processes sharing a backend can. Behind several
- * instances, provide a {@link KeyValueStoreTake} (Redis `GETDEL`, a Durable
- * Object) where the stores are built, and `consume` takes the record in one
- * atomic call instead.
+ * `KeyValueStore` (`effect/persistence`) implementations of the ephemeral
+ * stores. The token and state stores ({@link layerKV}) suit a deployment; the
+ * counter stores and `IdentifierStoreKV` ({@link layerKVSingleProcess}) are
+ * single-process only. Never keep single-use records on an eventually
+ * consistent backend, and provide a {@link KeyValueStoreTake} behind several
+ * instances.
  */
 import {
   Clock,
@@ -492,7 +409,7 @@ const rateLimitExpiry = (entry: RateLimitEntry, until: number): number =>
 /**
  * Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
  *
- * **Development and single-process use only** (see the module docs):
+ * **Development and single-process use only**:
  * `increment` is read-modify-write, so across processes parallel requests
  * share a count and overshoot the limit. In production use `./sql` or
  * another store with an atomic increment.
@@ -565,7 +482,7 @@ const verificationByCreatedAt: Order.Order<EmailVerification> = Order.mapInput(
  * Build an {@link EmailVerificationStore} over the ambient `KeyValueStore`.
  *
  * `deleteByUserId` is served by a secondary index key per user holding the
- * user's live tokens (see the module docs for staleness guarantees).
+ * user's live tokens, which {@link purgeExpiredKV} prunes as it deletes them.
  */
 export const emailVerificationStoreKV: Effect.Effect<
   typeof EmailVerificationStore.Service,
@@ -847,7 +764,7 @@ const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
  * deleting the OTP leaves it; `clearFailures` removes it, and
  * {@link purgeExpiredKV} once its backoff has long decayed.
  *
- * **Development and single-process use only** (see the module docs): its
+ * **Development and single-process use only**: its
  * counts are read-modify-write, so across processes parallel attempts share
  * a count. In production use `./sql` or another store with atomic counters.
  */
@@ -1127,7 +1044,7 @@ const purgeExpiredRecords = <A>(options: {
  *   cap the delay has fully decayed.
  *
  * Like the stores' other multi-step writes, this is read-then-delete, not
- * atomic (see the module docs): an OTP re-sent for the same address and
+ * atomic: an OTP re-sent for the same address and
  * purpose between the read and the delete is deleted too, so that code is
  * refused and the user asks for another. That fails closed.
  *
@@ -1297,7 +1214,7 @@ const withoutAttempts = (stored: StoredPendingMultiFactor): PendingMultiFactor =
 /**
  * Build a {@link PendingMultiFactorStore} over the ambient `KeyValueStore`.
  *
- * **Development and single-process use only** (see the module docs): its
+ * **Development and single-process use only**: its
  * counts are read-modify-write, so across processes parallel attempts share
  * a count. In production use `./sql` or another store with atomic counters.
  */
@@ -1416,7 +1333,7 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
 /**
  * Build an {@link IdentifierStore} over the ambient `KeyValueStore`.
  *
- * **Development and single-process use only** (see the module docs): a
+ * **Development and single-process use only**: a
  * `KeyValueStore` has no unique index, so `create` and `replace` check that
  * a value is free with a read before they write, and two processes can both
  * claim one address. `byo-stores.md` makes a real unique constraint a must;
@@ -1626,15 +1543,15 @@ export const GoogleOneTapNonceStoreKV: Layer.Layer<
  * The token and state stores, backed by the ambient `KeyValueStore`: OAuth
  * states, WebAuthn challenges, email verification, password reset and
  * magic-link tokens. This is the bundle for a deployment; it leaves out the
- * counter stores, which are single-process only (see the module docs), so
+ * counter stores, which are single-process only ({@link layerKVSingleProcess}), so
  * provide `RateLimitStore`, `EmailOtpStore` and `PendingMultiFactorStore`
  * from `@thomasfosterau/effect-auth/sql` or another store with atomic counters.
  * {@link layerKVSingleProcess} adds the KV counter stores, for development,
  * tests and one process.
  *
  * Their single-use `consume` is atomic within one process, and across
- * processes only when a {@link KeyValueStoreTake} is provided beneath (see
- * the module docs), and an eventually consistent backend such as Cloudflare KV can hand
+ * processes only when a {@link KeyValueStoreTake} is provided beneath, and an
+ * eventually consistent backend such as Cloudflare KV can hand
  * a spent record out again, so keep these on a strongly consistent backend.
  */
 export const layerKV: Layer.Layer<
@@ -1654,7 +1571,7 @@ export const layerKV: Layer.Layer<
  * `EmailOtpStoreKV`, `PendingMultiFactorStoreKV`): every ephemeral store over
  * the ambient `KeyValueStore`. **Development, tests and a single process
  * only**: across processes the counters' read-modify-write lets parallel
- * guesses share a count (see the module docs).
+ * guesses share a count.
  */
 export const layerKVSingleProcess: Layer.Layer<
   Layer.Success<typeof layerKV> | RateLimitStore | EmailOtpStore | PendingMultiFactorStore,

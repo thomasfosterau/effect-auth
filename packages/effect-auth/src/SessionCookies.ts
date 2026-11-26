@@ -1,22 +1,9 @@
 /**
- * Cookie **naming** policy, separated from the HTTP cluster so an app can read
- * the names its own edge has to look for.
- *
- * The effective session cookie name is a computed value, not a configured one:
- * `resolveCookieConfig` derives it from `name`, `secure` and `hostPrefix`, and
- * can emit a `__Host-` prefix. An app that wants to answer "does this request
- * carry a credential at all?" before dispatching therefore cannot simply
- * restate the configured name — it has to run the same derivation.
- *
- * This module is that derivation, and it has exactly one implementation:
- * `http/HttpServer.ts`'s `resolveCookieConfig` calls {@link resolveNaming}, and
- * `SessionResolution`'s credential predicates call {@link cookieNames}. Changing
- * `name`, `secure` or `hostPrefix` cannot desynchronise an app's fast path from
- * what the middleware reads, because there is nothing to keep in sync.
- *
- * It deliberately lives outside `http/` and pulls in no HTTP machinery: the
- * callers that need it most run at a raw `Request` with no Effect HTTP stack
- * in sight.
+ * Cookie naming, outside `http/`: {@link resolveNaming} derives the effective
+ * session cookie name, a `__Host-` prefix included, from `name`, `secure` and
+ * `hostPrefix`. The HTTP tier and `SessionResolution`'s credential predicates
+ * both call it, so an app's fast path cannot drift from what the middleware
+ * reads.
  *
  * @module session-cookies
  */

@@ -1,13 +1,8 @@
 /**
- * Route-level policy gate: a `HttpApiMiddleware` that runs the `Authorizer`
- * against a per-route `AuthorizeInput` and turns a deny into the wire-level
- * 403 `Forbidden` error.
- *
- * `AuthMiddleware` answers who is calling; a guard from
- * {@link makeAuthorizationMiddleware} answers whether they may, per route. The
- * input may be fixed or derived from the request (path params are in context).
- * A deny, or any failure computing the decision, is a 403 naming only the
- * decision's reason; the full trace is logged, never returned.
+ * Route-level policy gate: {@link makeAuthorizationMiddleware} runs the
+ * `Authorizer` on a per-route input, fixed or derived from the request, and
+ * answers a deny, or a failure to decide, with a `403` naming only the reason.
+ * The full trace is logged, never returned.
  *
  * @example Gate one endpoint on a per-request resource
  * ```ts
@@ -350,7 +345,7 @@ type GuardName<Id extends string, All extends string = Id> = Id extends string
  * Attach the returned class with `.middleware(...)` to whichever
  * `HttpApiEndpoint`/`HttpApiGroup` the policy protects, and provide its
  * `.layer` alongside the application layer — mirroring how `AuthMiddleware`
- * and its `layer()` are attached (see the module doc's example).
+ * and its `layer()` are attached (see the module example).
  *
  * **Naming.** `name` is the guard's type identity, so give each guard its own
  * name. It must be one non-empty string literal: a `string`, `any`, a template

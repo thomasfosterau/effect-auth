@@ -1,46 +1,8 @@
 /**
- * Cloudflare Access: trust the identity Access puts on every request it lets
- * through.
- *
- * When an application sits behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/),
- * Access signs the caller in at the edge and forwards an application token, a
- * JWT, in the `Cf-Access-Jwt-Assertion` header (and, for browsers, the
- * `CF_Authorization` cookie). This module verifies that token and hands back
- * the identity it carries, so the application runs no sign-in of its own:
- *
- * - **Signature**: RS256 only, against the key whose `kid` the token names,
- *   from the team's own key set (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`).
- *   The key URL comes from the configuration, never from the token.
- * - **Issuer**: `iss` equals the team domain exactly.
- * - **Audience**: `aud` contains the application's AUD tag.
- * - **Lifetime**: `exp` is required; `exp` and `nbf` are checked with a
- *   bounded clock tolerance.
- *
- * The key set is cached in memory for `keysTtlMs` and refetched early when a
- * token names a `kid` the cache does not hold (Access rotates its keys), at
- * most once per `minRefreshIntervalMs`, so a forged `kid` cannot turn every
- * request into a fetch. Refetches are serialised: concurrent requests wait for
- * one fetch rather than each starting their own.
- *
- * The verified identity is either a user (with the email the identity
- * provider attested) or a service token (its client id as `commonName`).
- * {@link findUser} maps a user identity to an existing effect-auth user by
- * verified email, and {@link userContextLayer} provides it as the request's
- * `CurrentUser`, `CurrentPrincipal` and `CurrentCredential` (a service token is
- * `"machine"`), so gated code runs as it would under any other credential.
- *
- * ## Header or cookie
- *
- * Cloudflare recommends the header: Access adds it to every request it
- * forwards, while the cookie is not guaranteed. The default reads only the
- * header. Add `"cookie"` to `sources` when the application reads the identity
- * on paths Access does not gate (an edit control on a page readers also see),
- * where only the browser's cookie arrives. A cookie credential is ambient, so
- * a state-changing request authenticated by it needs the same CSRF defence as
- * any session cookie (a trusted-origin check, a `SameSite` cookie).
- *
- * This module runs on Workers (`nodejs_compat`), in Node and anywhere else the
- * core does: signature verification goes through `effect/jose`.
+ * Cloudflare Access: verify the application token Access forwards (the
+ * `Cf-Access-Jwt-Assertion` header, and the `CF_Authorization` cookie when
+ * `sources` names it) and provide its identity as the request's user or service
+ * token. A cookie credential is ambient, so it needs the usual CSRF defence.
  *
  * @example
  * ```ts

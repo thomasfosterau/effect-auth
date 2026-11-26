@@ -1,21 +1,9 @@
 /**
- * OIDC Provider — act as an OpenID Connect identity provider.
- *
- * Mirrors better-auth's `oidc-provider` plugin: register client applications,
- * run the authorization-code flow (with PKCE), handle consent, and issue
- * opaque access/refresh tokens plus signed `id_token`s so third-party apps can
- * federate sign-in to this server.
- *
- * The `id_token` is signed with the {@link module:jwt} `JwtService`, sharing
- * its signing keys — the JWKS published at `/.well-known/jwks.json` (or
- * `GET /jwks`) verifies both plain user JWTs and OIDC `id_token`s. An
- * `id_token` carries `typ: "JWT"` and only its OIDC claims, so
- * `JwtService.verify` (which requires `typ: "at+jwt"`) refuses it as a bearer.
- *
- * Secrets at rest: client secrets, authorization codes, and access/refresh
- * tokens are stored only as sha256 hex digests — lookups by exact digest are
- * inherently timing-safe, and secret comparison re-hashes both sides before a
- * `crypto.timingSafeEqual`.
+ * OIDC provider: registers clients, runs the authorization-code flow with PKCE
+ * and consent, and issues opaque access and refresh tokens and `id_token`s
+ * signed with `JwtService`'s keys. Secrets, codes and tokens are stored as
+ * digests. An `id_token` is `typ: "JWT"`, which `JwtService.verify` refuses as
+ * a bearer.
  *
  * @module oidc-provider
  */

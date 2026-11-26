@@ -1,15 +1,8 @@
 /**
- * Rate limiting plugin (transform hook with short-circuit).
- *
- * Consumes a rate-limit token on `beforeAuthenticate`, which every
- * credential-verifying flow fires, keyed on the account (the resolved user,
- * else the handle; see `authenticationSubject`). When the limit is exceeded
- * the hook *fails* with `RateLimitError`, which propagates through the auth
- * error channel and short-circuits the attempt - demonstrating the "deny"
- * pattern within a transform hook.
- *
- * Demonstrates a plugin that declares its own service dependencies: the
- * resulting Layer is `Layer<Hooks, never, Hooks | RateLimiter | RateLimitStore>`.
+ * Per-account rate limiting on `beforeAuthenticate`, keyed by
+ * `authenticationSubject` (the resolved user, else the handle): past the limit
+ * the hook fails with `RateLimitError`. Its layer requires `RateLimiter` and
+ * `RateLimitStore`.
  *
  * @module plugins/rate-limit
  */

@@ -1,30 +1,9 @@
 /**
- * Drizzle-backed implementation of effect-auth's `IdentifierStore`, plus the
- * `Request`/`RequestResolver` pairs that batch identifier reads.
- *
- * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
- * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.IdentifierStore`. Both take an optional schema — any dialect's
- * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
- * application's own table — so switching database, table names or table shape
- * is a one-argument change.
- *
- * ### Contract notes
- *
- * - `getByValue` and `setVerified` return `null` on a miss; they never fail
- *   with a "not found" error.
- * - Deletes are silent no-ops when the row does not exist.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`, including the unique-index violation raised when two
- *   users race for the same `(type, value)` identifier. `Auth.claimIdentifier`
- *   and `Auth.replaceIdentifier` in core re-read the pair on failure and turn
- *   that race into an `IdentifierTakenError`.
- * - `replace` inserts the new identifier and then deletes the old one. The
- *   store opens no transaction of its own: run on a handle inside the
- *   application's transaction, the two statements commit or roll back together;
- *   otherwise each autocommits, and a failure between them leaves the user
- *   holding both identifiers, never neither. A value another user holds is
- *   refused by the unique index before anything is deleted.
+ * Drizzle `IdentifierStore` and the batched identifier reads, over a dialect's
+ * {@link Tables} or a `defineSchema` mapping. A unique-index violation is an
+ * `AuthError`, which core turns into `IdentifierTakenError`. `replace` inserts,
+ * then deletes, in no transaction of its own: outside the application's, a
+ * failure leaves both identifiers.
  */
 
 import { and, asc, eq, inArray, or } from "drizzle-orm";

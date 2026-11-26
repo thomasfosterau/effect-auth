@@ -1,10 +1,8 @@
 /**
- * A `beforeAuthenticate` probe for the flows' tests: it records every
- * attempt a flow hands the hook and, when told to, refuses it with a
- * `RateLimitError`, so a test can see both that a flow runs the gate and that
- * a refusal stops the flow before it checks or spends the credential.
- *
- * Internal test support: the `./testing` barrel does not export it.
+ * A `beforeAuthenticate` probe for flow tests: it records every attempt and,
+ * when told to, refuses with `RateLimitError`, to show that a flow runs the
+ * gate and stops before checking the credential. Internal; not in the
+ * `./testing` barrel.
  */
 import { Effect, Layer } from "effect";
 import { DeliveryScheduler } from "../DeliveryScheduler.ts";

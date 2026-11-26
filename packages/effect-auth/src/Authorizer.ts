@@ -1,11 +1,8 @@
 /**
- * The Effect shell around the pure policy kernel: principal context, entity
- * slice resolution, and the batteries-included `Authorizer` service.
- *
- * Cedar's architecture split, Effect-natively: services fetch the entity
- * slice (an Effect); the decision over the slice is the pure function in
- * `Policy.ts`. Every decision is deterministic and replayable from the
- * `(request, slice)` pair the trace hooks see.
+ * The Effect shell around the pure kernel: principal context, entity-slice
+ * resolution and the `Authorizer` service. Services fetch the slice; the
+ * decision over it is `Policy.ts`'s pure function, replayable from the
+ * `(request, slice)` pair.
  *
  * @module authorizer
  */

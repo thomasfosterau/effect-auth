@@ -1,13 +1,8 @@
 /**
- * The bounds on every request the core sends (remote JWKS, the Cloudflare
- * Access keys, the OAuth and OIDC provider endpoints, SSO discovery): a
- * timeout over the whole exchange, body included, a cap on the response
- * body, and no redirects followed.
- *
- * Requests go through the `HttpClient` the application provides
- * (`FetchHttpClient.layer` on Workers, Node and in browsers). Override the
- * limits by providing {@link OutboundLimits} where the services' layers are
- * built.
+ * The bounds on every request the core sends: one timeout over the whole
+ * exchange, a cap on the response body, and no redirects. Requests go through
+ * the application's `HttpClient`; override the limits by providing {@link
+ * OutboundLimits} where the services' layers are built.
  *
  * @example
  * ```ts

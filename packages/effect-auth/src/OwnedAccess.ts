@@ -1,115 +1,9 @@
 /**
- * Owned-material read access: a four-state visibility axis, the two
- * publication axes that narrow it (draft and moderation), the follower and
- * member seams it resolves through, the per-row predicate, and the per-request
- * read scope a LIST builds its `WHERE` from.
- *
- * Multi-tenant applications keep a member's material on an `owner` column
- * with a `visibility` of `public | followers | group | private`, an optional
- * `group` column naming the group a `group` row is shared with, and
- * optionally two orthogonal publication flags, `draft` and `unapproved`:
- *
- * | visibility  | who may view                                              |
- * | ----------- | --------------------------------------------------------- |
- * | `public`    | everyone, anonymous included                              |
- * | `followers` | the owner; the owner's followers ({@link IsFollower}); the `viewPrivate` axis |
- * | `group`     | the owner; the members of the row's group ({@link IsMember}); the `viewPrivate` axis |
- * | `private`   | the owner; the `viewPrivate` axis                         |
- *
- * `draft: true` narrows whatever `visibility` allows down to the owner and the
- * `viewPrivate` axis — a `public` draft is exactly as hidden as a `private`
- * row. `unapproved: true` (a moderated row whose state is anything but
- * approved: pending, rejected, a state added later) narrows it in exactly the
- * same way. The axes are independent conjuncts: neither publication flag ever
- * widens what `visibility` hides, and a row is **published** only when it is
- * neither a draft nor unapproved. The application maps its own moderation
- * column to the boolean (anything but exactly its approved state is `true`),
- * so the core carries no moderation vocabulary.
- *
- * ### No owner, no group
- *
- * A row whose owner column holds no string (SQL `NULL`, an absent key) has
- * **no owner**: pass `ownerId: undefined`. No viewer matches the owner arm —
- * the decision slice carries no `owner` attribute at all, never an empty or
- * sentinel id that could equal the anonymous principal — and the follower seam
- * is never asked about it. It is visible only when `public` and published, or
- * to the `viewPrivate` axis. Never coerce a missing owner with `String(value)`.
- *
- * A `group` row whose group column holds no string names no group and reads
- * as `private`: its owner and the `viewPrivate` axis only, and the member seam
- * is never asked. That is how a deleted group's rows become private to their
- * owners.
- *
- * ### One set of facts, two shapes
- *
- * A single `get` asks {@link OwnedAccess.canView} of the row; a `list` asks
- * {@link OwnedAccess.readScope} once per request and renders it as a `WHERE`
- * (`ownedListFilter` in `@thomasfosterau/effect-auth-drizzle`). Both are built
- * from the same facts — the owner, the visibility, the publication flags, the
- * group, the viewer's follow and group sets — so the list filter and the row
- * predicate cannot drift. The row predicate is decided by the policy kernel
- * (`Policy.decidePure` over {@link OwnedAccess.policies}); the scope is that
- * policy set's set-shaped projection, and `ReadScope.compile` over the same
- * policies and {@link OwnedAccess.binding} yields the same rows.
- *
- * ### Fail closed on the seams
- *
- * `followers` and `group` are the two visibility states that need an external
- * fact. They are read through {@link IsFollower} and {@link IsMember} with
- * `Effect.serviceOption`, so a runtime that does not provide one — a job, a
- * test, a deployment before the social graph exists — treats every non-owner
- * as a non-follower (or a non-member): such a row is then visible to its owner
- * and the `viewPrivate` axis only. An unprovided seam narrows the scope; it
- * never widens it. {@link isFollowerNever} and {@link isMemberNever} make that
- * posture explicit where a layer is wanted. A seam is asked only for a
- * signed-in viewer on a published row of its visibility whose owner (or
- * group) is a string.
- *
- * ### The four role axes
- *
- * A content application usually asks four rung questions of a signed-in
- * account: may it read other members' private material, see soft-deleted
- * rows, write someone else's owned row (moderate), and write reference data.
- * They need no API beyond the ladder and the guard kit: declare them as axes
- * once and hand each to the gate or predicate that asks it.
- *
- * ```ts
- * import assert from "node:assert/strict"
- * import { Context } from "effect"
- * import * as Option from "effect/Option"
- * import * as Auth from "@thomasfosterau/effect-auth"
- *
- * interface AppUser { readonly id: string; readonly role: string }
- * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
- *   "@app/CurrentViewer",
- * ) {}
- *
- * const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"])
- * const Axes = Roles.axes({
- *   viewPrivate: "moderator", // OwnedAccess.make / ReferenceAccess.make
- *   viewDeleted: "moderator", // Cacheability.shouldIncludeDeleted
- *   moderate: "moderator", // guards.requireOwnerOrRole(ownerId, Axes.moderate)
- *   writeCorpus: "contributor", // guards.requireRoleAtLeast(Axes.writeCorpus)
- * })
- * const guards = Auth.Guard.make({ ladder: Roles, viewer: CurrentViewer })
- *
- * assert.equal(guards.decideRole({ id: "c", role: "contributor" }, Axes.writeCorpus), true)
- * assert.equal(guards.decideRole({ id: "c", role: "contributor" }, Axes.moderate), false)
- * // A role outside the ladder holds no axis at all.
- * for (const axis of [Axes.viewPrivate, Axes.viewDeleted, Axes.moderate, Axes.writeCorpus]) {
- *   assert.equal(guards.decideRole({ id: "x", role: "superadmin" }, axis), false)
- * }
- * ```
- *
- * Every one fails closed on a role outside the ladder: `guards.decideRole`
- * answers `false` for it at every axis, so an unknown or retired role reads as
- * an ordinary account, never as a privileged one.
- *
- * ### A `false` is a 404
- *
- * `canView` is a predicate, not a gate: it never fails. A caller turns `false`
- * into the same not-found it returns for a missing id — never `Forbidden`,
- * which would confirm the row exists.
+ * Read access to owned material: the `visibility` axis (`public | followers |
+ * group | private`), the `draft` and `unapproved` axes that only narrow it, the
+ * follower and member seams, the per-row {@link OwnedAccess.canView} and the
+ * per-request {@link OwnedAccess.readScope}. Answer a `false` as not found,
+ * never `Forbidden`.
  *
  * @module owned-access
  */
@@ -465,6 +359,35 @@ const questionsFor = (row: OwnedRow): RelationQuestions => {
 
 /**
  * Build the owned-material read access.
+ *
+ * @example The four role axes
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Context } from "effect"
+ * import * as Option from "effect/Option"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * interface AppUser { readonly id: string; readonly role: string }
+ * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
+ *   "@app/CurrentViewer",
+ * ) {}
+ *
+ * const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"])
+ * const Axes = Roles.axes({
+ *   viewPrivate: "moderator", // OwnedAccess.make / ReferenceAccess.make
+ *   viewDeleted: "moderator", // Cacheability.shouldIncludeDeleted
+ *   moderate: "moderator", // guards.requireOwnerOrRole(ownerId, Axes.moderate)
+ *   writeCorpus: "contributor", // guards.requireRoleAtLeast(Axes.writeCorpus)
+ * })
+ * const guards = Auth.Guard.make({ ladder: Roles, viewer: CurrentViewer })
+ *
+ * assert.equal(guards.decideRole({ id: "c", role: "contributor" }, Axes.writeCorpus), true)
+ * assert.equal(guards.decideRole({ id: "c", role: "contributor" }, Axes.moderate), false)
+ * // A role outside the ladder holds no axis at all.
+ * for (const axis of [Axes.viewPrivate, Axes.viewDeleted, Axes.moderate, Axes.writeCorpus]) {
+ *   assert.equal(guards.decideRole({ id: "x", role: "superadmin" }, axis), false)
+ * }
+ * ```
  *
  * @example
  * ```ts

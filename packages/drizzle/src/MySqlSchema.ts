@@ -1,41 +1,8 @@
 /**
- * Drizzle `mysql-core` table definitions backing the effect-auth stores.
- *
- * The same tables as `Pg`, under the same names, with the same column
- * names. MySQL's differences from PostgreSQL are all physical:
- *
- * - Text keys are `varchar(255)` rather than `text`: InnoDB cannot index a
- *   `TEXT` column without a prefix length, and `(type, value)` *must* be
- *   indexable — that unique index is the claim mechanism behind
- *   `Auth.claimIdentifier`.
- * - Timestamps are `datetime({ mode: "date", fsp: 3 })`: millisecond precision
- *   (matching `Date`), and unlike `TIMESTAMP` not capped at 2038. MySQL stores
- *   no zone; a `Date` is an instant, and the store never reads a wall-clock
- *   field.
- * - Attribute bags are `json().$type<Auth.JsonObject>()`, `NOT NULL`
- *   and — unlike the other two dialects — *without* a default, because MySQL
- *   does not accept a literal `DEFAULT` on a `JSON` column. Every insert this
- *   package performs writes the bag explicitly, so nothing depends on it.
- * - Booleans are `boolean()`, i.e. `tinyint` `0`/`1`.
- * - Identifier values compare byte for byte: `identifiers.value` is
- *   `varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin` ({@link binaryVarchar}),
- *   because MySQL's default collation (`utf8mb4_0900_ai_ci` on MySQL 8) is
- *   case- and accent-insensitive: under it a lookup of `bob@exämple.com` finds
- *   `bob@example.com`'s row, so a reset or sign-in for one address resolves the
- *   other's account. PostgreSQL and SQLite compare bytes already. An
- *   application's own column that holds identifier values (the single-table
- *   store's `users.email`, or a table mapped through `defineSchema`) needs the
- *   same collation.
- *
- * ### Support status
- *
- * MySQL is supported at the type level and by the shared store implementation,
- * but is **not** covered by an integration suite: the test environment has no
- * MySQL server. `MySql.test.ts` pins the table definitions, the emitted DDL and
- * the fact that a `MySqlAsyncDatabase` handle satisfies `databaseLayer`; the query
- * behaviour itself is covered by the PostgreSQL (PGlite) and SQLite
- * (better-sqlite3) suites, which exercise the very same store code through the
- * very same seam.
+ * Drizzle `mysql-core` tables: the `Pg` tables under the same names and
+ * columns. Keys are `varchar(255)` so `(type, value)` can be indexed, instants
+ * `datetime(3)`, bags `json` with no default, and identifier values
+ * `utf8mb4_bin` ({@link binaryVarchar}). No integration suite runs on MySQL.
  */
 
 import {

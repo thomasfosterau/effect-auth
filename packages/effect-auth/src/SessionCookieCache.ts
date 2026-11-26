@@ -1,50 +1,9 @@
 /**
- * Signed session-data cookie cache.
- *
- * better-auth's `session.cookieCache` stores a short-lived HMAC-signed copy of
- * the session + user in a cookie so `GET /sessions/current` (and other authenticated
- * requests) can be served without hitting the session store on every request.
- *
- * The cookie value is `base64url(payload) . base64url(HMAC-SHA256(base64url
- * payload))`, where the payload is versioned for forward compatibility and
- * carries the session, user, a cache expiry (`now + maxAge`), the app's cache
- * epoch ({@link SessionCacheConfig.version}) and the primary session's stored
- * id (`sid`, the digest of the session cookie's token) — binding the cache
- * entry to a specific primary session cookie so identity cannot bleed across
- * account switches. Neither `sid` nor the session's `id` is the token itself.
- * With
- * {@link SessionCacheConfig.encrypt} the payload is AES-256-GCM encrypted
- * before it is signed.
- *
- * ### An authorization bound, not a tuning knob
- *
- * A cache hit resolves the session and the user without consulting the store,
- * so for up to `maxAge` it answers with what was true when the cookie was
- * issued. Two windows follow:
- *
- * - **A revoked session keeps working.** A session signed out or revoked on
- *   another device stays usable from a cached cookie until `maxAge` elapses.
- *   (The HTTP layer clears the cache cookie on the device that signs out.)
- * - **A changed user is served stale.** Anything the snapshot carries is
- *   served as it was: a banned user's profile, an edited name.
- *
- * Authorization-bearing attributes are kept out of that window: a user who
- * holds any of `UserService`'s server-only attributes
- * (`UserServiceConfig.serverOnlyAttributes`, default `["role"]`) is never
- * snapshotted, and a cookie that carries one is never served, so a demoted
- * admin's `role` always comes from the store. The ban and SCIM standing keys
- * (`banned`, `banExpires`, `scimDeactivated`) are gated the same way, whatever
- * the config. The cache then helps only users with no such attribute. Keep `maxAge` short (default 5 minutes) all the same,
- * since a revoked session's window is not narrowed by this.
- *
- * **To invalidate every outstanding cache cookie at once** (a role-ladder
- * change, a session-shape change, a suspected compromise), change
- * {@link SessionCacheConfig.version}. After a compromise, also revoke the
- * affected accounts' sessions: a still-valid session is simply re-cached under
- * the new epoch.
- *
- * Without `encrypt`, the cookie is signed but NOT encrypted: session and user
- * data (including any PII in `attributes`) is readable by the browser.
+ * Signed session-data cookie cache: an optionally encrypted snapshot of the
+ * session and user, bound to the session cookie. A hit skips the store for up
+ * to `maxAge`, so a revoked session works until then. Users with server-only or
+ * standing attributes are never cached. Change `version` to invalidate every
+ * cookie.
  */
 import { Data, DateTime, Effect, HashSet, Redacted, Result } from "effect";
 import * as Arr from "effect/Array";

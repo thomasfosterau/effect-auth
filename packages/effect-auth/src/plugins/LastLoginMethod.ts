@@ -1,16 +1,8 @@
 /**
- * Last-login-method plugin (tap hooks).
- *
- * Records the sign-in method (the {@link AuthResult.method} discriminator —
- * `"email-password"`, `"username"`, ...) into the issued session's
- * `attributes.method` on `afterSignIn`/`afterSignUp`, so apps can answer
- * "how did this user last authenticate?" server-side.
- *
- * The companion browser hint — a non-httpOnly `${cookie}_last_method` cookie
- * login pages read to highlight the user's previous method — is set by the
- * HTTP layer: enable it with `cookie.lastLoginMethod` on
- * `HttpServer.make` (it covers every sign-in endpoint, including the
- * flows that don't fire these hooks).
+ * Last-login-method plugin: records the sign-in method in the session's
+ * `attributes.method` on `afterSignIn` and `afterSignUp`. The browser hint
+ * cookie is the HTTP tier's (`cookie.lastLoginMethod`), which covers every
+ * sign-in endpoint.
  *
  * @module plugins/last-login-method
  */

@@ -1,26 +1,8 @@
 /**
- * Drizzle-backed implementation of effect-auth's `SessionStore`, plus the
- * `Request`/`RequestResolver` pair that batches session reads.
- *
- * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
- * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.SessionStore`. Both take an optional schema — any dialect's
- * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
- * application's own table — so switching database, table names or table shape
- * is a one-argument change.
- *
- * ### Contract notes
- *
- * - `get` returns `null` on a miss; it never fails with a "not found" error.
- * - Deletes are silent no-ops when the row does not exist.
- * - `touch` is one `UPDATE` of the two expiry columns guarded by
- *   `expires_at >= lastActivityAt`, then a re-read when the driver's
- *   affected-row count shows a match (no `RETURNING` on MySQL), so it never
- *   recreates a deleted session or writes `attributes`.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
- * - Session ids are SHA-256 hex digests of the bearer token, computed by the
- *   service layer — the database never sees a raw token.
+ * Drizzle `SessionStore` and the batched session reads, over a dialect's {@link
+ * Tables} or a `defineSchema` mapping. Session ids are the token digests the
+ * service computes. `touch` moves only the expiry columns, guarded so it never
+ * recreates a deleted session.
  */
 
 import { and, asc, eq, gte, inArray } from "drizzle-orm";

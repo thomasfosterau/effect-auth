@@ -1,15 +1,8 @@
 /**
- * The Release workflow's two scripts, either side of the publish job
- * (docs/PUBLISHING.md). Node built-ins only: the tag job installs nothing.
- *
- *   node scripts/release.ts pack [<out>]        after `vp run build`
- *   node scripts/release.ts tag <sha> [<out>]   after the publish job
- *
- * `pack` packs every public package whose version is not on npm into `<out>`
- * (default `release/`), in dependency order, and writes `<out>/manifest.json`.
- * `tag` creates the `<name>@<version>` tag and GitHub release for each
- * manifest entry, on commit `<sha>`, with that version's CHANGELOG section;
- * entries already released are skipped, so a re-run is safe.
+ * The Release workflow's scripts (docs/PUBLISHING.md), on Node built-ins only.
+ * `pack [<out>]`, after `vp run build`, packs every unpublished public package
+ * into `release/` with a manifest; `tag <sha> [<out>]` tags and releases each
+ * manifest entry, skipping those already released.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

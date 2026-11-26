@@ -1,38 +1,8 @@
 /**
- * IP-keyed rate limiting plugin.
- *
- * Applies per-operation rate limits keyed by the resolved client IP (from the
- * {@link ClientIP} service): every first-factor authentication attempt
- * (`beforeAuthenticate`: email and password, username, email and phone OTP,
- * magic link, passkey) draws on one `signin` bucket per address, second-factor
- * redemptions on a `second-factor` bucket, and sign-up and password-reset
- * requests on their own.
- *
- * **Unkeyed attempts count too**. An unknown or expired second-factor
- * challenge, magic-link token or passkey challenge names no account, so the
- * per-account plugins let it through; the flow still fires
- * `beforeAuthenticate` for it, and this plugin draws it from the same bucket
- * as a keyed attempt of that method, so guessing tokens costs the guesser's
- * address its budget.
- *
- * **A request with no client address is refused.** When the {@link ClientIP}
- * service is absent (a hook run outside an HTTP request, for example a direct
- * `EmailPasswordService.signIn` call from server code), or present but carrying
- * no address, the hook fails with a {@link RateLimitError} (`429` under the HTTP
- * layer). Such a request is never let through unlimited and never counted under
- * a bucket shared with other callers. With this plugin installed, every
- * authentication attempt, sign-up and password-reset request therefore needs
- * an address.
- *
- * **`Http.make` needs an address source for it.** A Web `Request` carries no
- * socket address, so under `Http.make` the address comes only from
- * `trustedProxy` (for example `ClientIP.cloudflare`). When the `Hooks` in
- * `services` include this plugin and `make` is given no `trustedProxy`, `make`
- * throws `ClientAddressConfigError`: with no proxy no request has an
- * address, so the plugin would refuse every one of them.
- *
- * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
- * infrastructure, so in-memory, SQL, and Redis backends all work.
+ * IP-keyed rate limits on sign-in attempts (one `signin` and one
+ * `second-factor` bucket per address), sign-up and password reset; unkeyed
+ * attempts count too. A request with no client address is refused with
+ * `RateLimitError`, so under `Http.make` the plugin needs a `trustedProxy`.
  *
  * @example
  * ```ts

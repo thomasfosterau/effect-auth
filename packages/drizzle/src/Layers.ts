@@ -1,11 +1,6 @@
 /**
- * The one composite layer this package ships: every drizzle-backed store at
- * once.
- *
- * It lives apart from the three store modules because it belongs to none of
- * them — each store module owns its own `layer`, and this is the bundle. The
- * batched read interface is deliberately *not* part of it; provide
- * `Requests.layer()` alongside when an application wants it.
+ * Every drizzle store as one layer. The batched `Requests.layer()` is not in
+ * it; provide it alongside when wanted.
  */
 
 import { Layer } from "effect";

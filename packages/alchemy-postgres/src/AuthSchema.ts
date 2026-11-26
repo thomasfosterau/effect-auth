@@ -1,46 +1,15 @@
 /**
- * `AuthSchema` — an Alchemy v2 resource that keeps the effect-auth schema
- * reconciled inside a Postgres database.
+ * `AuthSchema`: an Alchemy v2 resource that reconciles
+ * `@thomasfosterau/effect-auth/sql`'s `schemaStatements` in a Postgres
+ * database. The database is given to the provider, never as a prop, because
+ * props persist as plain data and a destroy runs from them. Tables survive
+ * teardown unless `dropOnDelete` is set.
  *
- * {@link AuthSchema} is built with Alchemy's own `Resource` constructor and
- * {@link AuthSchemaProvider} with Alchemy's own `Provider.succeed`, exactly
- * like `Alchemy.Random`. Declare it in an Alchemy program and the *engine*
- * runs the lifecycle — read, diff, reconcile, delete — nothing in this package
- * re-implements any of that.
- *
- * The DDL is not this package's either: it is
- * `@thomasfosterau/effect-auth/sql`'s `schemaStatements`, run through the
- * `SqlClient` a {@link PostgresDatabase} carries (`database(url)` from this
- * package, or {@link postgresDatabase} over any Postgres `SqlClient` layer).
- * The Cloudflare D1 counterpart is
- * `@thomasfosterau/effect-auth-alchemy-cloudflare`'s `AuthSchema`, an Alchemy
- * Action of its own type over the D1 provider's `QueryDatabase`, so one stack
- * can declare both.
- *
- * ### Where the database lives
- *
- * The database is given to the **provider**, not to the resource:
- *
+ * @example The database goes to the provider
  * ```ts
  * providers: Layer.mergeAll(AuthSchemaProvider({ database: database(url) }))
  * const schema = yield* AuthSchema("auth-schema", { dropOnDelete: true });
  * ```
- *
- * Resource props are *persisted state*. Alchemy strips every non-plain-data
- * value out of them at the commit boundary (`Diff.stripUnresolved`: "persisted
- * resource state must only ever hold plain data"), and a destroy runs entirely
- * from that persisted state — so a live client passed as a prop is present on
- * deploy and gone on delete, which would silently break
- * {@link AuthSchemaProps.dropOnDelete}. Alchemy's own providers take their
- * live clients the same way this one does: captured once when the provider
- * layer is built and closed over, with only serializable identifiers in props.
- *
- * A stack that reconciles more than one database registers them by name and
- * each resource selects one with {@link AuthSchemaProps.database}.
- *
- * This resource owns the *schema*, not the database, so tearing the stack down
- * leaves auth data in place unless you opt in with
- * {@link AuthSchemaProps.dropOnDelete}.
  */
 
 import { Clock, Data, Effect, type Layer } from "effect";
@@ -231,8 +200,8 @@ const propsOrEmpty = (props: AuthSchemaProps | undefined): AuthSchemaProps => pr
  *
  * The databases are held by the provider closure, so every lifecycle
  * operation — including the `delete` a real `alchemy destroy` replays from
- * persisted state — can connect. See the module docs for why they
- * cannot travel in props.
+ * persisted state — can connect. They cannot travel in props, which persist
+ * as plain data.
  */
 export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
   const databases: Readonly<Record<string, AuthSchemaDatabase>> =

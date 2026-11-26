@@ -129,7 +129,7 @@ only. For an operation a job may also perform, `Auth.Guard.requireSystem({ actio
 the system gate: it admits the current principal when it is a system principal a policy grants the
 action (decided by the `Authorizer` in context, so the decision is logged), and yields its
 `EntityRef`. Ask the user gate when a viewer is signed in (`guards.isSignedIn`) and the system gate
-otherwise; the `Guard` module docs have the full example. After the write, report it with
+otherwise; `requireSystem`'s docs have the full example. After the write, report it with
 `Auth.recordWrite({ principal, action, resource })`, naming whichever principal passed:
 `AuditPlugin` logs it as `auth.write`, so unattended writes are audited alongside a person's.
 
@@ -164,5 +164,5 @@ representation may sit in a viewer-less cache: `visibility` must be `public`, `d
 `unapproved` absent or `false`, `moderationState` absent or `"approved"`, and `deletedAt` absent
 (`null` included). The four role questions a content application asks — view private material,
 view deleted rows, moderate, write the corpus — are `Ladder` axes handed to `Guard`'s gates and
-predicates, and each fails closed on a role outside the ladder; the `OwnedAccess` module docs show
+predicates, and each fails closed on a role outside the ladder; the `OwnedAccess.make` example shows
 the pattern.

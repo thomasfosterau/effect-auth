@@ -540,5 +540,21 @@ export const verifier: typeof SamlVerifier.Service = {
  * A `Layer` providing core's `SamlVerifier`. Compose it into the layer stack
  * that builds `SsoService` — together with a `SamlReplayStore` — to turn on
  * SAML connections.
+ *
+ * @example Wiring the SSO service
+ * ```ts
+ * import { Layer } from "effect";
+ * import { FetchHttpClient } from "effect/http";
+ * import * as Saml from "@thomasfosterau/effect-auth/saml";
+ * import { SamlReplayStore, memorySamlReplayStore, SsoService } from "@thomasfosterau/effect-auth";
+ *
+ * const ssoLayer = SsoService.layer().pipe(
+ *   Layer.provide([
+ *     Saml.layer,
+ *     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
+ *     FetchHttpClient.layer,
+ *   ]),
+ * );
+ * ```
  */
 export const layer: Layer.Layer<SamlVerifier> = Layer.succeed(SamlVerifier, verifier);

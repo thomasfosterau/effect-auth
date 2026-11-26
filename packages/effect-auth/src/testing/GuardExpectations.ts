@@ -1,21 +1,9 @@
 /**
- * Guard-negative helpers: assert, in one line, that an operation refuses an
- * anonymous viewer, refuses a viewer one rung too low, and admits the rung it
- * names and the owner, with the status mapping `Guard` documents:
- *
- * | Case                      | write             | read                 |
- * | ------------------------- | ----------------- | -------------------- |
- * | anonymous                 | `Unauthorized` (401) | the app's not-found (404) |
- * | one rung below the minimum | `Forbidden` (403) | the app's not-found (404) |
- * | at the minimum            | allowed           | allowed              |
- * | the owner (below the minimum) | allowed       | allowed              |
- *
- * A read the viewer may not see must look exactly like a missing row, so a
- * read's refusals expect the app's not-found error (matched by `_tag`,
- * `"NotFound"` by default), never `Forbidden`.
- *
- * Each helper is an `Effect` that fails with {@link GuardExpectationError}
- * listing every case that came out wrong, so it runs under any test runner.
+ * Guard-negative helpers: assert in one line that an operation refuses an
+ * anonymous viewer and one a rung too low, and admits the rung and the owner. A
+ * write's refusals expect `Unauthorized` and `Forbidden`; a read's expect the
+ * app's not-found (`_tag` `"NotFound"` by default). A failure lists every wrong
+ * case.
  *
  * @module testing
  */

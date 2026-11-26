@@ -1,16 +1,8 @@
 /**
- * Alchemy's D1 client over an in-memory SQLite database, for tests only.
- *
- * D1 *is* SQLite behind an async, statement-at-a-time API, so the fastest
- * honest way to exercise {@link D1Client} without a Worker runtime is to put
- * that API in front of a real SQLite engine. The client is the provider's own
- * shape: its `PreparedStatement` class over a fake of the raw workerd binding,
- * as `@alchemy.run/cloudflare` builds every `QueryDatabaseClient`. The fake
- * implements only what that class calls: `prepare`, `bind` (a new statement,
- * as on the real binding), `all` / `raw` / `run`, and a `batch` that runs its
- * statements in one SQLite transaction, rolled back on failure, as D1's does.
- *
- * Excluded from the published build (see `tsconfig.json`).
+ * Alchemy's D1 client over an in-memory SQLite database, for tests: the
+ * provider's own `PreparedStatement` over a fake of the workerd binding, whose
+ * `batch` runs in one transaction rolled back on failure, as D1's does.
+ * Excluded from the build.
  */
 
 import {

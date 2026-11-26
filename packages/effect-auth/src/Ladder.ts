@@ -1,44 +1,8 @@
 /**
- * An ordered role ladder over the rungs `Rung`, least → most privileged: a
- * totally ordered set of rungs, a rank function, the one "at least this rung"
- * comparison, and named capability axes over it.
- *
- * This is the model the set-based RBAC in `Rbac.ts` cannot express. A user
- * holds exactly one rung (a single `role` string), and a capability is "that
- * rung **or above**" — a `>=` on the rung's position, with no store, no
- * permission lookup and no IO. It sits beside the policy kernel rather than
- * replacing it: `Policy.roleAtLeast` compiles an axis into an ordinary
- * declarative policy, so a ladder comparison is also storable and validated
- * against an `AuthorizationModel`.
- *
- * ### Four properties, each deliberate
- *
- * 1. **Total order.** `rank` reads the position straight off the array passed
- *    to {@link make}, least → most privileged, so the order is declared once.
- * 2. **Fail closed on an unknown rung.** A role string that is not on the
- *    ladder — a hand-written row, a rung a later migration removed — ranks
- *    `-1`, below every real rung, and satisfies no axis.
- * 3. **Fail closed on anonymous.** `null` / `undefined` satisfies nothing.
- * 4. **Named axes, not rung literals at call sites.** Declare
- *    `corpusWrite: "contributor"` once with {@link Ladder.axes} and have call
- *    sites name the axis; moving a capability between rungs is then a one-line
- *    edit rather than a sweep. Keep axes separate even when they sit on the
- *    same rung today — "may see private material" and "may change material"
- *    are different questions, and collapsing them is how a capability matrix
- *    silently over-grants.
- *
- * "Is anyone signed in" is deliberately **not** an axis: `requireUser` (in
- * `Guard.ts`) is not `requireRoleAtLeast(lowestRung)`, because the two diverge
- * the instant the ladder gains a rung below the lowest one.
- *
- * ### Import-free
- *
- * This module imports nothing — no `effect`, no other module of this package —
- * and is published on its own subpath (`@thomasfosterau/effect-auth/ladder`),
- * so a browser bundle can read the ladder for UX gates without pulling in the
- * server stack. Keep it that way: `ModuleGraph.test.ts` pins it.
- *
- * A usage example is on {@link make}, the entry point.
+ * An ordered role ladder, least to most privileged: a rank function, the one
+ * "at least this rung" comparison and named capability axes. An unknown rung
+ * and anonymous satisfy nothing. The module imports nothing, so a browser can
+ * load `./ladder`. The example is on {@link make}.
  *
  * @since 0.1.0
  * @category models

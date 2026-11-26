@@ -1,17 +1,9 @@
 /**
- * A {@link RateLimiter} implementation backed by
- * `effect/persistence`'s `RateLimiter`, so consumers keep the existing
- * `consumeToken`/`checkLimit` facade but gain the library's tested fixed-window
- * algorithm and pluggable storage backends (in-memory or Redis for
- * multi-instance deployments).
+ * A {@link RateLimiter} over `effect/persistence`'s `RateLimiter`, in memory or
+ * on Redis for several instances. A rule's `blockDurationMs` is a second fixed
+ * window under `<key>:blocked`, and `resetLimit` is a no-op.
  *
- * A rule's `blockDurationMs` is applied as a second fixed window, under
- * `<key>:blocked` in the same store: the first refusal opens it, and the key
- * is refused until it ends, even after its own window resets. `resetLimit` is
- * a no-op, since the backend has no delete.
- *
- * Usage (in-memory):
- *
+ * @example In memory
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Result } from "effect"
@@ -37,9 +29,7 @@
  * await Effect.runPromise(program)
  * ```
  *
- * Redis (multi-instance; atomic increments avoid the read-modify-write race of
- * the KV-backed stores):
- *
+ * @example On Redis, for several instances
  * ```ts
  * import { Layer } from "effect"
  * import { RateLimiter as PersistenceRateLimiter, Redis } from "effect/persistence"
@@ -196,6 +186,6 @@ export const rateLimiterPersistence: Effect.Effect<
 /**
  * A `Layer<RateLimiterTag, never, PersistenceRateLimiter.RateLimiter>`. Provide
  * `PersistenceRateLimiter.layer` plus a store (`layerStoreMemory` or a Redis
- * store) to obtain a runnable limiter (see the module docs for examples).
+ * store) to obtain a runnable limiter (the module examples show both).
  */
 export const rateLimiterPersistenceLayer = Layer.effect(RateLimiter, rateLimiterPersistence);

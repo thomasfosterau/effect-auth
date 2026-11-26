@@ -1,23 +1,9 @@
 /**
- * SQL schema for the effect-auth `SqlClient` stores.
- *
- * Tables are namespaced with an `auth_` prefix so they can live alongside an
- * application's own tables in the same database. All statements are
- * idempotent (`CREATE TABLE IF NOT EXISTS`) so {@link migrate} is safe to run
- * on every deploy.
- *
- * Column types use `TEXT`, `INTEGER`, and `BIGINT`:
- * - Epoch-millisecond timestamps are `BIGINT` — epoch-ms values (~1.75e12)
- *   overflow Postgres `INTEGER` (int4) and MySQL signed `INT`. `BIGINT` is
- *   safe on SQLite (D1 included), which treats it identically to `INTEGER`
- *   (64-bit affinity), and on Postgres.
- * - Booleans and small counters remain `INTEGER`.
- * - Attribute bags and other structured values are JSON `TEXT`.
- *
- * Token columns (`auth_sessions.id`, `auth_magic_links.token`,
- * `auth_email_verifications.token`, `auth_password_resets.token`,
- * `auth_api_keys.key_hash`) store the SHA-256 hash computed by the service
- * layer — the database never sees a raw bearer token.
+ * The `auth_`-prefixed tables of the `SqlClient` stores, as idempotent DDL
+ * ({@link schemaStatements}), so {@link migrate} is safe on every deploy.
+ * Instants are epoch-millisecond `BIGINT`s, booleans and counters `INTEGER`,
+ * structured values JSON `TEXT`, and token columns hold the service's SHA-256
+ * digests.
  */
 
 import { Effect } from "effect";

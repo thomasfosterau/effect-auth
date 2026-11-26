@@ -1,36 +1,15 @@
 /**
- * `AuthSchema` — an Alchemy Action that applies the effect-auth schema to a
- * `Cloudflare.D1.Database` on deploy.
+ * `AuthSchema`: an Alchemy Action that applies
+ * `@thomasfosterau/effect-auth/sql`'s `schemaStatements` to a
+ * `Cloudflare.D1.Database` on deploy, idempotently and beside the application's
+ * own migrations. An Action has no delete, so the tables go only with the
+ * database.
  *
- * It is built from Alchemy's own pieces, exactly as `@alchemy.run/cloudflare`
- * documents deploy-time database work: an `Action` whose init binds the
- * database with `Cloudflare.D1.QueryDatabase(database)` and whose body runs
- * the DDL through that client. The engine runs it in dependency order (after
- * the database exists, in the same deploy) and again whenever its input — the
- * database id and the schema's statements — changes.
- *
+ * @example
  * ```ts
  * const db = yield* Cloudflare.D1.Database("auth-db");
  * yield* AuthSchema("auth-schema", db).pipe(Effect.provide(Cloudflare.D1.QueryDatabaseLocal));
  * ```
- *
- * `Cloudflare.D1.QueryDatabaseLocal` is the provider's deploy-time
- * `QueryDatabase`: it talks to D1 over the Cloudflare HTTP API with the
- * stack's credentials, or to the local simulator under `alchemy dev`.
- *
- * ### Why not `Cloudflare.D1.Database({ migrations })`
- *
- * The database resource's `migrations` reads a directory of `.sql` files, and
- * a database takes one; the application's own migrations hold it. The auth
- * DDL is code — `@thomasfosterau/effect-auth/sql`'s `schemaStatements`, the
- * same statements every other SQL deployment runs — so it is applied beside
- * them, idempotently (`CREATE … IF NOT EXISTS`).
- *
- * ### What it does not do
- *
- * An Action has no delete: removing `AuthSchema` from the stack, or destroying
- * it, leaves the tables in place. They go with the database when the
- * `Cloudflare.D1.Database` resource is destroyed.
  */
 
 import type { Database } from "@alchemy.run/cloudflare/D1/Database";

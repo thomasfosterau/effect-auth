@@ -1,20 +1,9 @@
 /**
- * Anonymous (guest) authentication.
- *
- * Lets a visitor obtain a real user + session without credentials, then link
- * that identity to a full account on sign-up. Follows the house module pattern
- * (store tag + `Context.Service` tag + `make*` + `*ServiceLayer`), closely
- * mirroring `MagicLink.ts`.
- *
- * Convention: anonymous users carry `attributes.isAnonymous === true` and no
- * identifiers at all — the surrogate-keyed `User` needs no placeholder email.
- * Use {@link isAnonymousUser} to detect them.
- *
- * Account linking is triggered explicitly by the app/HTTP layer (hooks operate
- * on input values and cannot see the current session): after a guest signs up
- * for a real account, call {@link AnonymousService.linkAccount} with the
- * anonymous user and the freshly-created user; the `linkAccount` config
- * callback migrates any data, then the anonymous user is deleted.
+ * Anonymous (guest) sign-in: a real user and session without credentials,
+ * marked `attributes.isAnonymous` ({@link isAnonymousUser}) and holding no
+ * identifiers. After the guest signs up, the app calls {@link
+ * AnonymousService.linkAccount}, whose callback migrates their data before the
+ * anonymous user is deleted.
  */
 import { Clock, Context, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
 import { makeAmortizedPrune } from "./AmortizedPrune.ts";

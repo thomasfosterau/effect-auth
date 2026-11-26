@@ -1,38 +1,8 @@
 /**
- * Driver-agnostic SQL implementations of effect-auth's storage interfaces.
- *
- * Each `make*Store` is an Effect that reads the `SqlClient` service from
- * `effect/sql` out of the context and builds a plain store object,
- * and each `*StoreLayer` lifts it into an Effect `Layer` keyed by the
- * matching effect-auth `Context.Service` tag. {@link layer} bundles all of
- * them so a single `Layer.provide` wires up the entire auth stack on top of
- * a `SqlClient` layer for a supported dialect (SQLite, Cloudflare D1 and
- * PostgreSQL; see the package README). MySQL is not supported.
- *
- * Data codecs: dates as epoch milliseconds (`BIGINT`, read back as a number
- * from whatever an `int8` comes back as: see `Int8.ts`), booleans as `0`/`1`, attribute
- * bags and other structured values as JSON `TEXT`, binary values (WebAuthn
- * keys/challenges) as base64 `TEXT`.
- *
- * Concurrency: single-row upserts (`rateLimit.set`, `oauthAccount`,
- * `multiFactor`) and counters (`rateLimit.increment`,
- * `emailOtp.incrementAttempts`, `emailOtp.recordFailure`) use a single `ON CONFLICT … DO UPDATE` /
- * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. One-time consumes (`oauthState.consume`; the token stores'
- * `consume`) are a single `DELETE … RETURNING`, so a record is handed
- * out at most once; `multiFactor.useTotpCounter` / `useBackupCode` are
- * compare-and-set `UPDATE … RETURNING`s. Multi-step
- * writes (challenge, oauthState.create, emailOtp.upsert,
- * pendingMultiFactor.delete, and identifier.replace's claim-then-release) run
- * inside `sql.withTransaction`.
- * `ON CONFLICT` targets a declared primary key or unique index. MySQL has no
- * `ON CONFLICT` clause, so these statements fail there, and MySQL is not a
- * supported dialect. For MySQL, use `@thomasfosterau/effect-auth-drizzle`'s
- * MySQL tables.
- *
- * Token columns store SHA-256 hashes computed by the service layer (the
- * `auth_sessions.id` primary key included) — the database never sees a raw
- * bearer token.
+ * `effect/sql` implementations of the store contracts, for SQLite (D1 included)
+ * and PostgreSQL: a `make*Store` and `*StoreLayer` per store, and {@link layer}
+ * for all of them over a `SqlClient`. MySQL is not supported; use
+ * `@thomasfosterau/effect-auth-drizzle` there.
  */
 
 import { Clock, DateTime, Duration, Effect, Layer } from "effect";

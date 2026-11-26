@@ -1,103 +1,11 @@
 /**
- * Dist-level import smoke test for each package's published Effect floor.
+ * Packs every package and imports each entry from `dist/`, installed beside the
+ * lowest `effect` and peer versions its packed ranges admit, then runs
+ * behaviour, drizzle query and consumer type-check smokes, proving each
+ * published floor.
  *
- * Packs every package under `packages/*`, checks each packed manifest's
- * `repository` (below), and reads the `effect` peer range from each package
- * that imports Effect at module load. By default each package is
- * installed beside exactly the lowest `effect` its own range admits (its
- * floor): packages that share a floor share one scratch project, and a
- * package with a higher floor (the Alchemy packages' `catalogs.alchemy-peers`
- * range, when it sits above the programme's `catalogs.peers` one) gets a
- * project of its own. Each project
- * imports every `exports` entry of its packages from the packed `dist/`, and
- * the project holding `@thomasfosterau/effect-auth` runs a behaviour phase.
- * A stale `dist/`, or source that calls an API the floor does not have, fails
- * here instead of in a consumer. rc.113 renamed the `Config` constructors, and
- * the published range once claimed rc.112 while the code crashed at import on
- * every later rc: the unit suite only ever runs the catalog version, so this
- * is the check that proves each lower bound.
- *
- * Every package under `packages/*` is packed, the Svelte binding included,
- * and each packed manifest must set `repository.url` and `repository.directory`
- * to `packages/<dir>`. npm resolves a README's relative links against that
- * directory, so a missing or wrong value breaks them on the npm page. Every
- * offender is reported together. The binding is packed for this check only:
- * nothing imports it here.
- *
- * Run `vp run build` first (the packed tarballs contain `dist/`), then:
- *
- *   vp run check:dist [-- --effect <version> | catalog] [--keep]
- *
- * Third-party peers are installed the same way. `alchemy` with
- * `@alchemy.run/cloudflare` (beside effect-auth-alchemy-cloudflare) or with
- * `@effect/sql-pg` (beside effect-auth-alchemy-postgres), the core's optional
- * `@thomasfosterau/effect-jsonapi` and `@node-saml/node-saml`, and
- * `drizzle-orm` (beside effect-auth-drizzle) go in at
- * `semver.minVersion` of the range the packed manifest declares for them, so a
- * default run proves each peer floor the way it proves `effect`. The floor must
- * be a version npm publishes: a strict bound such as `>X` can name one that was
- * never released, and the check fails then, naming the package, peer, range
- * and computed version, rather than letting the install fail with an unclear error. When
- * several packages in one project declare the same peer, the highest floor is
- * installed, and the post-install check proves every declared range holds.
- * The log prints each peer version it installs and why.
- *
- * `--effect catalog` installs every package beside the version the workspace
- * builds against, and every peer at its catalog version (the newest leg). It
- * fails if that `effect` is outside any package's peer range (the workspace
- * would be building a package against an `effect` it does not support).
- * `--effect <version>` installs every package whose peer range admits that
- * version beside it, skips (and names) each package whose range does not: a
- * version below a package's floor is a combination that package does not
- * support. Its peers are installed at their floors, as in a default run.
- * `--keep` leaves the scratch projects on disk (the path is printed) instead of
- * deleting them, for debugging a failure.
- *
- * Each scratch project is installed with pnpm, as a pnpm consumer would
- * install it, and is its own pnpm workspace: its `package.json` carries the
- * workspace's `packageManager` (so a global pnpm of another major switches to
- * the pinned one rather than installing with its own defaults) and its
- * `pnpm-workspace.yaml` holds the settings the check relies on (see
- * `workspaceYaml`). It installs with `autoInstallPeers: false` and
- * `strictPeerDependencies: false`, which installs an `effect` that a peer
- * range rejects without complaint, so after each install the check reads
- * the `effect` range every one of our packages and every peer installed
- * beside them (such as `alchemy`) declares, and fails if the installed
- * `effect` misses one. It also checks each installed peer against the range
- * our packed manifests declare for it.
- *
- * Importing is not enough: the Effect API also moved *inside* the supported
- * range in places that only bite when a function is called (rc.116 replaced
- * `SchemaGetter.onSome`, which `protectedField` builds on), so the behaviour
- * phase builds the env-backed layers and exercises `protectedField` on the
- * packed dist.
- *
- * The query operators are the same kind of gap: the drizzle stores run
- * `eq`, `inArray`, `and`, `or` and `asc` only in the catalog-version tests. So
- * the project holding effect-auth-drizzle also runs a drizzle query smoke
- * (`drizzleSmoke`) against the drizzle-orm installed beside it, which builds
- * queries over the packed tables and the package's identifier store and batched
- * request read, and asserts the SQL and parameters they generate. No connection
- * is opened.
- *
- * The same project type-checks a consumer of the packed declarations
- * (`typeCheckDrizzleConsumer`): the Drizzle guide's `defineSchema` example,
- * read from the guide itself, and `drizzleConsumer`, which queries the packed
- * tables with the consumer's own drizzle and hands `databaseLayer` a real
- * handle of each dialect. It runs once on the drizzle-orm the project
- * installed and again on `drizzleApplicationsPin`, the commit build the
- * applications run (the drizzle query smoke runs on both too). It runs the
- * workspace's `tsc` strict, with
- * `exactOptionalPropertyTypes` and without `skipLibCheck`, beside
- * `@types/node` (the catalog version): an error in our `dist/` or in the
- * fixtures fails the run. drizzle-orm's own declarations do not pass that
- * configuration (1.0.0-rc.5's `PgPolicy` / `PgRole` classes fail
- * `exactOptionalPropertyTypes`), so errors located inside drizzle-orm are
- * printed and tolerated; a drizzle export our `dist/` names but drizzle lacks
- * still fails, because tsc reports it at the importing file.
- *
- * Not covered: the Svelte binding, which imports Effect
- * only through the core's `./client` subpath.
+ * After `vp run build`: `vp run check:dist [-- --effect <version> | catalog]
+ * [--keep]`.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -675,7 +583,8 @@ const drizzleConsumerTsconfig = JSON.stringify({
 
 /**
  * Type-check the drizzle consumer fixtures in `project` against the packed
- * declarations and the drizzle-orm installed there (see the module docs).
+ * declarations and the drizzle-orm installed there, without `skipLibCheck`;
+ * errors inside drizzle-orm's own declarations are printed and tolerated.
  */
 const typeCheckDrizzleConsumer = (project: string): void => {
   writeFileSync(join(project, "readme-define-schema.ts"), readmeDefineSchemaExample());

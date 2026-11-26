@@ -1,11 +1,7 @@
 /**
- * The user-keyed credential and token stores, and their per-user deletes.
- * Deleting a user (`UserPurge.ts`) clears all of them; the first
- * proof of an address (`FirstProof.ts`) clears a subset.
- *
- * The stores are optional: a caller resolves them once with
- * {@link userCredentialStores} where it resolves its other stores, and an app
- * without a store holds no credential of that kind.
+ * The user-keyed credential and token stores and their per-user deletes:
+ * `UserPurge.ts` clears all of them, `FirstProof.ts` a subset. The stores are
+ * optional; {@link userCredentialStores} resolves them once.
  *
  * @internal
  */

@@ -1,27 +1,9 @@
 /**
- * Form actions for the credential flows: sign-in, sign-up and the other
- * forms that POST a credential to the auth handler and redirect on success.
- *
- * A SvelteKit form action has to do three things the auth handler can't do
- * for it:
- *
- * - **Relay `Set-Cookie`.** The handler's response sets the session cookie,
- *   but SvelteKit only sends cookies set through `event.cookies`. Headers on a
- *   thrown redirect are not passed through. {@link credentialAction} copies
- *   every `Set-Cookie` onto `event.cookies` before it redirects.
- * - **Redirect only to a validated target.** The "where to go next" value comes
- *   from the client, so it goes through the core's `safeRedirect`.
- * - **Tell failures apart.** A `401` means wrong credentials. A `429` means
- *   throttled, and before this helper a throttled sign-in read as "the form did
- *   nothing". Anything else means the service failed. Each gets its own
- *   {@link CredentialFailureKind} and status, so the form can say which.
- * - **Tell "signed in" from "not yet".** A `202` issued no session: a second
- *   factor is pending, or the address must be verified first. The action
- *   returns a {@link CredentialPending} instead of redirecting, so the form can
- *   move to its second-factor or check-your-inbox step.
- *
- * SvelteKit's `redirect` and `fail` are passed in, not imported, so this
- * package carries no SvelteKit dependency of its own.
+ * Form actions for the credential flows. {@link credentialAction} copies every
+ * `Set-Cookie` onto `event.cookies`, redirects only through `safeRedirect`,
+ * tells wrong credentials, throttling and service failure apart, and returns
+ * {@link CredentialPending} for a `202`. SvelteKit's `redirect` and `fail` are
+ * passed in, so the package does not depend on SvelteKit.
  *
  * @module actions
  */

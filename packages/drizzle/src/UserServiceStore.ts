@@ -1,31 +1,8 @@
 /**
- * Drizzle-backed implementation of effect-auth's `UserServiceStore` — the
- * store `UserService`, `AccountManagementService` and `AdminService` read,
- * update and delete users through.
- *
- * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
- * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.UserServiceStore`. Both take an optional schema — any dialect's
- * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
- * application's own table — exactly as `UserStore` does.
- *
- * ### Contract notes
- *
- * - `get` reads through `UserStore`'s projection, so it returns the same user
- *   (promoted columns included, `password_hash` never), and `null` on a miss.
- * - `update` is one `UPDATE` of the user's row that writes `name`, `image`
- *   (`NULL` when absent), `updatedAt` and the attributes, then returns the user
- *   it was given, as core's `/sql` store does. The user is written whole: on a
- *   `defineSchema` mapping each attribute declared under `promoted` goes to its
- *   own column (`NULL` when the user no longer has it, which reads back absent),
- *   and every other attribute replaces the bag. Attributes for a users table
- *   with no mapped bag fail with `Auth.AuthError` rather than being dropped —
- *   the rule `EmailPasswordStore.createUser` applies. An update of a missing
- *   user writes nothing and still succeeds.
- * - `delete` removes the user's row only (sessions and identifiers are the
- *   services' to clean up); a delete of a missing user is a no-op.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
+ * Drizzle `UserServiceStore`, for `UserService`, `AccountManagementService` and
+ * `AdminService`: `get` is `UserStore`'s projection, `update` writes the user
+ * whole in one `UPDATE`, and `delete` removes the row only. It takes `Tables`
+ * or a `defineSchema` mapping, as `UserStore` does.
  */
 
 import { eq } from "drizzle-orm";

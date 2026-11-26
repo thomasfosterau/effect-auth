@@ -1,22 +1,9 @@
 /**
- * Run an `Effect` as a fixture principal in one call, so an application tests
- * its own guards, policies and session-aware read paths without HTTP.
- *
- * Two shapes, matching the two ways an app names its viewer:
- *
- * - {@link runAs} takes this library's `User` and provides the session
- *   context exactly as the required-auth middleware does: `CurrentSession`,
- *   `CurrentUser`, `MaybeCurrentSession`, `CurrentPrincipal` and
- *   `CurrentCredential`. Passing `null` provides the anonymous context
- *   (`MaybeCurrentSession` as `none`) and nothing else.
- * - {@link runAsViewer} takes the application's own viewer service (the one
- *   handed to `Guard.make`) and the app's user, and provides that viewer through
- *   `SessionContext.viewerLayer` alongside the same session context, so `Guard`
- *   gates, `Authorizer` decisions and `SessionContext` accessors all see the
- *   one fixture principal.
- *
- * The fixture session is minted from the `Clock` when the layer is built: it
- * started now and expires in 24 hours, so it is valid under `TestClock` too.
+ * Run an `Effect` as a fixture principal, to test guards, policies and
+ * session-aware reads without HTTP. {@link runAs} provides the session context
+ * as the required-auth middleware does (`null` is anonymous); {@link
+ * runAsViewer} also provides the app's own viewer. The session starts now and
+ * lasts 24 hours.
  *
  * @module testing
  */

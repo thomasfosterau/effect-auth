@@ -1,30 +1,9 @@
 /**
- * Role-based access control as **authoring sugar over the policy kernel**.
- *
- * RBAC is a way of *writing* policies, not a second engine. This module turns
- * the familiar flat configuration — who has which roles, which permissions a
- * role grants, which roles inherit which — into the two kernel artefacts a
- * decision is actually made from:
- *
- * - {@link policies} — one {@link Policy.DeclarativePolicy} per
- *   (role, permission) pair, so every rule authored the short way is pure
- *   data: storable, traceable, model-checkable, and partially evaluable.
- * - {@link entities} — the principal → role → parent-role fragment of the
- *   entity graph, so role assignment and role inheritance are ordinary
- *   hierarchy (`principal in Role::"editor"`) rather than a set union
- *   computed by a bespoke store.
- *
- * There is no `RoleStore` and no `checkPermission` behind this: the output
- * feeds `Authorizer`/`Policy.decide` like any other policy set.
- *
- * Role assignment is for users. A system principal (`System::"<name>"`) holds
- * no roles: `principalType: "System"` is refused, and the kernel never lets a
- * role permit (`principal in Role::"…"`) reach a system principal, so a role
- * change can never widen what a job may do (unless the application's own resolver
- * nests a `Role` inside a `System` group; see `System`). Grant a job with
- * `System.grant`. See
- * [ADR 0018](../../../docs/adr/0018-one-authorization-kernel.md) and
- * [the migration guide](../../../docs/guides/authorization-kernel-migration.md).
+ * Role-based access control as authoring sugar over the policy kernel: {@link
+ * policies} compiles roles and permissions into declarative policies, and
+ * {@link entities} the principal-to-role graph, for `Authorizer`. Roles are for
+ * users: `principalType: "System"` is refused. See ADR-0018 and
+ * `docs/guides/authorization-kernel-migration.md`.
  *
  * @example One-call RBAC setup
  * ```ts

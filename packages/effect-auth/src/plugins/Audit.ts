@@ -1,13 +1,8 @@
 /**
- * Audit logging plugin (tap hooks).
- *
- * Observes successful sign-up, sign-in and sign-out, and the writes the
- * application reports with `recordWrite`, and emits structured logs. A write
- * is logged with its acting principal, user or system, so unattended writes
- * by a background job are audited alongside a person's.
- * Demonstrates tap-only hooks authored with {@link Hooks.tap}, and the
- * `isolateTaps` option: a logging failure is caught and logged rather than
- * aborting the auth operation.
+ * Audit logging plugin: logs successful sign-up, sign-in and sign-out, and
+ * every write reported with `recordWrite` under its acting principal, user or
+ * system. Its taps are isolated, so a logging failure never aborts the
+ * operation.
  *
  * @module plugins/audit
  */

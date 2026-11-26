@@ -1,18 +1,8 @@
 /**
- * OTP-based second-factor gate for effect-auth.
- *
- * After first-factor success, `begin` sends a numeric OTP to the user (via
- * email, SMS, or any other channel supplied through `sendOtp`) and returns a
- * pending challenge token. `verify` redeems the token + OTP to create a
- * session.
- *
- * Reuses the generation, hashing, and attempt-limiting logic from the
- * EmailOtp / PhoneOtp engines (`generateOtp`, `hashToken`,
- * `constantTimeHashEqual`) without duplicating delivery or store concerns.
- *
- * Can serve as an **alternative** to TOTP (use `OtpSecondFactorGateLayer`
- * instead of `MultiFactorGateLayer`) or in **addition** to it by pairing with
- * `TrustedDevice.gate` from the TrustedDevice module.
+ * OTP second factor: after the first factor, `begin` sends a code through
+ * `sendOtp` and returns a pending challenge, which `verify` redeems with the
+ * code for a session. Use `OtpSecondFactorGateLayer` instead of TOTP's gate, or
+ * beside `TrustedDevice.gate`.
  *
  * @module otp-second-factor
  */

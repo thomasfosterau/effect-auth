@@ -1,17 +1,8 @@
 /**
- * A batched, `Effect.request`-driven read interface over the same three tables
- * the stores use.
- *
- * The store layers implement effect-auth's service contracts: one call, one
- * query, ordered exactly as the caller wrote it. That is the right shape for
- * the auth flows themselves, which read one session or one user at a time.
- *
- * Application code often has the opposite shape — a page that resolves twenty
- * users, or a list that asks "does this identifier exist?" once per row.
- * {@link AuthRequests} exposes those reads as Effect `Request`s backed by
- * `RequestResolver`s: concurrent lookups collected in the same batch window
- * collapse into one `WHERE ... IN (...)` query, and repeats of the same lookup
- * inside a batch collapse into one row read.
+ * Batched reads over the stores' tables for application code: concurrent
+ * `Effect.request`s in one batch window collapse into one `WHERE … IN (…)`.
+ * {@link layer} builds the shared resolvers, since Effect batches per resolver
+ * instance. There is no write path and no cache.
  *
  * @example
  * ```ts
@@ -28,21 +19,6 @@
  *   ),
  * );
  * ```
- *
- * ### Why a layer
- *
- * Effect batches per **resolver instance**, so the resolvers have to be shared
- * for anything to be batched at all. {@link layer} builds them once against the
- * ambient {@link DrizzleDatabase} and hands them out as a service; the
- * constructors below read that service back out of context, which is why each
- * returns an `Effect` requiring {@link AuthRequests}.
- *
- * ### What this is not
- *
- * There is no write path here and no cache by default: results live only for
- * the batch window. Wrap a resolver with `RequestResolver.withCache` if you
- * want request-level memoization, and remember that a cached auth read is a
- * stale auth read — bound its lifetime deliberately.
  */
 
 import { Context, Effect, Layer, RequestResolver } from "effect";

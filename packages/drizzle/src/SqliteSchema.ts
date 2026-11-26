@@ -1,26 +1,8 @@
 /**
- * Drizzle `sqlite-core` table definitions backing the effect-auth stores.
- *
- * The same tables as `Pg`, under the same names, with the same column
- * names — only the physical types change, because SQLite has neither a date
- * type, a boolean type, nor a JSON type.
- *
- * ### Column conventions
- *
- * - Timestamps are `integer({ mode: "timestamp_ms" })`: epoch milliseconds on
- *   disk, real `Date` values in the domain, so no precision is lost relative to
- *   PostgreSQL's `timestamptz`. (Time zone is not stored — a `Date` is an
- *   instant, and the store never reads a wall-clock field.)
- * - Attribute bags are `text({ mode: "json" }).$type<Auth.JsonObject>()`,
- *   `NOT NULL` with a `'{}'` default: drizzle serializes on write and parses on
- *   read, so the store layer still sees plain objects.
- * - Booleans are `integer({ mode: "boolean" })` — `0`/`1` on disk, `boolean` in
- *   the domain.
- * - Identifiers are unique on `(type, value)`; that index is the real claim
- *   mechanism behind `Auth.claimIdentifier`.
- *
- * Works with every drizzle SQLite driver — `better-sqlite3`, `libsql`,
- * `bun:sqlite`, D1, Expo, op-sqlite — synchronous or asynchronous.
+ * Drizzle `sqlite-core` tables: the `Pg` tables under the same names and
+ * columns. Instants are epoch-millisecond integers, bags JSON text with a
+ * `'{}'` default and booleans `0`/`1`, and `(type, value)` is unique. Every
+ * drizzle SQLite driver works, synchronous or not.
  */
 
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";

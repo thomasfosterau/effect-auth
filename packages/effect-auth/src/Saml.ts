@@ -1,45 +1,8 @@
 /**
- * SAML 2.0 contracts — the service-provider (SP) side of an enterprise SSO
- * connection, expressed as tags core can depend on without pulling in an XML
- * stack.
- *
- * Core `effect-auth` depends on nothing but `effect`, and a correct SAML
- * implementation needs XML canonicalisation, XML-DSig verification and DEFLATE
- * — none of which exist in the platform. So this module declares only the
- * **contract**: {@link SamlVerifier} (parse + cryptographically verify a SAML
- * Response, build an AuthnRequest, render SP metadata) and
- * {@link SamlReplayStore} (one-time records for AuthnRequest ids and seen
- * assertion ids). {@link module:sso} orchestrates them; the implementation
- * ships separately in `@thomasfosterau/effect-auth/saml`.
- *
- * This is the same split as {@link module:password}'s `PasswordHasher`
- * (contract in core) and `@thomasfosterau/effect-auth-argon2` (implementation).
- *
- * ## What a conforming {@link SamlVerifier} must enforce
- *
- * Everything below is a *security* requirement, not a nicety. Implementations
- * are expected to reject, not warn:
- *
- * 1. The signature must verify against one of the **pinned**
- *    {@link SamlVerifyInput.idpCertificates}. Certificates embedded in the
- *    document's `KeyInfo` are never trusted.
- * 2. Profile data must be read **only** from the bytes the signature actually
- *    covers — never from the surrounding, unverified document.
- * 3. A Response carrying more than one `Assertion` (signed or not) is invalid.
- * 4. `wantAssertionsSigned` defaults to `true`; when it is disabled the whole
- *    Response must be signed instead.
- * 5. `Issuer` must equal {@link SamlVerifyInput.idpEntityId}.
- * 6. `Conditions/AudienceRestriction` must contain
- *    {@link SamlVerifyInput.spEntityId}.
- * 7. `Destination` and `SubjectConfirmationData/@Recipient` must equal
- *    {@link SamlVerifyInput.acsUrl}.
- * 8. `NotBefore` / `NotOnOrAfter` must hold, allowing at most
- *    {@link SamlVerifyInput.clockSkewMs} of skew.
- * 9. `InResponseTo` must equal {@link SamlVerifyInput.expectedInResponseTo}
- *    when one is supplied.
- * 10. Signature and digest algorithms must be on an allow-list; SHA-1 is off by
- *     default and HMAC methods are never acceptable.
- * 11. Encrypted assertions are rejected outright rather than half-supported.
+ * SAML 2.0 contracts for the service-provider side of SSO: {@link SamlVerifier}
+ * and {@link SamlReplayStore}. `@thomasfosterau/effect-auth/saml` implements
+ * them, so the core carries no XML stack. {@link SamlVerifier} lists what a
+ * conforming verifier must reject.
  *
  * @module saml
  */
@@ -188,6 +151,22 @@ export interface SamlMetadataInput {
  * `@thomasfosterau/effect-auth/saml`'s `layer`. {@link module:sso} resolves it
  * *optionally*, so an app that registers no SAML connections never has to
  * install an XML stack — the SAML paths simply report that support is absent.
+ *
+ * A conforming implementation rejects, never warns, unless:
+ *
+ * 1. the signature verifies against a pinned
+ *    {@link SamlVerifyInput.idpCertificates} entry (never a `KeyInfo`
+ *    certificate), and profile data comes only from the signed bytes;
+ * 2. the Response holds at most one `Assertion`, and the assertion is signed
+ *    (or, with `wantAssertionsSigned: false`, the whole Response is);
+ * 3. `Issuer` equals {@link SamlVerifyInput.idpEntityId}, the audience
+ *    contains {@link SamlVerifyInput.spEntityId}, and `Destination` and
+ *    `Recipient` equal {@link SamlVerifyInput.acsUrl};
+ * 4. `NotBefore` / `NotOnOrAfter` hold within
+ *    {@link SamlVerifyInput.clockSkewMs}, and `InResponseTo` equals
+ *    {@link SamlVerifyInput.expectedInResponseTo} when one is given;
+ * 5. the algorithms are allow-listed (no SHA-1 by default, never HMAC), and
+ *    the assertion is not encrypted.
  */
 export class SamlVerifier extends Context.Service<
   SamlVerifier,

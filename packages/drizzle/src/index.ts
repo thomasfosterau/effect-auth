@@ -1,41 +1,9 @@
 /**
- * `@thomasfosterau/effect-auth-drizzle` — Drizzle ORM storage layers for
- * effect-auth, on PostgreSQL, SQLite or MySQL.
- *
- * Implements `SessionStore`, `UserStore` and `IdentifierStore` — the three
- * stores every sign-in flow touches — plus `EmailPasswordStore` (with
- * `PasswordResetUserStore`), `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the email
- * verification and password reset token stores, against drizzle table objects
- * you can hand straight to `drizzle-kit`. One module per store, plus a batched
- * `Request`/`RequestResolver` read interface for application code.
- *
- * ### The export map
- *
- * Each store is a namespace with the same two entry points, `make` and `layer`:
- *
- * - `SessionStore` / `UserStore` / `IdentifierStore` — the store modules.
- * - `EmailPasswordStore` (`layer`, `passwordResetUserLayer`), `UserServiceStore`
- *   (`UserService`, `AccountManagementService`, `AdminService`), `ApiKeyStore`,
- *   `RateLimitStore` (`purgeExpired` deletes its spent rows) and `TokenStore` (`emailVerificationLayer`,
- *   `passwordResetLayer`, `layer` for both) — the stores beyond sign-in.
- * - `SingleTableIdentifierStore` — the opt-in `IdentifierStore` whose email
- *   identifier is the application's own `users` row (one per user).
- * - `Requests` — the batched read interface (`Requests.layer`, `Requests.getUser`, ...).
- * - `Pg` / `Sqlite` / `MySql` — one dialect's tables and DDL each
- *   (`defineTables`, `tables`, `sessionsTable`, `migrationStatements`, ...).
- * - `layer` — the aggregate of the three sign-in stores.
- * - `DrizzleDatabase` / `databaseLayer` / `effectDatabaseLayer` / `AuthDatabase`
- *   — the database seam.
- * - `TableNames` / `defaultTableNames` / `Tables` and the row types — what the
- *   three dialects agree on.
- * - `defineSchema` / `fromTables` / `AuthSchema` and the `*ColumnNames` types —
- *   how to point the stores at tables this package did not define;
- *   `defineApiKeyTable`, `defineTokenTable` and `defineRateLimitTable` do the
- *   same for `ApiKeyStore`, `TokenStore` and `RateLimitStore`.
- * - `ladderCheck` — a role column's `CHECK`, derived from the app's `Ladder`.
- * - `ownedListFilter` / `isFollowerLayer` / `isMemberLayer` — `Auth.OwnedAccess`'s
- *   read scope rendered as a `WHERE`, and its follower and member seams over an
- *   application's own follow and membership tables.
+ * Drizzle ORM stores for effect-auth on PostgreSQL, SQLite or MySQL. Each store
+ * is a namespace with `make` and `layer`; `Pg`, `Sqlite` and `MySql` hold each
+ * dialect's tables and DDL; `defineSchema` maps the stores onto an
+ * application's tables; `Requests`, `ladderCheck` and `ownedListFilter`
+ * complete it.
  *
  * @example
  * ```ts

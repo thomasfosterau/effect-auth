@@ -1,12 +1,7 @@
 /**
- * Permission value helpers.
- *
- * A {@link PermissionRef} is a `{ resource, action }` pair describing either a
- * granted permission or a requested one. The `"*"` wildcard is supported in the
- * `resource` and/or `action` of a *granted* permission to match anything.
- *
- * These helpers are pure (no Effect, no dependencies) so they can be used in
- * stores, policies, tests, or plain application code.
+ * Permission helpers over {@link PermissionRef}, a `{ resource, action }` pair.
+ * A granted permission may use `"*"` in either part. Pure, with no Effect, for
+ * stores, policies, tests and application code.
  */
 
 import { Data } from "effect";

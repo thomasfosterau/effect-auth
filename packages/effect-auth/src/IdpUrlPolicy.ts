@@ -1,11 +1,8 @@
 /**
- * The URL policy for identity-provider endpoints a tenant registers (SSO
- * discovery, token, userinfo, JWKS): `https` only, no credentials in the
- * URL, and no host that names a private, loopback, link-local or otherwise
- * internal address. Hosts are checked as written, never resolved: the core
- * runs where DNS lookups are not available (Workers), so a public name that
- * resolves to a private address passes, and the egress network is the
- * defence there. Redirects are never followed, so only these URLs are reached.
+ * The URL policy for identity-provider endpoints a tenant registers: `https`,
+ * no credentials, and no private, loopback, link-local or internal host. Hosts
+ * are checked as written, never resolved (Workers have no DNS), so egress
+ * filtering is the defence against a name that resolves privately.
  */
 import * as Arr from "effect/Array";
 import { cidrContains } from "./ClientIP.ts";

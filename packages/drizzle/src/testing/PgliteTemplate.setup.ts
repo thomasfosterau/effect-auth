@@ -1,18 +1,7 @@
 /**
- * Vitest `globalSetup`: build one migrated PGlite data directory per test run
- * and hand its path to the test files.
- *
- * `PGlite.create()` runs `initdb` inside the WASM module before it opens a
- * database: seconds of CPU on an idle machine, and on a loaded one enough to
- * exceed the hook timeout that a test file's `beforeAll` runs under (this
- * package's 30 s `hookTimeout`).
- * Vitest applies no timeout to `globalSetup`, so that cost belongs here, in the
- * main process, and is paid once. A test file then starts each database from
- * this dump with {@link migratedPglite}, which skips `initdb` (and the
- * migrations) entirely.
- *
- * Wired up in this package's `vite.config.ts`; never published (`tsconfig.json`
- * excludes `src/testing/`).
+ * Vitest `globalSetup`: builds one migrated PGlite data directory per run, in
+ * the main process where no hook timeout applies, so each test file opens its
+ * database with {@link migratedPglite} and skips `initdb`. Never published.
  */
 
 import { PGlite } from "@electric-sql/pglite";

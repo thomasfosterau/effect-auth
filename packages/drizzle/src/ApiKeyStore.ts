@@ -1,30 +1,8 @@
 /**
- * Drizzle-backed implementation of effect-auth's `ApiKeyStore`, over the
- * `apiKeys` table of any dialect's {@link Tables}, or an application's own
- * table mapped with `defineApiKeyTable` (so the application owns its
- * `user_id` foreign key).
- *
- * ### Contract notes
- *
- * - `keyHash` is the SHA-256 hex digest `ApiKeyService` computes; the
- *   plaintext key is returned to the caller once and never reaches the store.
- *   The column is unique, so `getByHash` reads at most one row.
- * - `get` and `getByHash` return `null` on a miss; `delete` of a missing key is
- *   a no-op. `deleteByUserId` deletes every key of one user in one `DELETE`
- *   (core's account deletion calls it before the user row goes).
- * - Optional fields round-trip as absent: `NULL` reads back as a missing
- *   property, never as `null`. Instants are stored as timestamps and read
- *   back as the epoch milliseconds the contract uses.
- * - `update` writes every field but `id` and `createdAt`; a verify never
- *   calls it.
- * - `recordUse` is one `UPDATE` whose `WHERE` holds the whole check
- *   (enabled, not expired, the refill baseline unchanged, a use left) and
- *   whose `SET` moves only the usage columns, computing `remaining` in SQL.
- *   With no `RETURNING` on MySQL, it reads the driver's affected-row count and
- *   re-reads the row only when the `UPDATE` matched it. On MySQL that count
- *   must be the matched rows, mysql2's default (`FOUND_ROWS`).
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
+ * Drizzle `ApiKeyStore` (a dialect's {@link Tables}, or a table mapped with
+ * `defineApiKeyTable`). It stores only the key's digest; `NULL` fields read
+ * back absent and instants as epoch milliseconds. `recordUse` is one guarded
+ * `UPDATE`, which on MySQL needs mysql2's matched-rows count.
  */
 
 import { and, eq, gte, isNull, or, sql } from "drizzle-orm";

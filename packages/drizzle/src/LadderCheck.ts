@@ -1,9 +1,7 @@
 /**
- * The database backstop for a role column: a `CHECK` expression derived from
- * the application's `Ladder`, so the allowed rung set is declared exactly once
- * and the DDL cannot drift from the type and the runtime check
- * (`Auth.LadderSchema.rung`). Growing the ladder changes the generated DDL, so
- * a migration-drift gate catches the missing migration.
+ * A role column's `CHECK`, derived from the application's `Ladder`, so the rung
+ * set is declared once. Growing the ladder changes the DDL, so a
+ * migration-drift gate catches the missing migration.
  *
  * @example
  * ```ts

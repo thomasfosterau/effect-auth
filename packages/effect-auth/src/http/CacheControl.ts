@@ -1,20 +1,8 @@
 /**
- * `Cache-Control: no-store` for responses that carry session state.
- *
- * A response that sets a cookie is the viewer's: a shared cache (a CDN, a
- * proxy) that stored it would replay one browser's session cookie to the next
- * visitor. So every response carrying `Set-Cookie` that `Http.make` serves or
- * `RemoteSession` relays carries `no-store`, and so do the bodies that hand a
- * credential over without a cookie (the current session, a signed token, a new
- * API key, a TOTP secret).
- *
- * The merge keeps what is already there: a `Cache-Control` that has
- * `no-store` stays as it is, and one that lacks it keeps its directives
- * (`private`, `no-cache`, …) with `no-store` appended. RFC 9111 §5.2.2.5 has a
- * cache honour `no-store` whatever else the header says, so no directive
- * beside it can make the response storable again.
- *
- * Internal to the HTTP tier: `HttpServer` and `RemoteSession` share it.
+ * `Cache-Control: no-store` for responses that carry session state: every
+ * `Set-Cookie` response `Http.make` serves or `RemoteSession` relays, and every
+ * body that hands a credential over. The merge keeps existing directives and
+ * appends `no-store`. Internal to the HTTP tier.
  *
  * @module cache-control
  */

@@ -1,38 +1,9 @@
 /**
- * Enterprise SSO (single sign-on) — OIDC and SAML 2.0 relying party with domain
- * routing.
- *
- * Lets tenants bring their own identity provider: register a per-organization
- * connection, route sign-ins by email domain, and provision users (and,
- * optionally, organization members) on first login. Both protocols converge on
- * the same provisioning tail — refuse an address the connection does not
- * manage, find-or-create by IdP-verified email, claim the identifier as
- * verified, optionally add the user to the connection's
- * organization, add just-in-time memberships for organizations that have
- * verified the address's domain and opted into JIT, then mint a session. JIT
- * failures never fail the sign-in: membership is fail-open, authentication is
- * not.
- *
- * A connection signs in only addresses its tenant manages
- * ({@link module:managed-user}): an address on one of the connection's
- * organization's verified domains, or one held by a user that organization's
- * SSO provider or SCIM connection created. A connection registered without an
- * organization is bound to its own `domain`, which the platform admin who
- * registered it vouched for, and to the users it created itself.
- *
- * An **OIDC** connection is, under the hood, a dynamically-registered OAuth
- * provider, so that half reuses the machinery in {@link module:oauth} —
- * {@link OAuth.provider}, {@link discoverOAuthEndpoints}, and the shared
- * {@link OAuthStateStore}.
- *
- * A **SAML** connection stores the IdP's entity id, its HTTP-Redirect SSO
- * endpoint and its *pinned* signing certificates. Core owns the flow — minting
- * the `AuthnRequest` id, one-time-use enforcement, issuer checks, provisioning
- * — but not the XML: signature verification, canonicalisation and DEFLATE live
- * behind the {@link SamlVerifier} contract in {@link module:saml}, implemented
- * by `@thomasfosterau/effect-auth/saml`. Both {@link SamlVerifier} and
- * {@link SamlReplayStore} are resolved *optionally*, so an app with no SAML
- * connections never installs an XML stack.
+ * Enterprise SSO: an OIDC and SAML 2.0 relying party with per-organization
+ * connections and domain routing. Both protocols share one provisioning tail:
+ * refuse an unmanaged address, find or create by verified email, add
+ * memberships (just-in-time ones fail open), then mint a session. The SAML
+ * services are optional.
  *
  * @module sso
  */

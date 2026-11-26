@@ -1,14 +1,8 @@
 /**
- * Observability primitives: tracing spans (via `Effect.withSpan`) and metric
- * counters (via `Effect.Metric`) for all auth operations.
- *
- * Both are zero-cost no-ops when no Tracer or metric backend is in context —
- * Effect handles this natively, so there is no configuration needed to get
- * zero overhead.
- *
- * Security: **no PII is ever stored in span attributes or metric labels.**
- * Only non-identifying discriminators are recorded (algorithm, grant type,
- * outcome, provider, method).
+ * Tracing spans and metric counters for the auth operations, no-ops until a
+ * tracer or metric backend is in context. Spans and labels never carry personal
+ * data: only discriminators such as algorithm, grant type, outcome, provider
+ * and method.
  *
  * @module observability
  */

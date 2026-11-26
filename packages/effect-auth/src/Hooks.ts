@@ -1,22 +1,8 @@
 /**
- * Hooks - a typed, composable plugin system for the auth lifecycle.
- *
- * The {@link Hooks} service exposes a fixed set of *hook points* that fire at
- * every significant moment in the auth flow. Plugins are authored with
- * {@link makePlugin}, which produces a *decorator* Layer: it requires the
- * previous (inner) `Hooks` implementation and provides a wrapped one, threading
- * the inner call automatically so plugin authors never deal with `inner`.
- *
- * Two flavours of hook:
- *
- * - **Transform** ({@link Transform}) - receives a value and returns a
- *   (possibly modified) value of the same type. Sits in the critical path and
- *   may *short-circuit* by failing in the Effect error channel.
- * - **Tap** ({@link Tap}) - observes a value and performs a side effect. Tap
- *   functions are authored as `void`-returning Effects via {@link Hooks.tap},
- *   which adapts them to the canonical value-threading shape.
- *
- * Plugins stack with `Layer.provide`; {@link composePlugins} makes that clean.
+ * Hooks: a typed plugin system over fixed points in the auth lifecycle. A
+ * transform may rewrite a value or short-circuit by failing; a tap observes.
+ * {@link makePlugin} builds a decorator layer over the inner `Hooks`, and
+ * {@link composePlugins} stacks them.
  *
  * @example
  * ```ts

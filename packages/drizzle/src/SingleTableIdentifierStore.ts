@@ -1,119 +1,9 @@
 /**
- * A single-table `IdentifierStore`: the `email` identifier is the application's
- * own `users` row.
- *
- * {@link IdentifierStore} keeps identifiers in a table of their own, so a user
- * may hold several emails, a username and a phone number. An application whose
- * `users` table already carries the login address — `email` and
- * `email_verified` columns on the row — has no such table to hand over, and
- * migrating its entity graph onto one is the cost this module avoids. It is
- * opt-in: {@link layer} is a separate layer, and the default store stays the
- * multi-identifier one.
- *
- * ### The trade-off
- *
- * A user has at most **one** identifier, and it is always of type `email`. The
- * store cannot hold a second address, a username or a phone number, and says so
- * with an `IdentifierRefusedError` rather than silently dropping the write. Core
- * flows that need several identifiers at once fail on this store; SCIM's
- * add-then-remove when a `userName` changes is one, answered with `409
- * uniqueness`. Email change works: it goes through
- * `replace`, which rewrites the row's address in one `UPDATE`, on a nullable
- * column and a NOT NULL one alike.
- *
- * ### How each field is read and written
- *
- * | `Identifier` field | Lives in                                               |
- * | ------------------ | ------------------------------------------------------ |
- * | `id`               | `users.id` — an email identifier's id is its user's id |
- * | `userId`           | `users.id`                                             |
- * | `type`             | always `"email"`; no column                            |
- * | `value`            | `users.email`                                          |
- * | `verified`         | `users.email_verified`                                 |
- * | `verifiedAt`       | `users.email_verified_at`, when that column is mapped; otherwise not stored and never reported |
- * | `createdAt`        | `users.created_at`                                     |
- *
- * An identifier exists while `users.email` is non-null. A user whose email is
- * `NULL` holds no identifier.
- *
- * ### Nullable or NOT NULL `email`
- *
- * Whether `users.email` is nullable is read from the drizzle column at
- * {@link defineUsers} time, so the same store serves both:
- *
- * - **Nullable** (the usual case). Deleting an address writes `NULL` to
- *   `email`, and the row stays. Account deletion clears the address and then
- *   deletes the row.
- * - **NOT NULL.** The store never writes `NULL`. Deleting a user's address by
- *   identifier (`delete`) is refused with an `AuthError` while the row holds
- *   it, so a targeted delete leaves the address in place. `deleteByUser` does
- *   nothing: the user row is about to be deleted (account deletion does this
- *   right after it), and deleting the row takes the address with it. This
- *   departs from the {@link IdentifierStore} contract, which says `deleteByUser`
- *   deletes all of a user's identifiers: here the application's user writer must
- *   hard-delete the row. A soft-delete writer leaves the address claimed.
- *   Account deletion therefore works, and so does email change, whose `replace`
- *   never writes `NULL`. Sign-up works when the application's user writer
- *   inserts the row with the address core passes to `createUser` (see the
- *   requirements below); a writer that leaves it out cannot insert the row.
- *
- * ### Per-method behaviour
- *
- * - `getByValue("email", value)` is a lookup on `users.email`. Any other type
- *   resolves to `null`: the table holds no such identifiers.
- * - `listByUser` returns the user's email identifier, or `[]`.
- * - `create` refuses any type but `email` and a user that already holds an
- *   email (`IdentifierRefusedError`), fails for a user with no row
- *   (`AuthError`), and otherwise writes
- *   `users.email`, `users.email_verified` and, when mapped,
- *   `users.email_verified_at` on that row. The uniqueness of `users.email` is
- *   what rejects an address claimed by another user; the driver error surfaces
- *   as `AuthError`, which `Auth.claimIdentifier` re-reads into an
- *   `IdentifierTakenError`. The store's own duplicate check does not exist here:
- *   the index must carry it (see the requirements below).
- * - `replace` is one `UPDATE users SET email = <to>, email_verified = <to's>,
- *   email_verified_at = <to's, when mapped> WHERE id = <user> AND email = <from>`,
- *   then a read of the row. The `email = <from>` guard makes a stale `from`
- *   write nothing, and the call resolves to `null`; if that row already holds
- *   `to`'s address, the call reports it, since the row is then as asked. The
- *   unique index rejects an address another user holds, as for `create`, and
- *   `Auth.replaceIdentifier` re-reads that into an `IdentifierTakenError`. The
- *   new identifier keeps the user's id as its id and `created_at` as its
- *   creation time, so `to.id` and `to.createdAt` are not stored. Any type but
- *   `email` is refused with an `AuthError`.
- * - `setVerified` sets `users.email_verified`, and `users.email_verified_at` when
- *   mapped, then returns the identifier, or `null` when the id names no user
- *   holding an email. Without the `emailVerifiedAt` mapping the `verifiedAt`
- *   argument has no column to go to and is dropped.
- * - `delete` and `deleteByUser` on a nullable column set `users.email`,
- *   `users.email_verified` and, when mapped, `users.email_verified_at` back to
- *   `NULL`, `false` and `NULL`, and leave the user row alone. Deleting a missing
- *   identifier is a no-op. On a NOT NULL column see the section above.
- *
- * ### What the application's table must satisfy
- *
- * - `users.email` carries a **unique index**. The index is the only thing that
- *   stops two users holding one address; the store does not check it. It may be
- *   nullable or NOT NULL (see above).
- * - `users.email_verified` is a non-null boolean.
- * - `users.email_verified_at`, if mapped, is a nullable timestamp.
- * - The application's own user writer inserts the user row; the store never
- *   does. Core passes the address a user is created with to `createUser` as
- *   `input.identifier` (`Auth.NewUserIdentifier`). The writer stores it on the
- *   row it inserts, and the claim that follows (`Auth.createUserWithIdentifier`)
- *   finds the address already held by that user and writes nothing more. On a
- *   NOT NULL column this is the only way to insert the row. On a nullable one
- *   the writer may also leave the address out, and the claim writes it through
- *   `create`. The writer reports `created: true` only for a row it inserted
- *   (`Auth.CreateUserResult`); a writer that finds or creates on the address
- *   reports `created: false` for an existing user, and core then fails the
- *   sign-up instead of adopting that user. The writer never modifies an
- *   existing row: a plain insert that lets the unique index fail, or
- *   `onConflictDoNothing` followed by a select, never `onConflictDoUpdate`.
- * - Addresses are normalised by the application, as for every identifier store.
- *
- * The store writes nothing else on the row: `updated_at` and every other column
- * belong to the application.
+ * A single-table `IdentifierStore`: a user's one `email` identifier lives on
+ * the application's own `users` row (`email`, `email_verified`, optionally
+ * `email_verified_at`). It is opt-in through {@link layer}, and refuses
+ * anything but one email with `IdentifierRefusedError`. The Drizzle guide
+ * lists what the table must satisfy.
  *
  * @example
  * ```ts
@@ -165,7 +55,7 @@ export interface SingleTableUserColumnNames<TTable extends Table> {
   readonly id: ColumnKey<TTable, string>;
   /**
    * The login address. Unique. Nullable or NOT NULL: the store detects which from
-   * the column, and see the module docs for what each one means.
+   * the column; on a NOT NULL column the store never clears the address.
    */
   readonly email: ColumnKey<TTable, string | null>;
   /** Whether {@link email} has been verified. */

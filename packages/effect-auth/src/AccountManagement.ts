@@ -1,16 +1,7 @@
 /**
- * Account management flows: verification-gated email change and self-service
- * account deletion.
- *
- * Both flows issue a single-use, expiring token bound to the acting user (the
- * email-change token additionally carries the target email). The token is
- * delivered out-of-band via the configured `send*` callback; confirming the
- * token applies the change. This mirrors `EmailVerification`/`MagicLink`: a
- * store interface + `Context.Service` tag + `make*` factory + `*ServiceLayer`.
- *
- * House conventions followed: epoch-ms timestamps, timing-safe token lookup by
- * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
- * (see `HttpServer.ts`), and session invalidation on sensitive changes.
+ * Account management: verification-gated email change and self-service account
+ * deletion, each through a single-use, expiring token sent out of band and
+ * confirmed to apply the change. Sensitive changes invalidate sessions.
  */
 import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";

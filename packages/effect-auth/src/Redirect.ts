@@ -1,16 +1,8 @@
 /**
- * Post-authentication redirect targets.
- *
- * A sign-in form, an OAuth or SSO callback, and an OIDC authorization flow
- * all carry a "where to go next" value the client controls
- * (`/login?redirect=…`). Following it unchecked turns the sign-in page into
- * a phishing relay: `/login?redirect=https://evil.example` signs the victim
- * in and hands them to the attacker's look-alike. CSRF's trusted-origin check
- * does not cover this, because the request is same-origin; the *destination*
- * is what is untrusted.
- *
- * {@link safeRedirect} accepts only a same-origin path and falls back for
- * anything else.
+ * Post-authentication redirect targets. The "where to go next" value is the
+ * client's, and following it unchecked makes the sign-in page a phishing relay
+ * that no CSRF check catches. {@link safeRedirect} accepts only a same-origin
+ * path and falls back otherwise.
  *
  * @module redirect
  */
