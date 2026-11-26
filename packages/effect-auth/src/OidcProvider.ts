@@ -8,7 +8,9 @@
  *
  * The `id_token` is signed with the {@link module:jwt} `JwtService`, sharing
  * its signing keys — the JWKS published at `/.well-known/jwks.json` (or
- * `GET /jwks`) verifies both plain user JWTs and OIDC `id_token`s.
+ * `GET /jwks`) verifies both plain user JWTs and OIDC `id_token`s. An
+ * `id_token` carries `typ: "JWT"` and only its OIDC claims, so
+ * `JwtService.verify` (which requires `typ: "at+jwt"`) refuses it as a bearer.
  *
  * Secrets at rest: client secrets, authorization codes, and access/refresh
  * tokens are stored only as sha256 hex digests — lookups by exact digest are
@@ -982,11 +984,12 @@ export const make = (
             });
           }
           const signed = yield* jwt
-            .sign(user, {
+            .signIdToken({
+              ...(yield* claimsFor(user, grant.scopes)),
               iss: config.issuer,
+              sub: user.id,
               aud: grant.clientId,
               ...(grant.nonce !== undefined && { nonce: grant.nonce }),
-              ...(yield* claimsFor(user, grant.scopes)),
             })
             .pipe(
               Effect.catchTag("JwtError", (e) =>
