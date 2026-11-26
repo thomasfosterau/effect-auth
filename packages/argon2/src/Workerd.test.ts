@@ -249,7 +249,10 @@ const callWorker = async <S extends Schema.ConstraintDecoder<unknown>>(
   return Schema.decodeSync(Schema.fromJsonString(schema))(await response.text());
 };
 
-const Attempt = Schema.Struct({ ok: Schema.Boolean, threw: Schema.optional(Schema.String) });
+const Attempt = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true) }),
+  Schema.Struct({ ok: Schema.Literal(false), threw: Schema.String }),
+]);
 const Probe = Schema.Struct({ compile: Attempt, module: Attempt, instance: Attempt });
 
 /** An effect's outcome, as the worker reports it. */
@@ -284,8 +287,9 @@ describe.each(SERVED_NAMES)("workerd, the %s worker", (name) => {
   it("refuses to compile wasm inside a request, but instantiates a compiled module", async () => {
     const probe = await callWorker(Probe, name, "/probe");
 
-    expect(probe.compile.threw).toContain(DISALLOWED);
-    expect(probe.module.threw).toContain(DISALLOWED);
+    const refused = { ok: false, threw: expect.stringContaining(DISALLOWED) };
+    expect(probe.compile).toEqual(refused);
+    expect(probe.module).toEqual(refused);
     expect(probe.instance).toEqual({ ok: true });
   });
 

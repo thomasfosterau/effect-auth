@@ -139,8 +139,8 @@ const jws = async (algorithm) => {
     jwk,
     privateKeyPem,
     token,
-    verifies: await verifiesCompact(algorithm, token, jwk),
-    rejectsTampered: !(await verifiesCompact(algorithm, tamper(token), jwk)),
+    isVerified: await verifiesCompact(algorithm, token, jwk),
+    isTamperedRejected: !(await verifiesCompact(algorithm, tamper(token), jwk)),
   };
 };
 
@@ -152,7 +152,7 @@ const jwtService = (algorithm) =>
       const { token } = yield* jwt.sign({ id: "u-1", createdAt: now, updatedAt: now, attributes: {} });
       const claims = yield* jwt.verify(token);
       const tampered = yield* Effect.result(jwt.verify(tamper(token)));
-      return { token, sub: claims.sub, rejectsTampered: tampered._tag === "Failure", jwks: yield* jwt.getJwks };
+      return { token, sub: claims.sub, isTamperedRejected: tampered._tag === "Failure", jwks: yield* jwt.getJwks };
     }).pipe(
       Effect.provide(
         JwtService.layer({ issuer: "https://app.example.com", algorithm }).pipe(
@@ -178,7 +178,7 @@ const apple = async () => {
       now: 1_700_000_000_000,
     }),
   );
-  return { token, jwk, verifies: await verifiesCompact("ES256", token, jwk) };
+  return { token, jwk, isVerified: await verifiesCompact("ES256", token, jwk) };
 };
 
 const password = (hasher) =>
@@ -187,8 +187,8 @@ const password = (hasher) =>
       const { hash } = yield* hasher.hash("correct horse battery staple");
       return {
         hash,
-        verifies: yield* hasher.verify("correct horse battery staple", hash),
-        rejectsWrong: !(yield* hasher.verify("wrong password", hash)),
+        isVerified: yield* hasher.verify("correct horse battery staple", hash),
+        isWrongRejected: !(yield* hasher.verify("wrong password", hash)),
       };
     }),
   );
@@ -205,9 +205,9 @@ const aes = () =>
       return {
         sealed,
         opened,
-        rejectsTampered: tampered._tag === "Failure",
+        isTamperedRejected: tampered._tag === "Failure",
         cookieOpened: Option.getOrNull(yield* aes256GcmOpen(key, cookie)),
-        cookieRejectsWrongKey: Option.isNone(yield* aes256GcmOpen(yield* sha256("other"), cookie)),
+        isWrongKeyRejected: Option.isNone(yield* aes256GcmOpen(yield* sha256("other"), cookie)),
       };
     }),
   );
@@ -221,8 +221,8 @@ const der = async () => {
   const edSpki = await runCrypto(jwkToSpkiDer("EdDSA", ed.publicKey.export({ format: "jwk" })));
   const edSignature = new Uint8Array(crypto.sign(null, message, ed.privateKey));
   return {
-    es256: await runCrypto(verifySpkiSignature("ES256", spki, message, signature)),
-    eddsa: await runCrypto(verifySpkiSignature("EdDSA", edSpki, message, edSignature)),
+    isEs256Verified: await runCrypto(verifySpkiSignature("ES256", spki, message, signature)),
+    isEdDsaVerified: await runCrypto(verifySpkiSignature("EdDSA", edSpki, message, edSignature)),
   };
 };
 
@@ -235,9 +235,9 @@ const es256Malformed = async () => {
   const signature = unb64(token.slice(token.lastIndexOf(".") + 1));
   const withSignature = (bytes) => verifiesCompact("ES256", input + "." + b64(bytes), jwk);
   return {
-    der: await withSignature(crypto.sign("sha256", enc(input), privateKeyPem)),
-    short: await withSignature(signature.subarray(0, 63)),
-    long: await withSignature(new Uint8Array([...signature, 0])),
+    isDerAccepted: await withSignature(crypto.sign("sha256", enc(input), privateKeyPem)),
+    isShortAccepted: await withSignature(signature.subarray(0, 63)),
+    isLongAccepted: await withSignature(new Uint8Array([...signature, 0])),
   };
 };
 
@@ -264,7 +264,7 @@ const run = async (probe) => ({
   scrypt: await attempt(() => password(scryptHasher({ cost: 16384 }))),
   tokenHash: await attempt(async () => {
     const [raw, a, b] = await runCrypto(Effect.forEach(["raw-token", "a", "b"], hashToken));
-    return { digest: raw, equal: constantTimeHashEqual(a, a), unequal: !constantTimeHashEqual(a, b) };
+    return { digest: raw, isEqual: constantTimeHashEqual(a, a), isUnequal: !constantTimeHashEqual(a, b) };
   }),
   hmac: await attempt(async () => ({
     sha1: b64(await runCrypto(hmac("sha1", "key", "data"))),
@@ -281,7 +281,7 @@ const check = async (input) => ({
   jws: await Promise.all(input.jws.map(({ algorithm, jwk, token }) => verifiesCompact(algorithm, token, jwk))),
   eddsaToken: await signCompact("EdDSA", "node.signed-EdDSA", input.eddsa.privateKeyPem),
   decrypted: await runCrypto(Effect.flatMap(aes256GcmCipher(input.aes.secret), (cipher) => cipher.decrypt(input.aes.sealed))),
-  pbkdf2: await Effect.runPromise(pbkdf2Hasher().verify(input.pbkdf2.password, input.pbkdf2.hash)),
+  isPbkdf2Verified: await Effect.runPromise(pbkdf2Hasher().verify(input.pbkdf2.password, input.pbkdf2.hash)),
 });
 
 export default {
@@ -417,21 +417,21 @@ const SignedJws = Schema.Struct({
   jwk: Jwk,
   privateKeyPem: Schema.String,
   token: Schema.String,
-  verifies: Schema.Boolean,
-  rejectsTampered: Schema.Boolean,
+  isVerified: Schema.Boolean,
+  isTamperedRejected: Schema.Boolean,
 });
 
 const JwtRun = Schema.Struct({
   token: Schema.String,
   sub: Schema.String,
-  rejectsTampered: Schema.Boolean,
+  isTamperedRejected: Schema.Boolean,
   jwks: Schema.Struct({ keys: Schema.Array(Jwk) }),
 });
 
 const PasswordRun = Schema.Struct({
   hash: Schema.String,
-  verifies: Schema.Boolean,
-  rejectsWrong: Schema.Boolean,
+  isVerified: Schema.Boolean,
+  isWrongRejected: Schema.Boolean,
 });
 
 const Run = Schema.Struct({
@@ -441,25 +441,29 @@ const Run = Schema.Struct({
   rs256: Attempt(SignedJws),
   jwtES256: Attempt(JwtRun),
   jwtEdDSA: Attempt(JwtRun),
-  apple: Attempt(Schema.Struct({ token: Schema.String, jwk: Jwk, verifies: Schema.Boolean })),
+  apple: Attempt(Schema.Struct({ token: Schema.String, jwk: Jwk, isVerified: Schema.Boolean })),
   pbkdf2: Attempt(PasswordRun),
   scrypt: Attempt(PasswordRun),
   tokenHash: Attempt(
-    Schema.Struct({ digest: Schema.String, equal: Schema.Boolean, unequal: Schema.Boolean }),
+    Schema.Struct({ digest: Schema.String, isEqual: Schema.Boolean, isUnequal: Schema.Boolean }),
   ),
   hmac: Attempt(Schema.Struct({ sha1: Schema.String, sha256: Schema.String })),
   aes: Attempt(
     Schema.Struct({
       sealed: Schema.String,
       opened: Schema.String,
-      rejectsTampered: Schema.Boolean,
+      isTamperedRejected: Schema.Boolean,
       cookieOpened: Schema.NullOr(Schema.String),
-      cookieRejectsWrongKey: Schema.Boolean,
+      isWrongKeyRejected: Schema.Boolean,
     }),
   ),
-  der: Attempt(Schema.Struct({ es256: Schema.Boolean, eddsa: Schema.Boolean })),
+  der: Attempt(Schema.Struct({ isEs256Verified: Schema.Boolean, isEdDsaVerified: Schema.Boolean })),
   es256Malformed: Attempt(
-    Schema.Struct({ der: Schema.Boolean, short: Schema.Boolean, long: Schema.Boolean }),
+    Schema.Struct({
+      isDerAccepted: Schema.Boolean,
+      isShortAccepted: Schema.Boolean,
+      isLongAccepted: Schema.Boolean,
+    }),
   ),
   offline: Attempt(Schema.Finite),
 });
@@ -493,7 +497,7 @@ const Check = Schema.Struct({
   jws: Schema.Array(Schema.Boolean),
   eddsaToken: Schema.String,
   decrypted: Schema.String,
-  pbkdf2: Schema.Boolean,
+  isPbkdf2Verified: Schema.Boolean,
 });
 
 /** The value of a worker step, failing with the error it threw. */
@@ -578,8 +582,8 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
       const signed = valueOf(run[alg]);
       const algorithm: JwsAlgorithm =
         alg === "es256" ? "ES256" : alg === "eddsa" ? "EdDSA" : "RS256";
-      expect(signed.verifies).toBe(true);
-      expect(signed.rejectsTampered).toBe(true);
+      expect(signed.isVerified).toBe(true);
+      expect(signed.isTamperedRejected).toBe(true);
       expect(keyObjectVerifies(algorithm, signed.token, signed.jwk)).toBe(true);
     },
   );
@@ -602,7 +606,7 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     (name) => {
       const jwt = valueOf(run[name]);
       expect(jwt.sub).toBe("u-1");
-      expect(jwt.rejectsTampered).toBe(true);
+      expect(jwt.isTamperedRejected).toBe(true);
       const [jwk] = jwt.jwks.keys;
       assert(jwk !== undefined, "the JWKS has the signing key");
       const algorithm = name === "jwtES256" ? "ES256" : "EdDSA";
@@ -612,19 +616,19 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
 
   it("builds an Apple client secret that verifies in both runtimes", () => {
     const apple = valueOf(run.apple);
-    expect(apple.verifies).toBe(true);
+    expect(apple.isVerified).toBe(true);
     expect(keyObjectVerifies("ES256", apple.token, apple.jwk)).toBe(true);
   });
 
   it.each(["pbkdf2", "scrypt"] as const)("hashes and verifies a password with %s", (name) => {
     const result = valueOf(run[name]);
-    expect(result.verifies).toBe(true);
-    expect(result.rejectsWrong).toBe(true);
+    expect(result.isVerified).toBe(true);
+    expect(result.isWrongRejected).toBe(true);
   });
 
   it("hashes tokens, HMACs and digests as Node does", () => {
     const tokenHash = valueOf(run.tokenHash);
-    expect(tokenHash).toEqual({ digest: sha256Hex("raw-token"), equal: true, unequal: true });
+    expect(tokenHash).toEqual({ digest: sha256Hex("raw-token"), isEqual: true, isUnequal: true });
     expect(valueOf(run.hmac)).toEqual({
       sha1: Base64Url.encode(
         new Uint8Array(crypto.createHmac("sha1", "key").update("data").digest()),
@@ -637,9 +641,9 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     const aes = valueOf(run.aes);
     expect(aes).toMatchObject({
       opened: "refresh-token-123",
-      rejectsTampered: true,
+      isTamperedRejected: true,
       cookieOpened: "cached-session",
-      cookieRejectsWrongKey: true,
+      isWrongKeyRejected: true,
     });
     const opened = await Effect.runPromise(
       PlatformCrypto.provide(
@@ -650,7 +654,11 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
   });
 
   it("verifies a DER, a 63-byte and a 65-byte ES256 signature to false", () => {
-    expect(valueOf(run.es256Malformed)).toEqual({ der: false, short: false, long: false });
+    expect(valueOf(run.es256Malformed)).toEqual({
+      isDerAccepted: false,
+      isShortAccepted: false,
+      isLongAccepted: false,
+    });
   });
 
   it("verifies RFC 7515 Appendix A.3's ES256 JWS with its published public JWK", async () => {
@@ -663,7 +671,7 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
   });
 
   it("verifies WebAuthn DER signatures", () => {
-    expect(valueOf(run.der)).toEqual({ es256: true, eddsa: true });
+    expect(valueOf(run.der)).toEqual({ isEs256Verified: true, isEdDsaVerified: true });
   });
 
   it("hashes with PBKDF2 at its default 600,000 iterations within a Worker's CPU budget", async () => {
@@ -677,7 +685,7 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     };
     await timed();
     const { result, elapsed } = await timed();
-    expect(result).toMatchObject({ verifies: true, rejectsWrong: true });
+    expect(result).toMatchObject({ isVerified: true, isWrongRejected: true });
     expect(result.hash.split("$").slice(0, 2)).toEqual(["pbkdf2-sha256", "600000"]);
     expect(
       await Effect.runPromise(pbkdf2Hasher().verify("correct horse battery staple", result.hash)),
@@ -704,7 +712,7 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     expect(checked).toMatchObject({
       jws: [true, true, true],
       decrypted: "from-node",
-      pbkdf2: true,
+      isPbkdf2Verified: true,
     });
     // Ed25519 is deterministic: Node signs the worker's signing input to the same bytes.
     expect(keyObjectVerifies("EdDSA", checked.eddsaToken, eddsa.jwk)).toBe(true);
