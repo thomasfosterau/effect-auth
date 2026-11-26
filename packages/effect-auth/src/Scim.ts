@@ -50,6 +50,7 @@ import { revokeStandingAccess, userCredentialStores } from "./UserCredentials.ts
 import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -1207,7 +1208,7 @@ export const make = (
         const name = asString(value);
         const updated = yield* users.update({
           ...target.user,
-          ...(name === null ? {} : { name }),
+          ...definedKeys({ name: name ?? undefined }),
           updatedAt: yield* DateTime.nowAsDate,
         });
         return withUser(target, updated);

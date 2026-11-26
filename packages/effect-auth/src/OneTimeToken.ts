@@ -21,6 +21,7 @@ import { tokenHasher } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Store record
@@ -174,7 +175,7 @@ export const make = (
             const record: OneTimeTokenRecord = {
               token: yield* hashToken(rawToken),
               subject,
-              ...(options?.metadata !== undefined ? { metadata: options.metadata } : {}),
+              ...definedKeys({ metadata: options?.metadata }),
               createdAt: now,
               expiresAt: now + expiresIn,
             };
@@ -203,7 +204,7 @@ export const make = (
 
         return {
           subject: record.subject,
-          ...(record.metadata !== undefined ? { metadata: record.metadata } : {}),
+          ...definedKeys({ metadata: record.metadata }),
         } satisfies OneTimeTokenVerifyResult;
       }),
     };

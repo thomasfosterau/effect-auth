@@ -28,7 +28,7 @@ import {
   resolveRateLimitTable,
   writeValues,
 } from "./Columns.ts";
-import { queryRunner } from "./internal.ts";
+import { queryRunner, presentKeys } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 /** What a counter read projects, under the store's own field names. */
@@ -38,7 +38,7 @@ const toEntry = (row: RateLimitRow): Auth.RateLimitEntry => ({
   key: row.key,
   count: row.count,
   resetAt: row.resetAt.getTime(),
-  ...(row.blockedUntil === null ? {} : { blockedUntil: row.blockedUntil.getTime() }),
+  ...presentKeys({ blockedUntil: row.blockedUntil?.getTime() }),
 });
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));

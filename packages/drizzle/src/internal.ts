@@ -10,6 +10,8 @@ import * as Exit from "effect/Exit";
 import * as HashMap from "effect/HashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -22,6 +24,27 @@ import type {
   DrizzleSelectFields,
 } from "./Database.ts";
 import { defaultTableNames, type TableNames } from "./Schema.ts";
+
+/** `A` with every key that may hold `null` or `undefined` made optional and non-nullable. */
+export type PresentKeys<A> = {
+  [K in keyof A as null extends A[K] ? never : undefined extends A[K] ? never : K]: A[K];
+} & {
+  [K in keyof A as null extends A[K] ? K : undefined extends A[K] ? K : never]?: NonNullable<A[K]>;
+} extends infer B
+  ? { [K in keyof B]: B[K] }
+  : never;
+
+/**
+ * Drops the keys of `fields` whose value is `null` or `undefined`: a nullable
+ * column maps to an optional record field, which `exactOptionalPropertyTypes`
+ * spells by leaving the key out.
+ *
+ * @internal
+ */
+export function presentKeys<const A extends object>(fields: A): PresentKeys<A>;
+export function presentKeys(fields: R.ReadonlyRecord<string, unknown>): object {
+  return R.filter(fields, P.isNotNullish);
+}
 
 /**
  * Run a drizzle query, mapping any driver rejection to the `AuthError` the

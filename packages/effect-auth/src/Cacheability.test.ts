@@ -25,6 +25,7 @@ import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
 import * as SessionContext from "./SessionContext.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 interface AppUser {
   readonly id: string;
@@ -152,9 +153,9 @@ describe("OwnedAccess.serveableAxes", () => {
         const row: OwnedAccess.OwnedRow = {
           ownerId: "owner",
           visibility,
-          ...(draft === undefined ? {} : { draft }),
+          ...definedKeys({ draft }),
         };
-        const attributes = { visibility, ...(draft === undefined ? {} : { draft }) };
+        const attributes = { visibility, ...definedKeys({ draft }) };
         expect(serveable(attributes), `${visibility}/${String(draft)}`).toBe(visibleToAll(row));
       });
     });

@@ -15,6 +15,7 @@ import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type * as Ladder from "./Ladder.ts";
 import { type PermissionRef } from "./Permission.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Requests
@@ -171,8 +172,7 @@ const makeDeclarative = (effect: PolicyEffect, options: MakeOptions): Declarativ
   principal: options.principal ?? any,
   action: options.action ?? any,
   resource: options.resource ?? any,
-  ...(options.when !== undefined ? { when: options.when } : {}),
-  ...(options.description !== undefined ? { description: options.description } : {}),
+  ...definedKeys({ when: options.when, description: options.description }),
 });
 
 /**
@@ -207,7 +207,7 @@ export const custom = <E = never, R = never>(options: {
   _tag: "CustomPolicy",
   id: options.id,
   effect: options.effect ?? "permit",
-  ...(options.description !== undefined ? { description: options.description } : {}),
+  ...definedKeys({ description: options.description }),
   predicate: options.predicate,
 });
 
@@ -240,10 +240,12 @@ export const role = (
   permit({
     id: options?.id ?? `role:${roleId}`,
     principal: inScope(Entity.ref("Role", roleId)),
-    ...(options?.action !== undefined ? { action: options.action } : {}),
-    ...(options?.resource !== undefined ? { resource: options.resource } : {}),
-    ...(options?.when !== undefined ? { when: options.when } : {}),
-    ...(options?.description !== undefined ? { description: options.description } : {}),
+    ...definedKeys({
+      action: options?.action,
+      resource: options?.resource,
+      when: options?.when,
+      description: options?.description,
+    }),
   });
 
 /**
@@ -258,10 +260,12 @@ export const action = (
   permit({
     id: options?.id ?? `action:${actionId}`,
     action: eq(Entity.ref("Action", actionId)),
-    ...(options?.principal !== undefined ? { principal: options.principal } : {}),
-    ...(options?.resource !== undefined ? { resource: options.resource } : {}),
-    ...(options?.when !== undefined ? { when: options.when } : {}),
-    ...(options?.description !== undefined ? { description: options.description } : {}),
+    ...definedKeys({
+      principal: options?.principal,
+      resource: options?.resource,
+      when: options?.when,
+      description: options?.description,
+    }),
   });
 
 /**
@@ -319,12 +323,14 @@ export const roleAtLeast = <Rung extends string>(
   const name = P.isString(min) ? min : min.name;
   return permit({
     id: options?.id ?? `ladder:${name}`,
-    ...(options?.principal !== undefined ? { principal: options.principal } : {}),
-    ...(options?.action !== undefined ? { action: options.action } : {}),
-    ...(options?.resource !== undefined ? { resource: options.resource } : {}),
+    ...definedKeys({
+      principal: options?.principal,
+      action: options?.action,
+      resource: options?.resource,
+    }),
     when:
       options?.when === undefined ? ladderCondition : Condition.and(ladderCondition, options.when),
-    ...(options?.description !== undefined ? { description: options.description } : {}),
+    ...definedKeys({ description: options?.description }),
   });
 };
 

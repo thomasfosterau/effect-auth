@@ -46,7 +46,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { queryRunner, selectOne } from "./internal.ts";
+import { queryRunner, selectOne, presentKeys } from "./internal.ts";
 
 // ---------------------------------------------------------------------------
 // Mapping
@@ -138,7 +138,7 @@ const toIdentifier = (row: UserRow): Option.Option<Auth.Identifier> => {
     value: row.email,
     verified: row.emailVerified,
     createdAt: row.createdAt,
-    ...(verifiedAt === null ? {} : { verifiedAt }),
+    ...presentKeys({ verifiedAt }),
   });
 };
 

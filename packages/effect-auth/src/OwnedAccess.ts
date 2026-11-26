@@ -513,13 +513,15 @@ export const make = <Id, User extends Guard.Viewer, Rung extends string>(
         // which could otherwise equal a row owned by an id that happens to
         // match the anonymous sentinel. No owner is no attribute, never an
         // empty or sentinel id.
-        ...(P.isString(row.ownerId)
-          ? { owner: Entity.entityValue(Entity.ref(guards.principalType, row.ownerId)) }
-          : {}),
+        ...definedKeys({
+          owner: P.isString(row.ownerId)
+            ? Entity.entityValue(Entity.ref(guards.principalType, row.ownerId))
+            : undefined,
+        }),
         visibility: row.visibility,
         draft: row.draft === true,
         unapproved: row.unapproved === true,
-        ...(P.isString(row.groupId) ? { group: row.groupId } : {}),
+        ...definedKeys({ group: P.isString(row.groupId) ? row.groupId : undefined }),
       },
     });
     return Policy.decidePure(

@@ -66,6 +66,7 @@ import {
   type NewUserIdentifier,
   UserStore,
 } from "../UserStore.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * OAuth2 provider configuration
@@ -1405,15 +1406,15 @@ export const make = (
         return {
           account: newAccount,
           isNewUser: true,
-          ...(options?.linkToUserId
-            ? {
-                user: {
+          ...definedKeys({
+            user: options?.linkToUserId
+              ? {
                   id: newAccount.userId,
                   ...(userInfo.email && { email: userInfo.email }),
                   ...(userInfo.name && { name: userInfo.name }),
-                },
-              }
-            : {}),
+                }
+              : undefined,
+          }),
         } satisfies OAuthCallbackResult;
       });
 
@@ -1455,7 +1456,7 @@ export const make = (
             type: "email",
             value: email,
             verified: emailVerified,
-            ...(emailVerified ? { verifiedAt: yield* DateTime.nowAsDate } : {}),
+            ...definedKeys({ verifiedAt: emailVerified ? yield* DateTime.nowAsDate : undefined }),
           },
           (identifier) =>
             userStore.createUser({

@@ -492,9 +492,10 @@ export const make = (
           ...withoutBanAttributes(user.attributes),
           banned: true,
           banReason: options.reason ?? defaultBanReason,
-          ...(expiresIn !== undefined
-            ? { banExpires: (yield* Clock.currentTimeMillis) + expiresIn }
-            : {}),
+          ...definedKeys({
+            banExpires:
+              expiresIn !== undefined ? (yield* Clock.currentTimeMillis) + expiresIn : undefined,
+          }),
         };
 
         const banned = yield* userStore.update({
@@ -609,7 +610,7 @@ export const make = (
             type: "email",
             value: normalizeEmail(input.email),
             verified: emailVerified,
-            ...(emailVerified ? { verifiedAt: yield* DateTime.nowAsDate } : {}),
+            ...definedKeys({ verifiedAt: emailVerified ? yield* DateTime.nowAsDate : undefined }),
           },
           (identifier) =>
             adminStore.createUser({

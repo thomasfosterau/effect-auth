@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import { SqlClient, SqlError, Statement } from "effect/sql";
 import * as Auth from "../index.ts";
 import { decodeBigintColumns } from "./Int8.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs
@@ -169,8 +170,7 @@ const rowToUser = (
       createdAt,
       updatedAt,
       attributes,
-      ...(row.name != null ? { name: row.name } : {}),
-      ...(row.image != null ? { image: row.image } : {}),
+      ...definedKeys({ name: row.name ?? undefined, image: row.image ?? undefined }),
     })),
   );
 
@@ -215,8 +215,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.image !== undefined ? { image: input.image } : {}),
+        ...definedKeys({ name: input.name, image: input.image }),
       };
       // A plain INSERT with a fresh id: every success is a new user.
       yield* insert(user, label);
@@ -739,11 +738,13 @@ const rowToCredential = (
       algorithm: row.algorithm,
       counter: row.counter,
       createdAt: row.created_at,
-      ...(row.name != null ? { name: row.name } : {}),
-      ...(row.transports != null ? { transports: decodeStringList(row.transports) } : {}),
-      ...(row.backup_eligible != null ? { backupEligible: row.backup_eligible !== 0 } : {}),
-      ...(row.backup_state != null ? { backupState: row.backup_state !== 0 } : {}),
-      ...(row.aaguid != null ? { aaguid: row.aaguid } : {}),
+      ...definedKeys({
+        name: row.name ?? undefined,
+        transports: row.transports != null ? decodeStringList(row.transports) : undefined,
+        backupEligible: row.backup_eligible != null ? row.backup_eligible !== 0 : undefined,
+        backupState: row.backup_state != null ? row.backup_state !== 0 : undefined,
+        aaguid: row.aaguid ?? undefined,
+      }),
     }),
     catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
   });
@@ -892,9 +893,11 @@ const rowToOAuthState = (row: OAuthStateRow): Auth.OAuth.OAuthState => ({
   provider: row.provider,
   createdAt: row.created_at,
   expiresAt: row.expires_at,
-  ...(row.code_verifier != null ? { codeVerifier: row.code_verifier } : {}),
-  ...(row.nonce != null ? { nonce: row.nonce } : {}),
-  ...(row.return_to != null ? { returnTo: row.return_to } : {}),
+  ...definedKeys({
+    codeVerifier: row.code_verifier ?? undefined,
+    nonce: row.nonce ?? undefined,
+    returnTo: row.return_to ?? undefined,
+  }),
 });
 
 /** `Auth.OAuth.OAuthStateStore` over the `auth_oauth_states` table; requires `SqlClient`. */
@@ -955,11 +958,13 @@ const rowToOAuthAccount = (row: OAuthAccountRow): Auth.OAuth.OAuthAccount => ({
   accessToken: row.access_token,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
-  ...(row.email != null ? { email: row.email } : {}),
-  ...(row.name != null ? { name: row.name } : {}),
-  ...(row.picture != null ? { picture: row.picture } : {}),
-  ...(row.refresh_token != null ? { refreshToken: row.refresh_token } : {}),
-  ...(row.expires_at != null ? { expiresAt: row.expires_at } : {}),
+  ...definedKeys({
+    email: row.email ?? undefined,
+    name: row.name ?? undefined,
+    picture: row.picture ?? undefined,
+    refreshToken: row.refresh_token ?? undefined,
+    expiresAt: row.expires_at ?? undefined,
+  }),
 });
 
 /** `Auth.OAuth.OAuthAccountStore` over the `auth_oauth_accounts` table; requires `SqlClient`. */
@@ -1717,7 +1722,7 @@ const rowToMultiFactor = (
       backupCodes: decodeStringList(row.backup_codes),
       verified: row.verified !== 0,
       createdAt: row.created_at,
-      ...(row.last_used_counter != null ? { lastUsedCounter: row.last_used_counter } : {}),
+      ...definedKeys({ lastUsedCounter: row.last_used_counter ?? undefined }),
     }),
     catch: (cause) => new Auth.AuthError({ message: "multiFactor decode failed", cause }),
   });
@@ -1941,7 +1946,7 @@ const rowToIdentifier = (
       type,
       value: row.value,
       verified: row.verified !== 0,
-      ...(Option.isSome(verifiedAt) ? { verifiedAt: verifiedAt.value } : {}),
+      ...definedKeys({ verifiedAt: Option.isSome(verifiedAt) ? verifiedAt.value : undefined }),
       createdAt,
     })),
   );
@@ -2149,29 +2154,30 @@ const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError>
   Effect.try({
     try: () => ({
       id: row.id,
-      ...(row.name != null ? { name: row.name } : {}),
-      ...(row.prefix != null ? { prefix: row.prefix } : {}),
+      ...definedKeys({ name: row.name ?? undefined, prefix: row.prefix ?? undefined }),
       start: row.start,
       keyHash: row.key_hash,
       userId: row.user_id,
       enabled: row.enabled !== 0,
-      ...(row.expires_at != null ? { expiresAt: row.expires_at } : {}),
-      ...(row.last_used_at != null ? { lastUsedAt: row.last_used_at } : {}),
-      ...(row.permissions != null ? { permissions: decodePermissions(row.permissions) } : {}),
+      ...definedKeys({
+        expiresAt: row.expires_at ?? undefined,
+        lastUsedAt: row.last_used_at ?? undefined,
+        permissions: row.permissions != null ? decodePermissions(row.permissions) : undefined,
+      }),
       metadata: row.metadata != null ? decodeAttributesJson(row.metadata) : {},
-      ...(row.remaining != null ? { remaining: row.remaining } : {}),
-      ...(row.refill_amount != null ? { refillAmount: row.refill_amount } : {}),
-      ...(row.refill_interval != null ? { refillInterval: row.refill_interval } : {}),
-      ...(row.refill_max != null ? { refillMax: row.refill_max } : {}),
-      ...(row.last_refill_at != null ? { lastRefillAt: row.last_refill_at } : {}),
-      ...(row.rate_limit_max_requests != null && row.rate_limit_window_ms != null
-        ? {
-            rateLimit: {
-              maxRequests: row.rate_limit_max_requests,
-              windowMs: row.rate_limit_window_ms,
-            },
-          }
-        : {}),
+      ...definedKeys({
+        remaining: row.remaining ?? undefined,
+        refillAmount: row.refill_amount ?? undefined,
+        refillInterval: row.refill_interval ?? undefined,
+        refillMax: row.refill_max ?? undefined,
+        lastRefillAt: row.last_refill_at ?? undefined,
+      }),
+      ...definedKeys({
+        rateLimit:
+          row.rate_limit_max_requests != null && row.rate_limit_window_ms != null
+            ? { maxRequests: row.rate_limit_max_requests, windowMs: row.rate_limit_window_ms }
+            : undefined,
+      }),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }),

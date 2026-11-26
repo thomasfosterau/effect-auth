@@ -445,7 +445,7 @@ const decodeChallenge = (stored: StoredChallenge): Option.Option<WebAuthnChallen
         challenge: fromBase64(stored.challenge),
         ceremony: stored.ceremony,
         expiresAt: stored.expiresAt,
-        ...(stored.userId !== undefined ? { userId: stored.userId } : {}),
+        ...definedKeys({ userId: stored.userId }),
       })
     : Option.none();
 
@@ -467,7 +467,7 @@ export const challengeStoreKV: Effect.Effect<
             challenge: toBase64(challenge.challenge),
             ceremony: challenge.ceremony,
             expiresAt: challenge.expiresAt,
-            ...(challenge.userId !== undefined ? { userId: challenge.userId } : {}),
+            ...definedKeys({ userId: challenge.userId }),
           } satisfies StoredChallenge,
           challenge.expiresAt,
           "challenge.create",
@@ -1437,9 +1437,12 @@ const decodeIdentifier = (stored: StoredIdentifier): Identifier => ({
   type: stored.type,
   value: stored.value,
   verified: stored.verified,
-  ...(stored.verifiedAt !== undefined
-    ? { verifiedAt: DateTime.toDateUtc(DateTime.makeUnsafe(stored.verifiedAt)) }
-    : {}),
+  ...definedKeys({
+    verifiedAt:
+      stored.verifiedAt !== undefined
+        ? DateTime.toDateUtc(DateTime.makeUnsafe(stored.verifiedAt))
+        : undefined,
+  }),
   createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(stored.createdAt)),
 });
 
@@ -1449,7 +1452,9 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
   type: identifier.type,
   value: identifier.value,
   verified: identifier.verified,
-  ...(identifier.verifiedAt !== undefined ? { verifiedAt: identifier.verifiedAt.getTime() } : {}),
+  ...definedKeys({
+    verifiedAt: identifier.verifiedAt !== undefined ? identifier.verifiedAt.getTime() : undefined,
+  }),
   createdAt: identifier.createdAt.getTime(),
 });
 

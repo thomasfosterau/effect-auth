@@ -22,6 +22,7 @@ import * as Entity from "./Entity.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
 import * as PolicyStore from "./PolicyStore.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Principal context
@@ -226,7 +227,9 @@ export const requestForCurrent = (input: {
       resource: input.resource ?? principal,
       context: {
         ...input.context,
-        ...(Option.isSome(credentialClass) ? { credentialClass: credentialClass.value } : {}),
+        ...definedKeys({
+          credentialClass: Option.getOrUndefined(credentialClass),
+        }),
       },
     });
   });

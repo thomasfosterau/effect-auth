@@ -62,6 +62,7 @@ import { TrustedDeviceStore, type TrustedDeviceRecord } from "../TrustedDevice.t
 import type * as Types from "../Types.ts";
 import { UserServiceStore } from "../User.ts";
 import { type CreateUserResult, UserStore } from "../UserStore.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * Remove `key` from `map` and return what it held, if anything: a single-use
@@ -117,8 +118,7 @@ const insertUser = (
 ): CreateUserResult => {
   const user: Types.User = {
     id: globalThis.crypto.randomUUID(),
-    ...(input.name === undefined ? {} : { name: input.name }),
-    ...(input.image === undefined ? {} : { image: input.image }),
+    ...definedKeys({ name: input.name, image: input.image }),
     createdAt: now,
     updatedAt: now,
     attributes: "attributes" in input && input.attributes !== undefined ? input.attributes : {},
@@ -203,8 +203,7 @@ export const memoryOAuthUserStore = (
       }
       const updated: Types.User = {
         ...user,
-        ...(update.name === undefined ? {} : { name: update.name }),
-        ...(update.image === undefined ? {} : { image: update.image }),
+        ...definedKeys({ name: update.name, image: update.image }),
         updatedAt: now,
       };
       MutableHashMap.set(table.users, userId, updated);

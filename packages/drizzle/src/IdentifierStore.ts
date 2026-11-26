@@ -25,7 +25,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { queryRunner, type Query } from "./internal.ts";
+import { queryRunner, type Query, presentKeys } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ const toIdentifier = (row: IdentifierRow): Auth.Identifier => ({
   type: row.type,
   value: row.value,
   verified: row.verified,
-  ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
+  ...presentKeys({ verifiedAt: row.verifiedAt }),
   createdAt: row.createdAt,
 });
 

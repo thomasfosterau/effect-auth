@@ -114,7 +114,7 @@ export default defineConfig({
       // and a value that may be `undefined` is forwarded by leaving its key
       // out, which a conditional spread does.
       "effect/prefer-option-over-null": "error",
-      "effect/no-conditional-empty-object-spread": "off",
+      "effect/no-conditional-empty-object-spread": "error",
       // Owner decision (2026-11-11): the helper modules are namespace imports
       // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.

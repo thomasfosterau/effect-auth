@@ -53,6 +53,7 @@ import { memoryApiKeyStore } from "../testing/MemoryStores.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -473,8 +474,6 @@ const makeFixture = (
   };
 };
 
-const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
-
 /** A JSON request body, as the wire carries it. */
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
@@ -500,10 +499,12 @@ const req = (method: string, path: string, sessionId?: string, body?: Schema.Jso
   new Request(`http://test${path}`, {
     method,
     headers: {
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(sessionId !== undefined ? withCookie(sessionId) : {}),
+      ...definedKeys({ "content-type": body !== undefined ? "application/json" : undefined }),
+      ...definedKeys({
+        cookie: sessionId !== undefined ? `conduit_session=${sessionId}` : undefined,
+      }),
     },
-    ...(body !== undefined ? { body: toJson(body) } : {}),
+    ...definedKeys({ body: body !== undefined ? toJson(body) : undefined }),
   });
 
 /** A JSON:API request (`application/vnd.api+json`), signed in as `sessionId` when given. */
@@ -511,10 +512,14 @@ const apiReq = (method: string, path: string, body?: Schema.Json, sessionId?: st
   new Request(`http://test${path}`, {
     method,
     headers: {
-      ...(body !== undefined ? { "content-type": "application/vnd.api+json" } : {}),
-      ...(sessionId !== undefined ? withCookie(sessionId) : {}),
+      ...definedKeys({
+        "content-type": body !== undefined ? "application/vnd.api+json" : undefined,
+      }),
+      ...definedKeys({
+        cookie: sessionId !== undefined ? `conduit_session=${sessionId}` : undefined,
+      }),
     },
-    ...(body !== undefined ? { body: toJson(body) } : {}),
+    ...definedKeys({ body: body !== undefined ? toJson(body) : undefined }),
   });
 
 /** One JSON:API resource object, read for its id and the attributes a test names. */

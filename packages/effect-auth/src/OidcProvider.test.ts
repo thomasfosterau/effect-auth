@@ -68,6 +68,7 @@ import { expectSpecJson, JSON_API_MEDIA_TYPE, mediaTypeOf } from "./testing/Wire
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
 import { runPromiseHttp } from "./testing/HttpClient.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 const ISSUER = "http://idp.test/api/auth";
 
@@ -1608,7 +1609,9 @@ const apiRequest = (
     headers: {
       ...FIXTURE_CLIENT_HEADERS,
       ...(body !== undefined && { "content-type": "application/vnd.api+json" }),
-      ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+      ...definedKeys({
+        cookie: sessionId !== undefined ? `conduit_session=${sessionId}` : undefined,
+      }),
     },
     ...(body !== undefined && { body: encodeJson(body) }),
   });
@@ -1625,7 +1628,9 @@ const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
     headers: {
       ...FIXTURE_CLIENT_HEADERS,
       "content-type": "application/json",
-      ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+      ...definedKeys({
+        cookie: sessionId !== undefined ? `conduit_session=${sessionId}` : undefined,
+      }),
     },
     body: encodeJson(body),
   });
@@ -1642,7 +1647,7 @@ const jsonRequest = (
     headers: {
       ...FIXTURE_CLIENT_HEADERS,
       "content-type": "application/json",
-      ...(bearer !== undefined ? { authorization: `Bearer ${bearer}` } : {}),
+      ...definedKeys({ authorization: bearer !== undefined ? `Bearer ${bearer}` : undefined }),
     },
     // `JSON.stringify(undefined)` is `undefined`: no body at all.
     ...(body !== undefined && { body: encodeJson(body) }),
@@ -1659,10 +1664,11 @@ const get = (
   });
   return new Request(url, {
     headers: {
-      ...(options.sessionId !== undefined
-        ? { cookie: `conduit_session=${options.sessionId}` }
-        : {}),
-      ...(options.bearer !== undefined ? { authorization: `Bearer ${options.bearer}` } : {}),
+      ...definedKeys({
+        cookie:
+          options.sessionId !== undefined ? `conduit_session=${options.sessionId}` : undefined,
+        authorization: options.bearer !== undefined ? `Bearer ${options.bearer}` : undefined,
+      }),
     },
   });
 };

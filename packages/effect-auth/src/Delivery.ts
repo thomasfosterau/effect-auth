@@ -66,6 +66,7 @@ import type { EmailOtpPurpose } from "./email/EmailOtp.ts";
 import type { PhoneOtpPurpose } from "./PhoneOtp.ts";
 import { anyEmailValue, type IdentifierStore } from "./Identifier.ts";
 import { getPhoneNumber } from "./PhoneOtp.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -223,15 +224,14 @@ const toConnectEmail = (
     from: config.from,
     to: [{ email: message.to }],
     subject,
-    ...(text === undefined ? {} : { text }),
-    ...(html === undefined ? {} : { html }),
+    ...definedKeys({ text, html }),
   };
 };
 
 const toConnectSms = (message: SmsMessage, config: ConnectSmsSenderConfig): Connect.SmsMessage => ({
   to: message.to,
   body: (config.render ?? defaultSmsRender)(message),
-  ...(config.from === undefined ? {} : { from: config.from }),
+  ...definedKeys({ from: config.from }),
 });
 
 // A connect send error's `message` is safe to log by its contract (never the
