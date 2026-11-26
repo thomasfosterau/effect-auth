@@ -22,6 +22,11 @@ import {
   submitCredential,
 } from "./index.ts";
 
+/** The `locals` a hook fills. */
+interface Locals {
+  auth?: LocalsAuth;
+}
+
 const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-23T00:00:00.000Z"));
 const signedIn: SessionWithUser = {
   session: {
@@ -36,7 +41,7 @@ const signedIn: SessionWithUser = {
 };
 
 const event = (cookies: Record<string, string> = {}) => {
-  const locals: { auth?: LocalsAuth } = {};
+  const locals: Locals = {};
   return {
     request: new Request("https://app.example/page"),
     getClientAddress: () => "203.0.113.9",
@@ -309,9 +314,7 @@ const kit = {
   fail: <Data>(status: number, data: Data) => ({ status, data }),
 };
 
-const submit = (
-  url: string,
-): { event: ActionEvent; cookies: Array<[string, string, CookieOptions]> } => {
+const submit = (url: string) => {
   const form = new FormData();
   form.set("email", "ada@example.com");
   form.set("password", "hunter2");
@@ -327,7 +330,7 @@ const submit = (
       url: new URL(url),
       getClientAddress: () => "203.0.113.9",
       cookies: { set: (name, value, options) => void cookies.push([name, value, options]) },
-    },
+    } satisfies ActionEvent,
   };
 };
 
@@ -716,7 +719,7 @@ describe("against the real auth handler", () => {
         remoteSession.read(request, { clientAddress: event.getClientAddress() }),
       failure: { mode: "closed" },
     });
-    const locals: { auth?: LocalsAuth } = {};
+    const locals: Locals = {};
     await hook({
       event: {
         request: new Request("https://app.example/page", {

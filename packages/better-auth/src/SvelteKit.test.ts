@@ -16,6 +16,11 @@ import { makeAuth, rowOf, signUp, type TestAuth } from "./testing/Fixtures.ts";
 import { BetterAuthInstance } from "./BetterAuth.ts";
 import { BetterAuthSessions } from "./Session.ts";
 
+/** The `locals` a hook fills. */
+interface Locals {
+  auth?: LocalsAuth;
+}
+
 class Redirect {
   constructor(
     readonly status: number,
@@ -52,7 +57,7 @@ const event = (cookie: string | undefined) => {
       return [pair.slice(0, at), pair.slice(at + 1)] as const;
     }),
   );
-  const locals: { auth?: LocalsAuth } = {};
+  const locals: Locals = {};
   return {
     request,
     getClientAddress: () => "203.0.113.9",

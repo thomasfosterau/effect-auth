@@ -641,7 +641,12 @@ const AttestationStatementFormat = {
 export type AttestationStatementFormat =
   (typeof AttestationStatementFormat)[keyof typeof AttestationStatementFormat];
 
-const ATTESTATION_FORMATS: Readonly<Record<string, AttestationStatementFormat>> = {
+/** Each `fmt` this codec reads, by its registered identifier. */
+interface AttestationFormats {
+  readonly [fmt: string]: AttestationStatementFormat;
+}
+
+const ATTESTATION_FORMATS: AttestationFormats = {
   packed: AttestationStatementFormat.Packed,
   tpm: AttestationStatementFormat.TPM,
   "android-key": AttestationStatementFormat.AndroidKey,

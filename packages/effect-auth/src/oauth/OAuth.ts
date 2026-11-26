@@ -619,7 +619,7 @@ const verifyIdTokenClaims = (
     const [headerSeg, payloadSeg] = segments;
 
     const { header, payload } = yield* Effect.try({
-      try: (): { header: Types.JsonObject; payload: Types.JsonObject } => ({
+      try: () => ({
         header: decodeJwtSegment(headerSeg),
         payload: decodeJwtSegment(payloadSeg),
       }),
@@ -1701,11 +1701,11 @@ export const make = (
         // Refresh the user's profile fields from the provider when requested.
         // Silently skipped when the store does not implement updateUser.
         if (updateUserInfoOnLink && userStore.updateUser) {
-          const profileUpdate: { name?: string; image?: string } = {};
-          if (userInfo.name !== undefined) profileUpdate.name = userInfo.name;
-          if (userInfo.picture !== undefined) profileUpdate.image = userInfo.picture;
-          if (profileUpdate.name !== undefined || profileUpdate.image !== undefined) {
-            yield* userStore.updateUser(userId, profileUpdate);
+          if (userInfo.name !== undefined || userInfo.picture !== undefined) {
+            yield* userStore.updateUser(userId, {
+              ...(userInfo.name !== undefined && { name: userInfo.name }),
+              ...(userInfo.picture !== undefined && { image: userInfo.picture }),
+            });
           }
         }
 

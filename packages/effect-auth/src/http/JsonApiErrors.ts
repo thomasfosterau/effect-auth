@@ -177,9 +177,7 @@ type HttpError =
   | S.TooManyRequests
   | S.InternalServerError;
 
-const carry = (
-  error: Exclude<HttpError, S.InternalServerError>,
-): { readonly message: string; readonly code?: string } => ({
+const carry = (error: Exclude<HttpError, S.InternalServerError>) => ({
   message: error.message,
   ...(error.code !== undefined && { code: error.code }),
 });

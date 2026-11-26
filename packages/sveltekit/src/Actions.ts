@@ -270,36 +270,39 @@ const sameSiteOf = (value: string): CookieOptions["sameSite"] | undefined => {
 };
 
 /** How each `Set-Cookie` attribute lands in SvelteKit's options; unknown attributes are dropped. */
-const cookieAttributes: Readonly<Record<string, (options: CookieOptions, value: string) => void>> =
-  {
-    path: (options, value) => {
-      if (value !== "") options.path = value;
-    },
-    domain: (options, value) => {
-      if (value !== "") options.domain = value;
-    },
-    "max-age": (options, value) => {
-      if (/^-?\d+$/u.test(value)) options.maxAge = Number(value);
-    },
-    expires: (options, value) => {
-      Option.map(DateTime.make(value), (expires) => {
-        options.expires = DateTime.toDateUtc(expires);
-      });
-    },
-    httponly: (options) => {
-      options.httpOnly = true;
-    },
-    secure: (options) => {
-      options.secure = true;
-    },
-    partitioned: (options) => {
-      options.partitioned = true;
-    },
-    samesite: (options, value) => {
-      const sameSite = sameSiteOf(value);
-      if (sameSite !== undefined) options.sameSite = sameSite;
-    },
-  };
+interface CookieAttributeWriters {
+  readonly [attribute: string]: (options: CookieOptions, value: string) => void;
+}
+
+const cookieAttributes: CookieAttributeWriters = {
+  path: (options, value) => {
+    if (value !== "") options.path = value;
+  },
+  domain: (options, value) => {
+    if (value !== "") options.domain = value;
+  },
+  "max-age": (options, value) => {
+    if (/^-?\d+$/u.test(value)) options.maxAge = Number(value);
+  },
+  expires: (options, value) => {
+    Option.map(DateTime.make(value), (expires) => {
+      options.expires = DateTime.toDateUtc(expires);
+    });
+  },
+  httponly: (options) => {
+    options.httpOnly = true;
+  },
+  secure: (options) => {
+    options.secure = true;
+  },
+  partitioned: (options) => {
+    options.partitioned = true;
+  },
+  samesite: (options, value) => {
+    const sameSite = sameSiteOf(value);
+    if (sameSite !== undefined) options.sameSite = sameSite;
+  },
+};
 
 /**
  * Parse one `Set-Cookie` header into a name, a value and SvelteKit cookie

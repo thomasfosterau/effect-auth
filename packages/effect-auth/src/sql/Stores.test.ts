@@ -1489,7 +1489,7 @@ const storeContract = (engine: StoreEngine): void => {
       // Verifies the DDL uses BIGINT (not INTEGER) for every column that stores
       // epoch-milliseconds, ensuring Postgres adopters don't get int4
       // overflow on values like Date.now() (~1.75e12).
-      const timestampColumns: Record<string, readonly string[]> = {
+      const timestampColumns = {
         auth_users: ["created_at", "updated_at"],
         auth_sessions: ["expires_at", "created_at", "last_activity_at"],
         auth_rate_limits: ["reset_at", "blocked_until"],

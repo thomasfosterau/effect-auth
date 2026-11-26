@@ -16,7 +16,10 @@ import * as Users from "../Users.ts";
 import * as Credentials from "../Credentials.ts";
 
 export type Row = Record<string, ColumnValue>;
-export type Tables = Record<string, Array<Row>>;
+/** The memory adapter's rows, by model name. */
+export interface Tables {
+  [model: string]: Array<Row>;
+}
 
 export const makeAuth = (options: Partial<BetterAuthOptions> = {}) => {
   const db: Tables = { user: [], session: [], account: [], verification: [] };

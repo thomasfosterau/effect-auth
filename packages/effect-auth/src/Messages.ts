@@ -108,7 +108,12 @@ const param = (
   return P.isString(value) || P.isNumber(value) ? value : fallback;
 };
 
-const catalog: Record<string, string | Resolver> = {
+/** Each code's English message, or the resolver that builds it from params. */
+interface Catalog {
+  readonly [code: string]: string | Resolver;
+}
+
+const catalog: Catalog = {
   [ErrorCode.AUTH_ERROR]: "An unexpected error occurred",
   [ErrorCode.HASHING_ERROR]: "Password processing failed",
 

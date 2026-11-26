@@ -1337,7 +1337,7 @@ export const make = (
      * Without it there is no endpoint an OAuth client can register at: client
      * administration (`/oauth-clients`) is admin-gated JSON:API, not RFC 7591.
      */
-    const authorizationServerMetadata = (): Record<string, string | ReadonlyArray<string>> => ({
+    const authorizationServerMetadata = (): Types.JsonObject => ({
       issuer: config.issuer,
       authorization_endpoint: `${config.issuer}/oauth2/authorize`,
       token_endpoint: `${config.issuer}/oauth2/token`,

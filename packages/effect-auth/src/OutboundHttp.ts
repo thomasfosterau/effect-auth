@@ -23,6 +23,7 @@
  *
  * @since 0.9.0
  */
+import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -155,10 +156,7 @@ const readCapped = (
         }),
     ),
     Stream.runFoldEffect(
-      (): { readonly chunks: ReadonlyArray<Uint8Array>; readonly size: number } => ({
-        chunks: [],
-        size: 0,
-      }),
+      () => ({ chunks: Arr.empty<Uint8Array>(), size: 0 }),
       (acc, chunk) =>
         acc.size + chunk.byteLength > maxBodyBytes
           ? Effect.fail(tooLarge(maxBodyBytes))

@@ -3787,12 +3787,17 @@ describe("HTTP multi-session", () => {
 });
 
 // Parse the Set-Cookie header for a named cookie and return its directives.
-const parseCookieDirectives = (res: Response, name: string): Record<string, string | true> => {
+/** A `Set-Cookie` line's attributes by lower-cased name; a bare flag is `true`. */
+interface CookieDirectives {
+  [directive: string]: string | true;
+}
+
+const parseCookieDirectives = (res: Response, name: string): CookieDirectives => {
   const found = Arr.findFirst(
     Arr.map(res.headers.getSetCookie(), (header) => header.split(/;\s*/)),
     ([pair]) => pair.startsWith(`${name}=`),
   );
-  const out: Record<string, string | true> = {};
+  const out: CookieDirectives = {};
   if (Option.isNone(found)) return out;
   const [, ...directives] = found.value;
   Arr.forEach(directives, (d) => {
@@ -4239,7 +4244,7 @@ describe("client IP at the HTTP boundary", () => {
       /** A layer merged into the services, such as a log collector. */
       readonly layer?: Layer.Layer<never>;
     } = {},
-  ): { readonly handler: Handler; readonly keys: MutableHashSet.MutableHashSet<string> } => {
+  ) => {
     const entries = MutableHashMap.empty<string, RateLimitEntry>();
     const keys = MutableHashSet.empty<string>();
     const workingStore = {
