@@ -275,7 +275,7 @@ signUp: (...) => Effect<
   | SignUpDisabledError     // code: "SIGN_UP_DISABLED" → 403
   | InvalidInputError       // code: "INVALID_INPUT" → 400
   | AccountLockedError      // code: "ACCOUNT_LOCKED" → 403 (via plugin)
-  | UserBannedError         // code: "USER_BANNED" → 403 (via plugin)
+  | UserBannedError         // code: "USER_BANNED" → 403
   | CaptchaError            // code: "CAPTCHA_FAILED" → 400 (via plugin)
   | PwnedPasswordError,     // code: "PWNED_PASSWORD" → 400 (via plugin)
   ...

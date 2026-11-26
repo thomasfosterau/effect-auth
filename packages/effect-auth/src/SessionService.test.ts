@@ -879,3 +879,71 @@ describe("session config and best-effort writes", () => {
     ).toBe(true);
   });
 });
+
+describe("user standing, enforced with no plugin", () => {
+  const standing = (id: string, attributes: User["attributes"]): User => ({
+    id,
+    createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+    attributes,
+  });
+  const run = <A, E>(
+    program: (manager: Effect.Success<ReturnType<typeof make>>) => Effect.Effect<A, E>,
+  ) =>
+    Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(make(sessionConfig), program),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+    );
+  const setUser = (user: User) => MutableHashMap.set(mockUserStore.users, user.id, user);
+
+  beforeEach(() => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+  });
+
+  it.each([
+    ["banned", { banned: true }, "Your account has been suspended"],
+    ["SCIM-deactivated", { scimDeactivated: true }, "Your account has been deactivated"],
+  ])("refuses to create a session for a %s user", async (_, attributes, message) => {
+    setUser(standing("standing-user", attributes));
+    const result = await run((manager) => Effect.result(manager.createSession("standing-user")));
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("UserBannedError");
+    expect(result.failure.message).toBe(message);
+    expect(MutableHashMap.size(mockSessionStore.sessions)).toBe(0);
+  });
+
+  it.each([
+    ["banned", { banned: true }],
+    ["SCIM-deactivated", { scimDeactivated: true }],
+  ])(
+    "refuses a session a %s user still presents, and serves it once reinstated",
+    async (_, attributes) => {
+      setUser(standing("standing-user", {}));
+      const result = await run((manager) =>
+        Effect.gen(function* () {
+          const { token } = yield* manager.createSession("standing-user");
+          setUser(standing("standing-user", attributes));
+          const refused = yield* Effect.result(manager.validateSession(token));
+          setUser(standing("standing-user", {}));
+          const served = yield* manager.validateSession(token);
+          return { refused, served };
+        }),
+      );
+      assert(Result.isFailure(result.refused));
+      expect(result.refused.failure._tag).toBe("UserBannedError");
+      expect(result.served.user.id).toBe("standing-user");
+    },
+  );
+
+  it("serves a user whose ban has lapsed", async () => {
+    setUser(standing("standing-user", { banned: true, banExpires: 0 }));
+    const result = await run((manager) =>
+      Effect.flatMap(manager.createSession("standing-user"), ({ token }) =>
+        manager.validateSession(token),
+      ),
+    );
+    expect(result.user.id).toBe("standing-user");
+  });
+});

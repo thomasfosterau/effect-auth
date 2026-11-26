@@ -244,7 +244,7 @@ in `AdminConfig.adminUserIds`. Every admin-gated HTTP endpoint asks the mounted 
 **Ban**:
 `attributes.banned: true` on the User, with optional `banReason` and `banExpires` (epoch ms;
 absent means permanent, a past value means the ban has lapsed). `isBanned` reads it;
-`BannedUserPlugin` blocks a banned user's sessions.
+`SessionService` refuses a banned user's sessions, and a ban revokes their API keys and OIDC grants.
 
 **Impersonation**:
 The state where an admin is signed in _as_ a target User for support purposes. Carried on the

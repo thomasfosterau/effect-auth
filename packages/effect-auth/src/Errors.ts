@@ -297,8 +297,8 @@ export class AccountLockedError extends Data.TaggedError("AccountLockedError")<{
 }
 
 /**
- * User account has been permanently banned by an administrator.
- * Raised by the `BannedUserPlugin`.
+ * The user is banned or SCIM-deactivated. `SessionService` raises it when it
+ * would create or answer a session for such a user.
  */
 export class UserBannedError extends Data.TaggedError("UserBannedError")<{
   readonly message: string;
