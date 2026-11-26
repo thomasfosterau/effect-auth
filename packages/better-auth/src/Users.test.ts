@@ -48,7 +48,9 @@ describe("UserStore conformance", () => {
   });
   const layer = userStoreLayer.pipe(Layer.provide(BetterAuthInstance.layer(auth)));
   Arr.forEach(suite.cases, (testCase) => {
-    it(testCase.name, () => Effect.runPromise(testCase.run.pipe(Effect.provide(layer))));
+    it(testCase.name, () =>
+      expect(Effect.runPromise(testCase.run.pipe(Effect.provide(layer)))).resolves.toBeUndefined(),
+    );
   });
 });
 

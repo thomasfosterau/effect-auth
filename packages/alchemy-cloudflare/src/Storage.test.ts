@@ -364,7 +364,7 @@ describe("D1-backed effect-auth storage: conformance", () => {
     (suite) => {
       describe(suite.contract, () => {
         suite.cases.forEach((testCase) => {
-          it(testCase.name, () => run(testCase.run));
+          it(testCase.name, () => expect(run(testCase.run)).resolves.toBeUndefined());
         });
       });
     },

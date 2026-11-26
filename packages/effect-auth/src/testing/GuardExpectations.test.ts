@@ -38,27 +38,31 @@ const mismatchesOf = (
 };
 
 describe("expectGuarded", () => {
-  it("passes an owner-or-rung write gate", async () => {
-    await Effect.runPromise(
-      Testing.expectGuarded(editPost, CurrentViewer, {
-        ladder: Roles,
-        min: Axes.moderate,
-        viewerAt,
-        owner: author,
-      }),
-    );
+  it("passes an owner-or-rung write gate", () => {
+    expect(
+      mismatchesOf(
+        Testing.expectGuarded(editPost, CurrentViewer, {
+          ladder: Roles,
+          min: Axes.moderate,
+          viewerAt,
+          owner: author,
+        }),
+      ),
+    ).toEqual([]);
   });
 
-  it("passes a read that maps every refusal to not-found", async () => {
-    await Effect.runPromise(
-      Testing.expectGuarded(readPost, CurrentViewer, {
-        ladder: Roles,
-        min: Axes.moderate,
-        viewerAt,
-        owner: author,
-        access: "read",
-      }),
-    );
+  it("passes a read that maps every refusal to not-found", () => {
+    expect(
+      mismatchesOf(
+        Testing.expectGuarded(readPost, CurrentViewer, {
+          ladder: Roles,
+          min: Axes.moderate,
+          viewerAt,
+          owner: author,
+          access: "read",
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it("fails every refusal case when the guard is removed", () => {
@@ -143,14 +147,16 @@ describe("the single-case helpers", () => {
     ]);
   });
 
-  it("expectRefusesBelow checks only admission at the lowest rung", async () => {
-    await Effect.runPromise(
-      Testing.expectRefusesBelow(guards.requireRoleAtLeast("user"), CurrentViewer, {
-        ladder: Roles,
-        min: "user",
-        viewerAt,
-      }),
-    );
+  it("expectRefusesBelow checks only admission at the lowest rung", () => {
+    expect(
+      mismatchesOf(
+        Testing.expectRefusesBelow(guards.requireRoleAtLeast("user"), CurrentViewer, {
+          ladder: Roles,
+          min: "user",
+          viewerAt,
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it("expectAllowsOwner passes an owner gate and fails a rung-only one", async () => {

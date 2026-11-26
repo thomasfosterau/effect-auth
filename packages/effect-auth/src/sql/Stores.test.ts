@@ -2074,7 +2074,7 @@ const storeContract = (engine: StoreEngine): void => {
     Arr.forEach(suites, (suite) => {
       describe(`${suite.contract} conformance`, () => {
         Arr.forEach(suite.cases, (testCase) => {
-          it(testCase.name, () => run(testCase.run));
+          it(testCase.name, () => expect(run(testCase.run)).resolves.toBeUndefined());
         });
       });
     });

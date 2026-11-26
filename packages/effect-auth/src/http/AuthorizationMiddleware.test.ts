@@ -471,26 +471,40 @@ describe("makeAuthorizationMiddleware – guard names", () => {
     const dynamicName = widen<string>("RequireA");
     const patternName = widen<`${string}Guard`>("RequireAGuard");
     const unionName = widen<"RequireA" | "RequireB">("RequireA");
-    // The calls only need to type-check; each one is a valid runtime call too.
-    // @ts-expect-error -- `string` widens the guard's type.
-    void makeAuthorizationMiddleware(dynamicName, input);
-    // @ts-expect-error -- a template pattern widens it too.
-    void makeAuthorizationMiddleware(patternName, input);
-    // @ts-expect-error -- a union names several guards at once.
-    void makeAuthorizationMiddleware(unionName, input);
+    // Each refused call is still a valid runtime call; only the type check refuses it.
+    const keys = [
+      // @ts-expect-error -- `string` widens the guard's type.
+      makeAuthorizationMiddleware(dynamicName, input).key,
+      // @ts-expect-error -- a template pattern widens it too.
+      makeAuthorizationMiddleware(patternName, input).key,
+      // @ts-expect-error -- a union names several guards at once.
+      makeAuthorizationMiddleware(unionName, input).key,
+    ];
+    expect(keys).toEqual([
+      expect.stringMatching(/\/RequireA#\d+$/),
+      expect.stringMatching(/\/RequireAGuard#\d+$/),
+      expect.stringMatching(/\/RequireA#\d+$/),
+    ]);
   });
 
   it("the empty string is a compile error: it names no guard", () => {
     // @ts-expect-error -- `""` is not a guard name.
-    void makeAuthorizationMiddleware("", input);
+    const Guard = makeAuthorizationMiddleware("", input);
+    expect(Guard.key).toMatch(/^@effect-auth\/AuthorizationMiddleware\/#\d+$/);
   });
 
   it("an any-typed name is a compile error, inferred or explicit: any would type the guard as any", () => {
     const anyName: any = "RequireA";
-    // @ts-expect-error -- `any` is not a guard name.
-    void makeAuthorizationMiddleware(anyName, input);
-    // @ts-expect-error -- an explicit `any` type argument is not a guard name either.
-    void makeAuthorizationMiddleware<any>("RequireA", input);
+    const keys = [
+      // @ts-expect-error -- `any` is not a guard name.
+      makeAuthorizationMiddleware(anyName, input).key,
+      // @ts-expect-error -- an explicit `any` type argument is not a guard name either.
+      makeAuthorizationMiddleware<any>("RequireA", input).key,
+    ];
+    expect(keys).toEqual([
+      expect.stringMatching(/\/RequireA#\d+$/),
+      expect.stringMatching(/\/RequireA#\d+$/),
+    ]);
   });
 
   it("a widened name's rejection message is the parameter's type, pinned to its exact text", () => {
