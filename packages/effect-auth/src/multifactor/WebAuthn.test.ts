@@ -1,5 +1,17 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Clock, Context, Data, Effect, Layer, MutableHashMap, Order, Result, Struct } from "effect";
+import {
+  Cause,
+  Clock,
+  Context,
+  Data,
+  Effect,
+  Exit,
+  Layer,
+  MutableHashMap,
+  Order,
+  Result,
+  Struct,
+} from "effect";
 import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
 import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as Arr from "effect/Array";
@@ -421,6 +433,29 @@ describe("WebAuthn Service", () => {
       userVerification: "preferred",
     });
     expect(result.excludeCredentials).toEqual([]);
+    expect(result.attestation).toBe("none");
+  });
+
+  // Attestation statements are never verified, so asking for one is refused
+  // at build rather than implying a guarantee.
+  it.for(["indirect", "direct", "enterprise"] as const)(
+    "dies at build with WebAuthnConfigError for attestation %s",
+    async (attestation) => {
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(WebAuthn.make({ ...config, attestation }), dependencies),
+      );
+      assert(Exit.isFailure(exit));
+      const defect = Cause.squash(exit.cause);
+      assert(defect instanceof WebAuthn.WebAuthnConfigError);
+      expect(defect.message).toContain(attestation);
+    },
+  );
+
+  it("accepts attestation none", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(WebAuthn.make({ ...config, attestation: "none" }), dependencies),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
   });
 
   // --- Credential management tests ------------------------------------------
