@@ -58,7 +58,11 @@ export class AdminError extends Data.TaggedError("AdminError")<{
  * Query for listing users
  */
 export interface ListUsersQuery {
-  /** Maximum number of users to return */
+  /**
+   * Maximum number of users to return. `AdminService.listUsers` caps it at
+   * {@link AdminConfig.maxListLimit} and passes it always; a store called
+   * directly without one returns every match.
+   */
   readonly limit?: number;
   /** Number of users to skip (for pagination) */
   readonly offset?: number;
@@ -166,6 +170,11 @@ export interface AdminConfig {
   readonly adminUserIds?: ReadonlyArray<string>;
   /** Ban reason used when none is provided (default: "No reason") */
   readonly defaultBanReason?: string;
+  /**
+   * The most users one `listUsers` call returns (default: 100). A larger
+   * `limit` is lowered to it, and a call without one gets it.
+   */
+  readonly maxListLimit?: number;
   /** Default ban duration in milliseconds; undefined = permanent */
   readonly defaultBanExpiresIn?: number;
   /**
@@ -184,6 +193,8 @@ export interface AdminConfig {
     | ((raw: string) => Effect.Effect<string, Errors.AuthError>)
     | undefined;
 }
+
+const DEFAULT_MAX_LIST_LIMIT = 100;
 
 /** A copy of `attributes` without the ban keys (`banned`, `banReason`, `banExpires`). */
 const withoutBanAttributes = (attributes: Types.Attributes): Types.Attributes =>
@@ -430,7 +441,11 @@ export const make = (
         query: ListUsersQuery = {},
       ) {
         yield* requireAdmin(actor);
-        return yield* adminStore.listUsers(query);
+        const maxListLimit = config.maxListLimit ?? DEFAULT_MAX_LIST_LIMIT;
+        return yield* adminStore.listUsers({
+          ...query,
+          limit: Math.max(0, Math.min(query.limit ?? maxListLimit, maxListLimit)),
+        });
       }),
 
       setRole: Effect.fn("AdminService.setRole")(function* (

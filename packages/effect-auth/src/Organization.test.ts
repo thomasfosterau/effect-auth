@@ -3272,6 +3272,42 @@ describe("OrganizationStore conformance", () => {
     ).resolves.toBeUndefined();
   });
 
+  const pagedCase = suite.cases.find((testCase) =>
+    testCase.name.startsWith("listMembersByOrganizationPage"),
+  );
+  const pagedStore = (
+    slice: (members: ReadonlyArray<Member>, offset: number, limit: number) => ReadonlyArray<Member>,
+  ): typeof OrganizationStore.Service => ({
+    ...organizationStore,
+    listMembersByOrganizationPage: (organizationId, { offset, limit }) =>
+      Effect.map(organizationStore.listMembersByOrganization(organizationId), (members) =>
+        slice(
+          Arr.sort(
+            members,
+            Order.mapInput(Order.Number, (member: Member) => member.createdAt),
+          ),
+          offset,
+          limit,
+        ),
+      ),
+  });
+
+  it("passes a store whose listMembersByOrganizationPage pages oldest first", async () => {
+    assert(pagedCase !== undefined, "the suite has a paging case");
+    const store = pagedStore((members, offset, limit) => members.slice(offset, offset + limit));
+    await expect(
+      Effect.runPromise(pagedCase.run.pipe(Effect.provideService(OrganizationStore, store))),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails a store whose listMembersByOrganizationPage ignores the offset", async () => {
+    assert(pagedCase !== undefined, "the suite has a paging case");
+    const store = pagedStore((members, _offset, limit) => members.slice(0, limit));
+    await expect(
+      Effect.runPromise(pagedCase.run.pipe(Effect.provideService(OrganizationStore, store))),
+    ).rejects.toThrow(/listMembersByOrganizationPage/);
+  });
+
   it.each(["getMemberById", "getTeamMemberById", "getOrgRoleById"] as const)(
     "fails a store whose %s misses, in every case that reads it",
     async (lookup) => {

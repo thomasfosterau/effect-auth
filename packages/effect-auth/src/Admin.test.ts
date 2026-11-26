@@ -1089,4 +1089,27 @@ describe("AdminService", () => {
     ]);
     expect(result.searchedPage.total).toBe(4);
   });
+
+  it("caps a listing at maxListLimit, with or without a limit", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "alice@example.com");
+    seedUser("user-2", "bob@example.com");
+
+    const result = await runService(testContext, { maxListLimit: 2 }, (service) =>
+      Effect.all(
+        {
+          unlimited: service.listUsers(admin),
+          greedy: service.listUsers(admin, { limit: 1000 }),
+          small: service.listUsers(admin, { limit: 1 }),
+        },
+        { concurrency: 1 },
+      ),
+    );
+
+    expect(result.unlimited.users).toHaveLength(2);
+    expect(result.unlimited.total).toBe(3);
+    expect(result.greedy.users).toHaveLength(2);
+    expect(result.small.users).toHaveLength(1);
+  });
 });
