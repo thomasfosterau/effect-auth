@@ -19,7 +19,7 @@ import type * as Types from "./Types.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import { SessionService } from "./SessionService.ts";
 import { type HookError } from "./Hooks.ts";
-import { purgeUser, userPurgeStores } from "./UserPurge.ts";
+import { ensureUserRemovable, purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /**
@@ -75,8 +75,10 @@ export class AnonymousService extends Context.Service<
      * callback (app data migration), then delete the anonymous user and
      * whatever it still holds: the credentials and tokens in the
      * user-keyed stores present where this layer is built, its sessions, any
-     * identifiers (when an `IdentifierStore` is present), and the user row
-     * last.
+     * organization memberships, any identifiers (when an `IdentifierStore`
+     * is present), and the user row last. An anonymous user who is the last
+     * active owner of an organization with other members is refused with
+     * `LastOrganizationOwnerError` before the callback runs.
      *
      * Rejects with `InvalidInputError` if `anonymousUser` is not an anonymous
      * user or if `anonymousUser.id === newUser.id`. Idempotent: a second call
@@ -85,7 +87,10 @@ export class AnonymousService extends Context.Service<
     readonly linkAccount: (
       anonymousUser: Types.User,
       newUser: Types.User,
-    ) => Effect.Effect<void, Errors.AuthError | Errors.InvalidInputError>;
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | Errors.InvalidInputError | Errors.LastOrganizationOwnerError
+    >;
   }
 >()("@effect-auth/AnonymousService") {
   /**
@@ -161,6 +166,7 @@ const make = (
 
         MutableHashSet.add(inFlight, anonymousUser.id);
         return yield* Effect.gen(function* () {
+          yield* ensureUserRemovable(purgeServices, anonymousUser.id);
           if (config.linkAccount !== undefined) {
             yield* config.linkAccount({ anonymousUser, newUser });
           }

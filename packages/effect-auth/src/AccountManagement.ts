@@ -24,7 +24,7 @@ import { isImpersonationSession } from "./Types.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
-import { purgeUser, userPurgeStores } from "./UserPurge.ts";
+import { ensureUserRemovable, purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { normalizeEmail } from "./Normalize.ts";
 import * as Identifier from "./Identifier.ts";
 import { definedKeys } from "./DefinedKeys.ts";
@@ -238,7 +238,10 @@ export class AccountManagementService extends Context.Service<
      * passkeys, API keys, the multi-factor enrolment, trusted devices, OIDC
      * provider tokens and consents, password-reset and email-verification
      * tokens, this store's pending tokens), then the sessions, then the
-     * identifiers, and the user row last. A failure part-way leaves the user
+     * organization memberships, then the identifiers, and the user row last.
+     * A user who is the last active owner of an organization that has other
+     * members fails with `LastOrganizationOwnerError` before `beforeDelete`
+     * runs, with nothing deleted and the token kept. A failure part-way leaves the user
      * row (and whatever was not yet removed); the token is gone by then, so
      * the user requests deletion again. Wrap the call in the stores' shared
      * transaction, where they have one, to make it atomic.
@@ -247,7 +250,10 @@ export class AccountManagementService extends Context.Service<
       token: string,
     ) => Effect.Effect<
       { readonly userId: string },
-      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError
+      | Errors.AuthError
+      | Errors.UserNotFoundError
+      | Errors.LastOrganizationOwnerError
+      | AccountTokenError
     >;
   }
 >()("@effect-auth/AccountManagementService") {
@@ -592,6 +598,9 @@ const make = (
           }
           const user = foundUser.value;
 
+          // Refuse before anything is deleted, the app's data included.
+          yield* ensureUserRemovable(purgeServices, user.id);
+
           // App-data cleanup while the user still exists (a failure aborts).
           if (config.beforeDelete !== undefined) {
             yield* config.beforeDelete(user);
@@ -614,8 +623,11 @@ const make = (
  * links, passkeys, API keys, the multi-factor enrolment, trusted devices,
  * OIDC-provider tokens and consents, password-reset, email-verification and
  * account-management tokens), the unspent magic links and one-time codes
- * sent to the user's addresses, then the sessions, then the identifiers, and
- * the user row last. `UserService.deleteUser` delegates to it.
+ * sent to the user's addresses, then the sessions, then the organization
+ * memberships, then the identifiers, and the user row last. The last active
+ * owner of an organization with other members is refused
+ * (`LastOrganizationOwnerError`) before anything is deleted.
+ * `UserService.deleteUser` delegates to it.
  *
  * @example
  * ```ts

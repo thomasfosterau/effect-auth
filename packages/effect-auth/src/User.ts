@@ -170,14 +170,18 @@ export class UserService extends Context.Service<
      * Delete the user and everything the account holds, through the
      * `AccountDeletion` service in the context (`accountDeletionLayer`): the
      * user's credentials and tokens, the unspent magic links and one-time
-     * codes sent to its addresses, its sessions, its identifiers, and the
-     * user row last.
+     * codes sent to its addresses, its sessions, its organization
+     * memberships, its identifiers, and the user row last. A user who is the last active owner of an organization that has
+     * other members fails with `LastOrganizationOwnerError` and nothing is
+     * deleted.
      *
      * Without an `AccountDeletion` where this layer is built it fails with
      * `AuthError` and deletes nothing: it never deletes the user row alone,
      * which would leave every credential naming a user who no longer exists.
      */
-    readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly deleteUser: (
+      userId: string,
+    ) => Effect.Effect<void, Errors.AuthError | Errors.LastOrganizationOwnerError>;
 
     /**
      * The attributes {@link UserServiceConfig.serverOnlyAttributes} declares

@@ -65,6 +65,7 @@ export const ErrorCode = {
   // Misc
   RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
   RESEND_TOO_SOON: "RESEND_TOO_SOON",
+  LAST_ORGANIZATION_OWNER: "LAST_ORGANIZATION_OWNER",
   MAGIC_LINK_ERROR: "MAGIC_LINK_ERROR",
   PASSWORD_RESET_ERROR: "PASSWORD_RESET_ERROR",
   ONE_TIME_TOKEN_ERROR: "ONE_TIME_TOKEN_ERROR",
@@ -678,6 +679,20 @@ export class ResendTooSoonError extends Schema.TaggedError<
 }) {
   get code(): typeof ErrorCode.RESEND_TOO_SOON {
     return ErrorCode.RESEND_TOO_SOON;
+  }
+}
+
+/**
+ * Deleting a user who is the last active owner of an organization that still
+ * has other members. Transfer ownership, or remove the other members, first;
+ * nothing of the user was deleted.
+ */
+export class LastOrganizationOwnerError extends Data.TaggedError("LastOrganizationOwnerError")<{
+  readonly message: string;
+  readonly organizationId: string;
+}> {
+  get code(): typeof ErrorCode.LAST_ORGANIZATION_OWNER {
+    return ErrorCode.LAST_ORGANIZATION_OWNER;
   }
 }
 

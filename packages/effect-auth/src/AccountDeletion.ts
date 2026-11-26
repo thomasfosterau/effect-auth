@@ -8,13 +8,15 @@
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
-import type { AuthError } from "./Errors.ts";
+import type { AuthError, LastOrganizationOwnerError } from "./Errors.ts";
 
 /**
  * Deletes a user and everything the account holds: the credentials and
  * tokens in every user-keyed store present where its layer is built, the
  * unspent magic links and one-time codes sent to the user's addresses, the
- * sessions, the identifiers, and the user row last. A failure part-way leaves
+ * sessions, the organization memberships, the identifiers, and the user row
+ * last. The last active owner of an organization that has other members is
+ * refused with `LastOrganizationOwnerError`, with nothing deleted. A failure part-way leaves
  * the user row, and calling it again finishes the deletion. Deleting a user
  * that does not exist is a no-op.
  *
@@ -26,6 +28,8 @@ import type { AuthError } from "./Errors.ts";
 export class AccountDeletion extends Context.Service<
   AccountDeletion,
   {
-    readonly deleteUser: (userId: string) => Effect.Effect<void, AuthError>;
+    readonly deleteUser: (
+      userId: string,
+    ) => Effect.Effect<void, AuthError | LastOrganizationOwnerError>;
   }
 >()("@effect-auth/AccountDeletion") {}

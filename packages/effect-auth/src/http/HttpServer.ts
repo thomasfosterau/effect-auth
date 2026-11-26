@@ -21,7 +21,12 @@ import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
-import type { AuthError, ResendTooSoonError, UserNotFoundError } from "../Errors.ts";
+import type {
+  AuthError,
+  LastOrganizationOwnerError,
+  ResendTooSoonError,
+  UserNotFoundError,
+} from "../Errors.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import {
   Etag,
@@ -2450,10 +2455,14 @@ const clearDataCookie = (cfg: ResolvedCookieConfig) =>
     ? Effect.void
     : setResponseCookie(dataCookieName(cfg), "", clearCookieOptions(cfg));
 
+/** `409`: the user to delete is the last owner of an organization with other members. */
+const lastOwnerConflict = (e: LastOrganizationOwnerError) =>
+  Effect.fail(new S.Conflict({ message: e.message, code: e.code }));
+
 /**
  * The `redeem` handler of an emailed account token: confirm it with the
  * service's `confirm`, then clear the session-data cookie. A token that does
- * not verify is a `400`.
+ * not verify is a `400`; a deletion of an organization's last owner a `409`.
  */
 const redeemAccountToken =
   (
@@ -2461,7 +2470,10 @@ const redeemAccountToken =
     confirm: (
       service: typeof AccountManagementService.Service,
       token: string,
-    ) => Effect.Effect<unknown, AccountTokenError | UserNotFoundError | AuthError>,
+    ) => Effect.Effect<
+      unknown,
+      AccountTokenError | UserNotFoundError | LastOrganizationOwnerError | AuthError
+    >,
   ) =>
   ({
     payload,
@@ -2474,6 +2486,7 @@ const redeemAccountToken =
         Effect.catchTags({
           AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
           UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+          LastOrganizationOwnerError: lastOwnerConflict,
           AuthError: (e) => internalServerError(e),
         }),
       );
@@ -3678,9 +3691,15 @@ export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: Multi
           return Handlers.data(yield* loadAdminUserResource(user));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle(
-        "delete",
-        adminAction(cfg, (admin, actor, id) => admin.removeUser(actor, id)),
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          yield* Effect.catchTags(admin.removeUser(actor, params.id), {
+            AdminError: adminFailures.AdminError,
+            AuthError: adminFailures.AuthError,
+            LastOrganizationOwnerError: lastOwnerConflict,
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle(
         "deleteSessions",
