@@ -18,13 +18,7 @@ import * as Ladder from "../Ladder.ts";
 import type * as SessionContext from "../SessionContext.ts";
 import { runAsViewer, type ViewerFixture } from "./RunAs.ts";
 
-/**
- * One case whose outcome was not the expected one.
- *
- * @since 0.1.0
- * @category models
- */
-export const GuardMismatch = Schema.Struct({
+const GuardMismatchSchema = Schema.Struct({
   /** Which viewer ran: `"anonymous"`, `"below <rung>"`, `"at <rung>"`, `"owner"`. */
   case: Schema.String,
   /** `"allowed"`, or the `_tag` of the expected failure. */
@@ -39,7 +33,7 @@ export const GuardMismatch = Schema.Struct({
  * @since 0.1.0
  * @category models
  */
-export type GuardMismatch = typeof GuardMismatch.Type;
+export type GuardMismatch = typeof GuardMismatchSchema.Type;
 
 /**
  * An operation's guard did not behave as expected.
@@ -51,7 +45,7 @@ export class GuardExpectationError extends Schema.TaggedError<GuardExpectationEr
   "GuardExpectationError",
   {
     message: Schema.String,
-    mismatches: Schema.Array(GuardMismatch),
+    mismatches: Schema.Array(GuardMismatchSchema),
   },
 ) {}
 
