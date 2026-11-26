@@ -157,7 +157,7 @@ grant_type=authorization_code
 }
 ```
 
-The `refresh_token` is present because the grant included `offline_access`; refresh tokens rotate on every use, and replaying a consumed one revokes the whole family. The `id_token` verifies against `/.well-known/jwks.json`, and the access token resolves claims at `/oauth2/userinfo`.
+The `refresh_token` is present because the grant included `offline_access`; refresh tokens rotate on every use, and replaying a consumed one revokes the whole family, its access tokens included. The rotation is recorded in the `OidcTokenStore`, so the replay is caught across restarts and instances. The `id_token` verifies against `/.well-known/jwks.json`, and the access token resolves claims at `/oauth2/userinfo`.
 
 Errors follow RFC 6749: `invalid_client` is a `401`, everything else a `400` with the code in `message`.
 

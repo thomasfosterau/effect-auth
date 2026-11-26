@@ -566,6 +566,37 @@ const resolveAdmin = resolveOptional(AdminService, "Admin is not enabled");
 const resolveApiKey = resolveOptional(ApiKeyService, "API keys are not enabled");
 
 /** Resolve the JWT service, or fail with 404. */
+/** `decodeURIComponent`, with a malformed percent-escape as `None` rather than a throw. */
+const decodeUriComponent: (encoded: string) => Option.Option<string> =
+  Option.liftThrowable(decodeURIComponent);
+
+/**
+ * The client credentials of a token request. A Basic Authorization header
+ * takes precedence over body credentials (RFC 6749 §2.3.1); a header that is
+ * not base64 carries none, so the body's (if any) apply. Both parts are
+ * form-encoded, and a malformed escape is a bad credential, not a server fault.
+ */
+const tokenClientCredentials = (
+  authorization: string | undefined,
+  body: { readonly client_id?: string | undefined; readonly client_secret?: string | undefined },
+): Effect.Effect<
+  { readonly clientId: string | undefined; readonly clientSecret: string | undefined },
+  S.Unauthorized
+> => {
+  const fromBody = { clientId: body.client_id, clientSecret: body.client_secret };
+  if (authorization === undefined || !authorization.startsWith("Basic ")) {
+    return Effect.succeed(fromBody);
+  }
+  const decoded = Result.getOrElse(Base64.decodeString(authorization.slice(6)), () => "");
+  const sep = decoded.indexOf(":");
+  if (sep < 0) return Effect.succeed(fromBody);
+  const id = decodeUriComponent(decoded.slice(0, sep));
+  const secret = decodeUriComponent(decoded.slice(sep + 1));
+  return Option.isSome(id) && Option.isSome(secret)
+    ? Effect.succeed({ clientId: id.value, clientSecret: secret.value })
+    : Effect.fail(new S.Unauthorized({ message: "invalid_client" }));
+};
+
 const resolveJwt = resolveOptional(JwtService, "JWT is not enabled");
 
 /** Resolve the SSO service, or fail with 404. */
@@ -4162,20 +4193,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oidc = yield* resolveOidcProvider;
           // RFC 6749 §5.1: a token response is `no-store`.
           yield* noStore;
-          // Client authentication: a Basic Authorization header takes
-          // precedence over body credentials (RFC 6749 §2.3.1).
-          let clientId = payload.client_id;
-          let clientSecret = payload.client_secret;
-          const auth = request.headers["authorization"];
-          if (auth !== undefined && auth.startsWith("Basic ")) {
-            // Not base64: no Basic credentials, so the body's (if any) apply.
-            const decoded = Result.getOrElse(Base64.decodeString(auth.slice(6)), () => "");
-            const sep = decoded.indexOf(":");
-            if (sep >= 0) {
-              clientId = decodeURIComponent(decoded.slice(0, sep));
-              clientSecret = decodeURIComponent(decoded.slice(sep + 1));
-            }
-          }
+          const { clientId, clientSecret } = yield* tokenClientCredentials(
+            request.headers["authorization"],
+            payload,
+          );
           const result = yield* oidc.service
             .token({
               grantType: payload.grant_type,

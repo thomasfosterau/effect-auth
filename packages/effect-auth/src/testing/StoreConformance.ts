@@ -2261,8 +2261,54 @@ const makeOidcToken = (userId: string): OidcToken => ({
 });
 
 /**
+ * A group delete of `OidcTokenStore` (`deleteByFamily`, `deleteByClientId`):
+ * every kind of record in the group goes, a record outside it stays, and an
+ * unknown group is a no-op.
+ */
+const oidcTokenGroupDeleteCase = <E, R>(
+  method: string,
+  field: "familyId" | "clientId",
+  purge: (
+    store: typeof OidcTokenStore.Service,
+    group: string,
+  ) => Effect.Effect<void, Errors.AuthError>,
+) => ({
+  name: `${method} removes that ${field === "familyId" ? "family" : "client"}'s tokens only, and is a no-op for one with none`,
+  run: (newUser: () => Effect.Effect<string, E, R>) =>
+    Effect.gen(function* () {
+      const store = yield* OidcTokenStore;
+      const userId = yield* newUser();
+      const group = uuid();
+      const inGroup = (kind: OidcToken["kind"]): OidcToken => ({
+        ...makeOidcToken(userId),
+        kind,
+        familyId: uuid(),
+        [field]: group,
+      });
+      const mine = [inGroup("access"), inGroup("refresh"), inGroup("rotated")];
+      const other: OidcToken = { ...makeOidcToken(userId), familyId: uuid() };
+      yield* Effect.forEach([...mine, other], (token) => store.create(token), {
+        concurrency: 1,
+        discard: true,
+      });
+      yield* purge(store, group);
+      yield* purge(store, uuid());
+      yield* Effect.forEach(
+        mine,
+        (token) =>
+          Effect.flatMap(store.get(token.tokenHash), (found) =>
+            expectEqual(`a ${token.kind} token of the deleted group`, found, null),
+          ),
+        { concurrency: 1, discard: true },
+      );
+      yield* expectEqual("a token outside the group", yield* store.get(other.tokenHash), other);
+    }),
+});
+
+/**
  * The `OidcTokenStore` per-user delete: `deleteByUserId` removes
- * every access and refresh token issued to that user, and only theirs. And
+ * every access and refresh token issued to that user, and only theirs. Its
+ * group deletes, `deleteByFamily` and `deleteByClientId`, likewise. And
  * its single-use `consume`, which refresh rotation spends a token
  * with: handed out once, to exactly one of concurrent callers.
  *
@@ -2282,6 +2328,12 @@ export const oidcTokenStoreConformance = <E = never, R = never>(
         read: (store, token) => store.get(token.tokenHash),
         purge: (store, userId) => store.deleteByUserId(userId),
       },
+    ),
+    oidcTokenGroupDeleteCase<E, R>("deleteByFamily", "familyId", (store, familyId) =>
+      store.deleteByFamily(familyId),
+    ),
+    oidcTokenGroupDeleteCase<E, R>("deleteByClientId", "clientId", (store, clientId) =>
+      store.deleteByClientId(clientId),
     ),
     ...consumeCases<OidcTokenStore, typeof OidcTokenStore.Service, OidcToken, E, R>(
       OidcTokenStore,
