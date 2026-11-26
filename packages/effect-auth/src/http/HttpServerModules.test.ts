@@ -2292,7 +2292,7 @@ describe("HTTP JWT endpoints", () => {
 
     // Verify the ES256 signature against the published JWK.
     const [headerSeg, payloadSeg, sigSeg] = Schema.decodeUnknownSync(JwsSegments)(token.split("."));
-    const header = Schema.decodeUnknownSync(JwsHeader)(
+    const header = Schema.decodeSync(JwsHeader)(
       Buffer.from(headerSeg, "base64url").toString("utf8"),
     );
     expect(header.alg).toBe("ES256");
@@ -2306,7 +2306,7 @@ describe("HTTP JWT endpoints", () => {
     );
     expect(valid).toBe(true);
 
-    const payload = Schema.decodeUnknownSync(JwtClaims)(
+    const payload = Schema.decodeSync(JwtClaims)(
       Buffer.from(payloadSeg, "base64url").toString("utf8"),
     );
     expect(payload.sub).toBe("u");

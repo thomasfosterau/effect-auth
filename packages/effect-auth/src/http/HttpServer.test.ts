@@ -854,7 +854,7 @@ const sessionBody = async <S extends Schema.ConstraintDecoder<unknown>>(
 ): Promise<S["Type"]> => {
   const document = Schema.decodeUnknownSync(SessionDocumentBody)(await response.json());
   const user = document.included?.find((resource) => resource.type === "users");
-  return Schema.decodeUnknownSync(schema)({
+  return Schema.decodeSync(schema)({
     session: flatten(document.data),
     ...(user !== undefined && { user: flatten(user) }),
   });
@@ -866,7 +866,7 @@ const collectionBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
 ): Promise<S["Type"]> => {
   const document = Schema.decodeUnknownSync(CollectionBody)(await response.json());
-  return Schema.decodeUnknownSync(schema)(document.data.map(flatten));
+  return Schema.decodeSync(schema)(document.data.map(flatten));
 };
 
 /** A JSON:API data document's primary resource, flattened as {@link flatten} does. */
@@ -875,7 +875,7 @@ const resourceBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
 ): Promise<S["Type"]> => {
   const document = Schema.decodeUnknownSync(SessionDocumentBody)(await response.json());
-  return Schema.decodeUnknownSync(schema)(flatten(document.data));
+  return Schema.decodeSync(schema)(flatten(document.data));
 };
 
 /** The first error object's `detail` and `status` of a JSON:API error document. */
@@ -1170,7 +1170,7 @@ const authBody = async <S extends Schema.ConstraintDecoder<unknown>>(
   const document = Schema.decodeUnknownSync(SignInAnswer)(text === "" ? {} : parseJson(text));
   const user = document.included?.find((resource) => resource.type === "users");
   const challenge = document.data?.type === "second-factor-challenges" ? document.data : undefined;
-  return Schema.decodeUnknownSync(schema)({
+  return Schema.decodeSync(schema)({
     ...(user !== undefined && { user: flatten(user) }),
     needsEmailVerification: document.meta?.needsEmailVerification ?? false,
     ...(challenge !== undefined && {

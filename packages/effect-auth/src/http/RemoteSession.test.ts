@@ -616,7 +616,7 @@ describe("RemoteSession relay", () => {
     expect(call.method).toBe("POST");
     expect(call.headers["content-type"]).toBe("application/vnd.api+json");
     expect(call.headers["origin"]).toBe("https://app.example.com");
-    expect(Schema.decodeUnknownSync(SignInBody)(call.body).data.attributes.credential.email).toBe(
+    expect(Schema.decodeSync(SignInBody)(call.body).data.attributes.credential.email).toBe(
       "user@example.com",
     );
 
