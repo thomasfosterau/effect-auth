@@ -460,7 +460,13 @@ export const usersGroup = Group.make(
   HttpApiEndpoint.patch("changePassword", "/users/me/password", {
     payload: jsonApiPayload(PasswordChangeDocument),
     success: HttpApiSchema.NoContent,
-    error: [E.BadRequest.wire, E.Unauthorized.wire, E.InternalServerError.wire],
+    error: [
+      E.BadRequest.wire,
+      E.Unauthorized.wire,
+      E.Forbidden.wire,
+      E.TooManyRequests.wire,
+      E.InternalServerError.wire,
+    ],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),

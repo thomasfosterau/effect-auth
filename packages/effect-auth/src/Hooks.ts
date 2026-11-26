@@ -98,6 +98,26 @@ export interface ResetPasswordArgs {
   readonly newPassword: string;
 }
 
+/**
+ * Named arguments for the `beforeChangePassword` hook, fired once the current
+ * password has checked out. A transform may rewrite `newPassword`; failing
+ * refuses the change.
+ */
+export interface ChangePasswordArgs {
+  readonly userId: string;
+  readonly newPassword: string;
+}
+
+/**
+ * Named arguments for the `beforeSetPassword` hook, fired when an account
+ * without a password sets one. A transform may rewrite `newPassword`; failing
+ * refuses it.
+ */
+export interface SetPasswordArgs {
+  readonly userId: string;
+  readonly newPassword: string;
+}
+
 /** Named arguments for the email-verification creation hooks. */
 export interface CreateVerificationArgs {
   readonly userId: string;
@@ -347,6 +367,8 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   afterRequestPasswordReset: identity,
   beforeResetPassword: identity,
   afterResetPassword: identity,
+  beforeChangePassword: identity,
+  beforeSetPassword: identity,
   beforeCreateVerification: identity,
   afterCreateVerification: identity,
   beforeVerifyEmail: identity,
@@ -436,6 +458,18 @@ export class Hooks extends Context.Service<
     readonly afterRequestPasswordReset: Tap<EmailRef>;
     readonly beforeResetPassword: Transform<ResetPasswordArgs>;
     readonly afterResetPassword: Tap<PasswordResetResult>;
+    /**
+     * Fired by `EmailPasswordService.changePassword` after the current
+     * password verifies and before the new one is checked and hashed; see
+     * {@link ChangePasswordArgs}. `HaveIBeenPwnedPlugin` guards it.
+     */
+    readonly beforeChangePassword: Transform<ChangePasswordArgs>;
+    /**
+     * Fired by `EmailPasswordService.setPassword` before the new password is
+     * checked and hashed; see {@link SetPasswordArgs}. `HaveIBeenPwnedPlugin`
+     * guards it.
+     */
+    readonly beforeSetPassword: Transform<SetPasswordArgs>;
     readonly beforeCreateVerification: Transform<CreateVerificationArgs>;
     readonly afterCreateVerification: Tap<CreateVerificationArgs>;
     readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
@@ -604,6 +638,18 @@ const wrapHooks = (
       inner.afterResetPassword,
       impls.afterResetPassword,
       isolateTaps,
+    ),
+    beforeChangePassword: wrapHook(
+      "beforeChangePassword",
+      inner.beforeChangePassword,
+      impls.beforeChangePassword,
+      false,
+    ),
+    beforeSetPassword: wrapHook(
+      "beforeSetPassword",
+      inner.beforeSetPassword,
+      impls.beforeSetPassword,
+      false,
     ),
     beforeCreateVerification: wrapHook(
       "beforeCreateVerification",

@@ -416,6 +416,112 @@ describe("EmailPasswordService.changePassword revokes sessions and trusted devic
   });
 });
 
+describe("EmailPasswordService — change and set password hooks and legacy hashes", () => {
+  beforeEach(() => {
+    MutableHashMap.clear(users);
+    MutableHashMap.clear(identifierRecords);
+    MutableHashMap.clear(passwordHashes);
+    MutableHashMap.clear(sessions);
+  });
+
+  const credentials = { email: "ada@example.com", password: "old-password-123" };
+  const NEW = "new-password-456";
+
+  /** A plugin that records each new password it sees and refuses `refuse`. */
+  const guard = (seen: Array<string>, refuse: string) => {
+    const check = <A extends { readonly userId: string; readonly newPassword: string }>(args: A) =>
+      Effect.sync(() => void seen.push(`${args.userId}:${args.newPassword}`)).pipe(
+        Effect.andThen(
+          args.newPassword === refuse
+            ? Effect.fail(new Errors.PwnedPasswordError({ message: "breached" }))
+            : Effect.succeed(args),
+        ),
+      );
+    return composePlugins([
+      makePlugin({ beforeChangePassword: check, beforeSetPassword: check }),
+    ]).pipe(Layer.provide(Hooks.Default));
+  };
+
+  const run = async <A, E>(
+    hooks: Layer.Layer<Hooks>,
+    f: (service: typeof EmailPassword.EmailPasswordService.Service) => Effect.Effect<A, E>,
+  ) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* f(yield* EmailPassword.make());
+      }).pipe(Effect.provide(await makeTestContext()), Effect.provide(hooks)),
+    );
+
+  it("changePassword runs beforeChangePassword after the current password verifies", async () => {
+    const seen: Array<string> = [];
+    const outcome = await run(guard(seen, NEW), (service) =>
+      Effect.gen(function* () {
+        const { user } = yield* service.signUp(credentials);
+        const wrong = yield* Effect.flip(
+          service.changePassword({ userId: user.id, currentPassword: "nope", newPassword: NEW }),
+        );
+        const refused = yield* Effect.flip(
+          service.changePassword({
+            userId: user.id,
+            currentPassword: credentials.password,
+            newPassword: NEW,
+          }),
+        );
+        return { userId: user.id, wrong, refused };
+      }),
+    );
+    expect(outcome.wrong).toBeInstanceOf(Errors.InvalidCredentialsError);
+    expect(outcome.refused).toBeInstanceOf(Errors.PwnedPasswordError);
+    // The wrong current password never reached the hook.
+    expect(seen).toEqual([`${outcome.userId}:${NEW}`]);
+    // The refused password was not stored: the old one still signs in.
+    await run(Hooks.Default, (service) => service.signIn(credentials));
+  });
+
+  it("setPassword runs beforeSetPassword, and a refusal stores nothing", async () => {
+    const seen: Array<string> = [];
+    const userId = "no-password-user";
+    const refused = await run(guard(seen, NEW), (service) =>
+      Effect.flip(service.setPassword(userId, NEW)),
+    );
+    expect(refused).toBeInstanceOf(Errors.PwnedPasswordError);
+    expect(seen).toEqual([`${userId}:${NEW}`]);
+    expect(Option.isNone(MutableHashMap.get(passwordHashes, userId))).toBe(true);
+
+    await run(guard(seen, NEW), (service) => service.setPassword(userId, "fine-password-789"));
+    expect(Option.isSome(MutableHashMap.get(passwordHashes, userId))).toBe(true);
+  });
+
+  it("changePassword verifies a hash written by a previous hasher through MultiAlgorithmVerifier", async () => {
+    const legacy = Password.pbkdf2Hasher({ iterations: 1000 });
+    const current = Scrypt.scryptHasher({ cost: 16384 });
+    const userId = "legacy-user";
+    MutableHashMap.set(
+      passwordHashes,
+      userId,
+      (await Effect.runPromise(legacy.hash(credentials.password))).hash,
+    );
+    const context = Context.add(
+      Context.add(await makeTestContext(), PasswordHasher, current),
+      MultiAlgorithmVerifier,
+      Password.multiAlgorithmVerifier([legacy, current]),
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        yield* service.changePassword({
+          userId,
+          currentPassword: credentials.password,
+          newPassword: NEW,
+        });
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+    const stored = MutableHashMap.get(passwordHashes, userId);
+    assert(Option.isSome(stored), "the new hash is stored");
+    expect(await Effect.runPromise(current.verify(NEW, stored.value))).toBe(true);
+  });
+});
+
 describe("EmailPasswordService constant-work sign-in", () => {
   beforeEach(() => {
     MutableHashMap.clear(users);

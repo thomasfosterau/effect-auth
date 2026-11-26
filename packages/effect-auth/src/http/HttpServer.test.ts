@@ -114,6 +114,7 @@ import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import {
   CaptchaError,
+  PwnedPasswordError,
   ClientAddressConfigError,
   EmailVerificationError,
   RateLimiterConfigError,
@@ -1754,6 +1755,25 @@ describe("change-password and update-user", () => {
     );
     expect(res.status).toBe(204);
     expect((await handler(getRequest(CURRENT_SESSION, asCookie(sid2)))).status).toBe(200);
+  });
+
+  it("answers 400 when a beforeChangePassword plugin refuses the new password", async () => {
+    const hooks = makePlugin({
+      beforeChangePassword: () =>
+        Effect.fail(new PwnedPasswordError({ message: "This password has appeared in a breach" })),
+    }).pipe(Layer.provide(Hooks.Default));
+    const handler = handlerFor(makeFixture({ hooks }));
+    const sid = await signUp(handler, "a@b.com");
+
+    const res = await handler(
+      authRequest("change-password", { currentPassword: PW, newPassword: PW2 }, asCookie(sid)),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("PWNED_PASSWORD");
+    // Password unchanged.
+    expect(
+      (await handler(authRequest("password", { email: "a@b.com", password: PW }))).status,
+    ).toBe(201);
   });
 
   it("rejects a wrong current password with 400", async () => {

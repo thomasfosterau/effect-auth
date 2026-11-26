@@ -27,6 +27,7 @@ import {
 import { generateHotp, generateTotp } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
+import { scryptHasher } from "../password/Scrypt.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
@@ -431,6 +432,34 @@ describe("MultiFactorService", () => {
     expect(enabledAfterDisable).toBe(false);
     expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
     expect(revokedDevices).toEqual(["user-2fa-4"]);
+  });
+
+  it("verifies a password hashed by a previous hasher through MultiAlgorithmVerifier", async () => {
+    // Seeded with PBKDF2; the configured hasher is now scrypt.
+    await seedUser("user-2fa-legacy", "legacy@example.com", "correct-password");
+    const current = scryptHasher({ cost: 16384 });
+    const testContext = Context.add(
+      Context.add(await makeTestContext(), PasswordHasher, current),
+      Password.MultiAlgorithmVerifier,
+      Password.multiAlgorithmVerifier([Password.pbkdf2Hasher({ iterations: 1000 }), current]),
+    );
+
+    const enabledAfterDisable = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+          yield* service.enable("user-2fa-legacy", "correct-password");
+          yield* service.regenerateBackupCodes("user-2fa-legacy", "correct-password");
+          yield* service.disable("user-2fa-legacy", "correct-password");
+          return yield* service.isEnabled("user-2fa-legacy");
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+    expect(enabledAfterDisable).toBe(false);
   });
 
   it("should create a session on the challenge + verifyTotp happy path", async () => {
