@@ -54,6 +54,10 @@ Run `vp run ci` (CI runs exactly that, on Node LTS and latest). The pre-commit h
 - Inline comments only for what the code can't say: workarounds, performance, non-obvious decisions.
 - Never cite issues, PRs or CI runs; stable links to external documentation are fine.
 
+### READMEs
+
+A package README says what the package is, how to install it, one minimal example, a table of its entry points, and links; nothing more. API detail goes in the export's doc comment, how-tos in a `docs/guides/` page. Links in a package README are absolute, since npm renders it without the repository.
+
 ### Tests
 
 Tests sit beside the source (`Foo.test.ts`) and import from `vite-plus/test`, never `vitest`. Test logic that can break: error cases and the security properties (timing, entropy, expiry, replay). Don't test what the type system already checks. Storage adapters test against real engines in-process (PGlite, better-sqlite3).

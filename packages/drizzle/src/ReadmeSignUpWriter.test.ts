@@ -1,9 +1,10 @@
 /**
- * The README's sign-up writer examples, compiled and run.
+ * The Drizzle guide's sign-up writer examples (`docs/guides/drizzle.md`),
+ * compiled and run.
  *
  * The writers live in `testing/readme/`, between `README:begin` and
  * `README:end` markers, so the type check covers them; the first test checks the
- * README shows each one verbatim. The rest run them on PGlite against a NOT NULL
+ * guide shows each one verbatim. The rest run them on PGlite against a NOT NULL
  * users table and a nullable one, both mapping `email_verified_at`.
  */
 
@@ -55,8 +56,11 @@ const region = async (file: string): Promise<string> => {
 };
 
 describe("README: sign-up writer examples", () => {
-  it("the README shows each compiled writer verbatim", async () => {
-    const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  it("the guide shows each compiled writer verbatim", async () => {
+    const readme = await readFile(
+      new URL("../../../docs/guides/drizzle.md", import.meta.url),
+      "utf8",
+    );
     await Arr.reduce(
       ["./testing/readme/NotNullWriter.ts", "./testing/readme/NullableWriter.ts"],
       Promise.resolve(),

@@ -4,7 +4,7 @@ The included HTTP API is JSON:API ([ADR-0024](../adr/0024-json-api-http-tier.md)
 
 The conversion landed in six slices. Slices 1 to 3 (sessions and identifiers, sign-in and sign-up, account management) were already in `@thomasfosterau/effect-auth` 0.1.0, so an app on 0.1.0 or 0.2.0 has them; the tables mark them **0.1.0**. Slices 4 and 5 (organizations, teams, admin, API keys, OIDC clients, SSO, tokens, device approval) arrive in the release after 0.2.0, marked **next**. An app and the auth service it talks to, through `./client`, `Http.RemoteSession` or the SvelteKit binding, must be on the same release.
 
-The complete current surface is the [endpoint reference](../../packages/effect-auth/README.md#http-endpoint-reference) in the core README.
+The complete current surface is the [endpoint reference](./http-api.md#http-endpoint-reference) in the HTTP API guide.
 
 ## What every converted endpoint does differently
 

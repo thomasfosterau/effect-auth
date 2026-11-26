@@ -1,5 +1,5 @@
 /**
- * The core's crypto inside a real workerd, the runtime the README claims
+ * The core's crypto inside a real workerd, the runtime the getting-started guide claims
  * for everything but `./saml`: JWS through `effect/jose`, JWT, passwords,
  * AES-GCM and the `node:crypto` corral. `nodejs_compat` sets no `Buffer`
  * global on a Worker dated before 2024-09-23, so the corral imports `Buffer`
@@ -41,7 +41,7 @@ const workerd = Schema.decodeUnknownSync(Workerd)(createRequire(import.meta.url)
 /**
  * The compatibility dates the worker runs at: workerd's newest, and the
  * oldest the core supports (`nodejs_compat` on, no Node globals), which the
- * core README states.
+ * getting-started guide states.
  */
 const DATE_NAMES = ["current", "minimum"] as const;
 type DateName = (typeof DATE_NAMES)[number];
