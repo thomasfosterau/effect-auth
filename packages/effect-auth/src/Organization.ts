@@ -67,7 +67,7 @@ import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
 import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeDomain, normalizeEmail } from "./utils.ts";
 
 /**
  * Organization error
@@ -1402,9 +1402,6 @@ export class OrganizationService extends Context.Service<
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
-
-/** Trim surrounding whitespace and lower-case a domain. */
-const normalizeDomain = (domain: string): string => domain.trim().toLowerCase();
 
 /** The domain part of an email address, normalized; `""` when there is none. */
 const domainOfEmail = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");

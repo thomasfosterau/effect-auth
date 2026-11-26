@@ -160,6 +160,7 @@ import {
   type SessionCacheConfig,
 } from "../SessionCookieCache.ts";
 import * as Types from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
 
 /**
  * The services the auth handlers require. Your `services` layer must provide
@@ -2326,7 +2327,7 @@ export const emailVerificationsGroupLayer = (
         Effect.gen(function* () {
           const identifiers = yield* IdentifierStore;
           const verification = yield* EmailVerificationService;
-          const email = payload.data.attributes.email.trim().toLowerCase();
+          const email = normalizeEmail(payload.data.attributes.email);
           const identifier = yield* lookupIdentifier(identifiers, "email", email).pipe(
             Effect.catch(internalServerError),
           );

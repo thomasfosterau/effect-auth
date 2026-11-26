@@ -85,6 +85,7 @@ import { type CurrentUser, userLayer } from "./SessionContext.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
 import { isInGoodStanding } from "./UserStanding.ts";
+import { normalizeEmail } from "./utils.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -544,7 +545,7 @@ export const make = (
 
 /**
  * The effect-auth user an Access identity belongs to: the owner of a
- * **verified** email identifier equal to the identity's email (lower-cased).
+ * **verified** email identifier equal to the identity's email (normalised with `normalizeEmail`).
  *
  * `Option.none()` for a service token, for an email no user holds, for an
  * address held only unverified (Access proves the address, but this function
@@ -564,7 +565,7 @@ export const findUser = (
     const identifier = yield* lookupIdentifier(
       identifiers,
       "email",
-      identity.email.trim().toLowerCase(),
+      normalizeEmail(identity.email),
     );
     if (identifier === null || !identifier.verified) return Option.none();
     const user = yield* users.get(identifier.userId);

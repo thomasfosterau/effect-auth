@@ -88,6 +88,7 @@ import { tokenHasher } from "./TokenHash.ts";
 import { revokeStandingAccess, userCredentialStores } from "./UserCredentials.ts";
 import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
+import { normalizeEmail } from "./utils.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -628,8 +629,6 @@ const MEMBER_PATH_PATTERN = /^members\[\s*value\s+eq\s+(?:"([^"]*)"|'([^']*)')\s
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
-
-const normalizeEmail = (value: string): string => value.trim().toLowerCase();
 
 const parseBooleanString = (value: string): Option.Option<boolean> => {
   const lowered = value.trim().toLowerCase();

@@ -87,7 +87,7 @@ export interface ListUsersResult {
  * Input for admin-initiated user creation.
  */
 export interface AdminCreateUserInput {
-  /** Primary email address — normalised (trimmed, lower-cased) and recorded as an email `Identifier`. */
+  /** Primary email address — normalised (`normalizeEmail`) and recorded as an email `Identifier`. */
   readonly email: string;
   /** Whether the primary email identifier is created verified. Default false. */
   readonly emailVerified?: boolean;
@@ -102,7 +102,7 @@ export interface AdminCreateUserInput {
    * Additional identifier records created via `IdentifierStore` (email,
    * username, or phone), beyond the primary email. Each value is normalised
    * for its type before it is stored, as the flows that look it up expect:
-   * an email or username trimmed and lower-cased, a phone number through
+   * an email through `normalizeEmail`, a username trimmed and lower-cased, a phone number through
    * {@link AdminConfig.normalizePhoneNumber}.
    */
   readonly identifiers?: ReadonlyArray<{

@@ -558,9 +558,10 @@ describe("MagicLinkService", () => {
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-          // The attacker holds `exämple.com`; a case- and accent-insensitive
-          // store answers its lookups with Bob's record.
-          yield* service.send("bob@exämple.com");
+          // The attacker holds `böb@example.com` (a local part keeps its accents);
+          // a case- and accent-insensitive store answers its lookups with Bob's
+          // record.
+          yield* service.send("böb@example.com");
           return yield* service.verify(recorded(sentLinks).token);
         }).pipe(
           Effect.provideService(IdentifierStore, looseCollationIdentifierStore(identifierRecords)),
@@ -569,10 +570,10 @@ describe("MagicLinkService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    expect(sentLinks.map((sent) => sent.email)).toEqual(["bob@exämple.com"]);
+    expect(sentLinks.map((sent) => sent.email)).toEqual(["böb@example.com"]);
     // The link signs in a new account for the look-alike, never Bob's.
     expect(result.user.id).not.toBe("user-bob");
-    expect(findEmailIdentifier("bob@exämple.com")?.userId).toBe(result.user.id);
+    expect(findEmailIdentifier("böb@example.com")?.userId).toBe(result.user.id);
     expect(findEmailIdentifier("bob@example.com")?.userId).toBe("user-bob");
   });
 
