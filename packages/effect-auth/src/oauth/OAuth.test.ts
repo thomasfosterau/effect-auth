@@ -357,9 +357,7 @@ describe("OAuth provider bodies", () => {
       headers: { "content-type": "text/html" },
     });
 
-  const expectProviderError = async (
-    run: Effect.Effect<unknown, unknown, HttpClient.HttpClient>,
-  ) => {
+  const expectProviderError = async <A, E>(run: Effect.Effect<A, E, HttpClient.HttpClient>) => {
     const exit = await runPromiseExitHttp(run);
     assert(Exit.isFailure(exit), "the call fails");
     // A typed failure, not a defect.

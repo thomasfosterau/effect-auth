@@ -1646,9 +1646,9 @@ describe("HTTP SCIM endpoints", () => {
 const userOf = (fx: Awaited<ReturnType<typeof makeFixture>>, id: string) =>
   Option.getOrUndefined(MutableHashMap.get(fx.usersById, id));
 
-const failure = async (
+const failure = async <A, E>(
   fx: Awaited<ReturnType<typeof makeFixture>>,
-  effect: Effect.Effect<unknown, unknown>,
+  effect: Effect.Effect<A, E>,
 ) => {
   const err = await fx.run(Effect.flip(effect));
   assert.instanceOf(err, ScimError);

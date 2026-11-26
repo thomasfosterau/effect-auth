@@ -79,13 +79,16 @@ export interface RecordState {
  * (`vi.useFakeTimers({ toFake: ["Date"] })`): the expiry step moves it past
  * `expiresIn`.
  */
-export const runVerifySequence = <E extends { readonly _tag: string; readonly message: string }>(
+export const runVerifySequence = <
+  E extends { readonly _tag: string; readonly message: string },
+  SendError = never,
+>(
   sequence: VerifySequence,
   options: {
     readonly maxAttempts: number;
     readonly expiresIn: number;
     /** Request a code for the address, or `undefined` to request none. */
-    readonly send: Effect.Effect<void, unknown> | undefined;
+    readonly send: Effect.Effect<void, SendError> | undefined;
     /** Try {@link wrongCode} for the address. */
     readonly verify: Effect.Effect<unknown, E>;
     /** The address's stored record, or `null`. */

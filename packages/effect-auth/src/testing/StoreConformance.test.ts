@@ -54,9 +54,9 @@ const userStore: typeof UserStore.Service = {
 const seedUser = (user: Types.User) =>
   Effect.sync(() => void MutableHashMap.set(users, user.id, user));
 
-const register = <E, R>(
+const register = <E, R, LayerError>(
   suite: Testing.ConformanceSuite<E, R>,
-  layer: () => Layer.Layer<R, unknown>,
+  layer: () => Layer.Layer<R, LayerError>,
 ): void => {
   describe(`${suite.contract} conformance`, () => {
     Arr.forEach(suite.cases, (testCase) => {
