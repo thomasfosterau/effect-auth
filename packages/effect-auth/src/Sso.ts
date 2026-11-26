@@ -64,6 +64,7 @@ import {
 } from "./oauth/OAuth.ts";
 import * as OAuth from "./oauth/OAuth.ts";
 import type * as Types from "./Types.ts";
+import { normalizeDomain, normalizeEmail } from "./utils.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
 export class SsoError extends Data.TaggedError("SsoError")<{
@@ -83,7 +84,7 @@ export interface OidcSsoProvider {
   readonly id: string;
   /** OIDC issuer identifier (`iss`). */
   readonly issuer: string;
-  /** Email domain that routes to this provider (normalized, lowercase). */
+  /** Email domain that routes to this provider (lower-cased, punycoded under UTS 46). */
   readonly domain: string;
   readonly protocol: "oidc";
   readonly clientId: string;
@@ -115,7 +116,7 @@ export interface OidcSsoProvider {
  */
 export interface SamlSsoProvider {
   readonly id: string;
-  /** Email domain that routes to this provider (normalized, lowercase). */
+  /** Email domain that routes to this provider (lower-cased, punycoded under UTS 46). */
   readonly domain: string;
   readonly protocol: "saml";
   /** The IdP's entity id — the `Issuer` every assertion must carry. */
@@ -424,7 +425,6 @@ const browserHolds = (
     ? Effect.succeed(false)
     : Effect.zipWith(digest(browserState), digest(requestState), constantTimeHashEqual);
 
-const normalizeDomain = (value: string): string => value.trim().toLowerCase();
 const domainOf = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");
 
 /** The `sso:`-prefixed provider name stored in OAuth state, encoding the id. */
@@ -625,7 +625,7 @@ export const make = (
         sessions: sessionManager,
       });
 
-      const email = profile.email.trim().toLowerCase();
+      const email = normalizeEmail(profile.email);
 
       const { identifier, user: owner } = yield* findIdentifierOwner(
         identifiers,

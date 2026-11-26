@@ -122,7 +122,7 @@ export interface EmailPasswordConfig {
    * user, real or stand-in.
    *
    * Called directly, the service still answers with the stand-in user: its
-   * `email` is the submitted address, trimmed and lower-cased (after the
+   * `email` is the submitted address, normalised with `normalizeEmail` (after the
    * `beforeSignUp` hooks), with `emailVerified: false`, and its other fields
    * are what a store that keeps its input as given (as effect-auth/sql's
    * does) returns for a new user: the submitted `name` and `attributes` (`{}`

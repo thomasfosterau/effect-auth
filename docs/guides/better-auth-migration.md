@@ -189,7 +189,7 @@ SELECT <new uuid>, u.id, 'email', lower(trim(u.email)), u."emailVerified", ..., 
 FROM "user" u;
 ```
 
-Three rules the store enforces, so get them right in the migration: `value` is stored **normalized** (emails and usernames trimmed and lowercased, phones in E.164 — the store does not normalize for you); `(type, value)` must be backed by a **real unique index**, because `claimIdentifier`'s race repair depends on a concurrent duplicate `create` genuinely failing; and `verified` carries the verification state that used to live on `user.emailVerified`, with `verified_at` as its timestamp.
+Three rules the store enforces, so get them right in the migration: `value` is stored **normalized** (emails through `normalizeEmail`, which punycodes the domain and NFC-normalises the local part; usernames trimmed and lowercased; phones in E.164 — the store does not normalize for you); `(type, value)` must be backed by a **real unique index**, because `claimIdentifier`'s race repair depends on a concurrent duplicate `create` genuinely failing; and `verified` carries the verification state that used to live on `user.emailVerified`, with `verified_at` as its timestamp.
 
 If you used Better Auth's `username` plugin, its `user.username` becomes a second identifier row with `type = 'username'`. Same for `phoneNumber`, with `type = 'phone'`.
 

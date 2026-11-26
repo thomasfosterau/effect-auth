@@ -26,7 +26,7 @@
  * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
  * const layer = composePlugins([
- *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
+ *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: normalises email
  *   AuditPlugin, // afterSignIn/afterSignUp/afterSignOut: logs
  * ]).pipe(Layer.provide(Hooks.Default))
  *

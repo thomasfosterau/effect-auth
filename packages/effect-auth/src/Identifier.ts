@@ -33,8 +33,9 @@ export type IdentifierType = "email" | "username" | "phone";
  * Uniqueness is enforced on `(type, value)` — the same email address cannot
  * belong to two users, and neither can the same username or phone number.
  *
- * `value` is stored in normalized form: email addresses are trimmed and
- * lowercased; usernames are trimmed and lowercased; phone numbers are stored
+ * `value` is stored in normalized form: email addresses through
+ * `normalizeEmail` (trimmed, the local part lower-cased and NFC-normalised, the
+ * domain punycoded under UTS 46); usernames are trimmed and lowercased; phone numbers are stored
  * in E.164 form (app policy; the store does not normalize).
  */
 export const Identifier = Schema.Struct({
