@@ -16,6 +16,10 @@ What the library guarantees, and what it leaves to the application, is in [ARCHI
 
 To invalidate every cache cookie at once, change `cookie.cache.version` and revoke the affected sessions (a valid session is simply re-cached). Without `cookie.cache.encrypt: true` the cookie is signed, not encrypted, so the browser can read what it carries.
 
+### A double-submitted OIDC refresh signs the client out
+
+The OIDC provider rotates refresh tokens and treats any second use of one as reuse (RFC 6819 §5.2.2.3): it revokes the whole token family, every access token with it, and answers `invalid_grant`. That includes two requests that present the same token at once: both are refused, and the tokens the faster one was about to receive go with the family, so timing never decides whether a stolen token's family survives. A client that retries a refresh or sends it from two tabs therefore loses its tokens and must sign in again. Clients should serialize their refreshes.
+
 ## Supply chain
 
 - pnpm holds new versions for 24 hours (`minimumReleaseAge`), runs dependency build scripts only for `allowBuilds`, and installs from a strict catalog with a frozen lockfile (pnpm's default in CI; the release jobs also pass `--frozen-lockfile`). CI runs `pnpm audit --audit-level high`.

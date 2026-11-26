@@ -708,6 +708,38 @@ describe("OidcProviderService token state", () => {
     expect(infos.map(Result.isFailure)).toEqual([true, true]);
   });
 
+  it("revokes the family when two refreshes race with one token", async () => {
+    const { provider } = setup();
+    const service = provider();
+    const { credentials, tokens } = await Effect.runPromise(
+      grant(service, "openid offline_access"),
+    );
+    assert(Result.isSuccess(tokens));
+    const original = tokens.success;
+
+    // The store's reads yield, so both requests read the record before either spends it.
+    const raced = await Effect.runPromise(
+      Effect.all(
+        [
+          refresh(service, credentials, original.refreshToken ?? ""),
+          refresh(service, credentials, original.refreshToken ?? ""),
+        ],
+        { concurrency: "unbounded" },
+      ),
+    );
+    // The winner of the rotation finds the family revoked by the loser, so
+    // neither request keeps a token.
+    expect(raced.map((result) => Result.isFailure(result))).toEqual([true, true]);
+    expect(raced.map((result) => Result.isFailure(result) && result.failure)).toEqual([
+      expect.objectContaining({ error: "invalid_grant" }),
+      expect.objectContaining({ error: "invalid_grant" }),
+    ]);
+
+    // The original access token went with the family.
+    const info = await Effect.runPromise(Effect.result(service.userinfo(original.accessToken)));
+    assert(Result.isFailure(info));
+  });
+
   // A refresh down-scoped to drop openid signs no id_token, and is refused all the same.
   it.each([
     { attributes: { banned: true }, scope: undefined },
@@ -2115,7 +2147,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(afterRevoke.status).toBe(400);
   });
 
-  it("redeems an authorization code and rotates a refresh token once under concurrency", async () => {
+  it("redeems an authorization code once and revokes the family on concurrent refreshes", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
     const userSid = fx.makeSession(fx.seedUser("race@idp.test"));
@@ -2167,7 +2199,8 @@ describe("HTTP OIDC provider endpoints", () => {
     assert(issued !== undefined);
     const { refresh_token: refreshToken } = await jsonBody(issued, RefreshTokenBody);
 
-    // Concurrent refreshes of one token rotate it once, never forking the family.
+    // Concurrent refreshes of one token are reuse: every one is refused and
+    // the family is revoked, never forked.
     const rotations = await Promise.all(
       Arr.makeBy(3, () =>
         fx.handler(
@@ -2180,9 +2213,7 @@ describe("HTTP OIDC provider endpoints", () => {
         ),
       ),
     );
-    expect(rotations.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
-      200, 400, 400,
-    ]);
+    expect(rotations.map((response) => response.status)).toEqual([400, 400, 400]);
   });
 
   it("enforces absolute (non-sliding) refresh token lifetime", async () => {
