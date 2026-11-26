@@ -1,6 +1,12 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Clock, Context, Deferred, Effect, Fiber, MutableHashMap, Result } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as PlatformCrypto from "./PlatformCrypto.ts";

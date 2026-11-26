@@ -6,7 +6,8 @@
  *
  * @module handle
  */
-import { type Cause, Effect } from "effect";
+import type * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import {

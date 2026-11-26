@@ -7,7 +7,13 @@
  *
  * @module oidc-provider
  */
-import { Clock, Context, Data, Effect, HashMap, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as HashMap from "effect/HashMap";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

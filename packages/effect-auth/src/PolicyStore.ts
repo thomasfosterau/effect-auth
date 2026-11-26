@@ -7,7 +7,10 @@
  *
  * @module policy-store
  */
-import { Context, Effect, Match, MutableHashMap } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

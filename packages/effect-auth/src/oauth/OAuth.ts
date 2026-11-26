@@ -5,7 +5,14 @@
  * and related data structures.
  */
 
-import { Clock, Config, Context, DateTime, Effect, Formatter, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Formatter from "effect/Formatter";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

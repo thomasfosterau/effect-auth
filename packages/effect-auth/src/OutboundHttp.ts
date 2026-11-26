@@ -23,7 +23,10 @@
  *
  * @since 0.9.0
  */
-import { Context, Data, Duration, Effect } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";

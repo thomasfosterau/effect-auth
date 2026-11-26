@@ -1,14 +1,12 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import {
-  Cause,
-  Config,
-  ConfigProvider,
-  Effect,
-  Exit,
-  MutableHashSet,
-  Order,
-  Redacted,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Config from "effect/Config";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Order from "effect/Order";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { optionalSecret } from "./OptionalSecretConfig.ts";

@@ -4,7 +4,9 @@
  * test support: not exported from `./testing`.
  */
 import { createHmac, hkdfSync } from "node:crypto";
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as PlatformCrypto from "../PlatformCrypto.ts";

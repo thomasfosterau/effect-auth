@@ -47,7 +47,9 @@
  *
  * @module protected
  */
-import { Effect, SchemaGetter, SchemaIssue } from "effect";
+import * as Effect from "effect/Effect";
+import * as SchemaGetter from "effect/SchemaGetter";
+import * as SchemaIssue from "effect/SchemaIssue";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

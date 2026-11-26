@@ -1,4 +1,6 @@
-import { Clock, Data, Effect } from "effect";
+import * as Clock from "effect/Clock";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

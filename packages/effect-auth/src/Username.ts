@@ -4,7 +4,11 @@
  * EmailPasswordService}; sign-in resolves it and verifies the password with
  * email sign-in's error, `beforeAuthenticate` hook and `SecondFactorGate`.
  */
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Errors from "./Errors.ts";

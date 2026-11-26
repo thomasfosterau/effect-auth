@@ -11,7 +11,9 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
-import { DateTime, Effect, Layer } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import { readFile } from "node:fs/promises";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";

@@ -11,7 +11,8 @@
 
 import { boolean, datetime, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { databaseLayer } from "./Database.ts";

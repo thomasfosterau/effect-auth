@@ -18,7 +18,11 @@ import {
   memoryRateLimitStore,
 } from "./testing/MemoryStores.ts";
 import { RateLimitStore } from "./RateLimit.ts";
-import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

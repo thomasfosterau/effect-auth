@@ -6,7 +6,8 @@
 
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { afterAll } from "vite-plus/test";
 import { databaseLayer } from "./Database.ts";
 import { migrationStatements, tables } from "./SqliteSchema.ts";

@@ -4,7 +4,9 @@
  *
  * @since 0.1.0
  */
-import { Clock, Effect, Result } from "effect";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";

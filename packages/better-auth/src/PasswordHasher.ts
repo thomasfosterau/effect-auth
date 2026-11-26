@@ -4,7 +4,8 @@
  *
  * @since 0.1.0
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 

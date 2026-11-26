@@ -1,5 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Data, DateTime, Effect } from "effect";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";

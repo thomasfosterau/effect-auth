@@ -6,7 +6,13 @@
  * @module multi-factor
  */
 
-import { Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Hex } from "effect/encoding";

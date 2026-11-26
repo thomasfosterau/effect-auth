@@ -1,6 +1,6 @@
 import { sha256Hex } from "./Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { ApiKeyService } from "../ApiKey.ts";
 import { SessionService } from "../SessionService.ts";
 import * as Testing from "./index.ts";

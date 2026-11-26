@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { twoFactor, username } from "better-auth/plugins";

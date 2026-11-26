@@ -7,7 +7,8 @@
  *
  * @module system
  */
-import { Data, Layer } from "effect";
+import * as Data from "effect/Data";
+import * as Layer from "effect/Layer";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";

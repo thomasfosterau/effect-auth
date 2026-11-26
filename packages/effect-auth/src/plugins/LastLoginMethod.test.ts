@@ -1,6 +1,9 @@
 import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import { composePlugins, Hooks } from "../Hooks.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";

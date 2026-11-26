@@ -7,7 +7,8 @@ import { AtomRegistry } from "effect/reactivity";
 import { createAuthClient } from "./Client.ts";
 import { makeSessionAtoms } from "./SessionAtoms.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
-import { MutableHashMap, MutableHashSet } from "effect";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 

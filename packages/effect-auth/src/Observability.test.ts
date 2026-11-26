@@ -1,4 +1,5 @@
-import { Metric, Struct } from "effect";
+import * as Metric from "effect/Metric";
+import * as Struct from "effect/Struct";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { describe, it, expect } from "vite-plus/test";

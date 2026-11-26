@@ -1,6 +1,8 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
-import { Clock, Effect, Result } from "effect";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import { verifyCode, type VerifyFailure } from "./OtpCode.ts";
 import type { PhoneOtpPurpose, PhoneOtpStore } from "./PhoneOtp.ts";

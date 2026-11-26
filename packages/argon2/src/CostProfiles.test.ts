@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { Password } from "@thomasfosterau/effect-auth";
 import * as Argon2 from "./index.ts";

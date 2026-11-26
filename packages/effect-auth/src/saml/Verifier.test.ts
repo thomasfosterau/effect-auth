@@ -17,7 +17,8 @@
  * and exercises exactly the code path a real certificate would.
  */
 import { describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import { generateKeyPairSync } from "node:crypto";
 import { SignedXml } from "xml-crypto";
 import { SamlError, type SamlVerifyInput } from "../index.ts";

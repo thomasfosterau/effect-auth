@@ -6,7 +6,7 @@
  * @internal
  */
 
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";

@@ -5,7 +5,9 @@
  * clears it; past `freeFailures`, sends back off exponentially, never refused
  * for good. Internal.
  */
-import { Clock, Duration, Effect } from "effect";
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";

@@ -5,7 +5,12 @@
  * standing attributes are never cached. Change `version` to invalidate every
  * cookie.
  */
-import { Data, DateTime, Effect, HashSet, Redacted, Result } from "effect";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
+import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";

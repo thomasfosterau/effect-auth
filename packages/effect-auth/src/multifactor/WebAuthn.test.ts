@@ -1,17 +1,15 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import {
-  Cause,
-  Clock,
-  Context,
-  Data,
-  Effect,
-  Exit,
-  Layer,
-  MutableHashMap,
-  Order,
-  Result,
-  Struct,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Order from "effect/Order";
+import * as Result from "effect/Result";
+import * as Struct from "effect/Struct";
 import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
 import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as Arr from "effect/Array";

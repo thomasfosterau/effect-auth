@@ -5,7 +5,8 @@
  *
  * @module token-hash
  */
-import { Effect, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import { Digest, Mac } from "effect/crypto";
 import { Hex } from "effect/encoding";
 

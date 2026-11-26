@@ -7,7 +7,9 @@
  *
  * @module session-resolution
  */
-import { Cause, Effect, HashMap } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as HashMap from "effect/HashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

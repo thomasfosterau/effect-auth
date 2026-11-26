@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { OrganizationStore, type Member, type Organization, type Team } from "./Organization.ts";

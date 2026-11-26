@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { Digest } from "effect/crypto";
 import { sha256Hex } from "./testing/Sha256.ts";
 import { constantTimeHashEqual, hashToken, timingSafeEqualBytes } from "./TokenHash.ts";

@@ -3,7 +3,12 @@
  * over a `phone` identifier ({@link getPhoneNumber}). E.164 normalization is
  * the application's; the default `normalizePhoneNumber` only trims.
  */
-import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Order from "effect/Order";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { Digest, Mac, SecureRandom } from "effect/crypto";

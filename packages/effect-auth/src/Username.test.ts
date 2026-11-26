@@ -1,5 +1,10 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { DateTime, Effect, Layer, MutableHashMap, Order, Struct } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Order from "effect/Order";
+import * as Struct from "effect/Struct";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";

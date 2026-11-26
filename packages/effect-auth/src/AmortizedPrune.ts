@@ -1,4 +1,4 @@
-import { MutableHashMap } from "effect";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 
 /**

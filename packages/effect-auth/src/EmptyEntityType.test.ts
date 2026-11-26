@@ -9,7 +9,8 @@
  * equals nothing, itself included.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Condition from "./Condition.ts";

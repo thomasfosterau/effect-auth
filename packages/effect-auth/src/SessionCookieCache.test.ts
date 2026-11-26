@@ -1,5 +1,9 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, HashSet, Layer, Redacted } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Option from "effect/Option";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {

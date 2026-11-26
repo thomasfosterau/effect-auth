@@ -5,7 +5,7 @@
  * `Http.make` handler over the in-memory `./client/testing` fixture.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { MutableHashMap } from "effect";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";

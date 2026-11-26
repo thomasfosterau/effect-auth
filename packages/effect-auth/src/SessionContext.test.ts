@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Exit, Layer } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as Types from "./Types.ts";
 import * as SessionContext from "./SessionContext.ts";

@@ -19,7 +19,9 @@
  * @module effect-auth-alchemy-postgres
  */
 
-import { Effect, Layer, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import type { SqlClient, SqlError } from "effect/sql";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Sql from "@thomasfosterau/effect-auth/sql";

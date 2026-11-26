@@ -4,7 +4,9 @@
  * core's outbound requests. `FetchHttpClient`'s own default reads the global
  * once and keeps it.
  */
-import { Effect, type Exit, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import type * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import { FetchHttpClient, type HttpClient } from "effect/http";
 
 export const globalFetchHttpClient = FetchHttpClient.layer.pipe(

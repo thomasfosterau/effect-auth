@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as P from "effect/Predicate";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { makeAuth, rowOf, signUp } from "./testing/Fixtures.ts";

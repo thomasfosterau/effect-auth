@@ -5,7 +5,9 @@
  * @internal
  */
 
-import { Effect, Exit, HashMap } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as HashMap from "effect/HashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

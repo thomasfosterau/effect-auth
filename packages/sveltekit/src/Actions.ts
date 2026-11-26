@@ -7,7 +7,7 @@
  *
  * @module actions
  */
-import { DateTime } from "effect";
+import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

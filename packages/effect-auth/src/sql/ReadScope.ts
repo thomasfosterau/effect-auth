@@ -7,7 +7,8 @@
  * @module read-scope
  */
 
-import { Effect, Match } from "effect";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Arr from "effect/Array";
 import { SqlClient, type Statement } from "effect/sql";
 import { ReadScope } from "../index.ts";

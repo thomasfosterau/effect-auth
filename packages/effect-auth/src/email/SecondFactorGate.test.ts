@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect, Layer } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { enrolledGate, testChallenge } from "../testing/SecondFactor.ts";
 import type { User } from "../Types.ts";
 import { exemptFromSecondFactor, secondFactorChallenge } from "./EmailPassword.ts";

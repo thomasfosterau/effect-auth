@@ -1,7 +1,12 @@
 import { sha256Hex } from "../testing/Sha256.ts";
 import { testRootSecretLayer } from "../testing/RootSecret.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

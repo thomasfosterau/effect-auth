@@ -7,7 +7,10 @@
  */
 import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Logger, MutableHashMap } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Logger from "effect/Logger";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

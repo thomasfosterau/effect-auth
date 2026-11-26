@@ -1,5 +1,9 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Order from "effect/Order";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";

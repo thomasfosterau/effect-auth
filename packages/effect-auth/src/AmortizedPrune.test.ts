@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MutableHashMap } from "effect";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 

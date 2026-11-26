@@ -7,7 +7,9 @@
  * @module webauthn-codec
  */
 
-import { Data, Match, Result } from "effect";
+import * as Data from "effect/Data";
+import * as Match from "effect/Match";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

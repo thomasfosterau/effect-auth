@@ -1,5 +1,13 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import { Cause, Data, Effect, Exit, FileSystem, Layer, Path, Struct, Types } from "effect";
+import * as Cause from "effect/Cause";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Struct from "effect/Struct";
+import * as Types from "effect/Types";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

@@ -7,19 +7,17 @@
  * @module jwt
  */
 
-import {
-  Clock,
-  Config,
-  Context,
-  Data,
-  Deferred,
-  Duration,
-  Effect,
-  Layer,
-  Match,
-  Redacted,
-  Ref,
-} from "effect";
+import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Redacted from "effect/Redacted";
+import * as Ref from "effect/Ref";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

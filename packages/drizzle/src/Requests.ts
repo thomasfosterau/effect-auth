@@ -21,7 +21,10 @@
  * ```
  */
 
-import { Context, Effect, Layer, RequestResolver } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as RequestResolver from "effect/RequestResolver";
 import * as Option from "effect/Option";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import type { SchemaInput } from "./Columns.ts";

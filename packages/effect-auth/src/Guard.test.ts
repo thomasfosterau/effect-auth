@@ -12,7 +12,12 @@
  * every viewer.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, DateTime, Effect, Exit, Layer, Logger } from "effect";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";

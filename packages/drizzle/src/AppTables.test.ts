@@ -23,7 +23,8 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";

@@ -1,4 +1,5 @@
-import { Data, type Duration } from "effect";
+import * as Data from "effect/Data";
+import type * as Duration from "effect/Duration";
 
 // ---------------------------------------------------------------------------
 // Stable error codes – append-only; never rename or remove.

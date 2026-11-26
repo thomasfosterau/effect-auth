@@ -58,7 +58,10 @@
  *
  * @module organization-entities
  */
-import { Effect, HashSet, Layer, Match } from "effect";
+import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

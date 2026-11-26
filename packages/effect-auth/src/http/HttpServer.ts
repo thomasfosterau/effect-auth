@@ -1,21 +1,19 @@
-import {
-  Cause,
-  Clock,
-  Context,
-  DateTime,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  FileSystem,
-  Layer,
-  Match,
-  Path,
-  Result,
-  Scheduler,
-  Scope,
-  Stream,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Path from "effect/Path";
+import * as Result from "effect/Result";
+import * as Scheduler from "effect/Scheduler";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

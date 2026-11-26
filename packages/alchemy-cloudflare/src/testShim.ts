@@ -12,7 +12,8 @@ import {
 import { RuntimeContext } from "alchemy/RuntimeContext";
 import Database from "better-sqlite3";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
 interface RawStatement {
   bind: (...values: ReadonlyArray<unknown>) => RawStatement;

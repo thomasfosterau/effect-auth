@@ -38,7 +38,8 @@
  * @module rbac
  */
 
-import { Data, Layer } from "effect";
+import * as Data from "effect/Data";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as AuthorizationModel from "./AuthorizationModel.ts";

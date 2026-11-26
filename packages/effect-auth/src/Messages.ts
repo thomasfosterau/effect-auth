@@ -50,7 +50,9 @@
  * @module messages
  */
 
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { ErrorCode } from "./Errors.ts";

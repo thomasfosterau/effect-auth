@@ -9,7 +9,9 @@
  * `@thomasfosterau/effect-auth-drizzle`'s `OwnedListFilter.test.ts`.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Authorizer from "./Authorizer.ts";

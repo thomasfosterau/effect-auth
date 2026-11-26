@@ -6,7 +6,7 @@
  *
  * @internal
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import { definedKeys } from "./DefinedKeys.ts";

@@ -6,7 +6,7 @@
  *
  * @module plugins/last-login-method
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import type { AuthResult } from "../email/EmailPassword.ts";
 import { SessionService } from "../SessionService.ts";
 import { Hooks, makePlugin } from "../Hooks.ts";

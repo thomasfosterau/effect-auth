@@ -8,7 +8,7 @@
  *
  * @module plugins/normalize-email
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin } from "../Hooks.ts";
 import { normalizeEmail } from "../utils.ts";

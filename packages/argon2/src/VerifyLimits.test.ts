@@ -7,7 +7,7 @@
  * kernel, so each test can say whether verify reached it.
  */
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import { Password } from "@thomasfosterau/effect-auth";
 import { hashWasmFixtures } from "./HashWasm.fixtures.ts";

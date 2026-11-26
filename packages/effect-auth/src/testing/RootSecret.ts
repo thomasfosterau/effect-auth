@@ -2,7 +2,7 @@
  * A fixed root secret for tests and fixtures. Never use it outside a test:
  * every key it derives is public.
  */
-import { Layer } from "effect";
+import * as Layer from "effect/Layer";
 import { RootSecret } from "../RootSecret.ts";
 
 /** The public test root secret, 64 hex characters. */

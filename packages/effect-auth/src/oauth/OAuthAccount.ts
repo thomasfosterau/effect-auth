@@ -3,7 +3,8 @@
  * modules the flows import (the first proof of an address) can reach
  * the store without an import cycle. `OAuth.ts` re-exports both.
  */
-import { Context, type Effect } from "effect";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { AuthError } from "../Errors.ts";
 

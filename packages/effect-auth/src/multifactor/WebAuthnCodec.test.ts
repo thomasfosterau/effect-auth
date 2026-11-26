@@ -18,7 +18,7 @@ import {
   type CBORMap,
 } from "./WebAuthnCodec.ts";
 import { createHash } from "node:crypto";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Cipher from "../Cipher.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 

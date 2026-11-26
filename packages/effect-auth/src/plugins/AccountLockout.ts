@@ -7,7 +7,11 @@
  *
  * @module plugins/account-lockout
  */
-import { Clock, Context, Duration, Effect, MutableHashMap } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import { makeAmortizedPrune } from "../AmortizedPrune.ts";
 import * as Errors from "../Errors.ts";

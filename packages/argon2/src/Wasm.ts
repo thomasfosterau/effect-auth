@@ -8,7 +8,7 @@
  * @module argon2/wasm
  * @internal
  */
-import { Data } from "effect";
+import * as Data from "effect/Data";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";

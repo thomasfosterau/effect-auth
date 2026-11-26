@@ -118,9 +118,6 @@ export default defineConfig({
       // out, which a conditional spread does.
       "effect/prefer-option-over-null": "error",
       "effect/no-conditional-empty-object-spread": "off",
-      // Modules other than the helper ones come from the barrel
-      // (`import { Effect, Layer } from "effect"`).
-      "effect/no-barrel-imports": "off",
       // Owner decision (2026-11-11): the helper modules are namespace imports
       // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.

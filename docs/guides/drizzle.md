@@ -611,7 +611,8 @@ On a `NOT NULL` `email` column the row can't be inserted without the address,
 so the writer fails when there is none:
 
 ```ts
-import { DateTime, Effect } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` NOT NULL: the row can't be inserted without the address.
@@ -652,7 +653,8 @@ On a nullable column the writer can insert the row without an address, and the
 claim that follows writes it:
 
 ```ts
-import { DateTime, Effect } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` nullable: a user created without an address gets `NULL`.

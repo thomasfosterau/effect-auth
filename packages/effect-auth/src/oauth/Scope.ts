@@ -7,7 +7,7 @@
  * either as a raw space-delimited string or as any iterable of scope strings.
  */
 
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Str from "effect/String";

@@ -38,7 +38,7 @@
  * ```
  */
 
-import { Data } from "effect";
+import * as Data from "effect/Data";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";

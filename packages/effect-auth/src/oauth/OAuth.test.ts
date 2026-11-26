@@ -1,7 +1,14 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { createHash } from "node:crypto";
 import { testCryptoLayer, type TestCryptoServices } from "../testing/TestCrypto.ts";
-import { Cause, DateTime, Effect, Exit, Layer, Logger, MutableHashMap, Redacted } from "effect";
+import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

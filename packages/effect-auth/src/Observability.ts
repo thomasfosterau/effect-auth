@@ -7,7 +7,8 @@
  * @module observability
  */
 
-import { Effect, Metric } from "effect";
+import * as Effect from "effect/Effect";
+import * as Metric from "effect/Metric";
 
 // ---------------------------------------------------------------------------
 // Metric counters

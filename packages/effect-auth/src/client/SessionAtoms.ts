@@ -42,7 +42,7 @@
  *
  * @module client/atoms
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";

@@ -29,7 +29,12 @@
  *
  * @module trusted-device
  */
-import { Clock, Config, Context, Effect, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Option from "effect/Option";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import { Hex } from "effect/encoding";

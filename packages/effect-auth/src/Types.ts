@@ -6,7 +6,7 @@
  * type, runtime validation, and JSON serialization used by stores and the
  * HTTP protocol layer. Configuration shapes remain plain interfaces.
  */
-import type { Effect } from "effect";
+import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";

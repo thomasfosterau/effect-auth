@@ -12,7 +12,10 @@
  * ```
  */
 
-import { Clock, Data, Effect, type Layer } from "effect";
+import * as Clock from "effect/Clock";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import type * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { SqlClient, type SqlError } from "effect/sql";

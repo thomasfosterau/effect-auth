@@ -1,5 +1,9 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer, MutableHashSet, Order } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";

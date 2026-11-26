@@ -27,7 +27,7 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { rolldown, type Plugin } from "vite/rolldown";
 import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
-import { Data } from "effect";
+import * as Data from "effect/Data";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";

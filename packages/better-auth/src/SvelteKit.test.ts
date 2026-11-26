@@ -4,7 +4,9 @@
  * own sign-in route through `auth.handler`.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";

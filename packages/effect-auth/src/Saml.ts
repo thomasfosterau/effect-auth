@@ -6,7 +6,11 @@
  *
  * @module saml
  */
-import { Clock, Context, Data, Effect, MutableHashMap } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 import type { AuthError } from "./Errors.ts";

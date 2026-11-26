@@ -3,7 +3,7 @@
  * Internal: not exported from any barrel.
  */
 
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { Base64Url } from "effect/encoding";
 import type { SecureRandom } from "effect/crypto";
 

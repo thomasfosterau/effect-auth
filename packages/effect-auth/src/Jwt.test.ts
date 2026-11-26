@@ -1,6 +1,13 @@
 import { assert, describe, it, expect, beforeEach, beforeAll } from "vite-plus/test";
 import { testCryptoContext, type TestCryptoServices } from "./testing/TestCrypto.ts";
-import { Clock, Context, DateTime, Effect, Layer, Redacted, Result, type Scope } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
+import type * as Scope from "effect/Scope";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";

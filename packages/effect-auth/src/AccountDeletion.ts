@@ -6,7 +6,8 @@
  * @module AccountDeletion
  * @since 0.5.0
  */
-import { Context, type Effect } from "effect";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 import type { AuthError } from "./Errors.ts";
 
 /**

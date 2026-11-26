@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Effect, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import { PasswordHasher } from "./Password.ts";
 import * as Scrypt from "./Scrypt.ts";

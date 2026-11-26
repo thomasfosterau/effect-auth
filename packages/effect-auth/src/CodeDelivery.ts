@@ -3,7 +3,7 @@
  * the code's record is stored. Internal: not exported from any barrel.
  */
 
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import type { DeliveryPurpose } from "./Delivery.ts";
 import type { DetachedSend } from "./DeliveryScheduler.ts";
 

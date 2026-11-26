@@ -1,5 +1,9 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Logger, Result } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Logger from "effect/Logger";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

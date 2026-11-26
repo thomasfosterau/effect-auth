@@ -28,7 +28,9 @@
  *
  * @module hooks
  */
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import type * as Errors from "./Errors.ts";
 import type { AuthResult, SignInInput, SignUpInput } from "./email/EmailPassword.ts";

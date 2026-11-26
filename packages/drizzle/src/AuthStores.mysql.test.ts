@@ -7,7 +7,9 @@
  */
 
 import { drizzle } from "drizzle-orm/mysql-proxy";
-import { DateTime, Effect, Layer } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";

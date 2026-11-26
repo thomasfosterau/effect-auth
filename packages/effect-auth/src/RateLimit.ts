@@ -2,7 +2,11 @@
  * Rate limiting types for effect-auth
  */
 
-import { Clock, Context, Duration, Effect, Layer } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { RateLimitError, type AuthError } from "./Errors.ts";
