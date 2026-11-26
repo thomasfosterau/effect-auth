@@ -165,6 +165,11 @@ export interface OAuthCreateUserInput {
   readonly name?: string;
   readonly image?: string;
   /**
+   * Server-set attributes for the new user, such as the SSO provisioning
+   * stamp. OAuth sign-up passes none.
+   */
+  readonly attributes?: Types.Attributes | undefined;
+  /**
    * The login handle the user is created with: a store that keeps it on the
    * user row writes it there on insert, and any other store ignores it (see
    * {@link NewUserIdentifier}).
