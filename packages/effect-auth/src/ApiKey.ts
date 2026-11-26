@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
+import { guardCurrentSession } from "./Impersonation.ts";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { Base64Url } from "effect/encoding";
@@ -309,7 +310,10 @@ export class ApiKeyService extends Context.Service<
     readonly create: (
       userId: string,
       options?: ApiKeyCreateOptions,
-    ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError>;
+    ) => Effect.Effect<
+      ApiKeyCreateResult,
+      ApiKeyError | Errors.AuthError | Errors.ImpersonationForbiddenError
+    >;
 
     /**
      * Verify a plaintext API key: sha256 hash lookup, then the owner check (a
@@ -378,7 +382,7 @@ export class ApiKeyService extends Context.Service<
       userId: string,
       keyId: string,
       updates: ApiKeyUpdate,
-    ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError>;
+    ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError | Errors.ImpersonationForbiddenError>;
 
     /**
      * Delete a key on behalf of a user. Fails with {@link ApiKeyError} when the
@@ -387,7 +391,7 @@ export class ApiKeyService extends Context.Service<
     readonly delete: (
       userId: string,
       keyId: string,
-    ) => Effect.Effect<void, ApiKeyError | Errors.AuthError>;
+    ) => Effect.Effect<void, ApiKeyError | Errors.AuthError | Errors.ImpersonationForbiddenError>;
 
     /**
      * Delete every key of a user whose `expiresAt` is in the past. Returns the
@@ -639,6 +643,7 @@ export const make = (
         userId: string,
         options?: ApiKeyCreateOptions,
       ) {
+        yield* guardCurrentSession;
         const existing = yield* store.listByUserId(userId);
         if (existing.length >= maxKeysPerUser) {
           return yield* new ApiKeyError({
@@ -754,6 +759,7 @@ export const make = (
         keyId: string,
         updates: ApiKeyUpdate,
       ) {
+        yield* guardCurrentSession;
         const apiKey = yield* getOwned(userId, keyId);
 
         return yield* store.update({
@@ -774,6 +780,7 @@ export const make = (
       }),
 
       delete: Effect.fn("ApiKeyService.delete")(function* (userId: string, keyId: string) {
+        yield* guardCurrentSession;
         const apiKey = yield* getOwned(userId, keyId);
         yield* store.delete(apiKey.id);
       }),

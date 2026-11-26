@@ -331,6 +331,23 @@ export interface DeliveryFailure {
 }
 
 /**
+ * Named arguments for the `afterImpersonationStart` and
+ * `afterImpersonationStop` hooks: an administrator began or ended acting as
+ * a user (`AdminService.impersonateUser` / `stopImpersonating`). The session
+ * is named by its stored id, never its token.
+ */
+export interface ImpersonationEvent {
+  /** The administrator's user id. */
+  readonly impersonatorId: string;
+  /** The impersonated user's id. */
+  readonly userId: string;
+  /** The impersonation session's stored id (the token's digest). */
+  readonly sessionId: string;
+  /** When the impersonation session expires at the latest. */
+  readonly expiresAt: Date;
+}
+
+/**
  * A **transform** hook: maps a value to a new value of the same type.
  *
  * Returning a modified value mutates what flows downstream; failing in the
@@ -378,6 +395,8 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   afterVerifyEmail: identity,
   afterWrite: identity,
   afterDeliveryFailure: identity,
+  afterImpersonationStart: identity,
+  afterImpersonationStop: identity,
 });
 
 /**
@@ -481,6 +500,18 @@ export class Hooks extends Context.Service<
     readonly afterWrite: Tap<WriteEvent>;
     /** A send run off the response path failed; see {@link DeliveryFailure}. */
     readonly afterDeliveryFailure: Tap<DeliveryFailure>;
+    /**
+     * An administrator began impersonating a user, after the session was
+     * created; see {@link ImpersonationEvent}. `AuditPlugin` logs it.
+     */
+    readonly afterImpersonationStart: Tap<ImpersonationEvent>;
+    /**
+     * An administrator ended an impersonation through
+     * `AdminService.stopImpersonating`, after the session was revoked. An
+     * impersonation that simply expires, or is revoked another way, does not
+     * fire it.
+     */
+    readonly afterImpersonationStop: Tap<ImpersonationEvent>;
   }
 >()("@effect-auth/Hooks") {
   /** No-op base layer: identity for every hook point. */
@@ -683,6 +714,18 @@ const wrapHooks = (
       "afterDeliveryFailure",
       inner.afterDeliveryFailure,
       impls.afterDeliveryFailure,
+      isolateTaps,
+    ),
+    afterImpersonationStart: wrapHook(
+      "afterImpersonationStart",
+      inner.afterImpersonationStart,
+      impls.afterImpersonationStart,
+      isolateTaps,
+    ),
+    afterImpersonationStop: wrapHook(
+      "afterImpersonationStop",
+      inner.afterImpersonationStop,
+      impls.afterImpersonationStop,
       isolateTaps,
     ),
   };

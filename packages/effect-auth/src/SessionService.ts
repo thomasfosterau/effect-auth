@@ -46,6 +46,20 @@ const sessionConfigProblem = (
 const isPositivePeriod = (millis: number): boolean => Number.isFinite(millis) && millis > 0;
 
 /**
+ * The absolute deadline (epoch ms) an impersonation session carries in
+ * `attributes.impersonationExpiresAt`, which `AdminService.impersonateUser`
+ * sets. The session never outlives it, whatever the session configuration.
+ */
+const impersonationDeadline = (attributes: Types.Attributes): number | undefined => {
+  const deadline = attributes["impersonationExpiresAt"];
+  return P.isNumber(deadline) && Number.isFinite(deadline) ? deadline : undefined;
+};
+
+/** `millis`, or `deadline` when it comes first. */
+const capAt = (millis: number, deadline: number | undefined): number =>
+  deadline === undefined ? millis : Math.min(millis, deadline);
+
+/**
  * Run a best-effort store write whose failure must not fail the request, and
  * log the failure rather than drop it.
  */
@@ -101,10 +115,13 @@ export const make = (
             const rawToken = yield* generateSessionId();
             const nowUtc = yield* DateTime.now;
             const now = DateTime.toDateUtc(nowUtc);
+            const attributes = args.attributes ?? {};
             const expiresAt = DateTime.toDateUtc(
-              DateTime.mapEpochMillis(
-                nowUtc,
-                (millis) => millis + config.sessionExpiresIn.activePeriod,
+              DateTime.mapEpochMillis(nowUtc, (millis) =>
+                capAt(
+                  millis + config.sessionExpiresIn.activePeriod,
+                  impersonationDeadline(attributes),
+                ),
               ),
             );
 
@@ -114,7 +131,7 @@ export const make = (
               expiresAt,
               createdAt: now,
               lastActivityAt: now,
-              attributes: args.attributes ?? {},
+              attributes,
             };
 
             yield* sessionStore.create(session);
@@ -174,12 +191,25 @@ export const make = (
             });
           }
 
+          // An impersonation ends at its own deadline.
+          const deadline = impersonationDeadline(session.attributes);
+          if (deadline !== undefined && now.getTime() > deadline) {
+            yield* bestEffort(sessionStore.delete(tokenHash), "deleting an expired session");
+            return yield* new Errors.SessionExpiredError({
+              message: "Impersonation has expired",
+              sessionId: tokenHash,
+            });
+          }
+
           // Extend expiration (capped at absolute max lifetime).
           const newExpiresAt = DateTime.toDateUtc(
             DateTime.mapEpochMillis(nowUtc, (millis) =>
-              Math.min(
-                millis + config.sessionExpiresIn.idlePeriod,
-                session.createdAt.getTime() + config.sessionExpiresIn.activePeriod,
+              capAt(
+                Math.min(
+                  millis + config.sessionExpiresIn.idlePeriod,
+                  session.createdAt.getTime() + config.sessionExpiresIn.activePeriod,
+                ),
+                deadline,
               ),
             ),
           );

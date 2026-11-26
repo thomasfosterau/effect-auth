@@ -609,6 +609,7 @@ export const BackupCodesDocument = Document.DataDocument(R.BackupCodeSet, {
 const accountErrors = [
   E.BadRequest.wire,
   E.Unauthorized.wire,
+  E.Forbidden.wire,
   E.NotFound.wire,
   E.InternalServerError.wire,
 ];
@@ -1371,7 +1372,10 @@ export type ImpersonationCreateDocument = typeof ImpersonationCreateDocument.Typ
  *
  * - `POST /impersonations`: start one (`isAdmin`); `201` with the
  *   impersonation, the impersonated user included, and the session cookie now
- *   the impersonation's session.
+ *   the impersonation's session. An administrator target (unless
+ *   `allowImpersonatingAdmins`) and a request from an impersonation answer
+ *   `403`. The impersonation session answers `403` to every credential or
+ *   identity change.
  * - `DELETE /impersonations/current`: end the impersonation the request
  *   carries, signing its session out and clearing the session cookies; `204`.
  *   A session that is not an impersonation answers `404`.
@@ -1393,7 +1397,13 @@ export const ApiKeyCreateDocument = writeDocument("api-keys", S.ApiKeyCreatePayl
 export type ApiKeyCreateDocument = typeof ApiKeyCreateDocument.Type;
 
 /** The errors a request on one of the caller's own keys can answer with. */
-const apiKeyErrors = [E.BadRequest, E.Unauthorized, E.NotFound, E.InternalServerError] as const;
+const apiKeyErrors = [
+  E.BadRequest,
+  E.Unauthorized,
+  E.Forbidden,
+  E.NotFound,
+  E.InternalServerError,
+] as const;
 
 /**
  * What `GET /api-keys/current` answers: the `api-keys` resource of the key

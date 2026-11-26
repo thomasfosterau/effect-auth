@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Formatter from "effect/Formatter";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
+import { guardCurrentSession } from "../Impersonation.ts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -45,6 +46,7 @@ import {
   OAuthNoRefreshTokenError,
   OAuthLastCredentialError,
   OAuthEmailMismatchError,
+  ImpersonationForbiddenError,
   UserNotFoundError,
 } from "../Errors.ts";
 import { type HookError } from "../Hooks.ts";
@@ -1040,13 +1042,17 @@ export class OAuthService extends Context.Service<
       | OAuthAccountConflictError
       | OAuthEmailMismatchError
       | UserNotFoundError
+      | ImpersonationForbiddenError
     >;
 
     readonly unlinkAccount: (
       userId: string,
       provider: string,
       options?: { readonly allowUnlinkingAll?: boolean },
-    ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError | OAuthLastCredentialError>;
+    ) => Effect.Effect<
+      void,
+      AuthError | OAuthAccountNotFoundError | OAuthLastCredentialError | ImpersonationForbiddenError
+    >;
 
     readonly refreshAccessToken: (
       userId: string,
@@ -1629,6 +1635,8 @@ export const make = (
         // Spend the state first: a replayed or concurrent link carrying
         // the same state is refused, and so is a retry after a failure.
         const stateEntry = yield* consumeState(state);
+        // A refused impersonation still spends the state.
+        yield* guardCurrentSession;
 
         if (stateEntry.provider !== providerName) {
           return yield* new OAuthProviderError({
@@ -1722,6 +1730,7 @@ export const make = (
         providerName: string,
         opts?: { readonly allowUnlinkingAll?: boolean },
       ) {
+        yield* guardCurrentSession;
         const accounts = yield* accountStore.getByUserId(userId);
         const account = accounts.find((a) => a.provider === providerName);
 

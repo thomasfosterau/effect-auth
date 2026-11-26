@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { guardCurrentSession } from "../Impersonation.ts";
 import * as Option from "effect/Option";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
@@ -478,6 +479,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.AuthError
       | Errors.PasswordPolicyError
       | HookError
+      | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -495,6 +497,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.PasswordPolicyError
       | Errors.PasswordAlreadySetError
       | HookError
+      | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -828,6 +831,7 @@ export const make = (
       changePassword: Effect.fn("EmailPasswordService.changePassword")(function* (
         input: ChangePasswordInput,
       ) {
+        yield* guardCurrentSession;
         yield* validatePasswordLength(input.newPassword, {
           minPasswordLength: resolved.minPasswordLength,
           maxPasswordLength: resolved.maxPasswordLength,
@@ -877,6 +881,7 @@ export const make = (
         userId: string,
         rawNewPassword: string,
       ) {
+        yield* guardCurrentSession;
         const currentHash = yield* store.getPasswordHash(userId);
         if (Option.isSome(currentHash)) {
           return yield* new Errors.PasswordAlreadySetError({

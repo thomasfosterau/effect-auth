@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
+import { guardCurrentSession } from "../Impersonation.ts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Hex } from "effect/encoding";
@@ -286,6 +287,7 @@ export class MultiFactorService extends Context.Service<
       | Errors.HashingError
       | Errors.AuthError
       | Errors.UserNotFoundError
+      | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -295,7 +297,10 @@ export class MultiFactorService extends Context.Service<
     readonly confirmEnable: (
       userId: string,
       code: string,
-    ) => Effect.Effect<void, MultiFactorError | Errors.HashingError | Errors.AuthError>;
+    ) => Effect.Effect<
+      void,
+      MultiFactorError | Errors.HashingError | Errors.AuthError | Errors.ImpersonationForbiddenError
+    >;
 
     /**
      * Disable multi-factor after re-verifying the user's password, and revoke
@@ -306,7 +311,10 @@ export class MultiFactorService extends Context.Service<
       password: string,
     ) => Effect.Effect<
       void,
-      Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError
+      | Errors.InvalidCredentialsError
+      | Errors.HashingError
+      | Errors.AuthError
+      | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -355,7 +363,11 @@ export class MultiFactorService extends Context.Service<
       password: string,
     ) => Effect.Effect<
       readonly string[],
-      MultiFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError
+      | MultiFactorError
+      | Errors.InvalidCredentialsError
+      | Errors.HashingError
+      | Errors.AuthError
+      | Errors.ImpersonationForbiddenError
     >;
   }
 >()("@effect-auth/MultiFactorService") {
@@ -664,6 +676,7 @@ export const make = (
 
     return {
       enable: Effect.fn("MultiFactorService.enable")(function* (userId: string, password: string) {
+        yield* guardCurrentSession;
         yield* verifyPassword(userId, password);
 
         const existing = yield* store.get(userId);
@@ -734,6 +747,7 @@ export const make = (
         userId: string,
         code: string,
       ) {
+        yield* guardCurrentSession;
         const foundRecord = yield* store.get(userId);
         if (Option.isNone(foundRecord)) {
           return yield* new MultiFactorError({
@@ -761,6 +775,7 @@ export const make = (
         userId: string,
         password: string,
       ) {
+        yield* guardCurrentSession;
         yield* verifyPassword(userId, password);
         yield* store.delete(userId);
         // A device trusted under this enrolment must not skip a later one.
@@ -874,6 +889,7 @@ export const make = (
         userId: string,
         password: string,
       ) {
+        yield* guardCurrentSession;
         yield* verifyPassword(userId, password);
 
         const foundRecord = yield* store.get(userId);

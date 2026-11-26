@@ -251,8 +251,10 @@ absent means permanent, a past value means the ban has lapsed). `isBanned` reads
 
 **Impersonation**:
 The state where an admin is signed in _as_ a target User for support purposes. Carried on the
-session as `attributes.impersonatedBy` (the admin's userId) and `attributes.impersonationExpiresAt`
-(advisory; the application enforces it).
+session as `attributes.impersonatedBy` (the admin's userId) and `attributes.impersonationExpiresAt`,
+the deadline `SessionService` enforces. An admin target is refused unless `allowImpersonatingAdmins`
+is set, an impersonation cannot start another, and the session may not change the account's
+credentials or identity (`Impersonation.assertNotImpersonating`).
 
 ## Out of typology
 

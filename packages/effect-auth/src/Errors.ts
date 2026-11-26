@@ -69,6 +69,9 @@ export const ErrorCode = {
   MAGIC_LINK_ERROR: "MAGIC_LINK_ERROR",
   PASSWORD_RESET_ERROR: "PASSWORD_RESET_ERROR",
   ONE_TIME_TOKEN_ERROR: "ONE_TIME_TOKEN_ERROR",
+
+  // Impersonation
+  IMPERSONATION_FORBIDDEN: "IMPERSONATION_FORBIDDEN",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -377,6 +380,19 @@ export class UserBannedError extends Schema.TaggedError<
 }) {
   get code(): typeof ErrorCode.USER_BANNED {
     return ErrorCode.USER_BANNED;
+  }
+}
+
+/**
+ * The operation changes the account's credentials or identity, and the
+ * session asking is an administrator's impersonation, which may not. Raised by
+ * `Impersonation.assertNotImpersonating` and the services it guards.
+ */
+export class ImpersonationForbiddenError extends Data.TaggedError("ImpersonationForbiddenError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.IMPERSONATION_FORBIDDEN {
+    return ErrorCode.IMPERSONATION_FORBIDDEN;
   }
 }
 

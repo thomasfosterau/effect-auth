@@ -18,15 +18,16 @@ import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import * as Hooks from "./Hooks.ts";
+import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import { IdentifierStore, type IdentifierType, refusalAuthError } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { AccountManagementStore } from "./AccountManagement.ts";
 import { SessionService } from "./SessionService.ts";
-import type * as Types from "./Types.ts";
+import * as Types from "./Types.ts";
 import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
 import { revokeStandingAccess } from "./UserCredentials.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
@@ -174,11 +175,18 @@ export interface AdminConfig {
   /** Default ban duration in milliseconds; undefined = permanent */
   readonly defaultBanExpiresIn?: number;
   /**
-   * Advisory lifetime of impersonation sessions in milliseconds (default:
-   * 1 hour). Recorded on the session as `attributes.impersonationExpiresAt`;
-   * see {@link AdminService.impersonateUser}.
+   * The longest an impersonation session lives, in milliseconds (default:
+   * 1 hour). Recorded on the session as `attributes.impersonationExpiresAt`,
+   * which `SessionService` enforces: the session's `expiresAt` never passes
+   * it. A value that is not finite and positive fails the layer at build.
    */
   readonly impersonationSessionDuration?: number;
+  /**
+   * Whether an administrator may impersonate another administrator (by role
+   * or by `adminUserIds`). Default `false`: an admin target is refused with
+   * `AdminError`.
+   */
+  readonly allowImpersonatingAdmins?: boolean;
   /**
    * Normalises a phone number in `AdminCreateUserInput.identifiers`. Pass the
    * same function as `PhoneOtpConfig.normalizePhoneNumber`, so phone OTP
@@ -304,12 +312,16 @@ export class AdminService extends Context.Service<
     /**
      * Create a session for the target user marked with
      * `attributes.impersonatedBy = actor.id` and
-     * `attributes.impersonationExpiresAt = now + impersonationSessionDuration`.
+     * `attributes.impersonationExpiresAt = now + impersonationSessionDuration`,
+     * then fire `afterImpersonationStart`. The session expires at that
+     * deadline at the latest.
      *
-     * Note: `SessionService.createSession` does not accept a custom expiry, so
-     * the session's actual lifetime follows the session configuration; the
-     * `impersonationExpiresAt` attribute is advisory and can be enforced by the
-     * application (e.g. via an `afterValidateSession` hook).
+     * `actorSession` is the session the actor is signed in with. Fails with
+     * `AdminError` when it is not the actor's, when it is itself an
+     * impersonation (no nesting), or when the target is an administrator and
+     * `allowImpersonatingAdmins` is off. While impersonating, the session
+     * may not change the account's credentials or identity (see
+     * `Impersonation.assertNotImpersonating`).
      *
      * Answers the issued session and its raw token, as
      * `SessionService.createSession` does.
@@ -317,10 +329,23 @@ export class AdminService extends Context.Service<
     readonly impersonateUser: (
       actor: Types.User,
       userId: string,
+      actorSession: Types.Session,
     ) => Effect.Effect<
       Types.IssuedSession,
       AdminError | Errors.AuthError | Errors.UserNotFoundError | Hooks.HookError
     >;
+
+    /**
+     * End an impersonation: revoke `session`, presented as `token` (the raw
+     * token `impersonateUser` issued), running the sign-out hooks, then fire
+     * `afterImpersonationStop`. Fails with `AdminError` when the session is
+     * not an impersonation or `token` does not name it. Needs no admin actor:
+     * the impersonation session itself is signed in as the target user.
+     */
+    readonly stopImpersonating: (
+      session: Types.Session,
+      token: string,
+    ) => Effect.Effect<void, AdminError | Errors.AuthError | HookError>;
 
     /**
      * Create a new user with a primary email identifier, optionally with
@@ -378,10 +403,20 @@ export const make = (
   | IdentifierStore
   | PasswordHasher
   | SecureRandom.SecureRandom
+  | Digest.Digest
+  | Hooks
 > =>
   Effect.gen(function* () {
+    const hashToken = yield* tokenHasher;
     const defaultBanReason = config.defaultBanReason ?? "No reason";
     const impersonationSessionDuration = config.impersonationSessionDuration ?? 60 * 60 * 1000; // 1 hour
+    if (!(Number.isFinite(impersonationSessionDuration) && impersonationSessionDuration > 0)) {
+      return yield* Effect.die(
+        new AdminError({
+          message: `impersonationSessionDuration must be a finite, positive number of milliseconds (got ${String(impersonationSessionDuration)})`,
+        }),
+      );
+    }
 
     /** Fail with AdminError unless the actor is an administrator. */
     const requireAdmin = (actor: Types.User): Effect.Effect<void, AdminError> =>
@@ -418,6 +453,7 @@ export const make = (
     const identifierStore = yield* IdentifierStore;
     const hasher = yield* PasswordHasher;
     const crypto = yield* SecureRandom.SecureRandom;
+    const hooks = yield* Hooks;
     const accountTokens = yield* Effect.serviceOption(AccountManagementStore);
     const purgeServices = definedKeys({
       ...(yield* userPurgeStores),
@@ -557,8 +593,18 @@ export const make = (
       impersonateUser: Effect.fn("AdminService.impersonateUser")(function* (
         actor: Types.User,
         userId: string,
+        actorSession: Types.Session,
       ) {
         yield* requireAdmin(actor);
+
+        if (actorSession.userId !== actor.id) {
+          return yield* new AdminError({ message: "The session is not the actor's" });
+        }
+        // Nesting would let an impersonated admin impersonate again, and the
+        // new session would name them, not the real actor.
+        if (Types.isImpersonationSession(actorSession)) {
+          return yield* new AdminError({ message: "You cannot impersonate while impersonating" });
+        }
 
         const foundTarget = yield* userStore.get(userId);
         if (Option.isNone(foundTarget)) {
@@ -566,10 +612,43 @@ export const make = (
         }
         const target = foundTarget.value;
 
-        return yield* sessionManager.createSession(target.id, {
+        if (isAdmin(target, config) && config.allowImpersonatingAdmins !== true) {
+          return yield* new AdminError({ message: "Administrators cannot be impersonated" });
+        }
+
+        const issued = yield* sessionManager.createSession(target.id, {
           impersonatedBy: actor.id,
           impersonationExpiresAt: (yield* Clock.currentTimeMillis) + impersonationSessionDuration,
         });
+        yield* hooks.afterImpersonationStart({
+          impersonatorId: actor.id,
+          userId: issued.session.userId,
+          sessionId: issued.session.id,
+          expiresAt: issued.session.expiresAt,
+        });
+        return issued;
+      }),
+
+      stopImpersonating: Effect.fn("AdminService.stopImpersonating")(function* (
+        session: Types.Session,
+        token: string,
+      ) {
+        const impersonatorId = session.attributes["impersonatedBy"];
+        if (!P.isString(impersonatorId)) {
+          return yield* new AdminError({ message: "This session is not an impersonation" });
+        }
+        if (!constantTimeHashEqual(yield* hashToken(token), session.id)) {
+          return yield* new AdminError({ message: "The token does not name this session" });
+        }
+        yield* sessionManager.invalidateSession(token);
+        return yield* hooks
+          .afterImpersonationStop({
+            impersonatorId,
+            userId: session.userId,
+            sessionId: session.id,
+            expiresAt: session.expiresAt,
+          })
+          .pipe(Effect.asVoid);
       }),
 
       createUser: Effect.fn("AdminService.createUser")(function* (

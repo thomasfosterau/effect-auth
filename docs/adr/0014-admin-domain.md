@@ -4,7 +4,14 @@
 > `attributes.role` is in `AdminConfig.adminRoles` or their id is in `AdminConfig.adminUserIds`
 > (there is no `AdminAccessControl` or `"system-admin"` role), and a ban is stored as
 > `attributes.banned` / `banReason` / `banExpires` on the user, not as a `Ban` entity. See
-> [docs/CONTEXT.md](../CONTEXT.md). The text below is left as written.
+> [docs/CONTEXT.md](../CONTEXT.md). Impersonation is marked in `Session.attributes`
+> (`impersonatedBy`, `impersonationExpiresAt`), not a `Session` field; the guard is
+> `Impersonation.assertNotImpersonating` (failing with `ImpersonationForbiddenError`), applied to
+> password, email, multi-factor, passkey, API-key, linked-account, login-handle and account-deletion
+> changes, and the end is `AdminService.stopImpersonating`. An admin target is refused unless
+> `AdminConfig.allowImpersonatingAdmins` is set, impersonations do not nest, and starting and
+> stopping fire the `afterImpersonationStart` / `afterImpersonationStop` hooks, which `AuditPlugin`
+> logs. The text below is left as written.
 
 The Admin module lives under `packages/effect-auth/src/admin/` in the `effect-auth` core package,
 following the same bounded-context-in-core pattern as Organization (ADR-0008). Three decisions

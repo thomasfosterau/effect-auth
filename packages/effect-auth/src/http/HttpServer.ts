@@ -23,10 +23,12 @@ import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
 import type {
   AuthError,
+  ImpersonationForbiddenError,
   LastOrganizationOwnerError,
   ResendTooSoonError,
   UserNotFoundError,
 } from "../Errors.ts";
+import * as Impersonation from "../Impersonation.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import {
   Etag,
@@ -1762,6 +1764,7 @@ export const identifiersGroupLayer = (config?: CookieConfig, multiSession?: Mult
       .handle("delete", ({ params, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const identifiers = yield* IdentifierStore;
           const list = yield* identifiers
             .listByUser(resolved.user.id)
@@ -1802,6 +1805,7 @@ export const usersGroupLayer = (
       .handle("changePassword", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const { currentPassword, newPassword, revokeOtherSessions } = payload.data.attributes;
           const emailPassword = yield* EmailPasswordService;
           yield* emailPassword
@@ -1820,6 +1824,7 @@ export const usersGroupLayer = (
                 HashingError: (e) => internalServerError(e),
                 PasswordPolicyError: passwordPolicyFailure,
                 ...hookFailures,
+                ImpersonationForbiddenError: forbiddenFor,
               }),
             );
         }).pipe(JsonApiErrors.mapHttpErrors),
@@ -1862,6 +1867,15 @@ export const usersGroupLayer = (
 const forbiddenFor = (e: { readonly code: string; readonly message: string }) =>
   resolveMessage(e.code, e.message).pipe(
     Effect.flatMap((message) => Effect.fail(new S.Forbidden({ message, code: e.code }))),
+  );
+
+/**
+ * `403` when `session` is an administrator's impersonation, which may not
+ * change the account's credentials or identity (`Impersonation`).
+ */
+const refuseWhileImpersonating = (session: Types.Session) =>
+  Impersonation.assertNotImpersonating(session).pipe(
+    Effect.catchTag("ImpersonationForbiddenError", forbiddenFor),
   );
 
 /** Fail with `400`, the message resolved through the message catalogue. */
@@ -2505,6 +2519,7 @@ export const emailChangesGroupLayer = (
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const account = yield* resolveAccountManagement;
           const { newEmail, currentPassword } = payload.data.attributes;
           yield* account.service
@@ -2528,6 +2543,7 @@ export const emailChangesGroupLayer = (
                   Effect.fail(new S.Forbidden({ message: e.message, code: e.code })),
                 AuthError: (e) => internalServerError(e),
                 HashingError: (e) => internalServerError(e),
+                ImpersonationForbiddenError: forbiddenFor,
               }),
             );
         }).pipe(JsonApiErrors.mapHttpErrors),
@@ -2550,8 +2566,16 @@ export const accountDeletionsGroupLayer = (
       .handle("create", ({ request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const account = yield* resolveAccountManagement;
-          yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
+          yield* account.service.requestAccountDeletion(resolved.user.id).pipe(
+            Effect.catchTags({
+              ImpersonationForbiddenError: forbiddenFor,
+              UserNotFoundError: () =>
+                Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle("redeem", ({ payload }) =>
@@ -2595,6 +2619,7 @@ export const multiFactorEnrollmentsGroupLayer = (
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const multiFactor = yield* resolveMultiFactor;
           // The answer carries the TOTP secret and backup codes.
           yield* noStore;
@@ -2607,6 +2632,7 @@ export const multiFactorEnrollmentsGroupLayer = (
                   Effect.fail(new S.BadRequest({ message: e.message })),
                 MultiFactorError: (e) => internalServerError(e),
                 UserNotFoundError: (e) => internalServerError(e),
+                ImpersonationForbiddenError: forbiddenFor,
               }),
             );
           // The secret and backup codes are shown this once, in `meta`.
@@ -2622,6 +2648,7 @@ export const multiFactorEnrollmentsGroupLayer = (
       .handle("confirm", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const multiFactor = yield* resolveMultiFactor;
           yield* multiFactor.service
             .confirmEnable(resolved.user.id, payload.data.attributes.code)
@@ -2630,6 +2657,7 @@ export const multiFactorEnrollmentsGroupLayer = (
                 MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 HashingError: (e) => internalServerError(e),
                 AuthError: (e) => internalServerError(e),
+                ImpersonationForbiddenError: forbiddenFor,
               }),
             );
           return Handlers.data(enrollmentResource(true));
@@ -2638,10 +2666,11 @@ export const multiFactorEnrollmentsGroupLayer = (
       .handle("remove", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* refuseWhileImpersonating(resolved.session);
           const multiFactor = yield* resolveMultiFactor;
           yield* multiFactor.service
             .disable(resolved.user.id, payload.meta.password)
-            .pipe(Effect.catchTags(passwordGuardFailures));
+            .pipe(Effect.catchTags({ ...passwordGuardFailures, ImpersonationForbiddenError: forbiddenFor }));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -2659,6 +2688,7 @@ export const backupCodeSetsGroupLayer = (
         // The answer carries the new backup codes.
         yield* noStore;
         const resolved = yield* requireSession(request, cfg);
+        yield* refuseWhileImpersonating(resolved.session);
         const multiFactor = yield* resolveMultiFactor;
         const backupCodes = yield* multiFactor.service
           .regenerateBackupCodes(resolved.user.id, payload.data.attributes.password)
@@ -2666,6 +2696,7 @@ export const backupCodeSetsGroupLayer = (
             Effect.catchTags({
               MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               ...passwordGuardFailures,
+              ImpersonationForbiddenError: forbiddenFor,
             }),
           );
         // The codes are shown this once, in `meta`.
@@ -3618,7 +3649,7 @@ const adminActor = (request: HttpServerRequest.HttpServerRequest, cfg: ResolvedC
   Effect.gen(function* () {
     const resolved = yield* requireSession(request, cfg);
     const admin = yield* resolveAdmin;
-    return { admin: admin.service, actor: resolved.user };
+    return { admin: admin.service, actor: resolved.user, session: resolved.session };
   });
 
 /**
@@ -3776,9 +3807,9 @@ export const impersonationsGroupLayer = (
     handlers
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
-          const { admin, actor } = yield* adminActor(request, cfg);
+          const { admin, actor, session: actorSession } = yield* adminActor(request, cfg);
           const issued = yield* Effect.catchTags(
-            admin.impersonateUser(actor, payload.data.relationships.user.data.id),
+            admin.impersonateUser(actor, payload.data.relationships.user.data.id, actorSession),
             { ...hookFailures, ...adminFailures },
           );
           const { session } = issued;
@@ -3803,7 +3834,7 @@ export const impersonationsGroupLayer = (
       )
       .handle("delete", ({ params, request }) =>
         Effect.gen(function* () {
-          yield* resolveAdmin; // 404 when admin is not enabled
+          const admin = yield* resolveAdmin; // 404 when admin is not enabled
           if (params.id !== CURRENT) {
             return yield* new S.NotFound({ message: "Impersonation not found" });
           }
@@ -3811,21 +3842,31 @@ export const impersonationsGroupLayer = (
           if (!Types.isImpersonationSession(resolved.session)) {
             return yield* new S.NotFound({ message: "This session is not an impersonation" });
           }
-          const sessionManager = yield* SessionService;
-          yield* storeFailure(sessionManager.invalidateSession(token));
+          yield* admin.service.stopImpersonating(resolved.session, token).pipe(
+            // A hook or store failure is a `500`, as signing out answers it.
+            Effect.catch((e): Effect.Effect<never, S.NotFound | S.InternalServerError> =>
+              P.isTagged(e, "AdminError")
+                ? Effect.fail(new S.NotFound({ message: "This session is not an impersonation" }))
+                : internalServerError(e),
+            ),
+          );
           return yield* clearSessionCookies(request, cfg, token);
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
 };
 
-/** An API-key call's failures: a refusal (or a key the caller does not own) is `400`. */
+/**
+ * An API-key call's failures: a refusal (or a key the caller does not own) is
+ * `400`, a change from an impersonation session `403`.
+ */
 const asApiKeyOwner = <A, R>(
-  self: Effect.Effect<A, ApiKeyError | AuthError, R>,
-): Effect.Effect<A, S.BadRequest | S.InternalServerError, R> =>
+  self: Effect.Effect<A, ApiKeyError | AuthError | ImpersonationForbiddenError, R>,
+): Effect.Effect<A, S.BadRequest | S.Forbidden | S.InternalServerError, R> =>
   Effect.catchTags(self, {
     ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
     AuthError: (e) => internalServerError(e),
+    ImpersonationForbiddenError: forbiddenFor,
   });
 
 /**
@@ -3937,6 +3978,7 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
           const resolved = yield* requireSession(request, cfg);
           // A key is never minted from a machine-issued session.
           yield* requireInteractiveCredential(resolved.session);
+          yield* refuseWhileImpersonating(resolved.session);
           const apiKey = yield* resolveApiKey;
           // The answer carries the raw key, shown this once.
           yield* noStore;
@@ -3953,6 +3995,7 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
           // it, so it takes the same interactive session as create.
           const { apiKey, userId, session } = yield* owner(request);
           yield* requireInteractiveCredential(session);
+          yield* refuseWhileImpersonating(session);
           const updated = yield* asApiKeyOwner(
             apiKey.update(userId, params.id, apiKeyUpdate(payload.data.attributes ?? {})),
           );
@@ -3961,7 +4004,8 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
       )
       .handle("delete", ({ params, request }) =>
         Effect.gen(function* () {
-          const { apiKey, userId } = yield* owner(request);
+          const { apiKey, userId, session } = yield* owner(request);
+          yield* refuseWhileImpersonating(session);
           yield* asApiKeyOwner(apiKey.delete(userId, params.id));
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
