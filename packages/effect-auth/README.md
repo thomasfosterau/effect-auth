@@ -627,6 +627,23 @@ const refresh = (userId: string) =>
 export { OAuthLive, begin, callback, link, refresh };
 ```
 
+**What the presets read.**
+
+- Google's verification arrives as `verified_email` and is read as `email_verified`.
+- Microsoft's address is Graph's `mail`, or else the sign-in name when that is an address. Graph doesn't say whether it is verified, so a Microsoft sign-in never auto-links.
+- GitHub takes the primary address from `/user/emails`, private ones included, with GitHub's verification.
+- Apple's `email_verified` may arrive as the string `"true"`, which is read as `true`.
+
+A profile with no account id fails with `OAuthProviderError`; it never becomes an account under an empty id.
+
+An `id_token` must:
+
+- carry a numeric `exp`;
+- match the configured `issuer`, which a provider with `getUserInfoFromIdToken` must set;
+- be verified with a key of the header's algorithm (an `RSA` key for RS256, `EC` P-256 for ES256, `OKP` Ed25519 for EdDSA).
+
+**Link-only providers.** `TwitterProvider`, `RedditProvider`, `TikTokProvider` and `RobloxProvider` return no email address, so they can't create an account or sign in someone new: `signInWithCallback` fails with `OAuthMissingEmailError`. Link one to the signed-in user with `linkAccount`. After that, it signs that user in.
+
 **The callback `state` is single-use**. `handleCallback`, `signInWithCallback`, `linkAccount` and the OIDC SSO callback (`SsoService.handleCallback`, `POST /sso/callback`) spend it with `OAuthStateStore.consume`, an atomic get-and-delete, before they exchange the code. A replayed callback fails with `OAuthStateNotFoundError` (an `SsoError` for SSO, `400` over HTTP), whether the first use succeeded or failed, and of two concurrent callbacks carrying the same state only one gets past it. A store you write yourself must implement `consume` as one atomic operation (`DELETE … RETURNING`, a compare-and-swap, Redis `GETDEL`); `/sql`'s store is one `DELETE … RETURNING`. `OAuthStateStoreKV` serializes `consume` within its process only, since a `KeyValueStore` has no get-and-delete: behind several instances sharing one backend, use `/sql` or a store with a native atomic consume. The SAML `RelayState` is single-use the same way: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends.
 
 **Every single-use token is spent atomically**. Magic links, password-reset and email-verification tokens, one-time tokens, OIDC authorization codes and consent requests, OIDC refresh tokens (on rotation) and pending second-factor challenges are each spent with their store's `consume`, an atomic get-and-delete, so of concurrent redemptions of one token only one succeeds: one session, one password write, one token set, no forked refresh family. A TOTP code and a backup code are spent with `MultiFactorStore.useTotpCounter` / `useBackupCode`, compare-and-sets that accept each time step and each code once across every challenge and never recreate an enrolment a concurrent `disable` removed. `consume` is a required member of `EmailVerificationStore`, `PasswordResetStore`, `MagicLinkStore`, `OneTimeTokenStore`, `OidcCodeStore`, `OidcTokenStore` and `PendingMultiFactorStore`, and the two spends of `MultiFactorStore`; a store you write must make each one indivisible ([bring your own store](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#2-atomicity-what-must-be-a-single-indivisible-operation)). The `KeyValueStore` stores serialize `consume` within their process only. `Testing.magicLinkStoreConformance`, `oneTimeTokenStoreConformance`, `oidcCodeStoreConformance` and the email-verification, password-reset, OIDC-token, pending-multi-factor and multi-factor suites each run a concurrent-redemption case.

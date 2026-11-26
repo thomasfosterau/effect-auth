@@ -68,7 +68,8 @@ export interface OAuthProviderConfig {
    * Resolve the user profile from the OIDC `id_token` returned by the token
    * endpoint instead of calling {@link userInfoEndpoint}. Required for
    * providers that only expose identity via the id_token (e.g. Apple).
-   * Needs {@link jwksEndpoint} and {@link issuer} for verification.
+   * Needs {@link jwksEndpoint} and {@link issuer} for verification; without
+   * either, every sign-in fails.
    */
   readonly getUserInfoFromIdToken?: boolean;
   /** JWKS URL used to verify the OIDC `id_token` signature. */
@@ -554,9 +555,8 @@ const idTokenClaimFailure = (
   }
   const nowSec = now / 1000;
   const exp = payload["exp"];
-  if (P.isNumber(exp) && nowSec > exp) {
-    return "id_token expired";
-  }
+  if (!P.isNumber(exp)) return "id_token has no exp";
+  if (nowSec > exp) return "id_token expired";
   if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
     return "id_token nonce mismatch";
   }
@@ -597,6 +597,9 @@ const verifyIdTokenClaims = (
     }
 
     const jwk = yield* fetchIdTokenJwk(params, header);
+    if (!Cipher.jwkSuitsAlgorithm(alg, jwk)) {
+      return yield* fail(`id_token key is not a ${alg} key`);
+    }
 
     const verified = yield* Effect.try({
       try: () => {
@@ -629,10 +632,39 @@ const verifyIdTokenClaims = (
 
 /**
  * A provider's account id as a string: a string as is, a number (GitHub's,
- * Facebook's) in decimal, and anything else, a missing id included, as `""`.
+ * Facebook's) in decimal, and anything else, a missing id included, as `""`,
+ * which {@link provider} refuses.
  */
 const idString = (id: unknown): string =>
   P.isString(id) ? id : P.isNumber(id) || P.isBigInt(id) ? `${id}` : "";
+
+/**
+ * `email_verified` as a boolean: providers send it as one, or (Apple) as the
+ * string `"true"` / `"false"`. Anything else is left out, so unverified.
+ */
+const emailVerifiedClaim = (value: unknown): { readonly email_verified?: boolean } =>
+  P.isBoolean(value)
+    ? { email_verified: value }
+    : value === "true" || value === "false"
+      ? { email_verified: value === "true" }
+      : {};
+
+/**
+ * Refuse a profile without an account id: `(provider, "")` would be one
+ * account shared by every error-shaped profile the provider answers.
+ */
+const requireAccountId = (
+  provider: string,
+  info: OAuthUserInfo,
+): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
+  info.id === ""
+    ? Effect.fail(
+        new OAuthProviderError({
+          message: `${provider} returned a profile without an account id`,
+          provider,
+        }),
+      )
+    : Effect.succeed(info);
 
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
 const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
@@ -642,7 +674,7 @@ const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
     claims,
     { id: idString(claims["sub"] ?? claims["id"]) },
     P.isString(email) ? { email } : {},
-    P.isBoolean(email_verified) ? { email_verified } : {},
+    emailVerifiedClaim(email_verified),
     P.isString(name) ? { name } : {},
     P.isString(picture) ? { picture } : {},
   );
@@ -740,7 +772,8 @@ export const provider = (
   config: OAuthProviderConfig,
   usePKCE = true,
 ): OAuthProvider => {
-  const mapProfile = config.mapProfile ?? claimsToUserInfo;
+  const mapProfile = (claims: Types.JsonObject): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
+    requireAccountId(name, (config.mapProfile ?? claimsToUserInfo)(claims));
 
   const getUserInfo = (
     accessToken: string,
@@ -777,7 +810,7 @@ export const provider = (
         });
       }
 
-      return mapProfile(data);
+      return yield* mapProfile(data);
     });
 
   return {
@@ -873,20 +906,20 @@ export const provider = (
               provider: name,
             });
           }
-          if (!config.jwksEndpoint) {
+          if (!config.jwksEndpoint || config.issuer === undefined) {
             return yield* new OAuthProviderError({
-              message: `Provider ${name} is missing a jwksEndpoint for id_token verification`,
+              message: `Provider ${name} needs a jwksEndpoint and an issuer for id_token verification`,
               provider: name,
             });
           }
           const claims = yield* verifyIdTokenClaims(tokens.id_token, {
             provider: name,
             jwksEndpoint: config.jwksEndpoint,
-            ...(config.issuer !== undefined && { issuer: config.issuer }),
+            issuer: config.issuer,
             audience: config.clientId,
             ...(options?.expectedNonce !== undefined && { nonce: options.expectedNonce }),
           });
-          return mapProfile(claims);
+          return yield* mapProfile(claims);
         }
 
         return yield* getUserInfo(tokens.access_token);
@@ -1185,9 +1218,11 @@ export const make = (
     > =>
       Effect.gen(function* () {
         const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
-        const userInfo = yield* providerInstance.getProfile(tokens, {
+        const profile = yield* providerInstance.getProfile(tokens, {
           ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
         });
+        // A hand-written provider is held to the account-id rule too.
+        const userInfo = yield* requireAccountId(providerInstance.name, profile);
         return { tokens, userInfo };
       }).pipe(OutboundHttp.provide(outbound));
 
@@ -1677,6 +1712,11 @@ export const make = (
  * Pre-built OAuth providers
  */
 
+/**
+ * Google provider preset. Its `oauth2/v2/userinfo` endpoint reports the
+ * address's verification as `verified_email`, read here as `email_verified`,
+ * so a Google-verified address can auto-link.
+ */
 export const GoogleProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted;
@@ -1690,17 +1730,58 @@ export const GoogleProvider = (config: {
       tokenEndpoint: "https://oauth2.googleapis.com/token",
       userInfoEndpoint: "https://www.googleapis.com/oauth2/v2/userinfo",
       scopes: ["openid", "email", "profile"],
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"] ?? raw["sub"],
+          email: str(raw["email"]),
+          name: str(raw["name"]),
+          picture: str(raw["picture"]),
+          ...emailVerifiedClaim(raw["verified_email"] ?? raw["email_verified"]),
+        }),
     },
     true, // Use PKCE
   );
 
-/** GitHub OAuth 2.0 provider preset. */
+/** The address GitHub's `/user/emails` lists as primary, with its verification. */
+const githubPrimaryEmail = (
+  accessToken: string,
+): Effect.Effect<
+  { readonly email: string; readonly verified: boolean } | undefined,
+  OAuthProviderError,
+  HttpClient.HttpClient
+> =>
+  fetchProviderOk(
+    "github",
+    HttpClientRequest.get("https://api.github.com/user/emails", {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    }),
+    { fetchFailure: "Failed to list GitHub emails", statusFailure: "GitHub email lookup failed" },
+  ).pipe(
+    Effect.flatMap((response) => readJson("github", response, "email list")),
+    Effect.map((body) => {
+      const primary = Array.isArray(body)
+        ? body.find((entry) => isJsonObject(entry) && entry["primary"] === true)
+        : undefined;
+      const email = isJsonObject(primary) ? str(primary["email"]) : undefined;
+      return email === undefined || !isJsonObject(primary)
+        ? undefined
+        : { email, verified: primary["verified"] === true };
+    }),
+  );
+
+/**
+ * GitHub OAuth 2.0 provider preset. `/user` shows only a public address, so
+ * the profile takes the primary address from `/user/emails` (the
+ * `user:email` scope), with GitHub's verification, which lets a private or
+ * verified address sign in and auto-link. When that lookup fails, the public
+ * address is used, unverified.
+ */
 export const GitHubProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted;
   redirectUri: string;
-}): OAuthProvider =>
-  provider(
+}): OAuthProvider => {
+  const base = provider(
     "github",
     {
       ...config,
@@ -1708,9 +1789,36 @@ export const GitHubProvider = (config: {
       tokenEndpoint: "https://github.com/login/oauth/access_token",
       userInfoEndpoint: "https://api.github.com/user",
       scopes: ["user:email"],
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"],
+          email: str(raw["email"]),
+          name: str(raw["name"]) ?? str(raw["login"]),
+          picture: str(raw["avatar_url"]),
+        }),
     },
     false, // GitHub doesn't support PKCE yet
   );
+  const getUserInfo = (accessToken: string) =>
+    Effect.gen(function* () {
+      const info = yield* base.getUserInfo(accessToken);
+      const primary = yield* githubPrimaryEmail(accessToken).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("GitHub email lookup failed; using the public address").pipe(
+            Effect.annotateLogs({ error: error.message }),
+            Effect.as(undefined),
+          ),
+        ),
+      );
+      if (primary === undefined) return info;
+      return { ...info, email: primary.email, email_verified: primary.verified };
+    });
+  return {
+    ...base,
+    getUserInfo,
+    getProfile: (tokens) => getUserInfo(tokens.access_token),
+  };
+};
 
 /** Discord OAuth 2.0 provider preset. */
 export const DiscordProvider = (config: {
@@ -1745,6 +1853,19 @@ export const MicrosoftProvider = (config: {
       tokenEndpoint: `https://login.microsoftonline.com/${config.tenant ?? "common"}/oauth2/v2.0/token`,
       userInfoEndpoint: "https://graph.microsoft.com/v1.0/me",
       scopes: ["openid", "email", "profile"],
+      // Graph's `/me` has no `email`: the address is `mail`, else the sign-in
+      // name when it is one (a guest's `#EXT#` name is not). Graph does not
+      // say the address is verified, so it is not, and never auto-links.
+      mapProfile: (raw) => {
+        const upn = str(raw["userPrincipalName"]);
+        return profile(raw, {
+          id: raw["id"],
+          email:
+            str(raw["mail"]) ??
+            (upn !== undefined && upn.includes("@") && !upn.includes("#EXT#") ? upn : undefined),
+          name: str(raw["displayName"]),
+        });
+      },
     },
     true, // Use PKCE
   );
@@ -1915,7 +2036,14 @@ export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>
     false,
   );
 
-/** X/Twitter OAuth2 (PKCE + Basic auth required; email needs elevated access). */
+/**
+ * X/Twitter OAuth2 (PKCE + Basic auth required).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "twitter",
@@ -2020,7 +2148,14 @@ export const GitLabProvider = (
   );
 };
 
-/** Reddit (Basic auth; `identity` scope; no email; `duration=permanent`). */
+/**
+ * Reddit (Basic auth; `identity` scope; `duration=permanent`).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const RedditProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "reddit",
@@ -2131,7 +2266,14 @@ export const ZoomProvider = (config: OAuthClientConfig): OAuthProvider =>
     true,
   );
 
-/** TikTok (uses `client_key`; PKCE; profile under `data.user`). */
+/**
+ * TikTok (uses `client_key`; PKCE; profile under `data.user`).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "tiktok",
@@ -2157,7 +2299,14 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
     true,
   );
 
-/** Roblox (OpenID Connect; PKCE required). */
+/**
+ * Roblox (OpenID Connect; PKCE required).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const RobloxProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "roblox",
