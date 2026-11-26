@@ -71,7 +71,7 @@ import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
-import { onlyAttributes, UserService } from "../User.ts";
+import { onlyAttributes, SIGN_UP_PROTECTED_ATTRIBUTES, UserService } from "../User.ts";
 import {
   missingPermission,
   notAMember,
@@ -133,6 +133,7 @@ import {
   ClientAddressConfigError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
+  SignUpAttributesConfigError,
 } from "../Errors.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken } from "../TokenHash.ts";
@@ -5345,6 +5346,33 @@ export { ClientAddressConfigError } from "../Errors.ts";
 // under `strict`.
 export { ServicesBuildPendingError } from "../Errors.ts";
 
+// The class lives in Errors.ts with the other startup errors; `make` throws it
+// and `makeAsync` rejects with it under `strict`.
+export { SignUpAttributesConfigError } from "../Errors.ts";
+
+/**
+ * The startup check on `signUpAttributes`: a key of
+ * `SIGN_UP_PROTECTED_ATTRIBUTES` there does nothing, since a sign-up never
+ * stores one. Under `strict` the handler refuses to start
+ * ({@link SignUpAttributesConfigError}); otherwise it logs a warning naming
+ * the keys and starts.
+ */
+const checkSignUpAttributes = (
+  options: AuthWebHandlerOptions,
+): Effect.Effect<void, SignUpAttributesConfigError> => {
+  const named = Arr.filter(options.signUpAttributes ?? [], (key) =>
+    SIGN_UP_PROTECTED_ATTRIBUTES.includes(key),
+  );
+  if (Arr.isReadonlyArrayEmpty(named)) return Effect.void;
+  const message =
+    `signUpAttributes names ${named.map((key) => `"${key}"`).join(", ")}, which a sign-up never ` +
+    "stores (SIGN_UP_PROTECTED_ATTRIBUTES: the ban, SCIM and anonymous-user keys), so listing " +
+    "them does nothing. Remove them from signUpAttributes.";
+  return options.strict === true
+    ? Effect.fail(new SignUpAttributesConfigError({ message, attributes: named }))
+    : Effect.logWarning(`[effect-auth] ${message}`);
+};
+
 /**
  * Options for the mountable auth Web handler.
  */
@@ -5374,6 +5402,10 @@ export interface AuthWebHandlerOptions {
    * keys) from a sign-up. The kept attributes may take at most
    * {@link SIGN_UP_ATTRIBUTES_MAX_BYTES} as JSON; a larger bag is refused
    * with `400`.
+   *
+   * Naming a key of `SIGN_UP_PROTECTED_ATTRIBUTES` here does nothing, so the
+   * handler logs a warning naming it when it is built, and with
+   * {@link strict} refuses to start ({@link SignUpAttributesConfigError}).
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
   /**
@@ -5500,9 +5532,17 @@ export interface AuthWebHandlerOptions {
    */
   readonly allowMissingClientIp?: boolean | undefined;
   /**
-   * Make {@link make} throw {@link ServicesBuildPendingError} when the
+   * Refuse configuration that would otherwise only be warned about, and a
+   * `services` build `make` cannot check at startup. Default `false`.
+   *
+   * With it, {@link make} throws (and {@link makeAsync} rejects with)
+   * {@link SignUpAttributesConfigError} when {@link signUpAttributes} names a
+   * key of `SIGN_UP_PROTECTED_ATTRIBUTES`, which without it is a logged
+   * warning.
+   *
+   * It also makes {@link make} throw {@link ServicesBuildPendingError} when the
    * `services` build has not finished by the time `make` has run it as far as
-   * it runs synchronously. Default `false`.
+   * it runs synchronously.
    *
    * Without it, `make` returns for such a build (asynchronous work, merged
    * layers that yield, a forked fiber the build waits on, a failed build whose
@@ -5528,8 +5568,9 @@ export interface AuthWebHandlerOptions {
    * startup errors or the build's own failure, or returns the handler, as it
    * does without this option.
    *
-   * {@link makeAsync} ignores it: it waits for the build however it is
-   * composed, so its startup errors always reject at startup.
+   * {@link makeAsync} waits for the build however it is composed, so its
+   * startup errors always reject at startup; there `strict` only refuses
+   * protected `signUpAttributes`.
    */
   readonly strict?: boolean | undefined;
 }
@@ -5916,6 +5957,9 @@ const tooManyRequests = (
  *   defect the defect itself, as `Effect.runSync` throws.
  * - {@link ServicesBuildPendingError}, only with `strict: true`: the build had
  *   not finished when `make` had run it synchronously (below).
+ * - {@link SignUpAttributesConfigError}, only with `strict: true`:
+ *   `signUpAttributes` names a key of `SIGN_UP_PROTECTED_ATTRIBUTES`. Without
+ *   `strict` that is a logged warning.
  *
  * **When `make` throws, and when it cannot.** `make` is synchronous, so it can
  * throw only when the `services` build finishes before it returns. It runs the
@@ -5972,6 +6016,8 @@ const tooManyRequests = (
 export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   const addressError = ipRateLimitAddressError(options);
   if (addressError !== undefined) throw addressError;
+  const signUpCheck = Effect.runSyncExit(checkSignUpAttributes(options));
+  if (Exit.isFailure(signUpCheck)) throw Cause.squash(signUpCheck.cause);
 
   // Build `services` here, synchronously until the build has an exit, so the
   // startup check below sees what the handler will serve. The handler
@@ -6022,14 +6068,16 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
  * - Any failure of the `services` build itself: the failure's error, or for a
  *   defect the defect itself, as `Effect.runPromise` rejects.
+ * - {@link SignUpAttributesConfigError}, only with `strict: true`, as `make`
+ *   throws it (a logged warning without `strict`).
  *
  * Before it rejects, `makeAsync` releases what the build acquired and waits
  * for every finalizer, asynchronous ones included. A finalizer that fails is
  * logged with `Effect.logError`, and the promise rejects with the reason the
  * services were refused.
  *
- * `makeAsync` ignores `strict`: it waits for the build whatever the option
- * says, so it never needs a synchronous one.
+ * `makeAsync` waits for the build whatever `strict` says, so it never needs a
+ * synchronous one; `strict` only refuses protected `signUpAttributes` here.
  *
  * A fiber the build forks with `Effect.forkChild` is interrupted when the layer
  * that forks it finishes building, and under `Layer.merge` or `Layer.mergeAll`
@@ -6044,6 +6092,7 @@ export const makeAsync = (options: AuthWebHandlerOptions): Promise<AuthWebHandle
     Effect.gen(function* () {
       const addressError = ipRateLimitAddressError(options);
       if (addressError !== undefined) return yield* addressError;
+      yield* checkSignUpAttributes(options);
       const servicesScope = yield* Scope.make();
       const services = yield* Layer.buildWithScope(options.services, servicesScope).pipe(
         Effect.tap((built) => {
