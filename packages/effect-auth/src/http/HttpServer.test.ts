@@ -2021,6 +2021,39 @@ describe("CSRF protection (trusted origins)", () => {
     expect(crossReferer.status).toBe(403);
   });
 
+  it("exempts only the cross-site protocol endpoints, in their exact spelling", async () => {
+    const handler = handlerFor(makeFixture(), { trustedOrigins: [] });
+    const evil = { origin: "https://evil.example" };
+    const postFrom = (path: string) =>
+      handler(new Request(`http://test${path}`, { method: "POST", headers: evil }));
+
+    // The token endpoint, dynamic registration and the SAML ACS are posted to
+    // cross-site by design and carry their own proof: they reach the router
+    // (here `404`, their modules are not configured), never `403`.
+    await inSequence(["/oauth2/token", "/register", "/sso/saml/acs/acme"], async (path) => {
+      expect((await postFrom(path)).status).not.toBe(403);
+    });
+    // Any other spelling, a neighbouring path or another method meets the gate.
+    await inSequence(
+      [
+        "/OAuth2/Token",
+        "/oauth2/token/",
+        "/register/client-1",
+        "/sso/saml/acs/acme/",
+        "/sso/saml/acs",
+        "/sso/callback",
+        "/sso-authorizations",
+      ],
+      async (path) => {
+        expect((await postFrom(path)).status).toBe(403);
+      },
+    );
+    const put = await handler(
+      new Request("http://test/register", { method: "PUT", headers: evil }),
+    );
+    expect(put.status).toBe(403);
+  });
+
   it("applies the CSRF check to POST /tokens (JWT issuance)", async () => {
     const handler = handlerFor(makeFixture(), { trustedOrigins: [] });
 
