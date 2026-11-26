@@ -826,7 +826,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
     });
 
-    it("OAuthAccountStore upserts, links, unlinks and reports hasPassword", async () => {
+    it("OAuthAccountStore creates, updates, links, unlinks and reports hasPassword", async () => {
       const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const account: Auth.OAuth.OAuthAccount = {
         id: "acc-1",

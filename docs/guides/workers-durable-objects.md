@@ -332,8 +332,10 @@ export const makeSessionStore = (
         const userId = await pointer(sessionId).read();
         return userId === null ? null : user(userId).read(sessionId);
       }),
+    // Never creates: a session whose pointer is gone was signed out or revoked.
     update: (session) =>
       call("session.update", async () => {
+        if ((await pointer(session.id).read()) === null) return session;
         await user(session.userId).put(session);
         await pointer(session.id).write(session.userId, session.expiresAt);
         return session;

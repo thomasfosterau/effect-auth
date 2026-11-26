@@ -12,7 +12,7 @@ import * as ApiKey from "../ApiKey.ts";
 import * as Errors from "../Errors.ts";
 import { type Identifier, IdentifierStore } from "../Identifier.ts";
 import { IdentifierStoreKV } from "../KeyValueStores.ts";
-import { OAuthAccountStore } from "../oauth/OAuthAccount.ts";
+import { type OAuthAccount, OAuthAccountStore } from "../oauth/OAuthAccount.ts";
 import { type OneTimeTokenRecord, OneTimeTokenStore } from "../OneTimeToken.ts";
 import { PhoneOtpStore } from "../PhoneOtp.ts";
 import { SessionStore } from "../SessionStore.ts";
@@ -28,8 +28,7 @@ const sessionStore = (): typeof SessionStore.Service => {
     create: (session) =>
       Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
     get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
-    update: (session) =>
-      Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    update: (session) => memorySessionStore(sessions).update(session),
     touch: (sessionId: string, touch: SessionTouch) =>
       memorySessionStore(sessions).touch(sessionId, touch),
     delete: (id) => Effect.sync(() => void MutableHashMap.remove(sessions, id)),
@@ -235,7 +234,41 @@ describe("a broken store fails its suite", () => {
         deleteByUserId: () => Effect.void,
       }),
     );
-    expect(failed).toHaveLength(1);
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "deleteByUserId removes that user's provider links only, and is a no-op for a user with none",
+    ]);
+  });
+
+  it("an OAuthAccountStore whose create and update upsert on (provider, providerId) fails its suite", async () => {
+    const failed = await failures(Testing.oauthAccountStoreConformance(), () => {
+      const accounts = MutableHashMap.empty<string, OAuthAccount>();
+      const key = (account: OAuthAccount) => `${account.provider}\u0000${account.providerId}`;
+      const upsert = (account: OAuthAccount) =>
+        Effect.sync(() => (MutableHashMap.set(accounts, key(account), account), account));
+      return Layer.succeed(OAuthAccountStore, {
+        ...Testing.memoryOAuthAccountStore(undefined, accounts),
+        create: upsert,
+        update: upsert,
+      });
+    });
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "create refuses a provider account already linked with AuthError, and the link keeps its user",
+      "update refreshes tokens and profile by id, never changes userId, and never creates",
+    ]);
+  });
+
+  it("a SessionStore whose update is a bare set fails the update-of-a-deleted-session case", async () => {
+    const failed = await failures(Testing.sessionStoreConformance(), () => {
+      const sessions = MutableHashMap.empty<string, Types.Session>();
+      return Layer.succeed(SessionStore, {
+        ...memorySessionStore(sessions),
+        update: (session) =>
+          Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+      });
+    });
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "update of a session deleted meanwhile creates nothing",
+    ]);
   });
 
   it("a PhoneOtpStore whose upsert resets the failure budget fails the failure-budget case", async () => {

@@ -42,7 +42,12 @@ const sessions = new Map<string, Auth.Session>();
 const sessionStore: typeof Auth.SessionStore.Service = {
   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
   get: (id) => Effect.sync(() => sessions.get(id) ?? null),
-  update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+  // Never creates: a session signed out or revoked since the caller read it stays gone.
+  update: (session) =>
+    Effect.sync(() => {
+      if (sessions.has(session.id)) sessions.set(session.id, session);
+      return session;
+    }),
   // The sliding refresh: moves only the expiry, never recreates a deleted session.
   touch: (id, touch) =>
     Effect.sync(() => {

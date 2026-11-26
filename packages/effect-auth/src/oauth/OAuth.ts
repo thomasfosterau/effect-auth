@@ -936,7 +936,11 @@ export class OAuthService extends Context.Service<
       options?: { linkToUserId?: string },
     ) => Effect.Effect<
       OAuthCallbackResult,
-      AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError
+      | AuthError
+      | OAuthProviderError
+      | OAuthStateNotFoundError
+      | OAuthStateExpiredError
+      | OAuthAccountConflictError
     >;
 
     /**
@@ -952,7 +956,9 @@ export class OAuthService extends Context.Service<
      * and its sessions revoked, the address is marked verified, and then the
      * identity is linked and the prover's session minted. Any other match (an
      * unverified provider email, auto-linking off for the provider, a dangling
-     * identifier) fails with `EmailInUseError` and changes nothing.
+     * identifier) fails with `EmailInUseError` and changes nothing. A
+     * provider account another callback linked meanwhile fails with
+     * `OAuthAccountConflictError`.
      *
      * This is the recommended high-level entrypoint; use {@link handleCallback}
      * only when managing users yourself.
@@ -967,6 +973,7 @@ export class OAuthService extends Context.Service<
       | OAuthStateNotFoundError
       | OAuthStateExpiredError
       | OAuthAccountNotLinkedError
+      | OAuthAccountConflictError
       | OAuthMissingEmailError
       | EmailInUseError
       | UserNotFoundError
@@ -1275,6 +1282,27 @@ export const make = (
         return { stateEntry, tokens, userInfo };
       });
 
+    /**
+     * Insert a new link. The store's `create` is a plain insert, so a provider
+     * account linked concurrently is refused; re-read it, as `claimIdentifier`
+     * does, so the caller sees a conflict rather than a store failure.
+     */
+    const createAccount = (
+      account: OAuthAccount,
+    ): Effect.Effect<OAuthAccount, AuthError | OAuthAccountConflictError> =>
+      accountStore.create(account).pipe(
+        Effect.catchTag("AuthError", (error) =>
+          Effect.gen(function* () {
+            const raced = yield* accountStore.get(account.provider, account.providerId);
+            if (raced === null) return yield* error;
+            return yield* new OAuthAccountConflictError({
+              message: `This ${account.provider} account is already linked`,
+              provider: account.provider,
+            });
+          }),
+        ),
+      );
+
     /** Store fresh tokens on an account a callback found already linked. */
     const refreshCallbackAccount = (existingAccount: OAuthAccount, tokens: OAuthTokenResponse) =>
       Effect.gen(function* () {
@@ -1324,7 +1352,7 @@ export const make = (
           yield* Clock.currentTimeMillis,
         );
 
-        yield* accountStore.create(yield* encryptAccount(newAccount));
+        yield* createAccount(yield* encryptAccount(newAccount));
 
         return {
           account: newAccount,
@@ -1515,7 +1543,7 @@ export const make = (
               createdAt: now,
               updatedAt: now,
             };
-            yield* accountStore.create(yield* encryptAccount(account));
+            yield* createAccount(yield* encryptAccount(account));
 
             const issued = yield* sessionOrChallenge(sessionManager, user, "oauth");
 
@@ -1612,7 +1640,7 @@ export const make = (
         if (existingAccount) {
           yield* accountStore.update(yield* encryptAccount(account));
         } else {
-          yield* accountStore.create(yield* encryptAccount(account));
+          yield* createAccount(yield* encryptAccount(account));
         }
 
         // Refresh the user's profile fields from the provider when requested.

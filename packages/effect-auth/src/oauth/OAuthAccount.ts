@@ -30,13 +30,34 @@ export interface OAuthAccount {
 export class OAuthAccountStore extends Context.Service<
   OAuthAccountStore,
   {
+    /**
+     * Insert a new provider link. A plain insert, never an upsert: when
+     * `(provider, providerId)` is already linked, fail with `AuthError` (a
+     * unique index's refusal) and leave the stored link as it is. The
+     * service re-reads the pair and reports `OAuthAccountConflictError`, so
+     * two concurrent first sign-ins with one provider account cannot both
+     * win, and a link cannot silently move to another user.
+     */
     readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
     readonly get: (
       provider: string,
       providerId: string,
     ) => Effect.Effect<OAuthAccount | null, AuthError>;
     readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
-    readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
+    /**
+     * Refresh the tokens and profile fields (`email`, `name`, `picture`,
+     * `accessToken`, `refreshToken`, `expiresAt`, `updatedAt`) of the link
+     * whose `id` is `account.id`. It never changes `userId`, `provider` or
+     * `providerId`, and never creates a link: it returns the link as stored
+     * afterwards, or `null` when no link has that id (unlinked meanwhile).
+     */
+    readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount | null, AuthError>;
+    /**
+     * Point the existing link for `(account.provider, account.providerId)` at
+     * `userId`; a no-op when there is none. The one method that changes a
+     * link's `userId`: the caller links an account `OAuthService.handleCallback`
+     * created unlinked, after creating the user, and checks ownership first.
+     */
     readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
     readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
     readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;

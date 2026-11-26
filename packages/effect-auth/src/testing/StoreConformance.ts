@@ -22,7 +22,9 @@
  * const store: typeof Auth.SessionStore.Service = {
  *   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *   get: (id) => Effect.sync(() => sessions.get(id) ?? null),
- *   update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *   // Never creates: a session deleted meanwhile stays deleted.
+ *   update: (session) =>
+ *     Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *   touch: (id, touch) =>
  *     Effect.sync(() => {
  *       const session = sessions.get(id)
@@ -351,6 +353,26 @@ export const sessionStoreConformance = <E = never, R = never>(
           };
           yield* expectEqual("update", yield* store.update(changed), changed);
           yield* expectEqual("get after update", yield* store.get(session.id), changed);
+        }),
+    },
+    {
+      name: "update of a session deleted meanwhile creates nothing",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* SessionStore;
+          const userId = yield* newUser();
+          const revoked = makeSession(userId);
+          const signedOut = makeSession(userId);
+          yield* store.create(revoked);
+          yield* store.create(signedOut);
+          // Revoked by deleteByUserId and signed out by delete between a read and its write.
+          yield* store.deleteByUserId(userId);
+          yield* store.update({ ...revoked, attributes: { device: "phone" } });
+          yield* store.update({ ...makeSession(userId), id: signedOut.id });
+          yield* store.update(makeSession(userId));
+          yield* expectEqual("get of the revoked session", yield* store.get(revoked.id), null);
+          yield* expectEqual("get of the signed-out session", yield* store.get(signedOut.id), null);
+          yield* expectEqual("the user's sessions", yield* store.listByUserId(userId), []);
         }),
     },
     {
@@ -2041,8 +2063,11 @@ const makeOAuthAccount = (userId: string): OAuthAccount => ({
 });
 
 /**
- * The `OAuthAccountStore` per-user delete: `deleteByUserId` removes
- * every provider link of that user, and only theirs.
+ * The `OAuthAccountStore` contract: `create` is a plain insert, so a
+ * provider account already linked is refused with `AuthError` and keeps its
+ * user; `update` refreshes a link by its `id` without ever changing its user
+ * or creating one; `deleteByUserId` removes every provider link of that user,
+ * and only theirs.
  *
  * @since 0.5.0
  * @category suites
@@ -2050,13 +2075,76 @@ const makeOAuthAccount = (userId: string): OAuthAccount => ({
 export const oauthAccountStoreConformance = <E = never, R = never>(
   options?: ConformanceOptions<E, R>,
 ): ConformanceSuite<E, R | OAuthAccountStore> =>
-  perUserDeleteSuite("OAuthAccountStore", options, OAuthAccountStore, {
-    records: "provider links",
-    make: makeOAuthAccount,
-    write: (store, account) => store.create(account),
-    read: (store, account) => store.get(account.provider, account.providerId),
-    purge: (store, userId) => store.deleteByUserId(userId),
-  });
+  suite<E, R, OAuthAccountStore>("OAuthAccountStore", options, [
+    {
+      name: "create refuses a provider account already linked with AuthError, and the link keeps its user",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* OAuthAccountStore;
+          const owner = yield* newUser();
+          const rival = yield* newUser();
+          const link = makeOAuthAccount(owner);
+          yield* expectEqual("create", yield* store.create(link), link);
+          const duplicate: OAuthAccount = {
+            ...makeOAuthAccount(rival),
+            providerId: link.providerId,
+          };
+          yield* expectFailure("create of a linked account", store.create(duplicate), "AuthError");
+          yield* expectEqual(
+            "get after the refused create",
+            yield* store.get(link.provider, link.providerId),
+            link,
+          );
+          yield* expectEqual("the rival's links", yield* store.getByUserId(rival), []);
+        }),
+    },
+    {
+      name: "update refreshes tokens and profile by id, never changes userId, and never creates",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* OAuthAccountStore;
+          const owner = yield* newUser();
+          const rival = yield* newUser();
+          const link = makeOAuthAccount(owner);
+          yield* store.create(link);
+          const refreshed: OAuthAccount = {
+            ...link,
+            userId: rival,
+            email: "refreshed@example.test",
+            accessToken: digest(),
+            refreshToken: digest(),
+            expiresAt: at(60 * 60 * 1000).getTime(),
+            updatedAt: at(1000).getTime(),
+          };
+          const expected: OAuthAccount = { ...refreshed, userId: owner };
+          yield* expectEqual("update", yield* store.update(refreshed), expected);
+          yield* expectEqual(
+            "get after update",
+            yield* store.get(link.provider, link.providerId),
+            expected,
+          );
+          yield* expectEqual("the rival's links", yield* store.getByUserId(rival), []);
+
+          const unknown = makeOAuthAccount(owner);
+          yield* expectEqual("update of an unknown id", yield* store.update(unknown), null);
+          yield* expectEqual(
+            "get after updating an unknown id",
+            yield* store.get(unknown.provider, unknown.providerId),
+            null,
+          );
+        }),
+    },
+    perUserDeleteCase<OAuthAccountStore, typeof OAuthAccountStore.Service, OAuthAccount, E, R>(
+      OAuthAccountStore,
+      {
+        records: "provider links",
+        make: makeOAuthAccount,
+        write: (store, account) => store.create(account),
+        read: (store, account) => store.get(account.provider, account.providerId),
+        purge: (store, userId) => store.deleteByUserId(userId),
+      },
+    ),
+  ]);
 
 const makePasskey = (userId: string): WebAuthnCredential => ({
   id: digest(),
