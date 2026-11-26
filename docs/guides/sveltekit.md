@@ -33,6 +33,15 @@ export const handle = sequence(
 - **The failure direction is your decision.** `failure` has no default. `open` is safe only when
   anonymous is the lower-privilege outcome (public reads, with every write gated on the resolved
   viewer). Otherwise use `closed`.
+- **A lookup's `Set-Cookie` reaches the browser.** `Http.RemoteSession`'s `read` answers the
+  session with the `Set-Cookie` lines the auth service sent (a refreshed cache cookie, or the
+  clearing of a stale one). Return it from `lookup` as it is and the hook appends them to the
+  response, except for an API-key or bearer caller, which never receives a cookie.
+- **The client address is SvelteKit's.** Pass `event.getClientAddress()` on with
+  `remoteSession.read(request, { clientAddress: event.getClientAddress() })`, and the credential
+  actions send it by default. Both send it in one header (`x-forwarded-for` unless you name
+  another) and drop the browser's own `x-forwarded-for` and `cf-connecting-ip`; configure the auth
+  handler to trust that one header (`trustedProxy: ClientIP.trustedHeader("x-forwarded-for")`).
 - **Cache-control comes after authentication.** The hook sets `Cache-Control: private, no-store`
   on any page rendered for a signed-in viewer, after rendering, whatever the route set. Don't put
   a cache-control hook before it in `sequence`: it would run before the viewer is known, and a page

@@ -1,8 +1,10 @@
 name: Release
 
-# `select` picks the Changesets mode; `version` opens the version PR; `publish`
-# runs in the protected `release` environment, the only job with `id-token`
-# (npm trusted publishing, through `vp pm publish`). See docs/PUBLISHING.md.
+# `select` picks the Changesets mode; `version` opens the version PR. To
+# release, `build` packs the unpublished packages without `id-token`; `publish`,
+# in the protected `release` environment, only publishes those tarballs (npm
+# trusted publishing); `tag` creates the tags and GitHub releases. See
+# docs/PUBLISHING.md.
 
 on:
   push:
@@ -99,19 +101,16 @@ jobs:
           PR_NUMBER: ${{ steps.version.outputs.pr-number }}
         run: gh pr edit "$PR_NUMBER" --add-assignee thomasfosterau
 
-  publish:
-    name: Publish to npm
+  build:
+    name: Build and pack
     needs: [verify-lockfile, select]
     if: needs.select.outputs.mode == 'publish'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    concurrency:
-      group: release-publish-${{ github.ref }}
-      cancel-in-progress: false
-    environment: release
     permissions:
-      contents: write
-      id-token: write
+      contents: read
+    outputs:
+      count: ${{ steps.pack.outputs.count }}
     env:
       # Stop pnpm re-installing (with lifecycle scripts) mid-job when a manifest looks newer than node_modules.
       pnpm_config_verify_deps_before_run: "false"
@@ -119,8 +118,6 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          # `changeset git-tag` skips versions already tagged.
-          fetch-depth: 0
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1.22.0
         with:
@@ -133,13 +130,98 @@ jobs:
       # The build runs on the Effect-patched tsc.
       - name: Patch the toolchain
         run: pnpm run prepare
-      # `vp run release` (vite.config.ts): builds every package on this commit,
-      # publishes each unpublished version with `vp pm publish -r` (pnpm, which
-      # rewrites `catalog:` / `workspace:` specifiers and does the OIDC exchange
-      # and provenance itself; no npm), then `changeset git-tag` reports the new
-      # tags through CHANGESETS_OUTPUT, and the action pushes them and creates
-      # the releases.
-      - name: Publish to npm
-        uses: changesets/action/publish@v2.1.2
+      # Builds, then packs each public package whose version is not on npm
+      # into release/, with release/manifest.json listing them in dependency order.
+      - name: Build and pack
+        id: pack
+        run: |
+          vp run release:pack
+          echo "count=$(jq length release/manifest.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7.0.2
+        if: steps.pack.outputs.count != '0'
         with:
-          script: vp run release
+          name: release
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job holding `id-token`. It runs no repository or dependency code:
+  # no install, no build, no cache, only pnpm publishing the tarballs `build` packed.
+  publish:
+    name: Publish to npm
+    needs: build
+    if: needs.build.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-publish-${{ github.ref }}
+      cancel-in-progress: false
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Only the files that pin the Vite+ and pnpm versions.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            package.json
+            pnpm-workspace.yaml
+          sparse-checkout-cone-mode: false
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version: lts
+          cache: false
+          run-install: false
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: release
+          path: release
+      # pnpm does the OIDC exchange and provenance itself. A version already on
+      # npm (a re-run after a partial failure) is skipped.
+      - name: Publish the tarballs
+        working-directory: release
+        run: |
+          jq -c '.[]' manifest.json | while read -r entry; do
+            name=$(jq -r .name <<<"$entry")
+            version=$(jq -r .version <<<"$entry")
+            tarball=$(jq -r .tarball <<<"$entry")
+            status=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${name/\//%2F}/$version")
+            case "$status" in
+              200) echo "already published $name@$version" ;;
+              404) vp pm publish "./$tarball" --access public --no-git-checks ;;
+              *) echo "registry returned HTTP $status for $name@$version" >&2; exit 1 ;;
+            esac
+          done
+
+  tag:
+    name: Tag and release
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version: lts
+          cache: false
+          run-install: false
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: release
+          path: release
+      # Node built-ins only, with Node's own type stripping.
+      - name: Create the tags and GitHub releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release.ts tag "$GITHUB_SHA"

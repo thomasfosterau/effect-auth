@@ -153,8 +153,8 @@ The endpoint is also under the per-address limit in `defaultEndpointRules`: 300
 requests a minute per client address, then a 5-minute block. It counts every request
 before the key is read, refused and resolved alike, and a request it refuses (`429`)
 spends no use of the key. Behind a service binding every request arrives from your
-edge, so the address is the one your `trustedProxy` reads from the forwarded headers
-(`cf-connecting-ip`, which the relay forwards). Override it with a rule ahead of the
+edge, so the address is the one your `trustedProxy` reads from the header the app sets
+(see [The client address](#the-client-address)). Override it with a rule ahead of the
 defaults (the first match wins):
 
 ```ts
@@ -172,13 +172,21 @@ Http.make({
 
 The endpoint checks no permissions; check the key's `permissions` through the policy
 kernel. Configure the header once and pass it to both sides: `cookie.apiKeyHeaders` on the
-auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`.
+auth service's `Http.make`, `credentials.apiKeyHeaders` on `RemoteSession.make`. The client
+forwards every `apiKeyHeaders` name on every call, so don't list a key header in
+`headers.also` instead: forwarded from there, it would not count as a key, and its caller
+would be handed cookies.
+
+A caller with an API key or a bearer token (`Bearer` or `Token`) never receives a
+`Set-Cookie`, from `relay` or from `read` and `resolveAtEdge`: a refreshed cache cookie
+would only land in whatever cookie jar its HTTP client keeps.
 
 ### Header forwarding is the library's job
 
 The forwarded set is an **allow-list**: the credential (`cookie`, `authorization`,
-`x-api-key`), the caller's identity (`cf-connecting-ip`, `x-forwarded-for`,
-`accept-language`, `user-agent`) and the CSRF inputs (`origin`, `referer`).
+`x-api-key`), the caller's language and agent (`accept-language`, `user-agent`) and the
+CSRF inputs (`origin`, `referer`). The browser's `x-forwarded-for` and `cf-connecting-ip`
+are not on it: see below.
 
 `content-type` and `content-length` are deliberately _not_ on it. Forwarding an inbound
 request's content headers onto a bodyless `GET` makes a router believe the request has a
@@ -188,6 +196,39 @@ the request degrades to anonymous, and every gated route answers 401. An allow-l
 that failure unreachable rather than something you remember to strip.
 
 Extend it with `headers: { also: [...] }` rather than replacing it.
+
+### The client address
+
+Every call reaches the auth service from your app, so its per-address limits key on the
+address header it trusts. Off Cloudflare the browser writes `x-forwarded-for` and
+`cf-connecting-ip` itself, and an auth service trusting them takes a client-chosen key the
+attacker rotates to defeat every per-IP limit. So the client does not forward them. Say
+what the address is instead:
+
+```ts
+const auth = Http.RemoteSession.make({
+  fetcher: env.AUTH,
+  // The address your runtime knows: the socket address, or a header your edge sets.
+  clientAddress: (request) => request.headers.get("cf-connecting-ip") ?? undefined,
+});
+// Or per call, where the address lives outside the Request (SvelteKit):
+auth.read(request, { clientAddress: event.getClientAddress() });
+```
+
+It goes in one header, `x-forwarded-for` unless you set `clientAddressHeader`, replacing
+whatever the browser sent there, and no header is sent when it answers `undefined`. On the
+auth service, trust exactly that header, and reach it only through the app:
+
+```ts
+Http.make({ services, trustedProxy: ClientIP.trustedHeader("x-forwarded-for") });
+```
+
+Behind Cloudflare, where Cloudflare sets `cf-connecting-ip`, forwarding it as it is also
+works: `headers: { also: ["cf-connecting-ip"] }` with `trustedProxy: ClientIP.cloudflare`.
+
+`relay(request)` without a `path` forwards the request's own pathname. One that starts with
+`//` (or `/\`) would resolve to another host, with the caller's cookie and authorization
+attached, so the relay answers it `400` without a call.
 
 ### CSRF across a server-to-server hop
 

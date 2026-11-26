@@ -28,7 +28,11 @@
     {
       "name": "repo-scripts",
       "detection": { "type": "fileExists", "pattern": "scripts/check-dist.ts" },
-      "entryPoints": ["scripts/check-dist.ts", "scripts/generate-argon2-wasm.ts"],
+      "entryPoints": [
+        "scripts/check-dist.ts",
+        "scripts/generate-argon2-wasm.ts",
+        "scripts/release.ts"
+      ],
       "entryPointRole": "support"
     }
   ],

@@ -17,6 +17,28 @@ import type { AuthClient } from "@thomasfosterau/effect-auth/client";
  */
 export type AuthSuccess = Awaited<ReturnType<AuthClient["signIn"]>>;
 
+/**
+ * The second-factor challenge a sign-in answers with (`202`) when the account
+ * has multi-factor on: no session yet, only a token to redeem with
+ * `client.multiFactor.continueChallenge`.
+ */
+export type SecondFactorChallenge = NonNullable<AuthSuccess["secondFactor"]>;
+
+/**
+ * The success handler of a session-yielding form: `onSecondFactor` for a
+ * second-factor challenge, `onSuccess` otherwise, so a documented
+ * `onSuccess={() => goto("/app")}` never navigates without a session.
+ */
+export const routeSignInResult =
+  (
+    onSuccess: ((result: AuthSuccess) => void) | undefined,
+    onSecondFactor: ((challenge: SecondFactorChallenge) => void) | undefined,
+  ) =>
+  (result: AuthSuccess): void => {
+    if (result.secondFactor !== undefined) onSecondFactor?.(result.secondFactor);
+    else onSuccess?.(result);
+  };
+
 /** The `{ status }` acknowledgement a "we sent you something" call resolves to. */
 export type StatusResponse = Awaited<ReturnType<AuthClient["passwordResetRequest"]>>;
 
