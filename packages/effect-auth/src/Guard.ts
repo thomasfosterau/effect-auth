@@ -185,7 +185,10 @@ import * as Policy from "./Policy.ts";
  * @since 0.1.0
  * @category errors
  */
-export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
+export class Unauthorized extends Schema.TaggedError<
+  Unauthorized,
+  { readonly brand: unique symbol }
+>()("Unauthorized", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
@@ -197,10 +200,13 @@ export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthoriz
  * @since 0.1.0
  * @category errors
  */
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
+export class Forbidden extends Schema.TaggedError<Forbidden, { readonly brand: unique symbol }>()(
+  "Forbidden",
+  {
+    message: Schema.String,
+    code: Schema.optional(Schema.String),
+  },
+) {}
 
 // ---------------------------------------------------------------------------
 // The viewer
