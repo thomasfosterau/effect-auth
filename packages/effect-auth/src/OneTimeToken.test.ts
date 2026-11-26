@@ -1,5 +1,7 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { exemptFromSecondFactor } from "./email/EmailPassword.ts";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -277,6 +279,36 @@ describe("redeemOneTimeTokenForSession", () => {
       }).pipe(Effect.provide(services)),
     );
     expect(subject).toBe("u-1");
+    expect(MutableHashMap.size(sessions)).toBe(1);
+  });
+
+  it("answers a second-factor challenge, and no session, for a user the gate requires one of", async () => {
+    const challenged: Array<string> = [];
+    const redeem = Effect.fn("redeem")(function* () {
+      const rawToken = yield* (yield* OneTimeTokenService).generate("u-1");
+      return yield* redeemOneTimeTokenForSession(rawToken);
+    });
+
+    const gated = await Effect.runPromise(
+      redeem().pipe(Effect.provide(Layer.merge(services, enrolledGate(challenged)))),
+    );
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.token).toBeUndefined();
+    expect(challenged).toEqual(["u-1"]);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+
+    const exempt = await Effect.runPromise(
+      redeem().pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            services,
+            enrolledGate(challenged),
+            exemptFromSecondFactor("one-time-token"),
+          ),
+        ),
+      ),
+    );
+    expect(exempt.session?.userId).toBe("u-1");
     expect(MutableHashMap.size(sessions)).toBe(1);
   });
 

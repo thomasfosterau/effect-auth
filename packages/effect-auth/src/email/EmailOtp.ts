@@ -27,7 +27,11 @@ import * as RootSecret from "../RootSecret.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
 import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
 import { SessionService } from "../SessionService.ts";
-import { EmailPasswordStore } from "./EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "./EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -222,12 +226,7 @@ export interface EmailOtpSignInOptions {
 /**
  * Result of a successful email OTP sign-in
  */
-export interface EmailOtpAuthResult {
-  readonly user: Types.User;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
-}
+export type EmailOtpAuthResult = { readonly user: Types.User } & SessionOrChallenge;
 
 /**
  * Result of a successful generic OTP check
@@ -526,16 +525,13 @@ export const make = (
           yield* proveAddress(firstProof, identifier);
         }
 
-        const { session, token } = yield* sessionManager.createSession(
-          user.id,
+        const issued = yield* sessionOrChallenge(
+          sessionManager,
+          user,
+          "email-otp",
           options?.sessionAttributes,
         );
-
-        return {
-          user,
-          session,
-          token,
-        } satisfies EmailOtpAuthResult;
+        return { user, ...issued } satisfies EmailOtpAuthResult;
       }),
 
       check: Effect.fn("EmailOtpService.check")(function* (

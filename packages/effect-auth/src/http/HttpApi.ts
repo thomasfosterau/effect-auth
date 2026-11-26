@@ -403,7 +403,8 @@ export const otpChallengesGroup = Group.make(
  *   not the address has an account.
  * - `POST /email-verifications/redemptions`: verify with the link's token.
  *   Answers `201` with the new session when verification signs the user in,
- *   else `204`.
+ *   `202` with the second-factor challenge when the gate requires one, else
+ *   `204`.
  */
 export const emailVerificationsGroup = Group.make(
   "email-verifications",
@@ -416,7 +417,11 @@ export const emailVerificationsGroup = Group.make(
     .middleware(Middleware.SchemaErrors),
   HttpApiEndpoint.post("redeem", "/email-verifications/redemptions", {
     payload: jsonApiPayload(EmailVerificationRedemptionDocument),
-    success: [MediaType.asJsonApi(SignedInDocument, 201), HttpApiSchema.NoContent],
+    success: [
+      MediaType.asJsonApi(SignedInDocument, 201),
+      MediaType.asJsonApi(PendingDocument, 202),
+      HttpApiSchema.NoContent,
+    ],
     error: sendErrors,
   })
     .middleware(Middleware.ContentNegotiation)

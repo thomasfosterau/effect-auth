@@ -2225,6 +2225,52 @@ describe("magic link", () => {
     expect(replay.status).toBe(400);
   });
 
+  it("answers an enrolled user's link with a second-factor challenge and no session", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    await signUp(handler, "ml2fa@example.com");
+    // A verified address, so the link is not its first proof (which clears the enrolment).
+    await handler(authRequest("send-verification", { email: "ml2fa@example.com" }));
+    const verified = await handler(
+      authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
+    );
+    expect(verified.status).toBe(201);
+    // The first proof cleared the sign-up's password: set it again by reset.
+    await handler(authRequest("request-reset", { email: "ml2fa@example.com" }));
+    const reset = await handler(
+      authRequest("reset-password", { token: fixture.sentResetTokens[0], newPassword: PW }),
+    );
+    expect(reset.status).toBe(204);
+    const sid = await signIn(handler, "ml2fa@example.com");
+    const enable = await handler(authRequest("enable-mfa", { password: PW }, asCookie(sid)));
+    const enrollment = await metaBody(enable, TotpEnrollmentBody);
+    const confirm = await handler(
+      authRequest("confirm-mfa", { code: await previousTotpFor(enrollment.secret) }, asCookie(sid)),
+    );
+    expect(confirm.status).toBe(200);
+
+    await handler(authRequest("send-magic-link", { email: "ml2fa@example.com" }));
+    const gated = await handler(
+      authRequest("magic-link", { token: fixture.sentMagicLinkTokens[0] }),
+    );
+
+    expect(gated.status).toBe(202);
+    expect(gated.headers.get("set-cookie")).toBeNull();
+    expect(gated.headers.get("cache-control")).toBe("no-store");
+    const body = await authBody(
+      gated,
+      Schema.Struct({ secondFactor: Schema.optional(Schema.Struct({ token: Schema.String })) }),
+    );
+    assert(body.secondFactor !== undefined, "the link is gated on the second factor");
+    const redeemed = await handler(
+      authRequest("verify-totp", {
+        token: body.secondFactor.token,
+        code: await totpFor(enrollment.secret),
+      }),
+    );
+    expect(redeemed.status).toBe(201);
+  });
+
   it("rejects unknown tokens with 400", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
     const res = await handler(authRequest("magic-link", { token: "nope" }));

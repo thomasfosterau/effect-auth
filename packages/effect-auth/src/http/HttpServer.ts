@@ -61,7 +61,7 @@ import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
 import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
-import { EmailPasswordService } from "../email/EmailPassword.ts";
+import { EmailPasswordService, type SessionOrChallenge } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
 import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
@@ -2036,7 +2036,7 @@ const invalidCode = (e: { readonly message: string }) =>
 /** The outcome of a passwordless sign-in, which never awaits a verification. */
 const passwordless =
   (method: string) =>
-  (result: { readonly user: Types.User } & Types.IssuedSession): SignInOutcome => ({
+  (result: { readonly user: Types.User } & SessionOrChallenge): SignInOutcome => ({
     ...result,
     needsEmailVerification: false,
     method,
@@ -2332,11 +2332,12 @@ export const emailVerificationsGroupLayer = (
                 ...hookFailures,
               }),
             );
-          // `201` with the session when verification signs the user in.
-          const { session, token } = result;
-          if (session === undefined || token === undefined) return yield* Effect.void;
-          yield* issueSession({ session, token }, cfg, "email-password", undefined);
-          return yield* signedIn({ ...result, session, method: "email-password" });
+          // `201` with the session when verification signs the user in, `202`
+          // with the challenge when the second-factor gate stops it.
+          if (result.session === undefined && result.secondFactor === undefined) {
+            return yield* Effect.void;
+          }
+          return yield* answerSignIn({ ...result, method: "email-password" }, cfg);
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
@@ -4200,11 +4201,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 ),
             }),
           );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result, cfg, "sso");
+          return yield* answerIdpSignIn(result, cfg, "sso");
         }),
       )
       // SAML assertion consumer service. The IdP form-POSTs here through the
@@ -4246,11 +4243,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                   ),
               }),
             );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result, cfg, "sso");
+          return yield* answerIdpSignIn(result, cfg, "sso");
         }),
       )
       .handle("samlMetadata", ({ params }) =>
@@ -5077,6 +5070,27 @@ const requireInteractiveCredential = (
  * The server-side session lifetime is unchanged; orphaned sessions expire via
  * the normal idle/absolute-lifetime checks.
  */
+/**
+ * Answer an identity-provider callback: the session cookie, or, when the
+ * second-factor gate stopped the sign-in, the challenge in `secondFactor`
+ * (`no-store`, like every answer that hands one over) and no cookie.
+ */
+const answerIdpSignIn = (
+  result: { readonly user: Types.User } & SessionOrChallenge,
+  cfg: ResolvedCookieConfig,
+  method: string,
+) =>
+  Effect.gen(function* () {
+    const body: S.AuthSuccess = {
+      user: yield* encodeUserView(result.user),
+      needsEmailVerification: false,
+      ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
+    };
+    if (result.session !== undefined) return yield* withSessionCookie(body, result, cfg, method);
+    yield* noStore;
+    return yield* HttpServerResponse.json(body).pipe(Effect.orDie);
+  });
+
 const withSessionCookie = (
   body: S.AuthSuccess,
   issued: Types.IssuedSession,

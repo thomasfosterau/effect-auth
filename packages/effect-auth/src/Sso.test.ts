@@ -1,5 +1,6 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
 import { DateTime, Effect, Layer, MutableHashMap, Result, Struct } from "effect";
@@ -15,7 +16,11 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  exemptFromSecondFactor,
+} from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
@@ -414,7 +419,7 @@ describe("SsoService", () => {
     expect(createdWith).toEqual([
       { type: "email", value: "worker@acme.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
     expect(members).toEqual([
       { ...members[0], organizationId: "org-1", userId: first.user.id, role: "member" },
     ]);
@@ -446,7 +451,7 @@ describe("SsoService", () => {
       },
     };
     /** Sign in through the IdP; `extra` adds stores beside the fixture's. */
-    const signIn = async (extra?: Layer.Layer<ApiKeyStore>) => {
+    const signIn = async <ROut = never>(extra?: Layer.Layer<ROut>) => {
       const layer = extra === undefined ? stores.layer : Layer.merge(stores.layer, extra);
       const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
       await Effect.runPromise(
@@ -560,8 +565,32 @@ describe("SsoService", () => {
     const result = await fx.signIn();
 
     expect(result.user.id).toBeTypeOf("string");
-    expect(result.session.userId).toBe(result.user.id);
+    expect(result.session?.userId).toBe(result.user.id);
     expect(fx.members).toEqual([]);
+  });
+
+  it("answers a second-factor challenge, and no session, when the gate requires one", async () => {
+    const challenged: Array<string> = [];
+    const fx = jitFixture();
+
+    const gated = await fx.signIn(enrolledGate(challenged));
+
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.session).toBeUndefined();
+    expect(challenged).toEqual([gated.user.id]);
+  });
+
+  it("issues a session past the gate when SSO is exempt from it", async () => {
+    const challenged: Array<string> = [];
+    const fx = jitFixture();
+
+    const exempt = await fx.signIn(
+      Layer.merge(enrolledGate(challenged), exemptFromSecondFactor("sso")),
+    );
+
+    expect(exempt.secondFactor).toBeUndefined();
+    expect(exempt.session?.userId).toBe(exempt.user.id);
+    expect(challenged).toEqual([]);
   });
 
   it("populates endpoints from OIDC discovery", async () => {
@@ -785,7 +814,7 @@ describe("SsoService — SAML", () => {
     const first = await Effect.runPromise(signIn("_a1"));
     expect(first.isNewUser).toBe(true);
     expect(first.provider.protocol).toBe("saml");
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
     const identifier = await Effect.runPromise(
       fx.identifiers.getByValue("email", "worker@acme.test"),
     );
@@ -1595,7 +1624,7 @@ describe("SSO callback state is single-use", () => {
   it("refuses a callback replayed after it signed the user in", async () => {
     const callback = await started();
     const first = await withFetch(ACME_IDP_ROUTES, () => Effect.runPromise(callback("code-1")));
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
 
     const replay = await withFetch(ACME_IDP_ROUTES, () =>
       Effect.runPromise(Effect.flip(callback("code-1"))),

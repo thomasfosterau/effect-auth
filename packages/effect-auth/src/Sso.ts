@@ -35,7 +35,11 @@ import { Digest, Mac, SecureRandom } from "effect/crypto";
 import { HttpClient } from "effect/http";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -208,14 +212,11 @@ export interface RegisterSamlProviderInput {
 }
 
 /** Result of a completed SSO sign-in. */
-export interface SsoSignInResult {
+export type SsoSignInResult = {
   readonly user: Types.User;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
   readonly isNewUser: boolean;
   readonly provider: SsoProvider;
-}
+} & SessionOrChallenge;
 
 /** Where to start an SSO sign-in from. */
 export interface SsoSignInSelector {
@@ -615,8 +616,8 @@ export const make = (
         ),
       );
 
-      const { session, token } = yield* sessionManager.createSession(user.id);
-      return { user, session, token, isNewUser, provider } satisfies SsoSignInResult;
+      const issued = yield* sessionOrChallenge(sessionManager, user, "sso");
+      return { user, ...issued, isNewUser, provider } satisfies SsoSignInResult;
     });
 
     /**

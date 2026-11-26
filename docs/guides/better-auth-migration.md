@@ -126,7 +126,7 @@ The default hasher is PBKDF2-SHA256; Argon2id is `Password.argon2idHasherLayer` 
 
 `Auth.MultiFactor.MultiFactorService` (`enable`, `confirmEnable`, `disable`, `isEnabled`, `beginChallenge`, `verifyTotp`, `verifyBackupCode`, `regenerateBackupCodes`) over `MultiFactorStore` + `PendingMultiFactorStore`, on `POST /multi-factor-enrollments` (enable), `PATCH` / `DELETE /multi-factor-enrollments/current` (confirm, disable), `POST /second-factor-challenges/verifications` (verify a TOTP or backup code) and `POST /backup-code-sets` (regenerate), as JSON:API resources. TOTP/HOTP primitives are in `Auth.MultiFactor` (`generateTotp`, `verifyTotp`, `generateHotp`, `verifyHotp`, `generateOtpUri`).
 
-Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiFactorGateLayer` (or `OtpSecondFactorGateLayer` for emailed/texted codes, or `TrustedDeviceWithMultiFactorGateLayer` / `TrustedDeviceWithOtpSecondFactorGateLayer` to honour remembered devices) and `signIn` returns a challenge instead of a session until the second factor clears. That replaces Better Auth's `twoFactor()` plugin plus its `trustDevice` option.
+Every sign-in method integrates through the `SecondFactorGate` seam (password, magic link, the one-time codes, OAuth, SSO and One Tap alike; `exemptFromSecondFactor` lists the methods sufficient alone, none by default): provide `MultiFactorGateLayer` (or `OtpSecondFactorGateLayer` for emailed/texted codes, or `TrustedDeviceWithMultiFactorGateLayer` / `TrustedDeviceWithOtpSecondFactorGateLayer` to honour remembered devices) and `signIn` returns a challenge instead of a session until the second factor clears. That replaces Better Auth's `twoFactor()` plugin plus its `trustDevice` option.
 
 ### Organizations and teams
 
