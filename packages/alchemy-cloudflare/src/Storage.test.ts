@@ -288,8 +288,9 @@ describe("D1-backed effect-auth storage", () => {
             now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           }),
         );
-        const outcomes = yield* Effect.all(
-          ["ada-a@example.com", "ada-b@example.com"].map((value) =>
+        const outcomes = yield* Effect.forEach(
+          ["ada-a@example.com", "ada-b@example.com"],
+          (value) =>
             identifiers.replace(
               ada,
               Auth.makeIdentifier({
@@ -300,7 +301,6 @@ describe("D1-backed effect-auth storage", () => {
                 now: DateTime.toDateUtc(DateTime.nowUnsafe()),
               }),
             ),
-          ),
           { concurrency: "unbounded" },
         );
         return { outcomes, listed: yield* identifiers.listByUser("user-1") };

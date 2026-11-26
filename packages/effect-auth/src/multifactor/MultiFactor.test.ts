@@ -656,8 +656,9 @@ describe("MultiFactorService", () => {
           const challenge = yield* service.beginChallenge("user-2fa-burst");
           // Nine wrong codes, then a right one, past the default cap of 5.
           const codes = [...Arr.replicate("wrong-backup", 9), backupCodes[0] ?? ""];
-          return yield* Effect.all(
-            codes.map((code) => Effect.result(service.verifyBackupCode(challenge.token, code))),
+          return yield* Effect.forEach(
+            codes,
+            (code) => Effect.result(service.verifyBackupCode(challenge.token, code)),
             { concurrency: "unbounded" },
           );
         }),
@@ -807,7 +808,9 @@ describe("MultiFactorService", () => {
             });
             const enabled = yield* service.enable(userId, "correct-password");
             const attempts = yield* redeem(service, enabled);
-            return yield* Effect.all(attempts.map(Effect.result), { concurrency: "unbounded" });
+            return yield* Effect.forEach(attempts, (attempt) => Effect.result(attempt), {
+              concurrency: "unbounded",
+            });
           }),
           testContext,
         ).pipe(Effect.provide(Hooks.Default)),

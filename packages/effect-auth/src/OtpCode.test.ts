@@ -47,10 +47,9 @@ describe("verifyCode under concurrency", () => {
         // Nine wrong guesses, then the right one: every guess reads the code
         // before any is counted, as a burst of parallel requests does.
         const guesses = [...Arr.makeBy(9, (i) => String(100_000 + i)), code];
-        return yield* Effect.all(
-          guesses.map((guess) => verify(store, guess)),
-          { concurrency: "unbounded" },
-        );
+        return yield* Effect.forEach(guesses, (guess) => verify(store, guess), {
+          concurrency: "unbounded",
+        });
       }),
     );
 

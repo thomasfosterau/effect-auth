@@ -313,8 +313,9 @@ describe("OtpSecondFactorService", () => {
           const wrong = otp === "000000" ? "000001" : "000000";
           // Nine wrong guesses, then the right one.
           const guesses = [...Array.from({ length: 9 }, () => wrong), otp];
-          return yield* Effect.all(
-            guesses.map((guess) => Effect.result(service.verify(challenge.token, guess))),
+          return yield* Effect.forEach(
+            guesses,
+            (guess) => Effect.result(service.verify(challenge.token, guess)),
             { concurrency: "unbounded" },
           );
         }),
