@@ -163,7 +163,7 @@ describe("RemoteSession session reads", () => {
     expect(call.headers["cookie"]).toBe("__Host-conduit_session=raw-token");
   });
 
-  it("forwards the caller's identity and origin, so CSRF and rate limits see the browser", async () => {
+  it("forwards the caller's origin and language, so the CSRF check sees the browser", async () => {
     const { calls, fetcher } = spy(() => okSession());
     const client = RemoteSession.make({ fetcher });
 
@@ -172,7 +172,6 @@ describe("RemoteSession session reads", () => {
         inbound({
           ...withSession,
           origin: "https://app.example.com",
-          "cf-connecting-ip": "203.0.113.4",
           "accept-language": "en-AU",
         }),
       ),
@@ -181,7 +180,6 @@ describe("RemoteSession session reads", () => {
     const call = calls[0];
     assert(call !== undefined);
     expect(call.headers["origin"]).toBe("https://app.example.com");
-    expect(call.headers["cf-connecting-ip"]).toBe("203.0.113.4");
     expect(call.headers["accept-language"]).toBe("en-AU");
   });
 
@@ -283,6 +281,129 @@ const trackedBody = (
     cancelled: () => cancelled,
   };
 };
+
+describe("RemoteSession client address", () => {
+  // What a browser off Cloudflare can send to rotate its rate-limit key.
+  const spoofed = {
+    ...withSession,
+    "x-forwarded-for": "198.51.100.66",
+    "cf-connecting-ip": "198.51.100.67",
+  };
+
+  it("drops the browser's own address headers by default", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({ fetcher });
+
+    await Effect.runPromise(client.read(inbound(spoofed)));
+    await Effect.runPromise(client.relay(inbound(spoofed), "/sessions/current"));
+
+    const addresses = calls.map((call) => [
+      call.headers["x-forwarded-for"],
+      call.headers["cf-connecting-ip"],
+    ]);
+    expect(addresses).toStrictEqual([
+      [undefined, undefined],
+      [undefined, undefined],
+    ]);
+  });
+
+  it("forwards one when the app opts in, as behind Cloudflare", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({ fetcher, headers: { also: ["cf-connecting-ip"] } });
+
+    await Effect.runPromise(client.read(inbound(spoofed)));
+
+    expect(calls[0]?.headers["cf-connecting-ip"]).toBe("198.51.100.67");
+    expect(calls[0]?.headers["x-forwarded-for"]).toBeUndefined();
+  });
+
+  it("sends clientAddress in one header on every call, replacing the browser's", async () => {
+    const { calls, fetcher } = spy((request) =>
+      new URL(request.url).pathname.endsWith("/api-keys/current")
+        ? new Response(null, { status: 401 })
+        : okSession(),
+    );
+    const client = RemoteSession.make({ fetcher, clientAddress: () => "203.0.113.9" });
+
+    await Effect.runPromise(client.read(inbound(spoofed)));
+    await Effect.runPromise(client.relay(inbound(spoofed), "/sessions/current"));
+    assert(client.readApiKey !== undefined);
+    await Effect.runPromise(client.readApiKey(inbound({ ...spoofed, "x-api-key": "k" })));
+
+    const addresses = calls.map((call) => [
+      call.headers["x-forwarded-for"],
+      call.headers["cf-connecting-ip"],
+    ]);
+    expect(addresses).toStrictEqual([
+      ["203.0.113.9", undefined],
+      ["203.0.113.9", undefined],
+      ["203.0.113.9", undefined],
+    ]);
+  });
+
+  it("a call's own address wins, and an unknown address sends none", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({
+      fetcher,
+      headers: { also: ["x-forwarded-for"] },
+      clientAddress: () => undefined,
+    });
+
+    await Effect.runPromise(client.read(inbound(spoofed), { clientAddress: "203.0.113.10" }));
+    await Effect.runPromise(client.read(inbound(spoofed)));
+
+    expect(calls[0]?.headers["x-forwarded-for"]).toBe("203.0.113.10");
+    // Even opted in, the browser's value never stands in for the app's.
+    expect(calls[1]?.headers["x-forwarded-for"]).toBeUndefined();
+  });
+
+  it("honours a custom header, and resolveAtEdge passes its address through", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({ fetcher, clientAddressHeader: "x-client-ip" });
+
+    await Effect.runPromise(
+      RemoteSession.resolveAtEdge({
+        client,
+        request: inbound(spoofed),
+        clientAddress: "2001:db8::1",
+      }),
+    );
+
+    expect(calls[0]?.headers["x-client-ip"]).toBe("2001:db8::1");
+    expect(calls[0]?.headers["x-forwarded-for"]).toBeUndefined();
+  });
+});
+
+describe("RemoteSession relay stays on the auth service's origin", () => {
+  it.each(["//evil.example/steal", "/\\evil.example/steal"])(
+    "answers 400 for the pathname %s without a call",
+    async (pathname) => {
+      const { calls, fetcher } = spy(() => okSession());
+      const client = RemoteSession.make({ fetcher, prefix: "" });
+      // The URL parser reads `\` as `/`, so both spellings arrive as `//`.
+      const request = new Request(`https://app.example.com${pathname}`, { headers: withSession });
+
+      const response = await Effect.runPromise(client.relay(request));
+      expect(response.status).toBe(400);
+      expect(calls).toHaveLength(0);
+
+      const viaPath = await Effect.runPromise(client.relay(inbound(withSession), pathname));
+      expect(viaPath.status).toBe(400);
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it("still relays an ordinary pathname", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({ fetcher });
+    const request = new Request("https://app.example.com/api/auth/sessions/current", {
+      headers: withSession,
+    });
+
+    await Effect.runPromise(client.relay(request));
+    expect(calls[0]?.url).toBe("https://auth.internal/api/auth/sessions/current");
+  });
+});
 
 describe("RemoteSession cancels every response body it does not read", () => {
   const reads = [
@@ -667,6 +788,109 @@ const clearing = (cacheControl?: string) =>
       "set-cookie": "__Host-conduit_session=; Path=/; Max-Age=0; HttpOnly; Secure",
     },
   });
+
+describe("the machine-caller rule covers session reads and every key spelling", () => {
+  const refreshed = "__Host-conduit_session_data=fresh; Path=/; HttpOnly";
+  const machineCallers: ReadonlyArray<readonly [string, Record<string, string>]> = [
+    ["a bearer token", { authorization: "Bearer tok" }],
+    ["the Token scheme", { authorization: "Token tok" }],
+    ["a bearer token beside a cookie", { ...withSession, authorization: "Bearer tok" }],
+  ];
+
+  it.each(machineCallers)("read hands %s no refreshed cookie", async (_, headers) => {
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    const result = await Effect.runPromise(client.read(inbound(headers)));
+    expect(Option.isSome(result.session)).toBe(true);
+    expect(result.setCookie).toStrictEqual([]);
+  });
+
+  it("read hands a 401's cookie-clearing line to no bearer caller either", async () => {
+    const clear = "__Host-conduit_session=; Path=/; Max-Age=0";
+    const { fetcher } = spy(
+      () => new Response(null, { status: 401, headers: { "set-cookie": clear } }),
+    );
+    const client = RemoteSession.make({ fetcher });
+
+    expect(
+      (await Effect.runPromise(client.read(inbound({ authorization: "Bearer tok" })))).setCookie,
+    ).toStrictEqual([]);
+    expect((await Effect.runPromise(client.read(inbound(withSession)))).setCookie).toStrictEqual([
+      clear,
+    ]);
+  });
+
+  it("resolveAtEdge replays no cookie for a bearer caller", async () => {
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    const edge = await Effect.runPromise(
+      RemoteSession.resolveAtEdge({ client, request: inbound({ authorization: "Bearer tok" }) }),
+    );
+    expect(edge.outcome).toBe("resolved");
+    expect(edge.credentialClass).toBe("machine");
+    expect(edge.setCookie).toStrictEqual([]);
+  });
+
+  it("a browser's read still receives its refreshed cookie", async () => {
+    const { fetcher } = spy(() => okSession([refreshed]));
+    const client = RemoteSession.make({ fetcher });
+
+    expect((await Effect.runPromise(client.read(inbound(withSession)))).setCookie).toStrictEqual([
+      refreshed,
+    ]);
+  });
+
+  it("the Token scheme through relay receives no Set-Cookie", async () => {
+    const { fetcher } = spy(() => signInResponse());
+    const client = RemoteSession.make({ fetcher });
+    const request = new Request("https://app.example.com/auth/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/vnd.api+json", authorization: "Token tok" },
+      body: "{}",
+    });
+
+    const response = await Effect.runPromise(client.relay(request, "/sessions"));
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+  });
+
+  it("a custom apiKeyHeaders name is forwarded and counts as a key, without headers.also", async () => {
+    const { calls, fetcher } = spy(() => signInResponse());
+    const client = RemoteSession.make({
+      fetcher,
+      credentials: { apiKeyHeaders: ["x-service-key"] },
+    });
+    const request = new Request("https://app.example.com/auth/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/vnd.api+json", "x-service-key": "k" },
+      body: "{}",
+    });
+
+    const response = await Effect.runPromise(client.relay(request, "/sessions"));
+    expect(calls[0]?.headers["x-service-key"]).toBe("k");
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+
+    const { calls: reads, fetcher: readFetcher } = spy(() => okSession([refreshed]));
+    const reader = RemoteSession.make({
+      fetcher: readFetcher,
+      credentials: { apiKeyHeaders: ["x-service-key"] },
+    });
+    const result = await Effect.runPromise(
+      reader.read(inbound({ ...withSession, "x-service-key": "k" })),
+    );
+    expect(reads[0]?.headers["x-service-key"]).toBe("k");
+    expect(result.setCookie).toStrictEqual([]);
+  });
+
+  it("a key header survives a forward list that leaves it out", async () => {
+    const { calls, fetcher } = spy(() => okSession());
+    const client = RemoteSession.make({ fetcher, headers: { forward: ["cookie"] } });
+
+    await Effect.runPromise(client.read(inbound({ ...withSession, "x-api-key": "k" })));
+    expect(calls[0]?.headers["x-api-key"]).toBe("k");
+  });
+});
 
 describe("a relayed response carrying Set-Cookie is no-store", () => {
   it("marks a relayed session cookie no-store, first sign-in and cookie-bearing alike", () => {

@@ -26,7 +26,9 @@ import { handle as auth } from "@thomasfosterau/effect-auth-sveltekit";
 const authHook = auth({
   cookies: { name: "app_session" },
   // The session read for this request: here, the auth Worker over a service binding.
-  lookup: (request) => remoteSession.resolve(request),
+  // `read` answers the session and its `Set-Cookie` lines, which the hook replays.
+  lookup: (request, event) =>
+    remoteSession.read(request, { clientAddress: event.getClientAddress() }),
   // Anonymous is the lower-privilege outcome for this app, so degrade to it.
   failure: { mode: "open", onDegraded: (cause) => Effect.logError("auth degraded", cause) },
 });

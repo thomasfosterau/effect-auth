@@ -34,6 +34,16 @@
  * `content-type` and `content-length` are not on it, so the failure is not
  * reachable by forgetting to strip them. See {@link HeaderPolicy} to extend it.
  *
+ * ### The client address is the app's to state
+ *
+ * Every call reaches the auth service from the app, so its per-address limits
+ * key on whatever address header it trusts. The browser's own
+ * `x-forwarded-for` and `cf-connecting-ip` are not forwarded by default, since
+ * off Cloudflare the browser chose them. Pass `clientAddress` to {@link make}
+ * (or per call) and the address the app's runtime knows goes in one header
+ * (`x-forwarded-for` by default), which the auth service trusts with
+ * `ClientIP.trustedHeader`.
+ *
  * ### `Set-Cookie` on session *reads* matters too
  *
  * When the signed session-data cookie cache is on, a session read refreshes it
@@ -47,10 +57,13 @@
  * A request bearing an API key or a bearer token is not a browser. Handing it
  * a `Set-Cookie` plants session state in whatever cookie jar its HTTP client
  * happens to keep, for no benefit — the key or token, not a session, is its
- * credential. The relay drops `Set-Cookie` whenever the *inbound* request
- * carries a machine credential, including the mixed case where it carries both
- * a cookie and a key or token. Every other caller receives it, a browser with
- * no cookie yet included, so a first sign-in through the relay signs in.
+ * credential. The relay and the session read drop `Set-Cookie` whenever the
+ * *inbound* request carries a machine credential, including the mixed case
+ * where it carries both a cookie and a key or token. Every other caller
+ * receives it, a browser with no cookie yet included, so a first sign-in
+ * through the relay signs in. What counts as an API key is
+ * `credentials.apiKeyHeaders`, and those headers are forwarded on every call,
+ * so the rule and the forwarded set cannot drift apart.
  *
  * ### A key resolves to its user, not to a session
  *
@@ -267,6 +280,13 @@ export interface HeaderPolicy {
  * at the top of this module. The relay re-adds them from the *body it is
  * actually sending*, never from the inbound request.
  *
+ * So are the browser's `x-forwarded-for` and `cf-connecting-ip`: off
+ * Cloudflare the browser chose their values, and an auth service trusting them
+ * would key its per-address limits on whatever the attacker sends. Send the
+ * address with `RemoteSessionOptions.clientAddress`, or forward one of them
+ * with `also` when an edge in front of the app sets it (`cf-connecting-ip`
+ * behind Cloudflare).
+ *
  * @since 0.1.0
  * @category constructors
  */
@@ -275,10 +295,9 @@ export const defaultForwardedHeaders: ReadonlyArray<string> = [
   "cookie",
   "authorization",
   "x-api-key",
-  // Who and where the caller is — rate limiting, trusted-proxy IP resolution,
-  // localised mail.
-  "cf-connecting-ip",
-  "x-forwarded-for",
+  // Who the caller is: localised mail, device labels. The client address is
+  // not here: the browser chose those headers' values, so it travels in the
+  // one header `clientAddress` sets instead (see `RemoteSessionOptions`).
   "accept-language",
   "user-agent",
   // The CSRF origin check runs on the auth service, so it has to see what the
@@ -336,7 +355,8 @@ export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
  *
  * Replay `setCookie` onto your outgoing response. When the signed cookie cache
  * is enabled this is how it keeps refreshing; drop it and the cache stops
- * refreshing after its first window.
+ * refreshing after its first window. It is empty for a request carrying an
+ * API key or a bearer token, by the same rule as {@link relayResponse}.
  *
  * @since 0.1.0
  * @category models
@@ -508,6 +528,10 @@ export const fromSessionWithUserView = (
     })),
   );
 
+/** The machine-caller rule: a request carrying an API key or a bearer token gets no cookie. */
+const mayReceiveCookies = (inbound: SessionResolution.CredentialPresence): boolean =>
+  !inbound.hasApiKey && !inbound.hasBearer;
+
 /**
  * Configuration for {@link make}.
  *
@@ -527,8 +551,43 @@ export interface RemoteSessionOptions {
   readonly prefix?: string;
   /** Header forward policy. See {@link defaultForwardedHeaders}. */
   readonly headers?: HeaderPolicy;
-  /** Cookie naming and API-key spellings, shared with the credential predicates. */
+  /**
+   * Cookie naming and API-key spellings, shared with the credential predicates.
+   * Every `apiKeyHeaders` name is forwarded on every call, so a key header
+   * belongs here rather than in `headers.also`: one listed only there would
+   * be forwarded without counting as a machine credential.
+   */
   readonly credentials?: SessionResolution.CredentialConfig;
+  /**
+   * The client's address for an inbound request, as the app's runtime knows
+   * it (the socket address, or a header an edge in front of the app sets), or
+   * `undefined` when it does not. It is sent in {@link clientAddressHeader}
+   * on every call to the auth service, replacing any value the browser sent
+   * there, and the header is removed when this answers `undefined`. A call's
+   * own {@link RequestContext.clientAddress} takes precedence.
+   *
+   * Configure the auth service to trust that one header, for example
+   * `trustedProxy: ClientIP.trustedHeader("x-forwarded-for")`, and keep it
+   * reachable only through the app.
+   */
+  readonly clientAddress?: ((request: Request) => string | undefined) | undefined;
+  /** The header {@link clientAddress} is sent in. Default `x-forwarded-for`. */
+  readonly clientAddressHeader?: string | undefined;
+}
+
+/**
+ * What a call knows about its request beyond the `Request` itself.
+ *
+ * @since 0.9.0
+ * @category models
+ */
+export interface RequestContext {
+  /**
+   * The client's address, for a runtime that exposes it outside the
+   * `Request` (SvelteKit's `event.getClientAddress()`). Takes precedence over
+   * {@link RemoteSessionOptions.clientAddress}.
+   */
+  readonly clientAddress?: string | undefined;
 }
 
 /**
@@ -548,7 +607,10 @@ export interface RemoteSessionClient {
    * Read the session over the transport. Always makes the call; use
    * {@link resolveAtEdge} to get the skip, the fault posture and the outcome.
    */
-  readonly read: (request: Request) => Effect.Effect<RemoteSessionResult, RemoteSessionError>;
+  readonly read: (
+    request: Request,
+    context?: RequestContext,
+  ) => Effect.Effect<RemoteSessionResult, RemoteSessionError>;
   /**
    * Resolve the API key the inbound request carries over the transport
    * (`GET /api-keys/current`): `{ session: None, user, apiKey }` for a
@@ -566,13 +628,25 @@ export interface RemoteSessionClient {
    * always provides it, and {@link resolveAtEdge} fails closed without it.
    */
   readonly readApiKey?:
-    | ((request: Request) => Effect.Effect<RemoteSessionResult, RemoteSessionError>)
+    | ((
+        request: Request,
+        context?: RequestContext,
+      ) => Effect.Effect<RemoteSessionResult, RemoteSessionError>)
     | undefined;
   /**
    * Forward a request to the auth service and return its response verbatim —
    * status, body and `Set-Cookie` — subject to the machine-caller rule.
+   *
+   * Without `path`, the request's own pathname is forwarded. A target that
+   * would leave the auth service's origin (a pathname starting `//` or `/\`)
+   * is answered `400` without a call, since the forwarded headers carry the
+   * caller's credentials.
    */
-  readonly relay: (request: Request, path?: string) => Effect.Effect<Response>;
+  readonly relay: (
+    request: Request,
+    path?: string,
+    context?: RequestContext,
+  ) => Effect.Effect<Response>;
 }
 
 /**
@@ -647,9 +721,39 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
   const credential = (request: Request): SessionResolution.CredentialPresence =>
     SessionResolution.detectCredential(SessionResolution.fromRequest(request), options.credentials);
 
-  const read = (request: Request): Effect.Effect<RemoteSessionResult, RemoteSessionError> =>
+  const addressHeader = options.clientAddressHeader ?? "x-forwarded-for";
+  const withClientAddress = (
+    headers: Headers,
+    request: Request,
+    context: RequestContext | undefined,
+  ): Headers => {
+    if (context?.clientAddress === undefined && options.clientAddress === undefined) return headers;
+    const address = context?.clientAddress ?? options.clientAddress?.(request);
+    if (address === undefined) headers.delete(addressHeader);
+    else headers.set(addressHeader, address);
+    return headers;
+  };
+  // The headers that count as an API key are the ones forwarded as one: a key
+  // header rides along on every call whether or not `headers` names it, so a
+  // forwarded key can never be invisible to the machine-caller rule.
+  const apiKeyHeaders = options.credentials?.apiKeyHeaders ?? ["x-api-key"];
+  const headerPolicy: HeaderPolicy = {
+    ...options.headers,
+    also: [...(options.headers?.also ?? []), ...apiKeyHeaders],
+  };
+  const outboundHeaders = (request: Request, context: RequestContext | undefined): Headers =>
+    withClientAddress(forwardedHeaders(request, headerPolicy), request, context);
+
+  /** `Set-Cookie` lines a caller may receive: none for a machine caller. */
+  const cookiesFor = (request: Request, setCookie: ReadonlyArray<string>): ReadonlyArray<string> =>
+    mayReceiveCookies(credential(request)) ? setCookie : [];
+
+  const read = (
+    request: Request,
+    context?: RequestContext,
+  ): Effect.Effect<RemoteSessionResult, RemoteSessionError> =>
     Effect.gen(function* () {
-      const headers = forwardedHeaders(request, options.headers);
+      const headers = outboundHeaders(request, context);
       // The session read is a JSON:API request whatever the inbound request
       // accepted (a browser navigation accepts `text/html`).
       headers.set("accept", MEDIA_TYPE);
@@ -659,7 +763,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       });
 
       const response = yield* promiseOrDie(() => send(outbound));
-      const setCookie = response.headers.getSetCookie();
+      const setCookie = cookiesFor(request, response.headers.getSetCookie());
 
       // 401 is "ran, nobody was signed in" — an expected answer, not a fault.
       // Its Set-Cookie still matters: it is how a stale cache cookie is cleared.
@@ -693,17 +797,15 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       return { session, setCookie };
     }).pipe(Effect.withSpan(spanNames.remoteSessionRead));
 
-  const apiKeyHeaders = options.credentials?.apiKeyHeaders ?? ["x-api-key"];
-
-  const readApiKey = (request: Request): Effect.Effect<RemoteSessionResult, RemoteSessionError> =>
+  const readApiKey = (
+    request: Request,
+    context?: RequestContext,
+  ): Effect.Effect<RemoteSessionResult, RemoteSessionError> =>
     Effect.gen(function* () {
       // The key headers ride along (the configured spellings too); the session
       // cookie and a bearer token never do, so the auth service cannot answer
       // for the session instead of the key.
-      const headers = forwardedHeaders(request, {
-        ...options.headers,
-        also: [...(options.headers?.also ?? []), ...apiKeyHeaders],
-      });
+      const headers = outboundHeaders(request, context);
       headers.delete("cookie");
       if (!Arr.some(apiKeyHeaders, (name) => name.toLowerCase() === "authorization")) {
         headers.delete("authorization");
@@ -746,10 +848,22 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       };
     }).pipe(Effect.withSpan(spanNames.remoteApiKeyRead));
 
-  const relay = (request: Request, path?: string): Effect.Effect<Response> =>
+  const relay = (
+    request: Request,
+    path?: string,
+    context?: RequestContext,
+  ): Effect.Effect<Response> =>
     Effect.gen(function* () {
-      const target = path === undefined ? new URL(request.url).pathname : `${prefix}${path}`;
-      const headers = forwardedHeaders(request, options.headers);
+      const target = new URL(
+        path === undefined ? new URL(request.url).pathname : `${prefix}${path}`,
+        baseUrl,
+      );
+      // `//host/…` (or `/\host/…`) is a network-path reference: it would
+      // send the caller's cookie and authorization to another host.
+      if (target.origin !== new URL(baseUrl).origin) {
+        return new Response(null, { status: 400 });
+      }
+      const headers = outboundHeaders(request, context);
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
 
       // Content headers come from the body being sent, never from the inbound
@@ -761,7 +875,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
 
       const response = yield* promiseOrDie(() =>
         send(
-          new Request(new URL(target, baseUrl).toString(), {
+          new Request(target.toString(), {
             method: request.method,
             headers,
             ...(body === undefined ? {} : { body }),
@@ -803,8 +917,7 @@ export const relayResponse = (
   // request carrying both a cookie and a key or token — is excluded too: the
   // machine credential is its credential, so the session state has nowhere
   // useful to go. A cookie is not required: a first sign-in has none yet.
-  const mayReceiveCookies = !inbound.hasApiKey && !inbound.hasBearer;
-  if (mayReceiveCookies) return noStoreWithSetCookie(upstream);
+  if (mayReceiveCookies(inbound)) return noStoreWithSetCookie(upstream);
 
   const headers = new Headers(upstream.headers);
   headers.delete("set-cookie");
@@ -839,7 +952,7 @@ export interface EdgeSession extends RemoteSessionResult {
 }
 
 /** Options for {@link resolveAtEdge} and {@link resolveAtEdgeFailOpen}. */
-export interface ResolveAtEdgeOptions {
+export interface ResolveAtEdgeOptions extends RequestContext {
   readonly client: RemoteSessionClient;
   readonly request: Request;
 }
@@ -865,7 +978,8 @@ const edgeRead = (
   options: ResolveAtEdgeOptions,
   credential: SessionResolution.CredentialPresence,
 ): Effect.Effect<RemoteSessionResult, RemoteSessionError> => {
-  if (!credential.hasApiKey) return options.client.read(options.request);
+  const context: RequestContext = { clientAddress: options.clientAddress };
+  if (!credential.hasApiKey) return options.client.read(options.request, context);
   const readApiKey = options.client.readApiKey;
   return readApiKey === undefined
     ? Effect.fail(
@@ -873,7 +987,7 @@ const edgeRead = (
           message: "This client cannot resolve an API key (no readApiKey)",
         }),
       )
-    : readApiKey(options.request);
+    : readApiKey(options.request, context);
 };
 
 /** Whether an edge read named a caller: a session, or an API key's user. */
