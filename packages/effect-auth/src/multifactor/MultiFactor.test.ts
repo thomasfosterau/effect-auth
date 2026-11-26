@@ -788,12 +788,12 @@ describe("MultiFactorService", () => {
   });
 
   describe("concurrent redemptions", () => {
-    const race = async <A, E>(
+    const race = async <A, E, RedeemError>(
       userId: string,
       redeem: (
         service: Effect.Success<ReturnType<typeof MultiFactor.make>>,
         enabled: { readonly secret: string; readonly backupCodes: ReadonlyArray<string> },
-      ) => Effect.Effect<ReadonlyArray<Effect.Effect<A, E>>, unknown>,
+      ) => Effect.Effect<ReadonlyArray<Effect.Effect<A, E>>, RedeemError>,
     ) => {
       const testContext = await makeTestContext();
       await seedUser(userId, `${userId}@example.com`, "correct-password");

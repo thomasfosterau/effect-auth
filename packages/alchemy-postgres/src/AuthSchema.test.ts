@@ -30,6 +30,12 @@ import {
 } from "./AuthSchema.ts";
 import * as Postgres from "./Postgres.ts";
 
+/** `effect` with its requirements erased, its success and error kept. */
+const assumeProvided = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  // SAFETY: each caller states which services the engine's types declare and
+  // the deploy never reaches; any other gap is a missing-service defect.
+  effect as Effect.Effect<A, E>;
+
 /**
  * The lifecycle below is driven by the **real** Alchemy engine — `Stack` +
  * `Plan.make` + `apply`, the same path `alchemy deploy` takes — against an
@@ -94,28 +100,30 @@ const makeEngine = (
   const state = Layer.succeed(State.State, State.InMemoryService(store));
   const providers = AuthSchemaProvider(options);
 
-  const withRuntime = <A>(effect: Effect.Effect<A, unknown, Stage>): Promise<A> =>
+  const withRuntime = <A, E>(effect: Effect.Effect<A, E, Stage>): Promise<A> =>
     Effect.runPromise(
-      // SAFETY: `LoggingCli` asks for a `Terminal` only to prompt in `approvePlan`;
-      // these deploys call `apply` directly and never ask for approval.
-      effect.pipe(
-        Effect.provideService(Stage, STAGE),
-        provideFreshArtifactStore,
-        Effect.provideService(AdoptPolicy, false),
-        Effect.provideService(AuthProviders, {}),
-        // The order of the provides below is load-bearing — each one supplies
-        // requirements of the layers provided before it, mirroring alchemy's
-        // own runtime layering — so they cannot collapse into a single merged
-        // provide.
-        // layerMergeAllWithDependencies: this layering predates the rc.118 move and
-        // is only newly flagged by @effect/language-service 0.87.3; left as is.
-        // @effect-diagnostics-next-line multipleEffectProvide:off layerMergeAllWithDependencies:off
-        Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
-        Effect.provide(Layer.provide(ProfileStoreLive, platform)),
-        Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
-        Effect.provide(platform),
-        Effect.scoped,
-      ) as Effect.Effect<A>,
+      assumeProvided(
+        // SAFETY: `LoggingCli` asks for a `Terminal` only to prompt in `approvePlan`;
+        // these deploys call `apply` directly and never ask for approval.
+        effect.pipe(
+          Effect.provideService(Stage, STAGE),
+          provideFreshArtifactStore,
+          Effect.provideService(AdoptPolicy, false),
+          Effect.provideService(AuthProviders, {}),
+          // The order of the provides below is load-bearing — each one supplies
+          // requirements of the layers provided before it, mirroring alchemy's
+          // own runtime layering — so they cannot collapse into a single merged
+          // provide.
+          // layerMergeAllWithDependencies: this layering predates the rc.118 move and
+          // is only newly flagged by @effect/language-service 0.87.3; left as is.
+          // @effect-diagnostics-next-line multipleEffectProvide:off layerMergeAllWithDependencies:off
+          Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
+          Effect.provide(Layer.provide(ProfileStoreLive, platform)),
+          Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
+          Effect.provide(platform),
+          Effect.scoped,
+        ),
+      ),
     );
 
   return {
@@ -126,18 +134,20 @@ const makeEngine = (
       program: Effect.Effect<A, E, R>,
     ): Promise<typeof DeployOutput.Type> =>
       withRuntime(
-        // SAFETY: `withRuntime` provides the engine services a deploy uses, and
-        // `compiled.services` is the whole context the stack was built in, its
-        // `State` and providers among it. `Stack.make` also declares
-        // `ChildProcessSpawner`, `Digest` and `Interaction`, which an `AuthSchema`
-        // deploy never reaches: one that did would fail with a missing-service defect.
-        program.pipe(
-          makeStack({ name: STACK, providers, state }),
-          Effect.flatMap((compiled) =>
-            Plan.make(compiled).pipe(Effect.flatMap(apply), Effect.provide(compiled.services)),
+        assumeProvided(
+          // SAFETY: `withRuntime` provides the engine services a deploy uses, and
+          // `compiled.services` is the whole context the stack was built in, its
+          // `State` and providers among it. `Stack.make` also declares
+          // `ChildProcessSpawner`, `Digest` and `Interaction`, which an `AuthSchema`
+          // deploy never reaches: one that did would fail with a missing-service defect.
+          program.pipe(
+            makeStack({ name: STACK, providers, state }),
+            Effect.flatMap((compiled) =>
+              Plan.make(compiled).pipe(Effect.flatMap(apply), Effect.provide(compiled.services)),
+            ),
+            Effect.flatMap(Schema.decodeUnknownEffect(DeployOutput)),
           ),
-          Effect.flatMap(Schema.decodeUnknownEffect(DeployOutput)),
-        ) as Effect.Effect<typeof DeployOutput.Type, unknown>,
+        ),
       ),
     /** `alchemy destroy`: apply an empty plan, so every resource is deleted. */
     destroy: (): Promise<void> =>

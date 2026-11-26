@@ -10,7 +10,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
-import { SqlClient, Statement } from "effect/sql";
+import { SqlClient, SqlError, Statement } from "effect/sql";
 import * as Auth from "../index.ts";
 import { decodeBigintColumns } from "./Int8.ts";
 
@@ -95,7 +95,7 @@ const asVoid = <A, E>(label: string, statement: Effect.Effect<A, E>) =>
  */
 const allRows = <A extends object>(
   label: string,
-  statement: Effect.Effect<ReadonlyArray<A>, unknown>,
+  statement: Effect.Effect<ReadonlyArray<A>, SqlError.SqlError>,
 ): Effect.Effect<ReadonlyArray<A>, Auth.AuthError> =>
   statement.pipe(
     Effect.mapError(toAuthError(label)),
@@ -106,7 +106,7 @@ const allRows = <A extends object>(
 
 const firstRow = <A extends object>(
   label: string,
-  statement: Effect.Effect<ReadonlyArray<A>, unknown>,
+  statement: Effect.Effect<ReadonlyArray<A>, SqlError.SqlError>,
 ) => allRows(label, statement).pipe(Effect.map(Arr.head));
 
 /** Decode a row read with {@link firstRow}, keeping a miss a miss. */

@@ -8,7 +8,7 @@ const now = DateTime.toDateUtc(DateTime.nowUnsafe());
 const enrolled: User = { id: "enrolled", createdAt: now, updatedAt: now, attributes: {} };
 const other: User = { id: "other", createdAt: now, updatedAt: now, attributes: {} };
 
-const run = <A>(effect: Effect.Effect<A, unknown>, layer: Layer.Layer<never> = Layer.empty) =>
+const run = <A, E>(effect: Effect.Effect<A, E>, layer: Layer.Layer<never> = Layer.empty) =>
   Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
 describe("secondFactorChallenge", () => {

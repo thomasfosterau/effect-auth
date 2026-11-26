@@ -743,10 +743,10 @@ export function makePlugin(
   impls: PluginImpls,
   options?: MakePluginOptions,
 ): Layer.Layer<Hooks, never, Hooks>;
-export function makePlugin(
-  source: PluginImpls | Effect.Effect<PluginImpls, never, unknown>,
+export function makePlugin<R>(
+  source: PluginImpls | Effect.Effect<PluginImpls, never, R>,
   options: MakePluginOptions = {},
-): Layer.Layer<Hooks, never, unknown> {
+): Layer.Layer<Hooks, never, Hooks | R> {
   return Layer.effect(
     Hooks,
     Effect.gen(function* () {

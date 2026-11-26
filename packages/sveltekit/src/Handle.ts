@@ -90,11 +90,11 @@ export interface LocalsAuth {
  * @since 0.1.0
  * @category models
  */
-export type FailurePolicy =
+export type FailurePolicy<E = unknown> =
   | { readonly mode: "closed" }
   | {
       readonly mode: "open";
-      readonly onDegraded: (cause: Cause.Cause<unknown>) => Effect.Effect<void>;
+      readonly onDegraded: (cause: Cause.Cause<E>) => Effect.Effect<void>;
     };
 
 /**
@@ -103,7 +103,7 @@ export type FailurePolicy =
  * @since 0.1.0
  * @category models
  */
-export interface HandleOptions {
+export interface HandleOptions<E = unknown> {
   /** The session cookie's naming, as the auth handler was configured. */
   readonly cookies?: SessionCookies.SessionCookieNaming;
   /**
@@ -116,9 +116,9 @@ export interface HandleOptions {
   readonly lookup: (
     request: Request,
     event: HandleEvent,
-  ) => Effect.Effect<Option.Option<SessionWithUser> | SessionLookup, unknown>;
+  ) => Effect.Effect<Option.Option<SessionWithUser> | SessionLookup, E>;
   /** What a lookup fault does. Required: neither direction is a safe default. */
-  readonly failure: FailurePolicy;
+  readonly failure: FailurePolicy<E>;
 }
 
 /** The `Cache-Control` a response rendered for a signed-in viewer is forced to. */
@@ -136,10 +136,10 @@ const noCookies: SessionLookup = { session: Option.none(), setCookie: [] };
 const asLookup = (value: Option.Option<SessionWithUser> | SessionLookup): SessionLookup =>
   Option.isOption(value) ? { session: value, setCookie: [] } : value;
 
-const resolveSession = (
+const resolveSession = <E>(
   event: HandleEvent,
-  options: HandleOptions,
-): Effect.Effect<SessionResolution.ResolveWithResult<SessionLookup>, unknown> => {
+  options: HandleOptions<E>,
+): Effect.Effect<SessionResolution.ResolveWithResult<SessionLookup>, E> => {
   const credential = SessionResolution.detectCredential(
     SessionResolution.fromCookies(event.cookies, event.request.headers),
     options.cookies,
@@ -212,7 +212,7 @@ const withLookupCookies = (response: Response, setCookie: ReadonlyArray<string>)
  * @category hooks
  */
 export const handle =
-  (options: HandleOptions) =>
+  <E>(options: HandleOptions<E>) =>
   async <Event extends HandleEvent>(input: HandleInput<Event>): Promise<Response> => {
     const { value, outcome } = await Effect.runPromise(resolveSession(input.event, options));
     const auth: LocalsAuth = { session: Option.getOrNull(value.session), outcome };

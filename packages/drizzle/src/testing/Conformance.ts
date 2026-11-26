@@ -6,14 +6,13 @@
  * Never published (`tsconfig.json` excludes `src/testing/`).
  */
 
-import type { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import type * as Testing from "@thomasfosterau/effect-auth/testing";
 
 export const conformance = <E, R>(
   label: string,
   suite: Testing.ConformanceSuite<E, R>,
-  run: (effect: Effect.Effect<void, unknown, R>) => Promise<void>,
+  run: (effect: Testing.ConformanceSuite<E, R>["cases"][number]["run"]) => Promise<void>,
 ): void => {
   describe(`${label}: ${suite.contract} conformance`, () => {
     suite.cases.forEach((testCase) => {

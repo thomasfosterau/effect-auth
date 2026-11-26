@@ -204,7 +204,7 @@ export interface PhoneOtpConfig {
     phoneNumber: string,
     otp: string,
     purpose: PhoneOtpPurpose,
-  ) => Effect.Effect<void, unknown>;
+  ) => Effect.Effect<void, Errors.AuthError | PhoneOtpError>;
   /**
    * Normalize a raw phone number before storage/lookup. Default trims
    * whitespace only — plug a real E.164 normalizer here.

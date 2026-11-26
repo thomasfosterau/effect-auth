@@ -50,9 +50,9 @@ export default defineConfig({
       // oxlint's `categories` below also cover the `effecttsgo` plugin's own
       // rules. These are outside the preset's `recommended`, so they stay at
       // the level they report at without the categories: `strict` only (500
-      // `Effect.provide` sites), and an awareness warning.
+      // `Effect.provide` sites).
       "effecttsgo/strict-effect-provide": "off",
-      "effecttsgo/any-unknown-in-error-context": "warn",
+      "effecttsgo/any-unknown-in-error-context": "error",
       "effecttsgo/unsafe-effect-type-assertion": "error",
       "effecttsgo/schema-number": "error",
 
@@ -316,6 +316,12 @@ export default defineConfig({
           "packages/alchemy-postgres/src/AuthSchema.test.ts",
         ],
         rules: { "effecttsgo/unsafe-effect-type-assertion": "off" },
+      },
+      {
+        // drizzle-orm types its Effect drivers' error channel as `unknown`
+        // (`DrizzleResult`); `run` maps it to `AuthError` at the boundary.
+        files: ["packages/drizzle/src/internal.ts"],
+        rules: { "effecttsgo/any-unknown-in-error-context": "off" },
       },
       {
         // The store conformance suites name each test from the typed case
