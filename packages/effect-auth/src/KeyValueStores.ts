@@ -1,15 +1,40 @@
 /**
  * `KeyValueStore`-backed implementations of effect-auth's ephemeral stores.
  *
- * These stores hold short-lived token/state data (OAuth states, WebAuthn
- * challenges, rate-limit counters, verification / reset / magic-link tokens,
- * email OTPs and pending multi-factor challenges) — a natural fit for a
- * key-value backend such as Redis, Cloudflare KV, or an in-memory map.
+ * These stores hold short-lived token and state data (OAuth states, WebAuthn
+ * challenges, verification, reset and magic-link tokens, One Tap nonces) and
+ * the attempt counters (rate limits, email OTPs, pending multi-factor
+ * challenges), plus one long-lived store, {@link IdentifierStoreKV}.
  *
  * Each layer requires the `KeyValueStore` service from
  * `effect/persistence`; provide any of its backends (e.g.
  * `KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`,
  * `KeyValueStore.layerSql`) underneath.
+ *
+ * ## What is supported where
+ *
+ * A `KeyValueStore` offers get, set and remove, and nothing atomic across
+ * them, so every write that depends on a read can interleave with another.
+ *
+ * - **Token and state stores** (`OAuthStateStoreKV`, `ChallengeStoreKV`,
+ *   `EmailVerificationStoreKV`, `PasswordResetStoreKV`, `MagicLinkStoreKV`,
+ *   `GoogleOneTapNonceStoreKV`) tolerate it, apart from spending a single-use
+ *   record, which `consume` serializes within one process (below).
+ *   {@link layerKV} bundles the first five, for a deployment.
+ * - **Counter stores** (`RateLimitStoreKV`, `EmailOtpStoreKV`,
+ *   `PendingMultiFactorStoreKV`) and **`IdentifierStoreKV`** are for
+ *   development, tests and a single process only. Their counts are
+ *   read-modify-write, so parallel guesses across processes share a count and
+ *   the attempt caps scale with concurrency, and `IdentifierStoreKV` checks a
+ *   value is free with a read before it writes, so two processes can both
+ *   claim one address. {@link layerKVSingleProcess} adds them to
+ *   {@link layerKV}. In production use `./sql` (or another store with atomic
+ *   counters and a unique index) for these.
+ *
+ * Never put a single-use record on an eventually consistent backend such as
+ * Cloudflare KV: a read after a remove may still see the record, so a spent
+ * token or state can be spent again. Use Durable Objects, D1 through
+ * `./sql`, or Redis.
  *
  * Records are serialized as JSON strings. All of these record shapes use
  * epoch-millisecond numbers for timestamps (no `Date` fields), so plain
@@ -43,9 +68,8 @@
  * `RateLimitStore.increment` (and `EmailOtpStore.recordFailure` and the
  * secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
- * the same count and only bump it once. This is acceptable for the KV
- * backend's intended use (best-effort rate limiting);
- * use a backend with atomic counters when strict enforcement is required.
+ * the same count and only bump it once, which is why the counter stores are
+ * single-process only.
  *
  * The per-code attempt counters (`EmailOtpStore.incrementAttempts`,
  * `PendingMultiFactorStore.recordFailedAttempt`) are the guess limit itself:
@@ -115,6 +139,7 @@ const toAuthError =
       message: `KeyValueStore ${label} failed${
         P.hasProperty(cause, "message") && P.isString(cause.message) ? `: ${cause.message}` : ""
       }`,
+      cause,
     });
 
 const toBase64 = (bytes: Uint8Array): string => Base64.encode(bytes);
@@ -360,10 +385,9 @@ export const challengeStoreKV: Effect.Effect<
         )
         .pipe(Effect.as(challenge)),
     get: (challenge) =>
-      kv.read<StoredChallenge>(challengeKey(challenge), "challenge.get").pipe(
-        Effect.orDie,
-        Effect.map((stored) => (stored ? decodeChallenge(stored) : null)),
-      ),
+      kv
+        .read<StoredChallenge>(challengeKey(challenge), "challenge.get")
+        .pipe(Effect.map((stored) => (stored ? decodeChallenge(stored) : null))),
     delete: (challenge) => kv.remove(challengeKey(challenge), "challenge.delete"),
   } satisfies typeof ChallengeStore.Service;
 });
@@ -387,8 +411,11 @@ const rateLimitExpiry = (entry: RateLimitEntry, until: number): number =>
 /**
  * Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
  *
- * `increment` is read-modify-write and therefore not atomic (see the module
- * docs) — fine for best-effort limiting, not for strict quota enforcement.
+ * **Development and single-process use only** (see the module docs):
+ * `increment` is read-modify-write, so across processes parallel requests
+ * share a count and overshoot the limit. In production use `./sql` or
+ * another store with an atomic increment.
+ *
  * The `ttl` arguments are honoured logically via each entry's `resetAt`
  * rather than by backend-level expiry, since `KeyValueStore` has no TTL API:
  * `set` takes a key and a value only. An entry therefore stays until
@@ -403,7 +430,7 @@ export const rateLimitStoreKV: Effect.Effect<
   const kv = jsonKv(store);
   const readEntry = (key: string) => kv.read<RateLimitEntry>(rateLimitKey(key), "rateLimit.get");
   return {
-    get: (key) => readEntry(key).pipe(Effect.orDie),
+    get: readEntry,
     set: (key, entry, ttl) =>
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         kv.writeExpiring(
@@ -436,7 +463,8 @@ export const rateLimitStoreKV: Effect.Effect<
 });
 
 /**
- * `RateLimitStore` layer backed by `KeyValueStore`.
+ * `RateLimitStore` layer backed by `KeyValueStore`. Development and
+ * single-process use only; see {@link rateLimitStoreKV}.
  */
 export const RateLimitStoreKV: Layer.Layer<RateLimitStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(RateLimitStore, rateLimitStoreKV);
@@ -649,10 +677,10 @@ export const magicLinkStoreKV: Effect.Effect<
     getByEmail: (email) =>
       Effect.gen(function* () {
         const tokens = yield* kv.readIndex(magicLinkEmailKey(email), "magicLink.getByEmail");
-        const first = Arr.head(tokens);
-        if (Option.isNone(first)) return null;
+        const latest = Arr.last(tokens);
+        if (Option.isNone(latest)) return null;
         return yield* kv.read<MagicLinkToken>(
-          magicLinkTokenKey(first.value),
+          magicLinkTokenKey(latest.value),
           "magicLink.getByEmail",
         );
       }),
@@ -705,8 +733,11 @@ const emailOtpFailuresKey = (email: string, purpose: EmailOtpPurpose) =>
  * the key itself and no secondary index is needed. The pair's failure budget
  * lives under its own `email-otp-failures:` key, so replacing or
  * deleting the OTP leaves it; `clearFailures` removes it, and
- * {@link purgeExpiredKV} once its backoff has long decayed. `incrementAttempts` and `recordFailure` are read-modify-write
- * (see the module docs on atomicity).
+ * {@link purgeExpiredKV} once its backoff has long decayed.
+ *
+ * **Development and single-process use only** (see the module docs): its
+ * counts are read-modify-write, so across processes parallel attempts share
+ * a count. In production use `./sql` or another store with atomic counters.
  */
 export const emailOtpStoreKV: Effect.Effect<
   typeof EmailOtpStore.Service,
@@ -761,7 +792,8 @@ export const emailOtpStoreKV: Effect.Effect<
 });
 
 /**
- * `EmailOtpStore` layer backed by `KeyValueStore`.
+ * `EmailOtpStore` layer backed by `KeyValueStore`. Development and
+ * single-process use only; see {@link emailOtpStoreKV}.
  */
 export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(EmailOtpStore, emailOtpStoreKV);
@@ -1141,6 +1173,10 @@ interface StoredPendingMultiFactor extends PendingMultiFactor {
 
 /**
  * Build a {@link PendingMultiFactorStore} over the ambient `KeyValueStore`.
+ *
+ * **Development and single-process use only** (see the module docs): its
+ * counts are read-modify-write, so across processes parallel attempts share
+ * a count. In production use `./sql` or another store with atomic counters.
  */
 export const pendingMultiFactorStoreKV: Effect.Effect<
   typeof PendingMultiFactorStore.Service,
@@ -1197,7 +1233,8 @@ export const pendingMultiFactorStoreKV: Effect.Effect<
 });
 
 /**
- * `PendingMultiFactorStore` layer backed by `KeyValueStore`.
+ * `PendingMultiFactorStore` layer backed by `KeyValueStore`. Development and
+ * single-process use only; see {@link pendingMultiFactorStoreKV}.
  */
 export const PendingMultiFactorStoreKV: Layer.Layer<
   PendingMultiFactorStore,
@@ -1254,6 +1291,12 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
 
 /**
  * Build an {@link IdentifierStore} over the ambient `KeyValueStore`.
+ *
+ * **Development and single-process use only** (see the module docs): a
+ * `KeyValueStore` has no unique index, so `create` and `replace` check that
+ * a value is free with a read before they write, and two processes can both
+ * claim one address. `byo-stores.md` makes a real unique constraint a must;
+ * in production use `./sql` or another store with one.
  *
  * Key layout:
  * - `identifier:${id}` — primary record (full `StoredIdentifier`)
@@ -1401,9 +1444,10 @@ export const identifierStoreKV: Effect.Effect<
 /**
  * `IdentifierStore` layer backed by `KeyValueStore`.
  *
- * Unlike the ephemeral stores in {@link layerKV}, identifier records are
- * long-lived. Provide this layer alongside a `KeyValueStore` backend that
- * persists data across restarts (file system, Redis, …).
+ * Development and single-process use only; see {@link identifierStoreKV}.
+ * Unlike the ephemeral stores, identifier records are long-lived, so even
+ * then give it a `KeyValueStore` backend that persists data across restarts
+ * (the file system, SQLite through `KeyValueStore.layerSql`).
  */
 export const IdentifierStoreKV: Layer.Layer<IdentifierStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(IdentifierStore, identifierStoreKV);
@@ -1455,29 +1499,40 @@ export const GoogleOneTapNonceStoreKV: Layer.Layer<
 // ---------------------------------------------------------------------------
 
 /**
- * Every ephemeral store in one layer, backed by the ambient `KeyValueStore`.
+ * The token and state stores, backed by the ambient `KeyValueStore`: OAuth
+ * states, WebAuthn challenges, email verification, password reset and
+ * magic-link tokens. This is the bundle for a deployment; it leaves out the
+ * counter stores, which are single-process only (see the module docs), so
+ * provide `RateLimitStore`, `EmailOtpStore` and `PendingMultiFactorStore`
+ * from `@thomasfosterau/effect-auth/sql` or another store with atomic counters.
+ * {@link layerKVSingleProcess} adds the KV counter stores, for development,
+ * tests and one process.
  *
- * Combine with a persistent backend (e.g. `@thomasfosterau/effect-auth/sql`'s user/session
- * stores) for a complete auth stack.
+ * Their single-use `consume` is atomic within one process (see the module
+ * docs), and an eventually consistent backend such as Cloudflare KV can hand
+ * a spent record out again, so keep these on a strongly consistent backend.
  */
 export const layerKV: Layer.Layer<
-  | OAuthStateStore
-  | ChallengeStore
-  | RateLimitStore
-  | EmailVerificationStore
-  | PasswordResetStore
-  | MagicLinkStore
-  | EmailOtpStore
-  | PendingMultiFactorStore,
+  OAuthStateStore | ChallengeStore | EmailVerificationStore | PasswordResetStore | MagicLinkStore,
   never,
   KeyValueStore.KeyValueStore
 > = Layer.mergeAll(
   OAuthStateStoreKV,
   ChallengeStoreKV,
-  RateLimitStoreKV,
   EmailVerificationStoreKV,
   PasswordResetStoreKV,
   MagicLinkStoreKV,
-  EmailOtpStoreKV,
-  PendingMultiFactorStoreKV,
 );
+
+/**
+ * {@link layerKV} and the KV counter stores (`RateLimitStoreKV`,
+ * `EmailOtpStoreKV`, `PendingMultiFactorStoreKV`): every ephemeral store over
+ * the ambient `KeyValueStore`. **Development, tests and a single process
+ * only**: across processes the counters' read-modify-write lets parallel
+ * guesses share a count (see the module docs).
+ */
+export const layerKVSingleProcess: Layer.Layer<
+  Layer.Success<typeof layerKV> | RateLimitStore | EmailOtpStore | PendingMultiFactorStore,
+  never,
+  KeyValueStore.KeyValueStore
+> = Layer.mergeAll(layerKV, RateLimitStoreKV, EmailOtpStoreKV, PendingMultiFactorStoreKV);

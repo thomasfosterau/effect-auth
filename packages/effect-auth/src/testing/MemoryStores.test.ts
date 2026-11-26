@@ -62,7 +62,7 @@ register(Testing.phoneOtpStoreConformance(), () =>
   Layer.succeed(PhoneOtpStore, Testing.memoryPhoneOtpStore()),
 );
 // The per-user deletes. `memoryStores` serves the email-verification
-// and password-reset stores from `layerKV`.
+// and password-reset stores from `layerKVSingleProcess`.
 register(Testing.oauthAccountStoreConformance(), () => Testing.memoryStores);
 register(Testing.credentialStoreConformance(), () => Testing.memoryStores);
 register(Testing.multiFactorStoreConformance(), () => Testing.memoryStores);
@@ -72,7 +72,7 @@ register(Testing.oidcConsentStoreConformance(), () => Testing.memoryStores);
 register(Testing.emailVerificationStoreConformance(), () => Testing.memoryStores);
 register(Testing.passwordResetStoreConformance(), () => Testing.memoryStores);
 register(Testing.accountManagementStoreConformance(), () => Testing.memoryStores);
-// The single-use consumes; `memoryStores` serves `MagicLinkStore` from `layerKV`.
+// The single-use consumes; `memoryStores` serves `MagicLinkStore` from `layerKVSingleProcess`.
 register(Testing.magicLinkStoreConformance(), () => Testing.memoryStores);
 register(Testing.oidcCodeStoreConformance(), () => Testing.memoryStores);
 

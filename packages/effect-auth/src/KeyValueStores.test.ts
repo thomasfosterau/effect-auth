@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing";
 import { KeyValueStore } from "effect/persistence";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
-  layerKV,
+  layerKVSingleProcess,
   OAuthStateStoreKV,
   ChallengeStoreKV,
   RateLimitStoreKV,
@@ -39,7 +39,7 @@ import { GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as Errors from "./Errors.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
-const testLayer = () => layerKV.pipe(Layer.provide(KeyValueStore.layerMemory));
+const testLayer = () => layerKVSingleProcess.pipe(Layer.provide(KeyValueStore.layerMemory));
 
 const run = <A, E>(
   effect: Effect.Effect<
@@ -74,6 +74,36 @@ describe("KeyValueStores", () => {
     expect(MagicLinkStoreKV).toBeDefined();
     expect(EmailOtpStoreKV).toBeDefined();
     expect(PendingMultiFactorStoreKV).toBeDefined();
+  });
+
+  describe("a failing backend", () => {
+    const backendError = new KeyValueStore.KeyValueStoreError({ message: "down", method: "get" });
+    const failing = KeyValueStore.makeStringOnly({
+      get: () => Effect.fail(backendError),
+      set: () => Effect.void,
+      remove: () => Effect.void,
+      clear: Effect.void,
+      size: Effect.succeed(0),
+      keys: Effect.succeed([]),
+    });
+    const failingLayer = layerKVSingleProcess.pipe(
+      Layer.provide(Layer.succeed(KeyValueStore.KeyValueStore, failing)),
+    );
+    const flip = <A>(
+      effect: Effect.Effect<A, Errors.AuthError, Layer.Success<typeof failingLayer>>,
+    ) => Effect.runPromise(Effect.flip(effect).pipe(Effect.provide(failingLayer)));
+
+    it("fails a challenge read with an AuthError that keeps the cause", async () => {
+      const error = await flip(ChallengeStore.use((store) => store.get(new Uint8Array([1]))));
+      expect(error).toBeInstanceOf(Errors.AuthError);
+      expect(error.cause).toBe(backendError);
+    });
+
+    it("fails a rate-limit read with an AuthError rather than a defect", async () => {
+      const error = await flip(RateLimitStore.use((store) => store.get("k")));
+      expect(error).toBeInstanceOf(Errors.AuthError);
+      expect(error.cause).toBe(backendError);
+    });
   });
 
   describe("OAuthStateStoreKV", () => {
@@ -200,7 +230,9 @@ describe("KeyValueStores", () => {
             yield* store.get(new Uint8Array([1, 2, 3])),
             yield* store.get(new Uint8Array([4, 5, 6])),
           ];
-        }).pipe(Effect.provide(Layer.provideMerge(layerKV, KeyValueStore.layerMemory))),
+        }).pipe(
+          Effect.provide(Layer.provideMerge(layerKVSingleProcess, KeyValueStore.layerMemory)),
+        ),
       );
       expect(loaded).toEqual([null, null]);
     });
@@ -359,6 +391,18 @@ describe("KeyValueStores", () => {
       expect(result.afterDelete).toBeNull();
       expect(result.two).toBeNull();
       expect(result.three?.email).toBe("b@example.com");
+    });
+
+    it("getByEmail returns the newest token for the address", async () => {
+      const latest = await run(
+        Effect.gen(function* () {
+          const store = yield* MagicLinkStore;
+          yield* store.create(link("ml-old", "a@example.com"));
+          yield* store.create(link("ml-new", "a@example.com"));
+          return yield* store.getByEmail("a@example.com");
+        }),
+      );
+      expect(latest?.token).toBe("ml-new");
     });
   });
 
@@ -749,7 +793,7 @@ describe("KeyValueStores", () => {
           Effect.provide(
             Layer.merge(
               Layer.provideMerge(
-                Layer.merge(layerKV, GoogleOneTapNonceStoreKV),
+                Layer.merge(layerKVSingleProcess, GoogleOneTapNonceStoreKV),
                 layerMemoryKeyValueStore,
               ),
               TestClock.layer(),
