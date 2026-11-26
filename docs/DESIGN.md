@@ -21,8 +21,8 @@ const app = Effect.gen(function* () {
 - **Service access:** `yield* Auth.X` where `X` is the service name
   (`SessionService`, `EmailPasswordService`, `WebAuthnService`, …).
 - **Layer construction:** `Auth.X.layer(config)` — a `static` on the service class,
-  mirroring `Hooks.Default` (core) and `WorkOS.layer/layerOptions/layerClient`
-  (`packages/workos/src/WorkOS.ts:246`), which already follow the Effect v4 idiom.
+  mirroring `Hooks.Default` (core) and `WorkOSClient.layer/layerHttpClient/layerConfig`
+  (`packages/workos/src/WorkOS.ts`), which already follow the Effect v4 idiom.
 - **Stores:** you implement a value of type `typeof Auth.XStore.Service` (no
   separate `XStoreShape` interface) and provide it with
   `Layer.succeed(Auth.XStore)(impl)` or a first-party layer from
@@ -130,7 +130,7 @@ plus `PasswordHasherLive`/`PBKDF2HasherLive` (`password/Password.ts` (then flat 
 
 - Canonical construction is `X.layer(...)` per D1. Where a module offers several
   implementations, statics are named `layer<Variant>` (`layerOptions`,
-  `layerClient` — the WorkOS precedent).
+  `layerHttpClient` — the WorkOS precedent).
 - Standalone cross-module layers (see coverage rule above) keep the
   `<What>Layer` PascalCase-value convention; a **function** returning a layer is
   named `<What>Layer(args)` too (the call site reads identically).
@@ -479,16 +479,16 @@ harms (skew + docs pollution).
 
 **Status quo & decision per package** (drift evidence:
 `sql/Stores.ts:1005–1085`, `alchemy/Stores.ts:860–892`, `argon2/Argon2.ts:52,101`,
-`siwe/SiweVerifier.ts:71–80`, `workos/WorkOS.ts:246–271`):
+`siwe/SiweVerifier.ts:71–80`, `workos/WorkOS.ts`):
 
-| Package   | Today                                                                                                         | Settled                                                                                                                  |
-| --------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `sql`     | 20 `XStoreLayer` values + lowercase aggregate `layer`                                                         | Keep; `layer` as the aggregate name matches Effect convention for a package's primary layer                              |
-| `alchemy` | `XStoreLayer(db)` functions + `layer(db)`                                                                     | Keep shape (D1 binding is a required argument); document that `XStoreLayer` may be value _or_ function per package needs |
-| `argon2`  | `makeArgon2Hasher(opts?)` plain + `Argon2HasherLayer(opts?)` function                                         | Keep; matches hasher family style                                                                                        |
-| `siwe`    | curried `Layer.succeed(Tag)(value)`                                                                           | Keep — the curried form is also used throughout core tests; both `Layer.succeed` call forms are acceptable               |
-| `workos`  | `Context.Service` class + `static layer/layerOptions/layerClient`, own `WorkOSError`, effect `Config` for env | **This is the reference implementation** of the settled idiom                                                            |
-| `client`  | `createAuthClient` factory, plain `AuthClientError extends Error`                                             | Keep — deliberately Effect-free for the browser bundle; the plain Error is intentional and documented                    |
+| Package   | Today                                                                                                            | Settled                                                                                                                  |
+| --------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `sql`     | 20 `XStoreLayer` values + lowercase aggregate `layer`                                                            | Keep; `layer` as the aggregate name matches Effect convention for a package's primary layer                              |
+| `alchemy` | `XStoreLayer(db)` functions + `layer(db)`                                                                        | Keep shape (D1 binding is a required argument); document that `XStoreLayer` may be value _or_ function per package needs |
+| `argon2`  | `makeArgon2Hasher(opts?)` plain + `Argon2HasherLayer(opts?)` function                                            | Keep; matches hasher family style                                                                                        |
+| `siwe`    | curried `Layer.succeed(Tag)(value)`                                                                              | Keep — the curried form is also used throughout core tests; both `Layer.succeed` call forms are acceptable               |
+| `workos`  | `Context.Service` class + `static layer/layerHttpClient/layerConfig`, own `WorkOSError`, effect `Config` for env | **This is the reference implementation** of the settled idiom                                                            |
+| `client`  | `createAuthClient` factory, plain `AuthClientError extends Error`                                                | Keep — deliberately Effect-free for the browser bundle; the plain Error is intentional and documented                    |
 
 Shared rules applied to all: config = plain `XConfig`/`XOptions` interfaces;
 errors reuse core tags unless the package wraps a foreign SDK (workos);

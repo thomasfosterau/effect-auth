@@ -742,8 +742,11 @@ describe("RemoteJwksVerifier", () => {
   // A third-party issuer signing with RS256, which JwtService never does.
   const rsa = testJwsKeyPair("RS256");
   const rsaJwks = { keys: [{ ...rsa.publicKeyJwk, kid: "rsa-1", alg: "RS256", use: "sig" }] };
-  const rsaSigned = (claims: Schema.JsonObject): string => {
-    const input = `${b64({ alg: "RS256", kid: "rsa-1", typ: "at+jwt" })}.${b64(claims)}`;
+  const rsaSigned = (
+    claims: Schema.JsonObject,
+    header: Schema.JsonObject = { alg: "RS256", kid: "rsa-1", typ: "at+jwt" },
+  ): string => {
+    const input = `${b64(header)}.${b64(claims)}`;
     const signature = testSignJws("RS256", Buffer.from(input), rsa.privateKeyPem);
     return `${input}.${Buffer.from(signature).toString("base64url")}`;
   };
@@ -998,6 +1001,35 @@ describe("RemoteJwksVerifier", () => {
 
     assert(Result.isFailure(result));
     expect(result.failure.message).toContain("Token type");
+  });
+
+  it("checks no typ with tokenType null, and still checks the issuer", async () => {
+    const untyped = { alg: "RS256", kid: "rsa-1" };
+    const verifyWith = (tokenType: string | null | undefined, issuer: string, token: string) =>
+      runVerifier(
+        Effect.result(
+          Effect.gen(function* () {
+            const verifier = yield* Jwt.remoteJwksVerifier({
+              jwksUri: rsaJwksUrl,
+              issuer,
+              ...(tokenType !== undefined && { tokenType }),
+            });
+            return yield* verifier.verify(token);
+          }),
+        ),
+      );
+    const token = rsaSigned(rsaClaims(), untyped);
+
+    const refused = await verifyWith(undefined, baseConfig.issuer, token);
+    assert(Result.isFailure(refused));
+    expect(refused.failure.message).toContain("Token type");
+
+    const accepted = await verifyWith(null, baseConfig.issuer, token);
+    assert(Result.isSuccess(accepted));
+    expect(accepted.success["sub"]).toBe("rsa-user");
+
+    const wrongIssuer = await verifyWith(null, "https://wrong-issuer.example.com", token);
+    assert(Result.isFailure(wrongIssuer));
   });
 
   it("should reject an issuer mismatch via the remote verifier", async () => {

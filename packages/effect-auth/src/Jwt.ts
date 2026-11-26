@@ -612,9 +612,11 @@ export interface RemoteJwksConfig {
   /**
    * The `typ` header a token must carry (default: {@link ACCESS_TOKEN_TYPE}).
    * Media types compare case-insensitively and without the `application/`
-   * prefix, so an `id_token` (`typ: "JWT"`) is refused by default.
+   * prefix, so an `id_token` (`typ: "JWT"`) is refused by default. `null`
+   * skips the check, for an issuer whose access tokens carry no `typ` (WorkOS);
+   * the issuer, signature and `exp` are checked whatever it says.
    */
-  readonly tokenType?: string;
+  readonly tokenType?: string | null;
 }
 
 /**
@@ -667,7 +669,7 @@ export const remoteJwksVerifier = (
     );
     const signature = yield* Signature.Signature;
     const options: JoseJwt.VerifyWithKeySetOptions = {
-      typ: config.tokenType ?? ACCESS_TOKEN_TYPE,
+      ...(config.tokenType !== null && { typ: config.tokenType ?? ACCESS_TOKEN_TYPE }),
       algorithms: config.algorithms ?? ["RS256", "ES256", "EdDSA"],
       issuer: config.issuer,
       ...(config.audience !== undefined && { audience: config.audience }),

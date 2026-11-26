@@ -2829,13 +2829,14 @@ export const deviceSessionsGroupLayer = (
           const { active, tokens } = yield* deviceTokens(request);
           const activeId = active === undefined ? undefined : yield* digestToken(active);
           const sessionManager = yield* SessionService;
-          const valid = Arr.getSomes(
+          const validated = Arr.getSomes(
             yield* Effect.forEach(
               tokens,
               // A token that no longer validates is left out; a store fault
               // is a 500, not a shorter list.
               (token) =>
                 sessionManager.validateSession(token).pipe(
+                  Effect.map((validated) => ({ token, validated })),
                   Effect.asSome,
                   Effect.catch(sessionValidationFailure),
                   Effect.catchTags({
@@ -2846,6 +2847,11 @@ export const deviceSessionsGroupLayer = (
               { concurrency: 1 },
             ),
           );
+          const reissues = Arr.flatMap(validated, ({ token, validated: { reissued } }) =>
+            reissued === undefined ? [] : [{ presented: token, issued: reissued }],
+          );
+          if (Arr.isArrayNonEmpty(reissues)) yield* reissueSessionCredentials(cfg, reissues);
+          const valid = validated.map(({ validated: { session, user } }) => ({ session, user }));
           const users = yield* Effect.forEach(
             Arr.dedupeWith(
               valid.map(({ user }) => user),
@@ -2895,10 +2901,17 @@ export const deviceSessionsGroupLayer = (
               AuthError: internalServerError,
             }),
           );
+          // A credential reissued as it was read is the one to switch to.
+          const active = resolved.reissued ?? { session: resolved.session, token: token.value };
+          if (resolved.reissued !== undefined) {
+            yield* reissueSessionCredentials(cfg, [
+              { presented: token.value, issued: resolved.reissued },
+            ]);
+          }
           yield* setResponseCookie(
             cfg.name,
-            token.value,
-            sessionCookieOptions(cfg, resolved.session.expiresAt),
+            active.token,
+            sessionCookieOptions(cfg, active.session.expiresAt),
           );
           // The cached session data describes the previous account.
           return yield* cfg.cache === undefined
@@ -5253,7 +5266,7 @@ const resolveSession = (
     readonly token: string;
   },
   S.Unauthorized | S.InternalServerError,
-  SessionService | Hooks
+  SessionService | Hooks | HttpServerRequest.HttpServerRequest
 > =>
   Effect.gen(function* () {
     const token = sessionIdFromRequest(request, cfg);
@@ -5272,13 +5285,13 @@ const resolveSession = (
       if (Option.isSome(resolved)) return { resolved: resolved.value, cacheHit: true, token };
     }
     const sessionManager = yield* SessionService;
-    const resolved = yield* sessionManager
+    const validated = yield* sessionManager
       .validateSession(token)
       .pipe(
         Effect.catch(sessionValidationFailure),
         Effect.catchTag("AuthError", internalServerError),
       );
-    return { resolved, cacheHit: false, token };
+    return { resolved: yield* carryReissued(cfg, token, validated), cacheHit: false, token };
   });
 
 const requireSession = (
@@ -5287,7 +5300,7 @@ const requireSession = (
 ): Effect.Effect<
   Types.SessionWithUser,
   S.Unauthorized | S.InternalServerError,
-  SessionService | Hooks
+  SessionService | Hooks | HttpServerRequest.HttpServerRequest
 > => resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /**
@@ -5404,6 +5417,88 @@ const decorateSessionResponse = (
     }
     return withNoStore(response);
   }).pipe(Effect.orDie);
+
+/** A credential `validateSession` replaced: the token presented and its replacement. */
+interface Reissue {
+  readonly presented: string;
+  readonly issued: Types.IssuedSession;
+}
+
+/**
+ * Carry the credentials `validateSession` replaced on the response: the
+ * session cookie when the request carried a replaced token there, its place
+ * in the device's multi-session list, and the `set-auth-token` header when
+ * the request presented it as a bearer token (bearer mode on) or bearer mode is
+ * `"always"`. Marked `no-store`, like every response that sets a cookie. A
+ * backend whose credential changes as it is read (a sealed cookie holding a
+ * refreshed access token) needs it, or the next request presents the spent
+ * one. One call carries every reissue of a request, so the list is written
+ * once.
+ */
+const reissueSessionCredentials = (
+  cfg: ResolvedCookieConfig,
+  reissues: ReadonlyArray<Reissue>,
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((request, response) =>
+    Effect.gen(function* () {
+      const replaced = (token: string) => reissues.find((r) => r.presented === token);
+      let next = response;
+      const cookieToken = request.cookies[cfg.name];
+      const fromCookie = cookieToken === undefined ? undefined : replaced(cookieToken);
+      if (fromCookie !== undefined) {
+        next = yield* HttpServerResponse.setCookie(
+          next,
+          cfg.name,
+          fromCookie.issued.token,
+          sessionCookieOptions(cfg, fromCookie.issued.session.expiresAt),
+        );
+      }
+      const listed = readDeviceSessionIds(request, cfg);
+      const latest = reissues.at(-1);
+      if (
+        cfg.multiSession !== undefined &&
+        latest !== undefined &&
+        listed.some((id) => replaced(id) !== undefined)
+      ) {
+        next = yield* HttpServerResponse.setCookie(
+          next,
+          multiCookieName(cfg),
+          listed.map((id) => replaced(id)?.issued.token ?? id).join("."),
+          sessionCookieOptions(cfg, latest.issued.session.expiresAt),
+        );
+      }
+      const presentedToken = sessionIdFromRequest(request, cfg);
+      const primary = presentedToken === undefined ? undefined : replaced(presentedToken);
+      const bearer = primary !== undefined && presentedToken !== cookieToken;
+      if (
+        primary !== undefined &&
+        (cfg.bearerMode === "always" ||
+          (cfg.bearerMode === "opt-in" && (bearer || request.headers["x-use-bearer"] === "1")))
+      ) {
+        next = HttpServerResponse.setHeader(next, BEARER_TOKEN_HEADER, primary.issued.token);
+      }
+      return withNoStore(next);
+    }).pipe(Effect.orDie),
+  );
+
+/**
+ * The session and user of a validation, with any reissued credential carried
+ * on the response ({@link reissueSessionCredentials}) and left out of the
+ * value, so no handler can put it in a body.
+ *
+ * @internal
+ */
+export const carryReissued = (
+  cfg: ResolvedCookieConfig,
+  presented: string,
+  { session, user, reissued }: Types.ValidatedSession,
+): Effect.Effect<Types.SessionWithUser, never, HttpServerRequest.HttpServerRequest> =>
+  reissued === undefined
+    ? Effect.succeed({ session, user })
+    : Effect.as(reissueSessionCredentials(cfg, [{ presented, issued: reissued }]), {
+        session,
+        user,
+      });
 
 // -----------------------------------------------------------------------------
 // Web handler

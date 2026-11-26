@@ -64,6 +64,7 @@ const allTargets: ReadonlyArray<Target> = [
   { dir: "argon2" },
   { dir: "better-auth", peers: ["better-auth"] },
   { dir: "sveltekit" },
+  { dir: "workos" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
   { dir: "alchemy-cloudflare", peers: ["alchemy", "@alchemy.run/cloudflare"] },
   { dir: "alchemy-postgres", peers: ["alchemy", "@effect/sql-pg"] },

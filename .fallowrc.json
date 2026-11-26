@@ -16,7 +16,7 @@
     "packages/effect-auth/src/sql/index.ts",
     "packages/effect-auth/src/saml/index.ts",
     "packages/effect-auth/src/password/Scrypt.ts",
-    "packages/{alchemy-cloudflare,alchemy-postgres,argon2,better-auth,drizzle,resend,svelte,sveltekit,twilio}/src/index.ts",
+    "packages/{alchemy-cloudflare,alchemy-postgres,argon2,better-auth,drizzle,resend,svelte,sveltekit,twilio,workos}/src/index.ts",
     "packages/*/src/**/PgliteTemplate.setup.ts",
     "packages/*/src/**/*.test.ts",
     "packages/svelte/scripts/postbuild.mjs",
@@ -97,7 +97,7 @@
       },
       {
         "name": "backend-adapters",
-        "patterns": ["packages/better-auth/**"]
+        "patterns": ["packages/better-auth/**", "packages/workos/**"]
       },
       {
         "name": "server-bindings",

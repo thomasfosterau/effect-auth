@@ -566,6 +566,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-drizzle#check",
           "@thomasfosterau/effect-auth-svelte#check",
           "@thomasfosterau/effect-auth-sveltekit#check",
+          "@thomasfosterau/effect-auth-workos#check",
         ],
       },
       // The API reference for every package; only the core's examples run.
@@ -580,6 +581,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-drizzle#docs",
           "@thomasfosterau/effect-auth-svelte#docs",
           "@thomasfosterau/effect-auth-sveltekit#docs",
+          "@thomasfosterau/effect-auth-workos#docs",
         ],
       },
       "check:dist": { command: "vpx scripts/check-dist.ts", cache: false },
@@ -621,6 +623,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-drizzle#build",
           "@thomasfosterau/effect-auth-svelte#build",
           "@thomasfosterau/effect-auth-sveltekit#build",
+          "@thomasfosterau/effect-auth-workos#build",
         ],
         cache: false,
       },

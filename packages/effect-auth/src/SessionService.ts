@@ -343,11 +343,15 @@ export class SessionService extends Context.Service<
      * and can only deny: its return value is not read back. Fails with
      * `UserBannedError` when the user is banned or SCIM-deactivated, with no
      * plugin needed.
+     *
+     * Another implementation may replace the credential as it reads it and
+     * answer the new one in `reissued` (see `Types.ValidatedSession`); this
+     * one never does.
      */
     readonly validateSession: (
       token: string,
     ) => Effect.Effect<
-      Types.SessionWithUser,
+      Types.ValidatedSession,
       | Errors.SessionNotFoundError
       | Errors.SessionExpiredError
       | Errors.UserNotFoundError
