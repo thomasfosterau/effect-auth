@@ -327,7 +327,7 @@ export interface OwnedAccess<Id> {
  * @since 0.1.0
  * @category models
  */
-export interface OwnedAccessOptions<Id, User extends Guard.ViewerShape, Rung extends string> {
+export interface OwnedAccessOptions<Id, User extends Guard.Viewer, Rung extends string> {
   readonly guards: Guard.Guards<Id, User, Rung>;
   /** The axis that sees other members' `private`, `followers` and `group` material, drafts and unapproved rows. */
   readonly viewPrivate: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>;
@@ -438,7 +438,7 @@ const questionsFor = (row: OwnedRow): RelationQuestions => {
  * @since 0.1.0
  * @category constructors
  */
-export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
+export const make = <Id, User extends Guard.Viewer, Rung extends string>(
   options: OwnedAccessOptions<Id, User, Rung>,
 ): OwnedAccess<Id> => {
   const { guards, viewPrivate } = options;

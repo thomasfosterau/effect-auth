@@ -121,7 +121,6 @@ export default defineConfig({
       "effect/prefer-namespace-imports": "error",
       // Renaming these would change the published API or the wire format.
       "effect/require-is-prefix-for-boolean-schema-field": "off",
-      "effect/no-shape-in-symbol-names": "off",
       "effect/no-object-parameters": "off",
       "effect/no-known-value-widening": "off",
       // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
@@ -305,6 +304,12 @@ export default defineConfig({
           "packages/alchemy-postgres/src/AuthSchema.test.ts",
         ],
         rules: { "effecttsgo/unsafe-effect-type-assertion": "off" },
+      },
+      {
+        // Third-party API boundary: `Context.ServiceClass.Shape` is Effect's
+        // name for a service key's type, which the guard instance extends.
+        files: ["packages/effect-auth/src/http/AuthorizationMiddleware.ts"],
+        rules: { "effect/no-shape-in-symbol-names": "off" },
       },
       {
         // drizzle-orm types its Effect drivers' error channel as `unknown`

@@ -218,12 +218,12 @@ export type CredentialError =
   | Auth.EmailInUseError
   | Auth.EmailNotVerifiedError;
 
-interface ApiErrorShape {
+interface ApiErrorLike {
   readonly statusCode: number;
   readonly body?: { readonly code?: unknown; readonly message?: unknown };
 }
 
-const isApiError = (error: unknown): error is ApiErrorShape =>
+const isApiError = (error: unknown): error is ApiErrorLike =>
   P.isObject(error) && P.isNumber(error["statusCode"]);
 
 /**

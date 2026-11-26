@@ -500,7 +500,7 @@ const refusals = <A>(
   );
 
 /** An error's tag and message: its own equality ignores the message. */
-const errorShape = (error: { readonly _tag: string; readonly message: string }) => ({
+const errorSummary = (error: { readonly _tag: string; readonly message: string }) => ({
   tag: error._tag,
   message: error.message,
 });
@@ -516,8 +516,8 @@ const expectAlike = (
   message: string,
 ) => {
   const expected = { tag: "OrganizationError", message };
-  expect(errorShape(refused.unknown)).toEqual(expected);
-  expect(refused.others.map(errorShape)).toEqual(refused.others.map(() => expected));
+  expect(errorSummary(refused.unknown)).toEqual(expected);
+  expect(refused.others.map(errorSummary)).toEqual(refused.others.map(() => expected));
 };
 
 /** The refusal of an operation needing `permission`. */
@@ -3499,7 +3499,7 @@ describe("OrganizationService membership and invitation limits", () => {
       }),
     );
 
-    expect(result.refused.map(errorShape)).toEqual(
+    expect(result.refused.map(errorSummary)).toEqual(
       result.refused.map(() => ({ tag: "OrganizationError", message: refusal })),
     );
     expect(result.byDomain.userId).toBe("domain-user");
@@ -3537,9 +3537,11 @@ describe("OrganizationService membership and invitation limits", () => {
     );
 
     expect(result.teamsAfter).toEqual([]);
-    expect(errorShape(result.leftAgain).message).toBe("You are not a member of this organization");
-    expect(errorShape(result.stranger).message).toBe("You are not a member of this organization");
-    expect(errorShape(result.lastOwner).message).toMatch(/last owner .* cannot leave/);
+    expect(errorSummary(result.leftAgain).message).toBe(
+      "You are not a member of this organization",
+    );
+    expect(errorSummary(result.stranger).message).toBe("You are not a member of this organization");
+    expect(errorSummary(result.lastOwner).message).toMatch(/last owner .* cannot leave/);
     expect(result.full.members.map((member) => member.userId)).toEqual(["admin-1"]);
   });
 
@@ -3565,8 +3567,8 @@ describe("OrganizationService membership and invitation limits", () => {
     );
 
     const capped = "Organization has reached its pending invitation limit";
-    expect(errorShape(result.third).message).toBe(capped);
-    expect(errorShape(result.revived).message).toBe(capped);
+    expect(errorSummary(result.third).message).toBe(capped);
+    expect(errorSummary(result.revived).message).toBe(capped);
   });
 
   it("waits out the resend cooldown per address, across a cancel and re-invite", async () => {
@@ -3637,8 +3639,8 @@ describe("OrganizationService membership and invitation limits", () => {
     );
 
     const stale = "This invitation is no longer valid; ask for a new one";
-    expect(errorShape(result.demoted).message).toBe(stale);
-    expect(errorShape(result.removed).message).toBe(stale);
+    expect(errorSummary(result.demoted).message).toBe(stale);
+    expect(errorSummary(result.removed).message).toBe(stale);
     expect(result.resent.inviterId).toBe("owner-1");
     expect(result.member.role).toBe("admin");
   });
@@ -3655,7 +3657,7 @@ describe("OrganizationService membership and invitation limits", () => {
       }),
     );
 
-    expect(errorShape(result).message).toMatch(/'owner' role/);
+    expect(errorSummary(result).message).toMatch(/'owner' role/);
   });
 
   it("counts only owned and accepted organizations toward the organization limit", async () => {
@@ -3688,6 +3690,6 @@ describe("OrganizationService membership and invitation limits", () => {
       }),
     );
 
-    expect(errorShape(result).message).toBe("You have reached the maximum of 2 organizations");
+    expect(errorSummary(result).message).toBe("You have reached the maximum of 2 organizations");
   });
 });
