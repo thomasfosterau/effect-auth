@@ -5,12 +5,20 @@
  * Lets tenants bring their own identity provider: register a per-organization
  * connection, route sign-ins by email domain, and provision users (and,
  * optionally, organization members) on first login. Both protocols converge on
- * the same provisioning tail — find-or-create by IdP-verified email, claim the
- * identifier as verified, optionally add the user to the connection's
+ * the same provisioning tail — refuse an address the connection does not
+ * manage, find-or-create by IdP-verified email, claim the identifier as
+ * verified, optionally add the user to the connection's
  * organization, add just-in-time memberships for organizations that have
  * verified the address's domain and opted into JIT, then mint a session. JIT
  * failures never fail the sign-in: membership is fail-open, authentication is
  * not.
+ *
+ * A connection signs in only addresses its tenant manages
+ * ({@link module:managed-user}): an address on one of the connection's
+ * organization's verified domains, or one held by a user that organization's
+ * SSO provider or SCIM connection created. A connection registered without an
+ * organization is bound to its own `domain`, which the platform admin who
+ * registered it vouched for, and to the users it created itself.
  *
  * An **OIDC** connection is, under the hood, a dynamically-registered OAuth
  * provider, so that half reuses the machinery in {@link module:oauth} —
@@ -47,7 +55,18 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as RootSecret from "./RootSecret.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
-import { OrganizationService, OrganizationStore, type Member } from "./Organization.ts";
+import {
+  OrganizationDomainStore,
+  OrganizationService,
+  OrganizationStore,
+  type Member,
+} from "./Organization.ts";
+import {
+  isOnDomains,
+  provisionedBy,
+  provisionedByAttributes,
+  verifiedDomains,
+} from "./ManagedUser.ts";
 import {
   defaultClockSkewMs,
   SamlReplayStore,
@@ -95,6 +114,12 @@ export interface OidcSsoProvider {
   readonly jwksEndpoint?: string;
   readonly scopes: readonly string[];
   readonly usePKCE: boolean;
+  /**
+   * Refuse a profile whose `email_verified` is not `true`. Absent means
+   * `true`; set `false` only for an IdP that never sends the claim and
+   * verifies every address it holds.
+   */
+  readonly requireEmailVerified?: boolean | undefined;
   /** Organization to add the user to on first login (with {@link defaultRole}). */
   readonly organizationId?: string;
   /** User id of the admin who registered the connection. */
@@ -187,6 +212,8 @@ export interface RegisterProviderInput {
   readonly jwksEndpoint?: string;
   readonly scopes?: readonly string[];
   readonly usePKCE?: boolean;
+  /** See {@link OidcSsoProvider.requireEmailVerified}. Default `true`. */
+  readonly requireEmailVerified?: boolean | undefined;
   readonly organizationId?: string;
 }
 
@@ -524,6 +551,54 @@ export const make = (
       );
     });
 
+    /** Add a user the connection just created to the connection's organization, if it has one. */
+    const joinConnectionOrganization = Effect.fn("SsoService.joinConnectionOrganization")(
+      function* (provider: SsoProvider, userId: string) {
+        if (provider.organizationId === undefined) return;
+        const orgStore = yield* Effect.serviceOption(OrganizationStore);
+        if (Option.isNone(orgStore)) return;
+        const existing = yield* orgStore.value.getMember(provider.organizationId, userId);
+        if (existing !== null) return;
+        const organization =
+          config.defaultRole !== undefined
+            ? null
+            : yield* orgStore.value.getOrganizationById(provider.organizationId);
+        const member: Member = {
+          id: yield* randomId(),
+          organizationId: provider.organizationId,
+          userId,
+          role: config.defaultRole ?? organization?.defaultRole ?? "member",
+          status: "active",
+          createdAt: yield* Clock.currentTimeMillis,
+        };
+        yield* orgStore.value.createMember(member);
+      },
+    );
+
+    /**
+     * Whether the connection may sign in as `email`: the address is on the
+     * tenant's domains (the organization's verified claims, else the
+     * connection's own `domain`), or its holder was created by the tenant.
+     */
+    const managesAddress = Effect.fn("SsoService.managesAddress")(function* (
+      provider: SsoProvider,
+      email: string,
+      owner: Types.User | null,
+    ) {
+      const stamp = owner === null ? null : provisionedBy(owner);
+      if (provider.organizationId === undefined) {
+        if (stamp?.kind === "sso" && stamp.connectionId === provider.id) return true;
+        return isOnDomains(email, [provider.domain]);
+      }
+      if (stamp?.organizationId === provider.organizationId) return true;
+      const domainStore = yield* Effect.serviceOption(OrganizationDomainStore);
+      const domains = yield* verifiedDomains(
+        Option.getOrUndefined(domainStore),
+        provider.organizationId,
+      );
+      return isOnDomains(email, domains);
+    });
+
     /**
      * The tail both protocols share: find-or-create the user by an
      * IdP-verified email, promote the identifier to verified, provision org
@@ -558,6 +633,12 @@ export const make = (
         email,
         () => new SsoError({ message: "Account is unavailable" }),
       );
+      if (!(yield* managesAddress(provider, email, owner))) {
+        return yield* new SsoError({
+          message: "This SSO connection does not manage that email address",
+        });
+      }
+
       let user = owner;
       const isNewUser = user === null;
       if (user === null) {
@@ -569,6 +650,13 @@ export const make = (
             userStore.createUser({
               ...(profile.name !== undefined && { name: profile.name }),
               ...(profile.image !== undefined && { image: profile.image }),
+              attributes: provisionedByAttributes({
+                kind: "sso",
+                connectionId: provider.id,
+                ...(provider.organizationId !== undefined && {
+                  organizationId: provider.organizationId,
+                }),
+              }),
               identifier,
             }),
         ).pipe(
@@ -584,27 +672,7 @@ export const make = (
       }
 
       // Provision organization membership on first login when configured.
-      if (isNewUser && provider.organizationId !== undefined) {
-        const orgStore = yield* Effect.serviceOption(OrganizationStore);
-        if (Option.isSome(orgStore)) {
-          const existing = yield* orgStore.value.getMember(provider.organizationId, user.id);
-          if (existing === null) {
-            const organization =
-              config.defaultRole !== undefined
-                ? null
-                : yield* orgStore.value.getOrganizationById(provider.organizationId);
-            const member: Member = {
-              id: yield* randomId(),
-              organizationId: provider.organizationId,
-              userId: user.id,
-              role: config.defaultRole ?? organization?.defaultRole ?? "member",
-              status: "active",
-              createdAt: yield* Clock.currentTimeMillis,
-            };
-            yield* orgStore.value.createMember(member);
-          }
-        }
-      }
+      if (isNewUser) yield* joinConnectionOrganization(provider, user.id);
 
       // Just-in-time membership from a verified email domain. Opt-in per
       // organization, and deliberately fail-open: a domain lookup that errors
@@ -700,6 +768,7 @@ export const make = (
           ...(jwksEndpoint !== undefined && { jwksEndpoint }),
           scopes: input.scopes ?? defaultScopes,
           usePKCE: input.usePKCE ?? true,
+          ...(input.requireEmailVerified === false && { requireEmailVerified: false }),
           ...(input.organizationId !== undefined && { organizationId: input.organizationId }),
           userId: registrarUserId,
           createdAt: yield* Clock.currentTimeMillis,
@@ -884,7 +953,12 @@ export const make = (
             Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
           );
 
-        if (profile.email === undefined || profile.email_verified === false) {
+        // A missing claim is not a verified address, unless the connection
+        // opted out for an IdP that never sends it.
+        const verified =
+          profile.email_verified === true ||
+          (provider.requireEmailVerified === false && profile.email_verified !== false);
+        if (profile.email === undefined || !verified) {
           return yield* new SsoError({
             message: "SSO provider did not return a verified email address",
           });

@@ -3465,6 +3465,7 @@ const oidcRegistration = (
   ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
   ...(p.scopes !== undefined && { scopes: p.scopes }),
   ...(p.usePKCE !== undefined && { usePKCE: p.usePKCE }),
+  ...(p.requireEmailVerified !== undefined && { requireEmailVerified: p.requireEmailVerified }),
   ...(organizationId !== undefined && { organizationId }),
 });
 
