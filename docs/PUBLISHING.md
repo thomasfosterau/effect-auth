@@ -10,7 +10,7 @@ Releases use [Changesets](https://github.com/changesets/changesets) and npm trus
 
 1. **Settings → Actions → General**: allow GitHub Actions to create pull requests.
 2. **Settings → Environments**: create `release` with yourself as required reviewer, limited to `trunk`.
-3. Publish a placeholder of each of the seven packages once, so its npm settings exist, then add a trusted publisher for each: GitHub Actions, `thomasfosterau/effect-auth`, `release.yml`, environment `release`.
+3. On npm, give each package a trusted publisher: GitHub Actions, `thomasfosterau/effect-auth`, `release.yml`, environment `release`. All seven packages are on npm with one. A new package needs a placeholder published once by hand, so its npm settings exist, before its trusted publisher can be added.
 4. Protect `trunk`: pull requests and passing CI required.
 
 `vp pm publish -r` stops at the first failure, before `changeset git-tag` runs. If a name isn't set up, fix it and re-run the failed job; already-published versions are skipped.
