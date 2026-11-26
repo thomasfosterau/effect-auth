@@ -17,8 +17,11 @@ import {
   type Identifier,
 } from "./Identifier.ts";
 import {
+  memoryOrganizationDomainStore,
+  OrganizationDomainStore,
   OrganizationStore,
   type Member,
+  type OrganizationDomain,
   type Organization,
   type Team,
   type TeamMember,
@@ -27,6 +30,7 @@ import { PasswordHasher } from "./password/Password.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Scim from "./Scim.ts";
+import * as ManagedUser from "./ManagedUser.ts";
 import {
   memoryScimConnectionStore,
   ScimConnectionStore,
@@ -60,7 +64,13 @@ const ORG_B = "org-b";
  * members and teams — and dies loudly on the rest, so a test that accidentally
  * exercises an unmapped path fails instead of quietly succeeding.
  */
-const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } = {}) => {
+const makeStores = (
+  options: {
+    readonly oneEmailPerUser?: boolean | undefined;
+    /** Seed organization A's verified acme.test claim. Default `true`. */
+    readonly claimAcme?: boolean | undefined;
+  } = {},
+) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const memory = memoryIdentifierStore(identifierRecords);
@@ -210,7 +220,12 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     getOrganizationBySlug: unused,
     updateOrganization: unused,
     deleteOrganization: unused,
-    updateMember: unused,
+    updateMember: (member: Member) =>
+      Effect.sync(() => {
+        const i = members.findIndex((m) => m.id === member.id);
+        if (i >= 0) members[i] = member;
+        return member;
+      }),
     deleteMember: unused,
     listMembersByUser: unused,
     countMembersByOrganization: unused,
@@ -270,7 +285,28 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     return team;
   };
 
+  const domainRecords = MutableHashMap.empty<string, OrganizationDomain>();
+  /** Claim `domain` for `organizationId`, in the given verification state. */
+  const seedDomain = (
+    organizationId: string,
+    domain: string,
+    verificationState: OrganizationDomain["verificationState"] = "verified",
+  ): void => {
+    const id = `dom-${MutableHashMap.size(domainRecords) + 1}`;
+    MutableHashMap.set(domainRecords, id, {
+      id,
+      organizationId,
+      domain,
+      verificationState,
+      verificationStrategy: "manual",
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+    });
+  };
+  // Organization A holds acme.test, so it manages the addresses the cases use.
+  if (options.claimAcme !== false) seedDomain(ORG_A, "acme.test");
+
   const layer = Layer.mergeAll(
+    Layer.succeed(OrganizationDomainStore)(memoryOrganizationDomainStore(domainRecords)),
     Layer.succeed(ScimConnectionStore)(memoryScimConnectionStore(connectionRecords)),
     Layer.succeed(ScimUserStore)(userStore),
     Layer.succeed(IdentifierStore)(identifiers),
@@ -312,6 +348,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     connectionRecords,
     seedUser,
     seedTeam,
+    seedDomain,
   };
 };
 
@@ -1516,5 +1553,208 @@ describe("HTTP SCIM endpoints", () => {
       "urn:ietf:params:scim:schemas:core:2.0:Group",
     ]);
     expect(schemasBody.Resources[0]?.attributes.map((a) => a.name)).toContain("userName");
+  });
+});
+
+const userOf = (fx: Awaited<ReturnType<typeof makeFixture>>, id: string) =>
+  Option.getOrUndefined(MutableHashMap.get(fx.usersById, id));
+
+const failure = async (
+  fx: Awaited<ReturnType<typeof makeFixture>>,
+  effect: Effect.Effect<unknown, unknown>,
+) => {
+  const err = await fx.run(Effect.flip(effect));
+  assert.instanceOf(err, ScimError);
+  return err;
+};
+
+describe("ScimService — managed users", () => {
+  it("stamps the users it creates with the connection and its organization", async () => {
+    const fx = await makeFixture();
+    const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
+    const user = userOf(fx, ada.id);
+    assert(user !== undefined);
+    expect(ManagedUser.provisionedBy(user)).toEqual({
+      kind: "scim",
+      connectionId: fx.a.connection.id,
+      organizationId: ORG_A,
+    });
+  });
+
+  it("creates no user with an address off the organization's verified domains", async () => {
+    const fx = await makeFixture();
+    const offDomain = await failure(
+      fx,
+      fx.service.createUser(fx.a.connection, { userName: "ada@evil.test" }),
+    );
+    expect(offDomain.status).toBe(400);
+    expect(offDomain.scimType).toBe("invalidValue");
+
+    const extra = await failure(
+      fx,
+      fx.service.createUser(fx.a.connection, {
+        userName: "ada@acme.test",
+        emails: [{ value: "x@b.test" }],
+      }),
+    );
+    expect(extra.scimType).toBe("invalidValue");
+    expect(MutableHashMap.size(fx.usersById)).toBe(0);
+
+    // A pending claim is no claim.
+    const pending = await makeFixture({}, { claimAcme: false });
+    pending.seedDomain(ORG_A, "acme.test", "pending");
+    const refused = await failure(pending, pending.service.createUser(pending.a.connection, ADA));
+    expect(refused.scimType).toBe("invalidValue");
+  });
+
+  it("refuses to rename, re-address or edit a member it does not manage", async () => {
+    const fx = await makeFixture();
+    // Eve signed up on another domain and joined A, which does not manage her.
+    const eve = fx.seedUser(ORG_A, "eve@other.test");
+    const before = userOf(fx, eve);
+
+    const operations: ReadonlyArray<Scim.ScimPatchOperation> = [
+      { op: "replace", path: "userName", value: "attacker@acme.test" },
+      { op: "add", path: "emails", value: [{ value: "x@acme.test" }] },
+      { op: "remove", path: "emails" },
+      { op: "replace", path: "displayName", value: "Mallory" },
+      { op: "replace", path: "externalId", value: "okta-9" },
+    ];
+    const refusals = await fx.run(
+      Effect.forEach(
+        operations,
+        (operation) => Effect.flip(fx.service.patchUser(fx.a.connection, eve, [operation])),
+        { concurrency: 1 },
+      ),
+    );
+    expect(
+      refusals.map((err) => (err instanceof ScimError ? [err.status, err.scimType] : err)),
+    ).toEqual(Arr.replicate([400, "mutability"], 5));
+    const changed = await failure(
+      fx,
+      fx.service.replaceUser(fx.a.connection, eve, { userName: "attacker@acme.test" }),
+    );
+    expect(changed.scimType).toBe("mutability");
+
+    expect(userOf(fx, eve)).toEqual(before);
+    const held = await fx.run(fx.identifiers.listByUser(eve));
+    expect(held.map((identifier) => identifier.value)).toEqual(["eve@other.test"]);
+  });
+
+  it("deactivates only the membership of a member it does not manage", async () => {
+    const fx = await makeFixture();
+    // Eve signed up on another domain and joined A, which does not manage her.
+    const eve = fx.seedUser(ORG_A, "eve@other.test");
+    fx.seedOrganization(ORG_A, "viewer");
+    await fx.run(fx.sessionManager.createSession(eve));
+    const membership = () => fx.members.find((m) => m.organizationId === ORG_A && m.userId === eve);
+
+    const patched = await fx.run(
+      fx.service.patchUser(fx.a.connection, eve, [{ op: "replace", path: "active", value: false }]),
+    );
+    expect(patched.active).toBe(false);
+    expect(membership()).toMatchObject({
+      status: "inactive",
+      role: "viewer",
+      previousRole: "member",
+    });
+    // The account and its sessions elsewhere are not this tenant's to touch.
+    expect(userOf(fx, eve)?.attributes[SCIM_DEACTIVATED_ATTRIBUTE]).toBeUndefined();
+    expect(MutableHashMap.size(fx.sessions)).toBe(1);
+
+    // A PUT that restates the profile may flip `active` back.
+    const restored = await fx.run(
+      fx.service.replaceUser(fx.a.connection, eve, { userName: "eve@other.test", active: true }),
+    );
+    expect(restored.active).toBe(true);
+    expect(membership()).toMatchObject({ status: "active", role: "member" });
+    expect(membership()?.previousRole).toBeUndefined();
+
+    await fx.run(fx.service.deactivateUser(fx.a.connection, eve));
+    expect(membership()?.status).toBe("inactive");
+    expect(userOf(fx, eve)?.attributes[SCIM_DEACTIVATED_ATTRIBUTE]).toBeUndefined();
+  });
+
+  it("refuses another organization's provisioned user even when they are a member", async () => {
+    const fx = await makeFixture();
+    const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
+    fx.members.push({
+      id: "m-b",
+      organizationId: ORG_B,
+      userId: ada.id,
+      role: "member",
+      createdAt: 0,
+    });
+
+    const err = await failure(
+      fx,
+      fx.service.patchUser(fx.b.connection, ada.id, [
+        { op: "replace", path: "userName", value: "attacker@evil.test" },
+      ]),
+    );
+    expect(err.scimType).toBe("mutability");
+
+    await fx.run(fx.service.deactivateUser(fx.b.connection, ada.id));
+    expect(userOf(fx, ada.id)?.attributes[SCIM_DEACTIVATED_ATTRIBUTE]).toBeUndefined();
+    expect(fx.members.find((m) => m.id === "m-b")?.status).toBe("inactive");
+  });
+
+  it("claims and unclaims only addresses on the verified domains for a managed user", async () => {
+    const fx = await makeFixture();
+    const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
+
+    const add = await failure(
+      fx,
+      fx.service.patchUser(fx.a.connection, ada.id, [
+        { op: "add", path: "emails", value: [{ value: "ada@evil.test" }] },
+      ]),
+    );
+    expect(add.scimType).toBe("invalidValue");
+    const rename = await failure(
+      fx,
+      fx.service.patchUser(fx.a.connection, ada.id, [
+        { op: "replace", path: "userName", value: "ada@evil.test" },
+      ]),
+    );
+    expect(rename.scimType).toBe("invalidValue");
+    const put = await failure(
+      fx,
+      fx.service.replaceUser(fx.a.connection, ada.id, {
+        userName: "ada@acme.test",
+        emails: [{ value: "ada@evil.test" }],
+      }),
+    );
+    expect(put.scimType).toBe("invalidValue");
+    expect(await fx.run(fx.identifiers.getByValue("email", "ada@evil.test"))).toBeNull();
+
+    // An address the user holds off the domains (proved some other way) is
+    // never SCIM's to unclaim, by name or by a remove-all.
+    const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+    await fx.run(
+      fx.identifiers.create(
+        makeIdentifier({
+          userId: ada.id,
+          type: "email",
+          value: "ada@home.test",
+          verified: true,
+          verifiedAt: now,
+          now,
+        }),
+      ),
+    );
+    const named = await failure(
+      fx,
+      fx.service.patchUser(fx.a.connection, ada.id, [
+        { op: "remove", path: "emails", value: [{ value: "ada@home.test" }] },
+      ]),
+    );
+    expect(named.scimType).toBe("invalidValue");
+    await fx.run(fx.service.patchUser(fx.a.connection, ada.id, [{ op: "remove", path: "emails" }]));
+    await fx.run(
+      fx.service.replaceUser(fx.a.connection, ada.id, { userName: "ada@acme.test", emails: [] }),
+    );
+    expect((await fx.run(fx.identifiers.getByValue("email", "ada@home.test")))?.userId).toBe(
+      ada.id,
+    );
   });
 });

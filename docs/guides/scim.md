@@ -22,6 +22,8 @@ const scimStores = Layer.mergeAll(
   Layer.succeed(ScimUserStore)(yourUserStore),
   identifierStoreLayer,
   organizationStoreLayer,
+  // The organization's verified domains: SCIM claims addresses only on them.
+  organizationDomainStoreLayer,
   sessionServiceLayer,
 );
 
@@ -95,9 +97,17 @@ Users provisioned here get their email identifier **verified**: the IdP is the s
 
 Which email is "primary" is pinned in `attributes.scimUserName`. Without it, a `PATCH` of `userName` would be silently overtaken by an older secondary address the next time the resource was read, because the primary is otherwise the earliest verified email. For a user SCIM did not create, the fallback is exactly that earliest-verified rule, so an account that signed up directly still projects correctly.
 
-## 5. Deactivation is a soft disable
+## 5. Managed users
 
-`PATCH {"active": false}` and `DELETE /Users/:id` both deactivate:
+A connection writes only to users its organization manages: users one of the organization's SCIM connections or SSO providers created (they carry `attributes.provisionedBy`), and users whose primary email is on one of the organization's verified domain claims. Domain claims are proved through DNS or attested by the operator, so add and verify them before you hand out a token, and provide an `OrganizationDomainStore`: without one an organization manages only the users it created.
+
+- Every address SCIM claims (`userName` on create or rename, `emails` on create, `PATCH` or `PUT`) must be on a verified domain; any other is `400 invalidValue`, and nothing is written.
+- SCIM never unclaims an address off the verified domains: naming one in a `remove` is `400 invalidValue`, and a remove-all or an authoritative `PUT` leaves it.
+- A member the organization does not manage (someone who signed up on another domain and joined, or another organization's user) can be read and listed, and `active` can change, but anything else (`userName`, `emails`, `displayName`, `externalId`) is `400 mutability`. A `PUT` that restates their profile unchanged may still set `active`.
+
+## 6. Deactivation is a soft disable
+
+For a member the organization does not manage, `active: false` and `DELETE /Users/:id` deactivate only the membership (`status: "inactive"`, the role parked in `previousRole` and restored by `active: true`), as `OrganizationService.deactivateMember` does; their account and sessions are not this tenant's. For a managed user, `PATCH {"active": false}` and `DELETE /Users/:id` both deactivate the account:
 
 - `attributes.scimDeactivated` is set to `true`,
 - every live session, API key and OIDC grant (access and refresh tokens, consents) the user holds is revoked,
@@ -107,7 +117,7 @@ Reactivation (`PATCH {"active": true}`) is then a single write — which is what
 
 `SessionService` refuses a deactivated user a new session and refuses any session they still present, with no plugin to wire: `validateSession` and `createSession` fail with `UserBannedError`. The OIDC provider mints no tokens for them and its userinfo endpoint refuses them. JWTs already issued cannot be revoked and run to their expiry. `ScimDeactivatedPlugin` is now a deprecated no-op.
 
-## 6. What is deliberately not supported
+## 7. What is deliberately not supported
 
 SCIM is a large specification and most of it is optional. This implementation advertises in `ServiceProviderConfig` exactly what it does, and nothing else — half-working provisioning is worse than provisioning that says no:
 
@@ -115,7 +125,7 @@ SCIM is a large specification and most of it is optional. This implementation ad
 - **PATCH paths**: `replace` on `active`, `displayName`, `userName`, `externalId`; `add`/`remove` on `emails`; `add`/`remove`/`replace` on `members` (including the `members[value eq "…"]` path filter). Entra's path-less form (`{"op":"replace","value":{"active":false}}`) is expanded into the same operations, and its stringly-typed `"False"` is accepted. Anything else is `400 invalidPath`.
 - **Not implemented**: bulk operations, sorting, ETags, password changes, and the enterprise user extension. All are reported as unsupported.
 
-## 7. Errors
+## 8. Errors
 
 Failures use the RFC 7644 §3.12 error body verbatim — no extra members, because conformance suites check:
 
