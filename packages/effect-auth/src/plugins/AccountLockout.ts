@@ -163,7 +163,7 @@ export interface AccountLockoutConfig {
    * apart from first-factor attempts and cleared, like them, only when a
    * session is issued. Default 5.
    */
-  readonly maxSecondFactorAttempts?: number | undefined;
+  readonly maxSecondFactorAttempts?: number;
   /**
    * What a lockout-store error during `beforeAuthenticate` does to the attempt.
    * `"fail-closed"` (default): the sign-in fails — protection never silently

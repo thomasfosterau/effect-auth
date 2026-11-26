@@ -10,6 +10,7 @@ import { type AuthError, RateLimitError } from "./Errors.ts";
 import * as RateLimit from "./RateLimit.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type { RecipientSendLimit } from "./Types.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /** The default cap: 5 sends per recipient per purpose per hour. */
 export const defaultRecipientSendLimit: RecipientSendLimit = {
@@ -60,11 +61,13 @@ export const makeRecipientSendGate = (
       ).pipe(
         Effect.catchTag("RateLimitError", (error) =>
           Effect.fail(
-            new RateLimitError({
-              message: "Too many messages sent to this recipient; try again later",
-              key: error.key,
-              retryAfter: error.retryAfter,
-            }),
+            new RateLimitError(
+              definedKeys({
+                message: "Too many messages sent to this recipient; try again later",
+                key: error.key,
+                retryAfter: error.retryAfter,
+              }),
+            ),
           ),
         ),
       );

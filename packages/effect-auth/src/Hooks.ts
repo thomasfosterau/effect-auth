@@ -196,19 +196,19 @@ export interface AuthenticateAttempt {
    * The handle the attempt names, normalized. Absent for an unkeyed attempt,
    * which names no account.
    */
-  readonly identifier?: AuthenticationIdentifier | undefined;
+  readonly identifier?: AuthenticationIdentifier;
   /**
    * The user the handle resolves to, when one does. Absent for a handle no
    * account holds, so a plugin that keys on it falls back to `identifier`
    * (see {@link authenticationSubject}) and treats a known and an unknown
    * handle alike.
    */
-  readonly userId?: string | undefined;
+  readonly userId?: string;
   /**
    * The captcha token the caller sent, for the password methods
    * (`"email-password"`, `"username"`); the other flows carry none.
    */
-  readonly captchaToken?: string | undefined;
+  readonly captchaToken?: string;
 }
 
 /**
@@ -278,7 +278,7 @@ export interface SendCodeAttempt {
   /** Where the code goes, normalized: an email address or an E.164 phone number. */
   readonly address: string;
   /** The captcha token the caller sent, if any. */
-  readonly captchaToken?: string | undefined;
+  readonly captchaToken?: string;
 }
 
 /**
@@ -287,7 +287,7 @@ export interface SendCodeAttempt {
  */
 export interface SendCodeOptions {
   /** A captcha token, handed to the `beforeSendCode` hook (`CaptchaPlugin` verifies it). */
-  readonly captchaToken?: string | undefined;
+  readonly captchaToken?: string;
 }
 
 /** A reference to an email address, used by password-reset hooks. */

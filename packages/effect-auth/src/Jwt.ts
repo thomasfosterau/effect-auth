@@ -613,7 +613,7 @@ export interface RemoteJwksConfig {
    * Media types compare case-insensitively and without the `application/`
    * prefix, so an `id_token` (`typ: "JWT"`) is refused by default.
    */
-  readonly tokenType?: string | undefined;
+  readonly tokenType?: string;
 }
 
 /**

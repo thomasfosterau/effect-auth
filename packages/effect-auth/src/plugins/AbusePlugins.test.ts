@@ -10,6 +10,7 @@ import { CaptchaPlugin } from "./Captcha.ts";
 import { AuthError, PwnedPasswordError, CaptchaError } from "../Errors.ts";
 import type { AuthenticateAttempt } from "../Hooks.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /** A stubbed HttpClient that answers every request with `respond(request)`. */
 const stubHttpClient = (respond: (url: string) => Response) =>
@@ -67,7 +68,7 @@ const signUp = (password: string, captchaToken?: string): SignUpInput => ({
 const signIn = (captchaToken?: string): AuthenticateAttempt => ({
   method: "email-password",
   identifier: { type: "email", value: "u@example.com" },
-  captchaToken,
+  ...definedKeys({ captchaToken }),
 });
 
 const sha1UpperSuffix = async (password: string): Promise<string> => {

@@ -92,12 +92,12 @@ export interface WebAuthnCredential {
    * value is refused. Absent on a credential stored before it was recorded;
    * the next sign-in records it.
    */
-  backupEligible?: boolean | undefined;
+  readonly backupEligible?: boolean;
   /**
    * BS: whether the credential was backed up at its latest ceremony. It may
    * change, and each sign-in records it.
    */
-  backupState?: boolean | undefined;
+  readonly backupState?: boolean;
   /**
    * The authenticator's AAGUID from registration, as a lowercase hyphenated
    * UUID (all zeros when the authenticator reports none), for an app's own
@@ -105,7 +105,7 @@ export interface WebAuthnCredential {
    * the authenticator's claim, not a verified fact. Absent on a credential
    * registered before it was recorded.
    */
-  aaguid?: string | undefined;
+  readonly aaguid?: string;
 }
 
 /**
@@ -161,7 +161,7 @@ export interface WebAuthnConfig {
    * `"direct"` and `"enterprise"` are refused: the layer build dies with
    * {@link WebAuthnConfigError}.
    */
-  attestation?: AttestationConveyancePreference | undefined;
+  readonly attestation?: AttestationConveyancePreference;
 }
 
 /** A `PublicKeyCredentialParameters` entry advertised to the authenticator. */

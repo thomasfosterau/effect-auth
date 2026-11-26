@@ -48,6 +48,7 @@ import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
 import { isInGoodStanding } from "./UserStanding.ts";
 import { normalizeEmail } from "./utils.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -140,20 +141,20 @@ export interface CloudflareAccessConfig {
    * Where the token is read from, in order; the first one present is used,
    * and an invalid one is refused rather than skipped. Default `["header"]`.
    */
-  readonly sources?: ReadonlyArray<CloudflareAccessSource> | undefined;
+  readonly sources?: ReadonlyArray<CloudflareAccessSource>;
   /** Override the key set URL (tests). Default `https://<teamDomain>/cdn-cgi/access/certs`. */
-  readonly certsUrl?: string | undefined;
+  readonly certsUrl?: string;
   /** Allowed clock skew for `exp` and `nbf`, in milliseconds. Default 60 000. */
-  readonly clockToleranceMs?: number | undefined;
+  readonly clockToleranceMs?: number;
   /** How long a fetched key set is used before it is refetched, in milliseconds. Default 3 600 000. */
-  readonly keysTtlMs?: number | undefined;
+  readonly keysTtlMs?: number;
   /**
    * The least time between two key set fetches, in milliseconds, whatever
    * `kid` a token names. Default 30 000.
    */
-  readonly minRefreshIntervalMs?: number | undefined;
+  readonly minRefreshIntervalMs?: number;
   /** How long a key set fetch may take, in milliseconds. Default 5 000. */
-  readonly fetchTimeoutMs?: number | undefined;
+  readonly fetchTimeoutMs?: number;
 }
 
 /**
@@ -168,15 +169,15 @@ export interface CloudflareAccessIdentity {
   /** The user's stable Access id (`sub`), or the service token's client id. */
   readonly subject: string;
   /** The email the identity provider attested; users only. */
-  readonly email?: string | undefined;
+  readonly email?: string;
   /** The service token's client id (`common_name`); service tokens only. */
-  readonly commonName?: string | undefined;
+  readonly commonName?: string;
   /** The country Access saw the sign-in from (`country`), when present. */
-  readonly country?: string | undefined;
+  readonly country?: string;
   /** The `identity_nonce`, for `/cdn-cgi/access/get-identity`, when present. */
-  readonly identityNonce?: string | undefined;
+  readonly identityNonce?: string;
   /** When Access issued the token (`iat`), when present. */
-  readonly issuedAt?: Date | undefined;
+  readonly issuedAt?: Date;
   /** When the token expires (`exp`). */
   readonly expiresAt: Date;
   /** Every verified claim. */
@@ -287,13 +288,13 @@ const identityOf = (
   const commonName = optionalString(claims, "common_name");
   const sub = optionalString(claims, "sub");
   const iat = claims["iat"];
-  const common = {
+  const common = definedKeys({
     country: optionalString(claims, "country"),
     identityNonce: optionalString(claims, "identity_nonce"),
     issuedAt: P.isNumber(iat) ? dateOf(iat) : undefined,
     expiresAt: dateOf(exp),
     claims,
-  };
+  });
   if (email !== undefined && sub !== undefined) {
     return { kind: "user", subject: sub, email, ...common };
   }

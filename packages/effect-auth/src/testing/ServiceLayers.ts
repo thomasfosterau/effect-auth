@@ -46,7 +46,7 @@ export interface SessionServiceLayerOptions {
   /** The users the layer's `UserStore` starts with, so `createSession` and `validateSession` find them. */
   readonly users: Iterable<Types.User>;
   /** Defaults to {@link defaultSessionConfig}. */
-  readonly config?: Types.SessionConfig | undefined;
+  readonly config?: Types.SessionConfig;
 }
 
 /**
@@ -113,15 +113,15 @@ export const sessionServiceLayer = (
  */
 export interface ApiKeyServiceLayerOptions {
   /** Records the layer's `ApiKeyStore` starts with (their `keyHash` is `hashApiKey` of the plaintext). */
-  readonly keys?: Iterable<ApiKey> | undefined;
+  readonly keys?: Iterable<ApiKey>;
   /**
    * The users the layer's `UserStore` starts with (none by default). A key
    * verifies only while its owner exists, so seed the owners of the
    * keys a test verifies.
    */
-  readonly users?: Iterable<Types.User> | undefined;
+  readonly users?: Iterable<Types.User>;
   /** The service's own config; the service defaults apply when omitted. */
-  readonly config?: ApiKeyConfig | undefined;
+  readonly config?: ApiKeyConfig;
 }
 
 /**

@@ -46,6 +46,7 @@ import { RateLimiter, RateLimitPresets, RateLimitStore } from "./RateLimit.ts";
 import { SessionService } from "./SessionService.ts";
 import * as Testing from "./testing/MemoryStores.ts";
 import { UsernameService } from "./Username.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 const password = "correct horse battery staple";
 const email = "ada@example.com";
@@ -111,7 +112,7 @@ const signUpAda = Effect.fn("signUpAda")(function* () {
 const signInByUsername = (secret: string, captchaToken?: string) =>
   Effect.gen(function* () {
     const usernames = yield* UsernameService;
-    return yield* usernames.signIn({ username, password: secret, captchaToken }).pipe(
+    return yield* usernames.signIn(definedKeys({ username, password: secret, captchaToken })).pipe(
       Effect.as("ok"),
       Effect.catch((error) => Effect.succeed(error._tag)),
     );
@@ -541,21 +542,23 @@ describe("the captcha guards the code and link sends", () => {
       method: "email OTP",
       to: email,
       send: (captchaToken?: string) =>
-        Effect.flatMap(EmailOtpService, (otp) => otp.send(email, "sign-in", { captchaToken })),
+        Effect.flatMap(EmailOtpService, (otp) =>
+          otp.send(email, "sign-in", definedKeys({ captchaToken })),
+        ),
     },
     {
       method: "phone OTP",
       to: phoneNumber,
       send: (captchaToken?: string) =>
         Effect.flatMap(PhoneOtpService, (otp) =>
-          otp.send(phoneNumber, "sign-in", { captchaToken }),
+          otp.send(phoneNumber, "sign-in", definedKeys({ captchaToken })),
         ),
     },
     {
       method: "magic link",
       to: email,
       send: (captchaToken?: string) =>
-        Effect.flatMap(MagicLinkService, (link) => link.send(email, { captchaToken })),
+        Effect.flatMap(MagicLinkService, (link) => link.send(email, definedKeys({ captchaToken }))),
     },
   ];
 

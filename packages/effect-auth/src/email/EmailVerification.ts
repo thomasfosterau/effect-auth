@@ -57,7 +57,7 @@ export interface EmailVerificationConfig {
    * as they answer any other, so the refusal never tells a caller whether the
    * address belongs to an unverified account.
    */
-  readonly resendCooldown?: number | undefined;
+  readonly resendCooldown?: number;
   /**
    * The per-recipient send cap: at most `max` resends
    * (`resendVerification`) to one email within `windowMs`, counted through
@@ -69,7 +69,7 @@ export interface EmailVerificationConfig {
    * answer any other (`isRecipientSendCapped`), so the refusal never tells an
    * unverified account from an unknown address.
    */
-  readonly recipientSendLimit?: RecipientSendLimit | false | undefined;
+  readonly recipientSendLimit?: RecipientSendLimit | false;
   readonly sendEmail: (to: string, token: string) => Effect.Effect<void, EmailVerificationError>;
 }
 
@@ -126,7 +126,7 @@ export interface CreateVerificationOptions {
    * `POST /email-verifications` sets it too: only an unverified account gets a
    * message there, so an inline send would answer it later, or with a `500`.
    */
-  readonly offResponsePath?: boolean | undefined;
+  readonly offResponsePath?: boolean;
 }
 
 /**

@@ -22,6 +22,7 @@ import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
 import { CurrentApiKeyDocument, SessionDocument } from "./HttpApi.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Resources from "./Resources.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -298,9 +299,9 @@ export interface RemoteSessionResult {
    * user the presented key acts as. `session` is `None` there, since a key is
    * not a session. Absent on a session read.
    */
-  readonly user?: Types.User | undefined;
+  readonly user?: Types.User;
   /** On the API-key path: the key that resolved, its public fields only. */
-  readonly apiKey?: RemoteApiKey | undefined;
+  readonly apiKey?: RemoteApiKey;
 }
 
 /**
@@ -499,9 +500,9 @@ export interface RemoteSessionOptions {
    * `trustedProxy: ClientIP.trustedHeader("x-forwarded-for")`, and keep it
    * reachable only through the app.
    */
-  readonly clientAddress?: ((request: Request) => string | undefined) | undefined;
+  readonly clientAddress?: (request: Request) => string | undefined;
   /** The header {@link clientAddress} is sent in. Default `x-forwarded-for`. */
-  readonly clientAddressHeader?: string | undefined;
+  readonly clientAddressHeader?: string;
 }
 
 /**
@@ -516,7 +517,7 @@ export interface RequestContext {
    * `Request` (SvelteKit's `event.getClientAddress()`). Takes precedence over
    * {@link RemoteSessionOptions.clientAddress}.
    */
-  readonly clientAddress?: string | undefined;
+  readonly clientAddress?: string;
 }
 
 /**
@@ -556,12 +557,10 @@ export interface RemoteSessionClient {
    * Optional only so a hand-built client keeps compiling; {@link make}
    * always provides it, and {@link resolveAtEdge} fails closed without it.
    */
-  readonly readApiKey?:
-    | ((
-        request: Request,
-        context?: RequestContext,
-      ) => Effect.Effect<RemoteSessionResult, RemoteSessionError>)
-    | undefined;
+  readonly readApiKey?: (
+    request: Request,
+    context?: RequestContext,
+  ) => Effect.Effect<RemoteSessionResult, RemoteSessionError>;
   /**
    * Forward a request to the auth service and return its response verbatim —
    * status, body and `Set-Cookie` — subject to the machine-caller rule.
@@ -910,7 +909,7 @@ const edgeRead = (
   options: ResolveAtEdgeOptions,
   credential: SessionResolution.CredentialPresence,
 ): Effect.Effect<RemoteSessionResult, RemoteSessionError> => {
-  const context: RequestContext = { clientAddress: options.clientAddress };
+  const context: RequestContext = definedKeys({ clientAddress: options.clientAddress });
   if (!credential.hasApiKey) return options.client.read(options.request, context);
   const readApiKey = options.client.readApiKey;
   return readApiKey === undefined

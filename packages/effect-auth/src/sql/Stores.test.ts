@@ -476,7 +476,7 @@ const storeContract = (engine: StoreEngine): void => {
           const purge = purgeUser(
             {
               ...(yield* userPurgeStores),
-              identifiers,
+              identifiers: Option.some(identifiers),
               revokeSessions: sessions.deleteByUserId,
               deleteUser: () => Effect.fail(new Auth.AuthError({ message: "user delete failed" })),
             },

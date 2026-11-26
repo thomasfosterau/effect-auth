@@ -76,9 +76,9 @@ export interface AuthLifecycleConfig {
    * they enforce (throttling, captcha, bans), apply only to the fresh branch's
    * verification send. The notice is sent without them.
    */
-  readonly sendExistingAccountNotice?:
-    | ((email: string) => Effect.Effect<void, Errors.AuthError | Errors.EmailVerificationError>)
-    | undefined;
+  readonly sendExistingAccountNotice?: (
+    email: string,
+  ) => Effect.Effect<void, Errors.AuthError | Errors.EmailVerificationError>;
 }
 
 /**
@@ -113,10 +113,10 @@ export interface AuthLifecycleResult {
    *   address, so the holder's profile stays with the holder. An address held
    *   verified fails with `EmailInUseError`.
    */
-  readonly identifier?: { readonly type: IdentifierType; readonly value: string } | undefined;
+  readonly identifier?: { readonly type: IdentifierType; readonly value: string };
   readonly session?: Types.Session;
   /** The raw session token, present with `session`: the credential the client presents; `session.id` is its digest. */
-  readonly token?: string | undefined;
+  readonly token?: string;
   readonly needsEmailVerification: boolean;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;

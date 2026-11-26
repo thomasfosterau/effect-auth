@@ -20,6 +20,7 @@ import { hashToken, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
 import { isInGoodStanding } from "./UserStanding.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * API key error
@@ -92,18 +93,16 @@ export interface ApiKey {
 export interface ApiKeyUse {
   /** Unix ms time of the use: the new `lastUsedAt` and `updatedAt` */
   readonly usedAt: number;
-  readonly refill?:
-    | {
-        /** The `lastRefillAt` the refill was computed from */
-        readonly from: number;
-        /** The new `lastRefillAt` */
-        readonly to: number;
-        /** Uses to add to `remaining` before the spend */
-        readonly amount: number;
-        /** Cap on `remaining` after the top-up; undefined = no cap */
-        readonly max?: number | undefined;
-      }
-    | undefined;
+  readonly refill?: {
+    /** The `lastRefillAt` the refill was computed from */
+    readonly from: number;
+    /** The new `lastRefillAt` */
+    readonly to: number;
+    /** Uses to add to `remaining` before the spend */
+    readonly amount: number;
+    /** Cap on `remaining` after the top-up; undefined = no cap */
+    readonly max?: number;
+  };
 }
 
 /**
@@ -253,9 +252,9 @@ export interface ApiKeyVerifyResult {
   /** A refusal's message, for the server log; an HTTP answer never carries it. */
   readonly error?: string;
   /** A refusal's cause, to branch on (the HTTP tier's `429` for `rate-limited`). */
-  readonly reason?: ApiKeyRefusal | undefined;
+  readonly reason?: ApiKeyRefusal;
   /** For a `rate-limited` refusal: how long until the key's own limit lets it through. */
-  readonly retryAfter?: Duration.Duration | undefined;
+  readonly retryAfter?: Duration.Duration;
 }
 
 /** A refused verification: its message for the log, and its reason. */
@@ -713,13 +712,13 @@ export const make = (
           const limited = yield* rateLimiter
             .consumeToken(`api-key:${apiKey.id}`, apiKey.rateLimit satisfies RateLimitConfig)
             .pipe(
-              Effect.as(null),
-              Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
+              Effect.as(Option.none<Errors.RateLimitError>()),
+              Effect.catchTag("RateLimitError", (e) => Effect.succeedSome(e)),
             );
-          if (limited !== null) {
+          if (Option.isSome(limited)) {
             return {
               ...refused("Rate limit exceeded", "rate-limited"),
-              retryAfter: limited.retryAfter,
+              ...definedKeys({ retryAfter: limited.value.retryAfter }),
             } satisfies ApiKeyVerifyResult;
           }
         }

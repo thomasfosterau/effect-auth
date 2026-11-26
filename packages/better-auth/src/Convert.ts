@@ -244,7 +244,10 @@ export const fromApiError = (error: unknown, email?: string): CredentialError =>
     return new Auth.InvalidCredentialsError({ message: "Invalid username or password" });
   }
   if (error.statusCode === 422 && code.startsWith("USER_ALREADY_EXISTS")) {
-    return new Auth.EmailInUseError({ message: "This email is already in use", email });
+    return new Auth.EmailInUseError({
+      message: "This email is already in use",
+      ...(email !== undefined && { email }),
+    });
   }
   if (error.statusCode === 403 && code === "EMAIL_NOT_VERIFIED") {
     return new Auth.EmailNotVerifiedError({ message: "Email not verified", email: email ?? "" });

@@ -17,6 +17,7 @@ import type * as Guard from "./Guard.ts";
 import type * as Ladder from "./Ladder.ts";
 import * as Policy from "./Policy.ts";
 import type * as ReadScope from "./ReadScope.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------
 // Models
@@ -44,15 +45,15 @@ export interface OwnedRow {
   readonly ownerId: string | undefined;
   readonly visibility: Visibility;
   /** Omitted for a leaf that has no draft axis. */
-  readonly draft?: boolean | undefined;
+  readonly draft?: boolean;
   /**
    * `true` for a moderated row whose state is anything but approved; it reads
    * exactly as `draft: true`. Omitted (or `false`) for a leaf that has no
    * moderation axis, or an approved row.
    */
-  readonly unapproved?: boolean | undefined;
+  readonly unapproved?: boolean;
   /** The group a `group` row is shared with; omitted or `undefined`: none, so the row reads as `private`. */
-  readonly groupId?: string | undefined;
+  readonly groupId?: string;
 }
 
 /**
@@ -226,8 +227,8 @@ export const isMemberNever: Layer.Layer<IsMember> = Layer.succeed(IsMember, {
  * @category models
  */
 export interface RelationQuestions {
-  readonly followersOf?: string | undefined;
-  readonly groupId?: string | undefined;
+  readonly followersOf?: string;
+  readonly groupId?: string;
 }
 
 /**
@@ -353,8 +354,8 @@ const contextHolds = (fact: string): Condition.Condition =>
 /** The seam questions an owned row can still be decided by: only published followers and group rows ask. */
 const questionsFor = (row: OwnedRow): RelationQuestions => {
   if (row.draft === true || row.unapproved === true) return {};
-  if (row.visibility === "followers") return { followersOf: row.ownerId };
-  return row.visibility === "group" ? { groupId: row.groupId } : {};
+  if (row.visibility === "followers") return definedKeys({ followersOf: row.ownerId });
+  return row.visibility === "group" ? definedKeys({ groupId: row.groupId }) : {};
 };
 
 /**

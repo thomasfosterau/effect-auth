@@ -31,6 +31,7 @@ import {
 import { firstProofServices, userForProvenEmail } from "../FirstProof.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * Email OTP error
@@ -72,7 +73,7 @@ export interface EmailOtpCreateUserInput {
    * user row writes it there on insert, and any other store ignores it (see
    * {@link NewUserIdentifier}).
    */
-  readonly identifier?: NewUserIdentifier | undefined;
+  readonly identifier?: NewUserIdentifier;
 }
 
 /**
@@ -175,7 +176,7 @@ export interface EmailOtpConfig {
    * so an attacker can slow an address's owner down, not lock them out. It
    * applies alike to an email with and without an account.
    */
-  readonly backoff?: Types.OtpBackoffConfig | undefined;
+  readonly backoff?: Types.OtpBackoffConfig;
   /**
    * Refuse to create a user at `"sign-in"`. Off by default. When set,
    * `"sign-in"` hides whether an email has an account, as `"forget-password"`
@@ -204,7 +205,7 @@ export interface EmailOtpConfig {
    * and the backoff let through, for an email with and without an account
    * alike, so the refusal reveals nothing about which emails are registered.
    */
-  readonly recipientSendLimit?: Types.RecipientSendLimit | false | undefined;
+  readonly recipientSendLimit?: Types.RecipientSendLimit | false;
   readonly sendVerificationOtp: (
     email: string,
     otp: string,
@@ -421,12 +422,14 @@ export const make = (
 
         // The send gate (captcha) runs before the address is looked
         // up, so it answers alike for every address.
-        yield* hooks.beforeSendCode({
-          method: "email-otp",
-          purpose,
-          address: email,
-          captchaToken: options?.captchaToken,
-        });
+        yield* hooks.beforeSendCode(
+          definedKeys({
+            method: "email-otp",
+            purpose,
+            address: email,
+            captchaToken: options?.captchaToken,
+          }),
+        );
 
         // Do not reveal whether the user exists to reduce email enumeration
         // risk: succeed without sending for sign-in when sign-up is disabled
@@ -487,11 +490,13 @@ export const make = (
           email,
           () => new EmailOtpError({ message: "Account is unavailable" }),
         );
-        yield* hooks.beforeAuthenticate({
-          method: "email-otp",
-          identifier: { type: "email", value: email },
-          userId: Option.getOrUndefined(Option.map(found, (owner) => owner.user.id)),
-        });
+        yield* hooks.beforeAuthenticate(
+          definedKeys({
+            method: "email-otp",
+            identifier: { type: "email", value: email },
+            userId: Option.getOrUndefined(Option.map(found, (owner) => owner.user.id)),
+          }),
+        );
 
         yield* verifyOtp(email, otp, "sign-in");
 
@@ -526,11 +531,13 @@ export const make = (
         // The same gate `signIn` runs. One identifier lookup for an
         // email with and without an account alike.
         const identifier = yield* lookupIdentifier(identifiers, "email", email);
-        yield* hooks.beforeAuthenticate({
-          method: "email-otp",
-          identifier: { type: "email", value: email },
-          userId: Option.getOrUndefined(Option.map(identifier, (found) => found.userId)),
-        });
+        yield* hooks.beforeAuthenticate(
+          definedKeys({
+            method: "email-otp",
+            identifier: { type: "email", value: email },
+            userId: Option.getOrUndefined(Option.map(identifier, (found) => found.userId)),
+          }),
+        );
 
         yield* verifyOtp(email, otp, purpose);
 

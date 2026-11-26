@@ -229,7 +229,7 @@ export class ScimUserStore extends Context.Service<
        * the user row writes it there on insert, and any other store ignores it
        * (see {@link NewUserIdentifier}).
        */
-      readonly identifier?: NewUserIdentifier | undefined;
+      readonly identifier?: NewUserIdentifier;
     }) => Effect.Effect<CreateUserResult, Errors.AuthError>;
     readonly get: (userId: string) => Effect.Effect<Option.Option<Types.User>, Errors.AuthError>;
     readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
@@ -315,7 +315,7 @@ export interface ScimListQuery {
 export interface ScimPatchOperation {
   /** `add`, `remove` or `replace` (case-insensitive). */
   readonly op: string;
-  readonly path?: string | undefined;
+  readonly path?: string;
   readonly value?: unknown;
 }
 

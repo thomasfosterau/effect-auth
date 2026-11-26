@@ -148,7 +148,7 @@ const adminUserStore = {
     name?: string;
     image?: string;
     attributes?: Attributes;
-    identifier?: NewUserIdentifier | undefined;
+    readonly identifier?: NewUserIdentifier;
   }) =>
     Effect.sync(() => {
       createdWith.push(input.identifier);

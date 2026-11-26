@@ -46,7 +46,7 @@ export interface NewUserIdentifier {
   readonly value: string;
   readonly verified: boolean;
   /** When the handle was verified; set only when {@link verified} is `true`. */
-  readonly verifiedAt?: Date | undefined;
+  readonly verifiedAt?: Date;
 }
 
 /**

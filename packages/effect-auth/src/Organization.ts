@@ -169,7 +169,7 @@ export interface Invitation {
    * resend cooldown runs from it. Absent on rows written before it existed,
    * which read as {@link createdAt}.
    */
-  readonly sentAt?: number | undefined;
+  readonly sentAt?: number;
 }
 
 /**
@@ -290,7 +290,7 @@ export interface OrganizationDomain {
    * own tooling passed as {@link AttestDomainOptions.attestedBy}. Absent for
    * `dns` claims and for an attestation made without one.
    */
-  readonly attestedBy?: string | undefined;
+  readonly attestedBy?: string;
 }
 
 /**
@@ -721,7 +721,7 @@ export interface AttestDomainOptions {
    * over HTTP, or any identifier the operator's tooling uses for its
    * operators. Omitted, the claim records no attester.
    */
-  readonly attestedBy?: string | undefined;
+  readonly attestedBy?: string;
 }
 
 /**
@@ -755,7 +755,7 @@ export interface InvitationResponseInput {
    * matching email identifier (an in-app "pending invitations" list); an
    * unverified one needs the token, which is then its first proof.
    */
-  readonly token?: string | undefined;
+  readonly token?: string;
 }
 
 /**
@@ -769,7 +769,7 @@ export interface AcceptInvitationInput extends InvitationResponseInput {
    * email identifier is unverified), every other session of the account is
    * revoked and this one kept; without it, all are revoked.
    */
-  readonly currentSessionId?: string | undefined;
+  readonly currentSessionId?: string;
 }
 
 /**

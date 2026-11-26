@@ -127,8 +127,8 @@ export type PublicReach =
  * @category models
  */
 export interface PublicReachOptions {
-  readonly action?: Entity.EntityRef | undefined;
-  readonly principal?: Entity.EntityRef | undefined;
+  readonly action?: Entity.EntityRef;
+  readonly principal?: Entity.EntityRef;
 }
 
 /**

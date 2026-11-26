@@ -30,6 +30,7 @@ import {
 } from "../UserStore.ts";
 import * as Obs from "../Observability.ts";
 import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * Fields for a new user record. Services record the login handle as an
@@ -45,7 +46,7 @@ export interface CreateUserInput {
    * user row writes it there on insert, and any other store ignores it (see
    * {@link NewUserIdentifier}).
    */
-  readonly identifier?: NewUserIdentifier | undefined;
+  readonly identifier?: NewUserIdentifier;
 }
 
 /**
@@ -81,7 +82,7 @@ export class EmailPasswordStore extends Context.Service<
      * (`crypto.randomUUID()`), the shape effect-auth/sql's `createUser`
      * assigns.
      */
-    readonly newUserId?: (() => Effect.Effect<string, Errors.AuthError>) | undefined;
+    readonly newUserId?: () => Effect.Effect<string, Errors.AuthError>;
 
     readonly getPasswordHash: (
       userId: string,
@@ -352,7 +353,7 @@ export interface AuthResult {
   readonly identifier?: { readonly type: IdentifierType; readonly value: string };
   readonly session?: Types.Session;
   /** The raw session token, present with `session`: the credential the client presents; `session.id` is its digest. */
-  readonly token?: string | undefined;
+  readonly token?: string;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
   /**
@@ -726,12 +727,14 @@ export const make = (
             "email",
             email,
           );
-          yield* hooks.beforeAuthenticate({
-            method: "email-password",
-            identifier: { type: "email", value: email },
-            userId: Option.getOrUndefined(Option.map(resolvedUser, (found) => found.user.id)),
-            captchaToken: input.captchaToken,
-          });
+          yield* hooks.beforeAuthenticate(
+            definedKeys({
+              method: "email-password",
+              identifier: { type: "email", value: email },
+              userId: Option.getOrUndefined(Option.map(resolvedUser, (found) => found.user.id)),
+              captchaToken: input.captchaToken,
+            }),
+          );
           const passwordHash = Option.isSome(resolvedUser)
             ? yield* store.getPasswordHash(resolvedUser.value.user.id)
             : Option.none<string>();

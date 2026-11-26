@@ -359,7 +359,7 @@ export interface SetFact {
 export interface Binding {
   readonly resourceType: string;
   readonly attributes: Readonly<Record<string, AttributeKind>>;
-  readonly setFacts?: Readonly<Record<string, SetFact>> | undefined;
+  readonly setFacts?: Readonly<Record<string, SetFact>>;
 }
 
 /**
@@ -373,8 +373,8 @@ export interface Binding {
 export interface ScopeRequest {
   readonly principal: Entity.EntityRef;
   readonly action: Entity.EntityRef;
-  readonly context?: Readonly<Record<string, Entity.AttributeValue>> | undefined;
-  readonly slice?: Entity.EntitySlice | undefined;
+  readonly context?: Readonly<Record<string, Entity.AttributeValue>>;
+  readonly slice?: Entity.EntitySlice;
 }
 
 /**

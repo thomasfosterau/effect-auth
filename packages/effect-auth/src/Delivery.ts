@@ -118,8 +118,8 @@ const logUnsent = (
 /** The content of an email: what a renderer turns a {@link EmailMessage} into. */
 export interface RenderedEmail {
   readonly subject: string;
-  readonly text?: string | undefined;
-  readonly html?: string | undefined;
+  readonly text?: string;
+  readonly html?: string;
 }
 
 const emailSubject = (purpose: DeliveryPurpose): string =>
@@ -200,15 +200,15 @@ export interface ConnectEmailSenderConfig {
   /** The sender every message goes out from. */
   readonly from: Connect.Recipient;
   /** Render a message's content. Defaults to {@link defaultEmailRender}. */
-  readonly render?: ((message: EmailMessage) => RenderedEmail) | undefined;
+  readonly render?: (message: EmailMessage) => RenderedEmail;
 }
 
 /** Configuration for {@link SmsSender.fromConnect} and {@link SmsSender.layerConnect}. */
 export interface ConnectSmsSenderConfig {
   /** The sender ID or number. Omitted, the provider's configured default is used. */
-  readonly from?: string | undefined;
+  readonly from?: string;
   /** Render a message's body. Defaults to {@link defaultSmsRender}. */
-  readonly render?: ((message: SmsMessage) => string) | undefined;
+  readonly render?: (message: SmsMessage) => string;
 }
 
 const toConnectEmail = (

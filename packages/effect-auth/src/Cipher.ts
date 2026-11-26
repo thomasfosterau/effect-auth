@@ -189,7 +189,7 @@ export const SEALED_PREFIX = "v2.";
 export const secretSealer = <RK = never, RL = never>(options: {
   readonly key: Effect.Effect<Uint8Array, never, RK>;
   readonly purpose: string;
-  readonly legacy?: Effect.Effect<TokenCipher, AuthError, RL> | undefined;
+  readonly legacy?: Effect.Effect<TokenCipher, AuthError, RL>;
 }): Effect.Effect<SecretSealer, never, Aead.Aead | SecureRandom.SecureRandom | RK | RL> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<RK | RL>();

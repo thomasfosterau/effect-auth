@@ -58,9 +58,9 @@ export type Access = "write" | "read";
  */
 export interface RefusalOptions {
   /** Defaults to `"write"`. */
-  readonly access?: Access | undefined;
+  readonly access?: Access;
   /** The `_tag` of the app's not-found error, expected for a read. Defaults to `"NotFound"`. */
-  readonly notFoundTag?: string | undefined;
+  readonly notFoundTag?: string;
 }
 
 const outcomeOf = <A, E>(exit: Exit.Exit<A, E>): string => {
@@ -227,7 +227,7 @@ export interface GuardedOptions<User, Rung extends string> extends RungOptions<U
    * The resource's owner, held below `min`. Given, the owner must be admitted
    * (an owner-or-rung gate); omitted, ownership is not checked.
    */
-  readonly owner?: User | undefined;
+  readonly owner?: User;
 }
 
 /**

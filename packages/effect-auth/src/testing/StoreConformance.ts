@@ -106,7 +106,7 @@ export interface ConformanceOptions<E = never, R = never> {
    * Write a user row before a case uses its id, for a store whose tables
    * reference the app's users. Omit it when nothing does.
    */
-  readonly seedUser?: ((user: Types.User) => Effect.Effect<void, E, R>) | undefined;
+  readonly seedUser?: (user: Types.User) => Effect.Effect<void, E, R>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1987,7 +1987,7 @@ interface PerUserDelete<S, A> {
   /** The records, plural, as the case name says them ("keys"). */
   readonly records: string;
   /** The per-user delete's name ("deleteByUserId"). */
-  readonly method?: string | undefined;
+  readonly method?: string;
   readonly make: (userId: string) => A;
   readonly write: (store: S, record: A) => Effect.Effect<unknown, Errors.AuthError>;
   /** Read `record` back: the record while it is stored, `None` once it is gone. */

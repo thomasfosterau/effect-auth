@@ -66,25 +66,25 @@ export interface CaptchaConfig {
    * The reCAPTCHA version the site key is for (`provider: "google-recaptcha"`
    * only). Version `3` requires {@link minScore}. Default `2`.
    */
-  readonly recaptchaVersion?: 2 | 3 | undefined;
+  readonly recaptchaVersion?: 2 | 3;
   /**
    * The lowest `score` (0 to 1) a token may carry. A token whose answer has
    * no numeric `score` is refused. Required for reCAPTCHA v3; for hCaptcha
    * it needs an Enterprise account, which returns a score.
    */
-  readonly minScore?: number | undefined;
+  readonly minScore?: number;
   /**
    * The hostname (or hostnames) the token must have been solved on: the
    * answer's `hostname`. Set it when other sites share the site key.
    */
-  readonly expectedHostname?: string | ReadonlyArray<string> | undefined;
+  readonly expectedHostname?: string | ReadonlyArray<string>;
   /**
    * The action the token must have been minted for: the answer's `action`
    * (Turnstile's `action`, reCAPTCHA v3's `action`). One string for every
    * guarded endpoint, or one per endpoint; an endpoint with none is not
    * checked.
    */
-  readonly expectedAction?: string | Partial<Record<CaptchaEndpoint, string>> | undefined;
+  readonly expectedAction?: string | Partial<Record<CaptchaEndpoint, string>>;
 }
 
 /** Why `config` cannot protect anything, or `undefined` when it can. */

@@ -209,13 +209,13 @@ const makeTestContext = async (
   emailPasswordConfig: EmailPasswordConfig = {},
   options: {
     /** Replaces the verification `sendEmail`, which by default records into `sentEmails`. */
-    readonly sendEmail?: EmailVerificationConfig["sendEmail"] | undefined;
+    readonly sendEmail?: EmailVerificationConfig["sendEmail"];
     /** The `Hooks` the verification and email-password services run. Default `Hooks.Default`. */
-    readonly hooks?: Layer.Layer<Hooks> | undefined;
+    readonly hooks?: Layer.Layer<Hooks>;
     /** The `UserService` config (built after, and not seen by, `EmailPasswordService`). */
-    readonly userService?: UserModule.UserServiceConfig | undefined;
+    readonly userService?: UserModule.UserServiceConfig;
     /** The verification resends' `resendCooldown`. Default: the service's. */
-    readonly resendCooldown?: number | undefined;
+    readonly resendCooldown?: number;
   } = {},
 ) => {
   const hasher = Password.pbkdf2Hasher({ iterations: 1000 });

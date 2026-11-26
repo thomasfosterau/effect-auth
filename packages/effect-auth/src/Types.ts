@@ -317,11 +317,11 @@ export interface OtpFailureBudget<P> {
  */
 export interface OtpBackoffConfig {
   /** Wrong codes allowed before sends are delayed. Default `5`. */
-  readonly freeFailures?: number | undefined;
+  readonly freeFailures?: number;
   /** The first delay, in ms, doubled for each further wrong code. Default 60 000 (one minute). */
-  readonly baseDelay?: number | undefined;
+  readonly baseDelay?: number;
   /** The longest delay, in ms. Default 86 400 000 (one day). */
-  readonly maxDelay?: number | undefined;
+  readonly maxDelay?: number;
 }
 
 /**

@@ -8,6 +8,7 @@
 import { Effect } from "effect";
 import * as Option from "effect/Option";
 import { ApiKeyStore } from "./ApiKey.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 import type * as Errors from "./Errors.ts";
 import { EmailVerificationStore } from "./email/EmailVerification.ts";
 import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
@@ -28,23 +29,23 @@ interface PerUser {
  * per-user delete.
  */
 export interface UserCredentialStores {
-  readonly oauthAccounts?: PerUser | undefined;
-  readonly passkeys?: PerUser | undefined;
-  readonly apiKeys?: PerUser | undefined;
-  readonly multiFactor?: Pick<typeof MultiFactorStore.Service, "delete"> | undefined;
-  readonly trustedDevices?: PerUser | undefined;
+  readonly oauthAccounts?: PerUser;
+  readonly passkeys?: PerUser;
+  readonly apiKeys?: PerUser;
+  readonly multiFactor?: Pick<typeof MultiFactorStore.Service, "delete">;
+  readonly trustedDevices?: PerUser;
   /** The access and refresh tokens the core's OIDC provider issued. */
-  readonly oidcTokens?: PerUser | undefined;
+  readonly oidcTokens?: PerUser;
   /** The consents the user granted the OIDC provider's clients. */
-  readonly oidcConsents?: PerUser | undefined;
-  readonly passwordResets?: PerUser | undefined;
-  readonly emailVerifications?: PerUser | undefined;
+  readonly oidcConsents?: PerUser;
+  readonly passwordResets?: PerUser;
+  readonly emailVerifications?: PerUser;
   /**
    * `AccountManagementStore`'s pending email-change and deletion tokens. Not
    * resolved by {@link userCredentialStores} (`AccountManagement.ts` imports
    * the purge); a caller that has the store passes it.
    */
-  readonly accountTokens?: PerUser | undefined;
+  readonly accountTokens?: PerUser;
 }
 
 /**
@@ -67,17 +68,18 @@ export const userCredentialStores: Effect.Effect<UserCredentialStores> = Effect.
     },
     { concurrency: 1 },
   ),
-  (found) => ({
-    oauthAccounts: Option.getOrUndefined(found.oauthAccounts),
-    passkeys: Option.getOrUndefined(found.passkeys),
-    apiKeys: Option.getOrUndefined(found.apiKeys),
-    multiFactor: Option.getOrUndefined(found.multiFactor),
-    trustedDevices: Option.getOrUndefined(found.trustedDevices),
-    oidcTokens: Option.getOrUndefined(found.oidcTokens),
-    oidcConsents: Option.getOrUndefined(found.oidcConsents),
-    passwordResets: Option.getOrUndefined(found.passwordResets),
-    emailVerifications: Option.getOrUndefined(found.emailVerifications),
-  }),
+  (found) =>
+    definedKeys({
+      oauthAccounts: Option.getOrUndefined(found.oauthAccounts),
+      passkeys: Option.getOrUndefined(found.passkeys),
+      apiKeys: Option.getOrUndefined(found.apiKeys),
+      multiFactor: Option.getOrUndefined(found.multiFactor),
+      trustedDevices: Option.getOrUndefined(found.trustedDevices),
+      oidcTokens: Option.getOrUndefined(found.oidcTokens),
+      oidcConsents: Option.getOrUndefined(found.oidcConsents),
+      passwordResets: Option.getOrUndefined(found.passwordResets),
+      emailVerifications: Option.getOrUndefined(found.emailVerifications),
+    }),
 );
 
 const perUser = (

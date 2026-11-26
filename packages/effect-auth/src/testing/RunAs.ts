@@ -36,12 +36,12 @@ export type AuthenticatedServices =
  */
 export interface RunAsOptions {
   /** Defaults to `"interactive"`; pass `"machine"` to run as an API key would. */
-  readonly credentialClass?: CredentialClass | undefined;
+  readonly credentialClass?: CredentialClass;
   /**
    * Fields of the fixture session to override. `userId` always follows the
    * user.
    */
-  readonly session?: Partial<Omit<Types.Session, "userId">> | undefined;
+  readonly session?: Partial<Omit<Types.Session, "userId">>;
 }
 
 const sessionLifetimeMillis = 24 * 60 * 60 * 1000;
@@ -209,7 +209,7 @@ export interface ViewerOptions<User> extends RunAsOptions {
    * field is left out), so `SessionContext.withRole()` reads the
    * same `role` the app's viewer holds.
    */
-  readonly toUser?: ((viewer: User, now: Date) => Types.User) | undefined;
+  readonly toUser?: (viewer: User, now: Date) => Types.User;
 }
 
 const isJson = Schema.is(Schema.Json);

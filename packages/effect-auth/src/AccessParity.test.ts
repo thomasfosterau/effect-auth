@@ -30,6 +30,7 @@ import * as Policy from "./Policy.ts";
 import * as ReadScope from "./ReadScope.ts";
 import * as ReferenceAccess from "./ReferenceAccess.ts";
 import * as SessionContext from "./SessionContext.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 interface AppUser {
   readonly id: string;
@@ -227,7 +228,7 @@ const ownedRows: ReadonlyArray<OwnedAccess.OwnedRow> = Arr.flatMap(VISIBILITIES,
           visibility,
           draft,
           unapproved,
-          groupId,
+          ...definedKeys({ groupId }),
         })),
       ),
     ),
@@ -442,11 +443,9 @@ const followersOfCases = (viewer: AppUser | null): ReadonlyArray<string | undefi
 const referenceRowsFor = (viewer: AppUser | null): ReadonlyArray<ReferenceAccess.ReferenceRow> =>
   Arr.flatMap([undefined, ...VISIBILITIES], (visibility) =>
     Arr.flatMap(followersOfCases(viewer), (followersOf) =>
-      Arr.map([GROUP, "g-other", undefined], (groupId) => ({
-        ...(visibility === undefined ? {} : { visibility }),
-        followersOf,
-        groupId,
-      })),
+      Arr.map([GROUP, "g-other", undefined], (groupId) =>
+        definedKeys({ visibility, followersOf, groupId }),
+      ),
     ),
   );
 

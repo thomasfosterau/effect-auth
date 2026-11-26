@@ -33,6 +33,7 @@ import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /** Error raised by phone OTP verification failures. */
 export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
@@ -123,7 +124,7 @@ export interface PhoneOtpCreateUserInput {
    * user row writes it there on insert, and any other store ignores it (see
    * {@link NewUserIdentifier}).
    */
-  readonly identifier?: NewUserIdentifier | undefined;
+  readonly identifier?: NewUserIdentifier;
 }
 
 /** User creation seam for phone-OTP sign-up. */
@@ -166,7 +167,7 @@ export interface PhoneOtpConfig {
    * so an attacker can slow a number's owner down, not lock them out. It
    * applies alike to a number with and without an account.
    */
-  readonly backoff?: Types.OtpBackoffConfig | undefined;
+  readonly backoff?: Types.OtpBackoffConfig;
   /**
    * Refuse to create a user at `sign-in`. Off by default. When set, `sign-in`
    * hides whether a number has an account: see {@link PhoneOtpService} `send`
@@ -198,7 +199,7 @@ export interface PhoneOtpConfig {
    * `phone-verification` sends count too, though a signed-in user asks for
    * them: `send` does not tell the two apart.
    */
-  readonly recipientSendLimit?: Types.RecipientSendLimit | false | undefined;
+  readonly recipientSendLimit?: Types.RecipientSendLimit | false;
   readonly sendOtp: (
     phoneNumber: string,
     otp: string,
@@ -396,12 +397,14 @@ export const make = (
 
         // The send gate (captcha) runs before the number is looked
         // up, so it answers alike for every number.
-        yield* hooks.beforeSendCode({
-          method: "phone-otp",
-          purpose,
-          address: phoneNumber,
-          captchaToken: options?.captchaToken,
-        });
+        yield* hooks.beforeSendCode(
+          definedKeys({
+            method: "phone-otp",
+            purpose,
+            address: phoneNumber,
+            captchaToken: options?.captchaToken,
+          }),
+        );
 
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
@@ -457,11 +460,13 @@ export const make = (
           phoneNumber,
           () => new PhoneOtpError({ message: "Account is unavailable" }),
         );
-        yield* hooks.beforeAuthenticate({
-          method: "phone-otp",
-          identifier: { type: "phone", value: phoneNumber },
-          userId: Option.getOrUndefined(Option.map(owned, (o) => o.user.id)),
-        });
+        yield* hooks.beforeAuthenticate(
+          definedKeys({
+            method: "phone-otp",
+            identifier: { type: "phone", value: phoneNumber },
+            userId: Option.getOrUndefined(Option.map(owned, (o) => o.user.id)),
+          }),
+        );
 
         yield* verifyOtp(phoneNumber, otp, "sign-in");
 

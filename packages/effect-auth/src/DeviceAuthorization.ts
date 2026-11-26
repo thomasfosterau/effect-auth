@@ -133,7 +133,7 @@ export interface DeviceClient {
   /** The name the verification page shows the user. */
   readonly name: string;
   /** The scopes it may ask for. Default none. */
-  readonly scopes?: readonly string[] | undefined;
+  readonly scopes?: readonly string[];
 }
 
 /** Configuration for {@link DeviceAuthorizationService}. */
@@ -170,13 +170,13 @@ export interface DeviceAuthorizationConfig {
    * adding a `RateLimiter`: without the limit, a signed-in caller can try user
    * codes as fast as the address limit allows.
    */
-  readonly allowMissingRateLimiter?: boolean | undefined;
+  readonly allowMissingRateLimiter?: boolean;
 }
 
 /** What {@link DeviceAuthorizationService.begin} takes: the registered client and the scopes it asks for. */
 export interface DeviceBeginInput {
   readonly clientId: string;
-  readonly scopes?: readonly string[] | undefined;
+  readonly scopes?: readonly string[];
 }
 
 /**
@@ -316,7 +316,7 @@ export class DeviceAuthorizationService extends Context.Service<
      * reads it to decide whether lookups and decisions may run without a
      * `RateLimiter`. Absent means `false`.
      */
-    readonly allowMissingRateLimiter?: boolean | undefined;
+    readonly allowMissingRateLimiter?: boolean;
   }
 >()("@effect-auth/DeviceAuthorizationService") {
   /**

@@ -30,6 +30,7 @@ import { firstProofServices, userForProvenEmail } from "./FirstProof.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * Magic link token record
@@ -53,7 +54,7 @@ export interface MagicLinkCreateUserInput {
    * user row writes it there on insert, and any other store ignores it (see
    * {@link NewUserIdentifier}).
    */
-  readonly identifier?: NewUserIdentifier | undefined;
+  readonly identifier?: NewUserIdentifier;
 }
 
 /**
@@ -133,7 +134,7 @@ export interface MagicLinkConfig {
    * lets through, for an email with and without an account alike, so the
    * refusal reveals nothing about which emails are registered.
    */
-  readonly recipientSendLimit?: Types.RecipientSendLimit | false | undefined;
+  readonly recipientSendLimit?: Types.RecipientSendLimit | false;
   readonly sendMagicLink: (
     email: string,
     token: string,
@@ -280,12 +281,14 @@ export const make = (
 
         // The send gate (captcha) runs before the address is looked
         // up, so it answers alike for every address.
-        yield* hooks.beforeSendCode({
-          method: "magic-link",
-          purpose: "sign-in",
-          address: email,
-          captchaToken: options?.captchaToken,
-        });
+        yield* hooks.beforeSendCode(
+          definedKeys({
+            method: "magic-link",
+            purpose: "sign-in",
+            address: email,
+            captchaToken: options?.captchaToken,
+          }),
+        );
 
         // Do not reveal whether the user exists to reduce email enumeration
         // risk: when sign-up is disabled and there is no matching account,
@@ -390,11 +393,13 @@ export const make = (
         );
         // The gate runs before the token is spent, so a refused attempt
         // leaves the link usable once the refusal lifts.
-        yield* hooks.beforeAuthenticate({
-          method: "magic-link",
-          identifier: { type: "email", value: magicLink.email },
-          userId: Option.getOrUndefined(Option.map(found, (owner) => owner.user.id)),
-        });
+        yield* hooks.beforeAuthenticate(
+          definedKeys({
+            method: "magic-link",
+            identifier: { type: "email", value: magicLink.email },
+            userId: Option.getOrUndefined(Option.map(found, (owner) => owner.user.id)),
+          }),
+        );
 
         // Spend the token atomically: of concurrent redemptions of one
         // link, only the caller whose `consume` took the record signs in.

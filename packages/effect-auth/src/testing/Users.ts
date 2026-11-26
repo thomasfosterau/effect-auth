@@ -7,6 +7,7 @@
  */
 import type * as Types from "../Types.ts";
 import { DateTime } from "effect";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * The canonical fixtures' ids: fixed, valid version-4 UUIDs, so a test can
@@ -40,14 +41,14 @@ export const fixtureEpoch: Date = DateTime.toDateUtc(
  */
 export interface FixtureUserOptions {
   /** Defaults to a fresh random UUID. */
-  readonly id?: string | undefined;
+  readonly id?: string;
   /** Written to `attributes.role`, where `Admin.isAdmin` and `SessionContext.withRole` read it. */
-  readonly role?: string | undefined;
-  readonly name?: string | undefined;
+  readonly role?: string;
+  readonly name?: string;
   /** Merged under `role`. */
-  readonly attributes?: Types.Attributes | undefined;
+  readonly attributes?: Types.Attributes;
   /** `createdAt` and `updatedAt`; defaults to {@link fixtureEpoch}. */
-  readonly createdAt?: Date | undefined;
+  readonly createdAt?: Date;
 }
 
 /**
@@ -101,13 +102,13 @@ export interface FixtureUsers {
  */
 export interface FixtureUsersOptions {
   /** Override any of the ids; the rest keep {@link fixtureUserIds}. */
-  readonly ids?: Partial<Record<keyof FixtureUsers, string>> | undefined;
+  readonly ids?: Partial<Record<keyof FixtureUsers, string>>;
   /** The admin's role. Defaults to `"admin"`, which `Admin.isAdmin` recognises by default. */
-  readonly adminRole?: string | undefined;
+  readonly adminRole?: string;
   /** The members' role. Defaults to `"user"`. */
-  readonly memberRole?: string | undefined;
+  readonly memberRole?: string;
   /** `createdAt` and `updatedAt`; defaults to {@link fixtureEpoch}. */
-  readonly createdAt?: Date | undefined;
+  readonly createdAt?: Date;
 }
 
 /**
@@ -139,20 +140,20 @@ export interface FixtureUsersOptions {
 export const fixtureUsers = (options: FixtureUsersOptions = {}): FixtureUsers => {
   const ids = { ...fixtureUserIds, ...options.ids };
   const memberRole = options.memberRole ?? "user";
-  const createdAt = options.createdAt;
+  const createdAt = definedKeys({ createdAt: options.createdAt });
   return {
     admin: fixtureUser({
       id: ids.admin,
       name: "Admin",
       role: options.adminRole ?? "admin",
-      createdAt,
+      ...createdAt,
     }),
-    member: fixtureUser({ id: ids.member, name: "Member", role: memberRole, createdAt }),
+    member: fixtureUser({ id: ids.member, name: "Member", role: memberRole, ...createdAt }),
     otherMember: fixtureUser({
       id: ids.otherMember,
       name: "Other Member",
       role: memberRole,
-      createdAt,
+      ...createdAt,
     }),
   };
 };

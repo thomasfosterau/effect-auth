@@ -541,13 +541,13 @@ describe("OAuth profile mapping", () => {
 describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => {
   describe("str", () => {
     it("returns the value for a string", () => {
-      expect(str("hello")).toBe("hello");
+      expect(str("hello")).toEqual(Option.some("hello"));
     });
-    it("returns undefined for non-string values", () => {
-      expect(str(42)).toBeUndefined();
-      expect(str(null)).toBeUndefined();
-      expect(str(undefined)).toBeUndefined();
-      expect(str({})).toBeUndefined();
+    it("returns None for non-string values", () => {
+      expect(str(42)).toEqual(Option.none());
+      expect(str(null)).toEqual(Option.none());
+      expect(str(undefined)).toEqual(Option.none());
+      expect(str({})).toEqual(Option.none());
     });
   });
 
@@ -569,11 +569,15 @@ describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => 
   describe("profile", () => {
     it("spreads the base record and sets canonical fields", () => {
       const raw = { id: "u1", extra: true };
-      const result = profile(raw, { id: "u1", email: "a@b.com", name: "Alice" });
+      const result = profile(raw, {
+        id: "u1",
+        email: Option.some("a@b.com"),
+        name: Option.some("Alice"),
+      });
       expect(result).toMatchObject({ id: "u1", email: "a@b.com", name: "Alice", extra: true });
     });
-    it("omits optional fields when undefined (exactOptionalPropertyTypes)", () => {
-      const result = profile({}, { id: "u2" });
+    it("omits optional fields that are absent or None", () => {
+      const result = profile({}, { id: "u2", name: Option.none() });
       expect(result.id).toBe("u2");
       expect("email" in result).toBe(false);
       expect("name" in result).toBe(false);

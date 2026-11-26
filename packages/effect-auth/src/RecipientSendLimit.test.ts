@@ -125,7 +125,7 @@ interface SendError {
 
 /** The cap option a path's service is built with, plus its cooldown (0: off). */
 interface Build {
-  readonly recipientSendLimit?: RecipientSendLimit | false | undefined;
+  readonly recipientSendLimit?: RecipientSendLimit | false;
   readonly resendCooldown: number;
 }
 
@@ -138,7 +138,7 @@ interface SendPath {
   /** Whether the path sends nothing to a recipient with no account. */
   readonly hidesAccount: boolean;
   /** Another spelling of `known` that normalizes to it. */
-  readonly knownSpelling?: string | undefined;
+  readonly knownSpelling?: string;
   readonly make: (world: World, build: Build) => Effect.Effect<Send, never, Deps>;
 }
 

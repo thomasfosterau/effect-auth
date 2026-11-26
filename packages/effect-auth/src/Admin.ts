@@ -31,6 +31,7 @@ import {
   type CreateUserResult,
   type NewUserIdentifier,
 } from "./UserStore.ts";
+import { definedKeys } from "./DefinedKeys.ts";
 
 /**
  * Admin error
@@ -127,7 +128,7 @@ export class AdminUserStore extends Context.Service<
        * the user row writes it there on insert, and any other store ignores it
        * (see {@link NewUserIdentifier}).
        */
-      readonly identifier?: NewUserIdentifier | undefined;
+      readonly identifier?: NewUserIdentifier;
     }) => Effect.Effect<CreateUserResult, Errors.AuthError>;
 
     /** Persist a hashed password for an existing user (admin reset; no current-password check). */
@@ -175,9 +176,7 @@ export interface AdminConfig {
    * finds the stored number. Default: trims whitespace only, as phone OTP's
    * default does. A failure fails `createUser` before anything is written.
    */
-  readonly normalizePhoneNumber?:
-    | ((raw: string) => Effect.Effect<string, Errors.AuthError>)
-    | undefined;
+  readonly normalizePhoneNumber?: (raw: string) => Effect.Effect<string, Errors.AuthError>;
 }
 
 const DEFAULT_MAX_LIST_LIMIT = 100;
@@ -409,13 +408,13 @@ export const make = (
     const hasher = yield* PasswordHasher;
     const crypto = yield* SecureRandom.SecureRandom;
     const accountTokens = yield* Effect.serviceOption(AccountManagementStore);
-    const purgeServices = {
+    const purgeServices = definedKeys({
       ...(yield* userPurgeStores),
       accountTokens: Option.getOrUndefined(accountTokens),
-      identifiers: identifierStore,
+      identifiers: Option.some(identifierStore),
       revokeSessions: sessionManager.invalidateUserSessions,
       deleteUser: userStore.delete,
-    };
+    });
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 

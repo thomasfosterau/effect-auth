@@ -160,6 +160,7 @@ import {
 } from "../SessionCookieCache.ts";
 import * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
+import { definedKeys } from "../DefinedKeys.ts";
 
 /**
  * The services the auth handlers require. Your `services` layer must provide
@@ -292,7 +293,7 @@ export interface CookieConfig {
    * `apiKeyHeaders`: pass the same value to `RemoteSession.make`'s
    * `credentials` so the edge and the auth service agree on where the key is.
    */
-  readonly apiKeyHeaders?: ReadonlyArray<string> | undefined;
+  readonly apiKeyHeaders?: ReadonlyArray<string>;
 }
 
 /** Multiple concurrent accounts per client (device-scoped session list). */
@@ -788,10 +789,10 @@ const samlConnection = <Algorithm extends string>(p: {
   readonly idpCertificates: ReadonlyArray<string>;
   readonly spEntityId: string;
   readonly acsUrl: string;
-  readonly signatureAlgorithms?: ReadonlyArray<Algorithm> | undefined;
-  readonly wantAssertionsSigned?: boolean | undefined;
-  readonly wantAuthnResponseSigned?: boolean | undefined;
-  readonly forceAuthn?: boolean | undefined;
+  readonly signatureAlgorithms?: ReadonlyArray<Algorithm>;
+  readonly wantAssertionsSigned?: boolean;
+  readonly wantAuthnResponseSigned?: boolean;
+  readonly forceAuthn?: boolean;
 }) => ({
   protocol: "saml" as const,
   domain: p.domain,
@@ -1870,7 +1871,7 @@ const badRequestFor = (e: { readonly code: string; readonly message: string }) =
 const passwordPolicyFailure = (e: {
   readonly code: string;
   readonly message: string;
-  readonly params?: Readonly<Record<string, string | number>> | undefined;
+  readonly params?: Readonly<Record<string, string | number>>;
 }) =>
   resolveMessage(e.code, e.message, e.params).pipe(
     Effect.flatMap((message) => Effect.fail(new S.BadRequest({ message, code: e.code }))),
@@ -1907,16 +1908,16 @@ const hookRefusals = <A, E, R>(
 /** What a sign-in, sign-up or verification produced, before it is answered. */
 interface SignInOutcome {
   readonly user: Types.User;
-  readonly session?: Types.Session | undefined;
+  readonly session?: Types.Session;
   /** The raw token of `session`: only ever set as a cookie or the bearer header. */
-  readonly token?: string | undefined;
+  readonly token?: string;
   readonly needsEmailVerification: boolean;
-  readonly secondFactor?: { readonly token: string; readonly expiresAt: number } | undefined;
-  readonly rememberMe?: boolean | undefined;
+  readonly secondFactor?: { readonly token: string; readonly expiresAt: number };
+  readonly rememberMe?: boolean;
   /** The method the last-login-method hint records. */
   readonly method: string;
   /** The user as the answer shows it, when the flow builds it itself (sign-up). */
-  readonly userResource?: R.User | undefined;
+  readonly userResource?: R.User;
 }
 
 /** The `201` / `200` answer for a new session. */
@@ -1999,7 +2000,7 @@ const signInWithPassword = (
   credential: {
     readonly email: string;
     readonly password: string;
-    readonly captchaToken?: string | undefined;
+    readonly captchaToken?: string;
   },
   rememberMe: boolean | undefined,
 ) =>
@@ -2030,19 +2031,21 @@ const signInWithUsername = (
   credential: {
     readonly username: string;
     readonly password: string;
-    readonly captchaToken?: string | undefined;
+    readonly captchaToken?: string;
   },
   rememberMe: boolean | undefined,
 ) =>
   Effect.gen(function* () {
     const username = yield* resolveUsername;
     const result = yield* username.service
-      .signIn({
-        username: credential.username,
-        password: credential.password,
-        captchaToken: credential.captchaToken,
-        ...(rememberMe !== undefined && { rememberMe }),
-      })
+      .signIn(
+        definedKeys({
+          username: credential.username,
+          password: credential.password,
+          captchaToken: credential.captchaToken,
+          ...(rememberMe !== undefined && { rememberMe }),
+        }),
+      )
       .pipe(
         Effect.catchTags({
           UsernameError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
@@ -2142,8 +2145,8 @@ const signInWithGoogleOneTap = (credential: { readonly idToken: string; readonly
 const signInWith = ({ credential, rememberMe }: typeof SignInDocument.Type.data.attributes) =>
   Match.value(credential).pipe(
     Match.discriminatorsExhaustive("method")({
-      password: (password) => signInWithPassword(password, rememberMe),
-      username: (username) => signInWithUsername(username, rememberMe),
+      password: (password) => signInWithPassword(definedKeys(password), rememberMe),
+      username: (username) => signInWithUsername(definedKeys(username), rememberMe),
       "email-otp": signInWithEmailOtp,
       "phone-otp": signInWithPhoneOtp,
       "magic-link": signInWithMagicLink,
@@ -2269,7 +2272,7 @@ export const otpChallengesGroupLayer = HttpApiBuilder.group(AuthApi, "otp-challe
       const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
         Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
       // The send gate (`beforeSendCode`, the captcha).
-      const options = { captchaToken: challenge.captchaToken };
+      const options = definedKeys({ captchaToken: challenge.captchaToken });
       return yield* Match.value(challenge).pipe(
         Match.discriminatorsExhaustive("channel")({
           email: ({ email, purpose }) =>
@@ -2386,7 +2389,7 @@ export const passwordResetsGroupLayer = HttpApiBuilder.group(
           const passwordReset = yield* PasswordResetService;
           const { email, captchaToken } = payload.data.attributes;
           // The send gate (`beforeSendCode`, the captcha).
-          yield* passwordReset.requestPasswordReset(email, { captchaToken }).pipe(
+          yield* passwordReset.requestPasswordReset(email, definedKeys({ captchaToken })).pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
               PasswordResetError: (e) => internalServerError(e),
@@ -2491,10 +2494,14 @@ export const emailChangesGroupLayer = (
           const account = yield* resolveAccountManagement;
           const { newEmail, currentPassword } = payload.data.attributes;
           yield* account.service
-            .requestEmailChange(resolved.user.id, newEmail, {
-              currentPassword,
-              session: resolved.session,
-            })
+            .requestEmailChange(
+              resolved.user.id,
+              newEmail,
+              definedKeys({
+                currentPassword,
+                session: resolved.session,
+              }),
+            )
             .pipe(
               Effect.catchTags({
                 // Anti-enumeration: never reveal whether the target address is taken.
@@ -3417,14 +3424,19 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
           const answer = { invitationId: params.id, token };
           if (status === "accepted") {
             const { member, invitation } = yield* refusedBadRequest(
-              org.acceptInvitation(actorId, { ...answer, currentSessionId: resolved.session.id }),
+              org.acceptInvitation(
+                actorId,
+                definedKeys({ ...answer, currentSessionId: resolved.session.id }),
+              ),
             );
             return Handlers.data(invitationResource(invitation), {
               meta: { membership: memberResource(member) },
             });
           }
           if (status === "rejected") {
-            const rejected = yield* refusedBadRequest(org.rejectInvitation(actorId, answer));
+            const rejected = yield* refusedBadRequest(
+              org.rejectInvitation(actorId, definedKeys(answer)),
+            );
             return Handlers.data(invitationResource(rejected));
           }
           if (status === "canceled") {
@@ -3456,8 +3468,8 @@ export const invitationsGroupLayer = (config?: CookieConfig, multiSession?: Mult
 
 /** `GET /admin/users`' query as the admin service's listing query. */
 const listUsersQuery = (query: {
-  readonly page?: { readonly offset?: number; readonly limit?: number } | undefined;
-  readonly filter?: { readonly email?: string } | undefined;
+  readonly page?: { readonly offset?: number; readonly limit?: number };
+  readonly filter?: { readonly email?: string };
 }): ListUsersQuery => ({
   ...(query.page?.limit !== undefined && { limit: query.page.limit }),
   ...(query.page?.offset !== undefined && { offset: query.page.offset }),
@@ -3466,8 +3478,8 @@ const listUsersQuery = (query: {
 
 /** A ban's `reason` and `expiresIn`, as the admin service's ban options. */
 const banOptions = (attributes: {
-  readonly reason?: string | undefined;
-  readonly expiresIn?: number | undefined;
+  readonly reason?: string;
+  readonly expiresIn?: number;
 }): BanUserOptions => ({
   ...(attributes.reason !== undefined && { reason: attributes.reason }),
   ...(attributes.expiresIn !== undefined && { expiresIn: attributes.expiresIn }),
@@ -3500,9 +3512,9 @@ const apiKeyUpdate = (a: S.ApiKeyUpdatePayload): ApiKeyUpdate => ({
 const oauthClientInput = (a: {
   readonly name: string;
   readonly redirectUris: ReadonlyArray<string>;
-  readonly clientType?: "web" | "native" | undefined;
-  readonly skipConsent?: boolean | undefined;
-  readonly metadata?: Types.Attributes | undefined;
+  readonly clientType?: "web" | "native";
+  readonly skipConsent?: boolean;
+  readonly metadata?: Types.Attributes;
 }): RegisterOidcClientInput => ({
   name: a.name,
   redirectUris: a.redirectUris,
@@ -3525,7 +3537,7 @@ const samlRegistration = (
   p: S.SsoRegisterSamlAttributes,
   organizationId: string | undefined,
 ): RegisterSamlProviderInput => ({
-  ...samlConnection(p),
+  ...samlConnection(definedKeys(p)),
   ...(organizationId !== undefined && { organizationId }),
 });
 
@@ -3707,7 +3719,7 @@ export const userBansGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
             admin.banUser(
               actor,
               payload.data.relationships.user.data.id,
-              banOptions(payload.data.attributes ?? {}),
+              banOptions(definedKeys(payload.data.attributes ?? {})),
             ),
           );
           return Handlers.data(userBanResource(banned), {
@@ -3962,7 +3974,7 @@ export const oauthClientsGroupLayer = (
           // The answer may carry the client secret, shown this once.
           yield* noStore;
           const result = yield* oidcProviderFailures(
-            oidc.registerClient(oauthClientInput(payload.data.attributes), userId),
+            oidc.registerClient(oauthClientInput(definedKeys(payload.data.attributes)), userId),
           );
           // A confidential client's secret is shown this once, in `meta`.
           return Handlers.data(oauthClientResource(result.client), {
@@ -4246,14 +4258,14 @@ const scopeList = (scope: string | undefined): ReadonlyArray<string> =>
  */
 export interface SsoRedirectConfig {
   /** Where a signed-in browser goes: an absolute URL or a root-relative path. Default `"/"`. */
-  readonly redirectTo?: string | undefined;
+  readonly redirectTo?: string;
   /**
    * Where a refused response sends the browser, with an `error` query
    * parameter: `access_denied` (the response was refused),
    * `temporarily_unavailable` (rate limited) or `server_error`. Default
    * {@link redirectTo}.
    */
-  readonly errorRedirectTo?: string | undefined;
+  readonly errorRedirectTo?: string;
   /**
    * Where a sign-in that needs a second factor sends the browser, with no
    * session cookie. The challenge rides in the URL fragment, which the browser
@@ -4261,7 +4273,7 @@ export interface SsoRedirectConfig {
    * Redeem the token with a code at `POST /second-factor-challenges/verifications`
    * (the client's second-factor continuation). Default {@link redirectTo}.
    */
-  readonly secondFactorRedirectTo?: string | undefined;
+  readonly secondFactorRedirectTo?: string;
 }
 
 /** `target` with a second-factor challenge in its fragment, replacing any fragment it had. */
@@ -4817,9 +4829,9 @@ const encodeScimGroup = (resource: ScimGroupResource, baseUrl: string): S.ScimGr
  * silently coercing to a surprising page.
  */
 const scimListQuery = (query: {
-  readonly filter?: string | undefined;
-  readonly startIndex?: string | undefined;
-  readonly count?: string | undefined;
+  readonly filter?: string;
+  readonly startIndex?: string;
+  readonly count?: string;
 }): Effect.Effect<ScimListQuery, S.ScimBadRequest> => {
   const parseInteger = (raw: string | undefined): number | null | undefined => {
     if (raw === undefined || raw.trim() === "") return undefined;
@@ -5032,7 +5044,7 @@ export const scimGroupLayer = HttpApiBuilder.group(AuthApi, "scim", (handlers) =
     .handle("scimListUsers", ({ query, request }) =>
       Effect.gen(function* () {
         const scim = yield* requireScim(request);
-        const listQuery = yield* scimListQuery(query);
+        const listQuery = yield* scimListQuery(definedKeys(query));
         const page = yield* scim.service
           .listUsers(scim.connection, listQuery)
           .pipe(Effect.catchTags(scimCatch));
@@ -5069,7 +5081,7 @@ export const scimGroupLayer = HttpApiBuilder.group(AuthApi, "scim", (handlers) =
       Effect.gen(function* () {
         const scim = yield* requireScim(request);
         const resource = yield* scim.service
-          .patchUser(scim.connection, params.id, payload.Operations)
+          .patchUser(scim.connection, params.id, Arr.map(payload.Operations, definedKeys))
           .pipe(Effect.catchTags(scimCatch));
         return encodeScimUser(resource, scim.service.baseUrl);
       }),
@@ -5094,7 +5106,7 @@ export const scimGroupLayer = HttpApiBuilder.group(AuthApi, "scim", (handlers) =
     .handle("scimListGroups", ({ query, request }) =>
       Effect.gen(function* () {
         const scim = yield* requireScim(request);
-        const listQuery = yield* scimListQuery(query);
+        const listQuery = yield* scimListQuery(definedKeys(query));
         const page = yield* scim.service
           .listGroups(scim.connection, listQuery)
           .pipe(Effect.catchTags(scimCatch));
@@ -5131,7 +5143,7 @@ export const scimGroupLayer = HttpApiBuilder.group(AuthApi, "scim", (handlers) =
       Effect.gen(function* () {
         const scim = yield* requireScim(request);
         const resource = yield* scim.service
-          .patchGroup(scim.connection, params.id, payload.Operations)
+          .patchGroup(scim.connection, params.id, Arr.map(payload.Operations, definedKeys))
           .pipe(Effect.catchTags(scimCatch));
         return encodeScimGroup(resource, scim.service.baseUrl);
       }),
@@ -5429,7 +5441,7 @@ export interface HttpIPRateLimitConfig {
    * `"fail-open"`: the error is logged and the request proceeds unlimited
    * (availability over abuse protection), as `AccountLockoutPlugin`'s option.
    */
-  readonly onStoreError?: "fail-closed" | "fail-open" | undefined;
+  readonly onStoreError?: "fail-closed" | "fail-open";
   /**
    * How many leading bits of an IPv6 address make one client: every address
    * in that prefix counts in one bucket, so a customer's /64 cannot mint a
@@ -5437,7 +5449,7 @@ export interface HttpIPRateLimitConfig {
    * address on its own. IPv4 addresses are keyed as they are. Default `64`.
    * Any other value makes `make` throw `RateLimiterConfigError`.
    */
-  readonly ipv6PrefixLength?: number | undefined;
+  readonly ipv6PrefixLength?: number;
 }
 
 const MINUTE_MS = 60 * 1000;
@@ -5759,7 +5771,7 @@ export interface AuthWebHandlerOptions<E = never> {
    * handler logs a warning naming it when it is built, and with
    * {@link strict} refuses to start ({@link SignUpAttributesConfigError}).
    */
-  readonly signUpAttributes?: ReadonlyArray<string> | undefined;
+  readonly signUpAttributes?: ReadonlyArray<string>;
   /**
    * The keys of a user's `attributes` left out of every `users` resource and
    * user view the handler answers with, except on the admin endpoints
@@ -5773,13 +5785,13 @@ export interface AuthWebHandlerOptions<E = never> {
    * `/api-keys/current`, so an app that authorizes on a hidden key over it
    * needs that key left visible here.
    */
-  readonly clientHiddenAttributes?: ReadonlyArray<string> | undefined;
+  readonly clientHiddenAttributes?: ReadonlyArray<string>;
   /**
    * Where the SAML assertion consumer service (`POST /sso/saml/acs/:providerId`)
    * redirects the browser after a sign-in (default `"/"`) or a refused
    * response (default the same, with an `error` query parameter).
    */
-  readonly sso?: SsoRedirectConfig | undefined;
+  readonly sso?: SsoRedirectConfig;
   /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
@@ -5850,7 +5862,7 @@ export interface AuthWebHandlerOptions<E = never> {
    * endpoint (see {@link ipRateLimit}) or an `IPRateLimitPlugin` hook is refused
    * with `429`.
    */
-  readonly trustedProxy?: TrustedProxyConfig | undefined;
+  readonly trustedProxy?: TrustedProxyConfig;
   /**
    * IP-keyed rate limiting at the HTTP boundary, before handlers run. **On by
    * default**: omitted or `{}`, the built-in
@@ -5888,7 +5900,7 @@ export interface AuthWebHandlerOptions<E = never> {
    * counted under a bucket shared with other callers. Requests to endpoints
    * with no rule are unaffected.
    */
-  readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
+  readonly ipRateLimit?: HttpIPRateLimitConfig | false;
   /**
    * Refuse configuration that would otherwise only be warned about, and a
    * `services` build `make` cannot check at startup. Default `false`.
@@ -5930,7 +5942,7 @@ export interface AuthWebHandlerOptions<E = never> {
    * startup errors always reject at startup; there `strict` only refuses
    * protected `signUpAttributes`.
    */
-  readonly strict?: boolean | undefined;
+  readonly strict?: boolean;
 }
 
 /**

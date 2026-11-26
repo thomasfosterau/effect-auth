@@ -185,7 +185,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     input: {
       readonly name?: string;
       readonly image?: string;
-      readonly attributes?: Auth.Attributes | undefined;
+      readonly attributes?: Auth.Attributes;
     },
     label: string,
   ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
@@ -1400,18 +1400,18 @@ export interface PurgeExpiredOptions {
    * The most rows the run deletes from each table. A positive integer;
    * omitted, every expired row goes, as {@link purgeExpired} does.
    */
-  readonly limit?: number | undefined;
+  readonly limit?: number;
   /**
    * How long an email-OTP failure budget outlives its latest wrong code.
    * Default 25 hours: the default backoff cap (`backoff.maxDelay`, a day) and
    * an hour's margin. Keep it at least your `maxDelay`.
    */
-  readonly otpFailureRetention?: Duration.Input | undefined;
+  readonly otpFailureRetention?: Duration.Input;
   /**
    * How long an unlocked account-lockout counter outlives its key's latest
    * attempt. Default a day. Keep it at least the plugin's `lockoutDurationMs`.
    */
-  readonly accountLockoutRetention?: Duration.Input | undefined;
+  readonly accountLockoutRetention?: Duration.Input;
 }
 
 /** {@link PurgeExpiredOptions.otpFailureRetention}'s default. */
@@ -1421,8 +1421,8 @@ export const DEFAULT_ACCOUNT_LOCKOUT_RETENTION: Duration.Duration = Duration.day
 
 const retentionMillis = (
   name: string,
-  input: Duration.Input | undefined,
   fallback: Duration.Duration,
+  input?: Duration.Input,
 ): Effect.Effect<number, Auth.AuthError> => {
   const millis = Duration.toMillis(input ?? fallback);
   return Number.isFinite(millis) && millis >= 0
@@ -1468,19 +1468,19 @@ export const purgeExpiredWith = (
   return Effect.gen(function* () {
     const otpFailureRetention = yield* retentionMillis(
       "otpFailureRetention",
-      options?.otpFailureRetention,
       DEFAULT_OTP_FAILURE_RETENTION,
+      options?.otpFailureRetention,
     );
     const accountLockoutRetention = yield* retentionMillis(
       "accountLockoutRetention",
-      options?.accountLockoutRetention,
       DEFAULT_ACCOUNT_LOCKOUT_RETENTION,
+      options?.accountLockoutRetention,
     );
     const sql = yield* SqlClient.SqlClient;
     const now = yield* Clock.currentTimeMillis;
     return yield* purgeTables(sql, {
       now,
-      limit,
+      limit: Option.fromUndefinedOr(limit),
       otpFailuresBefore: now - otpFailureRetention,
       lockoutAttemptsBefore: now - accountLockoutRetention,
     });
@@ -1507,15 +1507,16 @@ const purgeTable = (
     readonly table: string;
     readonly key: string;
     readonly expired: Statement.Fragment;
-    readonly limit: number | undefined;
+    readonly limit: Option.Option<number>;
   },
 ): Effect.Effect<number, Auth.AuthError> => {
   const table = sql.literal(options.table);
   const key = sql.literal(options.key);
-  const statement =
-    options.limit === undefined
-      ? sql`DELETE FROM ${table} WHERE ${options.expired} RETURNING ${key}`
-      : sql`DELETE FROM ${table} WHERE (${options.expired}) AND (${key}) IN (SELECT ${key} FROM ${table} WHERE ${options.expired} LIMIT ${options.limit}) RETURNING ${key}`;
+  const statement = Option.match(options.limit, {
+    onNone: () => sql`DELETE FROM ${table} WHERE ${options.expired} RETURNING ${key}`,
+    onSome: (limit) =>
+      sql`DELETE FROM ${table} WHERE (${options.expired}) AND (${key}) IN (SELECT ${key} FROM ${table} WHERE ${options.expired} LIMIT ${limit}) RETURNING ${key}`,
+  });
   return allRows(options.label, statement).pipe(Effect.map((rows) => rows.length));
 };
 
@@ -1525,7 +1526,7 @@ const purgeByExpiresAt = (
   table: string,
   key: string,
   now: number,
-  limit: number | undefined,
+  limit: Option.Option<number>,
 ) =>
   purgeTable(sql, {
     label: `purgeExpired.${table}`,
@@ -1541,7 +1542,7 @@ const purgeOrphans = (
   table: string,
   parent: string,
   key: string,
-  limit: number | undefined,
+  limit: Option.Option<number>,
 ) =>
   purgeTable(sql, {
     label: `purgeExpired.${table}`,
@@ -1555,7 +1556,7 @@ const purgeTables = (
   sql: SqlClient.SqlClient,
   options: {
     readonly now: number;
-    readonly limit: number | undefined;
+    readonly limit: Option.Option<number>;
     readonly otpFailuresBefore: number;
     readonly lockoutAttemptsBefore: number;
   },
@@ -1568,7 +1569,7 @@ const purgeTables = (
     sql`INSERT INTO auth_account_lockout_attempts (key, last_attempt_at)
           SELECT l.key, ${now} FROM auth_account_lockouts l
           WHERE NOT EXISTS (SELECT 1 FROM auth_account_lockout_attempts a WHERE a.key = l.key)
-          ${limit === undefined ? sql`` : sql`LIMIT ${limit}`}
+          ${Option.match(limit, { onNone: () => sql``, onSome: (n) => sql`LIMIT ${n}` })}
           ON CONFLICT(key) DO NOTHING`,
   );
   return Effect.gen(function* () {
