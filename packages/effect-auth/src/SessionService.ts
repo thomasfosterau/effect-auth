@@ -119,7 +119,7 @@ export const make = (
             return { session: created, token: rawToken } satisfies Types.IssuedSession;
           }).pipe(
             Effect.withSpan(Obs.spanNames.createSession),
-            Effect.tap(() => Obs.recordSessionCreated()),
+            Effect.tap(() => Obs.recordSessionCreated),
           ),
       ),
 
@@ -250,7 +250,7 @@ export const make = (
           yield* hooks.afterSignOut({ sessionId: storedId });
         }).pipe(
           Effect.withSpan(Obs.spanNames.signOut),
-          Effect.tap(() => Obs.recordSessionInvalidated()),
+          Effect.tap(() => Obs.recordSessionInvalidated),
         ),
       ),
 

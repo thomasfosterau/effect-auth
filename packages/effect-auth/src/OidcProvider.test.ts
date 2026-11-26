@@ -89,7 +89,7 @@ const makeOidcStores = () => {
     getByClientId: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(clients, id))),
     update: (c) => Effect.sync(() => (MutableHashMap.set(clients, c.clientId, c), c)),
     delete: (id) => Effect.sync(() => void MutableHashMap.remove(clients, id)),
-    list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(clients))),
+    list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(clients))),
   };
   const codeStore: typeof OidcCodeStore.Service = {
     create: (c) => Effect.sync(() => (MutableHashMap.set(codes, c.codeHash, c), c)),
@@ -159,9 +159,9 @@ const makeOidcStores = () => {
       }),
   };
   const jwtKeyStore: typeof JwtKeyStore.Service = {
-    getActive: () => Effect.succeed(jwtKeys[0] ?? null),
+    getActive: Effect.sync(() => jwtKeys[0] ?? null),
     create: (pair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
-    list: () => Effect.succeed([...jwtKeys]),
+    list: Effect.sync(() => [...jwtKeys]),
   };
 
   return { clientStore, codeStore, tokenStore, consentStore, jwtKeyStore, clients, codes, tokens };
@@ -1732,7 +1732,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2015,7 +2015,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorizeOnce = async () => {
       const res = await fx.handler(
         get(
@@ -2166,7 +2166,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2255,7 +2255,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2343,7 +2343,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2407,7 +2407,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2584,7 +2584,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     expect(client.client_id_issued_at).toBeGreaterThan(0);
 
     // 2. Authorization code with PKCE S256 — no client secret anywhere.
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
+    const pkce = await Effect.runPromise(generatePKCE.pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",

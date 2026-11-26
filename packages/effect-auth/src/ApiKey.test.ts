@@ -73,7 +73,7 @@ const storeContext = Context.merge(
 
 const makeRateLimitContext = async () => {
   const rateLimiter = await Effect.runPromise(
-    Effect.provide(RateLimit.make(), Context.make(RateLimitStore, rateLimitStore)),
+    Effect.provide(RateLimit.make, Context.make(RateLimitStore, rateLimitStore)),
   );
   return Context.merge(
     storeContext,

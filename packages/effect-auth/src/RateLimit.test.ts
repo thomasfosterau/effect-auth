@@ -59,14 +59,12 @@ const makeStore = (...entries: ReadonlyArray<RateLimitEntry>) => {
 
 const checkLimit = (layer: Layer.Layer<RateLimitStore>, key: string, config: RateLimitConfig) =>
   Effect.runPromise(
-    Effect.flatMap(make(), (limiter) => limiter.checkLimit(key, config)).pipe(
-      Effect.provide(layer),
-    ),
+    Effect.flatMap(make, (limiter) => limiter.checkLimit(key, config)).pipe(Effect.provide(layer)),
   );
 
 const refusal = (layer: Layer.Layer<RateLimitStore>, key: string, config: RateLimitConfig) =>
   Effect.runPromise(
-    Effect.flatMap(make(), (limiter) => Effect.flip(limiter.checkLimit(key, config))).pipe(
+    Effect.flatMap(make, (limiter) => Effect.flip(limiter.checkLimit(key, config))).pipe(
       Effect.provide(layer),
     ),
   );
@@ -132,9 +130,7 @@ describe("RateLimiter.checkLimit", () => {
 });
 
 const consume = (layer: Layer.Layer<RateLimitStore>, key: string, config: RateLimitConfig) =>
-  Effect.flatMap(make(), (limiter) => limiter.consumeToken(key, config)).pipe(
-    Effect.provide(layer),
-  );
+  Effect.flatMap(make, (limiter) => limiter.consumeToken(key, config)).pipe(Effect.provide(layer));
 
 describe("RateLimiter.consumeToken", () => {
   it("allows up to the limit in a window, then refuses", async () => {

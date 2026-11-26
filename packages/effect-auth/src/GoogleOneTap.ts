@@ -1,7 +1,7 @@
 /**
  * Google One Tap sign-in: verifies the prompt's `id_token` against Google's
  * keys and finds or creates the user. A server nonce blocks replay: mint it
- * with `createNonce()`, pass it as `data-nonce`, and hand the unhashed nonce to
+ * with `createNonce`, pass it as `data-nonce`, and hand the unhashed nonce to
  * `signIn`, which consumes it. Provide a {@link GoogleOneTapNonceStore}.
  *
  * @module google-one-tap
@@ -114,7 +114,7 @@ export class GoogleOneTapService extends Context.Service<
      * Google hashes it (SHA-256 hex) before embedding it in the id_token, but
      * you always work with the **unhashed** value.
      */
-    readonly createNonce: () => Effect.Effect<string, GoogleOneTapError | AuthError>;
+    readonly createNonce: Effect.Effect<string, GoogleOneTapError | AuthError>;
 
     /**
      * Verify a One Tap `credential` (id_token) and sign the user in:
@@ -179,15 +179,15 @@ export const make = (
     const hashNonce = yield* tokenHasher;
 
     return {
-      createNonce: Effect.fn("GoogleOneTapService.createNonce")(function* () {
-        const nonce = yield* generateNonce().pipe(
+      createNonce: Effect.gen(function* () {
+        const nonce = yield* generateNonce.pipe(
           Effect.provideService(SecureRandom.SecureRandom, crypto),
         );
         yield* nonceStore
           .create(nonce, (yield* Clock.currentTimeMillis) + nonceTtlMs)
           .pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));
         return nonce;
-      }),
+      }).pipe(Effect.withSpan("GoogleOneTapService.createNonce")),
 
       signIn: Effect.fn("GoogleOneTapService.signIn")(function* (
         credential: string,

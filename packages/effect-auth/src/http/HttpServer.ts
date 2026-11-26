@@ -1082,9 +1082,9 @@ const USER_CODE_RATE_LIMIT: RateLimitConfig = {
 /** The JWT service's public keys as a JWK Set (`/jwks` and the OIDC provider's). */
 const jwksDocument = Effect.fn("HttpServer.jwksDocument")(function* () {
   const jwt = yield* resolveJwt;
-  const jwks = yield* jwt.service
-    .getJwks()
-    .pipe(Effect.catchTags({ AuthError: (e) => internalServerError(e) }));
+  const jwks = yield* jwt.service.getJwks.pipe(
+    Effect.catchTags({ AuthError: (e) => internalServerError(e) }),
+  );
   return { keys: [...jwks.keys] };
 });
 
@@ -2260,57 +2260,56 @@ export const secondFactorChallengesGroupLayer = (
 };
 
 /** Layer implementing the `otp-challenges` group: send a code or a magic link. */
-export const otpChallengesGroupLayer = () =>
-  HttpApiBuilder.group(AuthApi, "otp-challenges", (handlers) =>
-    handlers.handle("create", ({ payload }) =>
-      Effect.gen(function* () {
-        // Anti-enumeration: each service succeeds silently for an unknown
-        // address or number; only store and delivery failures surface (500).
-        const challenge = payload.data.attributes;
-        const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
-          Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
-        // The send gate (`beforeSendCode`, the captcha).
-        const options = { captchaToken: challenge.captchaToken };
-        return yield* Match.value(challenge).pipe(
-          Match.discriminatorsExhaustive("channel")({
-            email: ({ email, purpose }) =>
-              Effect.flatMap(resolveEmailOtp, ({ service }) =>
-                service.send(email, purpose, options).pipe(
-                  Effect.catchTags({
-                    AuthError: (e) => internalServerError(e),
-                    EmailOtpError: (e) => internalServerError(e),
-                    ResendTooSoonError: resendTooSoon,
-                    ...hookFailures,
-                  }),
-                ),
+export const otpChallengesGroupLayer = HttpApiBuilder.group(AuthApi, "otp-challenges", (handlers) =>
+  handlers.handle("create", ({ payload }) =>
+    Effect.gen(function* () {
+      // Anti-enumeration: each service succeeds silently for an unknown
+      // address or number; only store and delivery failures surface (500).
+      const challenge = payload.data.attributes;
+      const resendTooSoon = (e: { readonly code: string; readonly message: string }) =>
+        Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code }));
+      // The send gate (`beforeSendCode`, the captcha).
+      const options = { captchaToken: challenge.captchaToken };
+      return yield* Match.value(challenge).pipe(
+        Match.discriminatorsExhaustive("channel")({
+          email: ({ email, purpose }) =>
+            Effect.flatMap(resolveEmailOtp, ({ service }) =>
+              service.send(email, purpose, options).pipe(
+                Effect.catchTags({
+                  AuthError: (e) => internalServerError(e),
+                  EmailOtpError: (e) => internalServerError(e),
+                  ResendTooSoonError: resendTooSoon,
+                  ...hookFailures,
+                }),
               ),
-            phone: ({ phoneNumber, purpose }) =>
-              Effect.flatMap(resolvePhoneOtp, ({ service }) =>
-                service.send(phoneNumber, purpose, options).pipe(
-                  Effect.catchTags({
-                    PhoneOtpError: (e) => internalServerError(e),
-                    AuthError: (e) => internalServerError(e),
-                    ResendTooSoonError: resendTooSoon,
-                    ...hookFailures,
-                  }),
-                ),
+            ),
+          phone: ({ phoneNumber, purpose }) =>
+            Effect.flatMap(resolvePhoneOtp, ({ service }) =>
+              service.send(phoneNumber, purpose, options).pipe(
+                Effect.catchTags({
+                  PhoneOtpError: (e) => internalServerError(e),
+                  AuthError: (e) => internalServerError(e),
+                  ResendTooSoonError: resendTooSoon,
+                  ...hookFailures,
+                }),
               ),
-            "magic-link": ({ email }) =>
-              Effect.flatMap(resolveMagicLink, ({ service }) =>
-                service.send(email, options).pipe(
-                  Effect.catchTags({
-                    AuthError: (e) => internalServerError(e),
-                    MagicLinkError: (e) => internalServerError(e),
-                    ResendTooSoonError: resendTooSoon,
-                    ...hookFailures,
-                  }),
-                ),
+            ),
+          "magic-link": ({ email }) =>
+            Effect.flatMap(resolveMagicLink, ({ service }) =>
+              service.send(email, options).pipe(
+                Effect.catchTags({
+                  AuthError: (e) => internalServerError(e),
+                  MagicLinkError: (e) => internalServerError(e),
+                  ResendTooSoonError: resendTooSoon,
+                  ...hookFailures,
+                }),
               ),
-          }),
-        );
-      }).pipe(Effect.asVoid, JsonApiErrors.mapHttpErrors),
-    ),
-  );
+            ),
+        }),
+      );
+    }).pipe(Effect.asVoid, JsonApiErrors.mapHttpErrors),
+  ),
+);
 
 /** Layer implementing the `email-verifications` group. */
 export const emailVerificationsGroupLayer = (
@@ -2375,8 +2374,10 @@ export const emailVerificationsGroupLayer = (
 };
 
 /** Layer implementing the `password-resets` group. */
-export const passwordResetsGroupLayer = () =>
-  HttpApiBuilder.group(AuthApi, "password-resets", (handlers) =>
+export const passwordResetsGroupLayer = HttpApiBuilder.group(
+  AuthApi,
+  "password-resets",
+  (handlers) =>
     handlers
       .handle("create", ({ payload }) =>
         Effect.gen(function* () {
@@ -2406,18 +2407,20 @@ export const passwordResetsGroupLayer = () =>
           );
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
-  );
+);
 
 /** Layer implementing the `google-one-tap-nonces` group. */
-export const googleOneTapNoncesGroupLayer = () =>
-  HttpApiBuilder.group(AuthApi, "google-one-tap-nonces", (handlers) =>
+export const googleOneTapNoncesGroupLayer = HttpApiBuilder.group(
+  AuthApi,
+  "google-one-tap-nonces",
+  (handlers) =>
     handlers.handle("create", () =>
       Effect.gen(function* () {
         const oneTap = yield* resolveGoogleOneTap;
         // The single-use nonce is this caller's alone: a cached answer would
         // hand it to the next caller.
         yield* noStore;
-        const nonce = yield* oneTap.service.createNonce().pipe(
+        const nonce = yield* oneTap.service.createNonce.pipe(
           Effect.catchTags({
             GoogleOneTapError: (e) => internalServerError(e),
             AuthError: (e) => internalServerError(e),
@@ -2426,7 +2429,7 @@ export const googleOneTapNoncesGroupLayer = () =>
         return Handlers.data(R.GoogleOneTapNonce.make({ id: nonce, attributes: {} }));
       }).pipe(JsonApiErrors.mapHttpErrors),
     ),
-  );
+);
 
 // -----------------------------------------------------------------------------
 // Account management
@@ -3940,7 +3943,7 @@ export const oauthClientsGroupLayer = (
       .handle("list", ({ request }) =>
         Effect.gen(function* () {
           const { oidc } = yield* administrator(request);
-          const clients = yield* storeFailure(oidc.listClients());
+          const clients = yield* storeFailure(oidc.listClients);
           return Handlers.collection(clients.map(oauthClientResource));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
@@ -4178,10 +4181,10 @@ export const groupLayers = (
     identifiersGroupLayer(config, multiSession),
     usersGroupLayer(config, multiSession, signUpAttributes),
     secondFactorChallengesGroupLayer(config, multiSession),
-    otpChallengesGroupLayer(),
+    otpChallengesGroupLayer,
     emailVerificationsGroupLayer(config, multiSession),
-    passwordResetsGroupLayer(),
-    googleOneTapNoncesGroupLayer(),
+    passwordResetsGroupLayer,
+    googleOneTapNoncesGroupLayer,
     emailChangesGroupLayer(config, multiSession),
     accountDeletionsGroupLayer(config, multiSession),
     multiFactorEnrollmentsGroupLayer(config, multiSession),
@@ -4203,7 +4206,7 @@ export const groupLayers = (
     ssoAuthorizationsGroupLayer(config, multiSession),
     tokensGroupLayer(config, multiSession),
     deviceAuthorizationsGroupLayer(config, multiSession),
-    scimGroupLayer(),
+    scimGroupLayer,
   ).pipe(
     // The protocol middleware the JSON:API endpoints declare: content
     // negotiation, schema errors as error documents, and the create's
@@ -5005,145 +5008,144 @@ const scimSchemas = (baseUrl: string): S.ScimDocumentView => {
  * Every route resolves `ScimService` optionally, so a deployment that never
  * provisions answers `404` here and pays nothing for the feature.
  */
-export const scimGroupLayer = () =>
-  HttpApiBuilder.group(AuthApi, "scim", (handlers) =>
-    handlers
-      .handle("scimCreateUser", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .createUser(scim.connection, toScimUserInput(payload))
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimUser(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimListUsers", ({ query, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const listQuery = yield* scimListQuery(query);
-          const page = yield* scim.service
-            .listUsers(scim.connection, listQuery)
-            .pipe(Effect.catchTags(scimCatch));
-          return {
-            schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
-            totalResults: page.totalResults,
-            startIndex: page.startIndex,
-            itemsPerPage: page.itemsPerPage,
-            Resources: page.resources.map((resource) =>
-              encodeScimUser(resource, scim.service.baseUrl),
-            ),
-          };
-        }),
-      )
-      .handle("scimGetUser", ({ params, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .getUser(scim.connection, params.id)
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimUser(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimReplaceUser", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .replaceUser(scim.connection, params.id, toScimUserInput(payload))
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimUser(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimPatchUser", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .patchUser(scim.connection, params.id, payload.Operations)
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimUser(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimDeleteUser", ({ params, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          yield* scim.service
-            .deactivateUser(scim.connection, params.id)
-            .pipe(Effect.catchTags(scimCatch));
-        }),
-      )
-      .handle("scimCreateGroup", ({ payload, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .createGroup(scim.connection, toScimGroupInput(payload))
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimGroup(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimListGroups", ({ query, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const listQuery = yield* scimListQuery(query);
-          const page = yield* scim.service
-            .listGroups(scim.connection, listQuery)
-            .pipe(Effect.catchTags(scimCatch));
-          return {
-            schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
-            totalResults: page.totalResults,
-            startIndex: page.startIndex,
-            itemsPerPage: page.itemsPerPage,
-            Resources: page.resources.map((resource) =>
-              encodeScimGroup(resource, scim.service.baseUrl),
-            ),
-          };
-        }),
-      )
-      .handle("scimGetGroup", ({ params, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .getGroup(scim.connection, params.id)
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimGroup(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimReplaceGroup", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .replaceGroup(scim.connection, params.id, toScimGroupInput(payload))
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimGroup(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimPatchGroup", ({ params, payload, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          const resource = yield* scim.service
-            .patchGroup(scim.connection, params.id, payload.Operations)
-            .pipe(Effect.catchTags(scimCatch));
-          return encodeScimGroup(resource, scim.service.baseUrl);
-        }),
-      )
-      .handle("scimDeleteGroup", ({ params, request }) =>
-        Effect.gen(function* () {
-          const scim = yield* requireScim(request);
-          yield* scim.service
-            .deleteGroup(scim.connection, params.id)
-            .pipe(Effect.catchTags(scimCatch));
-        }),
-      )
-      .handle("scimServiceProviderConfig", () =>
-        Effect.map(requireScimService(), (service) =>
-          scimServiceProviderConfig(service.baseUrl, service.maxPageSize),
-        ),
-      )
-      .handle("scimResourceTypes", () =>
-        Effect.map(requireScimService(), (service) => scimResourceTypes(service.baseUrl)),
-      )
-      .handle("scimSchemas", () =>
-        Effect.map(requireScimService(), (service) => scimSchemas(service.baseUrl)),
+export const scimGroupLayer = HttpApiBuilder.group(AuthApi, "scim", (handlers) =>
+  handlers
+    .handle("scimCreateUser", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .createUser(scim.connection, toScimUserInput(payload))
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimUser(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimListUsers", ({ query, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const listQuery = yield* scimListQuery(query);
+        const page = yield* scim.service
+          .listUsers(scim.connection, listQuery)
+          .pipe(Effect.catchTags(scimCatch));
+        return {
+          schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
+          totalResults: page.totalResults,
+          startIndex: page.startIndex,
+          itemsPerPage: page.itemsPerPage,
+          Resources: page.resources.map((resource) =>
+            encodeScimUser(resource, scim.service.baseUrl),
+          ),
+        };
+      }),
+    )
+    .handle("scimGetUser", ({ params, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .getUser(scim.connection, params.id)
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimUser(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimReplaceUser", ({ params, payload, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .replaceUser(scim.connection, params.id, toScimUserInput(payload))
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimUser(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimPatchUser", ({ params, payload, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .patchUser(scim.connection, params.id, payload.Operations)
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimUser(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimDeleteUser", ({ params, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        yield* scim.service
+          .deactivateUser(scim.connection, params.id)
+          .pipe(Effect.catchTags(scimCatch));
+      }),
+    )
+    .handle("scimCreateGroup", ({ payload, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .createGroup(scim.connection, toScimGroupInput(payload))
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimGroup(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimListGroups", ({ query, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const listQuery = yield* scimListQuery(query);
+        const page = yield* scim.service
+          .listGroups(scim.connection, listQuery)
+          .pipe(Effect.catchTags(scimCatch));
+        return {
+          schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
+          totalResults: page.totalResults,
+          startIndex: page.startIndex,
+          itemsPerPage: page.itemsPerPage,
+          Resources: page.resources.map((resource) =>
+            encodeScimGroup(resource, scim.service.baseUrl),
+          ),
+        };
+      }),
+    )
+    .handle("scimGetGroup", ({ params, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .getGroup(scim.connection, params.id)
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimGroup(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimReplaceGroup", ({ params, payload, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .replaceGroup(scim.connection, params.id, toScimGroupInput(payload))
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimGroup(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimPatchGroup", ({ params, payload, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        const resource = yield* scim.service
+          .patchGroup(scim.connection, params.id, payload.Operations)
+          .pipe(Effect.catchTags(scimCatch));
+        return encodeScimGroup(resource, scim.service.baseUrl);
+      }),
+    )
+    .handle("scimDeleteGroup", ({ params, request }) =>
+      Effect.gen(function* () {
+        const scim = yield* requireScim(request);
+        yield* scim.service
+          .deleteGroup(scim.connection, params.id)
+          .pipe(Effect.catchTags(scimCatch));
+      }),
+    )
+    .handle("scimServiceProviderConfig", () =>
+      Effect.map(requireScimService(), (service) =>
+        scimServiceProviderConfig(service.baseUrl, service.maxPageSize),
       ),
-  );
+    )
+    .handle("scimResourceTypes", () =>
+      Effect.map(requireScimService(), (service) => scimResourceTypes(service.baseUrl)),
+    )
+    .handle("scimSchemas", () =>
+      Effect.map(requireScimService(), (service) => scimSchemas(service.baseUrl)),
+    ),
+);
 
 /**
  * Encode a user for the wire with the derived `email`/`emailVerified`

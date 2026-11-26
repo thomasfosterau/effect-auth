@@ -39,23 +39,22 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
   let seq = 0;
 
   const store: typeof AnonymousUserStore.Service = {
-    createAnonymousUser: () =>
-      Effect.sync(() => {
-        const id = `anon-${++seq}`;
-        const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-        // `email` is not a first-class `User` field — anonymous users hold no
-        // identifiers at all (see `Anonymous.ts`), so this fixture's
-        // placeholder address rides in `attributes`.
-        const user: Types.User = {
-          id,
-          createdAt: now,
-          updatedAt: now,
-          attributes: { isAnonymous: true, email: `${id}@anonymous.local` },
-        };
-        MutableHashMap.set(users, id, user);
-        created.push(id);
-        return user;
-      }),
+    createAnonymousUser: Effect.sync(() => {
+      const id = `anon-${++seq}`;
+      const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+      // `email` is not a first-class `User` field — anonymous users hold no
+      // identifiers at all (see `Anonymous.ts`), so this fixture's
+      // placeholder address rides in `attributes`.
+      const user: Types.User = {
+        id,
+        createdAt: now,
+        updatedAt: now,
+        attributes: { isAnonymous: true, email: `${id}@anonymous.local` },
+      };
+      MutableHashMap.set(users, id, user);
+      created.push(id);
+      return user;
+    }),
     deleteUser: (userId) => Effect.sync(() => void MutableHashMap.remove(users, userId)),
   };
 

@@ -2,7 +2,7 @@
  * JSON Web Tokens on `effect/jose`: short-lived, asymmetrically signed JWTs
  * (`ES256` by default, or `EdDSA`) that services verify against the published
  * JWKS. Private keys are stored as JWE under a root-secret key. Serve
- * `getJwks()` at your issuer's `/.well-known/jwks.json`.
+ * `getJwks` at your issuer's `/.well-known/jwks.json`.
  *
  * @module jwt
  */
@@ -92,10 +92,10 @@ export class JwtKeyStore extends Context.Service<
   JwtKeyStore,
   {
     /** The key pair new tokens should be signed with, or null when none exists */
-    readonly getActive: () => Effect.Effect<JwtKeyPair | null, Errors.AuthError>;
+    readonly getActive: Effect.Effect<JwtKeyPair | null, Errors.AuthError>;
     readonly create: (pair: JwtKeyPair) => Effect.Effect<JwtKeyPair, Errors.AuthError>;
     /** Every known key pair (verification matches tokens by `kid`) */
-    readonly list: () => Effect.Effect<readonly JwtKeyPair[], Errors.AuthError>;
+    readonly list: Effect.Effect<readonly JwtKeyPair[], Errors.AuthError>;
   }
 >()("@effect-auth/JwtKeyStore") {}
 
@@ -216,7 +216,7 @@ export class JwtService extends Context.Service<
      * `alg`, and `use: "sig"`) and no private material. Serve this at
      * `/.well-known/jwks.json`.
      */
-    readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError>;
+    readonly getJwks: Effect.Effect<Jwks, Errors.AuthError>;
   }
 >()("@effect-auth/JwtService") {
   /**
@@ -453,7 +453,7 @@ export const make = (
 
     // Ref holding an in-progress key-creation Deferred; null when idle.
     // Prevents duplicate active keys when concurrent fibers both call sign()
-    // before any key exists (both see getActive() → null).
+    // before any key exists (both see getActive → null).
     type PendingDeferred = Deferred.Deferred<JwtKeyPair, JwtError | Errors.AuthError>;
     const pendingCreate = yield* Ref.make<PendingDeferred | null>(null);
 
@@ -464,7 +464,7 @@ export const make = (
      */
     const getOrCreateActiveKey = Effect.fn("JwtService.getOrCreateActiveKey")(
       function* (): Effect.fn.Return<JwtKeyPair, JwtError | Errors.AuthError> {
-        const active = yield* store.getActive();
+        const active = yield* store.getActive;
         if (active) return active;
 
         const deferred = yield* Deferred.make<JwtKeyPair, JwtError | Errors.AuthError>();
@@ -556,7 +556,7 @@ export const make = (
 
       verify: Effect.fn("JwtService.verify")((token: string) =>
         Effect.gen(function* () {
-          const keySet = yield* JoseJwks.makeLocal(keySetOf(yield* store.list()));
+          const keySet = yield* JoseJwks.makeLocal(keySetOf(yield* store.list));
           const verified = yield* JoseJwt.verifyWithKeySet(Claims, token, {
             typ: ACCESS_TOKEN_TYPE,
             algorithms: ["ES256", "EdDSA"],
@@ -577,9 +577,9 @@ export const make = (
         ),
       ),
 
-      getJwks: Effect.fn("JwtService.getJwks")(function* () {
-        return keySetOf(yield* store.list());
-      }),
+      getJwks: Effect.gen(function* () {
+        return keySetOf(yield* store.list);
+      }).pipe(Effect.withSpan("JwtService.getJwks")),
     };
   });
 

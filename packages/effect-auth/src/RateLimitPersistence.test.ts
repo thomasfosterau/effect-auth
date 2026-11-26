@@ -44,7 +44,7 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
     );
     assert.instanceOf(result, RateLimitError);
     expect(result.key).toBe("k1");
-    // The same Duration RateLimiter.make() reports: at most the window, not a bare number.
+    // The same Duration RateLimit.make reports: at most the window, not a bare number.
     assert.isTrue(result.retryAfter !== undefined && Duration.isDuration(result.retryAfter));
     expect(Duration.toMillis(result.retryAfter ?? Duration.zero)).toBeLessThanOrEqual(60_000);
     expect(Duration.toMillis(result.retryAfter ?? Duration.zero)).toBeGreaterThan(0);

@@ -329,9 +329,9 @@ const makeFixture = (
   const apiKeyStore = memoryApiKeyStore(apiKeys);
 
   const jwtKeyStore = {
-    getActive: () => Effect.succeed(jwtKeys[0] ?? null),
+    getActive: Effect.sync(() => jwtKeys[0] ?? null),
     create: (pair: JwtKeyPair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
-    list: () => Effect.succeed(jwtKeys),
+    list: Effect.succeed(jwtKeys),
   };
 
   // In-memory RateLimitStore: ApiKeyService resolves RateLimiter at construction

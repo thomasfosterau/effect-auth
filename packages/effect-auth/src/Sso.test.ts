@@ -167,7 +167,7 @@ const makeStores = (
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ?? null,
       ),
-    list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
+    list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(providers))),
   };
 
   const userStore = {
@@ -1380,7 +1380,7 @@ const makeHttpFixture = (
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ?? null,
       ),
-    list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
+    list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(providers))),
   };
   const stateStore = kvStateStore();
   // SSO only ever calls getMember/createMember plus the organization read that

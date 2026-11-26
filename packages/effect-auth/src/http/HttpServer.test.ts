@@ -635,7 +635,7 @@ const makeFixture = (
   };
 
   const anonymousUserStore: typeof AnonymousUserStore.Service = {
-    createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
+    createAnonymousUser: Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
     deleteUser: (userId) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 

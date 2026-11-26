@@ -55,7 +55,7 @@ describe("PolicyStore CRUD", () => {
     expect(await run(store.getPolicy("p1"))).toBeNull();
     expect(await run(store.createPolicy(policy))).toEqual(policy);
     expect(await run(store.getPolicy("p1"))).toEqual(policy);
-    expect(await run(store.listPolicies())).toEqual([policy]);
+    expect(await run(store.listPolicies)).toEqual([policy]);
 
     const updated = Policy.forbid({ id: "p1", action: Policy.eq(readDoc) });
     expect(await run(store.updatePolicy(updated))).toEqual(updated);
@@ -355,7 +355,7 @@ describe("effectivePolicies batching", () => {
     const store: typeof PolicyStore.PolicyStore.Service = {
       ...inner,
       getTemplate: (id) => Effect.suspend(() => (reads.get++, inner.getTemplate(id))),
-      listTemplates: () => Effect.suspend(() => (reads.list++, inner.listTemplates())),
+      listTemplates: Effect.suspend(() => (reads.list++, inner.listTemplates)),
     };
 
     const policies = await run(PolicyStore.effectivePolicies(store));

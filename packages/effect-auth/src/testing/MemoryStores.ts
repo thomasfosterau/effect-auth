@@ -468,9 +468,9 @@ export const memoryRateLimitStore = (
  * @category constructors
  */
 export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeyStore.Service => ({
-  getActive: () => Effect.sync(() => keys.at(-1) ?? null),
+  getActive: Effect.sync(() => keys.at(-1) ?? null),
   create: (pair) => Effect.sync(() => (keys.push(pair), pair)),
-  list: () => Effect.sync(() => [...keys]),
+  list: Effect.sync(() => [...keys]),
 });
 
 // ---------------------------------------------------------------------------
@@ -651,7 +651,7 @@ export const memoryOidcClientStore = (
   update: (client) =>
     Effect.sync(() => (MutableHashMap.set(clients, client.clientId, client), client)),
   delete: (clientId) => Effect.sync(() => void MutableHashMap.remove(clients, clientId)),
-  list: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(clients))),
+  list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(clients))),
 });
 
 /**

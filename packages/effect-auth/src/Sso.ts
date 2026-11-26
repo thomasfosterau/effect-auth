@@ -167,7 +167,7 @@ export class SsoProviderStore extends Context.Service<
     readonly create: (provider: SsoProvider) => Effect.Effect<SsoProvider, AuthError>;
     readonly getById: (id: string) => Effect.Effect<SsoProvider | null, AuthError>;
     readonly getByDomain: (domain: string) => Effect.Effect<SsoProvider | null, AuthError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<SsoProvider>, AuthError>;
+    readonly list: Effect.Effect<ReadonlyArray<SsoProvider>, AuthError>;
   }
 >()("@effect-auth/SsoProviderStore") {}
 

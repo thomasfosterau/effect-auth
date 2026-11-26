@@ -190,7 +190,7 @@ export const recordSignUp = (method: string, outcome: "success" | "failure"): Ef
   Metric.update(Metric.withAttributes(signUpTotal, { method, outcome }), 1);
 
 /** Count a created session on `effect_auth_sessions_created_total`. */
-export const recordSessionCreated = (): Effect.Effect<void> => Metric.update(sessionsCreated, 1);
+export const recordSessionCreated: Effect.Effect<void> = Metric.update(sessionsCreated, 1);
 
 /** Count a session validation on `effect_auth_sessions_validated_total`, by outcome. */
 export const recordSessionValidated = (
@@ -198,8 +198,7 @@ export const recordSessionValidated = (
 ): Effect.Effect<void> => Metric.update(Metric.withAttributes(sessionsValidated, { outcome }), 1);
 
 /** Count an invalidated session on `effect_auth_sessions_invalidated_total`. */
-export const recordSessionInvalidated = (): Effect.Effect<void> =>
-  Metric.update(sessionsInvalidated, 1);
+export const recordSessionInvalidated: Effect.Effect<void> = Metric.update(sessionsInvalidated, 1);
 
 /**
  * Count an app-edge session resolution on `effect_auth_session_resolutions_total`, by outcome (`degraded` is kept apart from `anonymous`).
@@ -221,8 +220,10 @@ export const recordRateLimitHit = (operation: string): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(rateLimitHits, { operation }), 1);
 
 /** Count an issued second-factor challenge on `effect_auth_multi_factor_challenges_total`. */
-export const recordMultiFactorChallenge = (): Effect.Effect<void> =>
-  Metric.update(multiFactorChallenges, 1);
+export const recordMultiFactorChallenge: Effect.Effect<void> = Metric.update(
+  multiFactorChallenges,
+  1,
+);
 
 /**
  * Count a second-factor verification on `effect_auth_multi_factor_verifications_total`, by factor type and outcome.

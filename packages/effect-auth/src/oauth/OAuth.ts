@@ -327,14 +327,17 @@ export class OAuthUserStore extends Context.Service<
   }
 >()("@effect-auth/OAuthUserStore") {}
 
+const randomBase64Url = (byteLength: number) =>
+  Effect.map(
+    SecureRandom.SecureRandom.use((random) => random.randomBytes(byteLength)),
+    Base64Url.encode,
+  );
+
 /**
  * Generate a cryptographically secure random state parameter
  */
-export const generateState = (): Effect.Effect<string, never, SecureRandom.SecureRandom> =>
-  Effect.gen(function* () {
-    const crypto = yield* SecureRandom.SecureRandom;
-    return yield* crypto.randomBytes(32).pipe(Effect.map((bytes) => Base64Url.encode(bytes)));
-  });
+export const generateState: Effect.Effect<string, never, SecureRandom.SecureRandom> =
+  randomBase64Url(32);
 
 /** The S256 PKCE challenge of `codeVerifier` (RFC 7636 §4.2). */
 export const pkceChallenge = (codeVerifier: string): Effect.Effect<string, never, Digest.Digest> =>
@@ -364,33 +367,20 @@ export const derivedPKCE = (
 /**
  * Generate a random PKCE code verifier and challenge
  */
-export const generatePKCE = (): Effect.Effect<
+export const generatePKCE: Effect.Effect<
   { codeVerifier: string; codeChallenge: string },
   never,
   SecureRandom.SecureRandom | Digest.Digest
-> =>
-  Effect.gen(function* () {
-    const crypto = yield* SecureRandom.SecureRandom;
-    const digest = yield* Digest.Digest;
-    const codeVerifierBytes = yield* crypto.randomBytes(32);
-    const codeVerifier = Base64Url.encode(codeVerifierBytes);
-    const codeChallengeBytes = yield* digest.digest(
-      Digest.sha256,
-      new TextEncoder().encode(codeVerifier),
-    );
-    const codeChallenge = Base64Url.encode(codeChallengeBytes);
-    return { codeVerifier, codeChallenge };
-  });
+> = Effect.flatMap(randomBase64Url(32), (codeVerifier) =>
+  Effect.map(pkceChallenge(codeVerifier), (codeChallenge) => ({ codeVerifier, codeChallenge })),
+);
 
 /**
  * Generate a cryptographically secure random nonce for OIDC id_token replay
  * protection.
  */
-export const generateNonce = (): Effect.Effect<string, never, SecureRandom.SecureRandom> =>
-  Effect.gen(function* () {
-    const crypto = yield* SecureRandom.SecureRandom;
-    return yield* crypto.randomBytes(16).pipe(Effect.map((bytes) => Base64Url.encode(bytes)));
-  });
+export const generateNonce: Effect.Effect<string, never, SecureRandom.SecureRandom> =
+  randomBase64Url(16);
 
 /** Decodes a JWT segment's JSON object; throws on invalid JSON or a non-object. */
 const decodeJwtSegmentJson = Schema.decodeSync(Schema.fromJsonString(Schema.JsonObject));
@@ -854,12 +844,12 @@ export const provider = (
     generateAuthorizationUrl: (customScopes?: readonly string[]) =>
       Effect.gen(function* () {
         const stateStore = yield* OAuthStateStore;
-        const state = yield* generateState();
+        const state = yield* generateState;
 
         // PKCE, with the verifier derived from the state rather than stored.
         const pkce = usePKCE ? yield* derivedPKCE(state) : undefined;
         // OIDC id_token flows carry a nonce for replay protection.
-        const nonce = config.getUserInfoFromIdToken ? yield* generateNonce() : undefined;
+        const nonce = config.getUserInfoFromIdToken ? yield* generateNonce : undefined;
 
         // Create state entry
         const stateEntry: OAuthState = {
