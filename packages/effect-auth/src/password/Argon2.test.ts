@@ -2,7 +2,7 @@ import { describe, it, expect, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
 import { Effect, Exit, Layer } from "effect";
 import * as P from "effect/Predicate";
-import { Kdf, Password as CryptoPassword, SecureRandom } from "effect/crypto";
+import { Kdf, Password as CryptoPassword } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
   argon2DefaultProfile,
@@ -57,10 +57,9 @@ const cryptoPasswords = (kdf: typeof Kdf.Kdf.Service, options?: Argon2Options) =
     }).pipe(
       Effect.provide(
         CryptoPassword.layer({ algorithm }).pipe(
-          Layer.provide([
-            Layer.succeed(Kdf.Kdf, kdf),
-            Layer.succeed(SecureRandom.SecureRandom, PlatformCrypto.instance),
-          ]),
+          // The counting Kdf first, so the platform layer only fills the rest.
+          Layer.provide(Layer.succeed(Kdf.Kdf, kdf)),
+          Layer.provide(PlatformCrypto.layer),
         ),
       ),
     ),

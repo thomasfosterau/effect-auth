@@ -17,7 +17,10 @@ import {
   parseClientDataJSON,
   type CBORMap,
 } from "./WebAuthnCodec.ts";
+import { createHash } from "node:crypto";
+import { Effect } from "effect";
 import * as Cipher from "../Cipher.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 // --- Minimal deterministic CBOR encoder, for building fixtures --------------
 
@@ -438,7 +441,11 @@ describe("parseClientDataJSON", () => {
 // --- Authenticator data ------------------------------------------------------
 
 const RP_ID = "example.com";
-const rpIdHash = Cipher.sha256(new TextEncoder().encode(RP_ID));
+/** SHA-256, synchronously, for building fixtures. */
+const sha256 = (data: Uint8Array | string): Uint8Array =>
+  new Uint8Array(createHash("sha256").update(data).digest());
+
+const rpIdHash = sha256(RP_ID);
 
 const signCounter = (counter: number): Uint8Array =>
   new Uint8Array([
@@ -479,8 +486,8 @@ describe("parseAuthenticatorData", () => {
     expect(parsed.signatureCounter).toBe(42);
     expect(parsed.credential).toBe(null);
     expect(parsed.relyingPartyIdHash).toEqual(rpIdHash);
-    expect(parsed.verifyRelyingPartyIdHash(RP_ID)).toBe(true);
-    expect(parsed.verifyRelyingPartyIdHash("evil.example")).toBe(false);
+    expect(parsed.verifyRelyingPartyIdHash(sha256(RP_ID))).toBe(true);
+    expect(parsed.verifyRelyingPartyIdHash(sha256("evil.example"))).toBe(false);
   });
 
   it("reads user-presence and user-verification flags independently", () => {
@@ -671,14 +678,18 @@ describe("assertion signature verification", () => {
       const hex = value.toString(16).padStart(length * 2, "0");
       return new Uint8Array(Arr.makeBy(length, (i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)));
     };
-    const spki = Cipher.jwkToSpkiDer({
-      kty: "EC",
-      crv: "P-256",
-      x: Buffer.from(toBytes(ec2.x, 32)).toString("base64url"),
-      y: Buffer.from(toBytes(ec2.y, 32)).toString("base64url"),
-    });
+    const run = <A, E>(effect: Effect.Effect<A, E, PlatformCrypto.Services>) =>
+      Effect.runPromise(PlatformCrypto.provide(effect));
+    const spki = await run(
+      Cipher.jwkToSpkiDer("ES256", {
+        kty: "EC",
+        crv: "P-256",
+        x: Buffer.from(toBytes(ec2.x, 32)).toString("base64url"),
+        y: Buffer.from(toBytes(ec2.y, 32)).toString("base64url"),
+      }),
+    );
 
-    const message = concatBytes(authData(0x05, 1), Cipher.sha256(bytes(1, 2, 3)));
+    const message = concatBytes(authData(0x05, 1), sha256(bytes(1, 2, 3)));
     const raw = new Uint8Array(
       await globalThis.crypto.subtle.sign(
         { name: "ECDSA", hash: "SHA-256" },
@@ -698,11 +709,13 @@ describe("assertion signature verification", () => {
     const body = concatBytes(derInteger(raw.subarray(0, 32)), derInteger(raw.subarray(32, 64)));
     const der = concatBytes(bytes(0x30, body.length), body);
 
-    expect(Cipher.verifyDerSignature("sha256", spki, message, der)).toBe(true);
+    expect(await run(Cipher.verifySpkiSignature("ES256", spki, message, der))).toBe(true);
+    // The raw r || s form is not what an authenticator sends.
+    expect(await run(Cipher.verifySpkiSignature("ES256", spki, message, raw))).toBe(false);
 
     // Flip a bit in the message: the same signature must no longer verify.
     const tampered = new Uint8Array(message);
     tampered[0] = (tampered[0] ?? 0) ^ 0x01;
-    expect(Cipher.verifyDerSignature("sha256", spki, tampered, der)).toBe(false);
+    expect(await run(Cipher.verifySpkiSignature("ES256", spki, tampered, der))).toBe(false);
   });
 });

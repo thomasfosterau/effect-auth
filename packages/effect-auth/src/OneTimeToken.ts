@@ -13,12 +13,12 @@
  * @module one-time-token
  */
 import { Clock, Context, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
@@ -151,11 +151,12 @@ export const make = (
 ): Effect.Effect<
   typeof OneTimeTokenService.Service,
   never,
-  OneTimeTokenStore | SecureRandom.SecureRandom
+  OneTimeTokenStore | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
     const store = yield* OneTimeTokenStore;
+    const hashToken = yield* tokenHasher;
     const crypto = yield* SecureRandom.SecureRandom;
 
     const generateRawToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
@@ -168,7 +169,7 @@ export const make = (
             const expiresIn = options?.expiresIn ?? defaultExpiresIn;
             const now = yield* Clock.currentTimeMillis;
             const record: OneTimeTokenRecord = {
-              token: hashToken(rawToken),
+              token: yield* hashToken(rawToken),
               subject,
               ...(options?.metadata !== undefined ? { metadata: options.metadata } : {}),
               createdAt: now,
@@ -187,7 +188,7 @@ export const make = (
         // Spend the token atomically before anything else, the expiry
         // check included, so "found but expired" and "not found" take the
         // same path, and of concurrent redemptions only one gets the record.
-        const record = yield* store.consume(hashToken(rawToken));
+        const record = yield* store.consume(yield* hashToken(rawToken));
         if (!record) {
           return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }

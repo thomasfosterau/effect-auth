@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Arr from "effect/Array";
@@ -10,7 +11,6 @@ import {
   normalizeUserCode,
   type DeviceAuthorizationRecord,
 } from "./DeviceAuthorization.ts";
-import { hashToken } from "./TokenHash.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { SessionService } from "./SessionService.ts";
@@ -138,7 +138,7 @@ describe("DeviceAuthorizationService", () => {
     expect(result.verificationUri).toBe("https://example.com/device");
     expect(result.interval).toBe(5);
     // The store is keyed by hash; the returned deviceCode is the raw value.
-    const record = Option.getOrUndefined(MutableHashMap.get(records, hashToken(result.deviceCode)));
+    const record = Option.getOrUndefined(MutableHashMap.get(records, sha256Hex(result.deviceCode)));
     expect(record?.status).toBe("pending");
   });
 
@@ -187,7 +187,7 @@ describe("DeviceAuthorizationService", () => {
 
   it("returns expired_token once the request has expired", async () => {
     const begun = await run((svc) => svc.begin());
-    const deviceHash = hashToken(begun.deviceCode);
+    const deviceHash = sha256Hex(begun.deviceCode);
     const record = Option.getOrUndefined(MutableHashMap.get(records, deviceHash));
     assert(record !== undefined, "begin stored the request");
     MutableHashMap.set(records, deviceHash, {
@@ -240,7 +240,7 @@ describe("DeviceAuthorizationService", () => {
 
   it("slow_down does not reset the polling window and escalates the interval", async () => {
     const begun = await run((svc) => svc.begin());
-    const hash = hashToken(begun.deviceCode);
+    const hash = sha256Hex(begun.deviceCode);
 
     // Seed lastPolledAt to 1 second ago — within the 5 s interval.
     const record = Option.getOrUndefined(MutableHashMap.get(records, hash));

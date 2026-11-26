@@ -47,13 +47,13 @@
  * @module trusted-device
  */
 import { Clock, Config, Context, Effect, Layer, Redacted } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
 import { Hex } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import { SecondFactorGate } from "./email/EmailPassword.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
+import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { MultiFactorService } from "./multifactor/MultiFactor.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -67,7 +67,7 @@ import { randomBase64UrlToken } from "./RandomToken.ts";
  * persisted; only its SHA-256 digest is kept for constant-time revocation.
  */
 export interface TrustedDeviceRecord {
-  /** SHA-256 hex digest of the raw token (`hashToken(rawToken)`). */
+  /** SHA-256 hex digest of the raw token (`(yield* hashToken(rawToken))`). */
   readonly tokenHash: string;
   readonly userId: string;
   readonly createdAt: number;
@@ -231,9 +231,6 @@ export const trustedDeviceConfig: Config.Config<TrustedDeviceConfig> = Config.al
 /** Separator between rawToken and HMAC in the cookie value. */
 const COOKIE_SEPARATOR = ".";
 
-const computeHmac = (secret: Redacted.Redacted, rawToken: string): string =>
-  Hex.encode(Cipher.hmac("sha256", Redacted.value(secret), rawToken));
-
 /** Constant-time comparison of two hex strings of equal expected length. */
 const timingSafeHexEqual = constantTimeHashEqual;
 
@@ -254,20 +251,28 @@ export const make = (
 ): Effect.Effect<
   typeof TrustedDeviceService.Service,
   never,
-  TrustedDeviceStore | SecureRandom.SecureRandom
+  TrustedDeviceStore | SecureRandom.SecureRandom | Mac.Mac | Digest.Digest
 > =>
   Effect.gen(function* () {
     const maxAge = config.maxAge ?? 30 * 24 * 60 * 60 * 1000;
     const store = yield* TrustedDeviceStore;
+    const hashToken = yield* tokenHasher;
     const crypto = yield* SecureRandom.SecureRandom;
+    const mac = yield* Mac.Mac;
+
+    const computeHmac = (rawToken: string): Effect.Effect<string, Errors.AuthError> =>
+      Cipher.hmac("sha256", Redacted.value(config.secret), rawToken).pipe(
+        Effect.provideService(Mac.Mac, mac),
+        Effect.map(Hex.encode),
+      );
 
     const generateRawToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
     return {
       issue: Effect.fn("TrustedDeviceService.issue")(function* (userId: string) {
         const rawToken = yield* generateRawToken();
-        const hmac = computeHmac(config.secret, rawToken);
-        const tokenHash = hashToken(rawToken);
+        const hmac = yield* computeHmac(rawToken);
+        const tokenHash = yield* hashToken(rawToken);
         const now = yield* Clock.currentTimeMillis;
         const record: TrustedDeviceRecord = {
           tokenHash,
@@ -287,10 +292,10 @@ export const make = (
         if (!parsed) return null;
 
         // Verify HMAC before touching the DB (forgery protection)
-        const expectedHmac = computeHmac(config.secret, parsed.rawToken);
+        const expectedHmac = yield* computeHmac(parsed.rawToken);
         if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
 
-        const tokenHash = hashToken(parsed.rawToken);
+        const tokenHash = yield* hashToken(parsed.rawToken);
         const record = yield* store.getByTokenHash(tokenHash);
         if (!record) return null;
 
@@ -305,7 +310,7 @@ export const make = (
       revoke: Effect.fn("TrustedDeviceService.revoke")(function* (cookieValue: string) {
         const parsed = parseCookie(cookieValue);
         if (!parsed) return;
-        yield* store.delete(hashToken(parsed.rawToken));
+        yield* store.delete(yield* hashToken(parsed.rawToken));
       }),
 
       revokeAll: Effect.fn("TrustedDeviceService.revokeAll")((userId: string) =>

@@ -4,6 +4,7 @@
  * credential of every kind (and a pending magic link and one-time codes for
  * its addresses) for the user being deleted and for a bystander.
  */
+import { sha256Hex } from "./testing/Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
@@ -40,7 +41,6 @@ import { PhoneOtpStore } from "./PhoneOtp.ts";
 import { RateLimiter } from "./RateLimit.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
-import { hashToken } from "./TokenHash.ts";
 import { TrustedDeviceStore } from "./TrustedDevice.ts";
 import type * as Types from "./Types.ts";
 import { UserService, UserServiceStore } from "./User.ts";
@@ -319,7 +319,7 @@ const inventory = (seeded: Seeded) =>
       trustedDevices: count(yield* (yield* TrustedDeviceStore).getByTokenHash(seeded.deviceHash)),
       oidcTokens: count(yield* (yield* OidcTokenStore).get(seeded.oidcTokenHash)),
       oidcConsents: count(yield* (yield* OidcConsentStore).get(id, "client")),
-      passwordResets: count(yield* (yield* PasswordResetStore).get(hashToken(seeded.resetToken))),
+      passwordResets: count(yield* (yield* PasswordResetStore).get(sha256Hex(seeded.resetToken))),
       emailVerifications: count(yield* (yield* EmailVerificationStore).getLatestByUserId(id)),
       accountTokens: count(yield* (yield* AccountManagementStore).get(`change-email-${id}`)),
       magicLinks: count(yield* (yield* MagicLinkStore).getByEmail(seeded.email)),

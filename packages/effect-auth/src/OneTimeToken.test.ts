@@ -1,8 +1,8 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { SecureRandom } from "effect/crypto";
 import { Hooks } from "./Hooks.ts";
 import {
   make as makeOneTimeTokenService,
@@ -14,7 +14,6 @@ import {
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
-import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
@@ -46,10 +45,7 @@ const oneTimeTokenStore = {
 };
 
 const makeTestContext = () =>
-  Context.merge(
-    Context.make(OneTimeTokenStore, oneTimeTokenStore),
-    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-  );
+  Context.merge(Context.make(OneTimeTokenStore, oneTimeTokenStore), PlatformCrypto.context());
 
 describe("OneTimeTokenService", () => {
   beforeEach(() => {
@@ -115,7 +111,7 @@ describe("OneTimeTokenService", () => {
     );
 
     const stored = Array.from(MutableHashMap.values(oneTimeTokens))[0];
-    expect(stored?.token).toBe(hashToken(rawToken));
+    expect(stored?.token).toBe(sha256Hex(rawToken));
     expect(stored?.token).not.toBe(rawToken);
   });
 
@@ -148,7 +144,7 @@ describe("OneTimeTokenService", () => {
     const testContext = makeTestContext();
 
     // Seed a pre-expired record directly into the store.
-    const expiredHash = hashToken("expired-raw-token");
+    const expiredHash = sha256Hex("expired-raw-token");
     MutableHashMap.set(oneTimeTokens, expiredHash, {
       token: expiredHash,
       subject: "user-expired",
@@ -205,7 +201,7 @@ describe("OneTimeTokenService", () => {
           const service = yield* makeOneTimeTokenService({ expiresIn: 1_000 });
           const rawToken = yield* service.generate("user-ttl");
           // Check that the stored record has a short TTL.
-          const hash = hashToken(rawToken);
+          const hash = sha256Hex(rawToken);
           const stored = Option.getOrUndefined(MutableHashMap.get(oneTimeTokens, hash));
           assert(stored !== undefined, "the token is stored");
           expect(stored.expiresAt - stored.createdAt).toBe(1_000);
@@ -223,7 +219,7 @@ describe("OneTimeTokenService", () => {
         Effect.gen(function* () {
           const service = yield* makeOneTimeTokenService({ expiresIn: 60_000 });
           const rawToken = yield* service.generate("user-override", { expiresIn: 5_000 });
-          const hash = hashToken(rawToken);
+          const hash = sha256Hex(rawToken);
           const stored = Option.getOrUndefined(MutableHashMap.get(oneTimeTokens, hash));
           assert(stored !== undefined, "the token is stored");
           expect(stored.expiresAt - stored.createdAt).toBe(5_000);

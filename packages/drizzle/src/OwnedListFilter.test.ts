@@ -6,7 +6,11 @@
  * viewer lists a corpus that spans every owner × visibility × draft
  * combination through the rendered `WHERE`, and the ids that come back must be
  * exactly the rows `Auth.OwnedAccess.canView` admits — with the follower seam
- * backed by the same database, absent, and explicitly `isFollowerNever`.
+ * backed by the same database, absent, and explicitly `isFollowerNever`. The
+ * `items` corpus adds the group and moderation axes (four visibilities, draft,
+ * unapproved, an ownerless and a groupless row), with the member seam in the
+ * same three modes, and also requires agreement with `ReadScope.compile` over
+ * `owned.policies` and `owned.binding`.
  *
  * Ported in spirit from gardeneria `apps/api/tests/integration/
  * owned-target-visibility.test.ts` and `comment-target-visibility-flip.test.ts`
@@ -23,15 +27,16 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { Context, Effect, Match, MutableHashSet, Order } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, assert, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
+import { isFollowerLayer, isMemberLayer, ownedListFilter } from "./OwnedListFilter.ts";
 import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 /** A stored visibility, checked to be one `OwnedAccess` names. */
 const decodeVisibility = Schema.decodeUnknownSync(
-  Schema.Literals(["public", "followers", "private"]),
+  Schema.Literals(["public", "followers", "group", "private"]),
 );
 
 const posts = pgTable("posts", {
@@ -48,6 +53,19 @@ const gardens = pgTable("gardens", {
 const follows = pgTable("follows", {
   followerId: text("follower_id").notNull(),
   ownerId: text("owner_id").notNull(),
+});
+/** Every axis at once: four visibilities, both publication flags, a nullable owner and group. */
+const items = pgTable("items", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id"),
+  visibility: text("visibility").notNull(),
+  draft: boolean("draft").notNull(),
+  unapproved: boolean("unapproved").notNull(),
+  groupId: text("group_id"),
+});
+const memberships = pgTable("memberships", {
+  accountId: text("account_id").notNull(),
+  groupId: text("group_id").notNull(),
 });
 
 interface AppUser {
@@ -70,6 +88,15 @@ const FOLLOWS = [
   ["bob", "alice"],
   ["dave", "alice"],
   ["alice", "carol"],
+] as const;
+
+const ITEM_VISIBILITIES = ["public", "followers", "group", "private"] as const;
+const GROUPS = ["club", "guild"] as const;
+// bob and erin are in the club; carol is in the guild.
+const MEMBERSHIPS = [
+  ["bob", "club"],
+  ["erin", "club"],
+  ["carol", "guild"],
 ] as const;
 
 const VIEWERS: ReadonlyArray<AppUser | null> = [
@@ -98,6 +125,8 @@ beforeAll(async () => {
     create table posts (id text primary key, owner_id text not null, visibility text not null, draft boolean not null);
     create table gardens (id text primary key, owner_id text not null, visibility text not null);
     create table follows (follower_id text not null, owner_id text not null);
+    create table items (id text primary key, owner_id text, visibility text not null, draft boolean not null, unapproved boolean not null, group_id text);
+    create table memberships (account_id text not null, group_id text not null);
   `);
   db = drizzle({ client });
   const postRows = OWNERS.flatMap((ownerId) =>
@@ -121,6 +150,27 @@ beforeAll(async () => {
   await db
     .insert(follows)
     .values(FOLLOWS.map(([followerId, ownerId]) => ({ followerId, ownerId })));
+  await db.insert(items).values(
+    Arr.flatMap([...OWNERS, null], (ownerId) =>
+      Arr.flatMap(ITEM_VISIBILITIES, (visibility) =>
+        Arr.flatMap([false, true], (draft) =>
+          Arr.flatMap([false, true], (unapproved) =>
+            Arr.map([...GROUPS, null], (groupId) => ({
+              id: [ownerId ?? "-", visibility, draft, unapproved, groupId ?? "-"].join(":"),
+              ownerId,
+              visibility,
+              draft,
+              unapproved,
+              groupId,
+            })),
+          ),
+        ),
+      ),
+    ),
+  );
+  await db
+    .insert(memberships)
+    .values(MEMBERSHIPS.map(([accountId, groupId]) => ({ accountId, groupId })));
 });
 
 afterAll(async () => {
@@ -272,6 +322,171 @@ describe("ownedListFilter agrees with canView, row for row", () => {
   });
 });
 
+const databaseMembers = () =>
+  isMemberLayer({
+    isMember: (accountId, groupId) =>
+      Effect.succeed(
+        MEMBERSHIPS.some(([account, group]) => account === accountId && group === groupId),
+      ),
+    groupsQuery: (accountId) =>
+      db
+        .select({ id: memberships.groupId })
+        .from(memberships)
+        .where(eq(memberships.accountId, accountId)),
+  });
+
+const withSeams = <A>(
+  effect: Effect.Effect<A, never, CurrentViewer>,
+  viewer: AppUser | null,
+  follower: Seam,
+  member: Seam,
+) => {
+  const followed = withSeam(effect, viewer, follower);
+  return Match.value(member).pipe(
+    Match.when("absent", () => followed),
+    Match.when("never", () => Effect.provide(followed, Auth.OwnedAccess.isMemberNever)),
+    Match.when("database", () => Effect.provide(followed, databaseMembers())),
+    Match.exhaustive,
+  );
+};
+
+/** `ReadScope.compile` over the owned policies, its sets answered as the seams would. */
+const compiledAdmits = (
+  viewer: AppUser | null,
+  follower: Seam,
+  member: Seam,
+): ((row: typeof items.$inferSelect) => boolean) => {
+  const principal =
+    viewer === null
+      ? Auth.Entity.entity(Auth.Entity.ref("Anonymous", "anonymous"))
+      : guards.principal(viewer);
+  const compiled = Auth.ReadScope.compile(owned.policies, owned.binding, {
+    principal: principal.ref,
+    action: Auth.Entity.ref("Action", "read"),
+    slice: Auth.Entity.slice([principal]),
+  });
+  assert(P.isTagged(compiled, "Exact"), "the owned policies compile to an exact scope");
+  return (row) =>
+    Auth.ReadScope.matches(
+      compiled.scope,
+      {
+        owner: row.ownerId,
+        visibility: row.visibility,
+        draft: row.draft,
+        unapproved: row.unapproved,
+        group: row.groupId,
+      },
+      (set, value) =>
+        viewer !== null &&
+        (set === "following"
+          ? follower === "database" &&
+            FOLLOWS.some(([from, to]) => from === viewer.id && to === value)
+          : set === "groups" &&
+            member === "database" &&
+            MEMBERSHIPS.some(([account, group]) => account === viewer.id && group === value)),
+    );
+};
+
+const ids = (rows: ReadonlyArray<{ readonly id: string }>) =>
+  Arr.sort(
+    rows.map((row) => row.id),
+    Order.String,
+  );
+
+const itemColumns = {
+  owner: items.ownerId,
+  visibility: items.visibility,
+  draft: items.draft,
+  unapproved: items.unapproved,
+  group: items.groupId,
+};
+
+const listItems = async (viewer: AppUser | null, follower: Seam, member: Seam) => {
+  const scope = await Effect.runPromise(withSeams(owned.readScope, viewer, follower, member));
+  const rows = await db
+    .select({ id: items.id })
+    .from(items)
+    .where(ownedListFilter(itemColumns)(scope));
+  return Arr.sort(
+    rows.map((row) => row.id),
+    Order.String,
+  );
+};
+
+describe("ownedListFilter agrees with canView and ReadScope.compile on the group and moderation axes", () => {
+  const SEAMS = ["database", "absent", "never"] as const;
+  Arr.forEach(SEAMS, (follower) => {
+    Arr.forEach(SEAMS, (member) => {
+      Arr.forEach(VIEWERS, (viewer) => {
+        it(`${describeViewer(viewer)}, follower seam ${follower}, member seam ${member}`, async () => {
+          const all = await db.select().from(items);
+          const viewed = await Effect.runPromise(
+            Effect.filter(all, (row) =>
+              withSeams(
+                owned.canView({
+                  ownerId: row.ownerId ?? undefined,
+                  visibility: decodeVisibility(row.visibility),
+                  draft: row.draft,
+                  unapproved: row.unapproved,
+                  groupId: row.groupId ?? undefined,
+                }),
+                viewer,
+                follower,
+                member,
+              ),
+            ),
+          );
+          const compiled = Arr.filter(all, compiledAdmits(viewer, follower, member));
+          const listed = await listItems(viewer, follower, member);
+          expect(listed).toEqual(ids(viewed));
+          expect(listed).toEqual(ids(compiled));
+        });
+      });
+    });
+  });
+
+  it("is not vacuous: group members see published group rows, nobody else does", async () => {
+    const bob = await listItems({ id: "bob", role: "user" }, "database", "database");
+    // alice's published club row lists for bob, a club member.
+    expect(bob).toContain("alice:group:false:false:club");
+    // Not when it is a draft, unapproved, another group's, or names no group.
+    expect(bob).not.toContain("alice:group:true:false:club");
+    expect(bob).not.toContain("alice:group:false:true:club");
+    expect(bob).not.toContain("alice:group:false:false:guild");
+    expect(bob).not.toContain("alice:group:false:false:-");
+    // An ownerless group row still lists for the group.
+    expect(bob).toContain("-:group:false:false:club");
+    // His own pending rows list for him, unapproved ones included.
+    expect(bob).toContain("bob:private:false:true:-");
+    // dave is in no group: no group row but his own.
+    const dave = await listItems({ id: "dave", role: "user" }, "database", "database");
+    expect(dave.filter((id) => id.includes(":group:"))).toEqual([]);
+    // Without the member seam the arm is gone.
+    const bobAlone = await listItems({ id: "bob", role: "user" }, "database", "absent");
+    expect(bobAlone).not.toContain("alice:group:false:false:club");
+    // Anonymous: public rows that are neither drafts nor unapproved.
+    const anonymous = await listItems(null, "database", "database");
+    expect(anonymous.length).toBeGreaterThan(0);
+    expect(
+      anonymous.every((id) => id.split(":").slice(1, 4).join(":") === "public:false:false"),
+    ).toBe(true);
+  });
+
+  it("without a group column, lists a group row only for its owner (narrower, never wider)", async () => {
+    const scope = await Effect.runPromise(
+      withSeams(owned.readScope, { id: "bob", role: "user" }, "database", "database"),
+    );
+    const { group: _group, ...withoutGroup } = itemColumns;
+    const rows = await db
+      .select({ id: items.id })
+      .from(items)
+      .where(ownedListFilter(withoutGroup)(scope));
+    expect(
+      rows.map((row) => row.id).filter((id) => id.includes(":group:") && !id.startsWith("bob:")),
+    ).toEqual([]);
+  });
+});
+
 describe("ownedListFilter's rendered SQL", () => {
   const dialect = new PgDialect();
   const render = (scope: Auth.OwnedAccess.OwnedReadScope, withDraft = true) => {
@@ -313,6 +528,33 @@ describe("ownedListFilter's rendered SQL", () => {
     });
     expect(rendered?.sql).toContain('"posts"."owner_id" in (select "owner_id" from "follows"');
     expect(rendered?.params).toEqual(["public", false, "bob", "followers", "bob", false]);
+  });
+
+  it("renders the unapproved conjunct and the group arm as a subquery", () => {
+    const groups = db
+      .select({ id: memberships.groupId })
+      .from(memberships)
+      .where(eq(memberships.accountId, "bob"));
+    const where = ownedListFilter(itemColumns)({
+      kind: "member",
+      userId: "bob",
+      following: Auth.OwnedAccess.nobody,
+      groups: Auth.OwnedAccess.subquery(groups),
+    });
+    assert(where !== undefined);
+    const { sql, params } = dialect.sqlToQuery(where);
+    expect(sql).toContain('"items"."unapproved" = $3');
+    expect(sql).toContain('"items"."group_id" in (select "group_id" from "memberships"');
+    expect(params).toEqual(["public", false, false, "bob", "group", "bob", false, false]);
+    // A group set it cannot nest drops the arm.
+    const foreign = ownedListFilter(itemColumns)({
+      kind: "member",
+      userId: "bob",
+      following: Auth.OwnedAccess.nobody,
+      groups: Auth.OwnedAccess.subquery(["club"]),
+    });
+    assert(foreign !== undefined);
+    expect(dialect.sqlToQuery(foreign).sql).not.toContain("group_id");
   });
 
   it("drops the followers arm for nobody, and for a follow set it cannot render (fail closed)", () => {
