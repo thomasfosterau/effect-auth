@@ -83,7 +83,7 @@ The set of services `Http.makeAsync` requires is `AuthServices` in `http/HttpSer
 
 ### Plugins vs hooks
 
-Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`. Register them where you would have provided `Auth.Hooks.Hooks.Default`.
+Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `ConfusablesPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`. Register them where you would have provided `Auth.Hooks.Hooks.Default`.
 
 ## 3. Storage: adapters → store contracts
 

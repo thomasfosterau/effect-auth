@@ -416,6 +416,9 @@ export const make = (
         if (Option.isNone(found) && disableSignUp) {
           return yield* new Errors.MagicLinkError({ message: "Sign-up is disabled" });
         }
+        if (Option.isNone(found)) {
+          yield* hooks.beforeClaimEmail({ email: magicLink.email, flow: "sign-up" });
+        }
         // A verified magic link proves ownership of the email.
         const user = yield* userForProvenEmail(
           firstProof,

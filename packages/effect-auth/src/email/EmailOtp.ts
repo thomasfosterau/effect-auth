@@ -509,6 +509,9 @@ export const make = (
         if (Option.isNone(found) && disableSignUp) {
           return yield* new EmailOtpError({ message: "Sign-up is disabled" });
         }
+        if (Option.isNone(found)) {
+          yield* hooks.beforeClaimEmail({ email, flow: "sign-up" });
+        }
         // A verified OTP proves ownership of the email.
         const user = yield* userForProvenEmail(
           firstProof,

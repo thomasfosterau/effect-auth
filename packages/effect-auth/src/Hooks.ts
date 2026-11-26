@@ -56,7 +56,8 @@ export type HookError =
   | Errors.AccountLockedError
   | Errors.UserBannedError
   | Errors.CaptchaError
-  | Errors.PwnedPasswordError;
+  | Errors.PwnedPasswordError
+  | Errors.ConfusableEmailError;
 
 /**
  * A reference to a session, used by the sign-out and validation hooks
@@ -110,6 +111,33 @@ export interface SetPasswordArgs {
 export interface CreateVerificationArgs {
   readonly userId: string;
   readonly email: string;
+}
+
+/**
+ * The flows that fire the `beforeClaimEmail` hook: a sign-up that creates a
+ * user with the address (`"sign-up"`) and `requestEmailChange`
+ * (`"email-change"`).
+ *
+ * @since 0.9.0
+ */
+export type ClaimEmailFlow = "sign-up" | "email-change";
+
+/**
+ * Named arguments for the `beforeClaimEmail` hook: an address a user chose,
+ * about to become their identifier. `email` is normalized (`normalizeEmail`:
+ * the domain in punycode). `userId` is the account changing its address, and
+ * absent on a sign-up.
+ *
+ * The hook is observe-or-deny: a plugin refuses the address by failing
+ * (`ConfusablesPlugin` with `ConfusableEmailError`), and the flows read
+ * nothing back.
+ *
+ * @since 0.9.0
+ */
+export interface ClaimEmailArgs {
+  readonly email: string;
+  readonly flow: ClaimEmailFlow;
+  readonly userId?: string | undefined;
 }
 
 /** Named arguments for the `beforeVerifyEmail` hook. */
@@ -393,6 +421,7 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   afterCreateVerification: identity,
   beforeVerifyEmail: identity,
   afterVerifyEmail: identity,
+  beforeClaimEmail: identity,
   afterWrite: identity,
   afterDeliveryFailure: identity,
   afterImpersonationStart: identity,
@@ -496,6 +525,16 @@ export class Hooks extends Context.Service<
     readonly afterCreateVerification: Tap<CreateVerificationArgs>;
     readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
     readonly afterVerifyEmail: Tap<EmailVerificationResult>;
+    /**
+     * Fired when a user chooses a new email address, before it is looked up
+     * or claimed: by `EmailPasswordService.signUp`, by the magic-link and
+     * email OTP sign-ins that create a user, and by
+     * `AccountManagementService.requestEmailChange` (after the current
+     * address is told); see {@link ClaimEmailArgs}. Failing refuses the
+     * address. Addresses an identity provider, SCIM or an admin supplies do
+     * not fire it. `ConfusablesPlugin` guards it.
+     */
+    readonly beforeClaimEmail: Transform<ClaimEmailArgs>;
     /** A write the application made, fired by {@link recordWrite}. */
     readonly afterWrite: Tap<WriteEvent>;
     /** A send run off the response path failed; see {@link DeliveryFailure}. */
@@ -708,6 +747,12 @@ const wrapHooks = (
       inner.afterVerifyEmail,
       impls.afterVerifyEmail,
       isolateTaps,
+    ),
+    beforeClaimEmail: wrapHook(
+      "beforeClaimEmail",
+      inner.beforeClaimEmail,
+      impls.beforeClaimEmail,
+      false,
     ),
     afterWrite: wrapHook("afterWrite", inner.afterWrite, impls.afterWrite, isolateTaps),
     afterDeliveryFailure: wrapHook(

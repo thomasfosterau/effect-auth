@@ -31,6 +31,7 @@
       "entryPoints": [
         "scripts/check-dist.ts",
         "scripts/generate-argon2-wasm.ts",
+        "scripts/generate-confusables.ts",
         "scripts/release.ts"
       ],
       "entryPointRole": "support"
