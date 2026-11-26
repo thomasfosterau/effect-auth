@@ -62,7 +62,6 @@ import { Hooks } from "../Hooks.ts";
 import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordService, type SessionOrChallenge } from "../email/EmailPassword.ts";
-import * as EmailPassword from "../email/EmailPassword.ts";
 import { IdentifierStore, lookupIdentifier, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService, type AccountTokenError } from "../AccountManagement.ts";
@@ -1800,7 +1799,7 @@ export const usersGroupLayer = (
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const { currentPassword, newPassword, revokeOtherSessions } = payload.data.attributes;
-          const emailPassword = yield* EmailPassword.make();
+          const emailPassword = yield* EmailPasswordService;
           yield* emailPassword
             .changePassword({
               userId: resolved.user.id,
@@ -6192,11 +6191,7 @@ const serve = <E>(
 
   const clientHiddenAttributes = options.clientHiddenAttributes ?? CLIENT_HIDDEN_ATTRIBUTES;
   const web = HttpRouter.toWebHandler(appLayer, {
-    // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
-    // `context` parameter of `web.handler` optional.
     middleware: (effect) =>
-      // SAFETY: HttpServerRequest and Scope are always provided by the server
-      // infrastructure before middleware runs, so the narrowed requirements hold.
       Effect.gen(function* () {
         const req = yield* HttpServerRequest.HttpServerRequest;
         const ip = resolveClientIP(req, options.trustedProxy);
@@ -6206,7 +6201,7 @@ const serve = <E>(
           Effect.provideService(ClientIP, { ip }),
           Effect.provideService(ClientHiddenAttributes, clientHiddenAttributes),
         );
-      }) as Effect.Effect<HttpServerResponse.HttpServerResponse>,
+      }),
   });
 
   const trustedOrigins = options.trustedOrigins ?? [];

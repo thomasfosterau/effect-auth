@@ -4858,11 +4858,9 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>): Handler => {
     Layer.provide(HttpServer.groupLayers({ secure: false })),
     Layer.provide(platform),
   );
-  // SAFETY: the handlers' phantom requirements are satisfied by `services` at
-  // runtime; `Http.make` narrows its handler the same way.
   return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
     disableLogger: true,
-  }).handler as (request: Request) => Promise<Response>;
+  }).handler;
 };
 
 /** A hooks stack with `IPRateLimitPlugin` (one sign-in per hour per address). */

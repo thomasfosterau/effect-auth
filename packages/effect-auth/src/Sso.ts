@@ -25,7 +25,7 @@ import {
 } from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as RootSecret from "./RootSecret.ts";
 import { tokenHasher } from "./TokenHash.ts";
@@ -285,11 +285,7 @@ export class SsoService extends Context.Service<
      */
     readonly signIn: (
       selector: SsoSignInSelector,
-    ) => Effect.Effect<
-      { readonly url: string; readonly state: string },
-      SsoError | AuthError,
-      OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest
-    >;
+    ) => Effect.Effect<{ readonly url: string; readonly state: string }, SsoError | AuthError>;
 
     /**
      * Complete the OIDC SSO callback: exchange the code, verify the profile,
@@ -304,17 +300,7 @@ export class SsoService extends Context.Service<
     readonly handleCallback: (
       state: string,
       code: string,
-    ) => Effect.Effect<
-      SsoSignInResult,
-      SsoError | AuthError | HookError,
-      | OAuthStateStore
-      | OAuthUserStore
-      | IdentifierStore
-      | UserStore
-      | SessionService
-      | EmailPasswordStore
-      | Hooks
-    >;
+    ) => Effect.Effect<SsoSignInResult, SsoError | AuthError | HookError>;
 
     /**
      * Complete the SAML assertion consumer service (ACS) POST: verify the
@@ -343,11 +329,7 @@ export class SsoService extends Context.Service<
       samlResponse: string,
       relayState?: string,
       options?: SamlCallbackOptions,
-    ) => Effect.Effect<
-      SsoSignInResult,
-      SsoError | AuthError | HookError,
-      OAuthUserStore | IdentifierStore | UserStore | SessionService | EmailPasswordStore | Hooks
-    >;
+    ) => Effect.Effect<SsoSignInResult, SsoError | AuthError | HookError>;
 
     /**
      * Render the SP `EntityDescriptor` XML for a SAML connection, ready to hand
@@ -467,6 +449,12 @@ export const make = (
   typeof SsoService.Service,
   never,
   | SsoProviderStore
+  | OAuthStateStore
+  | OAuthUserStore
+  | IdentifierStore
+  | UserStore
+  | SessionService
+  | EmailPasswordStore
   | SecureRandom.SecureRandom
   | Digest.Digest
   | Mac.Mac
@@ -488,10 +476,19 @@ export const make = (
     const mac = yield* Mac.Mac;
     const rootSecret = yield* RootSecret.RootSecret;
     /** The caller's state store, keyed by each state's digest. */
-    const hashedStates = Effect.map(OAuthStateStore, (states) =>
-      OAuth.hashedStateStore(states, digestToken),
-    );
+    const hashedStates = OAuth.hashedStateStore(yield* OAuthStateStore, digestToken);
+    const userStore = yield* OAuthUserStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
+    const sessionManager = yield* SessionService;
+    const passwords = yield* EmailPasswordStore;
+    const firstProof = yield* firstProofServices({
+      identifiers,
+      passwords,
+      sessions: sessionManager,
+    });
     const crypto = yield* SecureRandom.SecureRandom;
+    const digest = yield* Digest.Digest;
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
 
@@ -593,7 +590,6 @@ export const make = (
       const organizations = yield* Effect.serviceOption(OrganizationService);
       if (Option.isNone(organizations)) return;
 
-      const identifiers = yield* IdentifierStore;
       const owned = yield* identifiers.listByUser(userId);
       // The sign-in address is IdP-attested; the rest must carry their own
       // proof, or a self-asserted alias would be a free ticket into a tenant.
@@ -674,17 +670,6 @@ export const make = (
       provider: SsoProvider,
       profile: { readonly email: string; readonly name?: string; readonly image?: string },
     ) {
-      const userStore = yield* OAuthUserStore;
-      const identifiers = yield* IdentifierStore;
-      const users = yield* UserStore;
-      const sessionManager = yield* SessionService;
-      const passwords = yield* EmailPasswordStore;
-      const firstProof = yield* firstProofServices({
-        identifiers,
-        passwords,
-        sessions: sessionManager,
-      });
-
       const email = normalizeEmail(profile.email);
 
       const { identifier, user: owner } = yield* findIdentifierOwner(
@@ -958,7 +943,9 @@ export const make = (
           provider.usePKCE,
         );
         const result = yield* oauth.generateAuthorizationUrl().pipe(
-          Effect.provideService(OAuthStateStore, yield* hashedStates),
+          Effect.provideService(OAuthStateStore, hashedStates),
+          Effect.provideService(SecureRandom.SecureRandom, crypto),
+          Effect.provideService(Digest.Digest, digest),
           Effect.provideService(Mac.Mac, mac),
           Effect.provideService(RootSecret.RootSecret, rootSecret),
           Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
@@ -970,7 +957,7 @@ export const make = (
         state: string,
         code: string,
       ) {
-        const stateStore = yield* hashedStates;
+        const stateStore = hashedStates;
 
         // Spend the state before anything else: `consume` is an atomic
         // get-and-delete, so a replayed or concurrent callback carrying the
